@@ -288,10 +288,12 @@ async def _run_test_case_pipeline_async(
     )
     
     logging.info(f"[TestCase Pipeline] Starting generation for session {session.id}")
+    logging.info(f"[TestCase Pipeline] Using model: {model}")
     if human_feedback:
         logging.info(f"[TestCase Pipeline] With human feedback: {human_feedback[:100]}...")
     
     final_test_cases = []
+    event_count = 0
     
     async for event in runner.run_async(
         user_id=user_id,
@@ -301,23 +303,30 @@ async def _run_test_case_pipeline_async(
             parts=[types.Part(text="Generate and validate comprehensive test cases from the requirements.")]
         ),
     ):
+        event_count += 1
+        author = getattr(event, 'author', 'unknown')
+        logging.info(f"[TestCase Pipeline] Event #{event_count} from: {author}")
+        
         if event.content and event.content.parts:
             for part in event.content.parts:
                 if hasattr(part, 'text') and part.text:
+                    text_preview = part.text[:200] if len(part.text) > 200 else part.text
+                    logging.info(f"[TestCase Pipeline] Text from {author}: {text_preview}...")
                     parsed = _parse_test_cases_json(part.text)
                     if parsed:
+                        logging.info(f"[TestCase Pipeline] Parsed {len(parsed)} test cases from {author}")
                         final_test_cases = parsed
-        
-        if hasattr(event, 'author'):
-            logging.info(f"[TestCase Pipeline] Event from {event.author}")
+                if hasattr(part, 'function_call') and part.function_call:
+                    logging.info(f"[TestCase Pipeline] Function call: {part.function_call.name}")
     
     # Check session state
     state_tcs = session.state.get(STATE_TEST_CASES, "[]")
     state_parsed = _parse_test_cases_json(state_tcs)
     if state_parsed:
+        logging.info(f"[TestCase Pipeline] Found {len(state_parsed)} test cases in session state")
         final_test_cases = state_parsed
     
-    logging.info(f"[TestCase Pipeline] Generated {len(final_test_cases)} test cases")
+    logging.info(f"[TestCase Pipeline] Total events: {event_count}, Final test cases: {len(final_test_cases)}")
     return final_test_cases
 
 
