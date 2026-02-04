@@ -41,3 +41,6 @@ npm-debug.log*
 /frontend/.env.local
 /frontend/.env.*.local
 /frontend/.next/
+
+
+/.playwright-mcp

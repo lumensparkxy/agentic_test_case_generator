@@ -22,8 +22,8 @@ Note: ADK expects GOOGLE_API_KEY. The backend maps GEMINI_API_KEY to GOOGLE_API_
 
 ### 2) Backend
 
-Create a Python virtual environment and install deps:
-- backend/requirements.txt
+Create a Python virtual environment (3.10+ recommended) and install deps:
+- `python -m pip install -r backend/requirements.txt`
 
 Run the API:
 - `uvicorn app.main:app --reload --app-dir backend`
@@ -37,6 +37,11 @@ Run UI:
 - `npm run dev` in frontend
 
 Open http://localhost:5173
+
+## Troubleshooting
+- Backend fails with auth errors: verify `GEMINI_API_KEY` is set in [.env.example](.env.example) (copied to `.env`). The backend maps it to `GOOGLE_API_KEY` at runtime for ADK.
+- Frontend cannot reach API: set `VITE_API_BASE` in `.env` or use the default from [.env.example](.env.example).
+- Import errors after install: re-run `python -m pip install -r backend/requirements.txt` inside your active virtual environment.
 
 ## Notes
 - JIRA export is a stub; add credentials and mapping in backend/app/adapters/jira.py
