@@ -223,14 +223,14 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Upload Requirements</h2>
 						<p className="panel-description">
-							Add your requirements file (.md or .docx) and parse it to extract requirement items.
+							Add your requirements file (.md, .docx, or .xlsx) and parse it to extract requirement items.
 						</p>
 						<div className="panel-form">
 							<div className="form-group">
 								<label>Requirements file</label>
 								<input
 									type="file"
-									accept=".md,.docx"
+									accept=".md,.docx,.xlsx"
 									onChange={(e) => setFile(e.target.files?.[0] || null)}
 								/>
 							</div>

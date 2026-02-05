@@ -25,6 +25,7 @@ from .agents.requirements_agent import extract_requirements, refine_requirements
 from .agents.test_case_agent import generate_test_cases
 from .agents.export_agent import export_to_jira, export_to_csv, export_to_excel, export_to_json
 from .agents.automation_agent import generate_playwright_pom
+from .utils.excel_parser import parse_excel_to_text
 
 app = FastAPI(title="Agentic Test Case Generator")
 
@@ -78,8 +79,10 @@ async def parse_requirements(
         elif filename.endswith(".docx"):
             doc = Document(BytesIO(content))
             raw_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+        elif filename.endswith(".xlsx"):
+            raw_text = parse_excel_to_text(content)
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
+            raise HTTPException(status_code=400, detail="Unsupported file type. Supported: .md, .docx, .xlsx")
 
         requirements = extract_requirements(raw_text)
         return ParseResponse(source_name=filename, raw_text=raw_text, requirements=requirements)
