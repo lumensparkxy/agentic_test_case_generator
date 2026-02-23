@@ -1,9 +1,9 @@
 # Agentic Test Case Generator
 
-Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown), enriching context, generating test cases in a template format, exporting to JIRA (stub), and generating Playwright (Python) Page Object Model stubs.
+Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Excel), enriching context, generating test cases in a template format, exporting to JIRA (stub), and generating Playwright (Python) Page Object Model stubs.
 
 ## Features
-- Upload requirements (.md, .docx)
+- Upload requirements (.md, .docx, .xlsx)
 - Parse and extract requirement items
 - Add context links (app, prototype, diagrams, images)
 - Generate test cases from a user template
@@ -16,9 +16,9 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown), 
 ### 1) Configure environment
 Copy .env.example to .env and set values:
 - GEMINI_API_KEY (required)
-- MODEL_NAME (default: gemini-3-flash-preview)
+- MODEL_NAME (default: gemini-2.5-flash)
 
-Note: ADK expects GOOGLE_API_KEY. The backend maps GEMINI_API_KEY to GOOGLE_API_KEY at runtime.
+Note: ADK expects GOOGLE_API_KEY. If only GEMINI_API_KEY is set, the backend normalizes it to GOOGLE_API_KEY at runtime.
 
 ### 2) Backend
 
@@ -47,3 +47,4 @@ Open http://localhost:5173
 - JIRA export is a stub; add credentials and mapping in backend/app/adapters/jira.py
 - Automation generation is a stub; implement selectors and actions in backend/app/agents/automation_agent.py
 - Uploaded documents are processed in-memory and not stored
+- Upload size is capped at 16 MB per file

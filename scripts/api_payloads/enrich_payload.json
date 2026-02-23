@@ -1,0 +1,17 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "text": "The system shall allow users to sign in using email and password."
+    }
+  ],
+  "app_link": "https://example.test/app",
+  "prototype_link": "https://example.test/proto",
+  "diagram_links": [
+    "https://example.test/diag1"
+  ],
+  "image_links": [
+    "https://example.test/img1"
+  ],
+  "notes": "e2e verification run"
+}

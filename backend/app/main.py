@@ -1,8 +1,10 @@
 from io import BytesIO
 from typing import List, Optional
 import json
+import logging
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from docx import Document
 
 from .config import get_settings
@@ -28,6 +30,8 @@ from .agents.automation_agent import generate_playwright_pom
 from .utils.excel_parser import parse_excel_to_text
 
 app = FastAPI(title="Agentic Test Case Generator")
+
+MAX_UPLOAD_SIZE_BYTES = 16 * 1024 * 1024
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,14 +62,15 @@ async def parse_requirements(
     if feedback and existing_requirements:
         try:
             existing_reqs = json.loads(existing_requirements)
-            requirements = refine_requirements(existing_reqs, feedback)
+            requirements = await run_in_threadpool(refine_requirements, existing_reqs, feedback)
             return ParseResponse(
                 source_name="refined",
                 raw_text="",  # Keep empty since we're refining
                 requirements=requirements
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Refinement failed: {str(exc)}") from exc
+            logging.exception("Requirement refinement failed")
+            raise HTTPException(status_code=500, detail="Refinement failed") from exc
     
     # Otherwise, parse the uploaded file
     if not file:
@@ -73,6 +78,11 @@ async def parse_requirements(
     
     filename = file.filename or "uploaded"
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max supported size is {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB.",
+        )
     try:
         if filename.endswith(".md") or file.content_type == "text/markdown":
             raw_text = content.decode("utf-8", errors="ignore")
@@ -84,12 +94,13 @@ async def parse_requirements(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type. Supported: .md, .docx, .xlsx")
 
-        requirements = extract_requirements(raw_text)
+        requirements = await run_in_threadpool(extract_requirements, raw_text)
         return ParseResponse(source_name=filename, raw_text=raw_text, requirements=requirements)
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logging.exception("Requirement parsing failed")
+        raise HTTPException(status_code=500, detail="Requirement parsing failed") from exc
 
 
 @app.post("/requirements/enrich", response_model=EnrichInput)
@@ -101,13 +112,13 @@ async def enrich_requirements(payload: EnrichInput) -> EnrichInput:
 async def generate_test_cases_endpoint(
     payload: GenerateTestCasesInput,
 ) -> GenerateTestCasesResponse:
-    test_cases = generate_test_cases(payload)
+    test_cases = await run_in_threadpool(generate_test_cases, payload)
     return GenerateTestCasesResponse(test_cases=test_cases)
 
 
 @app.post("/export/jira", response_model=JiraExportResponse)
 async def export_jira(payload: JiraExportInput) -> JiraExportResponse:
-    return export_to_jira(payload)
+    return await run_in_threadpool(export_to_jira, payload)
 
 
 @app.post("/export/csv")
@@ -145,4 +156,4 @@ async def export_json_endpoint(payload: GenerateTestCasesResponse):
 
 @app.post("/automation/playwright", response_model=AutomationResponse)
 async def automation_playwright(payload: AutomationInput) -> AutomationResponse:
-    return generate_playwright_pom(payload)
+    return await run_in_threadpool(generate_playwright_pom, payload)

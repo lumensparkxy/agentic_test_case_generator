@@ -1,0 +1,46 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "text": "The system shall allow users to sign in using email and password."
+    }
+  ],
+  "template": {
+    "name": "default",
+    "format": "table",
+    "fields": [
+      "id",
+      "title",
+      "description",
+      "priority",
+      "type",
+      "status",
+      "preconditions",
+      "steps",
+      "expected_result",
+      "test_data",
+      "estimated_time",
+      "automation_status",
+      "component",
+      "tags"
+    ]
+  },
+  "context": {
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "text": "The system shall allow users to sign in using email and password."
+      }
+    ],
+    "app_link": "https://example.test/app",
+    "prototype_link": "https://example.test/proto",
+    "diagram_links": [
+      "https://example.test/diag1"
+    ],
+    "image_links": [
+      "https://example.test/img1"
+    ],
+    "notes": "e2e verification run"
+  },
+  "feedback": null
+}

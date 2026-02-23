@@ -7,7 +7,6 @@ Pipeline:
 3. Loop until validator approves or max iterations reached
 """
 import asyncio
-import json
 import logging
 import os
 import uuid
@@ -22,60 +21,13 @@ from pydantic import ValidationError
 
 from ..models import GenerateTestCasesInput, TestCase, TestStep
 from ..config import get_settings
+from ..utils.llm_json import parse_test_cases_json
 
 # State keys
 STATE_TEST_CASES = "current_test_cases"
 STATE_VALIDATION_FEEDBACK = "validation_feedback"
 
 APPROVAL_PHRASE = "APPROVED"
-
-
-def _extract_json(text: str) -> Optional[str]:
-    """Extract JSON from text that may contain markdown fences."""
-    if not text:
-        return None
-    text = text.strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    
-    if text.startswith("{") or text.startswith("["):
-        return text
-    start = min(
-        [pos for pos in [text.find("{"), text.find("[")] if pos != -1],
-        default=-1,
-    )
-    if start == -1:
-        return None
-    end = max(text.rfind("}"), text.rfind("]"))
-    if end == -1:
-        return None
-    return text[start : end + 1]
-
-
-def _parse_test_cases_json(text: str) -> List[Dict[str, Any]]:
-    """Parse test cases from agent response."""
-    if not text:
-        return []
-    
-    json_text = _extract_json(text)
-    if not json_text:
-        return []
-    
-    try:
-        data = json.loads(json_text)
-        if isinstance(data, list):
-            return data
-        elif isinstance(data, dict) and "test_cases" in data:
-            return data["test_cases"]
-    except json.JSONDecodeError:
-        pass
-    
-    return []
 
 
 def exit_loop(tool_context: ToolContext) -> dict:
@@ -312,7 +264,7 @@ async def _run_test_case_pipeline_async(
                 if hasattr(part, 'text') and part.text:
                     text_preview = part.text[:200] if len(part.text) > 200 else part.text
                     logging.info(f"[TestCase Pipeline] Text from {author}: {text_preview}...")
-                    parsed = _parse_test_cases_json(part.text)
+                    parsed = parse_test_cases_json(part.text)
                     if parsed:
                         logging.info(f"[TestCase Pipeline] Parsed {len(parsed)} test cases from {author}")
                         final_test_cases = parsed
@@ -321,7 +273,7 @@ async def _run_test_case_pipeline_async(
     
     # Check session state
     state_tcs = session.state.get(STATE_TEST_CASES, "[]")
-    state_parsed = _parse_test_cases_json(state_tcs)
+    state_parsed = parse_test_cases_json(state_tcs)
     if state_parsed:
         logging.info(f"[TestCase Pipeline] Found {len(state_parsed)} test cases in session state")
         final_test_cases = state_parsed

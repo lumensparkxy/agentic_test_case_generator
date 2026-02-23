@@ -1,0 +1,31 @@
+{
+  "project_key": "QA",
+  "issue_type": "Test",
+  "test_cases": [
+    {
+      "id": "TC-001",
+      "title": "Verify login with valid credentials",
+      "description": "Checks successful login",
+      "priority": "High",
+      "type": "Functional",
+      "status": "Draft",
+      "preconditions": "User account exists",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Open login page",
+          "expected": "Login form is displayed",
+          "test_data": null
+        }
+      ],
+      "expected_result": "User is logged in",
+      "test_data": "Valid account credentials",
+      "estimated_time": "5 mins",
+      "automation_status": "To Be Automated",
+      "component": "Authentication",
+      "tags": [
+        "REQ-001"
+      ]
+    }
+  ]
+}

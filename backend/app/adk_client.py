@@ -16,6 +16,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
+from .utils.llm_json import extract_json, parse_requirements_json
 
 # Default model
 DEFAULT_MODEL = "gemini-2.5-flash"
@@ -26,62 +27,6 @@ STATE_REVIEW_FEEDBACK = "review_feedback"
 
 # Approval phrase for loop termination
 APPROVAL_PHRASE = "APPROVED"
-
-# ============================================================================
-# JSON extraction helper
-# ============================================================================
-
-def _extract_json(text: str) -> Optional[str]:
-    """Extract JSON from text that may contain markdown fences."""
-    if not text:
-        return None
-    text = text.strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    
-    if text.startswith("{") or text.startswith("["):
-        return text
-    start = min(
-        [pos for pos in [text.find("{"), text.find("[")] if pos != -1],
-        default=-1,
-    )
-    if start == -1:
-        return None
-    end = max(text.rfind("}"), text.rfind("]"))
-    if end == -1:
-        return None
-    return text[start : end + 1]
-
-
-def _parse_requirements_json(text: str) -> List[Dict[str, str]]:
-    """Parse requirements from agent response (handles JSON array)."""
-    if not text:
-        return []
-    
-    json_text = _extract_json(text)
-    if not json_text:
-        return []
-    
-    try:
-        data = json.loads(json_text)
-        if isinstance(data, list):
-            valid = []
-            for item in data:
-                if isinstance(item, dict) and "id" in item and "text" in item:
-                    valid.append({"id": item["id"], "text": item["text"]})
-            return valid
-        elif isinstance(data, dict) and "requirements" in data:
-            return _parse_requirements_json(json.dumps(data["requirements"]))
-    except json.JSONDecodeError:
-        pass
-    
-    return []
-
 
 # ============================================================================
 # Tool to exit the refinement loop when requirements are approved
@@ -99,7 +44,7 @@ def exit_loop(tool_context: ToolContext) -> dict:
 # Build the ADK Agent Pipeline
 # ============================================================================
 
-def _build_requirement_extraction_pipeline(model: str) -> Agent:
+def _build_requirement_extraction_pipeline(model: str, max_iterations: int) -> Agent:
     """
     Build a multi-agent pipeline for requirement extraction using google-adk.
     
@@ -206,7 +151,7 @@ Either call exit_loop OR output the refined JSON array - never both.""",
     refinement_loop = LoopAgent(
         name="RefinementLoop",
         sub_agents=[reviewer_agent, refiner_agent],
-        max_iterations=5,
+        max_iterations=max_iterations,
     )
     
     # === Full Pipeline ===
@@ -226,11 +171,13 @@ Either call exit_loop OR output the refined JSON array - never both.""",
 async def _run_pipeline_async(
     document_text: str,
     model: str = DEFAULT_MODEL,
+    max_iterations: int = 3,
 ) -> List[Dict[str, str]]:
     """Run the ADK pipeline asynchronously and return extracted requirements."""
-    
+
+    safe_iterations = max(1, max_iterations)
     # Build the agent pipeline
-    root_agent = _build_requirement_extraction_pipeline(model)
+    root_agent = _build_requirement_extraction_pipeline(model, safe_iterations)
     
     # Create session service and runner
     session_service = InMemorySessionService()
@@ -277,7 +224,7 @@ Analyze the features and functionality described and produce high-quality testab
                 if hasattr(part, 'text') and part.text:
                     final_response = part.text
                     # Try to parse requirements from each response
-                    parsed = _parse_requirements_json(final_response)
+                    parsed = parse_requirements_json(final_response)
                     if parsed:
                         final_requirements = parsed
         
@@ -287,7 +234,7 @@ Analyze the features and functionality described and produce high-quality testab
     
     # Also check session state for requirements
     state_reqs = session.state.get(STATE_REQUIREMENTS, "[]")
-    state_parsed = _parse_requirements_json(state_reqs)
+    state_parsed = parse_requirements_json(state_reqs)
     if state_parsed:
         final_requirements = state_parsed
     
@@ -298,7 +245,7 @@ Analyze the features and functionality described and produce high-quality testab
 def run_requirement_extraction_loop_sync(
     document_text: str,
     model: str = DEFAULT_MODEL,
-    max_iterations: int = 3,  # Kept for API compatibility, LoopAgent uses its own
+    max_iterations: int = 3,
 ) -> List[Dict[str, str]]:
     """
     Synchronous wrapper to run the ADK requirement extraction pipeline.
@@ -316,10 +263,10 @@ def run_requirement_extraction_loop_sync(
             # We're in an async context, use nest_asyncio
             import nest_asyncio
             nest_asyncio.apply()
-            return asyncio.run(_run_pipeline_async(document_text, model))
+            return asyncio.run(_run_pipeline_async(document_text, model, max_iterations))
         except RuntimeError:
             # No running loop, safe to use asyncio.run
-            return asyncio.run(_run_pipeline_async(document_text, model))
+            return asyncio.run(_run_pipeline_async(document_text, model, max_iterations))
     except Exception as e:
         logging.error(f"[ADK Pipeline] Error: {e}")
         return []
@@ -338,14 +285,14 @@ def run_adk_prompt(
 ) -> str:
     """Legacy API - Run a single prompt (for backward compatibility)."""
     from google import genai
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
     try:
-        response = client.models.generate_content(
-            model=model or DEFAULT_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=instruction),
-        )
-        return response.text.strip() if response and response.text else ""
+        with genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", "")) as client:
+            response = client.models.generate_content(
+                model=model or DEFAULT_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(system_instruction=instruction),
+            )
+            return response.text.strip() if response and response.text else ""
     except Exception as e:
         logging.error(f"[{agent_name}] Error: {e}")
         return ""
@@ -360,7 +307,7 @@ def run_adk_json(
 ) -> Optional[object]:
     """Legacy API - Run a prompt and parse JSON response."""
     text = run_adk_prompt(prompt=prompt, model=model, agent_name=agent_name, instruction=instruction)
-    json_text = _extract_json(text)
+    json_text = extract_json(text)
     if not json_text:
         return None
     try:
@@ -380,8 +327,6 @@ async def _run_refinement_async(
 ) -> List[Dict[str, str]]:
     """Run ADK refinement with human feedback asynchronously."""
     from google import genai
-    
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
     
     # Format existing requirements
     req_text = json.dumps(existing_requirements, indent=2)
@@ -419,14 +364,15 @@ Output ONLY the JSON array, no explanations."""
 Please refine the requirements based on the feedback above."""
 
     try:
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=refiner_instruction),
-        )
+        with genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", "")) as client:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(system_instruction=refiner_instruction),
+            )
         
         if response and response.text:
-            parsed = _parse_requirements_json(response.text)
+            parsed = parse_requirements_json(response.text)
             if parsed:
                 return parsed
     except Exception as e:

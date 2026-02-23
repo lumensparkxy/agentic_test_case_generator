@@ -24,10 +24,20 @@ export default function App() {
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isParsing, setIsParsing] = useState(false);
 	const [isExporting, setIsExporting] = useState(false);
-	const [exportFormat, setExportFormat] = useState("csv");
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+	};
+
+	const parseApiError = async (res, fallbackMessage) => {
+		const text = await res.text();
+		if (!text) return fallbackMessage;
+		try {
+			const parsed = JSON.parse(text);
+			return parsed?.detail || parsed?.message || fallbackMessage;
+		} catch {
+			return text;
+		}
 	};
 
 	const parseRequirements = async (withFeedback = false) => {
@@ -91,10 +101,16 @@ export default function App() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
 			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to generate test cases");
+				throw new Error(errorMessage);
+			}
 			const data = await res.json();
 			setTestCases(data.test_cases || []);
 			setStatus(withFeedback ? "Test cases refined." : "Generated.");
 			if (withFeedback) setFeedback("");
+		} catch (error) {
+			setStatus(`Generation failed: ${error.message}`);
 		} finally {
 			setIsGenerating(false);
 		}
@@ -114,8 +130,14 @@ export default function App() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
 			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to export to JIRA");
+				throw new Error(errorMessage);
+			}
 			const data = await res.json();
 			setStatus(`${data.status}: ${data.message}`);
+		} catch (error) {
+			setStatus(`JIRA export failed: ${error.message}`);
 		} finally {
 			setIsExporting(false);
 		}
@@ -155,17 +177,25 @@ export default function App() {
 
 	const generateAutomation = async () => {
 		setStatus("Generating Playwright POM...");
-		const payload = {
-			test_cases: testCases,
-			target_base_url: appLink || null
-		};
-		const res = await fetch(`${API_BASE}/automation/playwright`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(payload)
-		});
-		const data = await res.json();
-		setStatus(`${data.status}: ${data.notes}`);
+		try {
+			const payload = {
+				test_cases: testCases,
+				target_base_url: appLink || null
+			};
+			const res = await fetch(`${API_BASE}/automation/playwright`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload)
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to generate automation stubs");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setStatus(`${data.status}: ${data.notes}`);
+		} catch (error) {
+			setStatus(`Automation generation failed: ${error.message}`);
+		}
 	};
 
 	const getPriorityClass = (priority) => {
@@ -364,7 +394,7 @@ export default function App() {
 							</div>
 						</div>
 						<span className="helper-text">
-							Fields used: id, title, preconditions, steps, tags.
+							Fields used: id, title, description, priority, type, status, preconditions, steps, expected result, test data, estimated time, automation status, component, tags.
 						</span>
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
