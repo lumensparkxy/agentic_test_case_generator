@@ -38,7 +38,7 @@ class TestCase(BaseModel):
     title: str
     description: Optional[str] = None  # What the test verifies
     priority: Literal["Critical", "High", "Medium", "Low"] = "Medium"
-    type: Literal["Functional", "Integration", "E2E", "Regression", "Smoke", "Security", "Performance", "Usability"] = "Functional"
+    type: Literal["Functional", "Integration", "E2E", "Regression", "Smoke", "Security", "Performance", "Usability", "UAT"] = "Functional"
     status: Literal["Draft", "Ready", "In Review", "Approved", "Deprecated"] = "Draft"
     preconditions: Optional[str] = None
     steps: List[TestStep]
