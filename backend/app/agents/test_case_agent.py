@@ -29,6 +29,57 @@ STATE_VALIDATION_FEEDBACK = "validation_feedback"
 
 APPROVAL_PHRASE = "APPROVED"
 
+ALLOWED_TEST_CASE_TYPES = {
+    "Functional",
+    "Integration",
+    "E2E",
+    "Regression",
+    "Smoke",
+    "Security",
+    "Performance",
+    "Usability",
+    "UAT",
+}
+
+TEST_CASE_TYPE_ALIASES = {
+    "e2e": "E2E",
+    "end to end": "E2E",
+    "end-to-end": "E2E",
+    "functional": "Functional",
+    "integration": "Integration",
+    "regression": "Regression",
+    "smoke": "Smoke",
+    "security": "Security",
+    "performance": "Performance",
+    "usability": "Usability",
+    "uat": "UAT",
+    "user acceptance": "UAT",
+    "user acceptance testing": "UAT",
+}
+
+
+def _normalize_test_case_type(raw_type: Any) -> str:
+    """Normalize model-generated test type values to supported literals."""
+    if not raw_type:
+        return "Functional"
+
+    raw = str(raw_type).strip()
+    if raw in ALLOWED_TEST_CASE_TYPES:
+        return raw
+
+    normalized_key = " ".join(raw.replace("_", " ").replace("-", " ").split()).lower()
+    mapped = TEST_CASE_TYPE_ALIASES.get(normalized_key)
+    if mapped:
+        return mapped
+
+    # Fallback to title-case exact matching for values like "functional".
+    title_case = raw.title()
+    if title_case in ALLOWED_TEST_CASE_TYPES:
+        return title_case
+
+    logging.warning(f"[TestCase Pipeline] Unknown test case type '{raw}', defaulting to Functional")
+    return "Functional"
+
 
 def exit_loop(tool_context: ToolContext) -> dict:
     """Call this function when test cases are validated and approved."""
@@ -81,7 +132,7 @@ You MUST address all points in this feedback when generating/refining test cases
 4. Include test data where needed (credentials, sample inputs, etc.)
 5. Cover positive, negative, and edge cases where applicable
 6. Assign appropriate priority based on business impact
-7. Set correct type (Functional, Integration, E2E, Regression, Smoke, etc.)
+7. Set correct type (Functional, Integration, E2E, Regression, Smoke, Security, Performance, Usability, UAT)
 8. Estimate execution time realistically
 
 **Output Format:**
@@ -113,7 +164,7 @@ Return ONLY a valid JSON object with industry-standard fields:
 
 **Field Guidelines:**
 - priority: Critical (blocking issues), High (core functionality), Medium (important features), Low (nice-to-have)
-- type: Functional, Integration, E2E, Regression, Smoke, Security, Performance, Usability
+- type: Functional, Integration, E2E, Regression, Smoke, Security, Performance, Usability, UAT
 - status: Always set to "Draft" for new test cases
 - estimated_time: "2 mins", "5 mins", "10 mins", "15 mins", "30 mins"
 - automation_status: "Manual", "To Be Automated", "Automated"
@@ -359,7 +410,7 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> List[TestCase]:
                 title=tc.get("title", "Untitled Test Case"),
                 description=tc.get("description"),
                 priority=tc.get("priority", "Medium"),
-                type=tc.get("type", "Functional"),
+                type=_normalize_test_case_type(tc.get("type", "Functional")),
                 status=tc.get("status", "Draft"),
                 preconditions=tc.get("preconditions"),
                 steps=steps,
