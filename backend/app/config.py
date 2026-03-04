@@ -1,16 +1,54 @@
 import os
 import logging
+from pathlib import Path
 from importlib.metadata import PackageNotFoundError, version
 from functools import lru_cache
 from pydantic import BaseModel
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - dependency fallback
+    load_dotenv = None
+
 
 DEFAULT_MODEL_NAME = "gemini-2.5-flash"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_environment_file() -> None:
+    """Load environment variables from repo/root .env so uvicorn cwd does not matter."""
+    if load_dotenv is None:
+        logging.warning("python-dotenv is not installed; .env auto-loading is disabled")
+        return
+
+    candidate_paths = [
+        REPO_ROOT / ".env",
+        Path.cwd() / ".env",
+    ]
+
+    seen = set()
+    for path in candidate_paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            load_dotenv(dotenv_path=resolved, override=False)
+
+
+_load_environment_file()
 
 
 class Settings(BaseModel):
     gemini_api_key: str
     model_name: str = DEFAULT_MODEL_NAME
+
+
+class AuthSettings(BaseModel):
+    google_client_id: str = ""
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 60
 
 
 def _parse_major_minor(raw_version: str) -> tuple[int, int]:
@@ -44,11 +82,33 @@ def _warn_if_dependency_mismatch() -> None:
 
 
 @lru_cache
+def get_auth_settings() -> AuthSettings:
+    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
+    jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
+    jwt_expiration_raw = os.getenv("JWT_EXPIRATION_MINUTES", "60")
+
+    try:
+        jwt_expiration_minutes = int(jwt_expiration_raw)
+    except ValueError:
+        logging.warning("Invalid JWT_EXPIRATION_MINUTES=%s. Falling back to 60.", jwt_expiration_raw)
+        jwt_expiration_minutes = 60
+
+    return AuthSettings(
+        google_client_id=google_client_id,
+        jwt_secret_key=jwt_secret_key,
+        jwt_algorithm=jwt_algorithm,
+        jwt_expiration_minutes=jwt_expiration_minutes,
+    )
+
+
+@lru_cache
 def get_settings() -> Settings:
     google_api_key = os.getenv("GOOGLE_API_KEY")
     gemini_api_key_env = os.getenv("GEMINI_API_KEY")
     gemini_api_key = google_api_key or gemini_api_key_env
     model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is required")
 

@@ -8,6 +8,28 @@ class Requirement(BaseModel):
     text: str
 
 
+class AuthUser(BaseModel):
+    sub: str
+    email: str
+    name: str
+    picture: Optional[str] = None
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    user: AuthUser
+
+
+class LogoutResponse(BaseModel):
+    status: str = "ok"
+
+
 class ParseResponse(BaseModel):
     source_name: str
     raw_text: str

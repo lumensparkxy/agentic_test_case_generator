@@ -1,7 +1,12 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { GoogleLogin } from "@react-oauth/google";
 import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+const STORAGE_AUTH_TOKEN = "tcg.auth.token";
+const STORAGE_AUTH_USER = "tcg.auth.user";
+const AUTH_REQUIRED_MESSAGE = "Sign in with Google to continue.";
 
 export default function App() {
 	const [file, setFile] = useState(null);
@@ -24,6 +29,13 @@ export default function App() {
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isParsing, setIsParsing] = useState(false);
 	const [isExporting, setIsExporting] = useState(false);
+	const [authToken, setAuthToken] = useState("");
+	const [currentUser, setCurrentUser] = useState(null);
+	const [isAuthenticating, setIsAuthenticating] = useState(false);
+	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+
+	const isAuthenticated = Boolean(authToken && currentUser);
+	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -40,6 +52,137 @@ export default function App() {
 		}
 	};
 
+	const clearAuthState = (nextStatus = null) => {
+		setAuthToken("");
+		setCurrentUser(null);
+		localStorage.removeItem(STORAGE_AUTH_TOKEN);
+		localStorage.removeItem(STORAGE_AUTH_USER);
+		if (nextStatus) {
+			setStatus(nextStatus);
+		}
+	};
+
+	const persistAuthState = (token, user) => {
+		setAuthToken(token);
+		setCurrentUser(user);
+		localStorage.setItem(STORAGE_AUTH_TOKEN, token);
+		localStorage.setItem(STORAGE_AUTH_USER, JSON.stringify(user));
+	};
+
+	useEffect(() => {
+		const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
+		const storedUserRaw = localStorage.getItem(STORAGE_AUTH_USER);
+
+		if (!storedToken || !storedUserRaw) {
+			setIsVerifyingSession(false);
+			return;
+		}
+
+		let storedUser;
+		try {
+			storedUser = JSON.parse(storedUserRaw);
+		} catch {
+			clearAuthState();
+			setIsVerifyingSession(false);
+			return;
+		}
+
+		const restoreSession = async () => {
+			try {
+				const res = await fetch(`${API_BASE}/auth/me`, {
+					method: "GET",
+					headers: {
+						Authorization: `Bearer ${storedToken}`
+					}
+				});
+				if (!res.ok) {
+					throw new Error("Stored session is no longer valid");
+				}
+				const data = await res.json();
+				persistAuthState(storedToken, data || storedUser);
+				setStatus(`Welcome back, ${(data || storedUser).name}.`);
+			} catch {
+				clearAuthState("Session expired. Please sign in again.");
+			} finally {
+				setIsVerifyingSession(false);
+			}
+		};
+
+		restoreSession();
+	}, []);
+
+	const apiRequest = async (path, options = {}, authRequired = true) => {
+		const headers = { ...(options.headers || {}) };
+
+		if (authRequired) {
+			if (!authToken) {
+				setStatus(AUTH_REQUIRED_MESSAGE);
+				throw new Error(AUTH_REQUIRED_MESSAGE);
+			}
+			headers.Authorization = `Bearer ${authToken}`;
+		}
+
+		const res = await fetch(`${API_BASE}${path}`, {
+			...options,
+			headers
+		});
+
+		if (authRequired && res.status === 401) {
+			clearAuthState("Session expired or unauthorized. Please sign in again.");
+			throw new Error("Session expired or unauthorized. Please sign in again.");
+		}
+
+		return res;
+	};
+
+	const handleGoogleLoginSuccess = async (credentialResponse) => {
+		if (!credentialResponse?.credential) {
+			setStatus("Google login did not return a credential token.");
+			return;
+		}
+
+		setIsAuthenticating(true);
+		setStatus("Signing in with Google...");
+		try {
+			const res = await apiRequest(
+				"/auth/google/login",
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ credential: credentialResponse.credential })
+				},
+				false
+			);
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to sign in with Google");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			persistAuthState(data.access_token, data.user);
+			setStatus(`Signed in as ${data.user.name}.`);
+		} catch (error) {
+			clearAuthState(`Google sign-in failed: ${error.message}`);
+		} finally {
+			setIsAuthenticating(false);
+		}
+	};
+
+	const handleGoogleLoginError = () => {
+		setStatus("Google sign-in failed. Please try again.");
+	};
+
+	const handleLogout = async () => {
+		setIsAuthenticating(true);
+		try {
+			await apiRequest("/auth/logout", { method: "POST" }, false);
+		} catch {
+			// Ignore logout network errors because session is local-storage backed.
+		} finally {
+			clearAuthState("Signed out.");
+			setIsAuthenticating(false);
+		}
+	};
+
 	const parseRequirements = async (withFeedback = false) => {
 		if (!file && !withFeedback) return;
 		setIsParsing(true);
@@ -51,13 +194,13 @@ export default function App() {
 				formData.append("feedback", reqFeedback);
 				formData.append("existing_requirements", JSON.stringify(requirements));
 			}
-			const res = await fetch(`${API_BASE}/requirements/parse`, {
+			const res = await apiRequest("/requirements/parse", {
 				method: "POST",
 				body: formData
 			});
 			if (!res.ok) {
-				const errorText = await res.text();
-				throw new Error(errorText || "Failed to parse requirements");
+				const errorMessage = await parseApiError(res, "Failed to parse requirements");
+				throw new Error(errorMessage);
 			}
 			const data = await res.json();
 			setRawText(data.raw_text || rawText);
@@ -96,7 +239,7 @@ export default function App() {
 				},
 				feedback: withFeedback && feedback ? feedback : null
 			};
-			const res = await fetch(`${API_BASE}/testcases/generate`, {
+			const res = await apiRequest("/testcases/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
@@ -125,7 +268,7 @@ export default function App() {
 				issue_type: jiraIssueType,
 				test_cases: testCases
 			};
-			const res = await fetch(`${API_BASE}/export/jira`, {
+			const res = await apiRequest("/export/jira", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
@@ -148,13 +291,16 @@ export default function App() {
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
 			const payload = { test_cases: testCases };
-			const res = await fetch(`${API_BASE}/export/${format}`, {
+			const res = await apiRequest(`/export/${format}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
 			});
 			
-			if (!res.ok) throw new Error("Export failed");
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Export failed");
+				throw new Error(errorMessage);
+			}
 			
 			// Download the file
 			const blob = await res.blob();
@@ -182,7 +328,7 @@ export default function App() {
 				test_cases: testCases,
 				target_base_url: appLink || null
 			};
-			const res = await fetch(`${API_BASE}/automation/playwright`, {
+			const res = await apiRequest("/automation/playwright", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
@@ -230,10 +376,54 @@ export default function App() {
 						export to JIRA, and create Playwright (Python) POM stubs.
 					</p>
 				</div>
-				<div className="status">
-					<strong>Status:</strong> {status || "Idle"}
+				<div className="header-right">
+					<div className={`status ${isAuthenticated ? "status-authenticated" : ""}`}>
+						<strong>Status:</strong> {status || "Idle"}
+					</div>
+					<div className="auth-panel">
+						{isVerifyingSession ? (
+							<span className="auth-message">Checking session...</span>
+						) : isAuthenticated ? (
+							<div className="auth-user">
+								{currentUser?.picture && (
+									<img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />
+								)}
+								<div className="auth-user-meta">
+									<strong>{currentUser?.name}</strong>
+									<span>{currentUser?.email}</span>
+								</div>
+								<button
+									type="button"
+									onClick={handleLogout}
+									className="secondary auth-logout-btn"
+									disabled={isAuthenticating}
+								>
+									{isAuthenticating ? "Signing out..." : "Sign Out"}
+								</button>
+							</div>
+						) : GOOGLE_CLIENT_ID ? (
+							<div className="auth-login">
+								<GoogleLogin
+									onSuccess={handleGoogleLoginSuccess}
+									onError={handleGoogleLoginError}
+									text="signin_with"
+									shape="pill"
+								/>
+							</div>
+						) : (
+							<span className="auth-message auth-config-missing">
+								Set VITE_GOOGLE_CLIENT_ID to enable Google sign-in.
+							</span>
+						)}
+					</div>
 				</div>
 			</header>
+
+			{!isAuthenticated && !isVerifyingSession && (
+				<div className="auth-warning-banner">
+					🔐 Sign in with Google to parse requirements, generate test cases, export artifacts, and create automation stubs.
+				</div>
+			)}
 
 			<div className="tabs">
 				{tabs.map((tab) => (
@@ -264,7 +454,7 @@ export default function App() {
 									onChange={(e) => setFile(e.target.files?.[0] || null)}
 								/>
 							</div>
-							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing}>
+							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || authActionDisabled}>
 								{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
 							</button>
 						</div>
@@ -305,7 +495,7 @@ export default function App() {
 								<div className="feedback-actions">
 									<button 
 										onClick={() => parseRequirements(true)} 
-										disabled={!reqFeedback.trim() || isParsing}
+										disabled={!reqFeedback.trim() || isParsing || authActionDisabled}
 										className="feedback-button"
 									>
 										{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
@@ -410,7 +600,7 @@ export default function App() {
 							Generate structured test cases from your parsed requirements and context.
 						</p>
 						<div className="panel-form button-row">
-							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating}>
+							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || authActionDisabled}>
 								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
 							</button>
 						</div>
@@ -555,7 +745,7 @@ export default function App() {
 								<div className="feedback-actions">
 									<button 
 										onClick={() => generateTestCases(true)} 
-										disabled={!feedback.trim() || isGenerating}
+										disabled={!feedback.trim() || isGenerating || authActionDisabled}
 										className="feedback-button"
 									>
 										{isGenerating ? "⏳ Updating Test Cases..." : "🔄 Implement Changes"}
@@ -586,7 +776,7 @@ export default function App() {
 								<button 
 									className="export-btn csv" 
 									onClick={() => exportToFormat("csv")} 
-									disabled={testCases.length === 0 || isExporting}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">📄</span>
 									<span className="export-label">CSV</span>
@@ -595,7 +785,7 @@ export default function App() {
 								<button 
 									className="export-btn excel" 
 									onClick={() => exportToFormat("excel")} 
-									disabled={testCases.length === 0 || isExporting}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">📊</span>
 									<span className="export-label">Excel</span>
@@ -604,7 +794,7 @@ export default function App() {
 								<button 
 									className="export-btn json" 
 									onClick={() => exportToFormat("json")} 
-									disabled={testCases.length === 0 || isExporting}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">{ }</span>
 									<span className="export-label">JSON</span>
@@ -643,7 +833,7 @@ export default function App() {
 								<button 
 									className="export-btn jira" 
 									onClick={exportToJira} 
-									disabled={testCases.length === 0 || !jiraProject || isExporting}
+									disabled={testCases.length === 0 || !jiraProject || isExporting || authActionDisabled}
 								>
 									{isExporting ? "⏳ Exporting..." : "🚀 Export to JIRA"}
 								</button>
@@ -696,7 +886,7 @@ export default function App() {
 							Generate Playwright (Python) Page Object Model stubs from test cases.
 						</p>
 						<div className="panel-form button-row">
-							<button onClick={generateAutomation} disabled={testCases.length === 0}>
+							<button onClick={generateAutomation} disabled={testCases.length === 0 || authActionDisabled}>
 								Generate Automation Stubs
 							</button>
 						</div>

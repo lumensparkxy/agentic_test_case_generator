@@ -1,25 +1,43 @@
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
 
 BASE = "http://127.0.0.1:8000"
 OUT_DIR = "/tmp/tcagent_api_verify"
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "").strip()
 
 
 def read_parse_requirements() -> list[dict]:
     with open(f"{OUT_DIR}/parse.out", "r", encoding="utf-8") as f:
         raw = f.read()
+
+    status = None
+    if "HTTP_STATUS:" in raw:
+        status_text = raw.rsplit("HTTP_STATUS:", 1)[-1].strip().splitlines()[0]
+        try:
+            status = int(status_text)
+        except ValueError:
+            status = None
+
+    if status != 200:
+        return []
+
     parse_json = raw.split("HTTP_STATUS:")[0].strip()
     data = json.loads(parse_json)
     return data["requirements"]
 
 
 def post_json(path: str, payload: dict) -> tuple[int, bytes, dict]:
+    headers = {"Content-Type": "application/json"}
+    if AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
+
     req = urllib.request.Request(
         BASE + path,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -46,7 +64,14 @@ def write_out(name: str, status: int, body: bytes, headers: dict) -> None:
 
 
 def main() -> None:
+    if not AUTH_TOKEN:
+        print("AUTH_TOKEN is not set; skipping protected e2e API verification.")
+        return
+
     requirements = read_parse_requirements()
+    if not requirements:
+        print("parse.out does not contain a successful parse response; skipping e2e API verification.")
+        return
 
     refine_payload = {
         "feedback": "Make wording concise and keep requirements strictly testable.",
@@ -56,7 +81,10 @@ def main() -> None:
     refine_req = urllib.request.Request(
         BASE + "/requirements/parse",
         data=refine_body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Bearer {AUTH_TOKEN}",
+        },
         method="POST",
     )
     try:

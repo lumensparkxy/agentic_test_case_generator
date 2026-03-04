@@ -2,19 +2,23 @@ from io import BytesIO
 from typing import List, Optional
 import json
 import logging
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from docx import Document
 
-from .config import get_settings
+from .config import get_auth_settings, get_settings
 from .models import (
+    AuthTokenResponse,
+    AuthUser,
     ParseResponse,
     EnrichInput,
     GenerateTestCasesInput,
     GenerateTestCasesResponse,
+    GoogleLoginRequest,
     JiraExportInput,
     JiraExportResponse,
+    LogoutResponse,
     AutomationInput,
     AutomationResponse,
     Requirement,
@@ -27,6 +31,8 @@ from .agents.requirements_agent import extract_requirements, refine_requirements
 from .agents.test_case_agent import generate_test_cases
 from .agents.export_agent import export_to_jira, export_to_csv, export_to_excel, export_to_json
 from .agents.automation_agent import generate_playwright_pom
+from .auth.google_auth import verify_google_credential
+from .auth.jwt_auth import create_access_token, get_current_user
 from .utils.excel_parser import parse_excel_to_text
 
 app = FastAPI(title="Agentic Test Case Generator")
@@ -50,8 +56,33 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.post("/auth/google/login", response_model=AuthTokenResponse)
+async def auth_google_login(payload: GoogleLoginRequest) -> AuthTokenResponse:
+    settings = get_auth_settings()
+    user_claims = verify_google_credential(payload.credential, settings.google_client_id)
+    user = AuthUser(**user_claims)
+    access_token, expires_in = create_access_token(user)
+    return AuthTokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=expires_in,
+        user=user,
+    )
+
+
+@app.get("/auth/me", response_model=AuthUser)
+async def auth_me(current_user: AuthUser = Depends(get_current_user)) -> AuthUser:
+    return current_user
+
+
+@app.post("/auth/logout", response_model=LogoutResponse)
+async def auth_logout() -> LogoutResponse:
+    return LogoutResponse(status="ok")
+
+
 @app.post("/requirements/parse", response_model=ParseResponse)
 async def parse_requirements(
+    _current_user: AuthUser = Depends(get_current_user),
     file: UploadFile = File(None),
     feedback: Optional[str] = Form(None),
     existing_requirements: Optional[str] = Form(None),
@@ -104,25 +135,35 @@ async def parse_requirements(
 
 
 @app.post("/requirements/enrich", response_model=EnrichInput)
-async def enrich_requirements(payload: EnrichInput) -> EnrichInput:
+async def enrich_requirements(
+    payload: EnrichInput,
+    _current_user: AuthUser = Depends(get_current_user),
+) -> EnrichInput:
     return payload
 
 
 @app.post("/testcases/generate", response_model=GenerateTestCasesResponse)
 async def generate_test_cases_endpoint(
     payload: GenerateTestCasesInput,
+    _current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
     test_cases = await run_in_threadpool(generate_test_cases, payload)
     return GenerateTestCasesResponse(test_cases=test_cases)
 
 
 @app.post("/export/jira", response_model=JiraExportResponse)
-async def export_jira(payload: JiraExportInput) -> JiraExportResponse:
+async def export_jira(
+    payload: JiraExportInput,
+    _current_user: AuthUser = Depends(get_current_user),
+) -> JiraExportResponse:
     return await run_in_threadpool(export_to_jira, payload)
 
 
 @app.post("/export/csv")
-async def export_csv(payload: GenerateTestCasesResponse):
+async def export_csv(
+    payload: GenerateTestCasesResponse,
+    _current_user: AuthUser = Depends(get_current_user),
+):
     """Export test cases to CSV format."""
     csv_content = export_to_csv(payload.test_cases)
     return StreamingResponse(
@@ -133,7 +174,10 @@ async def export_csv(payload: GenerateTestCasesResponse):
 
 
 @app.post("/export/excel")
-async def export_excel_endpoint(payload: GenerateTestCasesResponse):
+async def export_excel_endpoint(
+    payload: GenerateTestCasesResponse,
+    _current_user: AuthUser = Depends(get_current_user),
+):
     """Export test cases to Excel format."""
     excel_bytes = export_to_excel(payload.test_cases)
     return StreamingResponse(
@@ -144,7 +188,10 @@ async def export_excel_endpoint(payload: GenerateTestCasesResponse):
 
 
 @app.post("/export/json")
-async def export_json_endpoint(payload: GenerateTestCasesResponse):
+async def export_json_endpoint(
+    payload: GenerateTestCasesResponse,
+    _current_user: AuthUser = Depends(get_current_user),
+):
     """Export test cases to JSON format."""
     json_content = export_to_json(payload.test_cases)
     return StreamingResponse(
@@ -155,5 +202,8 @@ async def export_json_endpoint(payload: GenerateTestCasesResponse):
 
 
 @app.post("/automation/playwright", response_model=AutomationResponse)
-async def automation_playwright(payload: AutomationInput) -> AutomationResponse:
+async def automation_playwright(
+    payload: AutomationInput,
+    _current_user: AuthUser = Depends(get_current_user),
+) -> AutomationResponse:
     return await run_in_threadpool(generate_playwright_pom, payload)
