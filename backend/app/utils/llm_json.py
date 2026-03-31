@@ -78,6 +78,44 @@ def parse_test_cases_json(text: str) -> List[Dict[str, Any]]:
     return []
 
 
+def parse_coverage_plan_json(text: str) -> List[Dict[str, Any]]:
+    """Parse requirement coverage plan payload from model output."""
+    json_text = extract_json(text)
+    if not json_text:
+        return []
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError:
+        return []
+
+    if isinstance(data, list):
+        plan = data
+    elif isinstance(data, dict) and "coverage_plan" in data and isinstance(data["coverage_plan"], list):
+        plan = data["coverage_plan"]
+    else:
+        return []
+
+    valid: List[Dict[str, Any]] = []
+    for item in plan:
+        if not isinstance(item, dict):
+            continue
+        requirement_id = str(item.get("requirement_id") or "").strip()
+        requirement_text = str(item.get("requirement_text") or item.get("text") or "").strip()
+        scenarios = item.get("scenarios")
+        if not requirement_id or not isinstance(scenarios, list):
+            continue
+        valid.append(
+            {
+                "requirement_id": requirement_id,
+                "requirement_text": requirement_text,
+                "scenarios": [scenario for scenario in scenarios if isinstance(scenario, dict)],
+            }
+        )
+
+    return valid
+
+
 def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[str, Any]]:
     """Parse a structured reviewer/validator result from model output."""
     if not text:

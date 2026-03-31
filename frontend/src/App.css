@@ -403,6 +403,124 @@ input[type="file"]::file-selector-button:hover {
     color: var(--text-main);
 }
 
+.review-banner {
+    margin-top: 1.5rem;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+}
+
+.review-approved {
+    background: #f0fdf4;
+    border-color: #86efac;
+}
+
+.review-needs-work {
+    background: #fff7ed;
+    border-color: #fdba74;
+}
+
+.review-banner-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+}
+
+.review-banner p {
+    margin: 0;
+    color: var(--text-main);
+}
+
+.review-issues {
+    margin: 0.75rem 0 0;
+    padding-left: 1.25rem;
+    color: #9a3412;
+}
+
+.coverage-plan-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.coverage-plan-card {
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.coverage-plan-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.coverage-plan-id {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #2563eb;
+    margin-bottom: 0.2rem;
+}
+
+.coverage-plan-text {
+    color: var(--text-main);
+    font-size: 0.9rem;
+}
+
+.coverage-plan-summary {
+    white-space: nowrap;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 9999px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.coverage-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.coverage-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.coverage-chip.required::before {
+    content: "●";
+    font-size: 0.55rem;
+}
+
+.coverage-chip.recommended::before {
+    content: "○";
+    font-size: 0.6rem;
+}
+
+.coverage-chip.covered {
+    background: #dcfce7;
+    color: #166534;
+    border-color: #86efac;
+}
+
+.coverage-chip.missing {
+    background: #fef2f2;
+    color: #b91c1c;
+    border-color: #fecaca;
+}
+
 /* Requirements List */
 .requirements-list {
     list-style: none;
@@ -944,6 +1062,12 @@ pre {
 
     .panel-form.two-cols {
         grid-template-columns: 1fr;
+    }
+
+    .review-banner-header,
+    .coverage-plan-header {
+        flex-direction: column;
+        align-items: flex-start;
     }
 
     .test-cases-grid {

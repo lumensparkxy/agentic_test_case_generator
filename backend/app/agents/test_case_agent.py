@@ -18,11 +18,12 @@ from google.genai import types
 from pydantic import ValidationError
 
 from ..config import get_settings
-from ..models import GenerateTestCasesInput, RefineTestCasesInput, Requirement, TestCase, TestStep
-from ..utils.llm_json import parse_review_json, parse_test_cases_json
+from ..models import GenerateTestCasesInput, RefineTestCasesInput, Requirement, RequirementCoveragePlan, ScenarioIntent, TestCase, TestStep
+from ..utils.llm_json import parse_coverage_plan_json, parse_review_json, parse_test_cases_json
 
 STATE_TEST_CASES = "current_test_cases"
 STATE_VALIDATION_FEEDBACK = "validation_feedback"
+STATE_COVERAGE_PLAN = "coverage_plan"
 
 APPROVAL_PHRASE = "APPROVED"
 DEFAULT_TEST_CASE_THRESHOLD = 90
@@ -85,6 +86,59 @@ AUTOMATION_ALIASES = {
     "planned": "To Be Automated",
 }
 
+ALLOWED_SCENARIO_TYPES = {
+    "Happy Path",
+    "Negative",
+    "Boundary",
+    "Validation",
+    "Authorization",
+    "State Transition",
+    "Integration",
+    "Error Handling",
+    "Data Variation",
+}
+SCENARIO_TYPE_ALIASES = {
+    "happy": "Happy Path",
+    "happy path": "Happy Path",
+    "positive": "Happy Path",
+    "positive flow": "Happy Path",
+    "negative": "Negative",
+    "negative path": "Negative",
+    "sad path": "Negative",
+    "boundary": "Boundary",
+    "boundary value": "Boundary",
+    "limit": "Boundary",
+    "validation": "Validation",
+    "input validation": "Validation",
+    "authorization": "Authorization",
+    "authentication": "Authorization",
+    "permission": "Authorization",
+    "permissions": "Authorization",
+    "role based": "Authorization",
+    "state": "State Transition",
+    "state transition": "State Transition",
+    "workflow": "State Transition",
+    "integration": "Integration",
+    "api": "Integration",
+    "dependency": "Integration",
+    "external": "Integration",
+    "error": "Error Handling",
+    "error handling": "Error Handling",
+    "failure": "Error Handling",
+    "exception": "Error Handling",
+    "data": "Data Variation",
+    "data variation": "Data Variation",
+}
+SCENARIO_KEYWORD_RULES = [
+    (("invalid", "required", "format", "blank", "empty", "field", "input"), "Validation"),
+    (("min", "max", "limit", "length", "range", "threshold", "boundary"), "Boundary"),
+    (("login", "auth", "permission", "role", "access", "admin", "user"), "Authorization"),
+    (("status", "state", "workflow", "approve", "reject", "submit", "cancel", "transition"), "State Transition"),
+    (("api", "integration", "service", "email", "payment", "upload", "download", "import", "export", "webhook"), "Integration"),
+    (("error", "failure", "timeout", "unavailable", "retry", "exception"), "Error Handling"),
+    (("search", "sort", "filter", "duplicate", "record", "dataset", "data"), "Data Variation"),
+]
+
 
 def _dedupe_preserve(items: List[str]) -> List[str]:
     seen: set[str] = set()
@@ -144,6 +198,291 @@ def _normalize_automation_status(raw_status: Any) -> str:
     if raw in ALLOWED_AUTOMATION_STATUSES:
         return raw
     return AUTOMATION_ALIASES.get(raw.lower(), "Manual")
+
+
+def _normalize_scenario_type(raw_type: Any) -> str:
+    if not raw_type:
+        return "Happy Path"
+
+    raw = str(raw_type).strip()
+    if raw in ALLOWED_SCENARIO_TYPES:
+        return raw
+
+    normalized_key = " ".join(raw.replace("_", " ").replace("-", " ").split()).lower()
+    mapped = SCENARIO_TYPE_ALIASES.get(normalized_key)
+    if mapped:
+        return mapped
+
+    title_case = raw.title()
+    if title_case in ALLOWED_SCENARIO_TYPES:
+        return title_case
+
+    logging.warning("[TestCase Workflow] Unknown scenario type '%s', defaulting to Happy Path", raw)
+    return "Happy Path"
+
+
+def _scenario_tag(scenario_type: str) -> str:
+    normalized = _normalize_scenario_type(scenario_type)
+    return f"scenario:{normalized.lower().replace(' ', '-')}"
+
+
+def _coerce_bool(value: Any, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "yes", "1", "required", "must", "y"}:
+        return True
+    if normalized in {"false", "no", "0", "optional", "n"}:
+        return False
+    return default
+
+
+def _build_default_scenario(requirement: Requirement, scenario_type: str, index: int, *, must_have: bool = True) -> Dict[str, Any]:
+    normalized_type = _normalize_scenario_type(scenario_type)
+    return {
+        "id": f"{requirement.id}-SCN-{index:02d}",
+        "requirement_id": requirement.id,
+        "scenario_type": normalized_type,
+        "title": f"{normalized_type} coverage for {requirement.id}",
+        "objective": f"Validate requirement {requirement.id} ({requirement.text}) under {normalized_type.lower()} conditions.",
+        "priority": "High" if must_have else "Medium",
+        "must_have": must_have,
+    }
+
+
+def _default_scenarios_for_requirement(requirement: Requirement) -> List[Dict[str, Any]]:
+    text = requirement.text.lower()
+    scenario_types: List[str] = ["Happy Path", "Negative"]
+
+    for keywords, scenario_type in SCENARIO_KEYWORD_RULES:
+        if any(keyword in text for keyword in keywords) and scenario_type not in scenario_types:
+            scenario_types.append(scenario_type)
+        if len(scenario_types) >= 4:
+            break
+
+    if "Validation" not in scenario_types and any(keyword in text for keyword in ("field", "input", "form", "validate", "value")):
+        scenario_types.append("Validation")
+    elif len(scenario_types) < 3:
+        scenario_types.append("Validation")
+
+    defaults: List[Dict[str, Any]] = []
+    for index, scenario_type in enumerate(_dedupe_preserve(scenario_types)[:4], start=1):
+        defaults.append(
+            _build_default_scenario(
+                requirement,
+                scenario_type,
+                index,
+                must_have=index <= 2 or scenario_type in {"Validation", "Authorization", "State Transition", "Integration"},
+            )
+        )
+    return defaults
+
+
+def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[Requirement]) -> List[Dict[str, Any]]:
+    requirement_lookup = {requirement.id: requirement for requirement in requirements}
+    normalized_by_requirement: Dict[str, Dict[str, Any]] = {}
+
+    for raw_item in raw_plan or []:
+        requirement_id = str(raw_item.get("requirement_id") or "").strip()
+        if requirement_id not in requirement_lookup:
+            continue
+
+        requirement = requirement_lookup[requirement_id]
+        normalized_scenarios: List[Dict[str, Any]] = []
+        seen_scenario_types: set[str] = set()
+
+        for raw_scenario in raw_item.get("scenarios") or []:
+            if not isinstance(raw_scenario, dict):
+                continue
+
+            scenario_type = _normalize_scenario_type(raw_scenario.get("scenario_type") or raw_scenario.get("type"))
+            if scenario_type in seen_scenario_types:
+                continue
+
+            title = str(raw_scenario.get("title") or f"{scenario_type} coverage for {requirement_id}").strip()
+            objective = str(
+                raw_scenario.get("objective")
+                or raw_scenario.get("description")
+                or f"Validate requirement {requirement_id} under {scenario_type.lower()} conditions."
+            ).strip()
+            if not title or not objective:
+                continue
+
+            normalized_scenarios.append(
+                {
+                    "id": str(raw_scenario.get("id") or f"{requirement_id}-SCN-{len(normalized_scenarios) + 1:02d}"),
+                    "requirement_id": requirement_id,
+                    "scenario_type": scenario_type,
+                    "title": title,
+                    "objective": objective,
+                    "priority": _normalize_priority(raw_scenario.get("priority")),
+                    "must_have": _coerce_bool(raw_scenario.get("must_have"), default=True),
+                }
+            )
+            seen_scenario_types.add(scenario_type)
+
+        normalized_by_requirement[requirement_id] = {
+            "requirement_id": requirement_id,
+            "requirement_text": str(raw_item.get("requirement_text") or requirement.text).strip() or requirement.text,
+            "scenarios": normalized_scenarios,
+        }
+
+    normalized_plan: List[Dict[str, Any]] = []
+    for requirement in requirements:
+        existing = normalized_by_requirement.get(requirement.id)
+        if not existing:
+            normalized_plan.append(
+                {
+                    "requirement_id": requirement.id,
+                    "requirement_text": requirement.text,
+                    "scenarios": _default_scenarios_for_requirement(requirement),
+                }
+            )
+            continue
+
+        existing_types = {scenario["scenario_type"] for scenario in existing["scenarios"]}
+        for default_scenario in _default_scenarios_for_requirement(requirement):
+            if default_scenario["scenario_type"] in existing_types or len(existing["scenarios"]) >= 4:
+                continue
+            existing["scenarios"].append(default_scenario)
+            existing_types.add(default_scenario["scenario_type"])
+
+        if not existing["scenarios"]:
+            existing["scenarios"] = _default_scenarios_for_requirement(requirement)
+
+        normalized_plan.append(existing)
+
+    return normalized_plan
+
+
+def _fallback_coverage_plan(requirements: List[Requirement]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "requirement_id": requirement.id,
+            "requirement_text": requirement.text,
+            "scenarios": _default_scenarios_for_requirement(requirement),
+        }
+        for requirement in requirements
+    ]
+
+
+def _extract_scenario_types_from_test_case(test_case: Dict[str, Any]) -> List[str]:
+    tags = test_case.get("tags") or []
+    extracted: List[str] = []
+
+    for tag in tags:
+        normalized_tag = str(tag).strip()
+        if not normalized_tag.lower().startswith("scenario:"):
+            continue
+        extracted.append(_normalize_scenario_type(normalized_tag.split(":", 1)[1]))
+
+    if extracted:
+        return _dedupe_preserve(extracted)
+
+    steps = test_case.get("steps") or []
+    step_text = " ".join(
+        f"{step.get('action', '')} {step.get('expected', '')}"
+        for step in steps
+        if isinstance(step, dict)
+    )
+    combined_text = " ".join(
+        [
+            str(test_case.get("title") or ""),
+            str(test_case.get("description") or ""),
+            str(test_case.get("expected_result") or ""),
+            step_text,
+        ]
+    ).lower()
+
+    for keywords, scenario_type in SCENARIO_KEYWORD_RULES:
+        if any(keyword in combined_text for keyword in keywords):
+            extracted.append(scenario_type)
+
+    if not extracted:
+        extracted.append("Happy Path")
+
+    return _dedupe_preserve(extracted)
+
+
+def _compute_planned_scenario_metrics(
+    coverage_plan: List[Dict[str, Any]],
+    test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+) -> Dict[str, Any]:
+    requirement_ids = _serialize_requirement_ids(requirements)
+    requirement_id_set = set(requirement_ids)
+    scenarios_covered_by_requirement: Dict[str, set[str]] = {requirement_id: set() for requirement_id in requirement_ids}
+
+    for test_case in test_cases:
+        tags = test_case.get("tags") or []
+        linked_requirements = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        if not linked_requirements:
+            continue
+
+        scenario_types = _extract_scenario_types_from_test_case(test_case)
+        for requirement_id in linked_requirements:
+            scenarios_covered_by_requirement[requirement_id].update(scenario_types)
+
+    planned_total = 0
+    covered_total = 0
+    must_have_total = 0
+    must_have_covered = 0
+    missing_scenarios: List[str] = []
+    missing_must_have_scenarios: List[str] = []
+    requirement_summary: Dict[str, Dict[str, Any]] = {}
+
+    for plan_item in coverage_plan:
+        requirement_id = str(plan_item.get("requirement_id") or "").strip()
+        planned_scenarios = []
+        covered_scenarios = []
+        missing_scenario_types = []
+        matched_scenarios = scenarios_covered_by_requirement.get(requirement_id, set())
+
+        for scenario in plan_item.get("scenarios") or []:
+            scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
+            planned_total += 1
+            planned_scenarios.append(scenario_type)
+
+            is_must_have = _coerce_bool(scenario.get("must_have"), default=True)
+            if is_must_have:
+                must_have_total += 1
+
+            if scenario_type in matched_scenarios:
+                covered_total += 1
+                covered_scenarios.append(scenario_type)
+                if is_must_have:
+                    must_have_covered += 1
+                continue
+
+            label = f"{requirement_id} - {scenario_type}: {scenario.get('title') or scenario_type}"
+            missing_scenarios.append(label)
+            missing_scenario_types.append(scenario_type)
+            if is_must_have:
+                missing_must_have_scenarios.append(label)
+
+        requirement_summary[requirement_id] = {
+            "planned_scenarios": len(_dedupe_preserve(planned_scenarios)),
+            "covered_scenarios": len(_dedupe_preserve(covered_scenarios)),
+            "missing_scenario_types": _dedupe_preserve(missing_scenario_types),
+            "covered_scenario_types": _dedupe_preserve(covered_scenarios),
+        }
+
+    return {
+        "planned_scenarios_total": planned_total,
+        "covered_planned_scenarios": covered_total,
+        "scenario_coverage_ratio": round(covered_total / planned_total, 2) if planned_total else 1.0,
+        "must_have_scenarios_total": must_have_total,
+        "covered_must_have_scenarios": must_have_covered,
+        "must_have_scenario_coverage_ratio": round(must_have_covered / must_have_total, 2) if must_have_total else 1.0,
+        "missing_scenarios": missing_scenarios,
+        "missing_must_have_scenarios": missing_must_have_scenarios,
+        "requirement_scenario_summary": requirement_summary,
+    }
 
 
 def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, default_summary: str) -> Dict[str, Any]:
@@ -232,8 +571,18 @@ def _compute_test_case_coverage_metrics(test_cases: List[Dict[str, Any]], requir
     }
 
 
-def _heuristic_test_case_review(test_cases: List[Dict[str, Any]], requirements: List[Requirement], threshold: int) -> Dict[str, Any]:
+def _heuristic_test_case_review(
+    test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+    threshold: int,
+    coverage_plan: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     metrics = _compute_test_case_coverage_metrics(test_cases, requirements)
+    scenario_metrics = _compute_planned_scenario_metrics(
+        coverage_plan or _fallback_coverage_plan(requirements),
+        test_cases,
+        requirements,
+    )
     blocking_issues: List[str] = []
     suggestions: List[str] = []
     unmet_criteria: List[str] = []
@@ -270,6 +619,24 @@ def _heuristic_test_case_review(test_cases: List[Dict[str, Any]], requirements: 
         if metrics["cases_with_preconditions"] < metrics["total_test_cases"]:
             suggestions.append("Add preconditions to more test cases to improve execution readiness.")
             score -= 3
+
+        if scenario_metrics["missing_must_have_scenarios"]:
+            preview = ", ".join(scenario_metrics["missing_must_have_scenarios"][:3])
+            blocking_issues.append(
+                "Missing must-have planned scenarios: "
+                f"{preview}"
+                + ("." if len(scenario_metrics["missing_must_have_scenarios"]) <= 3 else ", ...")
+            )
+            unmet_criteria.append("Every must-have scenario in the coverage plan needs at least one corresponding test case.")
+            score -= len(scenario_metrics["missing_must_have_scenarios"]) * 7
+        elif scenario_metrics["missing_scenarios"]:
+            preview = ", ".join(scenario_metrics["missing_scenarios"][:3])
+            suggestions.append(
+                "Add more planned scenario coverage: "
+                f"{preview}"
+                + ("." if len(scenario_metrics["missing_scenarios"]) <= 3 else ", ...")
+            )
+            score -= min(12, len(scenario_metrics["missing_scenarios"]) * 2)
 
     score = max(0, min(100, score))
     approved = score >= threshold and not blocking_issues
@@ -336,6 +703,62 @@ def exit_loop(tool_context: ToolContext) -> dict:
     return {"status": "approved", "message": "Test cases approved"}
 
 
+def _build_coverage_planner_agent(
+    model: str,
+    requirements_text: str,
+    context_text: str,
+    human_feedback: Optional[str] = None,
+) -> Agent:
+    feedback_section = ""
+    if human_feedback:
+        feedback_section = f"""
+**Human Feedback to Consider:**
+{human_feedback}
+"""
+
+    return Agent(
+        name="CoveragePlannerAgent",
+        model=model,
+        include_contents='none',
+        instruction=f"""You are a Senior QA Strategist creating a scenario coverage plan before detailed test cases are written.
+
+**Requirements:**
+{requirements_text}
+
+**Context:**
+{context_text}
+{feedback_section}
+**Rules:**
+1. Produce 2-4 scenarios per requirement.
+2. Always include a 'Happy Path' scenario for every requirement.
+3. Include at least one non-happy-path scenario per requirement.
+4. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
+5. Mark essential scenarios with must_have=true.
+6. Output ONLY a JSON object shaped like:
+{{
+    "coverage_plan": [
+        {{
+            "requirement_id": "REQ-001",
+            "requirement_text": "The system shall ...",
+            "scenarios": [
+                {{
+                    "id": "REQ-001-SCN-01",
+                    "scenario_type": "Happy Path",
+                    "title": "Primary flow succeeds",
+                    "objective": "Explain what must be validated.",
+                    "priority": "High",
+                    "must_have": true
+                }}
+            ]
+        }}
+    ]
+}}
+""",
+        description="Plans scenario coverage for each requirement before test-case generation",
+        output_key=STATE_COVERAGE_PLAN,
+    )
+
+
 def _build_review_loop(
     model: str,
     threshold: int,
@@ -361,16 +784,23 @@ def _build_review_loop(
 {{{STATE_TEST_CASES}}}
 ```
 
+    **Coverage Plan:**
+    ```
+    {{{STATE_COVERAGE_PLAN}}}
+    ```
+
 **Requirements:**
 {requirements_text}
 {feedback_section}
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
 2. Steps are executable and expected results are specific.
-3. Requirement traceability tags cover every requirement.
-4. Priority, type, status, and automation status are valid.
-5. Test data, preconditions, and overall expected_result are present when needed.
-6. Human feedback has been addressed.
+    3. Requirement traceability tags cover every requirement.
+    4. Every must-have scenario from the coverage plan is represented by at least one test case.
+    5. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
+    6. Priority, type, status, and automation status are valid.
+    7. Test data, preconditions, and overall expected_result are present when needed.
+    8. Human feedback has been addressed.
 
 **Response Rules:**
 - Return ONLY a JSON object with this exact shape:
@@ -399,6 +829,11 @@ def _build_review_loop(
 ```
 {{{STATE_TEST_CASES}}}
 ```
+
+    **Coverage Plan:**
+    ```
+    {{{STATE_COVERAGE_PLAN}}}
+    ```
 
 **Structured Validation Result:**
 {{{STATE_VALIDATION_FEEDBACK}}}
@@ -454,13 +889,17 @@ def _build_generation_pipeline(
 
 **Template Configuration:**
 {template_text}
+
+**Coverage Plan To Implement:**
+{{{STATE_COVERAGE_PLAN}}}
 {feedback_section}
 **Rules:**
 1. Generate 1-3 test cases per requirement.
-2. Tag each test case with at least one requirement ID.
-3. Include detailed steps, expected results, realistic priorities, and execution metadata.
-4. Cover positive, negative, and edge scenarios where appropriate.
-5. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+2. Implement every must-have planned scenario and as many recommended scenarios as possible.
+3. Tag each test case with at least one requirement ID and one scenario tag using the format scenario:<kebab-case-scenario-type>.
+4. Include detailed steps, expected results, realistic priorities, and execution metadata.
+5. Keep each test case centered on one primary scenario from the coverage plan.
+6. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -468,7 +907,11 @@ def _build_generation_pipeline(
 
     return SequentialAgent(
         name="TestCaseGenerationPipeline",
-        sub_agents=[generator_agent, _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback)],
+        sub_agents=[
+            _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+            generator_agent,
+            _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback),
+        ],
         description="Generates and iteratively validates test cases from requirements",
     )
 
@@ -498,11 +941,15 @@ Context:
 Template:
 {template_text}
 
+Coverage plan:
+{{{STATE_COVERAGE_PLAN}}}
+
 Rules:
 1. Preserve good test cases and improve weak ones.
 2. Add, merge, split, or remove cases as needed.
 3. Keep requirement traceability intact or improve it.
-4. Output ONLY the JSON object.
+4. Ensure each test case includes a scenario tag formatted like scenario:happy-path.
+5. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,
@@ -510,7 +957,11 @@ Rules:
 
     return SequentialAgent(
         name="TestCaseRefinementPipeline",
-        sub_agents=[refinement_agent, _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback)],
+        sub_agents=[
+            _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+            refinement_agent,
+            _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback),
+        ],
         description="Refines an existing test-case set and re-validates it against the approval threshold",
     )
 
@@ -579,10 +1030,12 @@ Human feedback:
         state={
             STATE_TEST_CASES: "[]",
             STATE_VALIDATION_FEEDBACK: "",
+            STATE_COVERAGE_PLAN: "[]",
         },
     )
 
     current_test_cases: List[Dict[str, Any]] = []
+    current_coverage_plan: List[Dict[str, Any]] = []
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
 
@@ -608,6 +1061,10 @@ Human feedback:
             if parsed_test_cases and author in {"TestCaseGeneratorAgent", "TestCaseRefinementAgent", "TestCaseRefinerAgent"}:
                 current_test_cases = parsed_test_cases
 
+            parsed_coverage_plan = parse_coverage_plan_json(text)
+            if parsed_coverage_plan and author == "CoveragePlannerAgent":
+                current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
+
             parsed_review = parse_review_json(text, default_threshold=threshold)
             if parsed_review and author == "TestCaseValidatorAgent":
                 model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
@@ -624,13 +1081,26 @@ Human feedback:
     if state_test_cases:
         current_test_cases = state_test_cases
 
+    state_coverage_plan = parse_coverage_plan_json(session.state.get(STATE_COVERAGE_PLAN, "[]"))
+    if state_coverage_plan:
+        current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
+
+    if not current_coverage_plan:
+        current_coverage_plan = _fallback_coverage_plan(requirements)
+
     state_review = parse_review_json(session.state.get(STATE_VALIDATION_FEEDBACK, ""), default_threshold=threshold)
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Test case validation completed.")
 
-    heuristic_review = _heuristic_test_case_review(current_test_cases, requirements, threshold)
+    heuristic_review = _heuristic_test_case_review(
+        current_test_cases,
+        requirements,
+        threshold,
+        coverage_plan=current_coverage_plan,
+    )
     final_review = _merge_review_results(model_review, heuristic_review)
     coverage_metrics = _compute_test_case_coverage_metrics(current_test_cases, requirements)
+    coverage_metrics.update(_compute_planned_scenario_metrics(current_coverage_plan, current_test_cases, requirements))
 
     if iteration_history:
         iteration_history[-1] = _make_history_entry(
@@ -652,6 +1122,7 @@ Human feedback:
     logging.info("[TestCase Workflow] Final test cases: %s, approved=%s", len(current_test_cases), final_review["approved"])
     return {
         "test_cases": current_test_cases,
+        "coverage_plan": current_coverage_plan,
         "approved": final_review["approved"],
         "review": final_review,
         "iteration_history": iteration_history,
@@ -672,12 +1143,17 @@ def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
     except Exception as exc:
         logging.error("[TestCase Workflow] Error: %s", exc)
         requirements = kwargs.get("requirements") or []
+        fallback_plan = _fallback_coverage_plan(requirements)
         return {
             "test_cases": [],
+            "coverage_plan": fallback_plan,
             "approved": False,
-            "review": _heuristic_test_case_review([], requirements, DEFAULT_TEST_CASE_THRESHOLD),
+            "review": _heuristic_test_case_review([], requirements, DEFAULT_TEST_CASE_THRESHOLD, coverage_plan=fallback_plan),
             "iteration_history": [],
-            "coverage_metrics": _compute_test_case_coverage_metrics([], requirements),
+            "coverage_metrics": {
+                **_compute_test_case_coverage_metrics([], requirements),
+                **_compute_planned_scenario_metrics(fallback_plan, [], requirements),
+            },
         }
 
 
@@ -702,30 +1178,64 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
     return requirements_text, context_text, template_text
 
 
-def _fallback_raw_test_cases(requirements: List[Requirement], context: Optional[Any]) -> List[Dict[str, Any]]:
+def _fallback_raw_test_cases(
+    requirements: List[Requirement],
+    context: Optional[Any],
+    coverage_plan: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     raw_test_cases: List[Dict[str, Any]] = []
-    for idx, req in enumerate(requirements, start=1):
-        raw_test_cases.append(
-            {
-                "id": f"TC-{idx:03d}",
-                "title": f"Validate {req.text[:60]}",
-                "description": f"Verify that {req.text[:100]}",
-                "priority": "Medium",
-                "type": "Functional",
-                "status": "Draft",
-                "preconditions": context.notes if context else None,
-                "steps": [
-                    {"step": 1, "action": f"Navigate to feature area for {req.id}", "expected": "Target page or control is available", "test_data": None},
-                    {"step": 2, "action": f"Perform the behavior described by {req.id}", "expected": "The requirement is satisfied", "test_data": None},
-                ],
-                "expected_result": f"Requirement {req.id} is satisfied without defects.",
-                "test_data": None,
-                "estimated_time": "5 mins",
-                "automation_status": "To Be Automated",
-                "component": "General",
-                "tags": [req.id, "generated"],
-            }
-        )
+    requirements_by_id = {requirement.id: requirement for requirement in requirements}
+    normalized_plan = _normalize_coverage_plan(coverage_plan or _fallback_coverage_plan(requirements), requirements)
+
+    for idx, plan_item in enumerate(normalized_plan, start=1):
+        requirement = requirements_by_id.get(str(plan_item.get("requirement_id") or "").strip())
+        if not requirement:
+            continue
+
+        planned_scenarios = list(plan_item.get("scenarios") or [])
+        selected_scenarios = [scenario for scenario in planned_scenarios if _coerce_bool(scenario.get("must_have"), default=True)]
+        if not selected_scenarios:
+            selected_scenarios = planned_scenarios[:1]
+
+        for scenario_offset, scenario in enumerate(selected_scenarios[:2], start=1):
+            scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
+            raw_test_cases.append(
+                {
+                    "id": f"TC-{len(raw_test_cases) + 1:03d}",
+                    "title": str(scenario.get("title") or f"{scenario_type} validation for {requirement.id}"),
+                    "description": str(scenario.get("objective") or f"Verify that {requirement.text[:100]}"),
+                    "priority": _normalize_priority(scenario.get("priority")),
+                    "type": "Functional",
+                    "status": "Draft",
+                    "preconditions": context.notes if context else None,
+                    "steps": [
+                        {
+                            "step": 1,
+                            "action": f"Navigate to the feature area that implements {requirement.id}",
+                            "expected": "The relevant screen, API, or control is available for testing.",
+                            "test_data": None,
+                        },
+                        {
+                            "step": 2,
+                            "action": f"Execute the {scenario_type.lower()} scenario for {requirement.id}",
+                            "expected": str(scenario.get("objective") or f"Requirement {requirement.id} behaves as expected."),
+                            "test_data": None,
+                        },
+                        {
+                            "step": 3,
+                            "action": "Observe system behavior and capture the outcome.",
+                            "expected": f"The outcome matches the expected {scenario_type.lower()} behavior for {requirement.id}.",
+                            "test_data": None,
+                        },
+                    ],
+                    "expected_result": f"Requirement {requirement.id} is satisfied for the planned {scenario_type.lower()} scenario.",
+                    "test_data": None,
+                    "estimated_time": "5 mins",
+                    "automation_status": "To Be Automated",
+                    "component": "General",
+                    "tags": [requirement.id, _scenario_tag(scenario_type), "generated", f"plan:{idx:02d}-{scenario_offset:02d}"],
+                }
+            )
     return raw_test_cases
 
 
@@ -800,17 +1310,62 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
     return serialized
 
 
+def _hydrate_coverage_plan(
+    raw_coverage_plan: List[Dict[str, Any]],
+    requirements: List[Requirement],
+) -> List[RequirementCoveragePlan]:
+    normalized_plan = _normalize_coverage_plan(raw_coverage_plan or _fallback_coverage_plan(requirements), requirements)
+    hydrated: List[RequirementCoveragePlan] = []
+
+    for plan_item in normalized_plan:
+        scenarios = [
+            ScenarioIntent(
+                id=str(scenario.get("id") or ""),
+                requirement_id=str(plan_item.get("requirement_id") or ""),
+                scenario_type=_normalize_scenario_type(scenario.get("scenario_type")),
+                title=str(scenario.get("title") or "Untitled scenario"),
+                objective=str(scenario.get("objective") or scenario.get("title") or ""),
+                priority=_normalize_priority(scenario.get("priority")),
+                must_have=_coerce_bool(scenario.get("must_have"), default=True),
+            )
+            for scenario in plan_item.get("scenarios") or []
+        ]
+        hydrated.append(
+            RequirementCoveragePlan(
+                requirement_id=str(plan_item.get("requirement_id") or ""),
+                requirement_text=str(plan_item.get("requirement_text") or ""),
+                scenarios=scenarios,
+            )
+        )
+
+    return hydrated
+
+
 def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement]) -> Dict[str, Any]:
     serialized = _serialize_test_cases(test_cases)
-    coverage_metrics = dict(workflow.get("coverage_metrics") or _compute_test_case_coverage_metrics(serialized, requirements))
-    review = dict(workflow.get("review") or _heuristic_test_case_review(serialized, requirements, DEFAULT_TEST_CASE_THRESHOLD))
+    raw_coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(requirements))
+    normalized_coverage_plan = _normalize_coverage_plan(raw_coverage_plan, requirements)
+    default_coverage_metrics = _compute_test_case_coverage_metrics(serialized, requirements)
+    default_coverage_metrics.update(_compute_planned_scenario_metrics(normalized_coverage_plan, serialized, requirements))
+    coverage_metrics = dict(workflow.get("coverage_metrics") or default_coverage_metrics)
+    review = dict(
+        workflow.get("review")
+        or _heuristic_test_case_review(
+            serialized,
+            requirements,
+            DEFAULT_TEST_CASE_THRESHOLD,
+            coverage_plan=normalized_coverage_plan,
+        )
+    )
     approved = bool(workflow.get("approved", False))
+    coverage_plan = _hydrate_coverage_plan(normalized_coverage_plan, requirements)
 
     return {
         "test_cases": test_cases,
         "approved": approved,
         "review": review,
         "iteration_history": list(workflow.get("iteration_history") or []),
+        "coverage_plan": coverage_plan,
         "coverage_metrics": coverage_metrics,
     }
 
@@ -830,12 +1385,19 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
     )
 
     raw_test_cases = workflow.get("test_cases", [])
+    coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
-        raw_test_cases = _fallback_raw_test_cases(payload.requirements, payload.context)
-        fallback_review = _heuristic_test_case_review(raw_test_cases, payload.requirements, DEFAULT_TEST_CASE_THRESHOLD)
+        raw_test_cases = _fallback_raw_test_cases(payload.requirements, payload.context, coverage_plan=coverage_plan)
+        fallback_review = _heuristic_test_case_review(
+            raw_test_cases,
+            payload.requirements,
+            DEFAULT_TEST_CASE_THRESHOLD,
+            coverage_plan=coverage_plan,
+        )
         workflow = {
             "test_cases": raw_test_cases,
+            "coverage_plan": coverage_plan,
             "review": fallback_review,
             "approved": fallback_review["approved"],
             "iteration_history": [
@@ -846,7 +1408,10 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
                     test_cases=raw_test_cases,
                 )
             ],
-            "coverage_metrics": _compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
+            "coverage_metrics": {
+                **_compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
+                **_compute_planned_scenario_metrics(coverage_plan, raw_test_cases, payload.requirements),
+            },
         }
 
     test_cases = _hydrate_test_cases(raw_test_cases)
@@ -869,9 +1434,15 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
     )
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
+    coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
     if not workflow.get("test_cases"):
         logging.warning("[TestCase Workflow] Refinement returned no test cases, restoring previous set")
-        fallback_review = _heuristic_test_case_review(raw_test_cases, payload.requirements, DEFAULT_TEST_CASE_THRESHOLD)
+        fallback_review = _heuristic_test_case_review(
+            raw_test_cases,
+            payload.requirements,
+            DEFAULT_TEST_CASE_THRESHOLD,
+            coverage_plan=coverage_plan,
+        )
         fallback_review["approved"] = False
         fallback_review["summary"] = "Test case refinement returned no updated output. Previous test cases were restored and require further review."
         fallback_review["blocking_issues"] = _dedupe_preserve(
@@ -879,6 +1450,7 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
         )
         workflow = {
             "test_cases": raw_test_cases,
+            "coverage_plan": coverage_plan,
             "review": fallback_review,
             "approved": False,
             "iteration_history": [
@@ -889,7 +1461,10 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
                     test_cases=raw_test_cases,
                 )
             ],
-            "coverage_metrics": _compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
+            "coverage_metrics": {
+                **_compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
+                **_compute_planned_scenario_metrics(coverage_plan, raw_test_cases, payload.requirements),
+            },
         }
 
     test_cases = _hydrate_test_cases(raw_test_cases)

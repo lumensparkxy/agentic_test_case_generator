@@ -93,6 +93,21 @@ FRONTEND_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${FRONTE
 INITIAL_CORS="http://localhost:5173,http://127.0.0.1:5173"
 GCLOUD_ENV_DELIMITER='@'
 
+dedupe_csv() {
+  printf '%s' "$1" \
+    | tr ',' '\n' \
+    | sed 's#[[:space:]]*##g' \
+    | sed '/^$/d' \
+    | sed 's#/$##' \
+    | awk '!seen[$0]++' \
+    | paste -sd, -
+}
+
+cloud_run_service_origin() {
+  local service_name="$1"
+  printf 'https://%s-%s.%s.run.app' "$service_name" "$PROJECT_NUMBER" "$REGION"
+}
+
 build_env_var_arg() {
   local cors_allow_origins="$1"
 
@@ -123,6 +138,7 @@ gcloud config set project "$PROJECT_ID" >/dev/null
 gcloud services enable \
   run.googleapis.com \
   artifactregistry.googleapis.com \
+  generativelanguage.googleapis.com \
   secretmanager.googleapis.com >/dev/null
 
 ensure_artifact_repo "$ARTIFACT_REPO" "$REGION"
@@ -175,12 +191,14 @@ gcloud run deploy "$FRONTEND_SERVICE" \
   "${DEPLOY_ARGS[@]}" >/dev/null
 
 FRONTEND_URL="$(gcloud run services describe "$FRONTEND_SERVICE" --region "$REGION" --format='value(status.url)')"
+FRONTEND_SERVICE_URL="$(cloud_run_service_origin "$FRONTEND_SERVICE")"
+FINAL_CORS="$(dedupe_csv "$INITIAL_CORS,$FRONTEND_URL,$FRONTEND_SERVICE_URL")"
 printf 'Frontend deployed: %s\n' "$FRONTEND_URL"
 
 printf 'Updating backend CORS to frontend URL...\n'
 gcloud run services update "$BACKEND_SERVICE" \
   --region "$REGION" \
-  --set-env-vars "$(build_env_var_arg "$FRONTEND_URL")" \
+  --set-env-vars "$(build_env_var_arg "$FINAL_CORS")" \
   --set-secrets "GEMINI_API_KEY=${SECRET_GEMINI_NAME}:latest,JWT_SECRET_KEY=${SECRET_JWT_NAME}:latest" >/dev/null
 
 cat <<EOF
@@ -192,8 +210,9 @@ Backend URL:  ${BACKEND_URL}
 
 Next steps:
 1. In Google Cloud Console, open the OAuth 2.0 Web Client used by this app.
-2. Add this Authorized JavaScript origin:
+2. Add these Authorized JavaScript origins:
    ${FRONTEND_URL}
+  ${FRONTEND_SERVICE_URL}
 3. If you later attach a custom domain, add that origin too and rerun this script.
 4. Verify sign-in and the full app flow in the deployed frontend.
 

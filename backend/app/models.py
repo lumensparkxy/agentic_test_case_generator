@@ -59,6 +59,32 @@ class WorkflowIteration(BaseModel):
     suggestions: List[str] = Field(default_factory=list)
 
 
+class ScenarioIntent(BaseModel):
+    id: str
+    requirement_id: str
+    scenario_type: Literal[
+        "Happy Path",
+        "Negative",
+        "Boundary",
+        "Validation",
+        "Authorization",
+        "State Transition",
+        "Integration",
+        "Error Handling",
+        "Data Variation",
+    ] = "Happy Path"
+    title: str
+    objective: str
+    priority: Literal["Critical", "High", "Medium", "Low"] = "Medium"
+    must_have: bool = True
+
+
+class RequirementCoveragePlan(BaseModel):
+    requirement_id: str
+    requirement_text: str
+    scenarios: List[ScenarioIntent] = Field(default_factory=list)
+
+
 class EnrichInput(BaseModel):
     requirements: List[Requirement]
     app_link: Optional[HttpUrl] = None
@@ -121,6 +147,7 @@ class GenerateTestCasesResponse(BaseModel):
     approved: bool = False
     review: ReviewResult = Field(default_factory=ReviewResult)
     iteration_history: List[WorkflowIteration] = Field(default_factory=list)
+    coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)
     coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
 
 

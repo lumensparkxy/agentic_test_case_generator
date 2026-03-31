@@ -20,6 +20,9 @@ export default function App() {
 	const [templateName, setTemplateName] = useState("default");
 	const [templateFormat, setTemplateFormat] = useState("table");
 	const [testCases, setTestCases] = useState([]);
+	const [coveragePlan, setCoveragePlan] = useState([]);
+	const [coverageMetrics, setCoverageMetrics] = useState(null);
+	const [testCaseReview, setTestCaseReview] = useState(null);
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
@@ -206,6 +209,12 @@ export default function App() {
 			const data = await res.json();
 			setRawText(data.raw_text || rawText);
 			setRequirements(data.requirements || []);
+			setTestCases([]);
+			setCoveragePlan([]);
+			setCoverageMetrics(null);
+			setTestCaseReview(null);
+			setExpandedRows({});
+			setFeedback("");
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
 			if (withFeedback) setReqFeedback("");
 		} catch (error) {
@@ -219,7 +228,7 @@ export default function App() {
 		setIsGenerating(true);
 		setStatus(withFeedback ? "Refining test cases with feedback..." : "Generating test cases...");
 		try {
-			const payload = {
+			const sharedPayload = {
 				requirements,
 				template: {
 					name: templateName,
@@ -238,9 +247,21 @@ export default function App() {
 						: null,
 					notes: "Generated via UI"
 				},
-				feedback: withFeedback && feedback ? feedback : null
 			};
-			const res = await apiRequest("/testcases/generate", {
+
+			const useRefineEndpoint = withFeedback && testCases.length > 0;
+			const payload = useRefineEndpoint
+				? {
+					...sharedPayload,
+					test_cases: testCases,
+					feedback: feedback.trim()
+				}
+				: {
+					...sharedPayload,
+					feedback: withFeedback && feedback ? feedback.trim() : null
+				};
+
+			const res = await apiRequest(useRefineEndpoint ? "/testcases/refine" : "/testcases/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
@@ -251,7 +272,13 @@ export default function App() {
 			}
 			const data = await res.json();
 			setTestCases(data.test_cases || []);
-			setStatus(withFeedback ? "Test cases refined." : "Generated.");
+			setCoveragePlan(data.coverage_plan || []);
+			setCoverageMetrics(data.coverage_metrics || null);
+			setTestCaseReview(data.review || null);
+			setExpandedRows({});
+			const reviewScore = typeof data.review?.score === "number" ? ` Score ${data.review.score}/${data.review.threshold}.` : "";
+			const reviewSummary = data.review?.summary ? ` ${data.review.summary}` : "";
+			setStatus(`${withFeedback ? "Test cases refined." : "Generated."}${reviewScore}${reviewSummary}`.trim());
 			if (withFeedback) setFeedback("");
 		} catch (error) {
 			setStatus(`Generation failed: ${error.message}`);
@@ -303,6 +330,10 @@ export default function App() {
 	const getStatusClass = (status) => {
 		const map = { Draft: "status-draft", Ready: "status-ready", "In Review": "status-review", Approved: "status-approved" };
 		return map[status] || "";
+	};
+
+	const getRequirementScenarioSummary = (requirementId) => {
+		return coverageMetrics?.requirement_scenario_summary?.[requirementId] || null;
 	};
 
 	const tabs = [
@@ -554,6 +585,67 @@ export default function App() {
 								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
 							</button>
 						</div>
+
+						{testCaseReview && (
+							<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
+								<div className="review-banner-header">
+									<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
+									<span>Score {testCaseReview.score}/{testCaseReview.threshold}</span>
+								</div>
+								<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
+								{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
+									<ul className="review-issues">
+										{testCaseReview.blocking_issues.slice(0, 3).map((issue) => (
+											<li key={issue}>{issue}</li>
+										))}
+									</ul>
+								)}
+							</div>
+						)}
+
+						{coveragePlan.length > 0 && (
+							<div className="result-section">
+								<h3>Scenario Coverage Plan</h3>
+								<p className="helper-text">
+									The engine now plans scenario intent per requirement before generating detailed test cases.
+								</p>
+								<div className="coverage-plan-list">
+									{coveragePlan.map((plan) => {
+										const summary = getRequirementScenarioSummary(plan.requirement_id);
+										const missingScenarioTypes = new Set(summary?.missing_scenario_types || []);
+										return (
+											<div key={plan.requirement_id} className="coverage-plan-card">
+												<div className="coverage-plan-header">
+													<div>
+														<div className="coverage-plan-id">{plan.requirement_id}</div>
+														<div className="coverage-plan-text">{plan.requirement_text}</div>
+													</div>
+													{summary && (
+														<span className="coverage-plan-summary">
+															{summary.covered_scenarios}/{summary.planned_scenarios} planned scenarios covered
+														</span>
+													)}
+												</div>
+												<div className="coverage-chip-row">
+													{plan.scenarios?.map((scenario) => {
+														const isMissing = missingScenarioTypes.has(scenario.scenario_type);
+														return (
+															<span
+																key={scenario.id}
+																className={`coverage-chip ${scenario.must_have ? "required" : "recommended"} ${isMissing ? "missing" : "covered"}`}
+																title={scenario.objective}
+															>
+																{scenario.scenario_type}
+															</span>
+														);
+													})}
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							</div>
+						)}
 
 						<div className="result-section">
 							<h3>Generated Test Cases</h3>
