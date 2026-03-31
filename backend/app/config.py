@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from importlib.metadata import PackageNotFoundError, version
 from functools import lru_cache
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     from dotenv import load_dotenv
@@ -13,6 +13,10 @@ except ImportError:  # pragma: no cover - dependency fallback
 
 DEFAULT_MODEL_NAME = "gemini-2.5-flash"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CORS_ALLOW_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
 
 
 def _load_environment_file() -> None:
@@ -46,9 +50,19 @@ class Settings(BaseModel):
 
 class AuthSettings(BaseModel):
     google_client_id: str = ""
+    google_client_ids: list[str] = Field(default_factory=list)
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60
+
+
+def get_cors_allow_origins() -> list[str]:
+    raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
+    if not raw_origins.strip():
+        return list(DEFAULT_CORS_ALLOW_ORIGINS)
+
+    parsed_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
+    return parsed_origins or list(DEFAULT_CORS_ALLOW_ORIGINS)
 
 
 def _parse_major_minor(raw_version: str) -> tuple[int, int]:
@@ -56,6 +70,21 @@ def _parse_major_minor(raw_version: str) -> tuple[int, int]:
     major = int(parts[0]) if parts and parts[0].isdigit() else 0
     minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
     return major, minor
+
+
+def _split_csv_env(raw_value: str) -> list[str]:
+    return [value.strip() for value in raw_value.split(",") if value.strip()]
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
 def _warn_if_dependency_mismatch() -> None:
@@ -83,7 +112,11 @@ def _warn_if_dependency_mismatch() -> None:
 
 @lru_cache
 def get_auth_settings() -> AuthSettings:
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    google_client_ids = _dedupe_preserving_order(
+        _split_csv_env(os.getenv("GOOGLE_CLIENT_IDS", ""))
+        + [google_client_id, os.getenv("VITE_GOOGLE_CLIENT_ID", "").strip()]
+    )
     jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
     jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expiration_raw = os.getenv("JWT_EXPIRATION_MINUTES", "60")
@@ -95,7 +128,8 @@ def get_auth_settings() -> AuthSettings:
         jwt_expiration_minutes = 60
 
     return AuthSettings(
-        google_client_id=google_client_id,
+        google_client_id=google_client_id or (google_client_ids[0] if google_client_ids else ""),
+        google_client_ids=google_client_ids,
         jwt_secret_key=jwt_secret_key,
         jwt_algorithm=jwt_algorithm,
         jwt_expiration_minutes=jwt_expiration_minutes,

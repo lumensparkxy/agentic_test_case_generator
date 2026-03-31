@@ -1,0 +1,30 @@
+services:
+  backend:
+    container_name: tcg-backend-local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8080"
+    environment:
+      MODEL_NAME: ${MODEL_NAME:-gemini-3-flash-preview}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-test-secret}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-60}
+      CORS_ALLOW_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+
+  frontend:
+    container_name: tcg-frontend-local
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE: http://localhost:8000
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+    ports:
+      - "5173:8080"
+    depends_on:
+      - backend

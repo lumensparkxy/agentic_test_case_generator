@@ -1,6 +1,5 @@
-from typing import List, Optional, Literal
-from pydantic import BaseModel, HttpUrl
-from enum import Enum
+from typing import Any, Dict, List, Optional, Literal
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class Requirement(BaseModel):
@@ -17,6 +16,7 @@ class AuthUser(BaseModel):
 
 class GoogleLoginRequest(BaseModel):
     credential: str
+    client_id: Optional[str] = None
 
 
 class AuthTokenResponse(BaseModel):
@@ -34,6 +34,29 @@ class ParseResponse(BaseModel):
     source_name: str
     raw_text: str
     requirements: List[Requirement]
+
+
+class ReviewResult(BaseModel):
+    approved: bool = False
+    score: int = 0
+    threshold: int = 0
+    summary: str = ""
+    blocking_issues: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
+    unmet_criteria: List[str] = Field(default_factory=list)
+
+
+class WorkflowIteration(BaseModel):
+    iteration: int
+    actor: str
+    approved: bool = False
+    score: int = 0
+    threshold: int = 0
+    summary: str = ""
+    artifact_count: int = 0
+    artifact_ids: List[str] = Field(default_factory=list)
+    blocking_issues: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
 
 
 class EnrichInput(BaseModel):
@@ -85,8 +108,28 @@ class GenerateTestCasesInput(BaseModel):
     feedback: Optional[str] = None  # Human feedback for refinement
 
 
+class RefineTestCasesInput(BaseModel):
+    requirements: List[Requirement]
+    test_cases: List[TestCase]
+    template: TestCaseTemplate
+    context: Optional[EnrichInput] = None
+    feedback: str
+
+
 class GenerateTestCasesResponse(BaseModel):
     test_cases: List[TestCase]
+    approved: bool = False
+    review: ReviewResult = Field(default_factory=ReviewResult)
+    iteration_history: List[WorkflowIteration] = Field(default_factory=list)
+    coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RequirementsWorkflowResponse(ParseResponse):
+    source_names: List[str] = Field(default_factory=list)
+    approved: bool = False
+    review: ReviewResult = Field(default_factory=ReviewResult)
+    iteration_history: List[WorkflowIteration] = Field(default_factory=list)
+    coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class JiraExportInput(BaseModel):

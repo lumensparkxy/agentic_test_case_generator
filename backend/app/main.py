@@ -7,11 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from docx import Document
 
-from .config import get_auth_settings, get_settings
+from .config import get_auth_settings, get_cors_allow_origins, get_settings
 from .models import (
     AuthTokenResponse,
     AuthUser,
-    ParseResponse,
     EnrichInput,
     GenerateTestCasesInput,
     GenerateTestCasesResponse,
@@ -22,13 +21,15 @@ from .models import (
     AutomationInput,
     AutomationResponse,
     Requirement,
+    RefineTestCasesInput,
+    RequirementsWorkflowResponse,
 )
 from fastapi.responses import StreamingResponse
 import csv
 import io
 
 from .agents.requirements_agent import extract_requirements, refine_requirements
-from .agents.test_case_agent import generate_test_cases
+from .agents.test_case_agent import generate_test_cases, refine_test_cases
 from .agents.export_agent import export_to_jira, export_to_csv, export_to_excel, export_to_json
 from .agents.automation_agent import generate_playwright_pom
 from .auth.google_auth import verify_google_credential
@@ -41,10 +42,7 @@ MAX_UPLOAD_SIZE_BYTES = 16 * 1024 * 1024
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=get_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,7 +57,7 @@ async def health() -> dict:
 @app.post("/auth/google/login", response_model=AuthTokenResponse)
 async def auth_google_login(payload: GoogleLoginRequest) -> AuthTokenResponse:
     settings = get_auth_settings()
-    user_claims = verify_google_credential(payload.credential, settings.google_client_id)
+    user_claims = verify_google_credential(payload.credential, settings.google_client_ids, payload.client_id)
     user = AuthUser(**user_claims)
     access_token, expires_in = create_access_token(user)
     return AuthTokenResponse(
@@ -80,53 +78,82 @@ async def auth_logout() -> LogoutResponse:
     return LogoutResponse(status="ok")
 
 
-@app.post("/requirements/parse", response_model=ParseResponse)
+@app.post("/requirements/parse", response_model=RequirementsWorkflowResponse)
 async def parse_requirements(
     _current_user: AuthUser = Depends(get_current_user),
+    files: Optional[List[UploadFile]] = File(None),
     file: UploadFile = File(None),
     feedback: Optional[str] = Form(None),
     existing_requirements: Optional[str] = Form(None),
-) -> ParseResponse:
+) -> RequirementsWorkflowResponse:
     _settings = get_settings()
     
     # If feedback is provided, refine existing requirements
     if feedback and existing_requirements:
         try:
             existing_reqs = json.loads(existing_requirements)
-            requirements = await run_in_threadpool(refine_requirements, existing_reqs, feedback)
-            return ParseResponse(
+            workflow = await run_in_threadpool(refine_requirements, existing_reqs, feedback)
+            return RequirementsWorkflowResponse(
                 source_name="refined",
+                source_names=["refined"],
                 raw_text="",  # Keep empty since we're refining
-                requirements=requirements
+                requirements=workflow["requirements"],
+                approved=workflow["approved"],
+                review=workflow["review"],
+                iteration_history=workflow["iteration_history"],
+                coverage_metrics=workflow["coverage_metrics"],
             )
         except Exception as exc:
             logging.exception("Requirement refinement failed")
             raise HTTPException(status_code=500, detail="Refinement failed") from exc
     
     # Otherwise, parse the uploaded file
-    if not file:
-        raise HTTPException(status_code=400, detail="No file provided")
-    
-    filename = file.filename or "uploaded"
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Max supported size is {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB.",
-        )
-    try:
-        if filename.endswith(".md") or file.content_type == "text/markdown":
-            raw_text = content.decode("utf-8", errors="ignore")
-        elif filename.endswith(".docx"):
-            doc = Document(BytesIO(content))
-            raw_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-        elif filename.endswith(".xlsx"):
-            raw_text = parse_excel_to_text(content)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type. Supported: .md, .docx, .xlsx")
+    uploads: List[UploadFile] = list(files or [])
+    if file is not None:
+        uploads.append(file)
 
-        requirements = await run_in_threadpool(extract_requirements, raw_text)
-        return ParseResponse(source_name=filename, raw_text=raw_text, requirements=requirements)
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    try:
+        raw_sections: List[str] = []
+        source_names: List[str] = []
+
+        for upload in uploads:
+            filename = upload.filename or "uploaded"
+            content = await upload.read()
+            if len(content) > MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Max supported size is {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB.",
+                )
+
+            if filename.endswith(".md") or upload.content_type == "text/markdown":
+                parsed_text = content.decode("utf-8", errors="ignore")
+            elif filename.endswith(".docx"):
+                doc = Document(BytesIO(content))
+                parsed_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+            elif filename.endswith(".xlsx"):
+                parsed_text = parse_excel_to_text(content)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported file type. Supported: .md, .docx, .xlsx")
+
+            source_names.append(filename)
+            raw_sections.append(f"--- SOURCE: {filename} ---\n{parsed_text}")
+
+        raw_text = "\n\n".join(raw_sections)
+        workflow = await run_in_threadpool(extract_requirements, raw_text, len(source_names))
+        source_name = source_names[0] if len(source_names) == 1 else f"{len(source_names)} documents"
+        return RequirementsWorkflowResponse(
+            source_name=source_name,
+            source_names=source_names,
+            raw_text=raw_text,
+            requirements=workflow["requirements"],
+            approved=workflow["approved"],
+            review=workflow["review"],
+            iteration_history=workflow["iteration_history"],
+            coverage_metrics=workflow["coverage_metrics"],
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -147,8 +174,17 @@ async def generate_test_cases_endpoint(
     payload: GenerateTestCasesInput,
     _current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
-    test_cases = await run_in_threadpool(generate_test_cases, payload)
-    return GenerateTestCasesResponse(test_cases=test_cases)
+    result = await run_in_threadpool(generate_test_cases, payload)
+    return GenerateTestCasesResponse(**result)
+
+
+@app.post("/testcases/refine", response_model=GenerateTestCasesResponse)
+async def refine_test_cases_endpoint(
+    payload: RefineTestCasesInput,
+    _current_user: AuthUser = Depends(get_current_user),
+) -> GenerateTestCasesResponse:
+    result = await run_in_threadpool(refine_test_cases, payload)
+    return GenerateTestCasesResponse(**result)
 
 
 @app.post("/export/jira", response_model=JiraExportResponse)

@@ -76,3 +76,70 @@ def parse_test_cases_json(text: str) -> List[Dict[str, Any]]:
         return data["test_cases"]
 
     return []
+
+
+def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[str, Any]]:
+    """Parse a structured reviewer/validator result from model output."""
+    if not text:
+        return None
+
+    normalized = text.strip()
+    if normalized.upper() == "APPROVED":
+        return {
+            "approved": True,
+            "score": 100,
+            "threshold": default_threshold,
+            "summary": "Approved by reviewer.",
+            "blocking_issues": [],
+            "suggestions": [],
+            "unmet_criteria": [],
+        }
+
+    json_text = extract_json(normalized)
+    if not json_text:
+        return None
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    blocking_issues = data.get("blocking_issues") or []
+    suggestions = data.get("suggestions") or []
+    unmet_criteria = data.get("unmet_criteria") or []
+
+    if isinstance(blocking_issues, str):
+        blocking_issues = [blocking_issues]
+    if isinstance(suggestions, str):
+        suggestions = [suggestions]
+    if isinstance(unmet_criteria, str):
+        unmet_criteria = [unmet_criteria]
+
+    raw_score = data.get("score", 0)
+    raw_threshold = data.get("threshold", default_threshold)
+
+    try:
+        score = int(raw_score)
+    except (TypeError, ValueError):
+        score = 0
+
+    try:
+        threshold = int(raw_threshold)
+    except (TypeError, ValueError):
+        threshold = default_threshold
+
+    approved = bool(data.get("approved", False))
+    summary = str(data.get("summary", "")).strip()
+
+    return {
+        "approved": approved,
+        "score": max(0, min(100, score)),
+        "threshold": max(0, threshold),
+        "summary": summary,
+        "blocking_issues": [str(item).strip() for item in blocking_issues if str(item).strip()],
+        "suggestions": [str(item).strip() for item in suggestions if str(item).strip()],
+        "unmet_criteria": [str(item).strip() for item in unmet_criteria if str(item).strip()],
+    }

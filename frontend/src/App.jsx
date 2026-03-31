@@ -20,8 +20,6 @@ export default function App() {
 	const [templateName, setTemplateName] = useState("default");
 	const [templateFormat, setTemplateFormat] = useState("table");
 	const [testCases, setTestCases] = useState([]);
-	const [jiraProject, setJiraProject] = useState("");
-	const [jiraIssueType, setJiraIssueType] = useState("Test");
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
@@ -149,7 +147,10 @@ export default function App() {
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ credential: credentialResponse.credential })
+					body: JSON.stringify({
+						credential: credentialResponse.credential,
+						client_id: credentialResponse.clientId || GOOGLE_CLIENT_ID || null
+					})
 				},
 				false
 			);
@@ -259,33 +260,6 @@ export default function App() {
 		}
 	};
 
-	const exportToJira = async () => {
-		setIsExporting(true);
-		setStatus("Exporting to JIRA...");
-		try {
-			const payload = {
-				project_key: jiraProject,
-				issue_type: jiraIssueType,
-				test_cases: testCases
-			};
-			const res = await apiRequest("/export/jira", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to export to JIRA");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			setStatus(`${data.status}: ${data.message}`);
-		} catch (error) {
-			setStatus(`JIRA export failed: ${error.message}`);
-		} finally {
-			setIsExporting(false);
-		}
-	};
-
 	const exportToFormat = async (format) => {
 		setIsExporting(true);
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
@@ -321,29 +295,6 @@ export default function App() {
 		}
 	};
 
-	const generateAutomation = async () => {
-		setStatus("Generating Playwright POM...");
-		try {
-			const payload = {
-				test_cases: testCases,
-				target_base_url: appLink || null
-			};
-			const res = await apiRequest("/automation/playwright", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to generate automation stubs");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			setStatus(`${data.status}: ${data.notes}`);
-		} catch (error) {
-			setStatus(`Automation generation failed: ${error.message}`);
-		}
-	};
-
 	const getPriorityClass = (priority) => {
 		const map = { Critical: "priority-critical", High: "priority-high", Medium: "priority-medium", Low: "priority-low" };
 		return map[priority] || "";
@@ -359,8 +310,7 @@ export default function App() {
 		{ id: 1, label: "Context", title: "Context Inputs" },
 		{ id: 2, label: "Template", title: "Template Setup" },
 		{ id: 3, label: "Generate", title: "Generate Test Cases" },
-		{ id: 4, label: "Export", title: "Export Test Cases" },
-		{ id: 5, label: "Automation", title: "Playwright POM" }
+		{ id: 4, label: "Export", title: "Export Test Cases" }
 	];
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
@@ -373,7 +323,7 @@ export default function App() {
 					<h1 className="title">Agentic Test Case Generator</h1>
 					<p className="subtitle">
 						A guided pipeline to parse requirements, enrich context, generate test cases,
-						export to JIRA, and create Playwright (Python) POM stubs.
+						and export polished artifacts.
 					</p>
 				</div>
 				<div className="header-right">
@@ -421,7 +371,7 @@ export default function App() {
 
 			{!isAuthenticated && !isVerifyingSession && (
 				<div className="auth-warning-banner">
-					🔐 Sign in with Google to parse requirements, generate test cases, export artifacts, and create automation stubs.
+					🔐 Sign in with Google to parse requirements, generate test cases, and export artifacts.
 				</div>
 			)}
 
@@ -765,10 +715,8 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Export Test Cases</h2>
 						<p className="panel-description">
-							Export your generated test cases in various formats.
+							Download your generated test cases as CSV, Excel, or JSON.
 						</p>
-						
-						{/* Quick Export Options */}
 						<div className="export-section">
 							<h3 className="section-subtitle">📥 Quick Export</h3>
 							<p className="helper-text">Download test cases directly to your computer.</p>
@@ -796,103 +744,12 @@ export default function App() {
 									onClick={() => exportToFormat("json")} 
 									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
-									<span className="export-icon">{ }</span>
+									<span className="export-icon">🧾</span>
 									<span className="export-label">JSON</span>
 									<span className="export-desc">API/Import ready</span>
 								</button>
 							</div>
 						</div>
-						
-						<hr className="section-divider" />
-						
-						{/* JIRA Integration */}
-						<div className="export-section">
-							<h3 className="section-subtitle">🔗 JIRA Integration</h3>
-							<p className="helper-text">Push test cases directly to your JIRA project.</p>
-							<div className="panel-form two-cols">
-								<div className="form-group">
-									<label>JIRA Project Key</label>
-									<input
-										placeholder="e.g., QA, TEST, PROJ"
-										value={jiraProject}
-										onChange={(e) => setJiraProject(e.target.value)}
-									/>
-								</div>
-								<div className="form-group">
-									<label>Issue Type</label>
-									<select value={jiraIssueType} onChange={(e) => setJiraIssueType(e.target.value)}>
-										<option value="Test">Test</option>
-										<option value="Test Case">Test Case</option>
-										<option value="Test Execution">Test Execution</option>
-										<option value="Story">Story</option>
-										<option value="Task">Task</option>
-									</select>
-								</div>
-							</div>
-							<div className="panel-form button-row">
-								<button 
-									className="export-btn jira" 
-									onClick={exportToJira} 
-									disabled={testCases.length === 0 || !jiraProject || isExporting || authActionDisabled}
-								>
-									{isExporting ? "⏳ Exporting..." : "🚀 Export to JIRA"}
-								</button>
-							</div>
-							<span className="helper-text warning">
-								⚠️ JIRA integration requires API credentials to be configured in the backend.
-							</span>
-						</div>
-						
-						<hr className="section-divider" />
-						
-						{/* Other Integrations */}
-						<div className="export-section">
-							<h3 className="section-subtitle">📦 Other Integrations</h3>
-							<div className="integration-grid">
-								<div className="integration-card disabled">
-									<span className="integration-icon">🧪</span>
-									<span className="integration-name">Xray</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-								<div className="integration-card disabled">
-									<span className="integration-icon">🧫</span>
-									<span className="integration-name">TestRail</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-								<div className="integration-card disabled">
-									<span className="integration-icon">🔬</span>
-									<span className="integration-name">qTest</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-								<div className="integration-card disabled">
-									<span className="integration-icon">📋</span>
-									<span className="integration-name">Azure DevOps</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-							</div>
-						</div>
-						
-						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">Back</button>
-							<button onClick={goNext} disabled={testCases.length === 0}>Next</button>
-						</div>
-					</section>
-				)}
-
-				{activeTab === 5 && (
-					<section className="panel">
-						<h2 className="panel-title">Playwright POM</h2>
-						<p className="panel-description">
-							Generate Playwright (Python) Page Object Model stubs from test cases.
-						</p>
-						<div className="panel-form button-row">
-							<button onClick={generateAutomation} disabled={testCases.length === 0 || authActionDisabled}>
-								Generate Automation Stubs
-							</button>
-						</div>
-						<span className="helper-text">
-							Generates POM and test file stubs based on the generated test cases.
-						</span>
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
 						</div>

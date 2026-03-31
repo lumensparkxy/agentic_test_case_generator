@@ -1,14 +1,18 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 import logging
 import re
 from ..models import Requirement
 from ..config import get_settings
-from ..adk_client import run_requirement_extraction_loop_sync, run_requirement_refinement_sync
+from ..adk_client import (
+    DEFAULT_REQUIREMENT_THRESHOLD,
+    run_requirement_extraction_workflow_sync,
+    run_requirement_refinement_workflow_sync,
+)
 
 MAX_ITERATIONS = 3
 
 
-def extract_requirements(text: str) -> List[Requirement]:
+def extract_requirements(text: str, document_count: int = 1) -> Dict[str, Any]:
     """
     Multi-agent ADK loop for requirement extraction:
     1. ExtractorAgent: Parses document and extracts candidate requirements
@@ -21,23 +25,34 @@ def extract_requirements(text: str) -> List[Requirement]:
     logging.info("Starting ADK multi-agent requirement extraction loop...")
     
     # Run the ADK agent loop
-    extracted = run_requirement_extraction_loop_sync(
+    workflow = run_requirement_extraction_workflow_sync(
         document_text=text,
         model=settings.model_name,
-        max_iterations=MAX_ITERATIONS
+        max_iterations=MAX_ITERATIONS,
+        document_count=document_count,
     )
     
+    extracted = workflow.get("requirements", [])
     if extracted:
-        logging.info(f"ADK loop extracted {len(extracted)} requirements successfully.")
-        return _convert_to_requirements(extracted)
+        requirements = _convert_to_requirements(extracted)
+        logging.info(f"ADK loop extracted {len(requirements)} requirements successfully.")
+        return _build_workflow_response(requirements, workflow, document_count=document_count)
     
     # Fallback to heuristic if ADK fails
     logging.warning("ADK extraction returned empty; using enhanced heuristic fallback.")
     candidates = _heuristic_extract(text)
-    return _finalize_requirements(candidates)
+    requirements = _finalize_requirements(candidates)
+    fallback_workflow = _build_fallback_workflow(
+        requirements=requirements,
+        summary="Primary extraction workflow returned no requirements. Heuristic fallback produced draft requirements that still need approval.",
+        document_count=document_count,
+        existing_review=workflow.get("review"),
+        existing_history=workflow.get("iteration_history"),
+    )
+    return _build_workflow_response(requirements, fallback_workflow, document_count=document_count)
 
 
-def refine_requirements(existing_requirements: List[Dict[str, Any]], feedback: str) -> List[Requirement]:
+def refine_requirements(existing_requirements: List[Dict[str, Any]], feedback: str) -> Dict[str, Any]:
     """
     Refine existing requirements based on human feedback using ADK agent loop.
     """
@@ -46,19 +61,140 @@ def refine_requirements(existing_requirements: List[Dict[str, Any]], feedback: s
     logging.info(f"Refining {len(existing_requirements)} requirements with feedback: {feedback[:100]}...")
     
     # Run the ADK refinement agent
-    refined = run_requirement_refinement_sync(
+    workflow = run_requirement_refinement_workflow_sync(
         existing_requirements=existing_requirements,
         feedback=feedback,
         model=settings.model_name,
     )
     
+    refined = workflow.get("requirements", [])
     if refined:
-        logging.info(f"ADK refinement produced {len(refined)} requirements.")
-        return _convert_to_requirements(refined)
+        requirements = _convert_to_requirements(refined)
+        logging.info(f"ADK refinement produced {len(requirements)} requirements.")
+        return _build_workflow_response(requirements, workflow, document_count=1)
     
     # Fallback: return original requirements if refinement fails
     logging.warning("ADK refinement returned empty; returning original requirements.")
-    return _convert_to_requirements(existing_requirements)
+    requirements = _convert_to_requirements(existing_requirements)
+    fallback_workflow = _build_fallback_workflow(
+        requirements=requirements,
+        summary="Requirement refinement returned no updated requirements. The previous approved draft was restored and needs re-review.",
+        document_count=1,
+        existing_review=workflow.get("review"),
+        existing_history=workflow.get("iteration_history"),
+    )
+    return _build_workflow_response(requirements, fallback_workflow, document_count=1)
+
+
+def _build_workflow_response(
+    requirements: List[Requirement],
+    workflow: Dict[str, Any],
+    document_count: int,
+) -> Dict[str, Any]:
+    coverage_metrics = dict(workflow.get("coverage_metrics") or {})
+    if not coverage_metrics:
+        coverage_metrics = _compute_requirement_coverage_metrics(requirements, document_count)
+
+    review = dict(workflow.get("review") or {})
+    if not review:
+        review = {
+            "approved": False,
+            "score": 0,
+            "threshold": DEFAULT_REQUIREMENT_THRESHOLD,
+            "summary": "Requirement review data is unavailable.",
+            "blocking_issues": ["No structured requirement review was captured."],
+            "suggestions": ["Re-run the requirement workflow to regenerate structured review output."],
+            "unmet_criteria": ["Structured review is required before progressing."],
+        }
+
+    return {
+        "requirements": requirements,
+        "approved": bool(workflow.get("approved", False)),
+        "review": review,
+        "iteration_history": list(workflow.get("iteration_history") or []),
+        "coverage_metrics": coverage_metrics,
+    }
+
+
+def _build_fallback_workflow(
+    requirements: List[Requirement],
+    summary: str,
+    document_count: int,
+    existing_review: Dict[str, Any] | None = None,
+    existing_history: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    blocking_issues = list((existing_review or {}).get("blocking_issues") or [])
+    suggestions = list((existing_review or {}).get("suggestions") or [])
+    unmet_criteria = list((existing_review or {}).get("unmet_criteria") or [])
+
+    blocking_issues.append("Heuristic fallback was used instead of a completed review/refine loop.")
+    suggestions.append("Review and refine the fallback requirements before moving to the next phase.")
+    unmet_criteria.append("Approval threshold was not reached through the structured requirement loop.")
+
+    review = {
+        "approved": False,
+        "score": min(int((existing_review or {}).get("score", 0) or 0), DEFAULT_REQUIREMENT_THRESHOLD - 5),
+        "threshold": DEFAULT_REQUIREMENT_THRESHOLD,
+        "summary": summary,
+        "blocking_issues": _dedupe_strings(blocking_issues),
+        "suggestions": _dedupe_strings(suggestions),
+        "unmet_criteria": _dedupe_strings(unmet_criteria),
+    }
+
+    coverage_metrics = _compute_requirement_coverage_metrics(requirements, document_count)
+    history = list(existing_history or [])
+    if not history:
+        history.append(
+            {
+                "iteration": 1,
+                "actor": "FallbackReview",
+                "approved": False,
+                "score": review["score"],
+                "threshold": review["threshold"],
+                "summary": review["summary"],
+                "artifact_count": len(requirements),
+                "artifact_ids": [req.id for req in requirements[:8]],
+                "blocking_issues": review["blocking_issues"],
+                "suggestions": review["suggestions"],
+            }
+        )
+
+    return {
+        "approved": False,
+        "review": review,
+        "iteration_history": history,
+        "coverage_metrics": coverage_metrics,
+    }
+
+
+def _compute_requirement_coverage_metrics(requirements: List[Requirement], document_count: int) -> Dict[str, Any]:
+    total = len(requirements)
+    unique_count = len({req.text.strip().lower() for req in requirements if req.text})
+    shall_format_count = sum(1 for req in requirements if req.text.strip().lower().startswith("the system shall"))
+    average_word_count = round(sum(len(req.text.split()) for req in requirements) / total, 2) if total else 0.0
+
+    return {
+        "document_count": max(1, document_count),
+        "total_requirements": total,
+        "unique_requirements": unique_count,
+        "duplicate_requirements": max(0, total - unique_count),
+        "shall_format_count": shall_format_count,
+        "shall_format_ratio": round(shall_format_count / total, 2) if total else 0.0,
+        "average_word_count": average_word_count,
+        "requirements_per_document": round(total / max(1, document_count), 2),
+    }
+
+
+def _dedupe_strings(items: List[str]) -> List[str]:
+    seen = set()
+    deduped: List[str] = []
+    for item in items:
+        value = str(item).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 def _convert_to_requirements(extracted: List[Dict[str, Any]]) -> List[Requirement]:
