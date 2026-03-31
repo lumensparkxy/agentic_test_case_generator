@@ -12,6 +12,7 @@ from .models import (
     AuthTokenResponse,
     AuthUser,
     EnrichInput,
+    EnrichResponse,
     GenerateTestCasesInput,
     GenerateTestCasesResponse,
     GoogleLoginRequest,
@@ -34,6 +35,7 @@ from .agents.export_agent import export_to_jira, export_to_csv, export_to_excel,
 from .agents.automation_agent import generate_playwright_pom
 from .auth.google_auth import verify_google_credential
 from .auth.jwt_auth import create_access_token, get_current_user
+from .services.context_grounding import build_grounded_context
 from .utils.excel_parser import parse_excel_to_text
 
 app = FastAPI(title="Agentic Test Case Generator")
@@ -52,6 +54,10 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+def _build_grounded_context_from_enrich_input(payload: EnrichInput):
+    return build_grounded_context(payload)
 
 
 @app.post("/auth/google/login", response_model=AuthTokenResponse)
@@ -161,12 +167,21 @@ async def parse_requirements(
         raise HTTPException(status_code=500, detail="Requirement parsing failed") from exc
 
 
-@app.post("/requirements/enrich", response_model=EnrichInput)
+@app.post("/requirements/enrich", response_model=EnrichResponse)
 async def enrich_requirements(
     payload: EnrichInput,
     _current_user: AuthUser = Depends(get_current_user),
-) -> EnrichInput:
-    return payload
+) -> EnrichResponse:
+    grounded_context = payload.grounded_context or _build_grounded_context_from_enrich_input(payload)
+    return EnrichResponse(
+        requirements=payload.requirements,
+        app_link=payload.app_link,
+        prototype_link=payload.prototype_link,
+        diagram_links=payload.diagram_links,
+        image_links=payload.image_links,
+        notes=payload.notes,
+        grounded_context=grounded_context,
+    )
 
 
 @app.post("/testcases/generate", response_model=GenerateTestCasesResponse)

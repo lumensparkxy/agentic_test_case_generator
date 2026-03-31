@@ -1,0 +1,114 @@
+from pathlib import Path
+import sys
+import unittest
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+  sys.path.insert(0, str(BACKEND_DIR))
+
+from app.utils.llm_json import parse_requirement_analysis_json
+
+
+class ParseRequirementAnalysisJsonTests(unittest.TestCase):
+    def test_parses_wrapped_requirement_analysis_payload(self) -> None:
+        payload = """
+        {
+          "requirement_analysis": [
+            {
+              "requirement_id": "REQ-001",
+              "requirement_text": "The system shall allow users to sign in using email and password.",
+              "business_rules": [
+                {
+                  "id": "BR-001",
+                  "requirement_id": "REQ-001",
+                  "title": "Email and password login",
+                  "description": "Users can authenticate with email and password.",
+                  "rule_type": "Business"
+                }
+              ],
+              "field_constraints": [
+                {
+                  "id": "FC-001",
+                  "requirement_id": "REQ-001",
+                  "field_name": "email",
+                  "description": "Email must be supplied.",
+                  "constraint_type": "Required"
+                }
+              ],
+              "role_permissions": [
+                {
+                  "id": "RP-001",
+                  "requirement_id": "REQ-001",
+                  "role": "User",
+                  "action": "Sign in",
+                  "effect": "Allow"
+                }
+              ],
+              "state_transitions": [
+                {
+                  "id": "ST-001",
+                  "requirement_id": "REQ-001",
+                  "entity": "Session",
+                  "from_state": "Signed Out",
+                  "to_state": "Signed In",
+                  "trigger": "Submit valid credentials"
+                }
+              ],
+              "risk_signals": [
+                {
+                  "id": "RS-001",
+                  "requirement_id": "REQ-001",
+                  "title": "Credential misuse",
+                  "rationale": "Authentication endpoints are security-sensitive.",
+                  "category": "Security",
+                  "severity": "High"
+                }
+              ],
+              "suggested_scenarios": ["Happy Path", "Negative", "Negative"],
+              "dependencies": ["Email service", "Email service"]
+            }
+          ]
+        }
+        """
+
+        parsed = parse_requirement_analysis_json(payload)
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["requirement_id"], "REQ-001")
+        self.assertEqual(parsed[0]["suggested_scenarios"], ["Happy Path", "Negative"])
+        self.assertEqual(parsed[0]["dependencies"], ["Email service"])
+        self.assertEqual(len(parsed[0]["business_rules"]), 1)
+        self.assertEqual(len(parsed[0]["field_constraints"]), 1)
+        self.assertEqual(len(parsed[0]["role_permissions"]), 1)
+        self.assertEqual(len(parsed[0]["state_transitions"]), 1)
+        self.assertEqual(len(parsed[0]["risk_signals"]), 1)
+
+    def test_returns_empty_list_for_malformed_payload(self) -> None:
+        parsed = parse_requirement_analysis_json("not-json-at-all")
+        self.assertEqual(parsed, [])
+
+    def test_filters_invalid_analysis_items(self) -> None:
+        payload = """
+        [
+          {
+            "requirement_id": "REQ-002",
+            "requirement_text": "The system shall require a rejection reason.",
+            "business_rules": ["ignore me"],
+            "suggested_scenarios": ["Validation", " ", "Validation"]
+          },
+          {
+            "requirement_text": "Missing id should be dropped"
+          }
+        ]
+        """
+
+        parsed = parse_requirement_analysis_json(payload)
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["requirement_id"], "REQ-002")
+        self.assertEqual(parsed[0]["business_rules"], [])
+        self.assertEqual(parsed[0]["suggested_scenarios"], ["Validation"])
+
+
+if __name__ == "__main__":
+    unittest.main()

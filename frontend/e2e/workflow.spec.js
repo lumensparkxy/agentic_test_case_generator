@@ -35,9 +35,20 @@ async function openGenerateTab(page) {
 		})
 		.toBeGreaterThan(0);
 
-	for (let i = 0; i < 3; i += 1) {
-		await page.getByRole("button", { name: /^Next$/ }).click();
-	}
+	await page.getByRole("button", { name: /^Next$/ }).click();
+	await page.locator('input[placeholder="https://your-app"]').fill("https://example.com/app");
+	await page.getByRole("button", { name: /analyze context/i }).click();
+
+	await expect(page.getByRole("heading", { name: /context analysis preview/i })).toBeVisible({ timeout: 120_000 });
+	await expect
+		.poll(async () => page.locator(".artifact-review-item").count(), {
+			timeout: 30_000,
+			message: "Expected analyzed context artifacts to appear in the Context tab.",
+		})
+		.toBeGreaterThan(0);
+
+	await page.getByRole("button", { name: /^Next$/ }).click();
+	await page.getByRole("button", { name: /^Next$/ }).click();
 }
 
 test.describe("Agentic Test Case Generator E2E", () => {
@@ -63,6 +74,14 @@ test.describe("Agentic Test Case Generator E2E", () => {
 			})
 			.toBeGreaterThan(0);
 
+		await expect(page.getByRole("heading", { name: /requirement analysis/i })).toBeVisible();
+		await expect
+			.poll(async () => page.locator(".analysis-card").count(), {
+				timeout: 30_000,
+				message: "Expected requirement analysis cards to render after generation.",
+			})
+			.toBeGreaterThan(0);
+
 		await page.getByRole("button", { name: /^Next$/ }).click();
 
 		const jsonButton = page.getByRole("button", { name: /json/i }).first();
@@ -84,6 +103,13 @@ test.describe("Agentic Test Case Generator E2E", () => {
 				(tc) => Array.isArray(tc.tags) && tc.tags.some((tag) => /^REQ-\d+/i.test(tag)),
 			).length,
 			withTwoOrMoreSteps: testCases.filter((tc) => Array.isArray(tc.steps) && tc.steps.length >= 2).length,
+			charFragmentCases: testCases.filter((tc) => {
+				if (!Array.isArray(tc.steps) || tc.steps.length <= 10) {
+					return false;
+				}
+				const tinyActions = tc.steps.filter((step) => (step?.action?.trim()?.length || 0) <= 2).length;
+				return tinyActions >= Math.ceil(tc.steps.length * 0.4);
+			}).map((tc) => tc.id),
 			invalidPriorities: testCases.filter((tc) => !allowedPriorities.has(tc.priority)).map((tc) => tc.id),
 			invalidTypes: testCases.filter((tc) => !allowedTypes.has(tc.type)).map((tc) => tc.id),
 			untitledCases: testCases.filter(
@@ -104,6 +130,7 @@ test.describe("Agentic Test Case Generator E2E", () => {
 			expect(quality.withTwoOrMoreSteps).toBeGreaterThanOrEqual(
 				Math.ceil(quality.total * minimumStructuredCaseRatio),
 			);
+			expect(quality.charFragmentCases).toEqual([]);
 		expect(quality.invalidPriorities).toEqual([]);
 		expect(quality.invalidTypes).toEqual([]);
 		expect(quality.untitledCases).toEqual([]);

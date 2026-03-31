@@ -2,6 +2,26 @@ import json
 from typing import Any, Dict, List, Optional
 
 
+def _clean_string_list(values: Any) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    cleaned: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+def _clean_object_list(values: Any) -> List[Dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    return [value for value in values if isinstance(value, dict)]
+
+
 def extract_json(text: str) -> Optional[str]:
     """Extract JSON from text that may contain markdown fences."""
     if not text:
@@ -110,6 +130,54 @@ def parse_coverage_plan_json(text: str) -> List[Dict[str, Any]]:
                 "requirement_id": requirement_id,
                 "requirement_text": requirement_text,
                 "scenarios": [scenario for scenario in scenarios if isinstance(scenario, dict)],
+            }
+        )
+
+    return valid
+
+
+def parse_requirement_analysis_json(text: str) -> List[Dict[str, Any]]:
+    """Parse requirement analysis payload from model output."""
+    json_text = extract_json(text)
+    if not json_text:
+        return []
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError:
+        return []
+
+    analysis_candidates: Any = data
+    if isinstance(data, dict):
+        for key in ("requirement_analysis", "requirement_analyses", "analysis", "analyses"):
+            if isinstance(data.get(key), list):
+                analysis_candidates = data[key]
+                break
+
+    if not isinstance(analysis_candidates, list):
+        return []
+
+    valid: List[Dict[str, Any]] = []
+    for item in analysis_candidates:
+        if not isinstance(item, dict):
+            continue
+
+        requirement_id = str(item.get("requirement_id") or "").strip()
+        requirement_text = str(item.get("requirement_text") or item.get("text") or "").strip()
+        if not requirement_id:
+            continue
+
+        valid.append(
+            {
+                "requirement_id": requirement_id,
+                "requirement_text": requirement_text,
+                "business_rules": _clean_object_list(item.get("business_rules")),
+                "field_constraints": _clean_object_list(item.get("field_constraints")),
+                "role_permissions": _clean_object_list(item.get("role_permissions")),
+                "state_transitions": _clean_object_list(item.get("state_transitions")),
+                "risk_signals": _clean_object_list(item.get("risk_signals")),
+                "suggested_scenarios": _clean_string_list(item.get("suggested_scenarios")),
+                "dependencies": _clean_string_list(item.get("dependencies")),
             }
         )
 

@@ -1,0 +1,86 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "text": "The system shall allow employees to create and save an expense report as a draft with one or more line items."
+    },
+    {
+      "id": "REQ-002",
+      "text": "The system shall keep an expense report in Draft status until the employee explicitly submits it."
+    },
+    {
+      "id": "REQ-003",
+      "text": "The system shall prevent submission when the total claimed amount exceeds the configured policy limit."
+    },
+    {
+      "id": "REQ-004",
+      "text": "The system shall display a validation message when an expense date is in the future."
+    },
+    {
+      "id": "REQ-005",
+      "text": "The system shall allow managers to approve only expense reports that are in Submitted status."
+    },
+    {
+      "id": "REQ-006",
+      "text": "The system shall require managers to enter a rejection reason when rejecting an expense report."
+    },
+    {
+      "id": "REQ-007",
+      "text": "The system shall allow only finance administrators to export Approved expense reports to CSV."
+    }
+  ],
+  "template": {
+    "name": "default",
+    "format": "table",
+    "fields": [
+      "id",
+      "title",
+      "description",
+      "priority",
+      "type",
+      "status",
+      "preconditions",
+      "steps",
+      "expected_result",
+      "test_data",
+      "estimated_time",
+      "automation_status",
+      "component",
+      "tags"
+    ]
+  },
+  "context": {
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "text": "The system shall allow employees to create and save an expense report as a draft with one or more line items."
+      },
+      {
+        "id": "REQ-002",
+        "text": "The system shall keep an expense report in Draft status until the employee explicitly submits it."
+      },
+      {
+        "id": "REQ-003",
+        "text": "The system shall prevent submission when the total claimed amount exceeds the configured policy limit."
+      },
+      {
+        "id": "REQ-004",
+        "text": "The system shall display a validation message when an expense date is in the future."
+      },
+      {
+        "id": "REQ-005",
+        "text": "The system shall allow managers to approve only expense reports that are in Submitted status."
+      },
+      {
+        "id": "REQ-006",
+        "text": "The system shall require managers to enter a rejection reason when rejecting an expense report."
+      },
+      {
+        "id": "REQ-007",
+        "text": "The system shall allow only finance administrators to export Approved expense reports to CSV."
+      }
+    ],
+    "notes": "Expense workflow with roles Employee, Manager, and Finance Administrator. Valid states include Draft, Submitted, Approved, and Rejected."
+  },
+  "feedback": null
+}

@@ -306,7 +306,7 @@ def _is_noise(text: str) -> bool:
         r'^(purpose|overview|introduction|scope):?\s*$',
         r'^\*\*[^*]+\*\*:?\s*$',  # Just a bold heading
         r'^(note|notes|tip|warning):',
-        r'api[_-]?key|environment|config',
+        r'\b(?:api[_-]?key|environment|config)\b',
         r'^\d+\.\s*\*\*[^:]+\*\*:',  # Numbered heading like "2. **Quality**:"
     ]
     
@@ -339,7 +339,7 @@ def _heuristic_extract(text: str) -> List[str]:
         r'^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d',
         r'^\*\*[^*]+\*\*:?\s*$',  # Just bold text (heading)
         r'^(purpose|overview|introduction|scope|background|context):?\s*$',
-        r'api[_-]?key|secret|password|credential',
+        r'api[_-]?key|secret',
         r'\(default:',  # Config defaults
         r'is a stub',  # Implementation notes
         r'^\s*(#|//|/\*)',  # Code comments
@@ -360,7 +360,7 @@ def _heuristic_extract(text: str) -> List[str]:
     
     # Feature-like patterns (action verbs at start)
     feature_start_patterns = [
-        r'^(upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate)',
+        r'^(allow|enable|support|provide|prevent|lock|keep|require|sort|upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate)',
     ]
     feature_start_re = re.compile('|'.join(feature_start_patterns), re.IGNORECASE)
     
@@ -371,7 +371,7 @@ def _heuristic_extract(text: str) -> List[str]:
         lower = line.lower()
         
         # Track document sections
-        if re.match(r'^#+\s*(features?|capabilities|functionality)', lower):
+        if re.match(r'^#+\s*(?:functional\s+)?(?:features?|capabilities|functionality)\b', lower):
             in_features_section = True
             continue
         elif re.match(r'^#+\s', line):
@@ -446,7 +446,7 @@ def _format_as_requirement(text: str) -> Optional[str]:
         return text
     
     # Starts with action verb - convert to "The system shall [verb]"
-    action_match = re.match(r'^(upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate|allow|enable|support|provide)\s+(.+)', text, re.IGNORECASE)
+    action_match = re.match(r'^(upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate|allow|enable|support|provide|prevent|lock|keep|require|sort)\s+(.+)', text, re.IGNORECASE)
     if action_match:
         verb = action_match.group(1).lower()
         rest = action_match.group(2)

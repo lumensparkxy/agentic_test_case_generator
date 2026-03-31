@@ -1,0 +1,43 @@
+{
+  "name": "auth_portal_markdown",
+  "description": "Authentication, profile, search, and notification requirement extraction quality baseline.",
+  "minimum_requirements": 9,
+  "maximum_duplicate_requirements": 0,
+  "minimum_shall_format_ratio": 1.0,
+  "minimum_review_score": 85,
+  "minimum_average_word_count": 7,
+  "require_sequential_ids": true,
+  "maximum_short_requirements": 0,
+  "minimum_concept_coverage_ratio": 1.0,
+  "must_include_concepts": [
+    {
+      "label": "credential sign in",
+      "keywords": ["sign in", "email", "password"]
+    },
+    {
+      "label": "account lockout",
+      "keywords": ["lock", "failed login", "10 minutes"]
+    },
+    {
+      "label": "password reset email",
+      "keywords": ["reset", "password", "email link"]
+    },
+    {
+      "label": "profile photo constraints",
+      "keywords": ["profile photo", "jpg", "png"]
+    },
+    {
+      "label": "search no results",
+      "keywords": ["no-results", "search matches"]
+    },
+    {
+      "label": "email change confirmation",
+      "keywords": ["confirmation email", "changes their email address"]
+    }
+  ],
+  "must_exclude_keywords": [
+    "api_key",
+    "npm run dev",
+    "frontend"
+  ]
+}

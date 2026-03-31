@@ -58,6 +58,34 @@ Run UI:
 
 Open http://localhost:5173
 
+### 3.1) Evaluate generation quality with benchmark fixtures
+
+To measure the current test-case generator against the benchmark fixtures in `scripts/benchmark_inputs/`, run:
+
+- `python scripts/evaluate_generation.py`
+
+Useful options:
+
+- `--offline` to force deterministic fallback mode even if model credentials are present
+- `--strict` to fail the run when any expected benchmark trait is unmet
+- `--output-json path/to/report.json` to save the benchmark report as JSON
+
+If no `GOOGLE_API_KEY` or `GEMINI_API_KEY` is configured, the script automatically uses offline fallback mode and still reports structural baseline metrics.
+
+### 3.2) Evaluate requirement extraction quality with benchmark fixtures
+
+To measure the requirements agent against the document-style benchmark fixtures in `scripts/benchmark_requirement_inputs/`, run:
+
+- `python scripts/evaluate_requirements.py`
+
+Useful options:
+
+- `--offline` to force deterministic heuristic mode even if model credentials are present
+- `--strict` to fail the run when any expected benchmark trait is unmet
+- `--output-json path/to/report.json` to save the benchmark report as JSON
+
+If no `GOOGLE_API_KEY` or `GEMINI_API_KEY` is configured, the script automatically uses offline fallback mode and still reports structural baseline metrics for extraction quality.
+
 ### 4) Run with containers on fixed local ports
 
 If you want the containerized app to use the same local URLs every time, run it with Docker Compose from the repo root:

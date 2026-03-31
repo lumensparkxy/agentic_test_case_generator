@@ -2,7 +2,13 @@ import React, { useEffect, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import "./App.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const API_BASE = (() => {
+	const configuredApiBase = (import.meta.env.VITE_API_BASE || "").trim();
+	if (!configuredApiBase) {
+		return "http://127.0.0.1:8000";
+	}
+	return configuredApiBase === "http://localhost:8000" ? "http://127.0.0.1:8000" : configuredApiBase;
+})();
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 const STORAGE_AUTH_USER = "tcg.auth.user";
@@ -20,15 +26,19 @@ export default function App() {
 	const [templateName, setTemplateName] = useState("default");
 	const [templateFormat, setTemplateFormat] = useState("table");
 	const [testCases, setTestCases] = useState([]);
+	const [requirementAnalysis, setRequirementAnalysis] = useState([]);
 	const [coveragePlan, setCoveragePlan] = useState([]);
 	const [coverageMetrics, setCoverageMetrics] = useState(null);
 	const [testCaseReview, setTestCaseReview] = useState(null);
+	const [enrichedContext, setEnrichedContext] = useState(null);
+	const [selectedArtifactSourceIds, setSelectedArtifactSourceIds] = useState([]);
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
 	const [expandedRows, setExpandedRows] = useState({});
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isParsing, setIsParsing] = useState(false);
+	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
 	const [isExporting, setIsExporting] = useState(false);
 	const [authToken, setAuthToken] = useState("");
 	const [currentUser, setCurrentUser] = useState(null);
@@ -37,9 +47,45 @@ export default function App() {
 
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
+	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+	};
+
+	const resetContextAnalysis = () => {
+		setEnrichedContext(null);
+		setSelectedArtifactSourceIds([]);
+	};
+
+	const buildContextPayload = () => {
+		const baseContext = {
+			requirements,
+			app_link: appLink || null,
+			prototype_link: prototypeLink || null,
+			diagram_links: diagramLinks
+				? diagramLinks.split(";").map((x) => x.trim()).filter(Boolean)
+				: null,
+			image_links: imageLinks
+				? imageLinks.split(";").map((x) => x.trim()).filter(Boolean)
+				: null,
+			notes: "Generated via UI",
+		};
+
+		if (!enrichedContext?.grounded_context) {
+			return { ...baseContext, grounded_context: null };
+		}
+
+		const selectedIds = new Set(selectedArtifactSourceIds);
+		const groundedContext = enrichedContext.grounded_context;
+		return {
+			...baseContext,
+			grounded_context: {
+				...groundedContext,
+				artifact_sources: (groundedContext.artifact_sources || []).filter((source) => selectedIds.has(source.id)),
+				ui_elements: (groundedContext.ui_elements || []).filter((element) => !element.source_id || selectedIds.has(element.source_id)),
+			},
+		};
 	};
 
 	const parseApiError = async (res, fallbackMessage) => {
@@ -210,9 +256,11 @@ export default function App() {
 			setRawText(data.raw_text || rawText);
 			setRequirements(data.requirements || []);
 			setTestCases([]);
+			setRequirementAnalysis([]);
 			setCoveragePlan([]);
 			setCoverageMetrics(null);
 			setTestCaseReview(null);
+			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
@@ -235,18 +283,7 @@ export default function App() {
 					format: templateFormat,
 					fields: ["id", "title", "description", "priority", "type", "status", "preconditions", "steps", "expected_result", "test_data", "estimated_time", "automation_status", "component", "tags"]
 				},
-				context: {
-					requirements,
-					app_link: appLink || null,
-					prototype_link: prototypeLink || null,
-					diagram_links: diagramLinks
-						? diagramLinks.split(";").map((x) => x.trim())
-						: null,
-					image_links: imageLinks
-						? imageLinks.split(";").map((x) => x.trim())
-						: null,
-					notes: "Generated via UI"
-				},
+				context: buildContextPayload(),
 			};
 
 			const useRefineEndpoint = withFeedback && testCases.length > 0;
@@ -272,6 +309,7 @@ export default function App() {
 			}
 			const data = await res.json();
 			setTestCases(data.test_cases || []);
+			setRequirementAnalysis(data.requirement_analysis || []);
 			setCoveragePlan(data.coverage_plan || []);
 			setCoverageMetrics(data.coverage_metrics || null);
 			setTestCaseReview(data.review || null);
@@ -334,6 +372,68 @@ export default function App() {
 
 	const getRequirementScenarioSummary = (requirementId) => {
 		return coverageMetrics?.requirement_scenario_summary?.[requirementId] || null;
+	};
+
+	const getRequirementAnalysisSummary = (requirementId) => {
+		return coverageMetrics?.requirement_analysis_summary?.[requirementId] || null;
+	};
+
+	const getRequirementAnalysisGaps = (requirementId) => {
+		const analysis = requirementAnalysis.find((a) => a.requirement_id === requirementId);
+		if (!analysis) {
+			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
+		}
+		const summary = coverageMetrics?.requirement_analysis_summary?.[requirementId] || {};
+		const coveredRules = new Set(summary.rules_covered || []);
+		const coveredConstraints = new Set(summary.constraints_covered || []);
+		const coveredPermissions = new Set(summary.permissions_covered || []);
+		const coveredTransitions = new Set(summary.transitions_covered || []);
+		const coveredRisks = new Set(summary.risks_covered || []);
+		return {
+			highRisks: (analysis.risk_signals || []).filter((r) => r.severity === "High" && !coveredRisks.has(r.id)).map((r) => r.title),
+			rules: (analysis.business_rules || []).filter((r) => !coveredRules.has(r.id)).map((r) => r.title),
+			constraints: (analysis.field_constraints || []).filter((c) => !coveredConstraints.has(c.id)).map((c) => c.field_name),
+			permissions: (analysis.role_permissions || []).filter((p) => !coveredPermissions.has(p.id)).map((p) => `${p.role}: ${p.action}`),
+			transitions: (analysis.state_transitions || []).filter((t) => !coveredTransitions.has(t.id)).map((t) => `${t.from_state} → ${t.to_state}`),
+		};
+	};
+
+	const coveredScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.covered_scenarios || 0), 0);
+	const plannedScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.length || 0), 0);
+	const mustHaveScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.filter((s) => s.must_have).length || 0), 0);
+	const mustHaveCoveredScenarioTotal = coveragePlan.reduce((sum, plan) => {
+		const missing = new Set(getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types || []);
+		return sum + (plan.scenarios?.filter((s) => s.must_have && !missing.has(s.scenario_type)).length || 0);
+	}, 0);
+	const missingScenarioCount = coveragePlan.reduce((sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types?.length || 0), 0);
+	const requirementAnalysisGapCount = requirementAnalysis.reduce((sum, analysis) => {
+		const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
+		return sum + Object.values(gaps).reduce((s, arr) => s + arr.length, 0);
+	}, 0);
+
+	const analyzeContext = async () => {
+		setIsAnalyzingContext(true);
+		setStatus("Analyzing context artifacts...");
+		try {
+			const res = await apiRequest("/requirements/enrich", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(buildContextPayload())
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to analyze context");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setEnrichedContext(data);
+			setSelectedArtifactSourceIds((data.grounded_context?.artifact_sources || []).map((source) => source.id));
+			setStatus("Context analyzed.");
+		} catch (error) {
+			setStatus(`Context analysis failed: ${error.message}`);
+			resetContextAnalysis();
+		} finally {
+			setIsAnalyzingContext(false);
+		}
 	};
 
 	const tabs = [
@@ -533,6 +633,77 @@ export default function App() {
 								/>
 							</div>
 						</div>
+						{hasContextInputs && (
+							<div className="panel-form button-row">
+								<button
+									onClick={analyzeContext}
+									disabled={isAnalyzingContext || authActionDisabled}
+								>
+									{isAnalyzingContext ? "⏳ Analyzing..." : "Analyze Context"}
+								</button>
+								{enrichedContext && (
+									<button
+										className="secondary"
+										onClick={resetContextAnalysis}
+									>
+										Clear Analysis
+									</button>
+								)}
+							</div>
+						)}
+						{enrichedContext?.grounded_context && (
+							<div className="result-section">
+								<h3>Grounded Context</h3>
+								{(enrichedContext.grounded_context.artifact_sources || []).length > 0 && (
+									<div className="artifact-sources">
+										<h4>Artifact Sources</h4>
+										<ul className="artifact-source-list">
+											{enrichedContext.grounded_context.artifact_sources.map((source) => (
+												<li key={source.id} className="artifact-source-item">
+													<label>
+														<input
+															type="checkbox"
+															checked={selectedArtifactSourceIds.includes(source.id)}
+															onChange={(e) => {
+																setSelectedArtifactSourceIds((prev) =>
+																	e.target.checked
+																		? [...prev, source.id]
+																		: prev.filter((id) => id !== source.id)
+																);
+															}}
+														/>
+														<span>{source.url || source.id}</span>
+														{source.type && <span className="artifact-type">{source.type}</span>}
+													</label>
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+								<div className="analysis-detail-grid">
+									{(enrichedContext.grounded_context.ui_elements || []).length > 0 && (
+										<div className="analysis-detail-block">
+											<h4>UI Elements</h4>
+											<ul className="analysis-detail-list">
+												{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
+													<li key={el.id}>{el.element_type}: {el.label || el.id}</li>
+												))}
+											</ul>
+										</div>
+									)}
+									{(enrichedContext.grounded_context.workflows || []).length > 0 && (
+										<div className="analysis-detail-block">
+											<h4>Workflows</h4>
+											<ul className="analysis-detail-list">
+												{enrichedContext.grounded_context.workflows.slice(0, 4).map((workflow) => (
+													<li key={workflow.id}>{workflow.name}: {(workflow.transitions || []).join(", ") || workflow.description}</li>
+												))}
+											</ul>
+										</div>
+									)}
+								</div>
+							</div>
+						)}
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
 							<button onClick={goNext}>Next</button>
@@ -605,45 +776,193 @@ export default function App() {
 
 						{coveragePlan.length > 0 && (
 							<div className="result-section">
-								<h3>Scenario Coverage Plan</h3>
-								<p className="helper-text">
-									The engine now plans scenario intent per requirement before generating detailed test cases.
-								</p>
-								<div className="coverage-plan-list">
-									{coveragePlan.map((plan) => {
-										const summary = getRequirementScenarioSummary(plan.requirement_id);
-										const missingScenarioTypes = new Set(summary?.missing_scenario_types || []);
-										return (
-											<div key={plan.requirement_id} className="coverage-plan-card">
-												<div className="coverage-plan-header">
-													<div>
-														<div className="coverage-plan-id">{plan.requirement_id}</div>
-														<div className="coverage-plan-text">{plan.requirement_text}</div>
+								<details className="collapsible-panel">
+									<summary className="collapsible-panel-summary">
+										<span className="collapsible-panel-copy">
+											<span className="collapsible-panel-title">Scenario Coverage Plan</span>
+											<span className="collapsible-panel-description">
+												Planned scenario intent per requirement, available on demand instead of taking over the page.
+											</span>
+										</span>
+										<span className="collapsible-panel-meta">
+											<span className="analysis-summary-pill">{coveragePlan.length} requirements</span>
+											<span className="analysis-summary-pill">Scenarios {coveredScenarioTotal}/{plannedScenarioTotal}</span>
+											<span className="analysis-summary-pill">Must-have {mustHaveCoveredScenarioTotal}/{mustHaveScenarioTotal}</span>
+											{missingScenarioCount > 0 && (
+												<span className="analysis-summary-pill collapsible-pill-alert">Missing {missingScenarioCount}</span>
+											)}
+											<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+										</span>
+									</summary>
+									<div className="collapsible-panel-body">
+										<div className="coverage-plan-list">
+											{coveragePlan.map((plan) => {
+												const summary = getRequirementScenarioSummary(plan.requirement_id);
+												const missingScenarioTypes = new Set(summary?.missing_scenario_types || []);
+												return (
+													<div key={plan.requirement_id} className="coverage-plan-card">
+														<div className="coverage-plan-header">
+															<div>
+																<div className="coverage-plan-id">{plan.requirement_id}</div>
+																<div className="coverage-plan-text">{plan.requirement_text}</div>
+															</div>
+															{summary && (
+																<span className="coverage-plan-summary">
+																	{summary.covered_scenarios}/{summary.planned_scenarios} planned scenarios covered
+																</span>
+															)}
+														</div>
+														<div className="coverage-chip-row">
+															{plan.scenarios?.map((scenario) => {
+																const isMissing = missingScenarioTypes.has(scenario.scenario_type);
+																return (
+																	<span
+																		key={scenario.id}
+																		className={`coverage-chip ${scenario.must_have ? "required" : "recommended"} ${isMissing ? "missing" : "covered"}`}
+																		title={scenario.objective}
+																	>
+																		{scenario.scenario_type}
+																	</span>
+																);
+															})}
+														</div>
 													</div>
-													{summary && (
-														<span className="coverage-plan-summary">
-															{summary.covered_scenarios}/{summary.planned_scenarios} planned scenarios covered
-														</span>
-													)}
-												</div>
-												<div className="coverage-chip-row">
-													{plan.scenarios?.map((scenario) => {
-														const isMissing = missingScenarioTypes.has(scenario.scenario_type);
-														return (
-															<span
-																key={scenario.id}
-																className={`coverage-chip ${scenario.must_have ? "required" : "recommended"} ${isMissing ? "missing" : "covered"}`}
-																title={scenario.objective}
-															>
-																{scenario.scenario_type}
-															</span>
-														);
-													})}
-												</div>
+												);
+											})}
+										</div>
+									</div>
+								</details>
+							</div>
+						)}
+
+						{requirementAnalysis.length > 0 && (
+							<div className="result-section">
+								<details className="collapsible-panel">
+									<summary className="collapsible-panel-summary">
+										<span className="collapsible-panel-copy">
+											<span className="collapsible-panel-title">Requirement Analysis</span>
+											<span className="collapsible-panel-description">
+												Rules, constraints, permissions, transitions, and risks extracted before scenario planning.
+											</span>
+										</span>
+										<span className="collapsible-panel-meta">
+											<span className="analysis-summary-pill">{requirementAnalysis.length} requirements</span>
+											{coverageMetrics && (
+												<>
+													<span className="analysis-summary-pill">Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}</span>
+													<span className="analysis-summary-pill">Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}</span>
+												</>
+											)}
+											{requirementAnalysisGapCount > 0 && (
+												<span className="analysis-summary-pill collapsible-pill-alert">Gaps {requirementAnalysisGapCount}</span>
+											)}
+											<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+										</span>
+									</summary>
+									<div className="collapsible-panel-body">
+										{coverageMetrics && (
+											<div className="analysis-overview-row">
+												<span className="analysis-summary-pill">Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}</span>
+												<span className="analysis-summary-pill">Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}</span>
+												<span className="analysis-summary-pill">Permissions {coverageMetrics.role_permissions_covered || 0}/{coverageMetrics.role_permissions_total || 0}</span>
+												<span className="analysis-summary-pill">Transitions {coverageMetrics.state_transitions_covered || 0}/{coverageMetrics.state_transitions_total || 0}</span>
+												<span className="analysis-summary-pill">Risks {coverageMetrics.risk_signals_covered || 0}/{coverageMetrics.risk_signals_total || 0}</span>
 											</div>
-										);
-									})}
-								</div>
+										)}
+										<div className="analysis-card-list">
+											{requirementAnalysis.map((analysis) => {
+												const summary = getRequirementAnalysisSummary(analysis.requirement_id);
+												const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
+												const hasGaps = Object.values(gaps).some((items) => items.length > 0);
+												return (
+													<div key={analysis.requirement_id} className="analysis-card">
+														<div className="analysis-card-header">
+															<div>
+																<div className="coverage-plan-id">{analysis.requirement_id}</div>
+																<div className="coverage-plan-text">{analysis.requirement_text}</div>
+															</div>
+															{summary && (
+																<span className="coverage-plan-summary">
+																	{summary.business_rules_covered}/{summary.business_rules_total} rules • {summary.field_constraints_covered}/{summary.field_constraints_total} constraints
+																</span>
+															)}
+														</div>
+														<div className="analysis-summary-row">
+															<span className="analysis-summary-pill">Rules {analysis.business_rules?.length || 0}</span>
+															<span className="analysis-summary-pill">Constraints {analysis.field_constraints?.length || 0}</span>
+															<span className="analysis-summary-pill">Permissions {analysis.role_permissions?.length || 0}</span>
+															<span className="analysis-summary-pill">Transitions {analysis.state_transitions?.length || 0}</span>
+															<span className="analysis-summary-pill">Risks {analysis.risk_signals?.length || 0}</span>
+														</div>
+														{analysis.suggested_scenarios?.length > 0 && (
+															<div className="analysis-chip-row">
+																{analysis.suggested_scenarios.map((scenario) => (
+																	<span key={`${analysis.requirement_id}-${scenario}`} className="analysis-chip">
+																		{scenario}
+																	</span>
+																))}
+															</div>
+														)}
+														<div className="analysis-detail-grid">
+															<div className="analysis-detail-block">
+																<h4>Business rules</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.business_rules || []).slice(0, 2).map((rule) => (
+																		<li key={rule.id}>{rule.title}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Constraints</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.field_constraints || []).slice(0, 2).map((constraint) => (
+																		<li key={constraint.id}>{constraint.field_name}: {constraint.description}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Permissions</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.role_permissions || []).slice(0, 2).map((permission) => (
+																		<li key={permission.id}>{permission.role}: {permission.action}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Transitions</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.state_transitions || []).slice(0, 2).map((transition) => (
+																		<li key={transition.id}>{transition.from_state} → {transition.to_state}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Risks</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.risk_signals || []).slice(0, 2).map((risk) => (
+																		<li key={risk.id}>{risk.severity}: {risk.title}</li>
+																	))}
+																</ul>
+															</div>
+														</div>
+														{hasGaps && (
+															<div className="analysis-gap-block">
+																<strong>Coverage gaps</strong>
+																<ul className="analysis-gap-list">
+																	{gaps.highRisks.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.rules.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.constraints.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.permissions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.transitions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																</ul>
+															</div>
+														)}
+													</div>
+												);
+											})}
+										</div>
+									</div>
+								</details>
 							</div>
 						)}
 
@@ -693,8 +1012,8 @@ export default function App() {
 														<td className="tc-preconditions">{tc.preconditions || "-"}</td>
 														<td className="tc-steps">
 															<ol>
-																{tc.steps?.slice(0, expandedRows[tc.id] ? undefined : 2).map((step) => (
-																	<li key={step.step || step.action}>
+																{tc.steps?.slice(0, expandedRows[tc.id] ? undefined : 2).map((step, index) => (
+																	<li key={`${tc.id}-step-${step.step || index + 1}`}>
 																		<strong>{step.action}</strong>
 																		<span className="step-expected">→ {step.expected}</span>
 																		{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
@@ -746,9 +1065,9 @@ export default function App() {
 											<div className="case-steps">
 												<strong>Steps</strong>
 												<ol>
-													{tc.steps?.map((step) => (
-														<li key={step.step || step.action}>
-															<span className="step-action">{step.step}. {step.action}</span>
+													{tc.steps?.map((step, index) => (
+														<li key={`${tc.id}-card-step-${step.step || index + 1}`}>
+															<span className="step-action">{step.step || index + 1}. {step.action}</span>
 															<span className="step-expected">→ {step.expected}</span>
 															{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
 														</li>

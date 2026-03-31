@@ -1,0 +1,18 @@
+{
+  "name": "auth_profile_search",
+  "description": "Authentication, profile, search, and notification baseline coverage.",
+  "minimum_test_cases": 8,
+  "minimum_review_score": 85,
+  "minimum_structured_case_ratio": 0.8,
+  "minimum_traceability_ratio": 1.0,
+  "minimum_expected_result_ratio": 1.0,
+  "minimum_description_ratio": 1.0,
+  "must_cover_all_requirements": true,
+  "recommended_scenarios": [
+    "Happy Path",
+    "Negative",
+    "Validation",
+    "Authorization",
+    "Data Variation"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "expense_workflow_markdown",
+  "description": "Expense workflow requirement extraction baseline covering draft, validation, workflow, and role permissions.",
+  "minimum_requirements": 7,
+  "maximum_duplicate_requirements": 0,
+  "minimum_shall_format_ratio": 1.0,
+  "minimum_review_score": 85,
+  "minimum_average_word_count": 7,
+  "require_sequential_ids": true,
+  "maximum_short_requirements": 0,
+  "minimum_concept_coverage_ratio": 1.0,
+  "must_include_concepts": [
+    {
+      "label": "draft creation",
+      "keywords": ["create", "expense report", "draft"]
+    },
+    {
+      "label": "draft until submit",
+      "keywords": ["draft status", "explicitly submits"]
+    },
+    {
+      "label": "policy limit validation",
+      "keywords": ["policy limit", "prevent submission"]
+    },
+    {
+      "label": "future date validation",
+      "keywords": ["validation message", "future"]
+    },
+    {
+      "label": "manager approval restriction",
+      "keywords": ["managers", "approve", "submitted status"]
+    },
+    {
+      "label": "rejection reason",
+      "keywords": ["rejection reason", "rejecting"]
+    },
+    {
+      "label": "finance csv export",
+      "keywords": ["finance administrators", "export", "csv"]
+    }
+  ],
+  "must_exclude_keywords": [
+    "src/reports/exporter.py",
+    "node_modules",
+    "csv export job"
+  ]
+}

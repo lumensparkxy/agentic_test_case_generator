@@ -7,6 +7,141 @@ class Requirement(BaseModel):
     text: str
 
 
+class BusinessRule(BaseModel):
+    id: str
+    requirement_id: str
+    title: str
+    description: str
+    rule_type: Literal[
+        "Business",
+        "Validation",
+        "Authorization",
+        "State Transition",
+        "Integration",
+        "Notification",
+        "Data",
+        "Constraint",
+        "Other",
+    ] = "Business"
+
+
+class FieldConstraint(BaseModel):
+    id: str
+    requirement_id: str
+    field_name: str
+    description: str
+    constraint_type: Literal[
+        "Required",
+        "Format",
+        "Length",
+        "Range",
+        "File Type",
+        "File Size",
+        "Allowed Values",
+        "Uniqueness",
+        "Dependency",
+        "Other",
+    ] = "Other"
+    operator: Optional[str] = None
+    value: Optional[str] = None
+    negative_example: Optional[str] = None
+
+
+class RolePermission(BaseModel):
+    id: str
+    requirement_id: str
+    role: str
+    action: str
+    effect: Literal["Allow", "Deny", "Conditional"] = "Allow"
+    conditions: Optional[str] = None
+
+
+class StateTransition(BaseModel):
+    id: str
+    requirement_id: str
+    entity: str
+    from_state: str
+    to_state: str
+    trigger: Optional[str] = None
+    guards: Optional[str] = None
+
+
+class RiskSignal(BaseModel):
+    id: str
+    requirement_id: str
+    title: str
+    rationale: str
+    category: Literal[
+        "Security",
+        "Data Integrity",
+        "Availability",
+        "Usability",
+        "Compliance",
+        "Workflow",
+        "Validation",
+        "Integration",
+        "Other",
+    ] = "Other"
+    severity: Literal["Critical", "High", "Medium", "Low"] = "Medium"
+
+
+class RequirementAnalysis(BaseModel):
+    requirement_id: str
+    requirement_text: str
+    business_rules: List[BusinessRule] = Field(default_factory=list)
+    field_constraints: List[FieldConstraint] = Field(default_factory=list)
+    role_permissions: List[RolePermission] = Field(default_factory=list)
+    state_transitions: List[StateTransition] = Field(default_factory=list)
+    risk_signals: List[RiskSignal] = Field(default_factory=list)
+    suggested_scenarios: List[str] = Field(default_factory=list)
+    dependencies: List[str] = Field(default_factory=list)
+
+
+class ArtifactSource(BaseModel):
+    id: str
+    source_type: Literal["app", "prototype", "diagram", "image", "note"] = "note"
+    label: str
+    url: Optional[HttpUrl] = None
+    status: Literal["Provided", "Analyzed", "Skipped", "Unavailable"] = "Provided"
+    notes: Optional[str] = None
+
+
+class GroundedUIElement(BaseModel):
+    id: str
+    source_id: Optional[str] = None
+    name: str
+    element_type: Literal["Page", "Form", "Field", "Button", "Message", "Filter", "Navigation", "Other"] = "Other"
+    description: str
+
+
+class GroundedApiSurface(BaseModel):
+    id: str
+    source_id: Optional[str] = None
+    name: str
+    description: str
+    method: Optional[str] = None
+    path: Optional[str] = None
+    auth_required: Optional[bool] = None
+
+
+class GroundedWorkflow(BaseModel):
+    id: str
+    source_id: Optional[str] = None
+    name: str
+    description: str
+    actors: List[str] = Field(default_factory=list)
+    states: List[str] = Field(default_factory=list)
+    transitions: List[str] = Field(default_factory=list)
+
+
+class GroundedContext(BaseModel):
+    artifact_sources: List[ArtifactSource] = Field(default_factory=list)
+    ui_elements: List[GroundedUIElement] = Field(default_factory=list)
+    api_surfaces: List[GroundedApiSurface] = Field(default_factory=list)
+    workflows: List[GroundedWorkflow] = Field(default_factory=list)
+    summary: Optional[str] = None
+
+
 class AuthUser(BaseModel):
     sub: str
     email: str
@@ -92,6 +227,11 @@ class EnrichInput(BaseModel):
     diagram_links: Optional[List[HttpUrl]] = None
     image_links: Optional[List[HttpUrl]] = None
     notes: Optional[str] = None
+    grounded_context: Optional[GroundedContext] = None
+
+
+class EnrichResponse(EnrichInput):
+    grounded_context: GroundedContext = Field(default_factory=GroundedContext)
 
 
 class TestStep(BaseModel):
@@ -119,6 +259,7 @@ class TestCase(BaseModel):
     automation_status: Literal["Manual", "Automated", "To Be Automated"] = "Manual"
     component: Optional[str] = None  # Module/feature area
     tags: Optional[List[str]] = None  # Includes linked requirement IDs
+    source_refs: Optional[List[str]] = None  # Grounded context artifact IDs used by this test case
 
 
 class TestCaseTemplate(BaseModel):
@@ -148,6 +289,7 @@ class GenerateTestCasesResponse(BaseModel):
     review: ReviewResult = Field(default_factory=ReviewResult)
     iteration_history: List[WorkflowIteration] = Field(default_factory=list)
     coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)
+    requirement_analysis: List[RequirementAnalysis] = Field(default_factory=list)
     coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
 
 

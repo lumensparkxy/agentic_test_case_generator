@@ -1,0 +1,6 @@
+{
+  "name": "expense_workflow_markdown",
+  "mode": "extract",
+  "document_count": 1,
+  "document_text": "# Expense Workflow Specification\n\nLast modified: 2026-03-20\n\n## Functional capabilities\n- Allow employees to create and save an expense report as a draft with one or more line items.\n- The system shall keep an expense report in Draft status until the employee explicitly submits it.\n- The system shall prevent submission when the total claimed amount exceeds the configured policy limit.\n- The system shall display a validation message when an expense date is in the future.\n- The system shall allow managers to approve only expense reports that are in Submitted status.\n- The system shall require managers to enter a rejection reason when rejecting an expense report.\n- The system shall allow only finance administrators to export Approved expense reports to CSV.\n\n## Implementation notes\n- src/reports/exporter.py will contain the CSV export job.\n- node_modules should not be committed.\n"
+}

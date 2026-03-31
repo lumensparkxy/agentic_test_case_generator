@@ -7,6 +7,7 @@ refine-existing-test-cases path so the UI can gate export on explicit approval.
 
 import asyncio
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -17,13 +18,29 @@ from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 from pydantic import ValidationError
 
+from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from ..config import get_settings
-from ..models import GenerateTestCasesInput, RefineTestCasesInput, Requirement, RequirementCoveragePlan, ScenarioIntent, TestCase, TestStep
-from ..utils.llm_json import parse_coverage_plan_json, parse_review_json, parse_test_cases_json
+from ..models import (
+    BusinessRule,
+    FieldConstraint,
+    GenerateTestCasesInput,
+    RefineTestCasesInput,
+    Requirement,
+    RequirementAnalysis,
+    RequirementCoveragePlan,
+    RiskSignal,
+    RolePermission,
+    ScenarioIntent,
+    StateTransition,
+    TestCase,
+    TestStep,
+)
+from ..utils.llm_json import parse_coverage_plan_json, parse_requirement_analysis_json, parse_review_json, parse_test_cases_json
 
 STATE_TEST_CASES = "current_test_cases"
 STATE_VALIDATION_FEEDBACK = "validation_feedback"
 STATE_COVERAGE_PLAN = "coverage_plan"
+STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 
 APPROVAL_PHRASE = "APPROVED"
 DEFAULT_TEST_CASE_THRESHOLD = 90
@@ -139,6 +156,73 @@ SCENARIO_KEYWORD_RULES = [
     (("search", "sort", "filter", "duplicate", "record", "dataset", "data"), "Data Variation"),
 ]
 
+RULE_TYPE_SCENARIO_HINTS = {
+    "Business": {"Happy Path", "Negative"},
+    "Validation": {"Validation", "Negative"},
+    "Authorization": {"Authorization", "Negative"},
+    "State Transition": {"State Transition", "Negative"},
+    "Integration": {"Integration", "Error Handling"},
+    "Notification": {"Integration", "Error Handling"},
+    "Data": {"Data Variation", "Happy Path"},
+    "Constraint": {"Validation", "Boundary", "Negative"},
+    "Other": {"Happy Path"},
+}
+
+CONSTRAINT_SCENARIO_HINTS = {
+    "Required": {"Validation", "Negative"},
+    "Format": {"Validation", "Negative"},
+    "Length": {"Boundary", "Validation"},
+    "Range": {"Boundary", "Validation", "Negative"},
+    "File Type": {"Validation", "Negative"},
+    "File Size": {"Boundary", "Validation"},
+    "Allowed Values": {"Validation", "Data Variation"},
+    "Uniqueness": {"Data Variation", "Negative"},
+    "Dependency": {"Integration", "Error Handling"},
+    "Other": {"Validation", "Negative"},
+}
+
+RISK_SCENARIO_HINTS = {
+    "Security": {"Authorization", "Negative"},
+    "Data Integrity": {"Data Variation", "Negative"},
+    "Availability": {"Error Handling", "Integration"},
+    "Usability": {"Happy Path", "Validation"},
+    "Compliance": {"Authorization", "Validation"},
+    "Workflow": {"State Transition", "Negative"},
+    "Validation": {"Validation", "Boundary"},
+    "Integration": {"Integration", "Error Handling"},
+    "Other": {"Happy Path", "Negative"},
+}
+
+MATCH_STOP_WORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "shall",
+    "must",
+    "when",
+    "only",
+    "allow",
+    "allows",
+    "allowing",
+    "system",
+    "user",
+    "users",
+    "into",
+    "from",
+    "their",
+    "than",
+    "then",
+    "have",
+    "will",
+}
+
+STEP_TEXT_PREFIX_PATTERN = re.compile(r"^\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
+STEP_TEXT_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
+STEP_BULLET_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*[-*•]\s+")
+
 
 def _dedupe_preserve(items: List[str]) -> List[str]:
     seen: set[str] = set()
@@ -224,6 +308,12 @@ def _normalize_scenario_type(raw_type: Any) -> str:
 def _scenario_tag(scenario_type: str) -> str:
     normalized = _normalize_scenario_type(scenario_type)
     return f"scenario:{normalized.lower().replace(' ', '-')}"
+
+
+def _normalize_source_refs(raw_source_refs: Any) -> List[str]:
+    if not isinstance(raw_source_refs, list):
+        return []
+    return _dedupe_preserve([str(reference).strip() for reference in raw_source_refs if str(reference).strip()])
 
 
 def _coerce_bool(value: Any, default: bool = True) -> bool:
@@ -485,6 +575,246 @@ def _compute_planned_scenario_metrics(
     }
 
 
+def _collect_test_case_text(test_case: Dict[str, Any]) -> str:
+    steps = test_case.get("steps") or []
+    step_text = " ".join(
+        f"{step.get('action', '')} {step.get('expected', '')} {step.get('test_data', '')}"
+        for step in steps
+        if isinstance(step, dict)
+    )
+    return " ".join(
+        [
+            str(test_case.get("title") or ""),
+            str(test_case.get("description") or ""),
+            str(test_case.get("preconditions") or ""),
+            str(test_case.get("expected_result") or ""),
+            str(test_case.get("test_data") or ""),
+            " ".join(str(tag) for tag in (test_case.get("tags") or [])),
+            step_text,
+        ]
+    ).lower()
+
+
+def _tokenize_for_match(text: str) -> set[str]:
+    tokens = re.findall(r"[a-z0-9]+", str(text).lower())
+    return {token for token in tokens if len(token) >= 3 and token not in MATCH_STOP_WORDS}
+
+
+def _analysis_item_is_covered(item_text: str, linked_case_texts: List[str], linked_scenarios: set[str], hinted_scenarios: set[str]) -> bool:
+    if hinted_scenarios and linked_scenarios.intersection(hinted_scenarios):
+        return True
+
+    item_tokens = _tokenize_for_match(item_text)
+    if not item_tokens:
+        return bool(linked_case_texts)
+
+    minimum_overlap = 1 if len(item_tokens) <= 3 else 2
+    for case_text in linked_case_texts:
+        case_tokens = _tokenize_for_match(case_text)
+        if len(item_tokens.intersection(case_tokens)) >= minimum_overlap:
+            return True
+    return False
+
+
+def _compute_requirement_analysis_metrics(
+    requirement_analysis: List[Dict[str, Any]],
+    test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+) -> Dict[str, Any]:
+    normalized_analysis = normalize_requirement_analysis(
+        requirement_analysis or fallback_requirement_analysis(requirements),
+        requirements,
+    )
+    requirement_ids = _serialize_requirement_ids(requirements)
+    requirement_id_set = set(requirement_ids)
+    test_cases_by_requirement: Dict[str, List[Dict[str, Any]]] = {requirement_id: [] for requirement_id in requirement_ids}
+
+    for test_case in test_cases:
+        tags = test_case.get("tags") or []
+        linked_ids = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        for requirement_id in linked_ids:
+            test_cases_by_requirement[requirement_id].append(test_case)
+
+    business_rules_total = 0
+    business_rules_covered = 0
+    field_constraints_total = 0
+    field_constraints_covered = 0
+    role_permissions_total = 0
+    role_permissions_covered = 0
+    state_transitions_total = 0
+    state_transitions_covered = 0
+    risk_signals_total = 0
+    risk_signals_covered = 0
+    rules_without_tests: List[str] = []
+    constraints_without_tests: List[str] = []
+    role_permissions_without_tests: List[str] = []
+    transitions_without_tests: List[str] = []
+    high_risk_items_without_tests: List[str] = []
+    requirement_analysis_summary: Dict[str, Dict[str, Any]] = {}
+
+    for item in normalized_analysis:
+        requirement_id = str(item.get("requirement_id") or "").strip()
+        linked_cases = test_cases_by_requirement.get(requirement_id, [])
+        linked_case_texts = [_collect_test_case_text(test_case) for test_case in linked_cases]
+        linked_scenarios = {
+            scenario_type
+            for test_case in linked_cases
+            for scenario_type in _extract_scenario_types_from_test_case(test_case)
+        }
+
+        rule_hits = 0
+        constraint_hits = 0
+        permission_hits = 0
+        transition_hits = 0
+        risk_hits = 0
+
+        for rule in item.get("business_rules") or []:
+            business_rules_total += 1
+            rule_text = f"{rule.get('title', '')} {rule.get('description', '')}"
+            hinted_scenarios = RULE_TYPE_SCENARIO_HINTS.get(str(rule.get("rule_type") or "Other"), {"Happy Path"})
+            covered = _analysis_item_is_covered(rule_text, linked_case_texts, linked_scenarios, hinted_scenarios)
+            if covered:
+                business_rules_covered += 1
+                rule_hits += 1
+            else:
+                rules_without_tests.append(f"{requirement_id} - {rule.get('title') or 'Untitled rule'}")
+
+        for constraint in item.get("field_constraints") or []:
+            field_constraints_total += 1
+            constraint_text = " ".join(
+                [
+                    str(constraint.get("field_name") or ""),
+                    str(constraint.get("description") or ""),
+                    str(constraint.get("value") or ""),
+                    str(constraint.get("negative_example") or ""),
+                ]
+            )
+            hinted_scenarios = CONSTRAINT_SCENARIO_HINTS.get(str(constraint.get("constraint_type") or "Other"), {"Validation"})
+            covered = _analysis_item_is_covered(constraint_text, linked_case_texts, linked_scenarios, hinted_scenarios)
+            if covered:
+                field_constraints_covered += 1
+                constraint_hits += 1
+            else:
+                constraints_without_tests.append(
+                    f"{requirement_id} - {constraint.get('field_name') or 'field'}: {constraint.get('description') or 'constraint'}"
+                )
+
+        for permission in item.get("role_permissions") or []:
+            role_permissions_total += 1
+            permission_text = f"{permission.get('role', '')} {permission.get('action', '')} {permission.get('conditions', '')}"
+            covered = _analysis_item_is_covered(permission_text, linked_case_texts, linked_scenarios, {"Authorization", "Negative"})
+            if covered:
+                role_permissions_covered += 1
+                permission_hits += 1
+            else:
+                role_permissions_without_tests.append(
+                    f"{requirement_id} - {permission.get('role') or 'Role'} {permission.get('action') or ''}".strip()
+                )
+
+        for transition in item.get("state_transitions") or []:
+            state_transitions_total += 1
+            transition_text = " ".join(
+                [
+                    str(transition.get("entity") or ""),
+                    str(transition.get("from_state") or ""),
+                    str(transition.get("to_state") or ""),
+                    str(transition.get("trigger") or ""),
+                    str(transition.get("guards") or ""),
+                ]
+            )
+            covered = _analysis_item_is_covered(transition_text, linked_case_texts, linked_scenarios, {"State Transition", "Negative"})
+            if covered:
+                state_transitions_covered += 1
+                transition_hits += 1
+            else:
+                transitions_without_tests.append(
+                    f"{requirement_id} - {transition.get('from_state') or 'Unknown'} → {transition.get('to_state') or 'Unknown'}"
+                )
+
+        for risk in item.get("risk_signals") or []:
+            risk_signals_total += 1
+            risk_text = f"{risk.get('title', '')} {risk.get('rationale', '')}"
+            hinted_scenarios = RISK_SCENARIO_HINTS.get(str(risk.get("category") or "Other"), {"Happy Path", "Negative"})
+            covered = _analysis_item_is_covered(risk_text, linked_case_texts, linked_scenarios, hinted_scenarios)
+            if covered:
+                risk_signals_covered += 1
+                risk_hits += 1
+            elif str(risk.get("severity") or "Medium") in {"Critical", "High"}:
+                high_risk_items_without_tests.append(f"{requirement_id} - {risk.get('title') or 'Untitled risk'}")
+
+        requirement_analysis_summary[requirement_id] = {
+            "business_rules_total": len(item.get("business_rules") or []),
+            "business_rules_covered": rule_hits,
+            "field_constraints_total": len(item.get("field_constraints") or []),
+            "field_constraints_covered": constraint_hits,
+            "role_permissions_total": len(item.get("role_permissions") or []),
+            "role_permissions_covered": permission_hits,
+            "state_transitions_total": len(item.get("state_transitions") or []),
+            "state_transitions_covered": transition_hits,
+            "risk_signals_total": len(item.get("risk_signals") or []),
+            "risk_signals_covered": risk_hits,
+        }
+
+    return {
+        "business_rules_total": business_rules_total,
+        "business_rules_covered": business_rules_covered,
+        "rule_coverage_ratio": round(business_rules_covered / business_rules_total, 2) if business_rules_total else 1.0,
+        "field_constraints_total": field_constraints_total,
+        "field_constraints_covered": field_constraints_covered,
+        "constraint_coverage_ratio": round(field_constraints_covered / field_constraints_total, 2) if field_constraints_total else 1.0,
+        "role_permissions_total": role_permissions_total,
+        "role_permissions_covered": role_permissions_covered,
+        "role_permission_coverage_ratio": round(role_permissions_covered / role_permissions_total, 2) if role_permissions_total else 1.0,
+        "state_transitions_total": state_transitions_total,
+        "state_transitions_covered": state_transitions_covered,
+        "transition_coverage_ratio": round(state_transitions_covered / state_transitions_total, 2) if state_transitions_total else 1.0,
+        "risk_signals_total": risk_signals_total,
+        "risk_signals_covered": risk_signals_covered,
+        "risk_coverage_ratio": round(risk_signals_covered / risk_signals_total, 2) if risk_signals_total else 1.0,
+        "rules_without_tests": _dedupe_preserve(rules_without_tests),
+        "constraints_without_tests": _dedupe_preserve(constraints_without_tests),
+        "role_permissions_without_tests": _dedupe_preserve(role_permissions_without_tests),
+        "transitions_without_tests": _dedupe_preserve(transitions_without_tests),
+        "high_risk_items_without_tests": _dedupe_preserve(high_risk_items_without_tests),
+        "requirement_analysis_summary": requirement_analysis_summary,
+    }
+
+
+def _compute_grounded_context_metrics(test_cases: List[Dict[str, Any]], context: Optional[Any]) -> Dict[str, Any]:
+    grounded_context = getattr(context, "grounded_context", None) if context else None
+    artifact_sources = list(getattr(grounded_context, "artifact_sources", []) or [])
+    artifact_ids = [str(source.id).strip() for source in artifact_sources if getattr(source, "id", None)]
+    artifact_id_set = set(artifact_ids)
+
+    if not artifact_ids:
+        return {
+            "grounded_artifact_count": 0,
+            "source_backed_test_cases": 0,
+            "grounded_source_backed_case_ratio": 1.0,
+            "artifacts_with_references": 0,
+            "artifact_reference_coverage_ratio": 1.0,
+            "unreferenced_artifacts": [],
+        }
+
+    referenced_artifacts: set[str] = set()
+    source_backed_test_cases = 0
+    for test_case in test_cases:
+        source_refs = [reference for reference in _normalize_source_refs(test_case.get("source_refs")) if reference in artifact_id_set]
+        if not source_refs:
+            continue
+        source_backed_test_cases += 1
+        referenced_artifacts.update(source_refs)
+
+    return {
+        "grounded_artifact_count": len(artifact_ids),
+        "source_backed_test_cases": source_backed_test_cases,
+        "grounded_source_backed_case_ratio": round(source_backed_test_cases / len(test_cases), 2) if test_cases else 0.0,
+        "artifacts_with_references": len(referenced_artifacts),
+        "artifact_reference_coverage_ratio": round(len(referenced_artifacts) / len(artifact_ids), 2) if artifact_ids else 1.0,
+        "unreferenced_artifacts": [artifact_id for artifact_id in artifact_ids if artifact_id not in referenced_artifacts],
+    }
+
+
 def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, default_summary: str) -> Dict[str, Any]:
     payload = review or {}
     blocking_issues = _dedupe_preserve(list(payload.get("blocking_issues") or []))
@@ -576,6 +906,8 @@ def _heuristic_test_case_review(
     requirements: List[Requirement],
     threshold: int,
     coverage_plan: Optional[List[Dict[str, Any]]] = None,
+    requirement_analysis: Optional[List[Dict[str, Any]]] = None,
+    context: Optional[Any] = None,
 ) -> Dict[str, Any]:
     metrics = _compute_test_case_coverage_metrics(test_cases, requirements)
     scenario_metrics = _compute_planned_scenario_metrics(
@@ -583,6 +915,12 @@ def _heuristic_test_case_review(
         test_cases,
         requirements,
     )
+    analysis_metrics = _compute_requirement_analysis_metrics(
+        requirement_analysis or fallback_requirement_analysis(requirements),
+        test_cases,
+        requirements,
+    )
+    grounded_context_metrics = _compute_grounded_context_metrics(test_cases, context)
     blocking_issues: List[str] = []
     suggestions: List[str] = []
     unmet_criteria: List[str] = []
@@ -637,6 +975,65 @@ def _heuristic_test_case_review(
                 + ("." if len(scenario_metrics["missing_scenarios"]) <= 3 else ", ...")
             )
             score -= min(12, len(scenario_metrics["missing_scenarios"]) * 2)
+
+        if analysis_metrics["high_risk_items_without_tests"]:
+            preview = ", ".join(analysis_metrics["high_risk_items_without_tests"][:3])
+            blocking_issues.append(
+                "High-risk requirement analysis items without coverage: "
+                f"{preview}"
+                + ("." if len(analysis_metrics["high_risk_items_without_tests"]) <= 3 else ", ...")
+            )
+            unmet_criteria.append("High or critical risks from requirement analysis need corresponding test coverage.")
+            score -= len(analysis_metrics["high_risk_items_without_tests"]) * 6
+
+        if analysis_metrics["rules_without_tests"]:
+            preview = ", ".join(analysis_metrics["rules_without_tests"][:3])
+            suggestions.append(
+                "Add requirement-rule coverage for: "
+                f"{preview}"
+                + ("." if len(analysis_metrics["rules_without_tests"]) <= 3 else ", ...")
+            )
+            score -= min(10, len(analysis_metrics["rules_without_tests"]) * 2)
+
+        if analysis_metrics["constraints_without_tests"]:
+            preview = ", ".join(analysis_metrics["constraints_without_tests"][:3])
+            suggestions.append(
+                "Add validation or boundary coverage for: "
+                f"{preview}"
+                + ("." if len(analysis_metrics["constraints_without_tests"]) <= 3 else ", ...")
+            )
+            score -= min(10, len(analysis_metrics["constraints_without_tests"]) * 2)
+
+        if analysis_metrics["role_permissions_without_tests"]:
+            preview = ", ".join(analysis_metrics["role_permissions_without_tests"][:3])
+            suggestions.append(
+                "Add authorization coverage for: "
+                f"{preview}"
+                + ("." if len(analysis_metrics["role_permissions_without_tests"]) <= 3 else ", ...")
+            )
+            score -= min(8, len(analysis_metrics["role_permissions_without_tests"]) * 2)
+
+        if analysis_metrics["transitions_without_tests"]:
+            preview = ", ".join(analysis_metrics["transitions_without_tests"][:3])
+            suggestions.append(
+                "Add state-transition coverage for: "
+                f"{preview}"
+                + ("." if len(analysis_metrics["transitions_without_tests"]) <= 3 else ", ...")
+            )
+            score -= min(10, len(analysis_metrics["transitions_without_tests"]) * 2)
+
+        if grounded_context_metrics["grounded_artifact_count"] > 0:
+            if grounded_context_metrics["source_backed_test_cases"] == 0:
+                suggestions.append("Grounded context is available, but no test cases cite artifact source references yet.")
+                score -= 5
+            elif grounded_context_metrics["artifact_reference_coverage_ratio"] < 0.5:
+                preview = ", ".join(grounded_context_metrics["unreferenced_artifacts"][:3])
+                suggestions.append(
+                    "Add broader grounded-context references for artifacts such as: "
+                    f"{preview}"
+                    + ("." if len(grounded_context_metrics["unreferenced_artifacts"]) <= 3 else ", ...")
+                )
+                score -= 3
 
     score = max(0, min(100, score))
     approved = score >= threshold and not blocking_issues
@@ -727,11 +1124,17 @@ def _build_coverage_planner_agent(
 
 **Context:**
 {context_text}
+
+**Requirement Analysis:**
+```
+{{{STATE_REQUIREMENT_ANALYSIS}}}
+```
 {feedback_section}
 **Rules:**
 1. Produce 2-4 scenarios per requirement.
 2. Always include a 'Happy Path' scenario for every requirement.
 3. Include at least one non-happy-path scenario per requirement.
+4. Use the requirement analysis to cover business rules, constraints, permissions, risks, and transitions when present.
 4. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
 5. Mark essential scenarios with must_have=true.
 6. Output ONLY a JSON object shaped like:
@@ -784,6 +1187,11 @@ def _build_review_loop(
 {{{STATE_TEST_CASES}}}
 ```
 
+    **Requirement Analysis:**
+    ```
+    {{{STATE_REQUIREMENT_ANALYSIS}}}
+    ```
+
     **Coverage Plan:**
     ```
     {{{STATE_COVERAGE_PLAN}}}
@@ -797,10 +1205,11 @@ def _build_review_loop(
 2. Steps are executable and expected results are specific.
     3. Requirement traceability tags cover every requirement.
     4. Every must-have scenario from the coverage plan is represented by at least one test case.
-    5. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
-    6. Priority, type, status, and automation status are valid.
-    7. Test data, preconditions, and overall expected_result are present when needed.
-    8. Human feedback has been addressed.
+    5. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
+    6. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
+    7. Priority, type, status, and automation status are valid.
+    8. Test data, preconditions, and overall expected_result are present when needed.
+    9. Human feedback has been addressed.
 
 **Response Rules:**
 - Return ONLY a JSON object with this exact shape:
@@ -829,6 +1238,11 @@ def _build_review_loop(
 ```
 {{{STATE_TEST_CASES}}}
 ```
+
+    **Requirement Analysis:**
+    ```
+    {{{STATE_REQUIREMENT_ANALYSIS}}}
+    ```
 
     **Coverage Plan:**
     ```
@@ -890,16 +1304,23 @@ def _build_generation_pipeline(
 **Template Configuration:**
 {template_text}
 
+**Requirement Analysis To Honor:**
+{{{STATE_REQUIREMENT_ANALYSIS}}}
+
 **Coverage Plan To Implement:**
 {{{STATE_COVERAGE_PLAN}}}
 {feedback_section}
 **Rules:**
 1. Generate 1-3 test cases per requirement.
 2. Implement every must-have planned scenario and as many recommended scenarios as possible.
-3. Tag each test case with at least one requirement ID and one scenario tag using the format scenario:<kebab-case-scenario-type>.
-4. Include detailed steps, expected results, realistic priorities, and execution metadata.
-5. Keep each test case centered on one primary scenario from the coverage plan.
-6. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+3. Reflect business rules, field constraints, role permissions, state transitions, and risks from the requirement analysis whenever they apply.
+4. Tag each test case with at least one requirement ID and one scenario tag using the format scenario:<kebab-case-scenario-type>.
+5. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
+6. Include detailed steps, expected results, realistic priorities, and execution metadata.
+7. Keep each test case centered on one primary scenario from the coverage plan.
+8. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
+9. Never return `steps` as a single string, markdown list, or paragraph.
+10. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -908,6 +1329,13 @@ def _build_generation_pipeline(
     return SequentialAgent(
         name="TestCaseGenerationPipeline",
         sub_agents=[
+            build_requirement_analysis_agent(
+                model,
+                requirements_text,
+                context_text,
+                output_key=STATE_REQUIREMENT_ANALYSIS,
+                human_feedback=human_feedback,
+            ),
             _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
             generator_agent,
             _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback),
@@ -941,6 +1369,9 @@ Context:
 Template:
 {template_text}
 
+Requirement analysis:
+{{{STATE_REQUIREMENT_ANALYSIS}}}
+
 Coverage plan:
 {{{STATE_COVERAGE_PLAN}}}
 
@@ -949,7 +1380,10 @@ Rules:
 2. Add, merge, split, or remove cases as needed.
 3. Keep requirement traceability intact or improve it.
 4. Ensure each test case includes a scenario tag formatted like scenario:happy-path.
-5. Output ONLY the JSON object.
+5. Preserve or improve any grounded-context `source_refs` when grounded context is available.
+6. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
+7. Never return `steps` as a plain string, markdown list, or free-form paragraph.
+8. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,
@@ -958,6 +1392,13 @@ Rules:
     return SequentialAgent(
         name="TestCaseRefinementPipeline",
         sub_agents=[
+            build_requirement_analysis_agent(
+                model,
+                requirements_text,
+                context_text,
+                output_key=STATE_REQUIREMENT_ANALYSIS,
+                human_feedback=human_feedback,
+            ),
             _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
             refinement_agent,
             _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback),
@@ -969,6 +1410,7 @@ Rules:
 async def _run_test_case_workflow_async(
     *,
     requirements: List[Requirement],
+    context: Optional[Any],
     requirements_text: str,
     context_text: str,
     template_text: str,
@@ -1031,11 +1473,13 @@ Human feedback:
             STATE_TEST_CASES: "[]",
             STATE_VALIDATION_FEEDBACK: "",
             STATE_COVERAGE_PLAN: "[]",
+            STATE_REQUIREMENT_ANALYSIS: "[]",
         },
     )
 
     current_test_cases: List[Dict[str, Any]] = []
     current_coverage_plan: List[Dict[str, Any]] = []
+    current_requirement_analysis: List[Dict[str, Any]] = []
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
 
@@ -1065,6 +1509,10 @@ Human feedback:
             if parsed_coverage_plan and author == "CoveragePlannerAgent":
                 current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
 
+            parsed_requirement_analysis = parse_requirement_analysis_json(text)
+            if parsed_requirement_analysis and author == "RequirementAnalysisAgent":
+                current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
+
             parsed_review = parse_review_json(text, default_threshold=threshold)
             if parsed_review and author == "TestCaseValidatorAgent":
                 model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
@@ -1085,6 +1533,13 @@ Human feedback:
     if state_coverage_plan:
         current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
 
+    state_requirement_analysis = parse_requirement_analysis_json(session.state.get(STATE_REQUIREMENT_ANALYSIS, "[]"))
+    if state_requirement_analysis:
+        current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
+
+    if not current_requirement_analysis:
+        current_requirement_analysis = fallback_requirement_analysis(requirements)
+
     if not current_coverage_plan:
         current_coverage_plan = _fallback_coverage_plan(requirements)
 
@@ -1097,10 +1552,14 @@ Human feedback:
         requirements,
         threshold,
         coverage_plan=current_coverage_plan,
+        requirement_analysis=current_requirement_analysis,
+        context=context,
     )
     final_review = _merge_review_results(model_review, heuristic_review)
     coverage_metrics = _compute_test_case_coverage_metrics(current_test_cases, requirements)
     coverage_metrics.update(_compute_planned_scenario_metrics(current_coverage_plan, current_test_cases, requirements))
+    coverage_metrics.update(_compute_requirement_analysis_metrics(current_requirement_analysis, current_test_cases, requirements))
+    coverage_metrics.update(_compute_grounded_context_metrics(current_test_cases, context))
 
     if iteration_history:
         iteration_history[-1] = _make_history_entry(
@@ -1122,6 +1581,7 @@ Human feedback:
     logging.info("[TestCase Workflow] Final test cases: %s, approved=%s", len(current_test_cases), final_review["approved"])
     return {
         "test_cases": current_test_cases,
+        "requirement_analysis": current_requirement_analysis,
         "coverage_plan": current_coverage_plan,
         "approved": final_review["approved"],
         "review": final_review,
@@ -1146,13 +1606,23 @@ def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
         fallback_plan = _fallback_coverage_plan(requirements)
         return {
             "test_cases": [],
+            "requirement_analysis": fallback_requirement_analysis(requirements),
             "coverage_plan": fallback_plan,
             "approved": False,
-            "review": _heuristic_test_case_review([], requirements, DEFAULT_TEST_CASE_THRESHOLD, coverage_plan=fallback_plan),
+            "review": _heuristic_test_case_review(
+                [],
+                requirements,
+                DEFAULT_TEST_CASE_THRESHOLD,
+                coverage_plan=fallback_plan,
+                requirement_analysis=fallback_requirement_analysis(requirements),
+                context=kwargs.get("context"),
+            ),
             "iteration_history": [],
             "coverage_metrics": {
                 **_compute_test_case_coverage_metrics([], requirements),
                 **_compute_planned_scenario_metrics(fallback_plan, [], requirements),
+                **_compute_requirement_analysis_metrics(fallback_requirement_analysis(requirements), [], requirements),
+                **_compute_grounded_context_metrics([], kwargs.get("context")),
             },
         }
 
@@ -1172,6 +1642,34 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
             context_parts.append(f"Images: {', '.join(str(link) for link in context.image_links)}")
         if context.notes:
             context_parts.append(f"Notes: {context.notes}")
+        if context.grounded_context:
+            grounded_context = context.grounded_context
+            if grounded_context.summary:
+                context_parts.append(f"Grounded context summary: {grounded_context.summary}")
+            if grounded_context.artifact_sources:
+                sources = ", ".join(
+                    f"{source.id} ({source.label}, {source.status})"
+                    for source in grounded_context.artifact_sources[:8]
+                )
+                context_parts.append(f"Grounded artifact sources: {sources}")
+            if grounded_context.ui_elements:
+                ui_elements = ", ".join(
+                    f"{element.element_type}: {element.name}"
+                    for element in grounded_context.ui_elements[:8]
+                )
+                context_parts.append(f"Grounded UI elements: {ui_elements}")
+            if grounded_context.api_surfaces:
+                api_surfaces = ", ".join(
+                    f"{surface.method or 'API'} {surface.path or surface.name}"
+                    for surface in grounded_context.api_surfaces[:8]
+                )
+                context_parts.append(f"Grounded API surfaces: {api_surfaces}")
+            if grounded_context.workflows:
+                workflows = ", ".join(
+                    f"{workflow.name} [{'; '.join(workflow.transitions[:4])}]"
+                    for workflow in grounded_context.workflows[:4]
+                )
+                context_parts.append(f"Grounded workflows: {workflows}")
     context_text = "\n".join(context_parts) if context_parts else "No additional context provided."
 
     template_text = f"Name: {template.name}, Format: {template.format}, Fields: {', '.join(template.fields)}"
@@ -1186,6 +1684,9 @@ def _fallback_raw_test_cases(
     raw_test_cases: List[Dict[str, Any]] = []
     requirements_by_id = {requirement.id: requirement for requirement in requirements}
     normalized_plan = _normalize_coverage_plan(coverage_plan or _fallback_coverage_plan(requirements), requirements)
+    grounded_source_refs: List[str] = []
+    if context and getattr(context, "grounded_context", None) and getattr(context.grounded_context, "artifact_sources", None):
+        grounded_source_refs = [str(source.id) for source in context.grounded_context.artifact_sources[:1] if getattr(source, "id", None)]
 
     for idx, plan_item in enumerate(normalized_plan, start=1):
         requirement = requirements_by_id.get(str(plan_item.get("requirement_id") or "").strip())
@@ -1234,9 +1735,96 @@ def _fallback_raw_test_cases(
                     "automation_status": "To Be Automated",
                     "component": "General",
                     "tags": [requirement.id, _scenario_tag(scenario_type), "generated", f"plan:{idx:02d}-{scenario_offset:02d}"],
+                    "source_refs": grounded_source_refs,
                 }
             )
     return raw_test_cases
+
+
+def _extract_step_text_blocks(text: str, marker_pattern: re.Pattern[str]) -> List[str]:
+    matches = list(marker_pattern.finditer(text))
+    if not matches:
+        return []
+
+    blocks: List[str] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[start:end].strip()
+        if block:
+            blocks.append(block)
+    return blocks
+
+
+def _normalize_raw_steps(raw_steps: Any) -> List[Any]:
+    if raw_steps is None:
+        return []
+
+    if isinstance(raw_steps, list):
+        normalized: List[Any] = []
+        for item in raw_steps:
+            if isinstance(item, list):
+                normalized.extend(_normalize_raw_steps(item))
+                continue
+            if item is None:
+                continue
+            normalized.append(item)
+        return normalized
+
+    if isinstance(raw_steps, dict):
+        return [raw_steps]
+
+    if isinstance(raw_steps, str):
+        normalized_text = raw_steps.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not normalized_text:
+            return []
+
+        numbered_blocks = _extract_step_text_blocks(normalized_text, STEP_TEXT_MARKER_PATTERN)
+        if numbered_blocks:
+            return numbered_blocks
+
+        bullet_blocks = _extract_step_text_blocks(normalized_text, STEP_BULLET_MARKER_PATTERN)
+        if bullet_blocks:
+            return bullet_blocks
+
+        lines = [line.strip() for line in normalized_text.split("\n") if line.strip()]
+        if len(lines) > 1:
+            return lines
+
+        return [normalized_text]
+
+    text_value = str(raw_steps).strip()
+    return [text_value] if text_value else []
+
+
+def _hydrate_text_step(raw_step: str, step_number: int) -> TestStep:
+    cleaned = STEP_TEXT_PREFIX_PATTERN.sub("", raw_step.strip())
+    cleaned = re.sub(r"^\s*[-*•]\s+", "", cleaned)
+    cleaned = re.sub(r"^\s*action\s*[:\-]\s*", "", cleaned, flags=re.IGNORECASE)
+
+    action = cleaned
+    expected = ""
+
+    for separator in ("->", "=>", "→"):
+        if separator not in cleaned:
+            continue
+        action, expected = cleaned.split(separator, 1)
+        break
+
+    if not expected:
+        split_parts = re.split(r"\bexpected(?:\s+result)?\s*[:\-]\s*", cleaned, maxsplit=1, flags=re.IGNORECASE)
+        if len(split_parts) == 2:
+            action, expected = split_parts
+
+    action = action.strip() or cleaned.strip() or f"Step {step_number}"
+    expected = expected.strip()
+
+    return TestStep(
+        step=step_number,
+        action=action,
+        expected=expected,
+        test_data=None,
+    )
 
 
 def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
@@ -1244,12 +1832,19 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
     for index, raw_test_case in enumerate(raw_test_cases, start=1):
         try:
             steps = []
-            for raw_step in raw_test_case.get("steps", []) or []:
+            for raw_step in _normalize_raw_steps(raw_test_case.get("steps", [])):
+                if isinstance(raw_step, str):
+                    steps.append(_hydrate_text_step(raw_step, len(steps) + 1))
+                    continue
+
+                if not isinstance(raw_step, dict):
+                    continue
+
                 steps.append(
                     TestStep(
                         step=raw_step.get("step", len(steps) + 1),
-                        action=raw_step.get("action", ""),
-                        expected=raw_step.get("expected", ""),
+                        action=str(raw_step.get("action", "") or ""),
+                        expected=str(raw_step.get("expected", "") or ""),
                         test_data=raw_step.get("test_data"),
                     )
                 )
@@ -1270,6 +1865,7 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     automation_status=_normalize_automation_status(raw_test_case.get("automation_status")),
                     component=raw_test_case.get("component"),
                     tags=raw_test_case.get("tags", []),
+                    source_refs=_normalize_source_refs(raw_test_case.get("source_refs")),
                 )
             )
         except (ValidationError, KeyError) as exc:
@@ -1305,6 +1901,7 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
                 "automation_status": test_case.automation_status,
                 "component": test_case.component,
                 "tags": test_case.tags or [],
+                "source_refs": test_case.source_refs or [],
             }
         )
     return serialized
@@ -1341,12 +1938,95 @@ def _hydrate_coverage_plan(
     return hydrated
 
 
-def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement]) -> Dict[str, Any]:
+def _hydrate_requirement_analysis(
+    raw_requirement_analysis: List[Dict[str, Any]],
+    requirements: List[Requirement],
+) -> List[RequirementAnalysis]:
+    normalized_analysis = normalize_requirement_analysis(
+        raw_requirement_analysis or fallback_requirement_analysis(requirements),
+        requirements,
+    )
+    hydrated: List[RequirementAnalysis] = []
+
+    for item in normalized_analysis:
+        hydrated.append(
+            RequirementAnalysis(
+                requirement_id=str(item.get("requirement_id") or ""),
+                requirement_text=str(item.get("requirement_text") or ""),
+                business_rules=[
+                    BusinessRule(
+                        id=str(rule.get("id") or ""),
+                        requirement_id=str(rule.get("requirement_id") or item.get("requirement_id") or ""),
+                        title=str(rule.get("title") or "Untitled rule"),
+                        description=str(rule.get("description") or rule.get("title") or ""),
+                        rule_type=str(rule.get("rule_type") or "Business"),
+                    )
+                    for rule in item.get("business_rules") or []
+                ],
+                field_constraints=[
+                    FieldConstraint(
+                        id=str(constraint.get("id") or ""),
+                        requirement_id=str(constraint.get("requirement_id") or item.get("requirement_id") or ""),
+                        field_name=str(constraint.get("field_name") or "field"),
+                        description=str(constraint.get("description") or ""),
+                        constraint_type=str(constraint.get("constraint_type") or "Other"),
+                        operator=constraint.get("operator"),
+                        value=constraint.get("value"),
+                        negative_example=constraint.get("negative_example"),
+                    )
+                    for constraint in item.get("field_constraints") or []
+                ],
+                role_permissions=[
+                    RolePermission(
+                        id=str(permission.get("id") or ""),
+                        requirement_id=str(permission.get("requirement_id") or item.get("requirement_id") or ""),
+                        role=str(permission.get("role") or "Unknown role"),
+                        action=str(permission.get("action") or "Unknown action"),
+                        effect=str(permission.get("effect") or "Allow"),
+                        conditions=permission.get("conditions"),
+                    )
+                    for permission in item.get("role_permissions") or []
+                ],
+                state_transitions=[
+                    StateTransition(
+                        id=str(transition.get("id") or ""),
+                        requirement_id=str(transition.get("requirement_id") or item.get("requirement_id") or ""),
+                        entity=str(transition.get("entity") or "Workflow item"),
+                        from_state=str(transition.get("from_state") or "Unknown"),
+                        to_state=str(transition.get("to_state") or "Unknown"),
+                        trigger=transition.get("trigger"),
+                        guards=transition.get("guards"),
+                    )
+                    for transition in item.get("state_transitions") or []
+                ],
+                risk_signals=[
+                    RiskSignal(
+                        id=str(risk.get("id") or ""),
+                        requirement_id=str(risk.get("requirement_id") or item.get("requirement_id") or ""),
+                        title=str(risk.get("title") or "Untitled risk"),
+                        rationale=str(risk.get("rationale") or ""),
+                        category=str(risk.get("category") or "Other"),
+                        severity=str(risk.get("severity") or "Medium"),
+                    )
+                    for risk in item.get("risk_signals") or []
+                ],
+                suggested_scenarios=[str(scenario) for scenario in item.get("suggested_scenarios") or []],
+                dependencies=[str(dependency) for dependency in item.get("dependencies") or []],
+            )
+        )
+
+    return hydrated
+
+
+def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement], context: Optional[Any]) -> Dict[str, Any]:
     serialized = _serialize_test_cases(test_cases)
+    raw_requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(requirements))
     raw_coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(requirements))
     normalized_coverage_plan = _normalize_coverage_plan(raw_coverage_plan, requirements)
     default_coverage_metrics = _compute_test_case_coverage_metrics(serialized, requirements)
     default_coverage_metrics.update(_compute_planned_scenario_metrics(normalized_coverage_plan, serialized, requirements))
+    default_coverage_metrics.update(_compute_requirement_analysis_metrics(raw_requirement_analysis, serialized, requirements))
+    default_coverage_metrics.update(_compute_grounded_context_metrics(serialized, context))
     coverage_metrics = dict(workflow.get("coverage_metrics") or default_coverage_metrics)
     review = dict(
         workflow.get("review")
@@ -1355,10 +2035,13 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
             requirements,
             DEFAULT_TEST_CASE_THRESHOLD,
             coverage_plan=normalized_coverage_plan,
+            requirement_analysis=raw_requirement_analysis,
+            context=context,
         )
     )
     approved = bool(workflow.get("approved", False))
     coverage_plan = _hydrate_coverage_plan(normalized_coverage_plan, requirements)
+    requirement_analysis = _hydrate_requirement_analysis(raw_requirement_analysis, requirements)
 
     return {
         "test_cases": test_cases,
@@ -1366,6 +2049,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "review": review,
         "iteration_history": list(workflow.get("iteration_history") or []),
         "coverage_plan": coverage_plan,
+        "requirement_analysis": requirement_analysis,
         "coverage_metrics": coverage_metrics,
     }
 
@@ -1376,6 +2060,7 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
 
     workflow = _run_workflow_sync(
         requirements=payload.requirements,
+        context=payload.context,
         requirements_text=requirements_text,
         context_text=context_text,
         template_text=template_text,
@@ -1385,6 +2070,7 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
     )
 
     raw_test_cases = workflow.get("test_cases", [])
+    requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
     coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
@@ -1394,9 +2080,12 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
             payload.requirements,
             DEFAULT_TEST_CASE_THRESHOLD,
             coverage_plan=coverage_plan,
+            requirement_analysis=requirement_analysis,
+            context=payload.context,
         )
         workflow = {
             "test_cases": raw_test_cases,
+            "requirement_analysis": requirement_analysis,
             "coverage_plan": coverage_plan,
             "review": fallback_review,
             "approved": fallback_review["approved"],
@@ -1411,11 +2100,13 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
             "coverage_metrics": {
                 **_compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
                 **_compute_planned_scenario_metrics(coverage_plan, raw_test_cases, payload.requirements),
+                **_compute_requirement_analysis_metrics(requirement_analysis, raw_test_cases, payload.requirements),
+                **_compute_grounded_context_metrics(raw_test_cases, payload.context),
             },
         }
 
     test_cases = _hydrate_test_cases(raw_test_cases)
-    return _build_response(test_cases, workflow, payload.requirements)
+    return _build_response(test_cases, workflow, payload.requirements, payload.context)
 
 
 def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
@@ -1425,6 +2116,7 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
     existing_test_cases = _serialize_test_cases(payload.test_cases)
     workflow = _run_workflow_sync(
         requirements=payload.requirements,
+        context=payload.context,
         requirements_text=requirements_text,
         context_text=context_text,
         template_text=template_text,
@@ -1434,6 +2126,7 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
     )
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
+    requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
     coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
     if not workflow.get("test_cases"):
         logging.warning("[TestCase Workflow] Refinement returned no test cases, restoring previous set")
@@ -1442,6 +2135,8 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
             payload.requirements,
             DEFAULT_TEST_CASE_THRESHOLD,
             coverage_plan=coverage_plan,
+            requirement_analysis=requirement_analysis,
+            context=payload.context,
         )
         fallback_review["approved"] = False
         fallback_review["summary"] = "Test case refinement returned no updated output. Previous test cases were restored and require further review."
@@ -1450,6 +2145,7 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
         )
         workflow = {
             "test_cases": raw_test_cases,
+            "requirement_analysis": requirement_analysis,
             "coverage_plan": coverage_plan,
             "review": fallback_review,
             "approved": False,
@@ -1464,8 +2160,10 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
             "coverage_metrics": {
                 **_compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
                 **_compute_planned_scenario_metrics(coverage_plan, raw_test_cases, payload.requirements),
+                **_compute_requirement_analysis_metrics(requirement_analysis, raw_test_cases, payload.requirements),
+                **_compute_grounded_context_metrics(raw_test_cases, payload.context),
             },
         }
 
     test_cases = _hydrate_test_cases(raw_test_cases)
-    return _build_response(test_cases, workflow, payload.requirements)
+    return _build_response(test_cases, workflow, payload.requirements, payload.context)

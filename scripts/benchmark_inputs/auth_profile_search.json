@@ -1,0 +1,110 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "text": "The system shall allow users to sign in using email and password."
+    },
+    {
+      "id": "REQ-002",
+      "text": "The system shall lock the account after 5 failed login attempts within 10 minutes."
+    },
+    {
+      "id": "REQ-003",
+      "text": "The system shall allow users to reset their password via email link."
+    },
+    {
+      "id": "REQ-004",
+      "text": "The system shall allow users to update their display name."
+    },
+    {
+      "id": "REQ-005",
+      "text": "The system shall allow users to upload a profile photo in JPG or PNG format up to 2 MB."
+    },
+    {
+      "id": "REQ-006",
+      "text": "The system shall allow users to search by keyword."
+    },
+    {
+      "id": "REQ-007",
+      "text": "The system shall sort search results by relevance by default."
+    },
+    {
+      "id": "REQ-008",
+      "text": "The system shall show a no-results message when no search matches are found."
+    },
+    {
+      "id": "REQ-009",
+      "text": "The system shall allow users to opt in to email notifications."
+    },
+    {
+      "id": "REQ-010",
+      "text": "The system shall send a confirmation email when a user changes their email address."
+    }
+  ],
+  "template": {
+    "name": "default",
+    "format": "table",
+    "fields": [
+      "id",
+      "title",
+      "description",
+      "priority",
+      "type",
+      "status",
+      "preconditions",
+      "steps",
+      "expected_result",
+      "test_data",
+      "estimated_time",
+      "automation_status",
+      "component",
+      "tags"
+    ]
+  },
+  "context": {
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "text": "The system shall allow users to sign in using email and password."
+      },
+      {
+        "id": "REQ-002",
+        "text": "The system shall lock the account after 5 failed login attempts within 10 minutes."
+      },
+      {
+        "id": "REQ-003",
+        "text": "The system shall allow users to reset their password via email link."
+      },
+      {
+        "id": "REQ-004",
+        "text": "The system shall allow users to update their display name."
+      },
+      {
+        "id": "REQ-005",
+        "text": "The system shall allow users to upload a profile photo in JPG or PNG format up to 2 MB."
+      },
+      {
+        "id": "REQ-006",
+        "text": "The system shall allow users to search by keyword."
+      },
+      {
+        "id": "REQ-007",
+        "text": "The system shall sort search results by relevance by default."
+      },
+      {
+        "id": "REQ-008",
+        "text": "The system shall show a no-results message when no search matches are found."
+      },
+      {
+        "id": "REQ-009",
+        "text": "The system shall allow users to opt in to email notifications."
+      },
+      {
+        "id": "REQ-010",
+        "text": "The system shall send a confirmation email when a user changes their email address."
+      }
+    ],
+    "notes": "Consumer web app covering authentication, profile management, search, and notification settings."
+  },
+  "feedback": null
+}
