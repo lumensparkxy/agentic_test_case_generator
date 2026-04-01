@@ -6,7 +6,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import _compute_requirement_analysis_metrics, _heuristic_test_case_review
+from app.agents.test_case_agent import (
+    _compute_requirement_analysis_metrics,
+    _extract_scenario_types_from_test_case,
+    _heuristic_test_case_review,
+    _merge_review_results,
+    _normalize_coverage_plan,
+)
 from app.models import Requirement
 
 
@@ -149,6 +155,246 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
 
         self.assertFalse(review["approved"])
         self.assertTrue(any("High-risk requirement analysis items" in issue for issue in review["blocking_issues"]))
+
+
+class CoveragePlanNormalizationTests(unittest.TestCase):
+    def test_backfilled_scenarios_do_not_become_must_have(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall display the dashboard summary for the signed-in user.",
+            )
+        ]
+
+        normalized_plan = _normalize_coverage_plan(
+            [
+                {
+                    "requirement_id": "REQ-001",
+                    "requirement_text": requirements[0].text,
+                    "scenarios": [
+                        {
+                            "id": "REQ-001-SCN-01",
+                            "scenario_type": "Happy Path",
+                            "title": "Dashboard summary is displayed",
+                            "objective": "Verify the signed-in user sees the dashboard summary.",
+                            "priority": "High",
+                            "must_have": True,
+                        }
+                    ],
+                }
+            ],
+            requirements,
+        )
+
+        scenarios = normalized_plan[0]["scenarios"]
+        self.assertEqual(scenarios[0]["scenario_type"], "Happy Path")
+        self.assertTrue(scenarios[0]["must_have"])
+        self.assertTrue(all(not scenario["must_have"] for scenario in scenarios[1:]))
+
+    def test_heuristic_review_ignores_backfilled_optional_scenario_gaps(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall display the dashboard summary for the signed-in user.",
+            )
+        ]
+        normalized_plan = _normalize_coverage_plan(
+            [
+                {
+                    "requirement_id": "REQ-001",
+                    "requirement_text": requirements[0].text,
+                    "scenarios": [
+                        {
+                            "id": "REQ-001-SCN-01",
+                            "scenario_type": "Happy Path",
+                            "title": "Dashboard summary is displayed",
+                            "objective": "Verify the signed-in user sees the dashboard summary.",
+                            "priority": "High",
+                            "must_have": True,
+                        }
+                    ],
+                }
+            ],
+            requirements,
+        )
+
+        review = _heuristic_test_case_review(
+            [
+                {
+                    "id": "TC-001",
+                    "title": "Signed-in user sees dashboard summary",
+                    "description": "Verify the dashboard summary appears after sign-in.",
+                    "priority": "High",
+                    "type": "Functional",
+                    "status": "Draft",
+                    "preconditions": "A user is signed in.",
+                    "steps": [
+                        {"step": 1, "action": "Sign in with valid credentials", "expected": "Dashboard loads", "test_data": None},
+                        {"step": 2, "action": "View the dashboard summary", "expected": "Summary widgets are visible", "test_data": None},
+                    ],
+                    "expected_result": "The signed-in user sees the dashboard summary.",
+                    "test_data": None,
+                    "estimated_time": "5 mins",
+                    "automation_status": "Manual",
+                    "component": "Dashboard",
+                    "tags": ["REQ-001", "scenario:happy-path"],
+                }
+            ],
+            requirements,
+            90,
+            coverage_plan=normalized_plan,
+            requirement_analysis=[
+                {
+                    "requirement_id": "REQ-001",
+                    "requirement_text": requirements[0].text,
+                    "business_rules": [
+                        {
+                            "id": "REQ-001-BR-01",
+                            "requirement_id": "REQ-001",
+                            "title": "Dashboard summary is displayed",
+                            "description": "The signed-in user sees the dashboard summary.",
+                            "rule_type": "Business",
+                        }
+                    ],
+                    "field_constraints": [],
+                    "role_permissions": [],
+                    "state_transitions": [],
+                    "risk_signals": [],
+                    "suggested_scenarios": ["Happy Path"],
+                    "dependencies": [],
+                }
+            ],
+        )
+
+        self.assertFalse(any("Missing must-have planned scenarios" in issue for issue in review["blocking_issues"]))
+        self.assertGreaterEqual(review["score"], 90)
+
+    def test_custom_scenario_tags_map_back_to_canonical_coverage_types(self) -> None:
+        test_case = {
+            "id": "TC-INT-001",
+            "title": "Upgrade existing installation while ignoring non-prefixed files",
+            "description": "Verify installation upgrades the browser engine and skips unsupported non-prefixed files.",
+            "tags": ["REQ-001", "scenario:upgrade", "scenario:ignore-non-prefixed-files"],
+            "steps": [
+                {"step": 1, "action": "Upgrade the existing installation", "expected": "The browser engine is installed", "test_data": None},
+                {"step": 2, "action": "Process non-prefixed files", "expected": "Non-prefixed files are ignored", "test_data": None},
+            ],
+            "expected_result": "Upgrade completes and non-prefixed files are skipped.",
+        }
+
+        extracted = _extract_scenario_types_from_test_case(test_case)
+
+        self.assertEqual(extracted, ["Integration", "Negative"])
+
+    def test_heuristic_review_recognizes_custom_scenario_tag_slugs(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall upgrade the existing installation by installing the specific browser engine and ignoring non-prefixed files.",
+            )
+        ]
+
+        review = _heuristic_test_case_review(
+            [
+                {
+                    "id": "TC-001",
+                    "title": "Upgrade existing installation and ignore non-prefixed files",
+                    "description": "Verify the upgrade installs the browser engine and ignores invalid non-prefixed files.",
+                    "priority": "High",
+                    "type": "Functional",
+                    "status": "Draft",
+                    "preconditions": "An older installation exists.",
+                    "steps": [
+                        {"step": 1, "action": "Run the upgrade", "expected": "The specific browser engine is installed", "test_data": None},
+                        {"step": 2, "action": "Include non-prefixed files in the input", "expected": "The system ignores them", "test_data": None},
+                    ],
+                    "expected_result": "The installation is upgraded and non-prefixed files are ignored.",
+                    "test_data": None,
+                    "estimated_time": "5 mins",
+                    "automation_status": "Manual",
+                    "component": "Installer",
+                    "tags": ["REQ-001", "scenario:upgrade", "scenario:ignore-non-prefixed-files"],
+                }
+            ],
+            requirements,
+            90,
+            coverage_plan=[
+                {
+                    "requirement_id": "REQ-001",
+                    "requirement_text": requirements[0].text,
+                    "scenarios": [
+                        {
+                            "id": "REQ-001-SCN-01",
+                            "requirement_id": "REQ-001",
+                            "scenario_type": "Integration",
+                            "title": "Upgrade existing installation",
+                            "objective": "Install the specific browser engine during upgrade.",
+                            "priority": "High",
+                            "must_have": True,
+                        },
+                        {
+                            "id": "REQ-001-SCN-02",
+                            "requirement_id": "REQ-001",
+                            "scenario_type": "Negative",
+                            "title": "Ignore non-prefixed files",
+                            "objective": "Ensure invalid non-prefixed files are ignored.",
+                            "priority": "High",
+                            "must_have": True,
+                        },
+                    ],
+                }
+            ],
+            requirement_analysis=[
+                {
+                    "requirement_id": "REQ-001",
+                    "requirement_text": requirements[0].text,
+                    "business_rules": [
+                        {
+                            "id": "REQ-001-BR-01",
+                            "requirement_id": "REQ-001",
+                            "title": "Installer handles browser engine upgrade",
+                            "description": "The specific browser engine is installed during upgrade.",
+                            "rule_type": "Integration",
+                        }
+                    ],
+                    "field_constraints": [],
+                    "role_permissions": [],
+                    "state_transitions": [],
+                    "risk_signals": [],
+                    "suggested_scenarios": ["Integration", "Negative"],
+                    "dependencies": [],
+                }
+            ],
+        )
+
+        self.assertFalse(any("Missing must-have planned scenarios" in issue for issue in review["blocking_issues"]))
+        self.assertGreaterEqual(review["score"], 90)
+
+
+class ReviewMergeTests(unittest.TestCase):
+    def test_disagreeing_reviews_prefer_heuristic_summary(self) -> None:
+        merged = _merge_review_results(
+            {
+                "approved": True,
+                "score": 96,
+                "threshold": 90,
+                "summary": "All must-have scenarios are implemented.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+            {
+                "approved": False,
+                "score": 82,
+                "threshold": 90,
+                "summary": "Test cases still need refinement before export is unlocked.",
+                "blocking_issues": ["Missing must-have planned scenarios: REQ-001 - Integration: Upgrade existing installation."],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+        )
+
+        self.assertEqual(merged["summary"], "Test cases still need refinement before export is unlocked.")
 
 
 if __name__ == "__main__":

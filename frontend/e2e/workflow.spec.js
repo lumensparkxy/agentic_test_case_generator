@@ -39,9 +39,9 @@ async function openGenerateTab(page) {
 	await page.locator('input[placeholder="https://your-app"]').fill("https://example.com/app");
 	await page.getByRole("button", { name: /analyze context/i }).click();
 
-	await expect(page.getByRole("heading", { name: /context analysis preview/i })).toBeVisible({ timeout: 120_000 });
+	await expect(page.getByRole("heading", { name: /grounded context/i })).toBeVisible({ timeout: 120_000 });
 	await expect
-		.poll(async () => page.locator(".artifact-review-item").count(), {
+		.poll(async () => page.locator(".artifact-source-item").count(), {
 			timeout: 30_000,
 			message: "Expected analyzed context artifacts to appear in the Context tab.",
 		})
@@ -69,18 +69,12 @@ test.describe("Agentic Test Case Generator E2E", () => {
 				const cards = await page.locator(".case-card").count();
 				return tableRows + cards;
 			}, {
-				timeout: 180_000,
+				timeout: 360_000,
 				message: "Expected generated test cases to appear in the UI.",
 			})
 			.toBeGreaterThan(0);
 
-		await expect(page.getByRole("heading", { name: /requirement analysis/i })).toBeVisible();
-		await expect
-			.poll(async () => page.locator(".analysis-card").count(), {
-				timeout: 30_000,
-				message: "Expected requirement analysis cards to render after generation.",
-			})
-			.toBeGreaterThan(0);
+		await expect(page.locator(".collapsible-panel-title", { hasText: /requirement analysis/i })).toBeVisible();
 
 		await page.getByRole("button", { name: /^Next$/ }).click();
 

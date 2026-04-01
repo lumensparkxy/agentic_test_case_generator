@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 
@@ -20,6 +21,30 @@ def _clean_object_list(values: Any) -> List[Dict[str, Any]]:
     if not isinstance(values, list):
         return []
     return [value for value in values if isinstance(value, dict)]
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    normalized = str(value).strip()
+    if not normalized:
+        return default
+
+    try:
+        return int(float(normalized))
+    except (TypeError, ValueError):
+        match = re.search(r"-?\d+(?:\.\d+)?", normalized)
+        if not match:
+            return default
+        try:
+            return int(float(match.group(0)))
+        except (TypeError, ValueError):
+            return default
 
 
 def extract_json(text: str) -> Optional[str]:
@@ -227,15 +252,8 @@ def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[st
     raw_score = data.get("score", 0)
     raw_threshold = data.get("threshold", default_threshold)
 
-    try:
-        score = int(raw_score)
-    except (TypeError, ValueError):
-        score = 0
-
-    try:
-        threshold = int(raw_threshold)
-    except (TypeError, ValueError):
-        threshold = default_threshold
+    score = _coerce_int(raw_score, default=0)
+    threshold = _coerce_int(raw_threshold, default=default_threshold)
 
     approved = bool(data.get("approved", False))
     summary = str(data.get("summary", "")).strip()

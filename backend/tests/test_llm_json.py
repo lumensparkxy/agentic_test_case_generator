@@ -6,7 +6,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
   sys.path.insert(0, str(BACKEND_DIR))
 
-from app.utils.llm_json import parse_requirement_analysis_json
+from app.utils.llm_json import parse_requirement_analysis_json, parse_review_json
 
 
 class ParseRequirementAnalysisJsonTests(unittest.TestCase):
@@ -108,6 +108,27 @@ class ParseRequirementAnalysisJsonTests(unittest.TestCase):
         self.assertEqual(parsed[0]["requirement_id"], "REQ-002")
         self.assertEqual(parsed[0]["business_rules"], [])
         self.assertEqual(parsed[0]["suggested_scenarios"], ["Validation"])
+
+
+class ParseReviewJsonTests(unittest.TestCase):
+    def test_parses_decimal_and_fraction_like_scores(self) -> None:
+        payload = """
+        {
+          "approved": true,
+          "score": "94.0/100",
+          "threshold": "90.0",
+          "summary": "Review completed.",
+          "blocking_issues": [],
+          "suggestions": [],
+          "unmet_criteria": []
+        }
+        """
+
+        parsed = parse_review_json(payload, default_threshold=90)
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["score"], 94)
+        self.assertEqual(parsed["threshold"], 90)
 
 
 if __name__ == "__main__":

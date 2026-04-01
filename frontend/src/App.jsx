@@ -314,9 +314,13 @@ export default function App() {
 			setCoverageMetrics(data.coverage_metrics || null);
 			setTestCaseReview(data.review || null);
 			setExpandedRows({});
-			const reviewScore = typeof data.review?.score === "number" ? ` Score ${data.review.score}/${data.review.threshold}.` : "";
-			const reviewSummary = data.review?.summary ? ` ${data.review.summary}` : "";
-			setStatus(`${withFeedback ? "Test cases refined." : "Generated."}${reviewScore}${reviewSummary}`.trim());
+			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
+			const reviewStatus = data.review
+				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
+				: "";
+			setStatus(
+				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""}.${reviewStatus}`.trim()
+			);
 			if (withFeedback) setFeedback("");
 		} catch (error) {
 			setStatus(`Generation failed: ${error.message}`);

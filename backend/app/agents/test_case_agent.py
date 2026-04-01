@@ -147,11 +147,12 @@ SCENARIO_TYPE_ALIASES = {
     "data variation": "Data Variation",
 }
 SCENARIO_KEYWORD_RULES = [
+    (("ignore", "unsupported", "reject", "prevent", "deny", "blocked", "skip", "non prefixed"), "Negative"),
     (("invalid", "required", "format", "blank", "empty", "field", "input"), "Validation"),
     (("min", "max", "limit", "length", "range", "threshold", "boundary"), "Boundary"),
     (("login", "auth", "permission", "role", "access", "admin", "user"), "Authorization"),
     (("status", "state", "workflow", "approve", "reject", "submit", "cancel", "transition"), "State Transition"),
-    (("api", "integration", "service", "email", "payment", "upload", "download", "import", "export", "webhook"), "Integration"),
+    (("api", "integration", "service", "email", "payment", "upload", "download", "import", "export", "webhook", "install", "installation", "upgrade", "browser", "engine", "dependency", "module", "plugin", "extension"), "Integration"),
     (("error", "failure", "timeout", "unavailable", "retry", "exception"), "Error Handling"),
     (("search", "sort", "filter", "duplicate", "record", "dataset", "data"), "Data Variation"),
 ]
@@ -284,6 +285,25 @@ def _normalize_automation_status(raw_status: Any) -> str:
     return AUTOMATION_ALIASES.get(raw.lower(), "Manual")
 
 
+def _infer_scenario_type_from_text(raw_text: Any) -> Optional[str]:
+    normalized_text = " ".join(str(raw_text or "").replace("_", " ").replace("-", " ").split()).lower()
+    if not normalized_text:
+        return None
+
+    mapped = SCENARIO_TYPE_ALIASES.get(normalized_text)
+    if mapped:
+        return mapped
+
+    if any(token in normalized_text for token in ("happy", "success", "successful", "primary flow", "positive")):
+        return "Happy Path"
+
+    for keywords, scenario_type in SCENARIO_KEYWORD_RULES:
+        if any(keyword in normalized_text for keyword in keywords):
+            return scenario_type
+
+    return None
+
+
 def _normalize_scenario_type(raw_type: Any) -> str:
     if not raw_type:
         return "Happy Path"
@@ -296,6 +316,10 @@ def _normalize_scenario_type(raw_type: Any) -> str:
     mapped = SCENARIO_TYPE_ALIASES.get(normalized_key)
     if mapped:
         return mapped
+
+    inferred = _infer_scenario_type_from_text(normalized_key)
+    if inferred:
+        return inferred
 
     title_case = raw.title()
     if title_case in ALLOWED_SCENARIO_TYPES:
@@ -435,15 +459,17 @@ def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[
             )
             continue
 
+        if not existing["scenarios"]:
+            existing["scenarios"] = _default_scenarios_for_requirement(requirement)
+            normalized_plan.append(existing)
+            continue
+
         existing_types = {scenario["scenario_type"] for scenario in existing["scenarios"]}
         for default_scenario in _default_scenarios_for_requirement(requirement):
             if default_scenario["scenario_type"] in existing_types or len(existing["scenarios"]) >= 4:
                 continue
-            existing["scenarios"].append(default_scenario)
+            existing["scenarios"].append({**default_scenario, "must_have": False})
             existing_types.add(default_scenario["scenario_type"])
-
-        if not existing["scenarios"]:
-            existing["scenarios"] = _default_scenarios_for_requirement(requirement)
 
         normalized_plan.append(existing)
 
@@ -469,7 +495,9 @@ def _extract_scenario_types_from_test_case(test_case: Dict[str, Any]) -> List[st
         normalized_tag = str(tag).strip()
         if not normalized_tag.lower().startswith("scenario:"):
             continue
-        extracted.append(_normalize_scenario_type(normalized_tag.split(":", 1)[1]))
+        inferred_type = _infer_scenario_type_from_text(normalized_tag.split(":", 1)[1])
+        if inferred_type:
+            extracted.append(inferred_type)
 
     if extracted:
         return _dedupe_preserve(extracted)
@@ -1065,7 +1093,12 @@ def _merge_review_results(model_review: Optional[Dict[str, Any]], heuristic_revi
     score = min(normalized_model["score"], heuristic_review["score"])
     threshold = max(normalized_model["threshold"], heuristic_review["threshold"])
     approved = normalized_model["approved"] and heuristic_review["approved"] and not combined_blocking and score >= threshold
-    summary = " ".join(_dedupe_preserve([normalized_model["summary"], heuristic_review["summary"]]))
+    if approved:
+        summary = " ".join(_dedupe_preserve([normalized_model["summary"], heuristic_review["summary"]]))
+    elif normalized_model["approved"] != heuristic_review["approved"]:
+        summary = heuristic_review["summary"] or normalized_model["summary"]
+    else:
+        summary = " ".join(_dedupe_preserve([heuristic_review["summary"], normalized_model["summary"]]))
 
     return {
         "approved": approved,
@@ -1861,7 +1894,7 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     steps=steps,
                     expected_result=raw_test_case.get("expected_result"),
                     test_data=raw_test_case.get("test_data"),
-                    estimated_time=raw_test_case.get("estimated_time"),
+                    estimated_time=str(raw_test_case["estimated_time"]) if raw_test_case.get("estimated_time") is not None else None,
                     automation_status=_normalize_automation_status(raw_test_case.get("automation_status")),
                     component=raw_test_case.get("component"),
                     tags=raw_test_case.get("tags", []),
