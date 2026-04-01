@@ -181,6 +181,27 @@ class ReviewResult(BaseModel):
     unmet_criteria: List[str] = Field(default_factory=list)
 
 
+class WorkflowSettings(BaseModel):
+    approval_threshold: Optional[int] = Field(default=None, ge=0, le=100)
+    max_iterations: Optional[int] = Field(default=None, ge=1, le=20)
+    timeout_seconds: Optional[int] = Field(default=None, ge=1, le=900)
+    stall_iteration_limit: Optional[int] = Field(default=None, ge=1, le=20)
+    retry_attempts: Optional[int] = Field(default=None, ge=0, le=5)
+
+
+class WorkflowDiagnostics(BaseModel):
+    status: Literal["completed", "partial", "fallback", "failed"] = "completed"
+    used_fallback: bool = False
+    failure_reason: Optional[str] = None
+    timed_out: bool = False
+    stalled: bool = False
+    max_iterations_reached: bool = False
+    parser_failures: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    best_iteration: Optional[int] = None
+    attempt_count: int = 1
+
+
 class WorkflowIteration(BaseModel):
     iteration: int
     actor: str
@@ -273,6 +294,7 @@ class GenerateTestCasesInput(BaseModel):
     template: TestCaseTemplate
     context: Optional[EnrichInput] = None
     feedback: Optional[str] = None  # Human feedback for refinement
+    workflow_settings: Optional[WorkflowSettings] = None
 
 
 class RefineTestCasesInput(BaseModel):
@@ -281,6 +303,7 @@ class RefineTestCasesInput(BaseModel):
     template: TestCaseTemplate
     context: Optional[EnrichInput] = None
     feedback: str
+    workflow_settings: Optional[WorkflowSettings] = None
 
 
 class GenerateTestCasesResponse(BaseModel):
@@ -291,6 +314,8 @@ class GenerateTestCasesResponse(BaseModel):
     coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)
     requirement_analysis: List[RequirementAnalysis] = Field(default_factory=list)
     coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
+    workflow_settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
+    workflow_diagnostics: WorkflowDiagnostics = Field(default_factory=WorkflowDiagnostics)
 
 
 class RequirementsWorkflowResponse(ParseResponse):
@@ -299,6 +324,8 @@ class RequirementsWorkflowResponse(ParseResponse):
     review: ReviewResult = Field(default_factory=ReviewResult)
     iteration_history: List[WorkflowIteration] = Field(default_factory=list)
     coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
+    workflow_settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
+    workflow_diagnostics: WorkflowDiagnostics = Field(default_factory=WorkflowDiagnostics)
 
 
 class JiraExportInput(BaseModel):

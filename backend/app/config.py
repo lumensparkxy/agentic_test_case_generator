@@ -19,6 +19,16 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
 )
 
 
+class _SuppressNonTextPartsWarning(logging.Filter):
+    """Suppress a known noisy google-genai warning triggered by expected tool-call responses."""
+
+    SUPPRESSED_PREFIX = "Warning: there are non-text parts in the response:"
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - tiny adapter
+        message = record.getMessage()
+        return not message.startswith(self.SUPPRESSED_PREFIX)
+
+
 def _load_environment_file() -> None:
     """Load environment variables from repo/root .env so uvicorn cwd does not matter."""
     if load_dotenv is None:
@@ -40,7 +50,15 @@ def _load_environment_file() -> None:
             load_dotenv(dotenv_path=resolved, override=False)
 
 
+def _configure_library_warning_filters() -> None:
+    logger = logging.getLogger("google_genai.types")
+    if any(isinstance(existing_filter, _SuppressNonTextPartsWarning) for existing_filter in logger.filters):
+        return
+    logger.addFilter(_SuppressNonTextPartsWarning())
+
+
 _load_environment_file()
+_configure_library_warning_filters()
 
 
 class Settings(BaseModel):
@@ -138,20 +156,20 @@ def get_auth_settings() -> AuthSettings:
 
 @lru_cache
 def get_settings() -> Settings:
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    gemini_api_key_env = os.getenv("GEMINI_API_KEY")
+    google_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None
+    gemini_api_key_env = (os.getenv("GEMINI_API_KEY") or "").strip() or None
     gemini_api_key = google_api_key or gemini_api_key_env
     model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is required")
 
-    if not google_api_key and gemini_api_key_env:
-        os.environ["GOOGLE_API_KEY"] = gemini_api_key_env
-        # Keep a single canonical key variable for SDK clients to avoid noisy warnings.
-        os.environ.pop("GEMINI_API_KEY", None)
-    elif google_api_key and gemini_api_key_env:
+    if google_api_key and gemini_api_key_env and google_api_key != gemini_api_key_env:
         logging.warning("Both GOOGLE_API_KEY and GEMINI_API_KEY are set; using GOOGLE_API_KEY")
+
+    # Keep a single canonical key variable for SDK clients to avoid noisy warnings.
+    os.environ["GOOGLE_API_KEY"] = gemini_api_key
+    os.environ.pop("GEMINI_API_KEY", None)
 
     _warn_if_dependency_mismatch()
     return Settings(gemini_api_key=gemini_api_key, model_name=model_name)

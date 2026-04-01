@@ -6,7 +6,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.requirements_agent import _finalize_requirements, _heuristic_extract
+from app.agents.requirements_agent import _build_fallback_workflow, _finalize_requirements, _heuristic_extract
+from app.models import Requirement
 
 
 class RequirementHeuristicExtractionTests(unittest.TestCase):
@@ -39,6 +40,27 @@ class RequirementHeuristicExtractionTests(unittest.TestCase):
         self.assertTrue(any("create and save an expense report as a draft" in text for text in requirement_texts))
         self.assertTrue(any("prevent submission" in text for text in requirement_texts))
         self.assertFalse(any("node_modules" in text for text in requirement_texts))
+
+
+class RequirementFallbackWorkflowTests(unittest.TestCase):
+    def test_fallback_workflow_preserves_threshold_and_marks_diagnostics(self) -> None:
+        requirements = [Requirement(id="REQ-001", text="The system shall allow users to sign in.")]
+
+        workflow = _build_fallback_workflow(
+            requirements=requirements,
+            summary="Fallback summary.",
+            document_count=1,
+            existing_settings={"approval_threshold": 92, "max_iterations": 4},
+            existing_diagnostics={"status": "partial", "warnings": ["Existing warning"]},
+        )
+
+        self.assertEqual(workflow["review"]["threshold"], 92)
+        self.assertEqual(workflow["workflow_settings"]["approval_threshold"], 92)
+        self.assertEqual(workflow["workflow_settings"]["max_iterations"], 4)
+        self.assertEqual(workflow["workflow_diagnostics"]["status"], "fallback")
+        self.assertTrue(workflow["workflow_diagnostics"]["used_fallback"])
+        self.assertEqual(workflow["workflow_diagnostics"]["failure_reason"], "fallback_generated_artifacts")
+        self.assertTrue(any("Existing warning" == warning for warning in workflow["workflow_diagnostics"]["warnings"]))
 
 
 if __name__ == "__main__":

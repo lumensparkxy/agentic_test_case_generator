@@ -12,8 +12,10 @@ from app.agents.test_case_agent import (
     _heuristic_test_case_review,
     _merge_review_results,
     _normalize_coverage_plan,
+    _prefer_review,
+    _resolve_test_case_workflow_settings,
 )
-from app.models import Requirement
+from app.models import Requirement, WorkflowSettings
 
 
 class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
@@ -395,6 +397,47 @@ class ReviewMergeTests(unittest.TestCase):
         )
 
         self.assertEqual(merged["summary"], "Test cases still need refinement before export is unlocked.")
+
+
+class WorkflowSettingsResolutionTests(unittest.TestCase):
+    def test_settings_resolution_applies_overrides(self) -> None:
+        resolved = _resolve_test_case_workflow_settings(
+            WorkflowSettings(
+                approval_threshold=94,
+                max_iterations=6,
+                timeout_seconds=120,
+                stall_iteration_limit=3,
+                retry_attempts=2,
+            )
+        )
+
+        self.assertEqual(resolved["approval_threshold"], 94)
+        self.assertEqual(resolved["max_iterations"], 6)
+        self.assertEqual(resolved["timeout_seconds"], 120)
+        self.assertEqual(resolved["stall_iteration_limit"], 3)
+        self.assertEqual(resolved["retry_attempts"], 2)
+
+    def test_prefer_review_favors_approved_candidate(self) -> None:
+        candidate = {
+            "approved": True,
+            "score": 91,
+            "threshold": 90,
+            "summary": "Candidate approved",
+            "blocking_issues": [],
+            "suggestions": [],
+            "unmet_criteria": [],
+        }
+        incumbent = {
+            "approved": False,
+            "score": 95,
+            "threshold": 90,
+            "summary": "Incumbent rejected",
+            "blocking_issues": ["Missing must-have scenario"],
+            "suggestions": [],
+            "unmet_criteria": [],
+        }
+
+        self.assertTrue(_prefer_review(candidate, incumbent))
 
 
 if __name__ == "__main__":

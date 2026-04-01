@@ -35,6 +35,8 @@ async function openGenerateTab(page) {
 		})
 		.toBeGreaterThan(0);
 
+	await expect(page.getByRole("heading", { name: /requirement workflow diagnostics/i })).toBeVisible();
+
 	await page.getByRole("button", { name: /^Next$/ }).click();
 	await page.locator('input[placeholder="https://your-app"]').fill("https://example.com/app");
 	await page.getByRole("button", { name: /analyze context/i }).click();
@@ -75,6 +77,7 @@ test.describe("Agentic Test Case Generator E2E", () => {
 			.toBeGreaterThan(0);
 
 		await expect(page.locator(".collapsible-panel-title", { hasText: /requirement analysis/i })).toBeVisible();
+		await expect(page.getByRole("heading", { name: /test-case workflow diagnostics/i })).toBeVisible();
 
 		await page.getByRole("button", { name: /^Next$/ }).click();
 

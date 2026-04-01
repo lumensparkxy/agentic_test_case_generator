@@ -79,67 +79,97 @@ def extract_json(text: str) -> Optional[str]:
     return normalized[start : end + 1]
 
 
-def parse_requirements_json(text: str) -> List[Dict[str, str]]:
-    """Parse requirements payload from model output."""
+def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], Optional[str]]:
+    """Parse requirements payload from model output and return an error when invalid."""
+    if not text or not str(text).strip():
+        return [], "empty output"
+
     json_text = extract_json(text)
     if not json_text:
-        return []
+        return [], "no JSON payload found"
 
     try:
         data = json.loads(json_text)
-    except json.JSONDecodeError:
-        return []
+    except json.JSONDecodeError as exc:
+        return [], f"invalid JSON payload: {exc.msg}"
+
+    if isinstance(data, dict) and "requirements" in data:
+        data = data["requirements"]
 
     if isinstance(data, list):
         valid: List[Dict[str, str]] = []
         for item in data:
             if isinstance(item, dict) and "id" in item and "text" in item:
                 valid.append({"id": str(item["id"]), "text": str(item["text"])})
-        return valid
 
-    if isinstance(data, dict) and "requirements" in data:
-        return parse_requirements_json(json.dumps(data["requirements"]))
+        if valid:
+            return valid, None
+        if not data:
+            return [], "requirements list was empty"
+        return [], "requirements payload did not contain valid id/text objects"
 
-    return []
+    return [], "requirements payload must be a JSON array or an object with a requirements array"
+
+
+def parse_requirements_json(text: str) -> List[Dict[str, str]]:
+    """Parse requirements payload from model output."""
+    parsed, _ = parse_requirements_json_detailed(text)
+    return parsed
+
+
+def parse_test_cases_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Parse test-case payload from model output and return an error when invalid."""
+    if not text or not str(text).strip():
+        return [], "empty output"
+
+    json_text = extract_json(text)
+    if not json_text:
+        return [], "no JSON payload found"
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        return [], f"invalid JSON payload: {exc.msg}"
+
+    if isinstance(data, list):
+        if data:
+            return data, None
+        return [], "test_cases list was empty"
+
+    if isinstance(data, dict) and "test_cases" in data and isinstance(data["test_cases"], list):
+        if data["test_cases"]:
+            return data["test_cases"], None
+        return [], "test_cases list was empty"
+
+    return [], "test-case payload must be a JSON array or an object with a test_cases array"
 
 
 def parse_test_cases_json(text: str) -> List[Dict[str, Any]]:
     """Parse test-case payload from model output."""
+    parsed, _ = parse_test_cases_json_detailed(text)
+    return parsed
+
+
+def parse_coverage_plan_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Parse requirement coverage plan payload from model output and return an error when invalid."""
+    if not text or not str(text).strip():
+        return [], "empty output"
+
     json_text = extract_json(text)
     if not json_text:
-        return []
+        return [], "no JSON payload found"
 
     try:
         data = json.loads(json_text)
-    except json.JSONDecodeError:
-        return []
-
-    if isinstance(data, list):
-        return data
-
-    if isinstance(data, dict) and "test_cases" in data and isinstance(data["test_cases"], list):
-        return data["test_cases"]
-
-    return []
-
-
-def parse_coverage_plan_json(text: str) -> List[Dict[str, Any]]:
-    """Parse requirement coverage plan payload from model output."""
-    json_text = extract_json(text)
-    if not json_text:
-        return []
-
-    try:
-        data = json.loads(json_text)
-    except json.JSONDecodeError:
-        return []
+    except json.JSONDecodeError as exc:
+        return [], f"invalid JSON payload: {exc.msg}"
 
     if isinstance(data, list):
         plan = data
     elif isinstance(data, dict) and "coverage_plan" in data and isinstance(data["coverage_plan"], list):
         plan = data["coverage_plan"]
     else:
-        return []
+        return [], "coverage-plan payload must be a JSON array or an object with a coverage_plan array"
 
     valid: List[Dict[str, Any]] = []
     for item in plan:
@@ -158,19 +188,32 @@ def parse_coverage_plan_json(text: str) -> List[Dict[str, Any]]:
             }
         )
 
-    return valid
+    if valid:
+        return valid, None
+    if not plan:
+        return [], "coverage_plan list was empty"
+    return [], "coverage_plan payload did not contain valid requirement_id/scenarios entries"
 
 
-def parse_requirement_analysis_json(text: str) -> List[Dict[str, Any]]:
-    """Parse requirement analysis payload from model output."""
+def parse_coverage_plan_json(text: str) -> List[Dict[str, Any]]:
+    """Parse requirement coverage plan payload from model output."""
+    parsed, _ = parse_coverage_plan_json_detailed(text)
+    return parsed
+
+
+def parse_requirement_analysis_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Parse requirement analysis payload from model output and return an error when invalid."""
+    if not text or not str(text).strip():
+        return [], "empty output"
+
     json_text = extract_json(text)
     if not json_text:
-        return []
+        return [], "no JSON payload found"
 
     try:
         data = json.loads(json_text)
-    except json.JSONDecodeError:
-        return []
+    except json.JSONDecodeError as exc:
+        return [], f"invalid JSON payload: {exc.msg}"
 
     analysis_candidates: Any = data
     if isinstance(data, dict):
@@ -180,7 +223,7 @@ def parse_requirement_analysis_json(text: str) -> List[Dict[str, Any]]:
                 break
 
     if not isinstance(analysis_candidates, list):
-        return []
+        return [], "requirement-analysis payload must be a JSON array or an object with a requirement_analysis array"
 
     valid: List[Dict[str, Any]] = []
     for item in analysis_candidates:
@@ -206,13 +249,23 @@ def parse_requirement_analysis_json(text: str) -> List[Dict[str, Any]]:
             }
         )
 
-    return valid
+    if valid:
+        return valid, None
+    if not analysis_candidates:
+        return [], "requirement_analysis list was empty"
+    return [], "requirement-analysis payload did not contain valid requirement_id entries"
 
 
-def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[str, Any]]:
-    """Parse a structured reviewer/validator result from model output."""
+def parse_requirement_analysis_json(text: str) -> List[Dict[str, Any]]:
+    """Parse requirement analysis payload from model output."""
+    parsed, _ = parse_requirement_analysis_json_detailed(text)
+    return parsed
+
+
+def parse_review_json_detailed(text: str, default_threshold: int = 0) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Parse a structured reviewer/validator result from model output and return an error when invalid."""
     if not text:
-        return None
+        return None, "empty output"
 
     normalized = text.strip()
     if normalized.upper() == "APPROVED":
@@ -224,19 +277,19 @@ def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[st
             "blocking_issues": [],
             "suggestions": [],
             "unmet_criteria": [],
-        }
+        }, None
 
     json_text = extract_json(normalized)
     if not json_text:
-        return None
+        return None, "no JSON payload found"
 
     try:
         data = json.loads(json_text)
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as exc:
+        return None, f"invalid JSON payload: {exc.msg}"
 
     if not isinstance(data, dict):
-        return None
+        return None, "review payload must be a JSON object"
 
     blocking_issues = data.get("blocking_issues") or []
     suggestions = data.get("suggestions") or []
@@ -266,4 +319,10 @@ def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[st
         "blocking_issues": [str(item).strip() for item in blocking_issues if str(item).strip()],
         "suggestions": [str(item).strip() for item in suggestions if str(item).strip()],
         "unmet_criteria": [str(item).strip() for item in unmet_criteria if str(item).strip()],
-    }
+    }, None
+
+
+def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[str, Any]]:
+    """Parse a structured reviewer/validator result from model output."""
+    parsed, _ = parse_review_json_detailed(text, default_threshold=default_threshold)
+    return parsed

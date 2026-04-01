@@ -6,6 +6,7 @@ from google import genai
 
 from ..config import get_settings
 from ..models import AutomationInput, AutomationResponse
+from ..utils.genai_response import extract_response_text
 
 
 def _build_pom_prompt(payload: AutomationInput) -> str:
@@ -66,7 +67,7 @@ def generate_playwright_pom(payload: AutomationInput) -> AutomationResponse:
                 max_output_tokens=8192,
             ),
         )
-        pom_code = response.text or ""
+        pom_code = extract_response_text(response)
 
         # Strip accidental markdown code fences
         if pom_code.startswith("```"):

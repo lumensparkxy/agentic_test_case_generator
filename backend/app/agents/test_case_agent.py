@@ -6,6 +6,7 @@ refine-existing-test-cases path so the UI can gate export on explicit approval.
 """
 
 import asyncio
+import json
 import logging
 import re
 import uuid
@@ -34,8 +35,14 @@ from ..models import (
     StateTransition,
     TestCase,
     TestStep,
+    WorkflowSettings,
 )
-from ..utils.llm_json import parse_coverage_plan_json, parse_requirement_analysis_json, parse_review_json, parse_test_cases_json
+from ..utils.llm_json import (
+    parse_coverage_plan_json_detailed,
+    parse_requirement_analysis_json_detailed,
+    parse_review_json_detailed,
+    parse_test_cases_json_detailed,
+)
 
 STATE_TEST_CASES = "current_test_cases"
 STATE_VALIDATION_FEEDBACK = "validation_feedback"
@@ -44,6 +51,9 @@ STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 
 APPROVAL_PHRASE = "APPROVED"
 DEFAULT_TEST_CASE_THRESHOLD = 90
+DEFAULT_TEST_CASE_MAX_ITERATIONS = 4
+DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT = 2
+DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 0
 
 ALLOWED_TEST_CASE_TYPES = {
     "Functional",
@@ -71,6 +81,21 @@ TEST_CASE_TYPE_ALIASES = {
     "uat": "UAT",
     "user acceptance": "UAT",
     "user acceptance testing": "UAT",
+    "validation": "Functional",
+    "boundary": "Functional",
+    "boundary value": "Functional",
+    "negative": "Functional",
+    "happy path": "Functional",
+    "positive": "Functional",
+    "state transition": "Functional",
+    "data variation": "Functional",
+    "error handling": "Functional",
+    "authorization": "Security",
+    "authentication": "Security",
+    "compliance": "Security",
+    "access control": "Security",
+    "api": "Integration",
+    "service": "Integration",
 }
 
 ALLOWED_PRIORITIES = {"Critical", "High", "Medium", "Low"}
@@ -249,6 +274,21 @@ def _normalize_test_case_type(raw_type: Any) -> str:
     mapped = TEST_CASE_TYPE_ALIASES.get(normalized_key)
     if mapped:
         return mapped
+
+    scenario_mapped = _normalize_scenario_type(raw)
+    scenario_type_to_test_type = {
+        "Happy Path": "Functional",
+        "Negative": "Functional",
+        "Boundary": "Functional",
+        "Validation": "Functional",
+        "Authorization": "Security",
+        "State Transition": "Functional",
+        "Integration": "Integration",
+        "Error Handling": "Functional",
+        "Data Variation": "Functional",
+    }
+    if scenario_mapped in scenario_type_to_test_type:
+        return scenario_type_to_test_type[scenario_mapped]
 
     title_case = raw.title()
     if title_case in ALLOWED_TEST_CASE_TYPES:
@@ -1126,6 +1166,100 @@ def _make_history_entry(iteration: int, actor: str, review: Dict[str, Any], test
     }
 
 
+def _resolve_test_case_workflow_settings(workflow_settings: Optional[WorkflowSettings]) -> Dict[str, Optional[int]]:
+    settings = workflow_settings or WorkflowSettings()
+
+    resolved_threshold = int(
+        settings.approval_threshold if settings.approval_threshold is not None else DEFAULT_TEST_CASE_THRESHOLD
+    )
+    resolved_max_iterations = int(
+        settings.max_iterations if settings.max_iterations is not None else DEFAULT_TEST_CASE_MAX_ITERATIONS
+    )
+    resolved_timeout_seconds = int(settings.timeout_seconds) if settings.timeout_seconds is not None else None
+    resolved_stall_iteration_limit = int(
+        settings.stall_iteration_limit
+        if settings.stall_iteration_limit is not None
+        else DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT
+    )
+    resolved_retry_attempts = int(
+        settings.retry_attempts if settings.retry_attempts is not None else DEFAULT_TEST_CASE_RETRY_ATTEMPTS
+    )
+
+    return {
+        "approval_threshold": max(0, min(100, resolved_threshold)),
+        "max_iterations": max(1, resolved_max_iterations),
+        "timeout_seconds": max(1, resolved_timeout_seconds) if resolved_timeout_seconds is not None else None,
+        "stall_iteration_limit": max(1, resolved_stall_iteration_limit),
+        "retry_attempts": max(0, resolved_retry_attempts),
+    }
+
+
+def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
+    return {
+        "status": "completed",
+        "used_fallback": False,
+        "failure_reason": None,
+        "timed_out": False,
+        "stalled": False,
+        "max_iterations_reached": False,
+        "parser_failures": [],
+        "warnings": [],
+        "best_iteration": None,
+        "attempt_count": attempt_count,
+    }
+
+
+def _log_test_case_workflow(event_type: str, **fields: Any) -> None:
+    payload = {"event": event_type, **fields}
+    logging.info("[TestCase Workflow] %s", json.dumps(payload, sort_keys=True, default=str))
+
+
+def _append_unique_message(container: List[str], message: str) -> None:
+    value = str(message).strip()
+    if value and value not in container:
+        container.append(value)
+
+
+def _record_parser_failure(diagnostics: Dict[str, Any], author: str, error: Optional[str]) -> None:
+    if not error:
+        return
+    _append_unique_message(diagnostics["parser_failures"], f"{author}: {error}")
+    diagnostics["status"] = "partial"
+    diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+    _log_test_case_workflow(
+        "parser_failure",
+        author=author,
+        error=error,
+        parser_failure_count=len(diagnostics["parser_failures"]),
+        status=diagnostics["status"],
+    )
+
+
+def _review_is_stalled(previous_review: Optional[Dict[str, Any]], current_review: Dict[str, Any]) -> bool:
+    if not previous_review:
+        return False
+
+    return (
+        current_review["score"] <= previous_review["score"]
+        and current_review["blocking_issues"] == previous_review["blocking_issues"]
+        and current_review["unmet_criteria"] == previous_review["unmet_criteria"]
+    )
+
+
+def _prefer_review(candidate: Dict[str, Any], incumbent: Optional[Dict[str, Any]]) -> bool:
+    if not incumbent:
+        return True
+    if candidate["approved"] != incumbent["approved"]:
+        return candidate["approved"]
+    if candidate["score"] != incumbent["score"]:
+        return candidate["score"] > incumbent["score"]
+    if len(candidate["blocking_issues"]) != len(incumbent["blocking_issues"]):
+        return len(candidate["blocking_issues"]) < len(incumbent["blocking_issues"])
+    if len(candidate["unmet_criteria"]) != len(incumbent["unmet_criteria"]):
+        return len(candidate["unmet_criteria"]) < len(incumbent["unmet_criteria"])
+    return False
+
+
 def exit_loop(tool_context: ToolContext) -> dict:
     logging.info("[exit_loop] Test cases approved - exiting validation loop")
     tool_context.actions.escalate = True
@@ -1313,6 +1447,7 @@ def _build_generation_pipeline(
     context_text: str,
     template_text: str,
     threshold: int,
+    max_iterations: int,
     human_feedback: Optional[str] = None,
 ) -> Agent:
     feedback_section = ""
@@ -1371,7 +1506,7 @@ def _build_generation_pipeline(
             ),
             _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
             generator_agent,
-            _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback),
+            _build_review_loop(model, threshold, max_iterations, requirements_text, human_feedback=human_feedback),
         ],
         description="Generates and iteratively validates test cases from requirements",
     )
@@ -1383,6 +1518,7 @@ def _build_refinement_pipeline(
     context_text: str,
     template_text: str,
     threshold: int,
+    max_iterations: int,
     human_feedback: str,
 ) -> Agent:
     refinement_agent = Agent(
@@ -1434,7 +1570,7 @@ Rules:
             ),
             _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
             refinement_agent,
-            _build_review_loop(model, threshold, 4, requirements_text, human_feedback=human_feedback),
+            _build_review_loop(model, threshold, max_iterations, requirements_text, human_feedback=human_feedback),
         ],
         description="Refines an existing test-case set and re-validates it against the approval threshold",
     )
@@ -1450,8 +1586,16 @@ async def _run_test_case_workflow_async(
     model: str,
     human_feedback: Optional[str] = None,
     existing_test_cases: Optional[List[Dict[str, Any]]] = None,
+    workflow_settings: Optional[WorkflowSettings] = None,
 ) -> Dict[str, Any]:
-    threshold = DEFAULT_TEST_CASE_THRESHOLD
+    resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
+    threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
+    max_iterations = int(resolved_settings["max_iterations"] or DEFAULT_TEST_CASE_MAX_ITERATIONS)
+    timeout_seconds = resolved_settings["timeout_seconds"]
+    stall_iteration_limit = int(
+        resolved_settings["stall_iteration_limit"] or DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT
+    )
+    diagnostics = _new_workflow_diagnostics()
     is_refinement = existing_test_cases is not None
 
     if is_refinement:
@@ -1461,6 +1605,7 @@ async def _run_test_case_workflow_async(
             context_text,
             template_text,
             threshold,
+            max_iterations,
             human_feedback or "No human feedback provided.",
         )
         message_text = f"""Refine these existing test cases using the human feedback.
@@ -1487,6 +1632,7 @@ Human feedback:
             context_text,
             template_text,
             threshold,
+            max_iterations,
             human_feedback=human_feedback,
         )
         message_text = "Generate and validate comprehensive test cases from the approved requirements."
@@ -1515,60 +1661,178 @@ Human feedback:
     current_requirement_analysis: List[Dict[str, Any]] = []
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
+    previous_review: Optional[Dict[str, Any]] = None
+    repeated_review_count = 0
+    best_candidate: Optional[Dict[str, Any]] = None
 
-    logging.info("[TestCase Workflow] Starting session %s", session.id)
-
-    async for event in runner.run_async(
-        user_id=user_id,
+    _log_test_case_workflow(
+        "session_started",
         session_id=session.id,
-        new_message=types.Content(role="user", parts=[types.Part(text=message_text)]),
-    ):
-        author = getattr(event, 'author', 'unknown')
-        logging.info("[TestCase Workflow] Event from %s", author)
+        user_id=user_id,
+        is_refinement=is_refinement,
+        settings=resolved_settings,
+        requirement_count=len(requirements),
+    )
 
-        if not event.content or not event.content.parts:
-            continue
+    async def _consume_events() -> None:
+        nonlocal current_test_cases, current_coverage_plan, current_requirement_analysis
+        nonlocal model_review, previous_review, repeated_review_count, best_candidate
 
-        for part in event.content.parts:
-            text = getattr(part, 'text', None)
-            if not text:
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text=message_text)]),
+        ):
+            author = getattr(event, 'author', 'unknown')
+            _log_test_case_workflow("event_received", session_id=session.id, author=author)
+
+            if not event.content or not event.content.parts:
                 continue
 
-            parsed_test_cases = parse_test_cases_json(text)
-            if parsed_test_cases and author in {"TestCaseGeneratorAgent", "TestCaseRefinementAgent", "TestCaseRefinerAgent"}:
-                current_test_cases = parsed_test_cases
+            for part in event.content.parts:
+                text = getattr(part, 'text', None)
+                if not text:
+                    continue
 
-            parsed_coverage_plan = parse_coverage_plan_json(text)
-            if parsed_coverage_plan and author == "CoveragePlannerAgent":
-                current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
+                if author in {"TestCaseGeneratorAgent", "TestCaseRefinementAgent", "TestCaseRefinerAgent"}:
+                    parsed_test_cases, parse_error = parse_test_cases_json_detailed(text)
+                    if parsed_test_cases:
+                        current_test_cases = parsed_test_cases
+                    else:
+                        _record_parser_failure(diagnostics, author, parse_error)
 
-            parsed_requirement_analysis = parse_requirement_analysis_json(text)
-            if parsed_requirement_analysis and author == "RequirementAnalysisAgent":
-                current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
+                if author == "CoveragePlannerAgent":
+                    parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
+                    if parsed_coverage_plan:
+                        current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
+                    else:
+                        _record_parser_failure(diagnostics, author, parse_error)
 
-            parsed_review = parse_review_json(text, default_threshold=threshold)
-            if parsed_review and author == "TestCaseValidatorAgent":
-                model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
-                iteration_history.append(
-                    _make_history_entry(
-                        iteration=len(iteration_history) + 1,
-                        actor=author,
-                        review=model_review,
-                        test_cases=current_test_cases,
+                if author == "RequirementAnalysisAgent":
+                    parsed_requirement_analysis, parse_error = parse_requirement_analysis_json_detailed(text)
+                    if parsed_requirement_analysis:
+                        current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
+                    else:
+                        _record_parser_failure(diagnostics, author, parse_error)
+
+                if author == "TestCaseValidatorAgent":
+                    parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
+                    if not parsed_review:
+                        _record_parser_failure(diagnostics, author, parse_error)
+                        continue
+
+                    model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
+                    iteration_number = len(iteration_history) + 1
+                    iteration_history.append(
+                        _make_history_entry(
+                            iteration=iteration_number,
+                            actor=author,
+                            review=model_review,
+                            test_cases=current_test_cases,
+                        )
                     )
-                )
 
-    state_test_cases = parse_test_cases_json(session.state.get(STATE_TEST_CASES, "[]"))
+                    candidate_review = _merge_review_results(
+                        model_review,
+                        _heuristic_test_case_review(
+                            current_test_cases,
+                            requirements,
+                            threshold,
+                            coverage_plan=current_coverage_plan or _fallback_coverage_plan(requirements),
+                            requirement_analysis=current_requirement_analysis or fallback_requirement_analysis(requirements),
+                            context=context,
+                        ),
+                    )
+                    if current_test_cases and (
+                        not best_candidate or _prefer_review(candidate_review, best_candidate["review"])
+                    ):
+                        best_candidate = {
+                            "test_cases": list(current_test_cases),
+                            "review": candidate_review,
+                            "iteration": iteration_number,
+                        }
+                        diagnostics["best_iteration"] = iteration_number
+
+                    score_delta = model_review["score"] - (previous_review["score"] if previous_review else 0)
+                    _log_test_case_workflow(
+                        "review_iteration",
+                        session_id=session.id,
+                        iteration=iteration_number,
+                        author=author,
+                        score=model_review["score"],
+                        threshold=model_review["threshold"],
+                        approved=model_review["approved"],
+                        score_delta=score_delta,
+                        blocking_issue_count=len(model_review["blocking_issues"]),
+                        suggestion_count=len(model_review["suggestions"]),
+                        test_case_count=len(current_test_cases),
+                    )
+
+                    if _review_is_stalled(previous_review, model_review):
+                        repeated_review_count += 1
+                    else:
+                        repeated_review_count = 1
+                    previous_review = model_review
+
+                    if repeated_review_count >= stall_iteration_limit:
+                        diagnostics["status"] = "partial"
+                        diagnostics["stalled"] = True
+                        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "stalled"
+                        _append_unique_message(
+                            diagnostics["warnings"],
+                            f"Test-case validation stalled after {repeated_review_count} repeated review cycles.",
+                        )
+                        _log_test_case_workflow(
+                            "review_stalled",
+                            session_id=session.id,
+                            repeated_review_count=repeated_review_count,
+                            stall_iteration_limit=stall_iteration_limit,
+                            last_score=model_review["score"],
+                        )
+                        return
+
+    try:
+        if timeout_seconds is not None:
+            await asyncio.wait_for(_consume_events(), timeout=timeout_seconds)
+        else:
+            await _consume_events()
+    except asyncio.TimeoutError:
+        diagnostics["status"] = "partial"
+        diagnostics["timed_out"] = True
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "timeout"
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Test-case workflow timed out after {timeout_seconds} second(s).",
+        )
+        _log_test_case_workflow(
+            "workflow_timeout",
+            session_id=session.id,
+            timeout_seconds=timeout_seconds,
+            completed_iterations=len(iteration_history),
+        )
+
+    state_test_cases_raw = session.state.get(STATE_TEST_CASES, "[]")
+    state_test_cases, state_test_cases_error = parse_test_cases_json_detailed(state_test_cases_raw)
     if state_test_cases:
         current_test_cases = state_test_cases
+    elif str(state_test_cases_raw).strip() not in {"", "[]"}:
+        _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error)
 
-    state_coverage_plan = parse_coverage_plan_json(session.state.get(STATE_COVERAGE_PLAN, "[]"))
+    state_coverage_plan_raw = session.state.get(STATE_COVERAGE_PLAN, "[]")
+    state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
     if state_coverage_plan:
         current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
+    elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
+        _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error)
 
-    state_requirement_analysis = parse_requirement_analysis_json(session.state.get(STATE_REQUIREMENT_ANALYSIS, "[]"))
+    state_requirement_analysis_raw = session.state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
+    state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(
+        state_requirement_analysis_raw
+    )
     if state_requirement_analysis:
         current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
+    elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
+        _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error)
 
     if not current_requirement_analysis:
         current_requirement_analysis = fallback_requirement_analysis(requirements)
@@ -1576,9 +1840,12 @@ Human feedback:
     if not current_coverage_plan:
         current_coverage_plan = _fallback_coverage_plan(requirements)
 
-    state_review = parse_review_json(session.state.get(STATE_VALIDATION_FEEDBACK, ""), default_threshold=threshold)
+    state_review_raw = session.state.get(STATE_VALIDATION_FEEDBACK, "")
+    state_review, state_review_error = parse_review_json_detailed(state_review_raw, default_threshold=threshold)
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Test case validation completed.")
+    elif str(state_review_raw).strip():
+        _record_parser_failure(diagnostics, "SessionStateValidationReview", state_review_error)
 
     heuristic_review = _heuristic_test_case_review(
         current_test_cases,
@@ -1589,18 +1856,63 @@ Human feedback:
         context=context,
     )
     final_review = _merge_review_results(model_review, heuristic_review)
+
+    if best_candidate and (
+        not current_test_cases or _prefer_review(best_candidate["review"], final_review)
+    ):
+        current_test_cases = list(best_candidate["test_cases"])
+        final_review = dict(best_candidate["review"])
+        diagnostics["best_iteration"] = best_candidate["iteration"]
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Retained the best-scoring test-case draft from iteration {best_candidate['iteration']}",
+        )
+        _log_test_case_workflow(
+            "best_artifact_retained",
+            session_id=session.id,
+            selected_iteration=best_candidate["iteration"],
+            selected_score=final_review["score"],
+            test_case_count=len(current_test_cases),
+        )
+
     coverage_metrics = _compute_test_case_coverage_metrics(current_test_cases, requirements)
     coverage_metrics.update(_compute_planned_scenario_metrics(current_coverage_plan, current_test_cases, requirements))
     coverage_metrics.update(_compute_requirement_analysis_metrics(current_requirement_analysis, current_test_cases, requirements))
     coverage_metrics.update(_compute_grounded_context_metrics(current_test_cases, context))
 
-    if iteration_history:
+    if len(iteration_history) >= max_iterations and not final_review["approved"] and not diagnostics["stalled"]:
+        diagnostics["status"] = "partial"
+        diagnostics["max_iterations_reached"] = True
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Test-case workflow reached the max iteration limit ({max_iterations}).",
+        )
+
+    if not current_test_cases and diagnostics["parser_failures"]:
+        diagnostics["status"] = "failed"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+    elif not final_review["approved"] and not diagnostics["failure_reason"]:
+        diagnostics["failure_reason"] = "quality_rejection"
+
+    if iteration_history and diagnostics.get("best_iteration") in {None, iteration_history[-1]["iteration"]}:
         iteration_history[-1] = _make_history_entry(
             iteration=iteration_history[-1]["iteration"],
             actor=iteration_history[-1]["actor"],
             review=final_review,
             test_cases=current_test_cases,
         )
+    elif iteration_history:
+        selection_entry = _make_history_entry(
+            iteration=len(iteration_history) + 1,
+            actor="WorkflowSelection",
+            review=final_review,
+            test_cases=current_test_cases,
+        )
+        selection_entry["summary"] = (
+            f"Retained best-scoring test cases from iteration {diagnostics['best_iteration']}. "
+            f"{final_review['summary']}"
+        ).strip()
+        iteration_history.append(selection_entry)
     else:
         iteration_history.append(
             _make_history_entry(
@@ -1611,7 +1923,16 @@ Human feedback:
             )
         )
 
-    logging.info("[TestCase Workflow] Final test cases: %s, approved=%s", len(current_test_cases), final_review["approved"])
+    _log_test_case_workflow(
+        "workflow_completed",
+        session_id=session.id,
+        approved=final_review["approved"],
+        score=final_review["score"],
+        threshold=final_review["threshold"],
+        test_case_count=len(current_test_cases),
+        iteration_count=len(iteration_history),
+        diagnostics=diagnostics,
+    )
     return {
         "test_cases": current_test_cases,
         "requirement_analysis": current_requirement_analysis,
@@ -1620,44 +1941,93 @@ Human feedback:
         "review": final_review,
         "iteration_history": iteration_history,
         "coverage_metrics": coverage_metrics,
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": diagnostics,
     }
 
 
 def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
-    try:
-        try:
-            asyncio.get_running_loop()
-            import nest_asyncio
+    resolved_settings = _resolve_test_case_workflow_settings(kwargs.get("workflow_settings"))
+    attempt_total = int(resolved_settings["retry_attempts"] or 0) + 1
+    last_error: Optional[Exception] = None
 
-            nest_asyncio.apply()
-            return asyncio.run(_run_test_case_workflow_async(**kwargs))
-        except RuntimeError:
-            return asyncio.run(_run_test_case_workflow_async(**kwargs))
-    except Exception as exc:
-        logging.error("[TestCase Workflow] Error: %s", exc)
-        requirements = kwargs.get("requirements") or []
-        fallback_plan = _fallback_coverage_plan(requirements)
-        return {
-            "test_cases": [],
-            "requirement_analysis": fallback_requirement_analysis(requirements),
-            "coverage_plan": fallback_plan,
-            "approved": False,
-            "review": _heuristic_test_case_review(
-                [],
-                requirements,
-                DEFAULT_TEST_CASE_THRESHOLD,
-                coverage_plan=fallback_plan,
-                requirement_analysis=fallback_requirement_analysis(requirements),
-                context=kwargs.get("context"),
-            ),
-            "iteration_history": [],
-            "coverage_metrics": {
-                **_compute_test_case_coverage_metrics([], requirements),
-                **_compute_planned_scenario_metrics(fallback_plan, [], requirements),
-                **_compute_requirement_analysis_metrics(fallback_requirement_analysis(requirements), [], requirements),
-                **_compute_grounded_context_metrics([], kwargs.get("context")),
-            },
-        }
+    for attempt in range(1, attempt_total + 1):
+        run_kwargs = dict(kwargs)
+        run_kwargs["workflow_settings"] = WorkflowSettings(**resolved_settings)
+
+        try:
+            try:
+                asyncio.get_running_loop()
+                import nest_asyncio
+
+                nest_asyncio.apply()
+                result = asyncio.run(_run_test_case_workflow_async(**run_kwargs))
+            except RuntimeError:
+                result = asyncio.run(_run_test_case_workflow_async(**run_kwargs))
+
+            diagnostics = dict(result.get("workflow_diagnostics") or _new_workflow_diagnostics())
+            diagnostics["attempt_count"] = attempt
+            result["workflow_diagnostics"] = diagnostics
+            result.setdefault("workflow_settings", dict(resolved_settings))
+
+            if diagnostics.get("timed_out") and attempt < attempt_total:
+                _log_test_case_workflow(
+                    "workflow_retry",
+                    attempt=attempt,
+                    attempt_total=attempt_total,
+                    retry_reason="timeout",
+                )
+                continue
+
+            return result
+        except Exception as exc:
+            last_error = exc
+            _log_test_case_workflow(
+                "workflow_attempt_error",
+                attempt=attempt,
+                attempt_total=attempt_total,
+                error=str(exc),
+            )
+            if attempt >= attempt_total:
+                break
+
+    requirements = kwargs.get("requirements") or []
+    fallback_plan = _fallback_coverage_plan(requirements)
+    fallback_analysis = fallback_requirement_analysis(requirements)
+    diagnostics = _new_workflow_diagnostics(attempt_count=attempt_total)
+    diagnostics["status"] = "failed"
+    diagnostics["failure_reason"] = "execution_error"
+    if last_error:
+        _append_unique_message(diagnostics["warnings"], f"Workflow execution error: {last_error}")
+    _log_test_case_workflow(
+        "workflow_failed",
+        attempt_total=attempt_total,
+        error=str(last_error) if last_error else None,
+        diagnostics=diagnostics,
+    )
+    return {
+        "test_cases": [],
+        "requirement_analysis": fallback_analysis,
+        "coverage_plan": fallback_plan,
+        "approved": False,
+        "review": _heuristic_test_case_review(
+            [],
+            requirements,
+            int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD),
+            coverage_plan=fallback_plan,
+            requirement_analysis=fallback_analysis,
+            context=kwargs.get("context"),
+        ),
+        "iteration_history": [],
+        "coverage_metrics": {
+            **_compute_test_case_coverage_metrics([], requirements),
+            **_compute_planned_scenario_metrics(fallback_plan, [], requirements),
+            **_compute_requirement_analysis_metrics(fallback_analysis, [], requirements),
+            **_compute_grounded_context_metrics([], kwargs.get("context")),
+        },
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": diagnostics,
+    }
 
 
 def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[Any], template: Any) -> tuple[str, str, str]:
@@ -2056,6 +2426,8 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
     raw_requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(requirements))
     raw_coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(requirements))
     normalized_coverage_plan = _normalize_coverage_plan(raw_coverage_plan, requirements)
+    resolved_settings = dict(workflow.get("workflow_settings") or {})
+    threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     default_coverage_metrics = _compute_test_case_coverage_metrics(serialized, requirements)
     default_coverage_metrics.update(_compute_planned_scenario_metrics(normalized_coverage_plan, serialized, requirements))
     default_coverage_metrics.update(_compute_requirement_analysis_metrics(raw_requirement_analysis, serialized, requirements))
@@ -2066,7 +2438,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         or _heuristic_test_case_review(
             serialized,
             requirements,
-            DEFAULT_TEST_CASE_THRESHOLD,
+            threshold,
             coverage_plan=normalized_coverage_plan,
             requirement_analysis=raw_requirement_analysis,
             context=context,
@@ -2084,6 +2456,8 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "coverage_plan": coverage_plan,
         "requirement_analysis": requirement_analysis,
         "coverage_metrics": coverage_metrics,
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
     }
 
 
@@ -2100,81 +2474,37 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
         model=settings.model_name,
         human_feedback=payload.feedback if payload.feedback else None,
         existing_test_cases=None,
+        workflow_settings=payload.workflow_settings,
     )
 
     raw_test_cases = workflow.get("test_cases", [])
     requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
     coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
+    resolved_settings = dict(workflow.get("workflow_settings") or _resolve_test_case_workflow_settings(payload.workflow_settings))
+    threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
         raw_test_cases = _fallback_raw_test_cases(payload.requirements, payload.context, coverage_plan=coverage_plan)
         fallback_review = _heuristic_test_case_review(
             raw_test_cases,
             payload.requirements,
-            DEFAULT_TEST_CASE_THRESHOLD,
-            coverage_plan=coverage_plan,
-            requirement_analysis=requirement_analysis,
-            context=payload.context,
-        )
-        workflow = {
-            "test_cases": raw_test_cases,
-            "requirement_analysis": requirement_analysis,
-            "coverage_plan": coverage_plan,
-            "review": fallback_review,
-            "approved": fallback_review["approved"],
-            "iteration_history": [
-                _make_history_entry(
-                    iteration=1,
-                    actor="FallbackValidation",
-                    review=fallback_review,
-                    test_cases=raw_test_cases,
-                )
-            ],
-            "coverage_metrics": {
-                **_compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
-                **_compute_planned_scenario_metrics(coverage_plan, raw_test_cases, payload.requirements),
-                **_compute_requirement_analysis_metrics(requirement_analysis, raw_test_cases, payload.requirements),
-                **_compute_grounded_context_metrics(raw_test_cases, payload.context),
-            },
-        }
-
-    test_cases = _hydrate_test_cases(raw_test_cases)
-    return _build_response(test_cases, workflow, payload.requirements, payload.context)
-
-
-def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
-    settings = get_settings()
-    requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
-
-    existing_test_cases = _serialize_test_cases(payload.test_cases)
-    workflow = _run_workflow_sync(
-        requirements=payload.requirements,
-        context=payload.context,
-        requirements_text=requirements_text,
-        context_text=context_text,
-        template_text=template_text,
-        model=settings.model_name,
-        human_feedback=payload.feedback,
-        existing_test_cases=existing_test_cases,
-    )
-
-    raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
-    requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
-    coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
-    if not workflow.get("test_cases"):
-        logging.warning("[TestCase Workflow] Refinement returned no test cases, restoring previous set")
-        fallback_review = _heuristic_test_case_review(
-            raw_test_cases,
-            payload.requirements,
-            DEFAULT_TEST_CASE_THRESHOLD,
+            threshold,
             coverage_plan=coverage_plan,
             requirement_analysis=requirement_analysis,
             context=payload.context,
         )
         fallback_review["approved"] = False
-        fallback_review["summary"] = "Test case refinement returned no updated output. Previous test cases were restored and require further review."
+        fallback_review["summary"] = "Test-case fallback produced a draft suite that still requires review approval."
         fallback_review["blocking_issues"] = _dedupe_preserve(
-            fallback_review["blocking_issues"] + ["Refinement loop did not return an updated test-case set."]
+            fallback_review["blocking_issues"] + ["Deterministic fallback was used instead of a completed generation/validation loop."]
+        )
+        workflow_diagnostics = dict(workflow.get("workflow_diagnostics") or _new_workflow_diagnostics())
+        workflow_diagnostics["status"] = "fallback"
+        workflow_diagnostics["used_fallback"] = True
+        workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "fallback_generated_artifacts"
+        _append_unique_message(
+            workflow_diagnostics["warnings"],
+            "Test-case fallback produced deterministic draft artifacts because the generation workflow returned no test cases.",
         )
         workflow = {
             "test_cases": raw_test_cases,
@@ -2196,6 +2526,81 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
                 **_compute_requirement_analysis_metrics(requirement_analysis, raw_test_cases, payload.requirements),
                 **_compute_grounded_context_metrics(raw_test_cases, payload.context),
             },
+            "workflow_settings": resolved_settings,
+            "workflow_diagnostics": workflow_diagnostics,
+        }
+
+    test_cases = _hydrate_test_cases(raw_test_cases)
+    return _build_response(test_cases, workflow, payload.requirements, payload.context)
+
+
+def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
+    settings = get_settings()
+    requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
+
+    existing_test_cases = _serialize_test_cases(payload.test_cases)
+    workflow = _run_workflow_sync(
+        requirements=payload.requirements,
+        context=payload.context,
+        requirements_text=requirements_text,
+        context_text=context_text,
+        template_text=template_text,
+        model=settings.model_name,
+        human_feedback=payload.feedback,
+        existing_test_cases=existing_test_cases,
+        workflow_settings=payload.workflow_settings,
+    )
+
+    raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
+    requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
+    coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
+    resolved_settings = dict(workflow.get("workflow_settings") or _resolve_test_case_workflow_settings(payload.workflow_settings))
+    threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
+    if not workflow.get("test_cases"):
+        logging.warning("[TestCase Workflow] Refinement returned no test cases, restoring previous set")
+        fallback_review = _heuristic_test_case_review(
+            raw_test_cases,
+            payload.requirements,
+            threshold,
+            coverage_plan=coverage_plan,
+            requirement_analysis=requirement_analysis,
+            context=payload.context,
+        )
+        fallback_review["approved"] = False
+        fallback_review["summary"] = "Test case refinement returned no updated output. Previous test cases were restored and require further review."
+        fallback_review["blocking_issues"] = _dedupe_preserve(
+            fallback_review["blocking_issues"] + ["Refinement loop did not return an updated test-case set."]
+        )
+        workflow_diagnostics = dict(workflow.get("workflow_diagnostics") or _new_workflow_diagnostics())
+        workflow_diagnostics["status"] = "fallback"
+        workflow_diagnostics["used_fallback"] = True
+        workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "fallback_generated_artifacts"
+        _append_unique_message(
+            workflow_diagnostics["warnings"],
+            "Test-case refinement fallback restored the previous suite because the refinement workflow returned no updated artifacts.",
+        )
+        workflow = {
+            "test_cases": raw_test_cases,
+            "requirement_analysis": requirement_analysis,
+            "coverage_plan": coverage_plan,
+            "review": fallback_review,
+            "approved": False,
+            "iteration_history": [
+                _make_history_entry(
+                    iteration=1,
+                    actor="FallbackValidation",
+                    review=fallback_review,
+                    test_cases=raw_test_cases,
+                )
+            ],
+            "coverage_metrics": {
+                **_compute_test_case_coverage_metrics(raw_test_cases, payload.requirements),
+                **_compute_planned_scenario_metrics(coverage_plan, raw_test_cases, payload.requirements),
+                **_compute_requirement_analysis_metrics(requirement_analysis, raw_test_cases, payload.requirements),
+                **_compute_grounded_context_metrics(raw_test_cases, payload.context),
+            },
+            "workflow_settings": resolved_settings,
+            "workflow_diagnostics": workflow_diagnostics,
         }
 
     test_cases = _hydrate_test_cases(raw_test_cases)

@@ -4,7 +4,6 @@ ADK Client - Multi-agent requirement extraction and refinement using Google ADK.
 Implements reviewer/refiner loops with structured review outputs so the UI can
 gate progression on explicit approval thresholds rather than implied success.
 """
-
 import asyncio
 import json
 import logging
@@ -18,15 +17,25 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 
-from .utils.llm_json import extract_json, parse_requirements_json, parse_review_json
+from .models import WorkflowSettings
+from .utils.genai_response import extract_response_text
+from .utils.llm_json import extract_json, parse_requirements_json_detailed, parse_review_json_detailed
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_REQUIREMENT_THRESHOLD = 85
+DEFAULT_REQUIREMENT_MAX_ITERATIONS = 3
+DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT = 2
+DEFAULT_REQUIREMENT_RETRY_ATTEMPTS = 0
 
 STATE_REQUIREMENTS = "current_requirements"
 STATE_REVIEW_FEEDBACK = "review_feedback"
 
 APPROVAL_PHRASE = "APPROVED"
+
+
+def _log_requirement_workflow(event_type: str, **fields: Any) -> None:
+    payload = {"event": event_type, **fields}
+    logging.info("[Requirement Workflow] %s", json.dumps(payload, sort_keys=True, default=str))
 
 
 def _dedupe_preserve(items: List[str]) -> List[str]:
@@ -193,6 +202,96 @@ def _make_history_entry(iteration: int, actor: str, review: Dict[str, Any], requ
     }
 
 
+def _resolve_requirement_workflow_settings(
+    workflow_settings: Optional[WorkflowSettings],
+    *,
+    max_iterations: int,
+    threshold: int = DEFAULT_REQUIREMENT_THRESHOLD,
+) -> Dict[str, Optional[int]]:
+    settings = workflow_settings or WorkflowSettings()
+
+    resolved_threshold = int(settings.approval_threshold if settings.approval_threshold is not None else threshold)
+    resolved_max_iterations = int(settings.max_iterations if settings.max_iterations is not None else max_iterations)
+    resolved_timeout_seconds = int(settings.timeout_seconds) if settings.timeout_seconds is not None else None
+    resolved_stall_iteration_limit = int(
+        settings.stall_iteration_limit
+        if settings.stall_iteration_limit is not None
+        else DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT
+    )
+    resolved_retry_attempts = int(
+        settings.retry_attempts if settings.retry_attempts is not None else DEFAULT_REQUIREMENT_RETRY_ATTEMPTS
+    )
+
+    return {
+        "approval_threshold": max(0, min(100, resolved_threshold)),
+        "max_iterations": max(1, resolved_max_iterations),
+        "timeout_seconds": max(1, resolved_timeout_seconds) if resolved_timeout_seconds is not None else None,
+        "stall_iteration_limit": max(1, resolved_stall_iteration_limit),
+        "retry_attempts": max(0, resolved_retry_attempts),
+    }
+
+
+def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
+    return {
+        "status": "completed",
+        "used_fallback": False,
+        "failure_reason": None,
+        "timed_out": False,
+        "stalled": False,
+        "max_iterations_reached": False,
+        "parser_failures": [],
+        "warnings": [],
+        "best_iteration": None,
+        "attempt_count": attempt_count,
+    }
+
+
+def _append_unique_message(container: List[str], message: str) -> None:
+    value = str(message).strip()
+    if value and value not in container:
+        container.append(value)
+
+
+def _record_parser_failure(diagnostics: Dict[str, Any], author: str, error: Optional[str]) -> None:
+    if not error:
+        return
+    _append_unique_message(diagnostics["parser_failures"], f"{author}: {error}")
+    diagnostics["status"] = "partial"
+    diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+    _log_requirement_workflow(
+        "parser_failure",
+        author=author,
+        error=error,
+        parser_failure_count=len(diagnostics["parser_failures"]),
+        status=diagnostics["status"],
+    )
+
+
+def _review_is_stalled(previous_review: Optional[Dict[str, Any]], current_review: Dict[str, Any]) -> bool:
+    if not previous_review:
+        return False
+
+    return (
+        current_review["score"] <= previous_review["score"]
+        and current_review["blocking_issues"] == previous_review["blocking_issues"]
+        and current_review["unmet_criteria"] == previous_review["unmet_criteria"]
+    )
+
+
+def _prefer_review(candidate: Dict[str, Any], incumbent: Optional[Dict[str, Any]]) -> bool:
+    if not incumbent:
+        return True
+    if candidate["approved"] != incumbent["approved"]:
+        return candidate["approved"]
+    if candidate["score"] != incumbent["score"]:
+        return candidate["score"] > incumbent["score"]
+    if len(candidate["blocking_issues"]) != len(incumbent["blocking_issues"]):
+        return len(candidate["blocking_issues"]) < len(incumbent["blocking_issues"])
+    if len(candidate["unmet_criteria"]) != len(incumbent["unmet_criteria"]):
+        return len(candidate["unmet_criteria"]) < len(incumbent["unmet_criteria"])
+    return False
+
+
 def exit_loop(tool_context: ToolContext) -> dict:
     """Call this function when the requirements are approved and meet quality standards."""
     logging.info("[exit_loop] Requirements approved - exiting refinement loop")
@@ -346,14 +445,21 @@ Rules:
 async def _run_requirement_workflow_async(
     *,
     model: str = DEFAULT_MODEL,
-    max_iterations: int = 3,
+    max_iterations: int = DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     document_text: Optional[str] = None,
     existing_requirements: Optional[List[Dict[str, Any]]] = None,
     human_feedback: Optional[str] = None,
     document_count: int = 1,
+    workflow_settings: Optional[WorkflowSettings] = None,
 ) -> Dict[str, Any]:
-    threshold = DEFAULT_REQUIREMENT_THRESHOLD
-    safe_iterations = max(1, max_iterations)
+    resolved_settings = _resolve_requirement_workflow_settings(workflow_settings, max_iterations=max_iterations)
+    threshold = int(resolved_settings["approval_threshold"] or DEFAULT_REQUIREMENT_THRESHOLD)
+    safe_iterations = int(resolved_settings["max_iterations"] or DEFAULT_REQUIREMENT_MAX_ITERATIONS)
+    timeout_seconds = resolved_settings["timeout_seconds"]
+    stall_iteration_limit = int(
+        resolved_settings["stall_iteration_limit"] or DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT
+    )
+    diagnostics = _new_workflow_diagnostics()
 
     is_refinement = bool(existing_requirements is not None)
     if is_refinement:
@@ -400,60 +506,204 @@ Human feedback:
     current_requirements: List[Dict[str, str]] = []
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
+    previous_review: Optional[Dict[str, Any]] = None
+    repeated_review_count = 0
+    best_candidate: Optional[Dict[str, Any]] = None
 
-    logging.info("[Requirement Workflow] Starting session %s", session.id)
-
-    async for event in runner.run_async(
-        user_id=user_id,
+    _log_requirement_workflow(
+        "session_started",
         session_id=session.id,
-        new_message=types.Content(role="user", parts=[types.Part(text=message_text)]),
-    ):
-        author = getattr(event, 'author', 'unknown')
-        logging.info("[Requirement Workflow] Event from %s", author)
+        user_id=user_id,
+        is_refinement=is_refinement,
+        settings=resolved_settings,
+        document_count=document_count,
+    )
 
-        if not event.content or not event.content.parts:
-            continue
+    async def _consume_events() -> None:
+        nonlocal current_requirements, model_review, previous_review, repeated_review_count, best_candidate
 
-        for part in event.content.parts:
-            text = getattr(part, 'text', None)
-            if not text:
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text=message_text)]),
+        ):
+            author = getattr(event, 'author', 'unknown')
+            _log_requirement_workflow("event_received", session_id=session.id, author=author)
+
+            if not event.content or not event.content.parts:
                 continue
 
-            parsed_requirements = parse_requirements_json(text)
-            if parsed_requirements and author in {"InitialExtractorAgent", "HumanFeedbackRefinerAgent", "RefinerAgent"}:
-                current_requirements = parsed_requirements
+            for part in event.content.parts:
+                text = getattr(part, 'text', None)
+                if not text:
+                    continue
 
-            parsed_review = parse_review_json(text, default_threshold=threshold)
-            if parsed_review and author == "ReviewerAgent":
-                model_review = _normalize_review_result(parsed_review, threshold, "Requirement review completed.")
-                iteration_history.append(
-                    _make_history_entry(
-                        iteration=len(iteration_history) + 1,
-                        actor=author,
-                        review=model_review,
-                        requirements=current_requirements,
+                if author in {"InitialExtractorAgent", "HumanFeedbackRefinerAgent", "RefinerAgent"}:
+                    parsed_requirements, parse_error = parse_requirements_json_detailed(text)
+                    if parsed_requirements:
+                        current_requirements = parsed_requirements
+                    else:
+                        _record_parser_failure(diagnostics, author, parse_error)
+
+                if author == "ReviewerAgent":
+                    parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
+                    if not parsed_review:
+                        _record_parser_failure(diagnostics, author, parse_error)
+                        continue
+
+                    model_review = _normalize_review_result(parsed_review, threshold, "Requirement review completed.")
+                    iteration_number = len(iteration_history) + 1
+                    iteration_history.append(
+                        _make_history_entry(
+                            iteration=iteration_number,
+                            actor=author,
+                            review=model_review,
+                            requirements=current_requirements,
+                        )
                     )
-                )
 
-    state_requirements = parse_requirements_json(session.state.get(STATE_REQUIREMENTS, "[]"))
+                    candidate_review = _merge_review_results(
+                        model_review,
+                        _heuristic_requirement_review(current_requirements, threshold, document_count),
+                    )
+                    if current_requirements and (
+                        not best_candidate or _prefer_review(candidate_review, best_candidate["review"])
+                    ):
+                        best_candidate = {
+                            "requirements": list(current_requirements),
+                            "review": candidate_review,
+                            "iteration": iteration_number,
+                        }
+                        diagnostics["best_iteration"] = iteration_number
+
+                    score_delta = model_review["score"] - (previous_review["score"] if previous_review else 0)
+                    _log_requirement_workflow(
+                        "review_iteration",
+                        session_id=session.id,
+                        iteration=iteration_number,
+                        author=author,
+                        score=model_review["score"],
+                        threshold=model_review["threshold"],
+                        approved=model_review["approved"],
+                        score_delta=score_delta,
+                        blocking_issue_count=len(model_review["blocking_issues"]),
+                        suggestion_count=len(model_review["suggestions"]),
+                        requirement_count=len(current_requirements),
+                    )
+
+                    if _review_is_stalled(previous_review, model_review):
+                        repeated_review_count += 1
+                    else:
+                        repeated_review_count = 1
+                    previous_review = model_review
+
+                    if repeated_review_count >= stall_iteration_limit:
+                        diagnostics["status"] = "partial"
+                        diagnostics["stalled"] = True
+                        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "stalled"
+                        _append_unique_message(
+                            diagnostics["warnings"],
+                            f"Requirement review stalled after {repeated_review_count} repeated review cycles.",
+                        )
+                        _log_requirement_workflow(
+                            "review_stalled",
+                            session_id=session.id,
+                            repeated_review_count=repeated_review_count,
+                            stall_iteration_limit=stall_iteration_limit,
+                            last_score=model_review["score"],
+                        )
+                        return
+
+    try:
+        if timeout_seconds is not None:
+            await asyncio.wait_for(_consume_events(), timeout=timeout_seconds)
+        else:
+            await _consume_events()
+    except asyncio.TimeoutError:
+        diagnostics["status"] = "partial"
+        diagnostics["timed_out"] = True
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "timeout"
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Requirement workflow timed out after {timeout_seconds} second(s).",
+        )
+        _log_requirement_workflow(
+            "workflow_timeout",
+            session_id=session.id,
+            timeout_seconds=timeout_seconds,
+            completed_iterations=len(iteration_history),
+        )
+
+    state_requirements_raw = session.state.get(STATE_REQUIREMENTS, "[]")
+    state_requirements, state_requirements_error = parse_requirements_json_detailed(state_requirements_raw)
     if state_requirements:
         current_requirements = state_requirements
+    elif str(state_requirements_raw).strip() not in {"", "[]"}:
+        _record_parser_failure(diagnostics, "SessionStateRequirements", state_requirements_error)
 
-    state_review = parse_review_json(session.state.get(STATE_REVIEW_FEEDBACK, ""), default_threshold=threshold)
+    state_review_raw = session.state.get(STATE_REVIEW_FEEDBACK, "")
+    state_review, state_review_error = parse_review_json_detailed(state_review_raw, default_threshold=threshold)
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Requirement review completed.")
+    elif str(state_review_raw).strip():
+        _record_parser_failure(diagnostics, "SessionStateReview", state_review_error)
 
     heuristic_review = _heuristic_requirement_review(current_requirements, threshold, document_count)
     final_review = _merge_review_results(model_review, heuristic_review)
+
+    if best_candidate and (
+        not current_requirements or _prefer_review(best_candidate["review"], final_review)
+    ):
+        current_requirements = list(best_candidate["requirements"])
+        final_review = dict(best_candidate["review"])
+        diagnostics["best_iteration"] = best_candidate["iteration"]
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Retained the best-scoring requirement draft from iteration {best_candidate['iteration']}",
+        )
+        _log_requirement_workflow(
+            "best_artifact_retained",
+            session_id=session.id,
+            selected_iteration=best_candidate["iteration"],
+            selected_score=final_review["score"],
+            requirement_count=len(current_requirements),
+        )
+
     coverage_metrics = _compute_requirement_coverage_metrics(current_requirements, document_count)
 
-    if iteration_history:
+    if len(iteration_history) >= safe_iterations and not final_review["approved"] and not diagnostics["stalled"]:
+        diagnostics["status"] = "partial"
+        diagnostics["max_iterations_reached"] = True
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Requirement workflow reached the max iteration limit ({safe_iterations}).",
+        )
+
+    if not current_requirements and diagnostics["parser_failures"]:
+        diagnostics["status"] = "failed"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+    elif not final_review["approved"] and not diagnostics["failure_reason"]:
+        diagnostics["failure_reason"] = "quality_rejection"
+
+    if iteration_history and diagnostics.get("best_iteration") in {None, iteration_history[-1]["iteration"]}:
         iteration_history[-1] = _make_history_entry(
             iteration=iteration_history[-1]["iteration"],
             actor=iteration_history[-1]["actor"],
             review=final_review,
             requirements=current_requirements,
         )
+    elif iteration_history:
+        selection_entry = _make_history_entry(
+            iteration=len(iteration_history) + 1,
+            actor="WorkflowSelection",
+            review=final_review,
+            requirements=current_requirements,
+        )
+        selection_entry["summary"] = (
+            f"Retained best-scoring requirements from iteration {diagnostics['best_iteration']}. "
+            f"{final_review['summary']}"
+        ).strip()
+        iteration_history.append(selection_entry)
     else:
         iteration_history.append(
             _make_history_entry(
@@ -464,49 +714,112 @@ Human feedback:
             )
         )
 
-    logging.info("[Requirement Workflow] Final requirements: %s, approved=%s", len(current_requirements), final_review["approved"])
+    _log_requirement_workflow(
+        "workflow_completed",
+        session_id=session.id,
+        approved=final_review["approved"],
+        score=final_review["score"],
+        threshold=final_review["threshold"],
+        requirement_count=len(current_requirements),
+        iteration_count=len(iteration_history),
+        diagnostics=diagnostics,
+    )
     return {
         "requirements": current_requirements,
         "approved": final_review["approved"],
         "review": final_review,
         "iteration_history": iteration_history,
         "coverage_metrics": coverage_metrics,
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": diagnostics,
     }
 
 
 def _run_requirement_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
-    try:
-        try:
-            asyncio.get_running_loop()
-            import nest_asyncio
+    resolved_settings = _resolve_requirement_workflow_settings(
+        kwargs.get("workflow_settings"),
+        max_iterations=kwargs.get("max_iterations", DEFAULT_REQUIREMENT_MAX_ITERATIONS),
+    )
+    attempt_total = int(resolved_settings["retry_attempts"] or 0) + 1
+    last_error: Optional[Exception] = None
 
-            nest_asyncio.apply()
-            return asyncio.run(_run_requirement_workflow_async(**kwargs))
-        except RuntimeError:
-            return asyncio.run(_run_requirement_workflow_async(**kwargs))
-    except Exception as exc:
-        logging.error("[Requirement Workflow] Error: %s", exc)
-        document_count = kwargs.get("document_count", 1)
-        return {
-            "requirements": [],
-            "approved": False,
-            "review": _heuristic_requirement_review([], DEFAULT_REQUIREMENT_THRESHOLD, document_count),
-            "iteration_history": [],
-            "coverage_metrics": _compute_requirement_coverage_metrics([], document_count),
-        }
+    for attempt in range(1, attempt_total + 1):
+        run_kwargs = dict(kwargs)
+        run_kwargs["workflow_settings"] = WorkflowSettings(**resolved_settings)
+        run_kwargs["max_iterations"] = resolved_settings["max_iterations"]
+
+        try:
+            try:
+                asyncio.get_running_loop()
+                import nest_asyncio
+
+                nest_asyncio.apply()
+                result = asyncio.run(_run_requirement_workflow_async(**run_kwargs))
+            except RuntimeError:
+                result = asyncio.run(_run_requirement_workflow_async(**run_kwargs))
+
+            diagnostics = dict(result.get("workflow_diagnostics") or _new_workflow_diagnostics())
+            diagnostics["attempt_count"] = attempt
+            result["workflow_diagnostics"] = diagnostics
+            result.setdefault("workflow_settings", dict(resolved_settings))
+
+            if diagnostics.get("timed_out") and attempt < attempt_total:
+                _log_requirement_workflow(
+                    "workflow_retry",
+                    attempt=attempt,
+                    attempt_total=attempt_total,
+                    retry_reason="timeout",
+                )
+                continue
+
+            return result
+        except Exception as exc:
+            last_error = exc
+            _log_requirement_workflow(
+                "workflow_attempt_error",
+                attempt=attempt,
+                attempt_total=attempt_total,
+                error=str(exc),
+            )
+            if attempt >= attempt_total:
+                break
+
+    document_count = kwargs.get("document_count", 1)
+    diagnostics = _new_workflow_diagnostics(attempt_count=attempt_total)
+    diagnostics["status"] = "failed"
+    diagnostics["failure_reason"] = "execution_error"
+    if last_error:
+        _append_unique_message(diagnostics["warnings"], f"Workflow execution error: {last_error}")
+    _log_requirement_workflow(
+        "workflow_failed",
+        attempt_total=attempt_total,
+        error=str(last_error) if last_error else None,
+        diagnostics=diagnostics,
+    )
+    return {
+        "requirements": [],
+        "approved": False,
+        "review": _heuristic_requirement_review([], int(resolved_settings["approval_threshold"] or DEFAULT_REQUIREMENT_THRESHOLD), document_count),
+        "iteration_history": [],
+        "coverage_metrics": _compute_requirement_coverage_metrics([], document_count),
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": diagnostics,
+    }
 
 
 def run_requirement_extraction_workflow_sync(
     document_text: str,
     model: str = DEFAULT_MODEL,
-    max_iterations: int = 3,
+    max_iterations: int = DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     document_count: int = 1,
+    workflow_settings: Optional[WorkflowSettings] = None,
 ) -> Dict[str, Any]:
     return _run_requirement_workflow_sync(
         document_text=document_text,
         model=model,
         max_iterations=max_iterations,
         document_count=document_count,
+        workflow_settings=workflow_settings,
     )
 
 
@@ -514,7 +827,8 @@ def run_requirement_refinement_workflow_sync(
     existing_requirements: List[Dict[str, Any]],
     feedback: str,
     model: str = DEFAULT_MODEL,
-    max_iterations: int = 3,
+    max_iterations: int = DEFAULT_REQUIREMENT_MAX_ITERATIONS,
+    workflow_settings: Optional[WorkflowSettings] = None,
 ) -> Dict[str, Any]:
     return _run_requirement_workflow_sync(
         existing_requirements=existing_requirements,
@@ -522,6 +836,7 @@ def run_requirement_refinement_workflow_sync(
         model=model,
         max_iterations=max_iterations,
         document_count=1,
+        workflow_settings=workflow_settings,
     )
 
 
@@ -561,7 +876,7 @@ def run_adk_prompt(
                 contents=prompt,
                 config=types.GenerateContentConfig(system_instruction=instruction),
             )
-            return response.text.strip() if response and response.text else ""
+            return extract_response_text(response)
     except Exception as exc:
         logging.error("[%s] Error: %s", agent_name, exc)
         return ""

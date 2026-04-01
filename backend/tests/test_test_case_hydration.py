@@ -6,10 +6,16 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import _hydrate_test_cases
+from app.agents.test_case_agent import _hydrate_test_cases, _normalize_test_case_type
 
 
 class TestCaseHydrationTests(unittest.TestCase):
+    def test_normalize_test_case_type_maps_scenario_like_labels(self) -> None:
+        self.assertEqual(_normalize_test_case_type("Validation"), "Functional")
+        self.assertEqual(_normalize_test_case_type("Boundary"), "Functional")
+        self.assertEqual(_normalize_test_case_type("Compliance"), "Security")
+        self.assertEqual(_normalize_test_case_type("API"), "Integration")
+
     def test_hydrate_test_cases_accepts_string_steps(self) -> None:
         raw_test_cases = [
             {
@@ -58,6 +64,40 @@ class TestCaseHydrationTests(unittest.TestCase):
         self.assertEqual(hydrated[0].steps[1].expected, "The release details are displayed")
         self.assertEqual(hydrated[0].steps[2].action, "Confirm FPS level")
         self.assertEqual(hydrated[0].steps[2].expected, "FPS01 is shown")
+
+    def test_hydrate_test_cases_normalizes_nonstandard_generated_type_labels(self) -> None:
+        raw_test_cases = [
+            {
+                "id": "TC-003",
+                "title": "Reject invalid upload file type",
+                "steps": [
+                    {"step": 1, "action": "Open the upload form", "expected": "Upload form is visible", "test_data": None},
+                    {"step": 2, "action": "Upload an unsupported file", "expected": "Validation error is displayed", "test_data": None},
+                ],
+                "priority": "High",
+                "type": "Validation",
+                "status": "Draft",
+                "automation_status": "Manual",
+            },
+            {
+                "id": "TC-004",
+                "title": "Enforce compliance rule for access review",
+                "steps": [
+                    {"step": 1, "action": "Open the access review screen", "expected": "Review screen is visible", "test_data": None},
+                    {"step": 2, "action": "Approve without required attestation", "expected": "Operation is blocked", "test_data": None},
+                ],
+                "priority": "High",
+                "type": "Compliance",
+                "status": "Draft",
+                "automation_status": "Manual",
+            },
+        ]
+
+        hydrated = _hydrate_test_cases(raw_test_cases)
+
+        self.assertEqual(len(hydrated), 2)
+        self.assertEqual(hydrated[0].type, "Functional")
+        self.assertEqual(hydrated[1].type, "Security")
 
 
 if __name__ == "__main__":

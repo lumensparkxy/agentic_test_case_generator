@@ -107,6 +107,10 @@ if [[ -f "$TMP_DIR/generate.out" ]]; then
   check_status_file "$TMP_DIR/generate.out" "$EXPECTED_PROTECTED_STATUS"
 fi
 
+if [[ -f "$TMP_DIR/parse.out" && "$EXPECTED_PROTECTED_STATUS" == "200" ]]; then
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/e2e_api_verify.py"
+fi
+
 if ! strings "$TMP_DIR/export_excel.bin" | grep -q "HTTP_STATUS:$EXPECTED_PROTECTED_STATUS"; then
   echo "Smoke check failed: $TMP_DIR/export_excel.bin"
   exit 1

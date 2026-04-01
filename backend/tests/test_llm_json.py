@@ -6,7 +6,14 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
   sys.path.insert(0, str(BACKEND_DIR))
 
-from app.utils.llm_json import parse_requirement_analysis_json, parse_review_json
+from app.utils.llm_json import (
+  parse_requirement_analysis_json,
+  parse_requirement_analysis_json_detailed,
+  parse_requirements_json_detailed,
+  parse_review_json,
+  parse_review_json_detailed,
+  parse_test_cases_json_detailed,
+)
 
 
 class ParseRequirementAnalysisJsonTests(unittest.TestCase):
@@ -87,6 +94,12 @@ class ParseRequirementAnalysisJsonTests(unittest.TestCase):
         parsed = parse_requirement_analysis_json("not-json-at-all")
         self.assertEqual(parsed, [])
 
+    def test_detailed_parser_reports_requirement_analysis_errors(self) -> None:
+        parsed, error = parse_requirement_analysis_json_detailed("not-json-at-all")
+
+        self.assertEqual(parsed, [])
+        self.assertEqual(error, "no JSON payload found")
+
     def test_filters_invalid_analysis_items(self) -> None:
         payload = """
         [
@@ -129,6 +142,26 @@ class ParseReviewJsonTests(unittest.TestCase):
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed["score"], 94)
         self.assertEqual(parsed["threshold"], 90)
+
+    def test_detailed_review_parser_reports_invalid_json(self) -> None:
+        parsed, error = parse_review_json_detailed('{"approved": true', default_threshold=90)
+
+        self.assertIsNone(parsed)
+        self.assertEqual(error, "invalid JSON payload: Expecting ',' delimiter")
+
+
+class DetailedPayloadParserTests(unittest.TestCase):
+    def test_requirements_detailed_parser_reports_missing_keys(self) -> None:
+        parsed, error = parse_requirements_json_detailed('[{"id": "REQ-001"}]')
+
+        self.assertEqual(parsed, [])
+        self.assertEqual(error, "requirements payload did not contain valid id/text objects")
+
+    def test_test_case_detailed_parser_reports_empty_list(self) -> None:
+        parsed, error = parse_test_cases_json_detailed('{"test_cases": []}')
+
+        self.assertEqual(parsed, [])
+        self.assertEqual(error, "test_cases list was empty")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from docx import Document
+from pydantic import ValidationError
 
 from .config import get_auth_settings, get_cors_allow_origins, get_settings
 from .models import (
@@ -24,6 +25,7 @@ from .models import (
     Requirement,
     RefineTestCasesInput,
     RequirementsWorkflowResponse,
+    WorkflowSettings,
 )
 from fastapi.responses import StreamingResponse
 import csv
@@ -60,6 +62,21 @@ def _build_grounded_context_from_enrich_input(payload: EnrichInput):
     return build_grounded_context(payload)
 
 
+def _parse_workflow_settings_form(workflow_settings: Optional[str]) -> Optional[WorkflowSettings]:
+    if not workflow_settings:
+        return None
+
+    try:
+        payload = json.loads(workflow_settings)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="workflow_settings must be valid JSON") from exc
+
+    try:
+        return WorkflowSettings(**payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="workflow_settings payload is invalid") from exc
+
+
 @app.post("/auth/google/login", response_model=AuthTokenResponse)
 async def auth_google_login(payload: GoogleLoginRequest) -> AuthTokenResponse:
     settings = get_auth_settings()
@@ -91,14 +108,16 @@ async def parse_requirements(
     file: UploadFile = File(None),
     feedback: Optional[str] = Form(None),
     existing_requirements: Optional[str] = Form(None),
+    workflow_settings: Optional[str] = Form(None),
 ) -> RequirementsWorkflowResponse:
     _settings = get_settings()
+    parsed_workflow_settings = _parse_workflow_settings_form(workflow_settings)
     
     # If feedback is provided, refine existing requirements
     if feedback and existing_requirements:
         try:
             existing_reqs = json.loads(existing_requirements)
-            workflow = await run_in_threadpool(refine_requirements, existing_reqs, feedback)
+            workflow = await run_in_threadpool(refine_requirements, existing_reqs, feedback, parsed_workflow_settings)
             return RequirementsWorkflowResponse(
                 source_name="refined",
                 source_names=["refined"],
@@ -108,6 +127,8 @@ async def parse_requirements(
                 review=workflow["review"],
                 iteration_history=workflow["iteration_history"],
                 coverage_metrics=workflow["coverage_metrics"],
+                workflow_settings=workflow.get("workflow_settings", {}),
+                workflow_diagnostics=workflow.get("workflow_diagnostics", {}),
             )
         except Exception as exc:
             logging.exception("Requirement refinement failed")
@@ -148,7 +169,7 @@ async def parse_requirements(
             raw_sections.append(f"--- SOURCE: {filename} ---\n{parsed_text}")
 
         raw_text = "\n\n".join(raw_sections)
-        workflow = await run_in_threadpool(extract_requirements, raw_text, len(source_names))
+        workflow = await run_in_threadpool(extract_requirements, raw_text, len(source_names), parsed_workflow_settings)
         source_name = source_names[0] if len(source_names) == 1 else f"{len(source_names)} documents"
         return RequirementsWorkflowResponse(
             source_name=source_name,
@@ -159,6 +180,8 @@ async def parse_requirements(
             review=workflow["review"],
             iteration_history=workflow["iteration_history"],
             coverage_metrics=workflow["coverage_metrics"],
+            workflow_settings=workflow.get("workflow_settings", {}),
+            workflow_diagnostics=workflow.get("workflow_diagnostics", {}),
         )
     except HTTPException:
         raise

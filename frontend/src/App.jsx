@@ -13,11 +13,46 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 const STORAGE_AUTH_USER = "tcg.auth.user";
 const AUTH_REQUIRED_MESSAGE = "Sign in with Google to continue.";
+const EMPTY_WORKFLOW_SETTINGS = {
+	approval_threshold: "",
+	max_iterations: "",
+	timeout_seconds: "",
+	stall_iteration_limit: "",
+	retry_attempts: "",
+};
+const WORKFLOW_SETTING_FIELDS = [
+	{ key: "approval_threshold", label: "Approval threshold", min: 0, max: 100 },
+	{ key: "max_iterations", label: "Max iterations", min: 1, max: 20 },
+	{ key: "timeout_seconds", label: "Timeout (seconds)", min: 1, max: 900 },
+	{ key: "stall_iteration_limit", label: "Stall limit", min: 1, max: 20 },
+	{ key: "retry_attempts", label: "Retry attempts", min: 0, max: 5 },
+];
+
+const buildWorkflowSettingsPayload = (settings) => {
+	const payload = Object.entries(settings || {}).reduce((acc, [key, value]) => {
+		const normalized = `${value ?? ""}`.trim();
+		if (!normalized) {
+			return acc;
+		}
+		const parsed = Number.parseInt(normalized, 10);
+		if (Number.isFinite(parsed)) {
+			acc[key] = parsed;
+		}
+		return acc;
+	}, {});
+
+	return Object.keys(payload).length ? payload : null;
+};
 
 export default function App() {
 	const [file, setFile] = useState(null);
 	const [rawText, setRawText] = useState("");
 	const [requirements, setRequirements] = useState([]);
+	const [requirementReview, setRequirementReview] = useState(null);
+	const [requirementCoverageMetrics, setRequirementCoverageMetrics] = useState(null);
+	const [requirementWorkflowDiagnostics, setRequirementWorkflowDiagnostics] = useState(null);
+	const [appliedRequirementWorkflowSettings, setAppliedRequirementWorkflowSettings] = useState(null);
+	const [requirementIterationHistory, setRequirementIterationHistory] = useState([]);
 	const [activeTab, setActiveTab] = useState(0);
 	const [appLink, setAppLink] = useState("");
 	const [prototypeLink, setPrototypeLink] = useState("");
@@ -30,11 +65,16 @@ export default function App() {
 	const [coveragePlan, setCoveragePlan] = useState([]);
 	const [coverageMetrics, setCoverageMetrics] = useState(null);
 	const [testCaseReview, setTestCaseReview] = useState(null);
+	const [testCaseWorkflowDiagnostics, setTestCaseWorkflowDiagnostics] = useState(null);
+	const [appliedTestCaseWorkflowSettings, setAppliedTestCaseWorkflowSettings] = useState(null);
+	const [testCaseIterationHistory, setTestCaseIterationHistory] = useState([]);
 	const [enrichedContext, setEnrichedContext] = useState(null);
 	const [selectedArtifactSourceIds, setSelectedArtifactSourceIds] = useState([]);
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
+	const [requirementWorkflowSettings, setRequirementWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
+	const [testCaseWorkflowSettings, setTestCaseWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
 	const [expandedRows, setExpandedRows] = useState({});
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isParsing, setIsParsing] = useState(false);
@@ -97,6 +137,89 @@ export default function App() {
 		} catch {
 			return text;
 		}
+	};
+
+	const updateWorkflowSetting = (setter, key) => (event) => {
+		setter((prev) => ({ ...prev, [key]: event.target.value }));
+	};
+
+	const renderWorkflowSettingsPanel = (title, description, settings, setSettings) => (
+		<div className="workflow-settings-panel">
+			<div className="workflow-settings-header">
+				<div>
+					<h3>{title}</h3>
+					<p>{description}</p>
+				</div>
+				<span className="workflow-settings-badge">Optional</span>
+			</div>
+			<div className="workflow-settings-grid">
+				{WORKFLOW_SETTING_FIELDS.map((field) => (
+					<div className="form-group" key={field.key}>
+						<label>{field.label}</label>
+						<input
+							type="number"
+							min={field.min}
+							max={field.max}
+							placeholder="Use backend default"
+							value={settings[field.key]}
+							onChange={updateWorkflowSetting(setSettings, field.key)}
+						/>
+					</div>
+				))}
+			</div>
+			<p className="workflow-settings-help">Leave any field blank to use the backend default for that workflow.</p>
+		</div>
+	);
+
+	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => {
+		if (!diagnostics && !appliedSettings) {
+			return null;
+		}
+
+		const warnings = diagnostics?.warnings || [];
+		const parserFailures = diagnostics?.parser_failures || [];
+		const pillEntries = [
+			appliedSettings?.approval_threshold != null ? `Threshold ${appliedSettings.approval_threshold}` : null,
+			appliedSettings?.max_iterations != null ? `Max iter ${appliedSettings.max_iterations}` : null,
+			diagnostics?.status ? `Status ${diagnostics.status}` : null,
+			iterationHistory?.length ? `Iterations ${iterationHistory.length}` : null,
+			diagnostics?.best_iteration ? `Best iter ${diagnostics.best_iteration}` : null,
+			diagnostics?.timed_out ? "Timed out" : null,
+			diagnostics?.stalled ? "Stalled" : null,
+			diagnostics?.used_fallback ? "Fallback used" : null,
+		].filter(Boolean);
+
+		return (
+			<div className="workflow-diagnostics-panel">
+				<div className="workflow-diagnostics-header">
+					<h3>{title}</h3>
+					{diagnostics?.failure_reason && <span className="workflow-diagnostics-reason">Reason: {diagnostics.failure_reason}</span>}
+				</div>
+				{pillEntries.length > 0 && (
+					<div className="workflow-diagnostics-pills">
+						{pillEntries.map((entry) => (
+							<span className="workflow-diagnostics-pill" key={entry}>{entry}</span>
+						))}
+					</div>
+				)}
+				{warnings.length > 0 && (
+					<div className="workflow-diagnostics-block warning">
+						<strong>Warnings</strong>
+						<ul>
+							{warnings.map((warning) => <li key={warning}>{warning}</li>)}
+						</ul>
+					</div>
+				)}
+				{parserFailures.length > 0 && (
+					<div className="workflow-diagnostics-block alert">
+						<strong>Parser issues</strong>
+						<ul>
+							{parserFailures.map((failure) => <li key={failure}>{failure}</li>)}
+						</ul>
+					</div>
+				)}
+			</div>
+		);
 	};
 
 	const clearAuthState = (nextStatus = null) => {
@@ -239,7 +362,9 @@ export default function App() {
 		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
 		try {
 			const formData = new FormData();
+			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
 			if (file) formData.append("file", file);
+			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
 			if (withFeedback && reqFeedback) {
 				formData.append("feedback", reqFeedback);
 				formData.append("existing_requirements", JSON.stringify(requirements));
@@ -255,11 +380,19 @@ export default function App() {
 			const data = await res.json();
 			setRawText(data.raw_text || rawText);
 			setRequirements(data.requirements || []);
+			setRequirementReview(data.review || null);
+			setRequirementCoverageMetrics(data.coverage_metrics || null);
+			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
+			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
+			setRequirementIterationHistory(data.iteration_history || []);
 			setTestCases([]);
 			setRequirementAnalysis([]);
 			setCoveragePlan([]);
 			setCoverageMetrics(null);
 			setTestCaseReview(null);
+			setTestCaseWorkflowDiagnostics(null);
+			setAppliedTestCaseWorkflowSettings(null);
+			setTestCaseIterationHistory([]);
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
@@ -276,6 +409,7 @@ export default function App() {
 		setIsGenerating(true);
 		setStatus(withFeedback ? "Refining test cases with feedback..." : "Generating test cases...");
 		try {
+			const workflowSettingsPayload = buildWorkflowSettingsPayload(testCaseWorkflowSettings);
 			const sharedPayload = {
 				requirements,
 				template: {
@@ -284,6 +418,7 @@ export default function App() {
 					fields: ["id", "title", "description", "priority", "type", "status", "preconditions", "steps", "expected_result", "test_data", "estimated_time", "automation_status", "component", "tags"]
 				},
 				context: buildContextPayload(),
+				workflow_settings: workflowSettingsPayload,
 			};
 
 			const useRefineEndpoint = withFeedback && testCases.length > 0;
@@ -313,6 +448,9 @@ export default function App() {
 			setCoveragePlan(data.coverage_plan || []);
 			setCoverageMetrics(data.coverage_metrics || null);
 			setTestCaseReview(data.review || null);
+			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
+			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
+			setTestCaseIterationHistory(data.iteration_history || []);
 			setExpandedRows({});
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review
@@ -544,6 +682,13 @@ export default function App() {
 							</button>
 						</div>
 
+						{renderWorkflowSettingsPanel(
+							"Requirements workflow settings",
+							"Tune the requirement review loop when you want stricter gates or shorter runs.",
+							requirementWorkflowSettings,
+							setRequirementWorkflowSettings,
+						)}
+
 						<div className="result-section">
 							<h3>Raw Text</h3>
 							<pre>{rawText || "No content yet"}</pre>
@@ -563,6 +708,43 @@ export default function App() {
 								</ul>
 							)}
 						</div>
+
+						{requirementReview && (
+							<div className={`review-banner ${requirementReview.approved ? "review-approved" : "review-needs-work"}`}>
+								<div className="review-banner-header">
+									<strong>{requirementReview.approved ? "Requirements approved" : "Requirements need refinement"}</strong>
+									<span>Score {requirementReview.score}/{requirementReview.threshold}</span>
+								</div>
+								<p>{requirementReview.summary || "The review loop completed without a summary."}</p>
+								{!requirementReview.approved && requirementReview.blocking_issues?.length > 0 && (
+									<ul className="review-issues">
+										{requirementReview.blocking_issues.slice(0, 3).map((issue) => (
+											<li key={issue}>{issue}</li>
+										))}
+									</ul>
+								)}
+							</div>
+						)}
+
+						{requirementCoverageMetrics && (
+							<div className="workflow-metrics-panel">
+								<h3>Requirement coverage snapshot</h3>
+								<div className="workflow-diagnostics-pills">
+									<span className="workflow-diagnostics-pill">Total {requirementCoverageMetrics.total_requirements ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Unique {requirementCoverageMetrics.unique_requirements ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Duplicates {requirementCoverageMetrics.duplicate_requirements ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Shall format {requirementCoverageMetrics.shall_format_count ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Per doc {requirementCoverageMetrics.requirements_per_document ?? 0}</span>
+								</div>
+							</div>
+						)}
+
+						{renderWorkflowDiagnostics(
+							"Requirement workflow diagnostics",
+							requirementWorkflowDiagnostics,
+							appliedRequirementWorkflowSettings,
+							requirementIterationHistory,
+						)}
 
 						{requirements.length > 0 && (
 							<div className="feedback-section">
@@ -755,6 +937,12 @@ export default function App() {
 						<p className="panel-description">
 							Generate structured test cases from your parsed requirements and context.
 						</p>
+						{renderWorkflowSettingsPanel(
+							"Test-case workflow settings",
+							"Control validation strictness, loop length, and timeout behavior for generation and refinement.",
+							testCaseWorkflowSettings,
+							setTestCaseWorkflowSettings,
+						)}
 						<div className="panel-form button-row">
 							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || authActionDisabled}>
 								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
@@ -776,6 +964,13 @@ export default function App() {
 									</ul>
 								)}
 							</div>
+						)}
+
+						{renderWorkflowDiagnostics(
+							"Test-case workflow diagnostics",
+							testCaseWorkflowDiagnostics,
+							appliedTestCaseWorkflowSettings,
+							testCaseIterationHistory,
 						)}
 
 						{coveragePlan.length > 0 && (

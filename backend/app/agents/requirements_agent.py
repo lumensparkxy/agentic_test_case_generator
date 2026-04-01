@@ -1,18 +1,23 @@
 from typing import List, Dict, Any, Optional
 import logging
 import re
-from ..models import Requirement
+from ..models import Requirement, WorkflowSettings
 from ..config import get_settings
 from ..adk_client import (
+    DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     DEFAULT_REQUIREMENT_THRESHOLD,
     run_requirement_extraction_workflow_sync,
     run_requirement_refinement_workflow_sync,
 )
 
-MAX_ITERATIONS = 3
+MAX_ITERATIONS = DEFAULT_REQUIREMENT_MAX_ITERATIONS
 
 
-def extract_requirements(text: str, document_count: int = 1) -> Dict[str, Any]:
+def extract_requirements(
+    text: str,
+    document_count: int = 1,
+    workflow_settings: Optional[WorkflowSettings] = None,
+) -> Dict[str, Any]:
     """
     Multi-agent ADK loop for requirement extraction:
     1. ExtractorAgent: Parses document and extracts candidate requirements
@@ -28,8 +33,9 @@ def extract_requirements(text: str, document_count: int = 1) -> Dict[str, Any]:
     workflow = run_requirement_extraction_workflow_sync(
         document_text=text,
         model=settings.model_name,
-        max_iterations=MAX_ITERATIONS,
+        max_iterations=workflow_settings.max_iterations if workflow_settings and workflow_settings.max_iterations else MAX_ITERATIONS,
         document_count=document_count,
+        workflow_settings=workflow_settings,
     )
     
     extracted = workflow.get("requirements", [])
@@ -48,11 +54,17 @@ def extract_requirements(text: str, document_count: int = 1) -> Dict[str, Any]:
         document_count=document_count,
         existing_review=workflow.get("review"),
         existing_history=workflow.get("iteration_history"),
+        existing_settings=workflow.get("workflow_settings"),
+        existing_diagnostics=workflow.get("workflow_diagnostics"),
     )
     return _build_workflow_response(requirements, fallback_workflow, document_count=document_count)
 
 
-def refine_requirements(existing_requirements: List[Dict[str, Any]], feedback: str) -> Dict[str, Any]:
+def refine_requirements(
+    existing_requirements: List[Dict[str, Any]],
+    feedback: str,
+    workflow_settings: Optional[WorkflowSettings] = None,
+) -> Dict[str, Any]:
     """
     Refine existing requirements based on human feedback using ADK agent loop.
     """
@@ -65,6 +77,8 @@ def refine_requirements(existing_requirements: List[Dict[str, Any]], feedback: s
         existing_requirements=existing_requirements,
         feedback=feedback,
         model=settings.model_name,
+        max_iterations=workflow_settings.max_iterations if workflow_settings and workflow_settings.max_iterations else MAX_ITERATIONS,
+        workflow_settings=workflow_settings,
     )
     
     refined = workflow.get("requirements", [])
@@ -82,6 +96,8 @@ def refine_requirements(existing_requirements: List[Dict[str, Any]], feedback: s
         document_count=1,
         existing_review=workflow.get("review"),
         existing_history=workflow.get("iteration_history"),
+        existing_settings=workflow.get("workflow_settings"),
+        existing_diagnostics=workflow.get("workflow_diagnostics"),
     )
     return _build_workflow_response(requirements, fallback_workflow, document_count=1)
 
@@ -91,6 +107,8 @@ def _build_workflow_response(
     workflow: Dict[str, Any],
     document_count: int,
 ) -> Dict[str, Any]:
+    resolved_settings = dict(workflow.get("workflow_settings") or {})
+    threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_REQUIREMENT_THRESHOLD)
     coverage_metrics = dict(workflow.get("coverage_metrics") or {})
     if not coverage_metrics:
         coverage_metrics = _compute_requirement_coverage_metrics(requirements, document_count)
@@ -100,7 +118,7 @@ def _build_workflow_response(
         review = {
             "approved": False,
             "score": 0,
-            "threshold": DEFAULT_REQUIREMENT_THRESHOLD,
+            "threshold": threshold,
             "summary": "Requirement review data is unavailable.",
             "blocking_issues": ["No structured requirement review was captured."],
             "suggestions": ["Re-run the requirement workflow to regenerate structured review output."],
@@ -113,6 +131,8 @@ def _build_workflow_response(
         "review": review,
         "iteration_history": list(workflow.get("iteration_history") or []),
         "coverage_metrics": coverage_metrics,
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
     }
 
 
@@ -122,7 +142,11 @@ def _build_fallback_workflow(
     document_count: int,
     existing_review: Dict[str, Any] | None = None,
     existing_history: List[Dict[str, Any]] | None = None,
+    existing_settings: Dict[str, Any] | None = None,
+    existing_diagnostics: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    resolved_settings = dict(existing_settings or {})
+    threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_REQUIREMENT_THRESHOLD)
     blocking_issues = list((existing_review or {}).get("blocking_issues") or [])
     suggestions = list((existing_review or {}).get("suggestions") or [])
     unmet_criteria = list((existing_review or {}).get("unmet_criteria") or [])
@@ -133,8 +157,8 @@ def _build_fallback_workflow(
 
     review = {
         "approved": False,
-        "score": min(int((existing_review or {}).get("score", 0) or 0), DEFAULT_REQUIREMENT_THRESHOLD - 5),
-        "threshold": DEFAULT_REQUIREMENT_THRESHOLD,
+        "score": max(0, min(int((existing_review or {}).get("score", 0) or 0), max(0, threshold - 5))),
+        "threshold": threshold,
         "summary": summary,
         "blocking_issues": _dedupe_strings(blocking_issues),
         "suggestions": _dedupe_strings(suggestions),
@@ -159,11 +183,23 @@ def _build_fallback_workflow(
             }
         )
 
+    diagnostics = dict(existing_diagnostics or {})
+    diagnostics["status"] = "fallback"
+    diagnostics["used_fallback"] = True
+    diagnostics["failure_reason"] = diagnostics.get("failure_reason") or "fallback_generated_artifacts"
+    warnings = list(diagnostics.get("warnings") or [])
+    fallback_warning = "Requirement fallback produced draft artifacts that still require review approval."
+    if fallback_warning not in warnings:
+        warnings.append(fallback_warning)
+    diagnostics["warnings"] = warnings
+
     return {
         "approved": False,
         "review": review,
         "iteration_history": history,
         "coverage_metrics": coverage_metrics,
+        "workflow_settings": resolved_settings,
+        "workflow_diagnostics": diagnostics,
     }
 
 
