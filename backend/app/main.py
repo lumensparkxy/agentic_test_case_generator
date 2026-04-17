@@ -39,6 +39,7 @@ from .agents.test_case_agent import generate_test_cases, refine_test_cases
 from .agents.export_agent import export_to_jira, export_to_csv, export_to_excel, export_to_json
 from .agents.automation_agent import generate_playwright_pom
 from .auth.google_auth import verify_google_credential
+from .auth.authorization import require_org_admin
 from .auth.jwt_auth import create_access_token, get_current_user
 from .services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from .services.context_grounding import build_grounded_context
@@ -206,16 +207,52 @@ async def auth_logout() -> LogoutResponse:
     return LogoutResponse(status="ok")
 
 
-@app.get("/reports/usage", response_model=UsageReportResponse)
+def _validate_usage_report_range(start_at: Optional[datetime], end_at: Optional[datetime]) -> None:
+    if start_at and end_at and start_at > end_at:
+        raise HTTPException(status_code=400, detail="start_at must be earlier than or equal to end_at")
+
+
+@app.get("/reports/usage/me", response_model=UsageReportResponse)
+async def usage_report_me(
+    current_user: AuthUser = Depends(get_current_user),
+    start_at: Optional[datetime] = None,
+    end_at: Optional[datetime] = None,
+) -> UsageReportResponse:
+    _validate_usage_report_range(start_at, end_at)
+
+    return await run_in_threadpool(
+        build_usage_report,
+        start_at=start_at,
+        end_at=end_at,
+        current_user=current_user,
+        scope="self",
+    )
+
+
+@app.get("/reports/usage/org", response_model=UsageReportResponse)
+async def usage_report_org(
+    current_user: AuthUser = Depends(require_org_admin),
+    start_at: Optional[datetime] = None,
+    end_at: Optional[datetime] = None,
+) -> UsageReportResponse:
+    _validate_usage_report_range(start_at, end_at)
+
+    return await run_in_threadpool(
+        build_usage_report,
+        start_at=start_at,
+        end_at=end_at,
+        current_user=current_user,
+        scope="organization",
+    )
+
+
+@app.get("/reports/usage", response_model=UsageReportResponse, deprecated=True)
 async def usage_report(
     current_user: AuthUser = Depends(get_current_user),
     start_at: Optional[datetime] = None,
     end_at: Optional[datetime] = None,
 ) -> UsageReportResponse:
-    if start_at and end_at and start_at > end_at:
-        raise HTTPException(status_code=400, detail="start_at must be earlier than or equal to end_at")
-
-    return await run_in_threadpool(build_usage_report, start_at=start_at, end_at=end_at)
+    return await usage_report_me(current_user=current_user, start_at=start_at, end_at=end_at)
 
 
 @app.post("/requirements/parse", response_model=RequirementsWorkflowResponse)

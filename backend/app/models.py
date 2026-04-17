@@ -154,6 +154,10 @@ class AuthUser(BaseModel):
     picture: Optional[str] = None
     provider: Optional[str] = None
     email_verified: Optional[bool] = None
+    organization_domain: Optional[str] = None
+    tenant_id: Optional[str] = None
+    roles: List[str] = Field(default_factory=list)
+    is_org_admin: bool = False
 
 
 class GoogleLoginRequest(BaseModel):

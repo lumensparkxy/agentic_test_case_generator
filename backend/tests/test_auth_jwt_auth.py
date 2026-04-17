@@ -10,7 +10,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.auth.jwt_auth import get_current_user
+from app.auth.authorization import require_org_admin
+from app.auth.jwt_auth import decode_access_token, get_current_user
 from app.models import AuthUser
 
 
@@ -45,6 +46,45 @@ class JwtAuthDependencyTests(unittest.TestCase):
 
         self.assertEqual(context.exception.status_code, 401)
         self.assertEqual(context.exception.detail, "Missing bearer access token")
+
+    def test_decode_access_token_preserves_org_admin_claims(self) -> None:
+        user = AuthUser(
+            sub="legacy-admin",
+            email="admin@acme.com",
+            name="Legacy Admin",
+            organization_domain="acme.com",
+            tenant_id="tenant-acme",
+            roles=["tenant_admin"],
+            is_org_admin=True,
+        )
+
+        from app.auth.jwt_auth import create_access_token
+
+        token, _ = create_access_token(user)
+        decoded_user = decode_access_token(token)
+
+        self.assertEqual(decoded_user.organization_domain, "acme.com")
+        self.assertEqual(decoded_user.tenant_id, "tenant-acme")
+        self.assertIn("tenant_admin", decoded_user.roles)
+        self.assertTrue(decoded_user.is_org_admin)
+
+    def test_require_org_admin_rejects_non_admin_user(self) -> None:
+        with self.assertRaises(HTTPException) as context:
+            require_org_admin(AuthUser(sub="user-1", email="user@acme.com", name="User"))
+
+        self.assertEqual(context.exception.status_code, 403)
+
+    def test_require_org_admin_accepts_explicit_admin_user(self) -> None:
+        current_user = AuthUser(
+            sub="admin-1",
+            email="admin@acme.com",
+            name="Admin",
+            organization_domain="acme.com",
+            roles=["org_admin"],
+            is_org_admin=True,
+        )
+
+        self.assertEqual(require_org_admin(current_user), current_user)
 
 
 if __name__ == "__main__":

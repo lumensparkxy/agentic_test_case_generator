@@ -43,6 +43,10 @@ def build_actor_snapshot(user: Optional[AuthUser]) -> Dict[str, Any]:
         "name": user.name,
         "provider": user.provider,
         "email_verified": user.email_verified,
+        "organization_domain": user.organization_domain,
+        "tenant_id": user.tenant_id,
+        "roles": list(user.roles or []),
+        "is_org_admin": user.is_org_admin,
     }
 
 
@@ -87,6 +91,8 @@ def start_workflow_run(
         "status": status,
         "request_id": request_id,
         "workspace_id": workspace_id,
+        "tenant_id": actor.tenant_id if actor else None,
+        "organization_domain": actor.organization_domain if actor else None,
         "actor": build_actor_snapshot(actor),
         "actor_user_id": actor.sub if actor else None,
         "started_at": _utcnow(),
@@ -95,7 +101,7 @@ def start_workflow_run(
     }
 
     if collection is not None:
-                _safe_set(collection.document(run_id), payload, operation="workflow_run_start")
+        _safe_set(collection.document(run_id), payload, operation="workflow_run_start")
 
     return run_id
 
@@ -143,6 +149,8 @@ def record_usage_event(
         "quantity": int(quantity),
         "unit": unit,
         "occurred_at": _utcnow(),
+        "tenant_id": actor.tenant_id if actor else None,
+        "organization_domain": actor.organization_domain if actor else None,
         "actor": build_actor_snapshot(actor),
         "actor_user_id": actor.sub if actor else None,
         "workspace_id": workspace_id,
@@ -153,6 +161,6 @@ def record_usage_event(
     }
 
     if collection is not None:
-                _safe_set(collection.document(event_id), payload, operation="usage_event_record")
+        _safe_set(collection.document(event_id), payload, operation="usage_event_record")
 
     return event_id

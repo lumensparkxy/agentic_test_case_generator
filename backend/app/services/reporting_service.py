@@ -2,27 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Literal, Optional
 
-from ..models import UsageReportGroup, UsageReportResponse, UsageReportUserSummary
+from ..models import AuthUser, UsageReportGroup, UsageReportResponse, UsageReportUserSummary
+from ..auth.identity import extract_email_domain, is_public_email_domain, normalize_email, resolve_organization_domain
 from .audit_service import USAGE_EVENTS_COLLECTION
 from .firebase_admin import get_firestore_client
-
-PUBLIC_EMAIL_DOMAINS = {
-    "gmail.com",
-    "googlemail.com",
-    "google.com",
-    "live.com",
-    "outlook.com",
-    "hotmail.com",
-    "msn.com",
-    "yahoo.com",
-    "icloud.com",
-    "me.com",
-    "aol.com",
-    "proton.me",
-    "protonmail.com",
-}
 
 
 def _utcnow() -> datetime:
@@ -64,6 +49,48 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
+def _extract_event_tenant_id(event: Dict[str, Any]) -> Optional[str]:
+    actor = dict(event.get("actor") or {})
+    return str(event.get("tenant_id") or actor.get("tenant_id") or "").strip() or None
+
+
+def _extract_event_domain(event: Dict[str, Any]) -> Optional[str]:
+    actor = dict(event.get("actor") or {})
+    explicit_domain = str(event.get("organization_domain") or actor.get("organization_domain") or "").strip().lower()
+    if explicit_domain:
+        return explicit_domain
+    return extract_email_domain(normalize_email(actor.get("email")))
+
+
+def _viewer_can_access_event(
+    event: Dict[str, Any],
+    current_user: Optional[AuthUser],
+    scope: Literal["all", "self", "organization"],
+) -> bool:
+    if current_user is None or scope == "all":
+        return True
+
+    viewer_user_id = str(current_user.sub or "").strip()
+    viewer_email = normalize_email(current_user.email)
+    actor = dict(event.get("actor") or {})
+    actor_user_id = str(actor.get("user_id") or event.get("actor_user_id") or "").strip()
+    actor_email = normalize_email(actor.get("email"))
+
+    if scope == "self":
+        return (bool(viewer_user_id) and actor_user_id == viewer_user_id) or (bool(viewer_email) and actor_email == viewer_email)
+
+    viewer_tenant_id = str(current_user.tenant_id or "").strip() or None
+    event_tenant_id = _extract_event_tenant_id(event)
+    if viewer_tenant_id and event_tenant_id:
+        return viewer_tenant_id == event_tenant_id
+
+    viewer_domain = resolve_organization_domain(current_user)
+    if not viewer_domain:
+        return False
+
+    return _extract_event_domain(event) == viewer_domain
+
+
 def _event_metric_totals(event: Dict[str, Any]) -> Dict[str, int]:
     metadata = event.get("metadata") or {}
     event_type = str(event.get("event_type") or "").strip()
@@ -78,14 +105,14 @@ def _event_metric_totals(event: Dict[str, Any]) -> Dict[str, int]:
     }
 
 
-def _derive_scope(actor: Dict[str, Any], fallback_user_id: str) -> Dict[str, Optional[str]]:
-    email = str(actor.get("email") or "").strip().lower()
+def _derive_scope(actor: Dict[str, Any], fallback_user_id: str, *, force_individual: bool = False) -> Dict[str, Optional[str]]:
+    email = normalize_email(actor.get("email"))
     name = str(actor.get("name") or "").strip() or None
     provider = str(actor.get("provider") or "").strip().lower() or None
     user_id = str(actor.get("user_id") or fallback_user_id or "unknown-user").strip() or "unknown-user"
-    domain = email.split("@", 1)[1] if "@" in email else None
+    domain = str(actor.get("organization_domain") or "").strip().lower() or extract_email_domain(email)
 
-    if not domain or domain in PUBLIC_EMAIL_DOMAINS:
+    if force_individual or is_public_email_domain(domain):
         return {
             "scope_type": "individual",
             "scope_key": f"user:{user_id}",
@@ -124,6 +151,8 @@ def build_usage_report(
     *,
     start_at: Optional[datetime] = None,
     end_at: Optional[datetime] = None,
+    current_user: Optional[AuthUser] = None,
+    scope: Literal["all", "self", "organization"] = "all",
 ) -> UsageReportResponse:
     if start_at and start_at.tzinfo is None:
         start_at = start_at.replace(tzinfo=timezone.utc)
@@ -141,17 +170,19 @@ def build_usage_report(
             continue
         if end_at and occurred_at and occurred_at > end_at:
             continue
+        if not _viewer_can_access_event(event, current_user, scope):
+            continue
 
         actor = dict(event.get("actor") or {})
-        scope = _derive_scope(actor, str(event.get("actor_user_id") or ""))
-        scope_key = str(scope["scope_key"])
+        scope_details = _derive_scope(actor, str(event.get("actor_user_id") or ""), force_individual=scope == "self")
+        scope_key = str(scope_details["scope_key"])
         group = groups.setdefault(
             scope_key,
             {
-                "scope_type": scope["scope_type"],
+                "scope_type": scope_details["scope_type"],
                 "scope_key": scope_key,
-                "display_name": scope["display_name"],
-                "organization_domain": scope["organization_domain"],
+                "display_name": scope_details["display_name"],
+                "organization_domain": scope_details["organization_domain"],
                 "total_events": 0,
                 "requirements_generated_count": 0,
                 "requirements_modified_count": 0,
@@ -163,14 +194,14 @@ def build_usage_report(
             },
         )
 
-        user_id = str(scope["user_id"] or "unknown-user")
+        user_id = str(scope_details["user_id"] or "unknown-user")
         user_summary = group["users"].setdefault(
             user_id,
             {
                 "user_id": user_id,
-                "email": scope["email"],
-                "name": scope["name"],
-                "provider": scope["provider"],
+            "email": scope_details["email"],
+            "name": scope_details["name"],
+            "provider": scope_details["provider"],
                 "total_events": 0,
                 "requirements_generated_count": 0,
                 "requirements_modified_count": 0,

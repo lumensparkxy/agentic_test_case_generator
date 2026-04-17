@@ -367,7 +367,7 @@ export default function App() {
 
 		setIsUsageLoading(true);
 		try {
-			const res = await apiRequest("/reports/usage", { method: "GET" });
+			const res = await apiRequest("/reports/usage/me", { method: "GET" });
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to load usage summary");
 				throw new Error(errorMessage);

@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..config import get_auth_settings
 from ..models import AuthUser
+from .identity import normalize_roles
 from .firebase_auth import verify_firebase_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -41,6 +42,10 @@ def create_access_token(user: AuthUser) -> Tuple[str, int]:
         "email": user.email,
         "name": user.name,
         "picture": user.picture,
+        "organization_domain": user.organization_domain,
+        "tenant_id": user.tenant_id,
+        "roles": list(user.roles or []),
+        "is_org_admin": user.is_org_admin,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
@@ -66,6 +71,10 @@ def decode_access_token(token: str) -> AuthUser:
             email=str(payload["email"]) if payload.get("email") is not None else None,
             name=str(payload.get("name") or payload.get("email") or payload["sub"]),
             picture=payload.get("picture"),
+            organization_domain=str(payload.get("organization_domain") or "").strip().lower() or None,
+            tenant_id=str(payload.get("tenant_id") or "").strip() or None,
+            roles=normalize_roles(payload.get("roles"), payload.get("role"), payload.get("tenant_role")),
+            is_org_admin=bool(payload.get("is_org_admin") or payload.get("org_admin") or payload.get("tenant_admin")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise _auth_error("Invalid access token payload") from exc
