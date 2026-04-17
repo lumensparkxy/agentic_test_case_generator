@@ -54,9 +54,15 @@ async function openGenerateTab(page) {
 }
 
 test.describe("Agentic Test Case Generator E2E", () => {
-	test("anonymous portal shows Google sign-in", async ({ page }) => {
+	test("anonymous portal opens provider chooser from sign-in", async ({ page }) => {
 		await page.goto("/");
-		await expect(page.getByRole("button", { name: /google|über google anmelden/i })).toBeVisible();
+		await expect(page.getByRole("button", { name: /^sign in$/i })).toBeVisible();
+
+		await page.getByRole("button", { name: /^sign in$/i }).click();
+		await expect(page.getByRole("dialog", { name: /choose a sign-in method/i })).toBeVisible();
+		await expect(page.getByRole("button", { name: /google/i })).toBeVisible();
+		await expect(page.getByRole("button", { name: /microsoft/i })).toBeVisible();
+		await expect(page.getByRole("button", { name: /apple/i })).toBeVisible();
 	});
 
 	test("authenticated user can parse, generate, and export high-quality test cases", async ({ page }) => {

@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import { firebaseAuth, firebaseGoogleProvider, hasFirebaseAuthConfig } from "./firebase";
+import {
+	createFirebaseAuthProvider,
+	firebaseAuth,
+	firebaseAuthHandlerUrl,
+	hasFirebaseAuthConfig,
+	visibleFirebaseAuthProviders,
+} from "./firebase";
 import "./App.css";
 
 const API_BASE = (() => {
@@ -12,7 +18,7 @@ const API_BASE = (() => {
 })();
 const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 const STORAGE_AUTH_USER = "tcg.auth.user";
-const AUTH_REQUIRED_MESSAGE = "Sign in with Google to continue.";
+const AUTH_REQUIRED_MESSAGE = "Sign in to continue.";
 const EMPTY_WORKFLOW_SETTINGS = {
 	approval_threshold: "",
 	max_iterations: "",
@@ -33,6 +39,72 @@ const USAGE_STATUS_ITEMS = [
 	{ key: "testCasesGeneratedCount", label: "TC +" },
 	{ key: "testCasesModifiedCount", label: "TC Δ" },
 ];
+
+const getAuthProviderLabel = (providerKeyOrId) => {
+	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (
+		providerKeyOrId === id || providerKeyOrId === providerId
+	));
+	return provider?.label || providerKeyOrId || null;
+};
+
+const buildProviderSignInErrorMessage = (providerConfig, error) => {
+	const providerLabel = providerConfig?.label || "Provider";
+	const handlerUrl = firebaseAuthHandlerUrl || "https://<your-project>.firebaseapp.com/__/auth/handler";
+	const rawMessage = `${error?.message || "Unknown error"}`.trim();
+	const errorCode = `${error?.code || ""}`.trim();
+
+	if (providerConfig?.id === "apple" && errorCode === "auth/operation-not-allowed") {
+		return `${providerLabel} sign-in is not enabled for the Firebase project used by this frontend. In Firebase Console → Authentication → Sign-in method → Apple, enable Apple and complete the Service ID, Team ID, Key ID, and private key setup. Apple Return URL: ${handlerUrl}`;
+	}
+
+	if (providerConfig?.id === "microsoft" && /redirect_uri|invalid_request/i.test(rawMessage)) {
+		return `${providerLabel} sign-in is missing the Firebase auth callback URL in the Microsoft Entra app registration. Add this Web redirect URI to the Azure/Microsoft app used by Firebase: ${handlerUrl}. Then verify the same Client ID and Client Secret are saved in Firebase Console → Authentication → Sign-in method → Microsoft.`;
+	}
+
+	if (errorCode === "auth/operation-not-allowed") {
+		return `${providerLabel} sign-in is not enabled for the Firebase project used by this app. Enable it in Firebase Console → Authentication → Sign-in method.`;
+	}
+
+	if (errorCode === "auth/unauthorized-domain") {
+		return `This hostname is not authorized for Firebase Authentication. Add ${window.location.hostname} to Firebase Console → Authentication → Settings → Authorized domains.`;
+	}
+
+	return `Sign-in with ${providerLabel} failed: ${rawMessage}`;
+};
+
+const AuthProviderIcon = ({ providerId }) => {
+	if (providerId === "google") {
+		return (
+			<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+				<path fill="#4285F4" d="M17.64 9.2045c0-.6382-.0573-1.2518-.1636-1.8409H9v3.4818h4.8436c-.2086 1.125-.8427 2.0782-1.796 2.7164v2.2582h2.9087c1.7018-1.5663 2.6837-3.874 2.6837-6.6155z" />
+				<path fill="#34A853" d="M9 18c2.43 0 4.4673-.8064 5.9564-2.1818l-2.9087-2.2582c-.8063.54-1.8372.8591-3.0477.8591-2.3427 0-4.3241-1.5818-5.0327-3.7091H.96v2.3318C2.4409 15.9836 5.4818 18 9 18z" />
+				<path fill="#FBBC05" d="M3.9673 10.7091c-.18-.54-.2836-1.1164-.2836-1.7091s.1036-1.1691.2836-1.7091V4.9591H.96C.3477 6.1791 0 7.5509 0 9s.3477 2.8209.96 4.0409l3.0073-2.3318z" />
+				<path fill="#EA4335" d="M9 3.5809c1.3214 0 2.5077.4541 3.44 1.3455l2.5818-2.5818C13.4636.8909 11.43 0 9 0 5.4818 0 2.4409 2.0164.96 4.9591l3.0073 2.3318C4.6759 5.1627 6.6573 3.5809 9 3.5809z" />
+			</svg>
+		);
+	}
+
+	if (providerId === "microsoft") {
+		return (
+			<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+				<rect x="1" y="1" width="7" height="7" fill="#F25022" />
+				<rect x="10" y="1" width="7" height="7" fill="#7FBA00" />
+				<rect x="1" y="10" width="7" height="7" fill="#00A4EF" />
+				<rect x="10" y="10" width="7" height="7" fill="#FFB900" />
+			</svg>
+		);
+	}
+
+	if (providerId === "apple") {
+		return (
+			<svg viewBox="0 0 384 512" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M318.7 268.7c-.2-38.2 31.2-56.5 32.6-57.4-17.8-26-45.4-29.6-55.3-30-23.5-2.4-45.8 13.8-57.7 13.8-11.8 0-30-13.4-49.3-13-25.3.4-48.7 14.7-61.7 37.5-26.3 45.6-6.7 113 18.7 149.8 12.4 17.9 27.1 38.1 46.5 37.3 18.7-.8 25.7-12 48.5-12 22.7 0 29 12 48.8 11.6 20.2-.4 33-18.1 45.3-36.1 14.2-20.8 20.1-41 20.3-42-.4-.2-36.8-14.1-37.2-56.5zm-40.6-100.1c10.3-12.5 17.2-29.8 15.3-47.1-14.7.6-32.8 9.8-43.4 22.3-9.5 10.9-17.8 28.4-15.6 45.1 16.5 1.3 33.4-8.4 43.7-20.3z" />
+			</svg>
+		);
+	}
+
+	return null;
+};
 
 const normalizeUsageMetric = (value) => {
 	const parsed = Number.parseInt(`${value ?? 0}`, 10);
@@ -152,11 +224,14 @@ export default function App() {
 	const [authToken, setAuthToken] = useState("");
 	const [currentUser, setCurrentUser] = useState(null);
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
+	const [activeAuthProvider, setActiveAuthProvider] = useState("");
+	const [isSignInDialogOpen, setIsSignInDialogOpen] = useState(false);
 	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
 	const [usageSummary, setUsageSummary] = useState(null);
 	const [isUsageLoading, setIsUsageLoading] = useState(false);
 
 	const isAuthenticated = Boolean(authToken && currentUser);
+	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
 	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
 
@@ -296,6 +371,7 @@ export default function App() {
 	const clearAuthState = (nextStatus = null) => {
 		setAuthToken("");
 		setCurrentUser(null);
+		setActiveAuthProvider("");
 		setUsageSummary(null);
 		setIsUsageLoading(false);
 		localStorage.removeItem(STORAGE_AUTH_TOKEN);
@@ -383,6 +459,26 @@ export default function App() {
 		}
 	};
 
+	const openSignInDialog = () => {
+		if (isAuthenticating || !hasVisibleAuthProviders) {
+			return;
+		}
+		setIsSignInDialogOpen(true);
+	};
+
+	const closeSignInDialog = () => {
+		if (isAuthenticating) {
+			return;
+		}
+		setIsSignInDialogOpen(false);
+	};
+
+	const handleSignInDialogOverlayClick = (event) => {
+		if (event.target === event.currentTarget) {
+			closeSignInDialog();
+		}
+	};
+
 	useEffect(() => {
 		if (!firebaseAuth) {
 			const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
@@ -466,6 +562,21 @@ export default function App() {
 		void refreshUsageSummary(currentUser);
 	}, [isAuthenticated, currentUser?.sub, currentUser?.email]);
 
+	useEffect(() => {
+		if (!isSignInDialogOpen) {
+			return undefined;
+		}
+
+		const handleKeyDown = (event) => {
+			if (event.key === "Escape") {
+				closeSignInDialog();
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [isSignInDialogOpen, isAuthenticating]);
+
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = { ...(options.headers || {}) };
 
@@ -491,20 +602,30 @@ export default function App() {
 		return res;
 	};
 
-	const handleGoogleSignIn = async () => {
+	const handleProviderSignIn = async (providerKey) => {
 		if (!firebaseAuth) {
 			setStatus("Firebase Auth is not configured.");
 			return;
 		}
 
+		const providerConfig = visibleFirebaseAuthProviders.find((provider) => provider.id === providerKey);
+		const provider = createFirebaseAuthProvider(providerKey);
+		if (!providerConfig || !provider) {
+			setStatus("Selected sign-in provider is not available.");
+			return;
+		}
+
 		setIsAuthenticating(true);
-		setStatus("Signing in with Google...");
+		setActiveAuthProvider(providerKey);
+		setIsSignInDialogOpen(false);
+		setStatus(`Signing in with ${providerConfig.label}...`);
 		try {
-			await signInWithPopup(firebaseAuth, firebaseGoogleProvider);
+			await signInWithPopup(firebaseAuth, provider);
 		} catch (error) {
-			clearAuthState(`Google sign-in failed: ${error.message}`);
+			clearAuthState(buildProviderSignInErrorMessage(providerConfig, error));
 		} finally {
 			setIsAuthenticating(false);
+			setActiveAuthProvider("");
 		}
 	};
 
@@ -762,6 +883,7 @@ export default function App() {
 			value: normalizeUsageMetric(usageSummary[item.key]),
 		}))
 		: [];
+	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
 
 	return (
 		<div className="page">
@@ -802,7 +924,7 @@ export default function App() {
 								)}
 								<div className="auth-user-meta">
 									<strong>{currentUser?.name}</strong>
-									<span>{currentUser?.email || currentUser?.provider || currentUser?.sub}</span>
+									<span>{currentUser?.email || getAuthProviderLabel(currentUser?.provider) || currentUser?.sub}</span>
 								</div>
 								<button
 									type="button"
@@ -813,12 +935,20 @@ export default function App() {
 									{isAuthenticating ? "Signing out..." : "Sign Out"}
 								</button>
 							</div>
-						) : hasFirebaseAuthConfig ? (
+						) : hasFirebaseAuthConfig && hasVisibleAuthProviders ? (
 							<div className="auth-login">
-								<button type="button" onClick={handleGoogleSignIn} disabled={isAuthenticating}>
-									{isAuthenticating ? "Signing in..." : "Sign in with Google"}
+								<button type="button" onClick={openSignInDialog} disabled={isAuthenticating}>
+									{isAuthenticating && currentAuthProviderLabel
+										? `Signing in with ${currentAuthProviderLabel}...`
+										: isAuthenticating
+											? "Signing in..."
+											: "Sign In"}
 								</button>
 							</div>
+						) : hasFirebaseAuthConfig ? (
+							<span className="auth-message auth-config-missing">
+								No Firebase sign-in providers are currently available.
+							</span>
 						) : (
 							<span className="auth-message auth-config-missing">
 								Set the VITE_FIREBASE_* variables to enable Firebase sign-in.
@@ -830,7 +960,53 @@ export default function App() {
 
 			{!isAuthenticated && !isVerifyingSession && (
 				<div className="auth-warning-banner">
-					🔐 Sign in with Google to parse requirements, generate test cases, and export artifacts.
+					🔐 Sign in to parse requirements, generate test cases, and export artifacts.
+				</div>
+			)}
+
+			{isSignInDialogOpen && (
+				<div className="auth-dialog-overlay" onClick={handleSignInDialogOverlayClick}>
+					<div
+						className="auth-dialog"
+						role="dialog"
+						aria-modal="true"
+						aria-labelledby="auth-dialog-title"
+						onClick={(event) => event.stopPropagation()}
+					>
+						<div className="auth-dialog-header">
+							<div>
+								<h2 id="auth-dialog-title">Choose a sign-in method</h2>
+								<p>Select one provider to continue into the workspace.</p>
+							</div>
+							<button
+								type="button"
+								className="auth-dialog-close"
+								onClick={closeSignInDialog}
+								disabled={isAuthenticating}
+								aria-label="Close sign-in dialog"
+							>
+								×
+							</button>
+						</div>
+						<div className="auth-provider-list">
+							{visibleFirebaseAuthProviders.map((provider) => (
+								<button
+									key={provider.id}
+									type="button"
+									className={`auth-provider-option auth-provider-option--${provider.buttonVariant || provider.id}`}
+									onClick={() => handleProviderSignIn(provider.id)}
+									disabled={isAuthenticating}
+								>
+									<span className="auth-provider-option-icon" aria-hidden="true">
+										<AuthProviderIcon providerId={provider.id} />
+									</span>
+									<span className="auth-provider-option-label">
+										{provider.buttonText || `Sign in with ${provider.label}`}
+									</span>
+								</button>
+							))}
+						</div>
+					</div>
 				</div>
 			)}
 
