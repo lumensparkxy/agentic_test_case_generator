@@ -1,11 +1,64 @@
 import os
 import logging
+from pathlib import Path
 from importlib.metadata import PackageNotFoundError, version
 from functools import lru_cache
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - dependency fallback
+    load_dotenv = None
 
 
 DEFAULT_MODEL_NAME = "gemini-2.5-flash"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CORS_ALLOW_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
+
+
+class _SuppressNonTextPartsWarning(logging.Filter):
+    """Suppress a known noisy google-genai warning triggered by expected tool-call responses."""
+
+    SUPPRESSED_PREFIX = "Warning: there are non-text parts in the response:"
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - tiny adapter
+        message = record.getMessage()
+        return not message.startswith(self.SUPPRESSED_PREFIX)
+
+
+def _load_environment_file() -> None:
+    """Load environment variables from repo/root .env so project config wins for local dev."""
+    if load_dotenv is None:
+        logging.warning("python-dotenv is not installed; .env auto-loading is disabled")
+        return
+
+    candidate_paths = [
+        REPO_ROOT / ".env",
+        Path.cwd() / ".env",
+    ]
+
+    seen = set()
+    for path in candidate_paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            load_dotenv(dotenv_path=resolved, override=True)
+
+
+def _configure_library_warning_filters() -> None:
+    logger = logging.getLogger("google_genai.types")
+    if any(isinstance(existing_filter, _SuppressNonTextPartsWarning) for existing_filter in logger.filters):
+        return
+    logger.addFilter(_SuppressNonTextPartsWarning())
+
+
+_load_environment_file()
+_configure_library_warning_filters()
 
 
 class Settings(BaseModel):
@@ -13,11 +66,48 @@ class Settings(BaseModel):
     model_name: str = DEFAULT_MODEL_NAME
 
 
+class AuthSettings(BaseModel):
+    google_client_id: str = ""
+    google_client_ids: list[str] = Field(default_factory=list)
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 60
+
+
+class FirebaseSettings(BaseModel):
+    project_id: str = ""
+    service_account_json: str = ""
+
+
+def get_cors_allow_origins() -> list[str]:
+    raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
+    if not raw_origins.strip():
+        return list(DEFAULT_CORS_ALLOW_ORIGINS)
+
+    parsed_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
+    return parsed_origins or list(DEFAULT_CORS_ALLOW_ORIGINS)
+
+
 def _parse_major_minor(raw_version: str) -> tuple[int, int]:
     parts = raw_version.split(".")
     major = int(parts[0]) if parts and parts[0].isdigit() else 0
     minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
     return major, minor
+
+
+def _split_csv_env(raw_value: str) -> list[str]:
+    return [value.strip() for value in raw_value.split(",") if value.strip()]
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
 def _warn_if_dependency_mismatch() -> None:
@@ -44,20 +134,55 @@ def _warn_if_dependency_mismatch() -> None:
 
 
 @lru_cache
+def get_auth_settings() -> AuthSettings:
+    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    google_client_ids = _dedupe_preserving_order(
+        _split_csv_env(os.getenv("GOOGLE_CLIENT_IDS", ""))
+        + [google_client_id, os.getenv("VITE_GOOGLE_CLIENT_ID", "").strip()]
+    )
+    jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
+    jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
+    jwt_expiration_raw = os.getenv("JWT_EXPIRATION_MINUTES", "60")
+
+    try:
+        jwt_expiration_minutes = int(jwt_expiration_raw)
+    except ValueError:
+        logging.warning("Invalid JWT_EXPIRATION_MINUTES=%s. Falling back to 60.", jwt_expiration_raw)
+        jwt_expiration_minutes = 60
+
+    return AuthSettings(
+        google_client_id=google_client_id or (google_client_ids[0] if google_client_ids else ""),
+        google_client_ids=google_client_ids,
+        jwt_secret_key=jwt_secret_key,
+        jwt_algorithm=jwt_algorithm,
+        jwt_expiration_minutes=jwt_expiration_minutes,
+    )
+
+
+@lru_cache
+def get_firebase_settings() -> FirebaseSettings:
+    return FirebaseSettings(
+        project_id=(os.getenv("FIREBASE_PROJECT_ID") or "").strip(),
+        service_account_json=(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip(),
+    )
+
+
+@lru_cache
 def get_settings() -> Settings:
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    gemini_api_key_env = os.getenv("GEMINI_API_KEY")
+    google_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None
+    gemini_api_key_env = (os.getenv("GEMINI_API_KEY") or "").strip() or None
     gemini_api_key = google_api_key or gemini_api_key_env
     model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is required")
 
-    if not google_api_key and gemini_api_key_env:
-        os.environ["GOOGLE_API_KEY"] = gemini_api_key_env
-        # Keep a single canonical key variable for SDK clients to avoid noisy warnings.
-        os.environ.pop("GEMINI_API_KEY", None)
-    elif google_api_key and gemini_api_key_env:
+    if google_api_key and gemini_api_key_env and google_api_key != gemini_api_key_env:
         logging.warning("Both GOOGLE_API_KEY and GEMINI_API_KEY are set; using GOOGLE_API_KEY")
+
+    # Keep a single canonical key variable for SDK clients to avoid noisy warnings.
+    os.environ["GOOGLE_API_KEY"] = gemini_api_key
+    os.environ.pop("GEMINI_API_KEY", None)
 
     _warn_if_dependency_mismatch()
     return Settings(gemini_api_key=gemini_api_key, model_name=model_name)

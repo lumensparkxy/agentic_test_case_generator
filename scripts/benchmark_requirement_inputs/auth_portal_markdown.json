@@ -1,0 +1,6 @@
+{
+  "name": "auth_portal_markdown",
+  "mode": "extract",
+  "document_count": 1,
+  "document_text": "# Customer Portal Requirements\n\nCreated: 2026-03-15\nAuthor: Product Team\n\n## Overview\nThis document captures the MVP features for the customer portal.\n\n## Features\n- Allow users to sign in using email and password.\n- The system shall lock the account after 5 failed login attempts within 10 minutes.\n- Allow users to reset their password via email link.\n- Allow users to update their display name.\n- Allow users to upload a profile photo in JPG or PNG format up to 2 MB.\n- Allow users to search by keyword.\n- The system shall sort search results by relevance by default.\n- The system shall show a no-results message when no search matches are found.\n- Allow users to opt in to email notifications.\n- The system shall send a confirmation email when a user changes their email address.\n\n## Notes\n- API_KEY values must never be logged.\n- Run npm run dev locally when testing the frontend.\n"
+}

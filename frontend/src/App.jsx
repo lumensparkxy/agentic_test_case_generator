@@ -1,12 +1,127 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { firebaseAuth, firebaseGoogleProvider, hasFirebaseAuthConfig } from "./firebase";
 import "./App.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const API_BASE = (() => {
+	const configuredApiBase = (import.meta.env.VITE_API_BASE || "").trim();
+	if (!configuredApiBase) {
+		return "http://127.0.0.1:8000";
+	}
+	return configuredApiBase === "http://localhost:8000" ? "http://127.0.0.1:8000" : configuredApiBase;
+})();
+const STORAGE_AUTH_TOKEN = "tcg.auth.token";
+const STORAGE_AUTH_USER = "tcg.auth.user";
+const AUTH_REQUIRED_MESSAGE = "Sign in with Google to continue.";
+const EMPTY_WORKFLOW_SETTINGS = {
+	approval_threshold: "",
+	max_iterations: "",
+	timeout_seconds: "",
+	stall_iteration_limit: "",
+	retry_attempts: "",
+};
+const WORKFLOW_SETTING_FIELDS = [
+	{ key: "approval_threshold", label: "Approval threshold", min: 0, max: 100 },
+	{ key: "max_iterations", label: "Max iterations", min: 1, max: 20 },
+	{ key: "timeout_seconds", label: "Timeout (seconds)", min: 1, max: 900 },
+	{ key: "stall_iteration_limit", label: "Stall limit", min: 1, max: 20 },
+	{ key: "retry_attempts", label: "Retry attempts", min: 0, max: 5 },
+];
+const USAGE_STATUS_ITEMS = [
+	{ key: "requirementsGeneratedCount", label: "Req +" },
+	{ key: "requirementsModifiedCount", label: "Req Δ" },
+	{ key: "testCasesGeneratedCount", label: "TC +" },
+	{ key: "testCasesModifiedCount", label: "TC Δ" },
+];
+
+const normalizeUsageMetric = (value) => {
+	const parsed = Number.parseInt(`${value ?? 0}`, 10);
+	return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildEmptyUsageSummary = (user) => ({
+	scopeType: "individual",
+	scopeKey: user?.sub ? `user:${user.sub}` : "user:current",
+	displayName: user?.name || user?.email || user?.sub || "Current user",
+	totalEvents: 0,
+	requirementsGeneratedCount: 0,
+	requirementsModifiedCount: 0,
+	testCasesGeneratedCount: 0,
+	testCasesModifiedCount: 0,
+	hasData: false,
+});
+
+const buildUsageSummaryFromSource = (source, user, group, hasData = true) => ({
+	scopeType: group?.scope_type || "individual",
+	scopeKey: group?.scope_key || (user?.sub ? `user:${user.sub}` : "user:current"),
+	displayName: source?.name || source?.email || group?.display_name || user?.name || user?.email || user?.sub || "Current user",
+	totalEvents: normalizeUsageMetric(source?.total_events),
+	requirementsGeneratedCount: normalizeUsageMetric(source?.requirements_generated_count),
+	requirementsModifiedCount: normalizeUsageMetric(source?.requirements_modified_count),
+	testCasesGeneratedCount: normalizeUsageMetric(source?.test_cases_generated_count),
+	testCasesModifiedCount: normalizeUsageMetric(source?.test_cases_modified_count),
+	hasData,
+});
+
+const getCurrentUserUsageSummary = (report, user) => {
+	if (!user) {
+		return null;
+	}
+
+	const fallback = buildEmptyUsageSummary(user);
+	const subject = `${user.sub || ""}`.trim();
+	const email = `${user.email || ""}`.trim().toLowerCase();
+	const groups = Array.isArray(report?.groups) ? report.groups : [];
+	const matchesUser = (candidate) => {
+		const candidateUserId = `${candidate?.user_id || ""}`.trim();
+		const candidateEmail = `${candidate?.email || ""}`.trim().toLowerCase();
+		return (subject && candidateUserId === subject) || (email && candidateEmail === email);
+	};
+
+	for (const group of groups) {
+		const users = Array.isArray(group?.users) ? group.users : [];
+		const matchedUser = users.find(matchesUser);
+		if (matchedUser) {
+			return buildUsageSummaryFromSource(matchedUser, user, group, true);
+		}
+
+		if (group?.scope_type === "individual") {
+			const scopeKey = `${group?.scope_key || ""}`.trim();
+			const displayName = `${group?.display_name || ""}`.trim().toLowerCase();
+			if ((subject && scopeKey === `user:${subject}`) || (email && displayName === email)) {
+				return buildUsageSummaryFromSource(group, user, group, true);
+			}
+		}
+	}
+
+	return fallback;
+};
+
+const buildWorkflowSettingsPayload = (settings) => {
+	const payload = Object.entries(settings || {}).reduce((acc, [key, value]) => {
+		const normalized = `${value ?? ""}`.trim();
+		if (!normalized) {
+			return acc;
+		}
+		const parsed = Number.parseInt(normalized, 10);
+		if (Number.isFinite(parsed)) {
+			acc[key] = parsed;
+		}
+		return acc;
+	}, {});
+
+	return Object.keys(payload).length ? payload : null;
+};
 
 export default function App() {
 	const [file, setFile] = useState(null);
 	const [rawText, setRawText] = useState("");
 	const [requirements, setRequirements] = useState([]);
+	const [requirementReview, setRequirementReview] = useState(null);
+	const [requirementCoverageMetrics, setRequirementCoverageMetrics] = useState(null);
+	const [requirementWorkflowDiagnostics, setRequirementWorkflowDiagnostics] = useState(null);
+	const [appliedRequirementWorkflowSettings, setAppliedRequirementWorkflowSettings] = useState(null);
+	const [requirementIterationHistory, setRequirementIterationHistory] = useState([]);
 	const [activeTab, setActiveTab] = useState(0);
 	const [appLink, setAppLink] = useState("");
 	const [prototypeLink, setPrototypeLink] = useState("");
@@ -15,18 +130,73 @@ export default function App() {
 	const [templateName, setTemplateName] = useState("default");
 	const [templateFormat, setTemplateFormat] = useState("table");
 	const [testCases, setTestCases] = useState([]);
-	const [jiraProject, setJiraProject] = useState("");
-	const [jiraIssueType, setJiraIssueType] = useState("Test");
+	const [requirementAnalysis, setRequirementAnalysis] = useState([]);
+	const [coveragePlan, setCoveragePlan] = useState([]);
+	const [coverageMetrics, setCoverageMetrics] = useState(null);
+	const [testCaseReview, setTestCaseReview] = useState(null);
+	const [testCaseWorkflowDiagnostics, setTestCaseWorkflowDiagnostics] = useState(null);
+	const [appliedTestCaseWorkflowSettings, setAppliedTestCaseWorkflowSettings] = useState(null);
+	const [testCaseIterationHistory, setTestCaseIterationHistory] = useState([]);
+	const [enrichedContext, setEnrichedContext] = useState(null);
+	const [selectedArtifactSourceIds, setSelectedArtifactSourceIds] = useState([]);
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
+	const [requirementWorkflowSettings, setRequirementWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
+	const [testCaseWorkflowSettings, setTestCaseWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
 	const [expandedRows, setExpandedRows] = useState({});
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isParsing, setIsParsing] = useState(false);
+	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
 	const [isExporting, setIsExporting] = useState(false);
+	const [authToken, setAuthToken] = useState("");
+	const [currentUser, setCurrentUser] = useState(null);
+	const [isAuthenticating, setIsAuthenticating] = useState(false);
+	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+	const [usageSummary, setUsageSummary] = useState(null);
+	const [isUsageLoading, setIsUsageLoading] = useState(false);
+
+	const isAuthenticated = Boolean(authToken && currentUser);
+	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
+	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+	};
+
+	const resetContextAnalysis = () => {
+		setEnrichedContext(null);
+		setSelectedArtifactSourceIds([]);
+	};
+
+	const buildContextPayload = () => {
+		const baseContext = {
+			requirements,
+			app_link: appLink || null,
+			prototype_link: prototypeLink || null,
+			diagram_links: diagramLinks
+				? diagramLinks.split(";").map((x) => x.trim()).filter(Boolean)
+				: null,
+			image_links: imageLinks
+				? imageLinks.split(";").map((x) => x.trim()).filter(Boolean)
+				: null,
+			notes: "Generated via UI",
+		};
+
+		if (!enrichedContext?.grounded_context) {
+			return { ...baseContext, grounded_context: null };
+		}
+
+		const selectedIds = new Set(selectedArtifactSourceIds);
+		const groundedContext = enrichedContext.grounded_context;
+		return {
+			...baseContext,
+			grounded_context: {
+				...groundedContext,
+				artifact_sources: (groundedContext.artifact_sources || []).filter((source) => selectedIds.has(source.id)),
+				ui_elements: (groundedContext.ui_elements || []).filter((element) => !element.source_id || selectedIds.has(element.source_id)),
+			},
+		};
 	};
 
 	const parseApiError = async (res, fallbackMessage) => {
@@ -40,29 +210,360 @@ export default function App() {
 		}
 	};
 
+	const updateWorkflowSetting = (setter, key) => (event) => {
+		setter((prev) => ({ ...prev, [key]: event.target.value }));
+	};
+
+	const renderWorkflowSettingsPanel = (title, description, settings, setSettings) => (
+		<div className="workflow-settings-panel">
+			<div className="workflow-settings-header">
+				<div>
+					<h3>{title}</h3>
+					<p>{description}</p>
+				</div>
+				<span className="workflow-settings-badge">Optional</span>
+			</div>
+			<div className="workflow-settings-grid">
+				{WORKFLOW_SETTING_FIELDS.map((field) => (
+					<div className="form-group" key={field.key}>
+						<label>{field.label}</label>
+						<input
+							type="number"
+							min={field.min}
+							max={field.max}
+							placeholder="Use backend default"
+							value={settings[field.key]}
+							onChange={updateWorkflowSetting(setSettings, field.key)}
+						/>
+					</div>
+				))}
+			</div>
+			<p className="workflow-settings-help">Leave any field blank to use the backend default for that workflow.</p>
+		</div>
+	);
+
+	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => {
+		if (!diagnostics && !appliedSettings) {
+			return null;
+		}
+
+		const warnings = diagnostics?.warnings || [];
+		const parserFailures = diagnostics?.parser_failures || [];
+		const pillEntries = [
+			appliedSettings?.approval_threshold != null ? `Threshold ${appliedSettings.approval_threshold}` : null,
+			appliedSettings?.max_iterations != null ? `Max iter ${appliedSettings.max_iterations}` : null,
+			diagnostics?.status ? `Status ${diagnostics.status}` : null,
+			iterationHistory?.length ? `Iterations ${iterationHistory.length}` : null,
+			diagnostics?.best_iteration ? `Best iter ${diagnostics.best_iteration}` : null,
+			diagnostics?.timed_out ? "Timed out" : null,
+			diagnostics?.stalled ? "Stalled" : null,
+			diagnostics?.used_fallback ? "Fallback used" : null,
+		].filter(Boolean);
+
+		return (
+			<div className="workflow-diagnostics-panel">
+				<div className="workflow-diagnostics-header">
+					<h3>{title}</h3>
+					{diagnostics?.failure_reason && <span className="workflow-diagnostics-reason">Reason: {diagnostics.failure_reason}</span>}
+				</div>
+				{pillEntries.length > 0 && (
+					<div className="workflow-diagnostics-pills">
+						{pillEntries.map((entry) => (
+							<span className="workflow-diagnostics-pill" key={entry}>{entry}</span>
+						))}
+					</div>
+				)}
+				{warnings.length > 0 && (
+					<div className="workflow-diagnostics-block warning">
+						<strong>Warnings</strong>
+						<ul>
+							{warnings.map((warning) => <li key={warning}>{warning}</li>)}
+						</ul>
+					</div>
+				)}
+				{parserFailures.length > 0 && (
+					<div className="workflow-diagnostics-block alert">
+						<strong>Parser issues</strong>
+						<ul>
+							{parserFailures.map((failure) => <li key={failure}>{failure}</li>)}
+						</ul>
+					</div>
+				)}
+			</div>
+		);
+	};
+
+	const clearAuthState = (nextStatus = null) => {
+		setAuthToken("");
+		setCurrentUser(null);
+		setUsageSummary(null);
+		setIsUsageLoading(false);
+		localStorage.removeItem(STORAGE_AUTH_TOKEN);
+		localStorage.removeItem(STORAGE_AUTH_USER);
+		if (nextStatus) {
+			setStatus(nextStatus);
+		}
+	};
+
+	const persistAuthState = (token, user) => {
+		setAuthToken(token);
+		setCurrentUser(user);
+		if (token) {
+			localStorage.setItem(STORAGE_AUTH_TOKEN, token);
+		}
+		if (user) {
+			localStorage.setItem(STORAGE_AUTH_USER, JSON.stringify(user));
+		}
+	};
+
+	const buildFirebaseFallbackUser = (firebaseUser) => ({
+		sub: firebaseUser.uid,
+		email: firebaseUser.email || null,
+		name: firebaseUser.displayName || firebaseUser.email || firebaseUser.phoneNumber || firebaseUser.uid,
+		picture: firebaseUser.photoURL || null,
+		provider: firebaseUser.providerData?.[0]?.providerId || null,
+		email_verified: firebaseUser.emailVerified ?? null,
+	});
+
+	const syncFirebaseSession = async (firebaseUser, successPrefix = "Signed in as") => {
+		const token = await firebaseUser.getIdToken();
+		const fallbackUser = buildFirebaseFallbackUser(firebaseUser);
+		const res = await fetch(`${API_BASE}/auth/me`, {
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${token}`,
+			},
+		});
+
+		if (!res.ok) {
+			const errorMessage = await parseApiError(res, "Session is no longer valid");
+			throw new Error(errorMessage);
+		}
+
+		const data = await res.json();
+		const resolvedUser = data || fallbackUser;
+		persistAuthState(token, resolvedUser);
+		setStatus(`${successPrefix} ${resolvedUser.name}.`);
+		return token;
+	};
+
+	const getCurrentAccessToken = async () => {
+		if (!firebaseAuth?.currentUser) {
+			return authToken || localStorage.getItem(STORAGE_AUTH_TOKEN) || "";
+		}
+
+		const token = await firebaseAuth.currentUser.getIdToken();
+		setAuthToken((current) => (current === token ? current : token));
+		return token;
+	};
+
+	const refreshUsageSummary = async (userOverride = currentUser) => {
+		const user = userOverride || currentUser;
+		if (!user) {
+			setUsageSummary(null);
+			setIsUsageLoading(false);
+			return;
+		}
+
+		setIsUsageLoading(true);
+		try {
+			const res = await apiRequest("/reports/usage/me", { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load usage summary");
+				throw new Error(errorMessage);
+			}
+
+			const report = await res.json();
+			setUsageSummary(getCurrentUserUsageSummary(report, user));
+		} catch (error) {
+			console.error("Failed to refresh usage summary", error);
+			setUsageSummary(buildEmptyUsageSummary(user));
+		} finally {
+			setIsUsageLoading(false);
+		}
+	};
+
+	useEffect(() => {
+		if (!firebaseAuth) {
+			const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
+			const storedUserRaw = localStorage.getItem(STORAGE_AUTH_USER);
+			if (!storedToken || !storedUserRaw) {
+				setIsVerifyingSession(false);
+				return undefined;
+			}
+
+			try {
+				const storedUser = JSON.parse(storedUserRaw);
+				persistAuthState(storedToken, storedUser);
+				setStatus(`Welcome back, ${storedUser.name}.`);
+			} catch {
+				clearAuthState();
+			}
+			setIsVerifyingSession(false);
+			return undefined;
+		}
+
+		const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+			if (!firebaseUser) {
+				const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
+				const storedUserRaw = localStorage.getItem(STORAGE_AUTH_USER);
+				if (!storedToken || !storedUserRaw) {
+					clearAuthState();
+					setIsVerifyingSession(false);
+					return;
+				}
+
+				let storedUser;
+				try {
+					storedUser = JSON.parse(storedUserRaw);
+				} catch {
+					clearAuthState();
+					setIsVerifyingSession(false);
+					return;
+				}
+
+				try {
+					const res = await fetch(`${API_BASE}/auth/me`, {
+						method: "GET",
+						headers: {
+							Authorization: `Bearer ${storedToken}`,
+						},
+					});
+					if (!res.ok) {
+						throw new Error("Stored session is no longer valid");
+					}
+					const data = await res.json();
+					persistAuthState(storedToken, data || storedUser);
+					setStatus(`Welcome back, ${(data || storedUser).name}.`);
+				} catch {
+					clearAuthState("Session expired. Please sign in again.");
+				} finally {
+					setIsVerifyingSession(false);
+				}
+				return;
+			}
+
+			setIsVerifyingSession(true);
+			try {
+				await syncFirebaseSession(firebaseUser);
+			} catch (error) {
+				clearAuthState(`Session expired. Please sign in again. ${error.message}`.trim());
+			} finally {
+				setIsVerifyingSession(false);
+			}
+		});
+
+		return unsubscribe;
+	}, []);
+
+	useEffect(() => {
+		if (!isAuthenticated || !currentUser) {
+			setUsageSummary(null);
+			setIsUsageLoading(false);
+			return;
+		}
+
+		void refreshUsageSummary(currentUser);
+	}, [isAuthenticated, currentUser?.sub, currentUser?.email]);
+
+	const apiRequest = async (path, options = {}, authRequired = true) => {
+		const headers = { ...(options.headers || {}) };
+
+		if (authRequired) {
+			const token = await getCurrentAccessToken();
+			if (!token) {
+				setStatus(AUTH_REQUIRED_MESSAGE);
+				throw new Error(AUTH_REQUIRED_MESSAGE);
+			}
+			headers.Authorization = `Bearer ${token}`;
+		}
+
+		const res = await fetch(`${API_BASE}${path}`, {
+			...options,
+			headers
+		});
+
+		if (authRequired && res.status === 401) {
+			clearAuthState("Session expired or unauthorized. Please sign in again.");
+			throw new Error("Session expired or unauthorized. Please sign in again.");
+		}
+
+		return res;
+	};
+
+	const handleGoogleSignIn = async () => {
+		if (!firebaseAuth) {
+			setStatus("Firebase Auth is not configured.");
+			return;
+		}
+
+		setIsAuthenticating(true);
+		setStatus("Signing in with Google...");
+		try {
+			await signInWithPopup(firebaseAuth, firebaseGoogleProvider);
+		} catch (error) {
+			clearAuthState(`Google sign-in failed: ${error.message}`);
+		} finally {
+			setIsAuthenticating(false);
+		}
+	};
+
+	const handleLogout = async () => {
+		setIsAuthenticating(true);
+		try {
+			if (firebaseAuth) {
+				await signOut(firebaseAuth);
+			}
+		} catch (error) {
+			setStatus(`Sign out failed: ${error.message}`);
+		} finally {
+			clearAuthState("Signed out.");
+			setIsAuthenticating(false);
+		}
+	};
+
 	const parseRequirements = async (withFeedback = false) => {
 		if (!file && !withFeedback) return;
 		setIsParsing(true);
 		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
 		try {
 			const formData = new FormData();
+			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
 			if (file) formData.append("file", file);
+			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
 			if (withFeedback && reqFeedback) {
 				formData.append("feedback", reqFeedback);
 				formData.append("existing_requirements", JSON.stringify(requirements));
 			}
-			const res = await fetch(`${API_BASE}/requirements/parse`, {
+			const res = await apiRequest("/requirements/parse", {
 				method: "POST",
 				body: formData
 			});
 			if (!res.ok) {
-				const errorText = await res.text();
-				throw new Error(errorText || "Failed to parse requirements");
+				const errorMessage = await parseApiError(res, "Failed to parse requirements");
+				throw new Error(errorMessage);
 			}
 			const data = await res.json();
 			setRawText(data.raw_text || rawText);
 			setRequirements(data.requirements || []);
+			setRequirementReview(data.review || null);
+			setRequirementCoverageMetrics(data.coverage_metrics || null);
+			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
+			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
+			setRequirementIterationHistory(data.iteration_history || []);
+			setTestCases([]);
+			setRequirementAnalysis([]);
+			setCoveragePlan([]);
+			setCoverageMetrics(null);
+			setTestCaseReview(null);
+			setTestCaseWorkflowDiagnostics(null);
+			setAppliedTestCaseWorkflowSettings(null);
+			setTestCaseIterationHistory([]);
+			resetContextAnalysis();
+			setExpandedRows({});
+			setFeedback("");
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
+			void refreshUsageSummary();
 			if (withFeedback) setReqFeedback("");
 		} catch (error) {
 			setStatus(`Parse failed: ${error.message}`);
@@ -75,28 +576,31 @@ export default function App() {
 		setIsGenerating(true);
 		setStatus(withFeedback ? "Refining test cases with feedback..." : "Generating test cases...");
 		try {
-			const payload = {
+			const workflowSettingsPayload = buildWorkflowSettingsPayload(testCaseWorkflowSettings);
+			const sharedPayload = {
 				requirements,
 				template: {
 					name: templateName,
 					format: templateFormat,
 					fields: ["id", "title", "description", "priority", "type", "status", "preconditions", "steps", "expected_result", "test_data", "estimated_time", "automation_status", "component", "tags"]
 				},
-				context: {
-					requirements,
-					app_link: appLink || null,
-					prototype_link: prototypeLink || null,
-					diagram_links: diagramLinks
-						? diagramLinks.split(";").map((x) => x.trim())
-						: null,
-					image_links: imageLinks
-						? imageLinks.split(";").map((x) => x.trim())
-						: null,
-					notes: "Generated via UI"
-				},
-				feedback: withFeedback && feedback ? feedback : null
+				context: buildContextPayload(),
+				workflow_settings: workflowSettingsPayload,
 			};
-			const res = await fetch(`${API_BASE}/testcases/generate`, {
+
+			const useRefineEndpoint = withFeedback && testCases.length > 0;
+			const payload = useRefineEndpoint
+				? {
+					...sharedPayload,
+					test_cases: testCases,
+					feedback: feedback.trim()
+				}
+				: {
+					...sharedPayload,
+					feedback: withFeedback && feedback ? feedback.trim() : null
+				};
+
+			const res = await apiRequest(useRefineEndpoint ? "/testcases/refine" : "/testcases/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
@@ -107,7 +611,22 @@ export default function App() {
 			}
 			const data = await res.json();
 			setTestCases(data.test_cases || []);
-			setStatus(withFeedback ? "Test cases refined." : "Generated.");
+			setRequirementAnalysis(data.requirement_analysis || []);
+			setCoveragePlan(data.coverage_plan || []);
+			setCoverageMetrics(data.coverage_metrics || null);
+			setTestCaseReview(data.review || null);
+			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
+			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
+			setTestCaseIterationHistory(data.iteration_history || []);
+			setExpandedRows({});
+			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
+			const reviewStatus = data.review
+				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
+				: "";
+			setStatus(
+				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""}.${reviewStatus}`.trim()
+			);
+			void refreshUsageSummary();
 			if (withFeedback) setFeedback("");
 		} catch (error) {
 			setStatus(`Generation failed: ${error.message}`);
@@ -116,45 +635,21 @@ export default function App() {
 		}
 	};
 
-	const exportToJira = async () => {
-		setIsExporting(true);
-		setStatus("Exporting to JIRA...");
-		try {
-			const payload = {
-				project_key: jiraProject,
-				issue_type: jiraIssueType,
-				test_cases: testCases
-			};
-			const res = await fetch(`${API_BASE}/export/jira`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to export to JIRA");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			setStatus(`${data.status}: ${data.message}`);
-		} catch (error) {
-			setStatus(`JIRA export failed: ${error.message}`);
-		} finally {
-			setIsExporting(false);
-		}
-	};
-
 	const exportToFormat = async (format) => {
 		setIsExporting(true);
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
 			const payload = { test_cases: testCases };
-			const res = await fetch(`${API_BASE}/export/${format}`, {
+			const res = await apiRequest(`/export/${format}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
 			});
 			
-			if (!res.ok) throw new Error("Export failed");
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Export failed");
+				throw new Error(errorMessage);
+			}
 			
 			// Download the file
 			const blob = await res.blob();
@@ -175,29 +670,6 @@ export default function App() {
 		}
 	};
 
-	const generateAutomation = async () => {
-		setStatus("Generating Playwright POM...");
-		try {
-			const payload = {
-				test_cases: testCases,
-				target_base_url: appLink || null
-			};
-			const res = await fetch(`${API_BASE}/automation/playwright`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to generate automation stubs");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			setStatus(`${data.status}: ${data.notes}`);
-		} catch (error) {
-			setStatus(`Automation generation failed: ${error.message}`);
-		}
-	};
-
 	const getPriorityClass = (priority) => {
 		const map = { Critical: "priority-critical", High: "priority-high", Medium: "priority-medium", Low: "priority-low" };
 		return map[priority] || "";
@@ -208,17 +680,88 @@ export default function App() {
 		return map[status] || "";
 	};
 
+	const getRequirementScenarioSummary = (requirementId) => {
+		return coverageMetrics?.requirement_scenario_summary?.[requirementId] || null;
+	};
+
+	const getRequirementAnalysisSummary = (requirementId) => {
+		return coverageMetrics?.requirement_analysis_summary?.[requirementId] || null;
+	};
+
+	const getRequirementAnalysisGaps = (requirementId) => {
+		const analysis = requirementAnalysis.find((a) => a.requirement_id === requirementId);
+		if (!analysis) {
+			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
+		}
+		const summary = coverageMetrics?.requirement_analysis_summary?.[requirementId] || {};
+		const coveredRules = new Set(summary.rules_covered || []);
+		const coveredConstraints = new Set(summary.constraints_covered || []);
+		const coveredPermissions = new Set(summary.permissions_covered || []);
+		const coveredTransitions = new Set(summary.transitions_covered || []);
+		const coveredRisks = new Set(summary.risks_covered || []);
+		return {
+			highRisks: (analysis.risk_signals || []).filter((r) => r.severity === "High" && !coveredRisks.has(r.id)).map((r) => r.title),
+			rules: (analysis.business_rules || []).filter((r) => !coveredRules.has(r.id)).map((r) => r.title),
+			constraints: (analysis.field_constraints || []).filter((c) => !coveredConstraints.has(c.id)).map((c) => c.field_name),
+			permissions: (analysis.role_permissions || []).filter((p) => !coveredPermissions.has(p.id)).map((p) => `${p.role}: ${p.action}`),
+			transitions: (analysis.state_transitions || []).filter((t) => !coveredTransitions.has(t.id)).map((t) => `${t.from_state} → ${t.to_state}`),
+		};
+	};
+
+	const coveredScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.covered_scenarios || 0), 0);
+	const plannedScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.length || 0), 0);
+	const mustHaveScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.filter((s) => s.must_have).length || 0), 0);
+	const mustHaveCoveredScenarioTotal = coveragePlan.reduce((sum, plan) => {
+		const missing = new Set(getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types || []);
+		return sum + (plan.scenarios?.filter((s) => s.must_have && !missing.has(s.scenario_type)).length || 0);
+	}, 0);
+	const missingScenarioCount = coveragePlan.reduce((sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types?.length || 0), 0);
+	const requirementAnalysisGapCount = requirementAnalysis.reduce((sum, analysis) => {
+		const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
+		return sum + Object.values(gaps).reduce((s, arr) => s + arr.length, 0);
+	}, 0);
+
+	const analyzeContext = async () => {
+		setIsAnalyzingContext(true);
+		setStatus("Analyzing context artifacts...");
+		try {
+			const res = await apiRequest("/requirements/enrich", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(buildContextPayload())
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to analyze context");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setEnrichedContext(data);
+			setSelectedArtifactSourceIds((data.grounded_context?.artifact_sources || []).map((source) => source.id));
+			setStatus("Context analyzed.");
+		} catch (error) {
+			setStatus(`Context analysis failed: ${error.message}`);
+			resetContextAnalysis();
+		} finally {
+			setIsAnalyzingContext(false);
+		}
+	};
+
 	const tabs = [
 		{ id: 0, label: "Upload", title: "Upload Requirements" },
 		{ id: 1, label: "Context", title: "Context Inputs" },
 		{ id: 2, label: "Template", title: "Template Setup" },
 		{ id: 3, label: "Generate", title: "Generate Test Cases" },
-		{ id: 4, label: "Export", title: "Export Test Cases" },
-		{ id: 5, label: "Automation", title: "Playwright POM" }
+		{ id: 4, label: "Export", title: "Export Test Cases" }
 	];
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
+	const statusUsageItems = usageSummary
+		? USAGE_STATUS_ITEMS.map((item) => ({
+			...item,
+			value: normalizeUsageMetric(usageSummary[item.key]),
+		}))
+		: [];
 
 	return (
 		<div className="page">
@@ -227,13 +770,69 @@ export default function App() {
 					<h1 className="title">Agentic Test Case Generator</h1>
 					<p className="subtitle">
 						A guided pipeline to parse requirements, enrich context, generate test cases,
-						export to JIRA, and create Playwright (Python) POM stubs.
+						and export polished artifacts.
 					</p>
 				</div>
-				<div className="status">
-					<strong>Status:</strong> {status || "Idle"}
+				<div className="header-right">
+					<div className={`status ${isAuthenticated ? "status-authenticated" : ""}`}>
+						<strong>Status:</strong>
+						<span className="status-message">{status || "Idle"}</span>
+						{isAuthenticated && (
+							<div className="status-usage" aria-label="Current user usage summary">
+								{statusUsageItems.length > 0 ? (
+									statusUsageItems.map((item) => (
+										<span className="status-usage-pill" key={item.key}>
+											<span className="status-usage-pill-label">{item.label}</span>
+											<span className="status-usage-pill-value">{item.value}</span>
+										</span>
+									))
+								) : isUsageLoading ? (
+									<span className="status-usage-loading">Loading usage…</span>
+								) : null}
+							</div>
+						)}
+					</div>
+					<div className="auth-panel">
+						{isVerifyingSession ? (
+							<span className="auth-message">Checking session...</span>
+						) : isAuthenticated ? (
+							<div className="auth-user">
+								{currentUser?.picture && (
+									<img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />
+								)}
+								<div className="auth-user-meta">
+									<strong>{currentUser?.name}</strong>
+									<span>{currentUser?.email || currentUser?.provider || currentUser?.sub}</span>
+								</div>
+								<button
+									type="button"
+									onClick={handleLogout}
+									className="secondary auth-logout-btn"
+									disabled={isAuthenticating}
+								>
+									{isAuthenticating ? "Signing out..." : "Sign Out"}
+								</button>
+							</div>
+						) : hasFirebaseAuthConfig ? (
+							<div className="auth-login">
+								<button type="button" onClick={handleGoogleSignIn} disabled={isAuthenticating}>
+									{isAuthenticating ? "Signing in..." : "Sign in with Google"}
+								</button>
+							</div>
+						) : (
+							<span className="auth-message auth-config-missing">
+								Set the VITE_FIREBASE_* variables to enable Firebase sign-in.
+							</span>
+						)}
+					</div>
 				</div>
 			</header>
+
+			{!isAuthenticated && !isVerifyingSession && (
+				<div className="auth-warning-banner">
+					🔐 Sign in with Google to parse requirements, generate test cases, and export artifacts.
+				</div>
+			)}
 
 			<div className="tabs">
 				{tabs.map((tab) => (
@@ -264,10 +863,17 @@ export default function App() {
 									onChange={(e) => setFile(e.target.files?.[0] || null)}
 								/>
 							</div>
-							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing}>
+							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || authActionDisabled}>
 								{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
 							</button>
 						</div>
+
+						{renderWorkflowSettingsPanel(
+							"Requirements workflow settings",
+							"Tune the requirement review loop when you want stricter gates or shorter runs.",
+							requirementWorkflowSettings,
+							setRequirementWorkflowSettings,
+						)}
 
 						<div className="result-section">
 							<h3>Raw Text</h3>
@@ -289,6 +895,43 @@ export default function App() {
 							)}
 						</div>
 
+						{requirementReview && (
+							<div className={`review-banner ${requirementReview.approved ? "review-approved" : "review-needs-work"}`}>
+								<div className="review-banner-header">
+									<strong>{requirementReview.approved ? "Requirements approved" : "Requirements need refinement"}</strong>
+									<span>Score {requirementReview.score}/{requirementReview.threshold}</span>
+								</div>
+								<p>{requirementReview.summary || "The review loop completed without a summary."}</p>
+								{!requirementReview.approved && requirementReview.blocking_issues?.length > 0 && (
+									<ul className="review-issues">
+										{requirementReview.blocking_issues.slice(0, 3).map((issue) => (
+											<li key={issue}>{issue}</li>
+										))}
+									</ul>
+								)}
+							</div>
+						)}
+
+						{requirementCoverageMetrics && (
+							<div className="workflow-metrics-panel">
+								<h3>Requirement coverage snapshot</h3>
+								<div className="workflow-diagnostics-pills">
+									<span className="workflow-diagnostics-pill">Total {requirementCoverageMetrics.total_requirements ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Unique {requirementCoverageMetrics.unique_requirements ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Duplicates {requirementCoverageMetrics.duplicate_requirements ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Shall format {requirementCoverageMetrics.shall_format_count ?? 0}</span>
+									<span className="workflow-diagnostics-pill">Per doc {requirementCoverageMetrics.requirements_per_document ?? 0}</span>
+								</div>
+							</div>
+						)}
+
+						{renderWorkflowDiagnostics(
+							"Requirement workflow diagnostics",
+							requirementWorkflowDiagnostics,
+							appliedRequirementWorkflowSettings,
+							requirementIterationHistory,
+						)}
+
 						{requirements.length > 0 && (
 							<div className="feedback-section">
 								<h3>Human Feedback</h3>
@@ -305,7 +948,7 @@ export default function App() {
 								<div className="feedback-actions">
 									<button 
 										onClick={() => parseRequirements(true)} 
-										disabled={!reqFeedback.trim() || isParsing}
+										disabled={!reqFeedback.trim() || isParsing || authActionDisabled}
 										className="feedback-button"
 									>
 										{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
@@ -362,6 +1005,77 @@ export default function App() {
 								/>
 							</div>
 						</div>
+						{hasContextInputs && (
+							<div className="panel-form button-row">
+								<button
+									onClick={analyzeContext}
+									disabled={isAnalyzingContext || authActionDisabled}
+								>
+									{isAnalyzingContext ? "⏳ Analyzing..." : "Analyze Context"}
+								</button>
+								{enrichedContext && (
+									<button
+										className="secondary"
+										onClick={resetContextAnalysis}
+									>
+										Clear Analysis
+									</button>
+								)}
+							</div>
+						)}
+						{enrichedContext?.grounded_context && (
+							<div className="result-section">
+								<h3>Grounded Context</h3>
+								{(enrichedContext.grounded_context.artifact_sources || []).length > 0 && (
+									<div className="artifact-sources">
+										<h4>Artifact Sources</h4>
+										<ul className="artifact-source-list">
+											{enrichedContext.grounded_context.artifact_sources.map((source) => (
+												<li key={source.id} className="artifact-source-item">
+													<label>
+														<input
+															type="checkbox"
+															checked={selectedArtifactSourceIds.includes(source.id)}
+															onChange={(e) => {
+																setSelectedArtifactSourceIds((prev) =>
+																	e.target.checked
+																		? [...prev, source.id]
+																		: prev.filter((id) => id !== source.id)
+																);
+															}}
+														/>
+														<span>{source.url || source.id}</span>
+														{source.type && <span className="artifact-type">{source.type}</span>}
+													</label>
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+								<div className="analysis-detail-grid">
+									{(enrichedContext.grounded_context.ui_elements || []).length > 0 && (
+										<div className="analysis-detail-block">
+											<h4>UI Elements</h4>
+											<ul className="analysis-detail-list">
+												{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
+													<li key={el.id}>{el.element_type}: {el.label || el.id}</li>
+												))}
+											</ul>
+										</div>
+									)}
+									{(enrichedContext.grounded_context.workflows || []).length > 0 && (
+										<div className="analysis-detail-block">
+											<h4>Workflows</h4>
+											<ul className="analysis-detail-list">
+												{enrichedContext.grounded_context.workflows.slice(0, 4).map((workflow) => (
+													<li key={workflow.id}>{workflow.name}: {(workflow.transitions || []).join(", ") || workflow.description}</li>
+												))}
+											</ul>
+										</div>
+									)}
+								</div>
+							</div>
+						)}
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
 							<button onClick={goNext}>Next</button>
@@ -409,11 +1123,233 @@ export default function App() {
 						<p className="panel-description">
 							Generate structured test cases from your parsed requirements and context.
 						</p>
+						{renderWorkflowSettingsPanel(
+							"Test-case workflow settings",
+							"Control validation strictness, loop length, and timeout behavior for generation and refinement.",
+							testCaseWorkflowSettings,
+							setTestCaseWorkflowSettings,
+						)}
 						<div className="panel-form button-row">
-							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating}>
+							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || authActionDisabled}>
 								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
 							</button>
 						</div>
+
+						{testCaseReview && (
+							<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
+								<div className="review-banner-header">
+									<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
+									<span>Score {testCaseReview.score}/{testCaseReview.threshold}</span>
+								</div>
+								<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
+								{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
+									<ul className="review-issues">
+										{testCaseReview.blocking_issues.slice(0, 3).map((issue) => (
+											<li key={issue}>{issue}</li>
+										))}
+									</ul>
+								)}
+							</div>
+						)}
+
+						{renderWorkflowDiagnostics(
+							"Test-case workflow diagnostics",
+							testCaseWorkflowDiagnostics,
+							appliedTestCaseWorkflowSettings,
+							testCaseIterationHistory,
+						)}
+
+						{coveragePlan.length > 0 && (
+							<div className="result-section">
+								<details className="collapsible-panel">
+									<summary className="collapsible-panel-summary">
+										<span className="collapsible-panel-copy">
+											<span className="collapsible-panel-title">Scenario Coverage Plan</span>
+											<span className="collapsible-panel-description">
+												Planned scenario intent per requirement, available on demand instead of taking over the page.
+											</span>
+										</span>
+										<span className="collapsible-panel-meta">
+											<span className="analysis-summary-pill">{coveragePlan.length} requirements</span>
+											<span className="analysis-summary-pill">Scenarios {coveredScenarioTotal}/{plannedScenarioTotal}</span>
+											<span className="analysis-summary-pill">Must-have {mustHaveCoveredScenarioTotal}/{mustHaveScenarioTotal}</span>
+											{missingScenarioCount > 0 && (
+												<span className="analysis-summary-pill collapsible-pill-alert">Missing {missingScenarioCount}</span>
+											)}
+											<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+										</span>
+									</summary>
+									<div className="collapsible-panel-body">
+										<div className="coverage-plan-list">
+											{coveragePlan.map((plan) => {
+												const summary = getRequirementScenarioSummary(plan.requirement_id);
+												const missingScenarioTypes = new Set(summary?.missing_scenario_types || []);
+												return (
+													<div key={plan.requirement_id} className="coverage-plan-card">
+														<div className="coverage-plan-header">
+															<div>
+																<div className="coverage-plan-id">{plan.requirement_id}</div>
+																<div className="coverage-plan-text">{plan.requirement_text}</div>
+															</div>
+															{summary && (
+																<span className="coverage-plan-summary">
+																	{summary.covered_scenarios}/{summary.planned_scenarios} planned scenarios covered
+																</span>
+															)}
+														</div>
+														<div className="coverage-chip-row">
+															{plan.scenarios?.map((scenario) => {
+																const isMissing = missingScenarioTypes.has(scenario.scenario_type);
+																return (
+																	<span
+																		key={scenario.id}
+																		className={`coverage-chip ${scenario.must_have ? "required" : "recommended"} ${isMissing ? "missing" : "covered"}`}
+																		title={scenario.objective}
+																	>
+																		{scenario.scenario_type}
+																	</span>
+																);
+															})}
+														</div>
+													</div>
+												);
+											})}
+										</div>
+									</div>
+								</details>
+							</div>
+						)}
+
+						{requirementAnalysis.length > 0 && (
+							<div className="result-section">
+								<details className="collapsible-panel">
+									<summary className="collapsible-panel-summary">
+										<span className="collapsible-panel-copy">
+											<span className="collapsible-panel-title">Requirement Analysis</span>
+											<span className="collapsible-panel-description">
+												Rules, constraints, permissions, transitions, and risks extracted before scenario planning.
+											</span>
+										</span>
+										<span className="collapsible-panel-meta">
+											<span className="analysis-summary-pill">{requirementAnalysis.length} requirements</span>
+											{coverageMetrics && (
+												<>
+													<span className="analysis-summary-pill">Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}</span>
+													<span className="analysis-summary-pill">Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}</span>
+												</>
+											)}
+											{requirementAnalysisGapCount > 0 && (
+												<span className="analysis-summary-pill collapsible-pill-alert">Gaps {requirementAnalysisGapCount}</span>
+											)}
+											<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+										</span>
+									</summary>
+									<div className="collapsible-panel-body">
+										{coverageMetrics && (
+											<div className="analysis-overview-row">
+												<span className="analysis-summary-pill">Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}</span>
+												<span className="analysis-summary-pill">Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}</span>
+												<span className="analysis-summary-pill">Permissions {coverageMetrics.role_permissions_covered || 0}/{coverageMetrics.role_permissions_total || 0}</span>
+												<span className="analysis-summary-pill">Transitions {coverageMetrics.state_transitions_covered || 0}/{coverageMetrics.state_transitions_total || 0}</span>
+												<span className="analysis-summary-pill">Risks {coverageMetrics.risk_signals_covered || 0}/{coverageMetrics.risk_signals_total || 0}</span>
+											</div>
+										)}
+										<div className="analysis-card-list">
+											{requirementAnalysis.map((analysis) => {
+												const summary = getRequirementAnalysisSummary(analysis.requirement_id);
+												const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
+												const hasGaps = Object.values(gaps).some((items) => items.length > 0);
+												return (
+													<div key={analysis.requirement_id} className="analysis-card">
+														<div className="analysis-card-header">
+															<div>
+																<div className="coverage-plan-id">{analysis.requirement_id}</div>
+																<div className="coverage-plan-text">{analysis.requirement_text}</div>
+															</div>
+															{summary && (
+																<span className="coverage-plan-summary">
+																	{summary.business_rules_covered}/{summary.business_rules_total} rules • {summary.field_constraints_covered}/{summary.field_constraints_total} constraints
+																</span>
+															)}
+														</div>
+														<div className="analysis-summary-row">
+															<span className="analysis-summary-pill">Rules {analysis.business_rules?.length || 0}</span>
+															<span className="analysis-summary-pill">Constraints {analysis.field_constraints?.length || 0}</span>
+															<span className="analysis-summary-pill">Permissions {analysis.role_permissions?.length || 0}</span>
+															<span className="analysis-summary-pill">Transitions {analysis.state_transitions?.length || 0}</span>
+															<span className="analysis-summary-pill">Risks {analysis.risk_signals?.length || 0}</span>
+														</div>
+														{analysis.suggested_scenarios?.length > 0 && (
+															<div className="analysis-chip-row">
+																{analysis.suggested_scenarios.map((scenario) => (
+																	<span key={`${analysis.requirement_id}-${scenario}`} className="analysis-chip">
+																		{scenario}
+																	</span>
+																))}
+															</div>
+														)}
+														<div className="analysis-detail-grid">
+															<div className="analysis-detail-block">
+																<h4>Business rules</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.business_rules || []).slice(0, 2).map((rule) => (
+																		<li key={rule.id}>{rule.title}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Constraints</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.field_constraints || []).slice(0, 2).map((constraint) => (
+																		<li key={constraint.id}>{constraint.field_name}: {constraint.description}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Permissions</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.role_permissions || []).slice(0, 2).map((permission) => (
+																		<li key={permission.id}>{permission.role}: {permission.action}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Transitions</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.state_transitions || []).slice(0, 2).map((transition) => (
+																		<li key={transition.id}>{transition.from_state} → {transition.to_state}</li>
+																	))}
+																</ul>
+															</div>
+															<div className="analysis-detail-block">
+																<h4>Risks</h4>
+																<ul className="analysis-detail-list">
+																	{(analysis.risk_signals || []).slice(0, 2).map((risk) => (
+																		<li key={risk.id}>{risk.severity}: {risk.title}</li>
+																	))}
+																</ul>
+															</div>
+														</div>
+														{hasGaps && (
+															<div className="analysis-gap-block">
+																<strong>Coverage gaps</strong>
+																<ul className="analysis-gap-list">
+																	{gaps.highRisks.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.rules.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.constraints.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.permissions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																	{gaps.transitions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+																</ul>
+															</div>
+														)}
+													</div>
+												);
+											})}
+										</div>
+									</div>
+								</details>
+							</div>
+						)}
 
 						<div className="result-section">
 							<h3>Generated Test Cases</h3>
@@ -461,8 +1397,8 @@ export default function App() {
 														<td className="tc-preconditions">{tc.preconditions || "-"}</td>
 														<td className="tc-steps">
 															<ol>
-																{tc.steps?.slice(0, expandedRows[tc.id] ? undefined : 2).map((step) => (
-																	<li key={step.step || step.action}>
+																{tc.steps?.slice(0, expandedRows[tc.id] ? undefined : 2).map((step, index) => (
+																	<li key={`${tc.id}-step-${step.step || index + 1}`}>
 																		<strong>{step.action}</strong>
 																		<span className="step-expected">→ {step.expected}</span>
 																		{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
@@ -514,9 +1450,9 @@ export default function App() {
 											<div className="case-steps">
 												<strong>Steps</strong>
 												<ol>
-													{tc.steps?.map((step) => (
-														<li key={step.step || step.action}>
-															<span className="step-action">{step.step}. {step.action}</span>
+													{tc.steps?.map((step, index) => (
+														<li key={`${tc.id}-card-step-${step.step || index + 1}`}>
+															<span className="step-action">{step.step || index + 1}. {step.action}</span>
 															<span className="step-expected">→ {step.expected}</span>
 															{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
 														</li>
@@ -555,7 +1491,7 @@ export default function App() {
 								<div className="feedback-actions">
 									<button 
 										onClick={() => generateTestCases(true)} 
-										disabled={!feedback.trim() || isGenerating}
+										disabled={!feedback.trim() || isGenerating || authActionDisabled}
 										className="feedback-button"
 									>
 										{isGenerating ? "⏳ Updating Test Cases..." : "🔄 Implement Changes"}
@@ -575,10 +1511,8 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Export Test Cases</h2>
 						<p className="panel-description">
-							Export your generated test cases in various formats.
+							Download your generated test cases as CSV, Excel, or JSON.
 						</p>
-						
-						{/* Quick Export Options */}
 						<div className="export-section">
 							<h3 className="section-subtitle">📥 Quick Export</h3>
 							<p className="helper-text">Download test cases directly to your computer.</p>
@@ -586,7 +1520,7 @@ export default function App() {
 								<button 
 									className="export-btn csv" 
 									onClick={() => exportToFormat("csv")} 
-									disabled={testCases.length === 0 || isExporting}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">📄</span>
 									<span className="export-label">CSV</span>
@@ -595,7 +1529,7 @@ export default function App() {
 								<button 
 									className="export-btn excel" 
 									onClick={() => exportToFormat("excel")} 
-									disabled={testCases.length === 0 || isExporting}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">📊</span>
 									<span className="export-label">Excel</span>
@@ -604,105 +1538,14 @@ export default function App() {
 								<button 
 									className="export-btn json" 
 									onClick={() => exportToFormat("json")} 
-									disabled={testCases.length === 0 || isExporting}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
-									<span className="export-icon">{ }</span>
+									<span className="export-icon">🧾</span>
 									<span className="export-label">JSON</span>
 									<span className="export-desc">API/Import ready</span>
 								</button>
 							</div>
 						</div>
-						
-						<hr className="section-divider" />
-						
-						{/* JIRA Integration */}
-						<div className="export-section">
-							<h3 className="section-subtitle">🔗 JIRA Integration</h3>
-							<p className="helper-text">Push test cases directly to your JIRA project.</p>
-							<div className="panel-form two-cols">
-								<div className="form-group">
-									<label>JIRA Project Key</label>
-									<input
-										placeholder="e.g., QA, TEST, PROJ"
-										value={jiraProject}
-										onChange={(e) => setJiraProject(e.target.value)}
-									/>
-								</div>
-								<div className="form-group">
-									<label>Issue Type</label>
-									<select value={jiraIssueType} onChange={(e) => setJiraIssueType(e.target.value)}>
-										<option value="Test">Test</option>
-										<option value="Test Case">Test Case</option>
-										<option value="Test Execution">Test Execution</option>
-										<option value="Story">Story</option>
-										<option value="Task">Task</option>
-									</select>
-								</div>
-							</div>
-							<div className="panel-form button-row">
-								<button 
-									className="export-btn jira" 
-									onClick={exportToJira} 
-									disabled={testCases.length === 0 || !jiraProject || isExporting}
-								>
-									{isExporting ? "⏳ Exporting..." : "🚀 Export to JIRA"}
-								</button>
-							</div>
-							<span className="helper-text warning">
-								⚠️ JIRA integration requires API credentials to be configured in the backend.
-							</span>
-						</div>
-						
-						<hr className="section-divider" />
-						
-						{/* Other Integrations */}
-						<div className="export-section">
-							<h3 className="section-subtitle">📦 Other Integrations</h3>
-							<div className="integration-grid">
-								<div className="integration-card disabled">
-									<span className="integration-icon">🧪</span>
-									<span className="integration-name">Xray</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-								<div className="integration-card disabled">
-									<span className="integration-icon">🧫</span>
-									<span className="integration-name">TestRail</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-								<div className="integration-card disabled">
-									<span className="integration-icon">🔬</span>
-									<span className="integration-name">qTest</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-								<div className="integration-card disabled">
-									<span className="integration-icon">📋</span>
-									<span className="integration-name">Azure DevOps</span>
-									<span className="integration-status">Coming Soon</span>
-								</div>
-							</div>
-						</div>
-						
-						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">Back</button>
-							<button onClick={goNext} disabled={testCases.length === 0}>Next</button>
-						</div>
-					</section>
-				)}
-
-				{activeTab === 5 && (
-					<section className="panel">
-						<h2 className="panel-title">Playwright POM</h2>
-						<p className="panel-description">
-							Generate Playwright (Python) Page Object Model stubs from test cases.
-						</p>
-						<div className="panel-form button-row">
-							<button onClick={generateAutomation} disabled={testCases.length === 0}>
-								Generate Automation Stubs
-							</button>
-						</div>
-						<span className="helper-text">
-							Generates POM and test file stubs based on the generated test cases.
-						</span>
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
 						</div>
