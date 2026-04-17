@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { GoogleLogin } from "@react-oauth/google";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { firebaseAuth, firebaseGoogleProvider, hasFirebaseAuthConfig } from "./firebase";
 import "./App.css";
 
 const API_BASE = (() => {
@@ -9,7 +10,6 @@ const API_BASE = (() => {
 	}
 	return configuredApiBase === "http://localhost:8000" ? "http://127.0.0.1:8000" : configuredApiBase;
 })();
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 const STORAGE_AUTH_USER = "tcg.auth.user";
 const AUTH_REQUIRED_MESSAGE = "Sign in with Google to continue.";
@@ -235,61 +235,138 @@ export default function App() {
 	const persistAuthState = (token, user) => {
 		setAuthToken(token);
 		setCurrentUser(user);
-		localStorage.setItem(STORAGE_AUTH_TOKEN, token);
-		localStorage.setItem(STORAGE_AUTH_USER, JSON.stringify(user));
+		if (token) {
+			localStorage.setItem(STORAGE_AUTH_TOKEN, token);
+		}
+		if (user) {
+			localStorage.setItem(STORAGE_AUTH_USER, JSON.stringify(user));
+		}
+	};
+
+	const buildFirebaseFallbackUser = (firebaseUser) => ({
+		sub: firebaseUser.uid,
+		email: firebaseUser.email || null,
+		name: firebaseUser.displayName || firebaseUser.email || firebaseUser.phoneNumber || firebaseUser.uid,
+		picture: firebaseUser.photoURL || null,
+		provider: firebaseUser.providerData?.[0]?.providerId || null,
+		email_verified: firebaseUser.emailVerified ?? null,
+	});
+
+	const syncFirebaseSession = async (firebaseUser, successPrefix = "Signed in as") => {
+		const token = await firebaseUser.getIdToken();
+		const fallbackUser = buildFirebaseFallbackUser(firebaseUser);
+		const res = await fetch(`${API_BASE}/auth/me`, {
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${token}`,
+			},
+		});
+
+		if (!res.ok) {
+			const errorMessage = await parseApiError(res, "Session is no longer valid");
+			throw new Error(errorMessage);
+		}
+
+		const data = await res.json();
+		const resolvedUser = data || fallbackUser;
+		persistAuthState(token, resolvedUser);
+		setStatus(`${successPrefix} ${resolvedUser.name}.`);
+		return token;
+	};
+
+	const getCurrentAccessToken = async () => {
+		if (!firebaseAuth?.currentUser) {
+			return authToken || localStorage.getItem(STORAGE_AUTH_TOKEN) || "";
+		}
+
+		const token = await firebaseAuth.currentUser.getIdToken();
+		setAuthToken((current) => (current === token ? current : token));
+		return token;
 	};
 
 	useEffect(() => {
-		const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
-		const storedUserRaw = localStorage.getItem(STORAGE_AUTH_USER);
+		if (!firebaseAuth) {
+			const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
+			const storedUserRaw = localStorage.getItem(STORAGE_AUTH_USER);
+			if (!storedToken || !storedUserRaw) {
+				setIsVerifyingSession(false);
+				return undefined;
+			}
 
-		if (!storedToken || !storedUserRaw) {
-			setIsVerifyingSession(false);
-			return;
-		}
-
-		let storedUser;
-		try {
-			storedUser = JSON.parse(storedUserRaw);
-		} catch {
-			clearAuthState();
-			setIsVerifyingSession(false);
-			return;
-		}
-
-		const restoreSession = async () => {
 			try {
-				const res = await fetch(`${API_BASE}/auth/me`, {
-					method: "GET",
-					headers: {
-						Authorization: `Bearer ${storedToken}`
-					}
-				});
-				if (!res.ok) {
-					throw new Error("Stored session is no longer valid");
-				}
-				const data = await res.json();
-				persistAuthState(storedToken, data || storedUser);
-				setStatus(`Welcome back, ${(data || storedUser).name}.`);
+				const storedUser = JSON.parse(storedUserRaw);
+				persistAuthState(storedToken, storedUser);
+				setStatus(`Welcome back, ${storedUser.name}.`);
 			} catch {
-				clearAuthState("Session expired. Please sign in again.");
+				clearAuthState();
+			}
+			setIsVerifyingSession(false);
+			return undefined;
+		}
+
+		const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+			if (!firebaseUser) {
+				const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
+				const storedUserRaw = localStorage.getItem(STORAGE_AUTH_USER);
+				if (!storedToken || !storedUserRaw) {
+					clearAuthState();
+					setIsVerifyingSession(false);
+					return;
+				}
+
+				let storedUser;
+				try {
+					storedUser = JSON.parse(storedUserRaw);
+				} catch {
+					clearAuthState();
+					setIsVerifyingSession(false);
+					return;
+				}
+
+				try {
+					const res = await fetch(`${API_BASE}/auth/me`, {
+						method: "GET",
+						headers: {
+							Authorization: `Bearer ${storedToken}`,
+						},
+					});
+					if (!res.ok) {
+						throw new Error("Stored session is no longer valid");
+					}
+					const data = await res.json();
+					persistAuthState(storedToken, data || storedUser);
+					setStatus(`Welcome back, ${(data || storedUser).name}.`);
+				} catch {
+					clearAuthState("Session expired. Please sign in again.");
+				} finally {
+					setIsVerifyingSession(false);
+				}
+				return;
+			}
+
+			setIsVerifyingSession(true);
+			try {
+				await syncFirebaseSession(firebaseUser);
+			} catch (error) {
+				clearAuthState(`Session expired. Please sign in again. ${error.message}`.trim());
 			} finally {
 				setIsVerifyingSession(false);
 			}
-		};
+		});
 
-		restoreSession();
+		return unsubscribe;
 	}, []);
 
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = { ...(options.headers || {}) };
 
 		if (authRequired) {
-			if (!authToken) {
+			const token = await getCurrentAccessToken();
+			if (!token) {
 				setStatus(AUTH_REQUIRED_MESSAGE);
 				throw new Error(AUTH_REQUIRED_MESSAGE);
 			}
-			headers.Authorization = `Bearer ${authToken}`;
+			headers.Authorization = `Bearer ${token}`;
 		}
 
 		const res = await fetch(`${API_BASE}${path}`, {
@@ -305,34 +382,16 @@ export default function App() {
 		return res;
 	};
 
-	const handleGoogleLoginSuccess = async (credentialResponse) => {
-		if (!credentialResponse?.credential) {
-			setStatus("Google login did not return a credential token.");
+	const handleGoogleSignIn = async () => {
+		if (!firebaseAuth) {
+			setStatus("Firebase Auth is not configured.");
 			return;
 		}
 
 		setIsAuthenticating(true);
 		setStatus("Signing in with Google...");
 		try {
-			const res = await apiRequest(
-				"/auth/google/login",
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						credential: credentialResponse.credential,
-						client_id: credentialResponse.clientId || GOOGLE_CLIENT_ID || null
-					})
-				},
-				false
-			);
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to sign in with Google");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			persistAuthState(data.access_token, data.user);
-			setStatus(`Signed in as ${data.user.name}.`);
+			await signInWithPopup(firebaseAuth, firebaseGoogleProvider);
 		} catch (error) {
 			clearAuthState(`Google sign-in failed: ${error.message}`);
 		} finally {
@@ -340,16 +399,14 @@ export default function App() {
 		}
 	};
 
-	const handleGoogleLoginError = () => {
-		setStatus("Google sign-in failed. Please try again.");
-	};
-
 	const handleLogout = async () => {
 		setIsAuthenticating(true);
 		try {
-			await apiRequest("/auth/logout", { method: "POST" }, false);
-		} catch {
-			// Ignore logout network errors because session is local-storage backed.
+			if (firebaseAuth) {
+				await signOut(firebaseAuth);
+			}
+		} catch (error) {
+			setStatus(`Sign out failed: ${error.message}`);
 		} finally {
 			clearAuthState("Signed out.");
 			setIsAuthenticating(false);
@@ -613,7 +670,7 @@ export default function App() {
 								)}
 								<div className="auth-user-meta">
 									<strong>{currentUser?.name}</strong>
-									<span>{currentUser?.email}</span>
+									<span>{currentUser?.email || currentUser?.provider || currentUser?.sub}</span>
 								</div>
 								<button
 									type="button"
@@ -624,18 +681,15 @@ export default function App() {
 									{isAuthenticating ? "Signing out..." : "Sign Out"}
 								</button>
 							</div>
-						) : GOOGLE_CLIENT_ID ? (
+						) : hasFirebaseAuthConfig ? (
 							<div className="auth-login">
-								<GoogleLogin
-									onSuccess={handleGoogleLoginSuccess}
-									onError={handleGoogleLoginError}
-									text="signin_with"
-									shape="pill"
-								/>
+								<button type="button" onClick={handleGoogleSignIn} disabled={isAuthenticating}>
+									{isAuthenticating ? "Signing in..." : "Sign in with Google"}
+								</button>
 							</div>
 						) : (
 							<span className="auth-message auth-config-missing">
-								Set VITE_GOOGLE_CLIENT_ID to enable Google sign-in.
+								Set the VITE_FIREBASE_* variables to enable Firebase sign-in.
 							</span>
 						)}
 					</div>

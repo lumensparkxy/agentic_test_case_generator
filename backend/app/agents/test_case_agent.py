@@ -1587,6 +1587,7 @@ async def _run_test_case_workflow_async(
     human_feedback: Optional[str] = None,
     existing_test_cases: Optional[List[Dict[str, Any]]] = None,
     workflow_settings: Optional[WorkflowSettings] = None,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
@@ -1644,7 +1645,7 @@ Human feedback:
         session_service=session_service,
     )
 
-    user_id = f"user_{uuid.uuid4().hex[:8]}"
+    user_id = str(actor_user_id or f"user_{uuid.uuid4().hex[:8]}")
     session = await session_service.create_session(
         app_name="test_case_generator",
         user_id=user_id,
@@ -2459,9 +2460,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
     }
-
-
-def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
+def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
     settings = get_settings()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -2475,6 +2474,7 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
         human_feedback=payload.feedback if payload.feedback else None,
         existing_test_cases=None,
         workflow_settings=payload.workflow_settings,
+        actor_user_id=actor_user_id,
     )
 
     raw_test_cases = workflow.get("test_cases", [])
@@ -2534,7 +2534,7 @@ def generate_test_cases(payload: GenerateTestCasesInput) -> Dict[str, Any]:
     return _build_response(test_cases, workflow, payload.requirements, payload.context)
 
 
-def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
+def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
     settings = get_settings()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -2549,6 +2549,7 @@ def refine_test_cases(payload: RefineTestCasesInput) -> Dict[str, Any]:
         human_feedback=payload.feedback,
         existing_test_cases=existing_test_cases,
         workflow_settings=payload.workflow_settings,
+        actor_user_id=actor_user_id,
     )
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases

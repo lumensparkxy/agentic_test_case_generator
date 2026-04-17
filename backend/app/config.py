@@ -30,7 +30,7 @@ class _SuppressNonTextPartsWarning(logging.Filter):
 
 
 def _load_environment_file() -> None:
-    """Load environment variables from repo/root .env so uvicorn cwd does not matter."""
+    """Load environment variables from repo/root .env so project config wins for local dev."""
     if load_dotenv is None:
         logging.warning("python-dotenv is not installed; .env auto-loading is disabled")
         return
@@ -47,7 +47,7 @@ def _load_environment_file() -> None:
             continue
         seen.add(resolved)
         if resolved.exists():
-            load_dotenv(dotenv_path=resolved, override=False)
+            load_dotenv(dotenv_path=resolved, override=True)
 
 
 def _configure_library_warning_filters() -> None:
@@ -72,6 +72,11 @@ class AuthSettings(BaseModel):
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60
+
+
+class FirebaseSettings(BaseModel):
+    project_id: str = ""
+    service_account_json: str = ""
 
 
 def get_cors_allow_origins() -> list[str]:
@@ -151,6 +156,14 @@ def get_auth_settings() -> AuthSettings:
         jwt_secret_key=jwt_secret_key,
         jwt_algorithm=jwt_algorithm,
         jwt_expiration_minutes=jwt_expiration_minutes,
+    )
+
+
+@lru_cache
+def get_firebase_settings() -> FirebaseSettings:
+    return FirebaseSettings(
+        project_id=(os.getenv("FIREBASE_PROJECT_ID") or "").strip(),
+        service_account_json=(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip(),
     )
 
 

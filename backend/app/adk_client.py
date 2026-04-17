@@ -451,6 +451,7 @@ async def _run_requirement_workflow_async(
     human_feedback: Optional[str] = None,
     document_count: int = 1,
     workflow_settings: Optional[WorkflowSettings] = None,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_requirement_workflow_settings(workflow_settings, max_iterations=max_iterations)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_REQUIREMENT_THRESHOLD)
@@ -493,7 +494,7 @@ Human feedback:
         session_service=session_service,
     )
 
-    user_id = f"user_{uuid.uuid4().hex[:8]}"
+    user_id = str(actor_user_id or f"user_{uuid.uuid4().hex[:8]}")
     session = await session_service.create_session(
         app_name="requirement_extractor",
         user_id=user_id,
@@ -813,6 +814,7 @@ def run_requirement_extraction_workflow_sync(
     max_iterations: int = DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     document_count: int = 1,
     workflow_settings: Optional[WorkflowSettings] = None,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     return _run_requirement_workflow_sync(
         document_text=document_text,
@@ -820,6 +822,7 @@ def run_requirement_extraction_workflow_sync(
         max_iterations=max_iterations,
         document_count=document_count,
         workflow_settings=workflow_settings,
+        actor_user_id=actor_user_id,
     )
 
 
@@ -829,6 +832,7 @@ def run_requirement_refinement_workflow_sync(
     model: str = DEFAULT_MODEL,
     max_iterations: int = DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     workflow_settings: Optional[WorkflowSettings] = None,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     return _run_requirement_workflow_sync(
         existing_requirements=existing_requirements,
@@ -837,6 +841,7 @@ def run_requirement_refinement_workflow_sync(
         max_iterations=max_iterations,
         document_count=1,
         workflow_settings=workflow_settings,
+        actor_user_id=actor_user_id,
     )
 
 
@@ -844,8 +849,9 @@ def run_requirement_extraction_loop_sync(
     document_text: str,
     model: str = DEFAULT_MODEL,
     max_iterations: int = 3,
+    actor_user_id: Optional[str] = None,
 ) -> List[Dict[str, str]]:
-    result = run_requirement_extraction_workflow_sync(document_text, model, max_iterations)
+    result = run_requirement_extraction_workflow_sync(document_text, model, max_iterations, actor_user_id=actor_user_id)
     return result.get("requirements", [])
 
 
@@ -854,8 +860,15 @@ def run_requirement_refinement_sync(
     feedback: str,
     model: str = DEFAULT_MODEL,
     max_iterations: int = 3,
+    actor_user_id: Optional[str] = None,
 ) -> List[Dict[str, str]]:
-    result = run_requirement_refinement_workflow_sync(existing_requirements, feedback, model, max_iterations)
+    result = run_requirement_refinement_workflow_sync(
+        existing_requirements,
+        feedback,
+        model,
+        max_iterations,
+        actor_user_id=actor_user_id,
+    )
     return result.get("requirements", [])
 
 

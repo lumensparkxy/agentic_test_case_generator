@@ -17,6 +17,7 @@ def extract_requirements(
     text: str,
     document_count: int = 1,
     workflow_settings: Optional[WorkflowSettings] = None,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Multi-agent ADK loop for requirement extraction:
@@ -36,6 +37,7 @@ def extract_requirements(
         max_iterations=workflow_settings.max_iterations if workflow_settings and workflow_settings.max_iterations else MAX_ITERATIONS,
         document_count=document_count,
         workflow_settings=workflow_settings,
+        actor_user_id=actor_user_id,
     )
     
     extracted = workflow.get("requirements", [])
@@ -64,6 +66,7 @@ def refine_requirements(
     existing_requirements: List[Dict[str, Any]],
     feedback: str,
     workflow_settings: Optional[WorkflowSettings] = None,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Refine existing requirements based on human feedback using ADK agent loop.
@@ -79,6 +82,7 @@ def refine_requirements(
         model=settings.model_name,
         max_iterations=workflow_settings.max_iterations if workflow_settings and workflow_settings.max_iterations else MAX_ITERATIONS,
         workflow_settings=workflow_settings,
+        actor_user_id=actor_user_id,
     )
     
     refined = workflow.get("requirements", [])

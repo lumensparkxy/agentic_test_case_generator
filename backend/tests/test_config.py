@@ -2,6 +2,7 @@ from pathlib import Path
 import logging
 import os
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -9,12 +10,23 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, get_settings
+from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, _load_environment_file, get_settings
 
 
 class ConfigSettingsTests(unittest.TestCase):
     def tearDown(self) -> None:
         get_settings.cache_clear()
+
+    def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            (temp_root / ".env").write_text("EXAMPLE_KEY=from_project_env\n", encoding="utf-8")
+
+            with patch.dict(os.environ, {"EXAMPLE_KEY": "from_process_env"}, clear=False):
+                with patch("app.config.REPO_ROOT", temp_root), patch("app.config.Path.cwd", return_value=temp_root):
+                    _load_environment_file()
+
+                self.assertEqual(os.environ.get("EXAMPLE_KEY"), "from_project_env")
 
     def test_get_settings_promotes_gemini_key_to_google_key(self) -> None:
         with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-only-key", "MODEL_NAME": DEFAULT_MODEL_NAME}, clear=False):

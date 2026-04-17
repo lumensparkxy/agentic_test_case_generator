@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..config import get_auth_settings
 from ..models import AuthUser
+from .firebase_auth import verify_firebase_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -62,12 +63,27 @@ def decode_access_token(token: str) -> AuthUser:
     try:
         return AuthUser(
             sub=str(payload["sub"]),
-            email=str(payload["email"]),
-            name=str(payload.get("name") or payload["email"]),
+            email=str(payload["email"]) if payload.get("email") is not None else None,
+            name=str(payload.get("name") or payload.get("email") or payload["sub"]),
             picture=payload.get("picture"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise _auth_error("Invalid access token payload") from exc
+
+
+def try_decode_legacy_access_token(token: str) -> Optional[AuthUser]:
+    settings = get_auth_settings()
+    if not settings.jwt_secret_key:
+        return None
+
+    try:
+        return decode_access_token(token)
+    except HTTPException as exc:
+        if exc.detail == "Access token has expired":
+            raise
+        if exc.detail in {"Invalid access token", "Invalid access token payload"}:
+            return None
+        raise
 
 
 def get_current_user(
@@ -76,4 +92,9 @@ def get_current_user(
     """FastAPI dependency that resolves the current user from Authorization Bearer token."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _auth_error("Missing bearer access token")
-    return decode_access_token(credentials.credentials)
+
+    legacy_user = try_decode_legacy_access_token(credentials.credentials)
+    if legacy_user is not None:
+        return legacy_user
+
+    return verify_firebase_access_token(credentials.credentials)

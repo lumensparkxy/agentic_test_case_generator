@@ -11,6 +11,7 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
+    "firebase": "^11.6.1",
     "@react-oauth/google": "^0.12.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

@@ -5,6 +5,10 @@ from pydantic import BaseModel, Field, HttpUrl
 class Requirement(BaseModel):
     id: str
     text: str
+    artifact_set_id: Optional[str] = None
+    artifact_item_id: Optional[str] = None
+    artifact_version_id: Optional[str] = None
+    artifact_version_number: Optional[int] = None
 
 
 class BusinessRule(BaseModel):
@@ -144,9 +148,11 @@ class GroundedContext(BaseModel):
 
 class AuthUser(BaseModel):
     sub: str
-    email: str
+    email: Optional[str] = None
     name: str
     picture: Optional[str] = None
+    provider: Optional[str] = None
+    email_verified: Optional[bool] = None
 
 
 class GoogleLoginRequest(BaseModel):
@@ -281,6 +287,10 @@ class TestCase(BaseModel):
     component: Optional[str] = None  # Module/feature area
     tags: Optional[List[str]] = None  # Includes linked requirement IDs
     source_refs: Optional[List[str]] = None  # Grounded context artifact IDs used by this test case
+    artifact_set_id: Optional[str] = None
+    artifact_item_id: Optional[str] = None
+    artifact_version_id: Optional[str] = None
+    artifact_version_number: Optional[int] = None
 
 
 class TestCaseTemplate(BaseModel):
