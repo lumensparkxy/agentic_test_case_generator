@@ -14,6 +14,13 @@ from .config import get_auth_settings, get_cors_allow_origins, get_settings
 from .models import (
     AuthTokenResponse,
     AuthUser,
+    BillingAllocationRequest,
+    BillingAllocationResponse,
+    BillingCreditGrantRequest,
+    BillingCreditGrantResponse,
+    BillingEntitlementResponse,
+    BillingLedgerResponse,
+    BillingOrgSummaryResponse,
     EnrichInput,
     EnrichResponse,
     GenerateTestCasesInput,
@@ -39,9 +46,18 @@ from .agents.test_case_agent import generate_test_cases, refine_test_cases
 from .agents.export_agent import export_to_jira, export_to_csv, export_to_excel, export_to_json
 from .agents.automation_agent import generate_playwright_pom
 from .auth.google_auth import verify_google_credential
-from .auth.authorization import require_org_admin
+from .auth.authorization import require_billing_admin, require_org_admin, require_org_or_billing_admin
 from .auth.jwt_auth import create_access_token, get_current_user
 from .services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
+from .services.billing_service import (
+    allocate_organization_credits,
+    build_organization_billing_summary,
+    enforce_billing_access,
+    get_my_billing_ledger,
+    grant_billing_credits,
+    record_billing_consumption,
+    resolve_billing_entitlements,
+)
 from .services.context_grounding import build_grounded_context
 from .services.reporting_service import build_usage_report
 from .services.versioning_service import persist_requirement_versions, persist_test_case_versions
@@ -183,6 +199,34 @@ def _log_failure(
     )
 
 
+def _record_billing_consumption_safe(
+    *,
+    current_user: AuthUser,
+    billing_context,
+    source_event_id: str,
+    request: Request,
+    workflow_run_id: str,
+    billing_key: str,
+    quantity: int,
+    unit: str,
+    metadata: Optional[dict[str, Any]] = None,
+) -> None:
+    try:
+        record_billing_consumption(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=source_event_id,
+            request_id=_get_request_id(request),
+            workflow_run_id=workflow_run_id,
+            billing_key=billing_key,
+            quantity=quantity,
+            unit=unit,
+            metadata=metadata,
+        )
+    except Exception:  # pragma: no cover - defensive safety after a successful workflow
+        logging.exception("Billing consumption recording failed after workflow success")
+
+
 @app.post("/auth/google/login", response_model=AuthTokenResponse)
 async def auth_google_login(payload: GoogleLoginRequest) -> AuthTokenResponse:
     settings = get_auth_settings()
@@ -255,6 +299,50 @@ async def usage_report(
     return await usage_report_me(current_user=current_user, start_at=start_at, end_at=end_at)
 
 
+@app.get("/entitlements/me", response_model=BillingEntitlementResponse)
+async def billing_entitlements_me(
+    current_user: AuthUser = Depends(get_current_user),
+) -> BillingEntitlementResponse:
+    return await run_in_threadpool(resolve_billing_entitlements, current_user=current_user)
+
+
+@app.get("/billing/ledger/me", response_model=BillingLedgerResponse)
+async def billing_ledger_me(
+    current_user: AuthUser = Depends(get_current_user),
+) -> BillingLedgerResponse:
+    return await run_in_threadpool(get_my_billing_ledger, current_user=current_user)
+
+
+@app.post("/billing/admin/credits/grant", response_model=BillingCreditGrantResponse)
+async def billing_admin_grant_credits(
+    payload: BillingCreditGrantRequest,
+    current_user: AuthUser = Depends(require_billing_admin),
+) -> BillingCreditGrantResponse:
+    return await run_in_threadpool(grant_billing_credits, current_user=current_user, payload=payload)
+
+
+@app.post("/billing/admin/allocations", response_model=BillingAllocationResponse)
+async def billing_admin_allocate_credits(
+    payload: BillingAllocationRequest,
+    current_user: AuthUser = Depends(require_org_or_billing_admin),
+) -> BillingAllocationResponse:
+    return await run_in_threadpool(allocate_organization_credits, current_user=current_user, payload=payload)
+
+
+@app.get("/billing/admin/org-summary", response_model=BillingOrgSummaryResponse)
+async def billing_admin_org_summary(
+    current_user: AuthUser = Depends(require_org_or_billing_admin),
+    organization_domain: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> BillingOrgSummaryResponse:
+    return await run_in_threadpool(
+        build_organization_billing_summary,
+        current_user=current_user,
+        organization_domain=organization_domain,
+        tenant_id=tenant_id,
+    )
+
+
 @app.post("/requirements/parse", response_model=RequirementsWorkflowResponse)
 async def parse_requirements(
     request: Request,
@@ -268,13 +356,19 @@ async def parse_requirements(
     _settings = get_settings()
     parsed_workflow_settings = _parse_workflow_settings_form(workflow_settings)
     request_id = _get_request_id(request)
+    is_refinement_request = bool(feedback and existing_requirements)
+    billing_context = await run_in_threadpool(
+        enforce_billing_access,
+        current_user=current_user,
+        billing_key="requirements.refine" if is_refinement_request else "requirements.parse",
+    )
 
     workflow_run_id = start_workflow_run(
-        operation="requirements.parse" if not (feedback and existing_requirements) else "requirements.refine",
+        operation="requirements.parse" if not is_refinement_request else "requirements.refine",
         actor=current_user,
         request_id=request_id,
         metadata={
-            "has_feedback": bool(feedback and existing_requirements),
+            "has_feedback": is_refinement_request,
             "workflow_settings": parsed_workflow_settings.model_dump() if parsed_workflow_settings else {},
         },
     )
@@ -320,6 +414,17 @@ async def parse_requirements(
                     "requirements_total": len(response.requirements),
                     "approved": response.approved,
                 },
+            )
+            _record_billing_consumption_safe(
+                current_user=current_user,
+                billing_context=billing_context,
+                source_event_id=event_id,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                billing_key="requirements.refine",
+                quantity=max(1, modified_count),
+                unit="requirement",
+                metadata={"approved": response.approved},
             )
             response.requirements = persist_requirement_versions(
                 current_requirements=response.requirements,
@@ -416,6 +521,17 @@ async def parse_requirements(
                 "source_names": source_names,
                 "approved": response.approved,
             },
+        )
+        _record_billing_consumption_safe(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=event_id,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            billing_key="requirements.parse",
+            quantity=len(response.requirements),
+            unit="requirement",
+            metadata={"approved": response.approved, "document_count": len(source_names)},
         )
         response.requirements = persist_requirement_versions(
             current_requirements=response.requirements,
@@ -518,6 +634,11 @@ async def generate_test_cases_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
     request_id = _get_request_id(request)
+    billing_context = await run_in_threadpool(
+        enforce_billing_access,
+        current_user=current_user,
+        billing_key="testcases.generate",
+    )
     workflow_run_id = start_workflow_run(
         operation="testcases.generate",
         actor=current_user,
@@ -541,6 +662,17 @@ async def generate_test_cases_endpoint(
                 "requirement_count": len(payload.requirements),
                 "approved": response.approved,
             },
+        )
+        _record_billing_consumption_safe(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=event_id,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            billing_key="testcases.generate",
+            quantity=len(response.test_cases),
+            unit="test_case",
+            metadata={"approved": response.approved, "requirement_count": len(payload.requirements)},
         )
         response.test_cases = persist_test_case_versions(
             current_test_cases=response.test_cases,
@@ -573,6 +705,11 @@ async def refine_test_cases_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
     request_id = _get_request_id(request)
+    billing_context = await run_in_threadpool(
+        enforce_billing_access,
+        current_user=current_user,
+        billing_key="testcases.refine",
+    )
     workflow_run_id = start_workflow_run(
         operation="testcases.refine",
         actor=current_user,
@@ -600,6 +737,17 @@ async def refine_test_cases_endpoint(
                 "test_cases_total": len(response.test_cases),
                 "approved": response.approved,
             },
+        )
+        _record_billing_consumption_safe(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=event_id,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            billing_key="testcases.refine",
+            quantity=max(1, modified_count),
+            unit="test_case",
+            metadata={"approved": response.approved},
         )
         response.test_cases = persist_test_case_versions(
             current_test_cases=response.test_cases,

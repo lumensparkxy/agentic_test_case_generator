@@ -1,8 +1,11 @@
 import os
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from importlib.metadata import PackageNotFoundError, version
 from functools import lru_cache
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 try:
@@ -11,7 +14,7 @@ except ImportError:  # pragma: no cover - dependency fallback
     load_dotenv = None
 
 
-DEFAULT_MODEL_NAME = "gemini-2.5-flash"
+DEFAULT_MODEL_NAME = "gemini-3-flash-preview"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://localhost:5173",
@@ -79,6 +82,18 @@ class FirebaseSettings(BaseModel):
     service_account_json: str = ""
 
 
+class BillingSettings(BaseModel):
+    pricing_version: str = "pilot-v1"
+    token_unit_size: int = 4
+    pilot_requirements_limit: int = 200
+    pilot_test_cases_limit: int = 200
+    contact_email: str = "hello@spica-digital.eu"
+    launch_date: Optional[datetime] = None
+    shadow_mode: bool = True
+    admin_emails: list[str] = Field(default_factory=list)
+    max_overdraft_units: int = 0
+
+
 def get_cors_allow_origins() -> list[str]:
     raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
     if not raw_origins.strip():
@@ -97,6 +112,50 @@ def _parse_major_minor(raw_version: str) -> tuple[int, int]:
 
 def _split_csv_env(raw_value: str) -> list[str]:
     return [value.strip() for value in raw_value.split(",") if value.strip()]
+
+
+def _parse_bool_env(raw_value: str, *, default: bool) -> bool:
+    normalized = str(raw_value or "").strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    logging.warning("Invalid boolean environment value %s. Falling back to %s.", raw_value, default)
+    return default
+
+
+def _parse_datetime_env(raw_value: str) -> Optional[datetime]:
+    normalized = str(raw_value or "").strip()
+    if not normalized:
+        return None
+
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        logging.warning("Invalid datetime environment value %s. Ignoring it.", raw_value)
+        return None
+
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _parse_non_negative_int_env(raw_value: str, *, default: int, env_name: str) -> int:
+    normalized = str(raw_value or "").strip()
+    if not normalized:
+        return default
+    try:
+        parsed = int(normalized)
+    except ValueError:
+        logging.warning("Invalid %s=%s. Falling back to %s.", env_name, raw_value, default)
+        return default
+    if parsed < 0:
+        logging.warning("Negative %s=%s. Falling back to %s.", env_name, raw_value, default)
+        return default
+    return parsed
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -164,6 +223,43 @@ def get_firebase_settings() -> FirebaseSettings:
     return FirebaseSettings(
         project_id=(os.getenv("FIREBASE_PROJECT_ID") or "").strip(),
         service_account_json=(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip(),
+    )
+
+
+@lru_cache
+def get_billing_settings() -> BillingSettings:
+    pricing_version = (os.getenv("BILLING_PRICING_VERSION") or "pilot-v1").strip() or "pilot-v1"
+    default_contact_email = BillingSettings().contact_email
+    contact_email = (os.getenv("BILLING_CONTACT_EMAIL") or default_contact_email).strip() or default_contact_email
+    launch_date = _parse_datetime_env(os.getenv("BILLING_LAUNCH_DATE", ""))
+    shadow_mode = _parse_bool_env(os.getenv("BILLING_SHADOW_MODE", "true"), default=True)
+
+    def _parse_positive_int(env_name: str, default: int) -> int:
+        raw_value = os.getenv(env_name, str(default))
+        try:
+            parsed = int(raw_value)
+        except ValueError:
+            logging.warning("Invalid %s=%s. Falling back to %s.", env_name, raw_value, default)
+            return default
+        if parsed <= 0:
+            logging.warning("Non-positive %s=%s. Falling back to %s.", env_name, raw_value, default)
+            return default
+        return parsed
+
+    return BillingSettings(
+        pricing_version=pricing_version,
+        token_unit_size=_parse_positive_int("BILLING_TOKEN_UNIT_SIZE", 4),
+        pilot_requirements_limit=_parse_positive_int("BILLING_PILOT_REQUIREMENTS_LIMIT", 200),
+        pilot_test_cases_limit=_parse_positive_int("BILLING_PILOT_TEST_CASE_LIMIT", 200),
+        contact_email=contact_email,
+        launch_date=launch_date,
+        shadow_mode=shadow_mode,
+        admin_emails=_dedupe_preserving_order(_split_csv_env(os.getenv("BILLING_ADMIN_EMAILS", ""))),
+        max_overdraft_units=_parse_non_negative_int_env(
+            os.getenv("BILLING_MAX_OVERDRAFT_UNITS", "0"),
+            default=0,
+            env_name="BILLING_MAX_OVERDRAFT_UNITS",
+        ),
     )
 
 
