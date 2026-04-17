@@ -27,6 +27,75 @@ const WORKFLOW_SETTING_FIELDS = [
 	{ key: "stall_iteration_limit", label: "Stall limit", min: 1, max: 20 },
 	{ key: "retry_attempts", label: "Retry attempts", min: 0, max: 5 },
 ];
+const USAGE_STATUS_ITEMS = [
+	{ key: "requirementsGeneratedCount", label: "Req +" },
+	{ key: "requirementsModifiedCount", label: "Req Δ" },
+	{ key: "testCasesGeneratedCount", label: "TC +" },
+	{ key: "testCasesModifiedCount", label: "TC Δ" },
+];
+
+const normalizeUsageMetric = (value) => {
+	const parsed = Number.parseInt(`${value ?? 0}`, 10);
+	return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildEmptyUsageSummary = (user) => ({
+	scopeType: "individual",
+	scopeKey: user?.sub ? `user:${user.sub}` : "user:current",
+	displayName: user?.name || user?.email || user?.sub || "Current user",
+	totalEvents: 0,
+	requirementsGeneratedCount: 0,
+	requirementsModifiedCount: 0,
+	testCasesGeneratedCount: 0,
+	testCasesModifiedCount: 0,
+	hasData: false,
+});
+
+const buildUsageSummaryFromSource = (source, user, group, hasData = true) => ({
+	scopeType: group?.scope_type || "individual",
+	scopeKey: group?.scope_key || (user?.sub ? `user:${user.sub}` : "user:current"),
+	displayName: source?.name || source?.email || group?.display_name || user?.name || user?.email || user?.sub || "Current user",
+	totalEvents: normalizeUsageMetric(source?.total_events),
+	requirementsGeneratedCount: normalizeUsageMetric(source?.requirements_generated_count),
+	requirementsModifiedCount: normalizeUsageMetric(source?.requirements_modified_count),
+	testCasesGeneratedCount: normalizeUsageMetric(source?.test_cases_generated_count),
+	testCasesModifiedCount: normalizeUsageMetric(source?.test_cases_modified_count),
+	hasData,
+});
+
+const getCurrentUserUsageSummary = (report, user) => {
+	if (!user) {
+		return null;
+	}
+
+	const fallback = buildEmptyUsageSummary(user);
+	const subject = `${user.sub || ""}`.trim();
+	const email = `${user.email || ""}`.trim().toLowerCase();
+	const groups = Array.isArray(report?.groups) ? report.groups : [];
+	const matchesUser = (candidate) => {
+		const candidateUserId = `${candidate?.user_id || ""}`.trim();
+		const candidateEmail = `${candidate?.email || ""}`.trim().toLowerCase();
+		return (subject && candidateUserId === subject) || (email && candidateEmail === email);
+	};
+
+	for (const group of groups) {
+		const users = Array.isArray(group?.users) ? group.users : [];
+		const matchedUser = users.find(matchesUser);
+		if (matchedUser) {
+			return buildUsageSummaryFromSource(matchedUser, user, group, true);
+		}
+
+		if (group?.scope_type === "individual") {
+			const scopeKey = `${group?.scope_key || ""}`.trim();
+			const displayName = `${group?.display_name || ""}`.trim().toLowerCase();
+			if ((subject && scopeKey === `user:${subject}`) || (email && displayName === email)) {
+				return buildUsageSummaryFromSource(group, user, group, true);
+			}
+		}
+	}
+
+	return fallback;
+};
 
 const buildWorkflowSettingsPayload = (settings) => {
 	const payload = Object.entries(settings || {}).reduce((acc, [key, value]) => {
@@ -84,6 +153,8 @@ export default function App() {
 	const [currentUser, setCurrentUser] = useState(null);
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
 	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+	const [usageSummary, setUsageSummary] = useState(null);
+	const [isUsageLoading, setIsUsageLoading] = useState(false);
 
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
@@ -225,6 +296,8 @@ export default function App() {
 	const clearAuthState = (nextStatus = null) => {
 		setAuthToken("");
 		setCurrentUser(null);
+		setUsageSummary(null);
+		setIsUsageLoading(false);
 		localStorage.removeItem(STORAGE_AUTH_TOKEN);
 		localStorage.removeItem(STORAGE_AUTH_USER);
 		if (nextStatus) {
@@ -282,6 +355,32 @@ export default function App() {
 		const token = await firebaseAuth.currentUser.getIdToken();
 		setAuthToken((current) => (current === token ? current : token));
 		return token;
+	};
+
+	const refreshUsageSummary = async (userOverride = currentUser) => {
+		const user = userOverride || currentUser;
+		if (!user) {
+			setUsageSummary(null);
+			setIsUsageLoading(false);
+			return;
+		}
+
+		setIsUsageLoading(true);
+		try {
+			const res = await apiRequest("/reports/usage", { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load usage summary");
+				throw new Error(errorMessage);
+			}
+
+			const report = await res.json();
+			setUsageSummary(getCurrentUserUsageSummary(report, user));
+		} catch (error) {
+			console.error("Failed to refresh usage summary", error);
+			setUsageSummary(buildEmptyUsageSummary(user));
+		} finally {
+			setIsUsageLoading(false);
+		}
 	};
 
 	useEffect(() => {
@@ -356,6 +455,16 @@ export default function App() {
 
 		return unsubscribe;
 	}, []);
+
+	useEffect(() => {
+		if (!isAuthenticated || !currentUser) {
+			setUsageSummary(null);
+			setIsUsageLoading(false);
+			return;
+		}
+
+		void refreshUsageSummary(currentUser);
+	}, [isAuthenticated, currentUser?.sub, currentUser?.email]);
 
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = { ...(options.headers || {}) };
@@ -454,6 +563,7 @@ export default function App() {
 			setExpandedRows({});
 			setFeedback("");
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
+			void refreshUsageSummary();
 			if (withFeedback) setReqFeedback("");
 		} catch (error) {
 			setStatus(`Parse failed: ${error.message}`);
@@ -516,6 +626,7 @@ export default function App() {
 			setStatus(
 				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""}.${reviewStatus}`.trim()
 			);
+			void refreshUsageSummary();
 			if (withFeedback) setFeedback("");
 		} catch (error) {
 			setStatus(`Generation failed: ${error.message}`);
@@ -645,6 +756,12 @@ export default function App() {
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
+	const statusUsageItems = usageSummary
+		? USAGE_STATUS_ITEMS.map((item) => ({
+			...item,
+			value: normalizeUsageMetric(usageSummary[item.key]),
+		}))
+		: [];
 
 	return (
 		<div className="page">
@@ -658,7 +775,22 @@ export default function App() {
 				</div>
 				<div className="header-right">
 					<div className={`status ${isAuthenticated ? "status-authenticated" : ""}`}>
-						<strong>Status:</strong> {status || "Idle"}
+						<strong>Status:</strong>
+						<span className="status-message">{status || "Idle"}</span>
+						{isAuthenticated && (
+							<div className="status-usage" aria-label="Current user usage summary">
+								{statusUsageItems.length > 0 ? (
+									statusUsageItems.map((item) => (
+										<span className="status-usage-pill" key={item.key}>
+											<span className="status-usage-pill-label">{item.label}</span>
+											<span className="status-usage-pill-value">{item.value}</span>
+										</span>
+									))
+								) : isUsageLoading ? (
+									<span className="status-usage-loading">Loading usage…</span>
+								) : null}
+							</div>
+						)}
 					</div>
 					<div className="auth-panel">
 						{isVerifyingSession ? (

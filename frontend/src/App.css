@@ -80,6 +80,7 @@ body {
     color: var(--text-muted);
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
 }
 
@@ -87,9 +88,48 @@ body {
     color: var(--text-main);
 }
 
+.status-message {
+    color: inherit;
+}
+
 .status-authenticated {
     border-color: #86efac;
     background-color: #f0fdf4;
+    color: #166534;
+}
+
+.status-usage {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 0.25rem;
+}
+
+.status-usage-pill,
+.status-usage-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(22, 101, 52, 0.18);
+    background: rgba(255, 255, 255, 0.7);
+    font-size: 0.72rem;
+    line-height: 1;
+}
+
+.status-usage-pill-label {
+    font-weight: 700;
+    color: #166534;
+}
+
+.status-usage-pill-value {
+    font-weight: 700;
+    color: #14532d;
+}
+
+.status-usage-loading {
     color: #166534;
 }
 
@@ -1323,6 +1363,14 @@ pre {
     .auth-user {
         justify-content: flex-start;
         flex-wrap: wrap;
+    }
+
+    .status {
+        width: 100%;
+    }
+
+    .status-usage {
+        margin-left: 0;
     }
 
     .auth-user-meta {

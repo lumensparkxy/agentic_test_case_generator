@@ -3,6 +3,7 @@ from typing import Any, List, Optional
 import json
 import logging
 from uuid import uuid4
+from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
@@ -26,6 +27,7 @@ from .models import (
     Requirement,
     RefineTestCasesInput,
     RequirementsWorkflowResponse,
+    UsageReportResponse,
     WorkflowSettings,
 )
 from fastapi.responses import StreamingResponse
@@ -40,6 +42,7 @@ from .auth.google_auth import verify_google_credential
 from .auth.jwt_auth import create_access_token, get_current_user
 from .services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from .services.context_grounding import build_grounded_context
+from .services.reporting_service import build_usage_report
 from .services.versioning_service import persist_requirement_versions, persist_test_case_versions
 from .utils.excel_parser import parse_excel_to_text
 
@@ -201,6 +204,18 @@ async def auth_me(current_user: AuthUser = Depends(get_current_user)) -> AuthUse
 @app.post("/auth/logout", response_model=LogoutResponse)
 async def auth_logout() -> LogoutResponse:
     return LogoutResponse(status="ok")
+
+
+@app.get("/reports/usage", response_model=UsageReportResponse)
+async def usage_report(
+    current_user: AuthUser = Depends(get_current_user),
+    start_at: Optional[datetime] = None,
+    end_at: Optional[datetime] = None,
+) -> UsageReportResponse:
+    if start_at and end_at and start_at > end_at:
+        raise HTTPException(status_code=400, detail="start_at must be earlier than or equal to end_at")
+
+    return await run_in_threadpool(build_usage_report, start_at=start_at, end_at=end_at)
 
 
 @app.post("/requirements/parse", response_model=RequirementsWorkflowResponse)
