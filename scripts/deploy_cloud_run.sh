@@ -59,6 +59,7 @@ grant_secret_accessor() {
 
 require_command docker
 require_command gcloud
+require_command curl
 
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-us-central1}"
@@ -67,21 +68,47 @@ BACKEND_SERVICE="${BACKEND_SERVICE:-tcg-backend}"
 FRONTEND_SERVICE="${FRONTEND_SERVICE:-tcg-frontend}"
 SECRET_GEMINI_NAME="${SECRET_GEMINI_NAME:-tcg-gemini-api-key}"
 SECRET_JWT_NAME="${SECRET_JWT_NAME:-tcg-jwt-secret-key}"
+SECRET_FIREBASE_SA_NAME="${SECRET_FIREBASE_SA_NAME:-tcg-firebase-service-account-json}"
 RUNTIME_SERVICE_ACCOUNT="${RUNTIME_SERVICE_ACCOUNT:-}"
 MODEL_NAME="${MODEL_NAME:-gemini-3-flash-preview}"
 JWT_ALGORITHM="${JWT_ALGORITHM:-HS256}"
 JWT_EXPIRATION_MINUTES="${JWT_EXPIRATION_MINUTES:-60}"
 TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-${VITE_GOOGLE_CLIENT_ID:-}}"
+GOOGLE_CLIENT_IDS="${GOOGLE_CLIENT_IDS:-}"
 VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-${GOOGLE_CLIENT_ID:-}}"
+FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID:-${VITE_FIREBASE_PROJECT_ID:-}}"
+FIREBASE_SERVICE_ACCOUNT_JSON="${FIREBASE_SERVICE_ACCOUNT_JSON:-}"
+GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}"
+VITE_FIREBASE_API_KEY="${VITE_FIREBASE_API_KEY:-}"
+VITE_FIREBASE_AUTH_DOMAIN="${VITE_FIREBASE_AUTH_DOMAIN:-}"
+VITE_FIREBASE_PROJECT_ID="${VITE_FIREBASE_PROJECT_ID:-${FIREBASE_PROJECT_ID:-}}"
+VITE_FIREBASE_STORAGE_BUCKET="${VITE_FIREBASE_STORAGE_BUCKET:-}"
+VITE_FIREBASE_MESSAGING_SENDER_ID="${VITE_FIREBASE_MESSAGING_SENDER_ID:-}"
+VITE_FIREBASE_APP_ID="${VITE_FIREBASE_APP_ID:-}"
+VITE_FIREBASE_MEASUREMENT_ID="${VITE_FIREBASE_MEASUREMENT_ID:-}"
 JWT_SECRET_KEY="${JWT_SECRET_KEY:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
 
 require_var PROJECT_ID
 require_var GOOGLE_CLIENT_ID
 require_var VITE_GOOGLE_CLIENT_ID
+require_var VITE_FIREBASE_API_KEY
+require_var VITE_FIREBASE_AUTH_DOMAIN
+require_var VITE_FIREBASE_PROJECT_ID
+require_var VITE_FIREBASE_APP_ID
 require_var JWT_SECRET_KEY
 require_var GEMINI_API_KEY
+
+if [[ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" && -n "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
+  if [[ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
+    echo "Warning: GOOGLE_APPLICATION_CREDENTIALS file not found: $GOOGLE_APPLICATION_CREDENTIALS" >&2
+    echo "Falling back to application default credentials for Firebase Admin." >&2
+  else
+    printf 'Loading Firebase Admin credentials from %s\n' "$GOOGLE_APPLICATION_CREDENTIALS"
+    FIREBASE_SERVICE_ACCOUNT_JSON="$(<"$GOOGLE_APPLICATION_CREDENTIALS")"
+  fi
+fi
 
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 DEFAULT_RUNTIME_SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
@@ -92,6 +119,22 @@ FRONTEND_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${FRONTE
 
 INITIAL_CORS="http://localhost:5173,http://127.0.0.1:5173"
 GCLOUD_ENV_DELIMITER='@'
+
+join_with_delimiter() {
+  local delimiter="$1"
+  shift
+
+  local first=1
+  local item
+  for item in "$@"; do
+    if (( first )); then
+      printf '%s' "$item"
+      first=0
+    else
+      printf '%s%s' "$delimiter" "$item"
+    fi
+  done
+}
 
 dedupe_csv() {
   printf '%s' "$1" \
@@ -110,14 +153,59 @@ cloud_run_service_origin() {
 
 build_env_var_arg() {
   local cors_allow_origins="$1"
+  local env_entries=(
+    "MODEL_NAME=$MODEL_NAME"
+    "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
+    "JWT_ALGORITHM=$JWT_ALGORITHM"
+    "JWT_EXPIRATION_MINUTES=$JWT_EXPIRATION_MINUTES"
+    "CORS_ALLOW_ORIGINS=$cors_allow_origins"
+  )
 
-  printf '^%s^MODEL_NAME=%s%sGOOGLE_CLIENT_ID=%s%sJWT_ALGORITHM=%s%sJWT_EXPIRATION_MINUTES=%s%sCORS_ALLOW_ORIGINS=%s' \
-    "$GCLOUD_ENV_DELIMITER" \
-    "$MODEL_NAME" "$GCLOUD_ENV_DELIMITER" \
-    "$GOOGLE_CLIENT_ID" "$GCLOUD_ENV_DELIMITER" \
-    "$JWT_ALGORITHM" "$GCLOUD_ENV_DELIMITER" \
-    "$JWT_EXPIRATION_MINUTES" "$GCLOUD_ENV_DELIMITER" \
-    "$cors_allow_origins"
+  if [[ -n "$GOOGLE_CLIENT_IDS" ]]; then
+    env_entries+=("GOOGLE_CLIENT_IDS=$GOOGLE_CLIENT_IDS")
+  fi
+  if [[ -n "$FIREBASE_PROJECT_ID" ]]; then
+    env_entries+=("FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID")
+  fi
+
+  printf '^%s^' "$GCLOUD_ENV_DELIMITER"
+  join_with_delimiter "$GCLOUD_ENV_DELIMITER" "${env_entries[@]}"
+}
+
+build_secret_arg() {
+  local secret_entries=(
+    "GEMINI_API_KEY=${SECRET_GEMINI_NAME}:latest"
+    "JWT_SECRET_KEY=${SECRET_JWT_NAME}:latest"
+  )
+
+  if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]]; then
+    secret_entries+=("FIREBASE_SERVICE_ACCOUNT_JSON=${SECRET_FIREBASE_SA_NAME}:latest")
+  fi
+
+  join_with_delimiter ',' "${secret_entries[@]}"
+}
+
+assert_cors_origin_allowed() {
+  local backend_url="$1"
+  local origin="$2"
+  local response
+
+  response="$(curl -sS -D - -o /dev/null -X OPTIONS "${backend_url}/requirements/enrich" \
+    -H "Origin: ${origin}" \
+    -H 'Access-Control-Request-Method: POST' \
+    -H 'Access-Control-Request-Headers: content-type,authorization' | tr -d '\r')"
+
+  if ! printf '%s\n' "$response" | awk 'NR == 1 { exit ($2 == 200 ? 0 : 1) }'; then
+    echo "CORS smoke check failed: unexpected preflight status for origin ${origin}" >&2
+    printf '%s\n' "$response" >&2
+    exit 1
+  fi
+
+  if ! printf '%s\n' "$response" | grep -Fqi "access-control-allow-origin: ${origin}"; then
+    echo "CORS smoke check failed: backend did not allow origin ${origin}" >&2
+    printf '%s\n' "$response" >&2
+    exit 1
+  fi
 }
 
 DEPLOY_ARGS=(--region "$REGION" --allow-unauthenticated --port 8080)
@@ -147,10 +235,16 @@ gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet >/dev/null
 printf 'Updating secrets in Secret Manager...\n'
 upsert_secret "$SECRET_GEMINI_NAME" "$GEMINI_API_KEY"
 upsert_secret "$SECRET_JWT_NAME" "$JWT_SECRET_KEY"
+if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]]; then
+  upsert_secret "$SECRET_FIREBASE_SA_NAME" "$FIREBASE_SERVICE_ACCOUNT_JSON"
+fi
 
 printf 'Granting Secret Manager access to runtime service account...\n'
 grant_secret_accessor "$SECRET_GEMINI_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
 grant_secret_accessor "$SECRET_JWT_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
+if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]]; then
+  grant_secret_accessor "$SECRET_FIREBASE_SA_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
+fi
 
 printf 'Building backend image...\n'
 docker build \
@@ -168,17 +262,34 @@ gcloud run deploy "$BACKEND_SERVICE" \
   --image "$BACKEND_IMAGE" \
   "${DEPLOY_ARGS[@]}" \
   --set-env-vars "$(build_env_var_arg "$INITIAL_CORS")" \
-  --set-secrets "GEMINI_API_KEY=${SECRET_GEMINI_NAME}:latest,JWT_SECRET_KEY=${SECRET_JWT_NAME}:latest" >/dev/null
+  --set-secrets "$(build_secret_arg)" >/dev/null
 
 BACKEND_URL="$(gcloud run services describe "$BACKEND_SERVICE" --region "$REGION" --format='value(status.url)')"
 printf 'Backend deployed: %s\n' "$BACKEND_URL"
 
 printf 'Building frontend image with API base %s...\n' "$BACKEND_URL"
+FRONTEND_BUILD_ARGS=(
+  --build-arg "VITE_API_BASE=${BACKEND_URL}"
+  --build-arg "VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}"
+  --build-arg "VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}"
+  --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}"
+  --build-arg "VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}"
+  --build-arg "VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}"
+)
+if [[ -n "$VITE_FIREBASE_STORAGE_BUCKET" ]]; then
+  FRONTEND_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}")
+fi
+if [[ -n "$VITE_FIREBASE_MESSAGING_SENDER_ID" ]]; then
+  FRONTEND_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}")
+fi
+if [[ -n "$VITE_FIREBASE_MEASUREMENT_ID" ]]; then
+  FRONTEND_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_MEASUREMENT_ID=${VITE_FIREBASE_MEASUREMENT_ID}")
+fi
+
 docker build \
   --platform "$TARGET_PLATFORM" \
   --provenance=false \
-  --build-arg "VITE_API_BASE=${BACKEND_URL}" \
-  --build-arg "VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}" \
+  "${FRONTEND_BUILD_ARGS[@]}" \
   -f frontend/Dockerfile \
   -t "$FRONTEND_IMAGE" .
 
@@ -192,6 +303,8 @@ gcloud run deploy "$FRONTEND_SERVICE" \
 
 FRONTEND_URL="$(gcloud run services describe "$FRONTEND_SERVICE" --region "$REGION" --format='value(status.url)')"
 FRONTEND_SERVICE_URL="$(cloud_run_service_origin "$FRONTEND_SERVICE")"
+FRONTEND_DOMAIN="$(printf '%s' "$FRONTEND_URL" | sed -E 's#^https?://##' | sed 's#/$##')"
+FRONTEND_SERVICE_DOMAIN="$(printf '%s' "$FRONTEND_SERVICE_URL" | sed -E 's#^https?://##' | sed 's#/$##')"
 FINAL_CORS="$(dedupe_csv "$INITIAL_CORS,$FRONTEND_URL,$FRONTEND_SERVICE_URL")"
 printf 'Frontend deployed: %s\n' "$FRONTEND_URL"
 
@@ -199,7 +312,11 @@ printf 'Updating backend CORS to frontend URL...\n'
 gcloud run services update "$BACKEND_SERVICE" \
   --region "$REGION" \
   --set-env-vars "$(build_env_var_arg "$FINAL_CORS")" \
-  --set-secrets "GEMINI_API_KEY=${SECRET_GEMINI_NAME}:latest,JWT_SECRET_KEY=${SECRET_JWT_NAME}:latest" >/dev/null
+  --set-secrets "$(build_secret_arg)" >/dev/null
+
+printf 'Running backend CORS smoke check for %s...\n' "$FRONTEND_URL"
+assert_cors_origin_allowed "$BACKEND_URL" "$FRONTEND_URL"
+printf 'CORS smoke check passed.\n'
 
 cat <<EOF
 
@@ -213,8 +330,11 @@ Next steps:
 2. Add these Authorized JavaScript origins:
    ${FRONTEND_URL}
   ${FRONTEND_SERVICE_URL}
-3. If you later attach a custom domain, add that origin too and rerun this script.
-4. Verify sign-in and the full app flow in the deployed frontend.
+3. In Firebase Console -> Authentication -> Settings -> Authorized domains, add:
+   ${FRONTEND_DOMAIN}
+  ${FRONTEND_SERVICE_DOMAIN}
+4. If you later attach a custom domain, add that origin/domain too and rerun this script.
+5. Verify sign-in and the full app flow in the deployed frontend.
 
 You can rerun this script anytime after changing the app:
   PROJECT_ID=${PROJECT_ID} REGION=${REGION} ./scripts/deploy_cloud_run.sh

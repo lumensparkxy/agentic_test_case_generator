@@ -18,10 +18,18 @@ Copy .env.example to .env and set values:
 - MODEL_NAME (default: gemini-2.5-flash)
 - GOOGLE_CLIENT_ID (required for login)
 - GOOGLE_CLIENT_IDS (optional comma-separated allow-list for multiple web client IDs)
+- FIREBASE_PROJECT_ID (recommended for Firebase Admin initialization)
+- FIREBASE_SERVICE_ACCOUNT_JSON (optional for local containers or non-GCP runtimes)
+- GOOGLE_APPLICATION_CREDENTIALS (optional alternative for the deploy helper; use an absolute path to a local Firebase Admin SDK JSON file)
 - JWT_SECRET_KEY (required for backend-issued access tokens)
 - JWT_ALGORITHM (default: HS256)
 - JWT_EXPIRATION_MINUTES (default: 60)
 - VITE_GOOGLE_CLIENT_ID (required for frontend sign-in button)
+- VITE_FIREBASE_API_KEY (required for frontend sign-in button)
+- VITE_FIREBASE_AUTH_DOMAIN (required for frontend sign-in button)
+- VITE_FIREBASE_PROJECT_ID (required for frontend sign-in button)
+- VITE_FIREBASE_APP_ID (required for frontend sign-in button)
+- VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_MEASUREMENT_ID (recommended to mirror your Firebase web app config)
 
 Note: ADK expects GOOGLE_API_KEY. If only GEMINI_API_KEY is set, the backend normalizes it to GOOGLE_API_KEY at runtime.
 
@@ -119,6 +127,10 @@ Prerequisites:
 	- `GEMINI_API_KEY`
 	- `GOOGLE_CLIENT_ID`
 	- `VITE_GOOGLE_CLIENT_ID`
+	- `VITE_FIREBASE_API_KEY`
+	- `VITE_FIREBASE_AUTH_DOMAIN`
+	- `VITE_FIREBASE_PROJECT_ID`
+	- `VITE_FIREBASE_APP_ID`
 	- `JWT_SECRET_KEY`
 
 Set your target project and optionally the region/repository/service names:
@@ -138,13 +150,18 @@ What the script does:
 - enables Cloud Run, Artifact Registry, and Secret Manager APIs
 - creates the Docker Artifact Registry repository if needed
 - stores `GEMINI_API_KEY` and `JWT_SECRET_KEY` in Secret Manager
+- optionally stores `FIREBASE_SERVICE_ACCOUNT_JSON` in Secret Manager when provided
+- if `GOOGLE_APPLICATION_CREDENTIALS` points to a local Firebase Admin SDK JSON file, the deploy script reads that file and uploads it as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret automatically
 - builds and pushes the backend container
 - deploys the backend to Cloud Run
-- builds and pushes the frontend container with the deployed backend URL baked in
+- builds and pushes the frontend container with the deployed backend URL and Firebase web config baked in
 - deploys the frontend to Cloud Run
 - updates backend CORS to allow the deployed frontend URL
+- runs a CORS preflight smoke check against the deployed backend
 
 After deployment, add the frontend Cloud Run URL as an Authorized JavaScript origin in your Google OAuth web client.
+
+If you use Firebase Authentication with popup or redirect flows, also add the deployed frontend hostname (without `https://`) to Firebase Console -> Authentication -> Settings -> Authorized domains. For Cloud Run, this is typically both the canonical `*.a.run.app` hostname and the region-scoped `*.run.app` hostname shown by the deploy script.
 
 ## API Authentication
 - Public endpoints:
