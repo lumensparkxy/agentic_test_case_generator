@@ -61,6 +61,10 @@ const buildProviderSignInErrorMessage = (providerConfig, error) => {
 		return `${providerLabel} sign-in is missing the Firebase auth callback URL in the Microsoft Entra app registration. Add this Web redirect URI to the Azure/Microsoft app used by Firebase: ${handlerUrl}. Then verify the same Client ID and Client Secret are saved in Firebase Console → Authentication → Sign-in method → Microsoft.`;
 	}
 
+	if (providerConfig?.id === "microsoft" && /AADSTS7000215|invalid_client|client secret/i.test(rawMessage)) {
+		return `${providerLabel} sign-in is failing because the Microsoft Entra client secret saved in Firebase is invalid. In Firebase Console → Authentication → Sign-in method → Microsoft, re-enter the Microsoft app registration secret VALUE (not the secret ID), or generate a new client secret in Microsoft Entra and save that value in Firebase. The redirect URI should remain ${handlerUrl}.`;
+	}
+
 	if (errorCode === "auth/operation-not-allowed") {
 		return `${providerLabel} sign-in is not enabled for the Firebase project used by this app. Enable it in Firebase Console → Authentication → Sign-in method.`;
 	}

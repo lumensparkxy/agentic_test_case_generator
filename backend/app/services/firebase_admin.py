@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+from pathlib import Path
 from functools import lru_cache
 
 import firebase_admin
@@ -16,6 +18,10 @@ def _build_firebase_credential():
         except json.JSONDecodeError as exc:
             raise RuntimeError("FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON") from exc
 
+    application_default_path = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+    if application_default_path and not Path(application_default_path).exists():
+        raise RuntimeError(f"GOOGLE_APPLICATION_CREDENTIALS file was not found: {application_default_path}")
+
     return credentials.ApplicationDefault()
 
 
@@ -30,7 +36,7 @@ def get_firebase_admin_app():
             return firebase_admin.initialize_app(_build_firebase_credential(), options=options)
         except Exception as exc:  # pragma: no cover - depends on local credential setup
             logging.exception("Firebase Admin initialization failed")
-            raise RuntimeError("Firebase Admin credentials are not configured correctly") from exc
+            raise RuntimeError(f"Firebase Admin credentials are not configured correctly: {exc}") from exc
 
 
 @lru_cache
