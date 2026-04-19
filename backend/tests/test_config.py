@@ -10,12 +10,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, _load_environment_file, get_settings
+from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, _load_environment_file, get_billing_settings, get_settings
 
 
 class ConfigSettingsTests(unittest.TestCase):
     def tearDown(self) -> None:
         get_settings.cache_clear()
+        get_billing_settings.cache_clear()
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -78,6 +79,36 @@ class ConfigSettingsTests(unittest.TestCase):
 
         self.assertFalse(log_filter.filter(noisy_record))
         self.assertTrue(log_filter.filter(normal_record))
+
+    def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "BILLING_CONTACT_EMAIL": "billing@example.com",
+                "BILLING_LAUNCH_DATE": "2026-04-17T00:00:00Z",
+                "BILLING_SHADOW_MODE": "false",
+                "BILLING_PRICING_VERSION": "pilot-v1",
+                "BILLING_TOKEN_UNIT_SIZE": "4",
+                "BILLING_PILOT_REQUIREMENTS_LIMIT": "200",
+                "BILLING_PILOT_TEST_CASE_LIMIT": "200",
+                "BILLING_ADMIN_EMAILS": "ops@example.com,finance@example.com",
+                "BILLING_MAX_OVERDRAFT_UNITS": "8",
+            },
+            clear=False,
+        ):
+            get_billing_settings.cache_clear()
+            settings = get_billing_settings()
+
+        self.assertEqual(settings.contact_email, "billing@example.com")
+        self.assertEqual(settings.pricing_version, "pilot-v1")
+        self.assertEqual(settings.token_unit_size, 4)
+        self.assertEqual(settings.pilot_requirements_limit, 200)
+        self.assertEqual(settings.pilot_test_cases_limit, 200)
+        self.assertFalse(settings.shadow_mode)
+        self.assertEqual(settings.admin_emails, ["ops@example.com", "finance@example.com"])
+        self.assertEqual(settings.max_overdraft_units, 8)
+        self.assertIsNotNone(settings.launch_date)
+        self.assertEqual(settings.launch_date.isoformat(), "2026-04-17T00:00:00+00:00")
 
 
 if __name__ == "__main__":

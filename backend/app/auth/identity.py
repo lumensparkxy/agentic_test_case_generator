@@ -31,6 +31,13 @@ ORG_ADMIN_ROLE_NAMES = {
     "reporting_admin",
 }
 
+INTERNAL_BILLING_ADMIN_ROLE_NAMES = {
+    "billing_admin",
+    "super_admin",
+    "platform_admin",
+    "platform_owner",
+}
+
 
 def normalize_email(value: Any) -> str:
     return str(value or "").strip().lower()
@@ -95,3 +102,11 @@ def user_has_org_admin_access(user: Optional[AuthUser]) -> bool:
 
     normalized_roles = {role.strip().lower() for role in (user.roles or []) if str(role).strip()}
     return bool(user.is_org_admin or normalized_roles.intersection(ORG_ADMIN_ROLE_NAMES))
+
+
+def user_has_internal_billing_admin_role(user: Optional[AuthUser]) -> bool:
+    if user is None:
+        return False
+
+    normalized_roles = {role.strip().lower() for role in (user.roles or []) if str(role).strip()}
+    return bool(normalized_roles.intersection(INTERNAL_BILLING_ADMIN_ROLE_NAMES))

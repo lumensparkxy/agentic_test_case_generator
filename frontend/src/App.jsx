@@ -39,6 +39,7 @@ const USAGE_STATUS_ITEMS = [
 	{ key: "testCasesGeneratedCount", label: "TC +" },
 	{ key: "testCasesModifiedCount", label: "TC Δ" },
 ];
+const PILOT_WARNING_THRESHOLD = 20;
 
 const getAuthProviderLabel = (providerKeyOrId) => {
 	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (
@@ -113,6 +114,21 @@ const AuthProviderIcon = ({ providerId }) => {
 const normalizeUsageMetric = (value) => {
 	const parsed = Number.parseInt(`${value ?? 0}`, 10);
 	return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const createRequestId = () => {
+	if (globalThis.crypto?.randomUUID) {
+		return globalThis.crypto.randomUUID();
+	}
+	return `tcg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const formatPlanLabel = (planTier) => {
+	const normalized = `${planTier || "pilot"}`.trim().toLowerCase();
+	if (!normalized) {
+		return "Pilot";
+	}
+	return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 };
 
 const buildEmptyUsageSummary = (user) => ({
@@ -233,11 +249,26 @@ export default function App() {
 	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
 	const [usageSummary, setUsageSummary] = useState(null);
 	const [isUsageLoading, setIsUsageLoading] = useState(false);
+	const [billingEntitlements, setBillingEntitlements] = useState(null);
+	const [isBillingLoading, setIsBillingLoading] = useState(false);
 
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
 	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
+	const billingEnforcementEnabled = Boolean(billingEntitlements && !billingEntitlements.shadow_mode);
+	const requirementWorkflowLocked = Boolean(
+		billingEnforcementEnabled
+		&& billingEntitlements?.account?.plan_tier === "pilot"
+		&& billingEntitlements?.requirements?.exhausted
+	);
+	const testCaseWorkflowLocked = Boolean(
+		billingEnforcementEnabled
+		&& billingEntitlements?.account?.plan_tier === "pilot"
+		&& billingEntitlements?.test_cases?.exhausted
+	);
+	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked;
+	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked;
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -283,7 +314,14 @@ export default function App() {
 		if (!text) return fallbackMessage;
 		try {
 			const parsed = JSON.parse(text);
-			return parsed?.detail || parsed?.message || fallbackMessage;
+			if (typeof parsed?.detail === "string") {
+				return parsed.detail;
+			}
+			if (parsed?.detail?.message) {
+				const contactEmail = parsed?.detail?.contact_email;
+				return contactEmail ? `${parsed.detail.message} Contact ${contactEmail}.` : parsed.detail.message;
+			}
+			return parsed?.message || fallbackMessage;
 		} catch {
 			return text;
 		}
@@ -378,6 +416,8 @@ export default function App() {
 		setActiveAuthProvider("");
 		setUsageSummary(null);
 		setIsUsageLoading(false);
+		setBillingEntitlements(null);
+		setIsBillingLoading(false);
 		localStorage.removeItem(STORAGE_AUTH_TOKEN);
 		localStorage.removeItem(STORAGE_AUTH_USER);
 		if (nextStatus) {
@@ -460,6 +500,32 @@ export default function App() {
 			setUsageSummary(buildEmptyUsageSummary(user));
 		} finally {
 			setIsUsageLoading(false);
+		}
+	};
+
+	const refreshBillingEntitlements = async (userOverride = currentUser) => {
+		const user = userOverride || currentUser;
+		if (!user) {
+			setBillingEntitlements(null);
+			setIsBillingLoading(false);
+			return;
+		}
+
+		setIsBillingLoading(true);
+		try {
+			const res = await apiRequest("/entitlements/me", { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load billing entitlements");
+				throw new Error(errorMessage);
+			}
+
+			const payload = await res.json();
+			setBillingEntitlements(payload || null);
+		} catch (error) {
+			console.error("Failed to refresh billing entitlements", error);
+			setBillingEntitlements(null);
+		} finally {
+			setIsBillingLoading(false);
 		}
 	};
 
@@ -560,10 +626,15 @@ export default function App() {
 		if (!isAuthenticated || !currentUser) {
 			setUsageSummary(null);
 			setIsUsageLoading(false);
+			setBillingEntitlements(null);
+			setIsBillingLoading(false);
 			return;
 		}
 
-		void refreshUsageSummary(currentUser);
+		void Promise.all([
+			refreshUsageSummary(currentUser),
+			refreshBillingEntitlements(currentUser),
+		]);
 	}, [isAuthenticated, currentUser?.sub, currentUser?.email]);
 
 	useEffect(() => {
@@ -648,11 +719,17 @@ export default function App() {
 	};
 
 	const parseRequirements = async (withFeedback = false) => {
+		if (requirementWorkflowLocked) {
+			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
+			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
+			return;
+		}
 		if (!file && !withFeedback) return;
 		setIsParsing(true);
 		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
 		try {
 			const formData = new FormData();
+			const requestId = createRequestId();
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
 			if (file) formData.append("file", file);
 			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
@@ -662,6 +739,7 @@ export default function App() {
 			}
 			const res = await apiRequest("/requirements/parse", {
 				method: "POST",
+				headers: { "X-Request-ID": requestId },
 				body: formData
 			});
 			if (!res.ok) {
@@ -688,7 +766,7 @@ export default function App() {
 			setExpandedRows({});
 			setFeedback("");
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
-			void refreshUsageSummary();
+			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setReqFeedback("");
 		} catch (error) {
 			setStatus(`Parse failed: ${error.message}`);
@@ -698,9 +776,15 @@ export default function App() {
 	};
 
 	const generateTestCases = async (withFeedback = false) => {
+		if (testCaseWorkflowLocked) {
+			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
+			setStatus(`Test-case workflows are locked. Contact ${contactEmail} to upgrade.`);
+			return;
+		}
 		setIsGenerating(true);
 		setStatus(withFeedback ? "Refining test cases with feedback..." : "Generating test cases...");
 		try {
+			const requestId = createRequestId();
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(testCaseWorkflowSettings);
 			const sharedPayload = {
 				requirements,
@@ -727,7 +811,7 @@ export default function App() {
 
 			const res = await apiRequest(useRefineEndpoint ? "/testcases/refine" : "/testcases/generate", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
 				body: JSON.stringify(payload)
 			});
 			if (!res.ok) {
@@ -751,7 +835,7 @@ export default function App() {
 			setStatus(
 				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""}.${reviewStatus}`.trim()
 			);
-			void refreshUsageSummary();
+			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setFeedback("");
 		} catch (error) {
 			setStatus(`Generation failed: ${error.message}`);
@@ -881,13 +965,85 @@ export default function App() {
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
+	const billingContactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
+	const billingStatusItems = billingEntitlements
+		? [
+			{ key: "plan", label: "Plan", value: formatPlanLabel(billingEntitlements.account?.plan_tier), variant: "neutral" },
+			...(billingEntitlements.account?.plan_tier === "pilot"
+				? [
+					{ key: "requirementsRemaining", label: "Req left", value: normalizeUsageMetric(billingEntitlements.requirements?.remaining), variant: billingEntitlements.requirements?.exhausted ? "alert" : "default" },
+					{ key: "testCasesRemaining", label: "TC left", value: normalizeUsageMetric(billingEntitlements.test_cases?.remaining), variant: billingEntitlements.test_cases?.exhausted ? "alert" : "default" },
+				]
+				: []),
+			...(billingEntitlements.account?.plan_tier !== "pilot"
+				? [{ key: "walletBalance", label: billingEntitlements.account?.plan_tier === "enterprise" ? "Allocation" : "Credits", value: billingEntitlements.wallet?.balance_token_display || "0", variant: normalizeUsageMetric(billingEntitlements.wallet?.balance_units) > 0 ? "default" : "alert" }]
+				: []),
+		]
+		: [];
 	const statusUsageItems = usageSummary
 		? USAGE_STATUS_ITEMS.map((item) => ({
 			...item,
 			value: normalizeUsageMetric(usageSummary[item.key]),
+			variant: "default",
 		}))
 		: [];
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
+	const pilotAlert = (() => {
+		if (!billingEntitlements || billingEntitlements.account?.plan_tier !== "pilot") {
+			return null;
+		}
+
+		const requirementsRemaining = normalizeUsageMetric(billingEntitlements.requirements?.remaining);
+		const testCasesRemaining = normalizeUsageMetric(billingEntitlements.test_cases?.remaining);
+		const exhaustedFamilies = [];
+		const lowFamilies = [];
+
+		if (billingEntitlements.requirements?.exhausted) {
+			exhaustedFamilies.push("requirements");
+		} else if (requirementsRemaining <= PILOT_WARNING_THRESHOLD) {
+			lowFamilies.push(`${requirementsRemaining} requirement actions left`);
+		}
+
+		if (billingEntitlements.test_cases?.exhausted) {
+			exhaustedFamilies.push("test cases");
+		} else if (testCasesRemaining <= PILOT_WARNING_THRESHOLD) {
+			lowFamilies.push(`${testCasesRemaining} test-case actions left`);
+		}
+
+		if (!exhaustedFamilies.length && !lowFamilies.length && !billingEntitlements.shadow_mode) {
+			return null;
+		}
+
+		if (billingEntitlements.shadow_mode) {
+			return {
+				variant: "preview",
+				title: "Billing preview is active",
+				message: exhaustedFamilies.length
+					? `Pilot limits would block ${exhaustedFamilies.join(" and ")} once enforcement is enabled.`
+					: lowFamilies.length
+						? `Pilot balances are informational for now: ${lowFamilies.join(" • ")}.`
+						: "Pilot balances are being calculated in shadow mode before hard enforcement is switched on.",
+			};
+		}
+
+		if (exhaustedFamilies.length) {
+			return {
+				variant: "locked",
+				title: `Pilot limit reached for ${exhaustedFamilies.join(" and ")}`,
+				message: "Upgrade to premium or contact support to keep processing those workflows.",
+			};
+		}
+
+		if (lowFamilies.length) {
+			return {
+				variant: "warning",
+				title: "Pilot quota running low",
+				message: lowFamilies.join(" • "),
+			};
+		}
+
+		return null;
+	})();
 
 	return (
 		<div className="page">
@@ -905,14 +1061,23 @@ export default function App() {
 						<span className="status-message">{status || "Idle"}</span>
 						{isAuthenticated && (
 							<div className="status-usage" aria-label="Current user usage summary">
-								{statusUsageItems.length > 0 ? (
-									statusUsageItems.map((item) => (
-										<span className="status-usage-pill" key={item.key}>
+								{billingStatusItems.length > 0 ? (
+									billingStatusItems.map((item) => (
+										<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
 											<span className="status-usage-pill-label">{item.label}</span>
 											<span className="status-usage-pill-value">{item.value}</span>
 										</span>
 									))
-								) : isUsageLoading ? (
+								) : null}
+								{statusUsageItems.length > 0 ? (
+									statusUsageItems.map((item) => (
+										<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
+											<span className="status-usage-pill-label">{item.label}</span>
+											<span className="status-usage-pill-value">{item.value}</span>
+										</span>
+									))
+								) : null}
+								{isUsageLoading || isBillingLoading ? (
 									<span className="status-usage-loading">Loading usage…</span>
 								) : null}
 							</div>
@@ -965,6 +1130,16 @@ export default function App() {
 			{!isAuthenticated && !isVerifyingSession && (
 				<div className="auth-warning-banner">
 					🔐 Sign in to parse requirements, generate test cases, and export artifacts.
+				</div>
+			)}
+
+			{isAuthenticated && pilotAlert && (
+				<div className={`billing-banner billing-banner-${pilotAlert.variant}`}>
+					<div>
+						<strong>{pilotAlert.title}</strong>
+						<span>{pilotAlert.message}</span>
+					</div>
+					<a href={`mailto:${billingContactEmail}`} className="billing-banner-link">Contact {billingContactEmail}</a>
 				</div>
 			)}
 
@@ -1043,7 +1218,7 @@ export default function App() {
 									onChange={(e) => setFile(e.target.files?.[0] || null)}
 								/>
 							</div>
-							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || authActionDisabled}>
+							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
 								{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
 							</button>
 						</div>
@@ -1128,7 +1303,7 @@ export default function App() {
 								<div className="feedback-actions">
 									<button 
 										onClick={() => parseRequirements(true)} 
-										disabled={!reqFeedback.trim() || isParsing || authActionDisabled}
+										disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
 										className="feedback-button"
 									>
 										{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
@@ -1310,7 +1485,7 @@ export default function App() {
 							setTestCaseWorkflowSettings,
 						)}
 						<div className="panel-form button-row">
-							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || authActionDisabled}>
+							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || testCaseActionDisabled}>
 								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
 							</button>
 						</div>
@@ -1671,7 +1846,7 @@ export default function App() {
 								<div className="feedback-actions">
 									<button 
 										onClick={() => generateTestCases(true)} 
-										disabled={!feedback.trim() || isGenerating || authActionDisabled}
+										disabled={!feedback.trim() || isGenerating || testCaseActionDisabled}
 										className="feedback-button"
 									>
 										{isGenerating ? "⏳ Updating Test Cases..." : "🔄 Implement Changes"}

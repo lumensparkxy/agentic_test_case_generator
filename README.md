@@ -3,7 +3,7 @@
 Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Excel), enriching context, generating test cases in a template format, and exporting them as CSV, Excel, or JSON.
 
 ## Features
-- Firebase Authentication with Google, Microsoft, and Apple sign-in
+- Google Login (Google Identity Services)
 - Upload requirements (.md, .docx, .xlsx)
 - Parse and extract requirement items
 - Add context links (app, prototype, diagrams, images)
@@ -27,7 +27,6 @@ Copy .env.example to .env and set values:
 - VITE_GOOGLE_CLIENT_ID (required for frontend sign-in button)
 - VITE_FIREBASE_API_KEY (required for frontend sign-in button)
 - VITE_FIREBASE_AUTH_DOMAIN (required for frontend sign-in button)
-- VITE_FIREBASE_ENABLE_GOOGLE_AUTH, VITE_FIREBASE_ENABLE_MICROSOFT_AUTH, VITE_FIREBASE_ENABLE_APPLE_AUTH (optional booleans to show/hide provider buttons while configuring providers)
 - VITE_FIREBASE_PROJECT_ID (required for frontend sign-in button)
 - VITE_FIREBASE_APP_ID (required for frontend sign-in button)
 - VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_MEASUREMENT_ID (recommended to mirror your Firebase web app config)
@@ -48,37 +47,6 @@ For Google login, set `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` to the same
 	- `VITE_GOOGLE_CLIENT_ID`
 
 If you also run a deployed frontend with a different Google OAuth web client, add both client IDs to `GOOGLE_CLIENT_IDS` as a comma-separated list.
-
-### 1.2) Microsoft and Apple quick setup (Firebase Auth)
-
-For popup-based Firebase OAuth providers, the callback handler used by this project is:
-
-- `https://<VITE_FIREBASE_AUTH_DOMAIN>/__/auth/handler`
-
-For the current local `.env`, that resolves to:
-
-- `https://testcase-generatorxy.firebaseapp.com/__/auth/handler`
-
-Microsoft setup:
-
-1. In Firebase Console -> Authentication -> Sign-in method, enable **Microsoft**.
-2. Create or open the Microsoft Entra app registration that backs this Firebase provider.
-3. Add this **Web redirect URI** in the Microsoft app registration:
-	- `https://<VITE_FIREBASE_AUTH_DOMAIN>/__/auth/handler`
-4. Copy the Microsoft **Client ID** and **Client Secret** back into the Firebase Microsoft provider configuration and save.
-
-Apple setup:
-
-1. Join the Apple Developer Program and create a **Service ID** for Sign in with Apple.
-2. In the Apple developer configuration for Sign in with Apple on the web, add this **Return URL**:
-	- `https://<VITE_FIREBASE_AUTH_DOMAIN>/__/auth/handler`
-3. Create a Sign in with Apple private key.
-4. In Firebase Console -> Authentication -> Sign-in method, enable **Apple** and provide the Service ID, Team ID, Key ID, and private key.
-
-If you are still configuring a provider, you can temporarily hide its button in the chooser with one of these optional `.env` flags:
-
-- `VITE_FIREBASE_ENABLE_MICROSOFT_AUTH=false`
-- `VITE_FIREBASE_ENABLE_APPLE_AUTH=false`
 
 ### 2) Backend
 
@@ -214,10 +182,6 @@ Frontend stores the access token in `localStorage` for the current MVP.
 - Frontend cannot reach API: set `VITE_API_BASE` in `.env` or use the default from [.env.example](.env.example).
 - Import errors after install: re-run `python -m pip install -r backend/requirements.txt` inside your active virtual environment.
 - Google sign-in fails with audience/issuer errors: verify `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` exactly match the same web OAuth client ID, or list every valid web client ID in `GOOGLE_CLIENT_IDS`.
-- Apple sign-in fails with `auth/operation-not-allowed`: enable Apple in Firebase Console -> Authentication -> Sign-in method and complete the Service ID / Team ID / Key ID / private key setup for the same Firebase project referenced by `VITE_FIREBASE_PROJECT_ID`.
-- Microsoft sign-in fails with `invalid_request` or `redirect_uri` errors: add `https://<VITE_FIREBASE_AUTH_DOMAIN>/__/auth/handler` as a Web redirect URI in the Microsoft Entra app registration used by Firebase, then re-save that provider's Client ID and Client Secret in Firebase Console.
-- Microsoft sign-in fails with `AADSTS7000215`, `invalid_client`, or “Invalid client secret provided”: in the Microsoft Entra app registration, copy the **client secret value** (not the secret ID), then paste that value into Firebase Console -> Authentication -> Sign-in method -> Microsoft. If needed, generate a new client secret and update Firebase with the new secret value.
-- Microsoft or Apple buttons should be hidden until provider setup is ready: set `VITE_FIREBASE_ENABLE_MICROSOFT_AUTH=false` or `VITE_FIREBASE_ENABLE_APPLE_AUTH=false` in `.env`, then restart the frontend dev server.
 - Login button missing: verify `VITE_GOOGLE_CLIENT_ID` is present in `.env` and restart frontend dev server.
 - Requests return 401 after login: token may be expired or invalid; sign out/in again and confirm backend `JWT_SECRET_KEY` is set.
 

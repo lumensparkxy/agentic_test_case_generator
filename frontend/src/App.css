@@ -133,6 +133,26 @@ body {
     color: #166534;
 }
 
+.status-usage-pill-neutral {
+    border-color: rgba(30, 41, 59, 0.14);
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.status-usage-pill-neutral .status-usage-pill-label,
+.status-usage-pill-neutral .status-usage-pill-value {
+    color: #334155;
+}
+
+.status-usage-pill-alert {
+    border-color: rgba(185, 28, 28, 0.2);
+    background: rgba(254, 242, 242, 0.92);
+}
+
+.status-usage-pill-alert .status-usage-pill-label,
+.status-usage-pill-alert .status-usage-pill-value {
+    color: #b91c1c;
+}
+
 .auth-panel {
     display: flex;
     align-items: center;
@@ -202,6 +222,56 @@ body {
     background: #fffbeb;
     color: #92400e;
     font-size: 0.9rem;
+}
+
+.billing-banner {
+    margin-bottom: 1rem;
+    padding: 0.9rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: 0.9rem;
+}
+
+.billing-banner strong {
+    display: block;
+    margin-bottom: 0.2rem;
+}
+
+.billing-banner span {
+    color: inherit;
+}
+
+.billing-banner-preview {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
+.billing-banner-warning {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #92400e;
+}
+
+.billing-banner-locked {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #b91c1c;
+}
+
+.billing-banner-link {
+    color: inherit;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.billing-banner-link:hover {
+    text-decoration: underline;
 }
 
 .auth-dialog-overlay {
@@ -1510,6 +1580,11 @@ pre {
 
     .auth-dialog-overlay {
         padding: 1rem;
+    }
+
+    .billing-banner {
+        flex-direction: column;
+        align-items: flex-start;
     }
 
     .auth-dialog {
