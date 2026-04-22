@@ -82,6 +82,13 @@ class FirebaseSettings(BaseModel):
     service_account_json: str = ""
 
 
+class JiraSettings(BaseModel):
+    connection_secret_key: str = ""
+    api_timeout_seconds: int = 15
+    project_page_size: int = 50
+    issue_page_size: int = 50
+
+
 class BillingSettings(BaseModel):
     pricing_version: str = "pilot-v1"
     token_unit_size: int = 4
@@ -158,6 +165,21 @@ def _parse_non_negative_int_env(raw_value: str, *, default: int, env_name: str) 
     return parsed
 
 
+def _parse_positive_int_env(raw_value: str, *, default: int, env_name: str) -> int:
+    normalized = str(raw_value or "").strip()
+    if not normalized:
+        return default
+    try:
+        parsed = int(normalized)
+    except ValueError:
+        logging.warning("Invalid %s=%s. Falling back to %s.", env_name, raw_value, default)
+        return default
+    if parsed <= 0:
+        logging.warning("Non-positive %s=%s. Falling back to %s.", env_name, raw_value, default)
+        return default
+    return parsed
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -227,6 +249,33 @@ def get_firebase_settings() -> FirebaseSettings:
 
 
 @lru_cache
+def get_jira_settings() -> JiraSettings:
+    auth_settings = get_auth_settings()
+    connection_secret_key = (
+        (os.getenv("JIRA_CONNECTION_SECRET_KEY") or "").strip()
+        or auth_settings.jwt_secret_key
+    )
+    return JiraSettings(
+        connection_secret_key=connection_secret_key,
+        api_timeout_seconds=_parse_positive_int_env(
+            os.getenv("JIRA_API_TIMEOUT_SECONDS", "15"),
+            default=15,
+            env_name="JIRA_API_TIMEOUT_SECONDS",
+        ),
+        project_page_size=_parse_positive_int_env(
+            os.getenv("JIRA_PROJECT_PAGE_SIZE", "50"),
+            default=50,
+            env_name="JIRA_PROJECT_PAGE_SIZE",
+        ),
+        issue_page_size=_parse_positive_int_env(
+            os.getenv("JIRA_ISSUE_PAGE_SIZE", "50"),
+            default=50,
+            env_name="JIRA_ISSUE_PAGE_SIZE",
+        ),
+    )
+
+
+@lru_cache
 def get_billing_settings() -> BillingSettings:
     pricing_version = (os.getenv("BILLING_PRICING_VERSION") or "pilot-v1").strip() or "pilot-v1"
     default_contact_email = BillingSettings().contact_email
@@ -234,23 +283,23 @@ def get_billing_settings() -> BillingSettings:
     launch_date = _parse_datetime_env(os.getenv("BILLING_LAUNCH_DATE", ""))
     shadow_mode = _parse_bool_env(os.getenv("BILLING_SHADOW_MODE", "true"), default=True)
 
-    def _parse_positive_int(env_name: str, default: int) -> int:
-        raw_value = os.getenv(env_name, str(default))
-        try:
-            parsed = int(raw_value)
-        except ValueError:
-            logging.warning("Invalid %s=%s. Falling back to %s.", env_name, raw_value, default)
-            return default
-        if parsed <= 0:
-            logging.warning("Non-positive %s=%s. Falling back to %s.", env_name, raw_value, default)
-            return default
-        return parsed
-
     return BillingSettings(
         pricing_version=pricing_version,
-        token_unit_size=_parse_positive_int("BILLING_TOKEN_UNIT_SIZE", 4),
-        pilot_requirements_limit=_parse_positive_int("BILLING_PILOT_REQUIREMENTS_LIMIT", 200),
-        pilot_test_cases_limit=_parse_positive_int("BILLING_PILOT_TEST_CASE_LIMIT", 200),
+        token_unit_size=_parse_positive_int_env(
+            os.getenv("BILLING_TOKEN_UNIT_SIZE", "4"),
+            default=4,
+            env_name="BILLING_TOKEN_UNIT_SIZE",
+        ),
+        pilot_requirements_limit=_parse_positive_int_env(
+            os.getenv("BILLING_PILOT_REQUIREMENTS_LIMIT", "200"),
+            default=200,
+            env_name="BILLING_PILOT_REQUIREMENTS_LIMIT",
+        ),
+        pilot_test_cases_limit=_parse_positive_int_env(
+            os.getenv("BILLING_PILOT_TEST_CASE_LIMIT", "200"),
+            default=200,
+            env_name="BILLING_PILOT_TEST_CASE_LIMIT",
+        ),
         contact_email=contact_email,
         launch_date=launch_date,
         shadow_mode=shadow_mode,

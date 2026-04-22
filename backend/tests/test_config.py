@@ -10,13 +10,23 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, _load_environment_file, get_billing_settings, get_settings
+from app.config import (
+    DEFAULT_MODEL_NAME,
+    _SuppressNonTextPartsWarning,
+    _load_environment_file,
+    get_auth_settings,
+    get_billing_settings,
+    get_jira_settings,
+    get_settings,
+)
 
 
 class ConfigSettingsTests(unittest.TestCase):
     def tearDown(self) -> None:
+        get_auth_settings.cache_clear()
         get_settings.cache_clear()
         get_billing_settings.cache_clear()
+        get_jira_settings.cache_clear()
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -109,6 +119,27 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertEqual(settings.max_overdraft_units, 8)
         self.assertIsNotNone(settings.launch_date)
         self.assertEqual(settings.launch_date.isoformat(), "2026-04-17T00:00:00+00:00")
+
+    def test_get_jira_settings_falls_back_to_jwt_secret_and_parses_limits(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "JWT_SECRET_KEY": "jwt-secret-key",
+                "JIRA_CONNECTION_SECRET_KEY": "",
+                "JIRA_API_TIMEOUT_SECONDS": "18",
+                "JIRA_PROJECT_PAGE_SIZE": "25",
+                "JIRA_ISSUE_PAGE_SIZE": "40",
+            },
+            clear=False,
+        ):
+            get_auth_settings.cache_clear()
+            get_jira_settings.cache_clear()
+            settings = get_jira_settings()
+
+        self.assertEqual(settings.connection_secret_key, "jwt-secret-key")
+        self.assertEqual(settings.api_timeout_seconds, 18)
+        self.assertEqual(settings.project_page_size, 25)
+        self.assertEqual(settings.issue_page_size, 40)
 
 
 if __name__ == "__main__":

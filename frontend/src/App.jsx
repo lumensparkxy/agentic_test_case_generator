@@ -40,6 +40,89 @@ const USAGE_STATUS_ITEMS = [
 	{ key: "testCasesModifiedCount", label: "TC Δ" },
 ];
 const PILOT_WARNING_THRESHOLD = 20;
+const EMPTY_JIRA_CONNECTION_STATUS = {
+	connected: false,
+	connection: null,
+};
+const EMPTY_JIRA_CONNECTION_FORM = {
+	baseUrl: "",
+	email: "",
+	apiToken: "",
+};
+const DEFAULT_JIRA_ISSUE_TYPE_OPTIONS = ["Epic", "Story", "Task", "Bug"];
+const DEFAULT_JIRA_SYNC_SECTION_TITLE = "Agentic Requirements";
+const JIRA_SOURCE_FIELDS = [
+	"source_system",
+	"source_issue_key",
+	"source_issue_type",
+	"source_parent_key",
+	"source_issue_url",
+	"source_issue_updated_at",
+	"sync_target_issue_key",
+	"artifact_set_id",
+	"artifact_item_id",
+	"artifact_version_id",
+	"artifact_version_number",
+];
+
+const buildJiraConnectionForm = (connection, user) => ({
+	baseUrl: connection?.base_url || "",
+	email: connection?.email || user?.email || "",
+	apiToken: "",
+});
+
+const isJiraLinkedRequirement = (requirement) => Boolean(
+	requirement?.source_system === "jira"
+	|| requirement?.source_issue_key
+	|| requirement?.sync_target_issue_key
+	|| requirement?.artifact_item_id
+);
+
+const mergeRequirementMetadata = (nextRequirements = [], previousRequirements = []) => {
+	const previousList = Array.isArray(previousRequirements) ? previousRequirements : [];
+	const nextList = Array.isArray(nextRequirements) ? nextRequirements : [];
+	if (!previousList.length || !nextList.length) {
+		return nextList;
+	}
+
+	const previousByArtifactId = new Map();
+	const previousById = new Map();
+	const resolvedTargets = previousList
+		.map((requirement) => requirement?.sync_target_issue_key || requirement?.source_issue_key || "")
+		.filter(Boolean);
+	const uniqueResolvedTargets = [...new Set(resolvedTargets)];
+	const defaultSyncTargetKey = uniqueResolvedTargets.length === 1 ? uniqueResolvedTargets[0] : null;
+
+	previousList.forEach((requirement) => {
+		if (requirement?.artifact_item_id) {
+			previousByArtifactId.set(requirement.artifact_item_id, requirement);
+		}
+		if (requirement?.id) {
+			previousById.set(requirement.id, requirement);
+		}
+	});
+
+	return nextList.map((requirement, index) => {
+		const matchedRequirement = (
+			(requirement?.artifact_item_id && previousByArtifactId.get(requirement.artifact_item_id))
+			|| previousById.get(requirement?.id)
+			|| (nextList.length === previousList.length ? previousList[index] : null)
+		);
+
+		const metadata = JIRA_SOURCE_FIELDS.reduce((acc, field) => {
+			if ((requirement?.[field] == null || requirement?.[field] === "") && matchedRequirement?.[field] != null && matchedRequirement?.[field] !== "") {
+				acc[field] = matchedRequirement[field];
+			}
+			return acc;
+		}, {});
+
+		if (!requirement?.sync_target_issue_key && !metadata.sync_target_issue_key && defaultSyncTargetKey && !matchedRequirement) {
+			metadata.sync_target_issue_key = defaultSyncTargetKey;
+		}
+
+		return Object.keys(metadata).length ? { ...requirement, ...metadata } : requirement;
+	});
+};
 
 const getAuthProviderLabel = (providerKeyOrId) => {
 	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (
@@ -251,6 +334,29 @@ export default function App() {
 	const [isUsageLoading, setIsUsageLoading] = useState(false);
 	const [billingEntitlements, setBillingEntitlements] = useState(null);
 	const [isBillingLoading, setIsBillingLoading] = useState(false);
+	const [requirementSourceMode, setRequirementSourceMode] = useState("file");
+	const [jiraConnectionStatus, setJiraConnectionStatus] = useState(EMPTY_JIRA_CONNECTION_STATUS);
+	const [jiraConnectionForm, setJiraConnectionForm] = useState(EMPTY_JIRA_CONNECTION_FORM);
+	const [isJiraConnectionLoading, setIsJiraConnectionLoading] = useState(false);
+	const [isSavingJiraConnection, setIsSavingJiraConnection] = useState(false);
+	const [isDeletingJiraConnection, setIsDeletingJiraConnection] = useState(false);
+	const [jiraProjectQuery, setJiraProjectQuery] = useState("");
+	const [jiraProjects, setJiraProjects] = useState([]);
+	const [selectedJiraProjectKey, setSelectedJiraProjectKey] = useState("");
+	const [isLoadingJiraProjects, setIsLoadingJiraProjects] = useState(false);
+	const [jiraProjectIssueTypes, setJiraProjectIssueTypes] = useState([]);
+	const [isLoadingJiraIssueTypes, setIsLoadingJiraIssueTypes] = useState(false);
+	const [jiraIssueType, setJiraIssueType] = useState("");
+	const [jiraIssueQuery, setJiraIssueQuery] = useState("");
+	const [jiraIssueResults, setJiraIssueResults] = useState([]);
+	const [selectedJiraIssueKey, setSelectedJiraIssueKey] = useState("");
+	const [isSearchingJiraIssues, setIsSearchingJiraIssues] = useState(false);
+	const [isImportingFromJira, setIsImportingFromJira] = useState(false);
+	const [jiraSyncPreview, setJiraSyncPreview] = useState(null);
+	const [jiraSyncResults, setJiraSyncResults] = useState(null);
+	const [jiraManagedSectionTitle, setJiraManagedSectionTitle] = useState(DEFAULT_JIRA_SYNC_SECTION_TITLE);
+	const [isPreviewingJiraSync, setIsPreviewingJiraSync] = useState(false);
+	const [isApplyingJiraSync, setIsApplyingJiraSync] = useState(false);
 
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
@@ -269,6 +375,20 @@ export default function App() {
 	);
 	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked;
 	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked;
+	const jiraConnection = jiraConnectionStatus?.connection || null;
+	const jiraConnected = Boolean(jiraConnectionStatus?.connected && jiraConnection);
+	const hasJiraRequirements = requirements.some((requirement) => isJiraLinkedRequirement(requirement));
+	const jiraSyncIssues = Array.isArray(jiraSyncPreview?.issues) ? jiraSyncPreview.issues : [];
+	const jiraPreviewHasReadyIssue = jiraSyncIssues.some((issue) => issue.status === "ready");
+	const selectedJiraIssue = jiraIssueResults.find((issue) => issue.key === selectedJiraIssueKey) || null;
+	const jiraIssueTypeOptions = jiraProjectIssueTypes.length
+		? jiraProjectIssueTypes.map((issueType) => issueType.name)
+		: DEFAULT_JIRA_ISSUE_TYPE_OPTIONS;
+	const jiraImportedIssueKeys = [...new Set(
+		requirements
+			.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
+			.filter(Boolean)
+	)];
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -418,6 +538,17 @@ export default function App() {
 		setIsUsageLoading(false);
 		setBillingEntitlements(null);
 		setIsBillingLoading(false);
+		setRequirementSourceMode("file");
+		setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
+		setJiraConnectionForm(EMPTY_JIRA_CONNECTION_FORM);
+		setJiraProjects([]);
+		setSelectedJiraProjectKey("");
+		setJiraProjectIssueTypes([]);
+		setJiraIssueType("");
+		setJiraIssueResults([]);
+		setSelectedJiraIssueKey("");
+		setJiraSyncPreview(null);
+		setJiraSyncResults(null);
 		localStorage.removeItem(STORAGE_AUTH_TOKEN);
 		localStorage.removeItem(STORAGE_AUTH_USER);
 		if (nextStatus) {
@@ -628,6 +759,16 @@ export default function App() {
 			setIsUsageLoading(false);
 			setBillingEntitlements(null);
 			setIsBillingLoading(false);
+			setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
+			setJiraConnectionForm(EMPTY_JIRA_CONNECTION_FORM);
+			setJiraProjects([]);
+			setSelectedJiraProjectKey("");
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			setJiraIssueResults([]);
+			setSelectedJiraIssueKey("");
+			setJiraSyncPreview(null);
+			setJiraSyncResults(null);
 			return;
 		}
 
@@ -636,6 +777,16 @@ export default function App() {
 			refreshBillingEntitlements(currentUser),
 		]);
 	}, [isAuthenticated, currentUser?.sub, currentUser?.email]);
+
+	useEffect(() => {
+		if (!currentUser?.email || jiraConnected) {
+			return;
+		}
+		setJiraConnectionForm((prev) => ({
+			...prev,
+			email: prev.email || currentUser.email,
+		}));
+	}, [currentUser?.email, jiraConnected]);
 
 	useEffect(() => {
 		if (!isSignInDialogOpen) {
@@ -666,6 +817,7 @@ export default function App() {
 
 		const res = await fetch(`${API_BASE}${path}`, {
 			...options,
+			cache: "no-store",
 			headers
 		});
 
@@ -675,6 +827,395 @@ export default function App() {
 		}
 
 		return res;
+	};
+
+	const resetJiraSyncState = () => {
+		setJiraSyncPreview(null);
+		setJiraSyncResults(null);
+	};
+
+	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
+		const user = userOverride || currentUser;
+		if (!user) {
+			setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
+			setJiraConnectionForm(EMPTY_JIRA_CONNECTION_FORM);
+			return null;
+		}
+
+		if (!silent) {
+			setIsJiraConnectionLoading(true);
+		}
+		try {
+			const res = await apiRequest("/integrations/jira/connection", { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load JIRA connection");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setJiraConnectionStatus(data || EMPTY_JIRA_CONNECTION_STATUS);
+			setJiraConnectionForm(buildJiraConnectionForm(data?.connection, user));
+			return data;
+		} catch (error) {
+			if (!silent) {
+				setStatus(`JIRA connection check failed: ${error.message}`);
+			}
+			setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
+			setJiraConnectionForm(buildJiraConnectionForm(null, user));
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			return null;
+		} finally {
+			if (!silent) {
+				setIsJiraConnectionLoading(false);
+			}
+		}
+	};
+
+	const loadJiraProjectIssueTypes = async (projectKeyOverride = selectedJiraProjectKey, { silent = false } = {}) => {
+		const normalizedProjectKey = `${projectKeyOverride || ""}`.trim();
+		if (!jiraConnected || !normalizedProjectKey) {
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			return [];
+		}
+		if (!silent) {
+			setIsLoadingJiraIssueTypes(true);
+		}
+		try {
+			const res = await apiRequest(`/integrations/jira/projects/${encodeURIComponent(normalizedProjectKey)}/issue-types`, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load JIRA issue types");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const issueTypes = Array.isArray(data?.issue_types) ? data.issue_types : [];
+			setJiraProjectIssueTypes(issueTypes);
+			setJiraIssueType((prev) => (prev && issueTypes.some((issueType) => issueType.name === prev) ? prev : ""));
+			if (!silent && issueTypes.length) {
+				setStatus(`Loaded ${issueTypes.length} issue type${issueTypes.length === 1 ? "" : "s"} for ${normalizedProjectKey}.`);
+			}
+			return issueTypes;
+		} catch (error) {
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			if (!silent) {
+				setStatus(`JIRA issue type load failed: ${error.message}`);
+			}
+			return [];
+		} finally {
+			if (!silent) {
+				setIsLoadingJiraIssueTypes(false);
+			}
+		}
+	};
+
+	useEffect(() => {
+		if (!isAuthenticated || !currentUser) {
+			return;
+		}
+		void refreshJiraConnectionStatus(currentUser, { silent: true });
+	}, [isAuthenticated, currentUser?.sub]);
+
+	const loadJiraProjects = async (queryOverride = jiraProjectQuery, { silent = false, assumeConnected = false } = {}) => {
+		if (!(jiraConnected || assumeConnected)) {
+			if (!silent) {
+				setStatus("Connect JIRA before loading projects.");
+			}
+			return [];
+		}
+		if (!silent) {
+			setIsLoadingJiraProjects(true);
+		}
+		try {
+			const params = new URLSearchParams();
+			if (`${queryOverride || ""}`.trim()) {
+				params.set("query", `${queryOverride}`.trim());
+			}
+			params.set("max_results", "50");
+			const res = await apiRequest(`/integrations/jira/projects?${params.toString()}`, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load JIRA projects");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const projects = Array.isArray(data?.projects) ? data.projects : [];
+			setJiraProjects(projects);
+			setSelectedJiraProjectKey((prev) => {
+				if (prev && projects.some((project) => project.key === prev)) {
+					return prev;
+				}
+				return projects[0]?.key || "";
+			});
+			if (!silent) {
+				setStatus(projects.length ? `Loaded ${projects.length} JIRA project${projects.length === 1 ? "" : "s"}.` : "JIRA returned no browseable projects for this account. If you expected to see a project like TheONE, check that this user has Browse Projects access.");
+			}
+			return projects;
+		} catch (error) {
+			if (!silent) {
+				setStatus(`JIRA project load failed: ${error.message}`);
+			}
+			return [];
+		} finally {
+			if (!silent) {
+				setIsLoadingJiraProjects(false);
+			}
+		}
+	};
+
+	useEffect(() => {
+		if (!jiraConnected || jiraProjects.length > 0 || isLoadingJiraProjects) {
+			return;
+		}
+		void loadJiraProjects("", { silent: true, assumeConnected: true });
+	}, [jiraConnected, jiraProjects.length, isLoadingJiraProjects]);
+
+	useEffect(() => {
+		setJiraIssueResults([]);
+		setSelectedJiraIssueKey("");
+		if (!jiraConnected || !selectedJiraProjectKey) {
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			return;
+		}
+		void loadJiraProjectIssueTypes(selectedJiraProjectKey, { silent: true });
+	}, [jiraConnected, selectedJiraProjectKey]);
+
+	const saveJiraConnection = async () => {
+		if (!jiraConnectionForm.baseUrl.trim() || !jiraConnectionForm.email.trim() || !jiraConnectionForm.apiToken.trim()) {
+			setStatus("Enter your JIRA Cloud URL, email, and API token before connecting.");
+			return;
+		}
+		setIsSavingJiraConnection(true);
+		setStatus("Connecting to JIRA Cloud...");
+		try {
+			const res = await apiRequest("/integrations/jira/connection", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					base_url: jiraConnectionForm.baseUrl.trim(),
+					email: jiraConnectionForm.email.trim(),
+					api_token: jiraConnectionForm.apiToken,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to connect to JIRA");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setJiraConnectionStatus(data || EMPTY_JIRA_CONNECTION_STATUS);
+			setJiraConnectionForm(buildJiraConnectionForm(data?.connection, currentUser));
+			setJiraProjects([]);
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			setJiraIssueResults([]);
+			setSelectedJiraIssueKey("");
+			const connectedAs = data?.connection?.display_name || data?.connection?.email || jiraConnectionForm.email.trim();
+			setStatus(`Connected to JIRA Cloud as ${connectedAs}. Loading projects...`);
+			const projects = await loadJiraProjects("", { silent: true, assumeConnected: true });
+			setStatus(
+				projects.length
+					? `Connected to JIRA Cloud as ${connectedAs}. Loaded ${projects.length} JIRA project${projects.length === 1 ? "" : "s"}.`
+					: `Connected to JIRA Cloud as ${connectedAs}, but JIRA returned no browseable projects. If you expected to see a project like TheONE, check that this user has Browse Projects access.`
+			);
+		} catch (error) {
+			setStatus(`JIRA connection failed: ${error.message}`);
+		} finally {
+			setIsSavingJiraConnection(false);
+		}
+	};
+
+	const deleteStoredJiraConnection = async () => {
+		setIsDeletingJiraConnection(true);
+		setStatus("Disconnecting JIRA Cloud...");
+		try {
+			const res = await apiRequest("/integrations/jira/connection", { method: "DELETE" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to delete JIRA connection");
+				throw new Error(errorMessage);
+			}
+			setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
+			setJiraConnectionForm(buildJiraConnectionForm(null, currentUser));
+			setJiraProjects([]);
+			setSelectedJiraProjectKey("");
+			setJiraProjectIssueTypes([]);
+			setJiraIssueType("");
+			setJiraIssueResults([]);
+			setSelectedJiraIssueKey("");
+			setStatus("Disconnected from JIRA Cloud.");
+		} catch (error) {
+			setStatus(`JIRA disconnect failed: ${error.message}`);
+		} finally {
+			setIsDeletingJiraConnection(false);
+		}
+	};
+
+	const searchJiraIssues = async () => {
+		if (!selectedJiraProjectKey) {
+			setStatus("Choose a JIRA project before searching issues.");
+			return;
+		}
+		setIsSearchingJiraIssues(true);
+		const issueTypeLabel = jiraIssueType ? jiraIssueType.toLowerCase() : "issues";
+		setStatus(`Searching ${issueTypeLabel} in JIRA...`);
+		try {
+			const params = new URLSearchParams({
+				project_key: selectedJiraProjectKey,
+				max_results: "20",
+			});
+			if (`${jiraIssueType || ""}`.trim()) {
+				params.set("issue_type", `${jiraIssueType}`.trim());
+			}
+			if (`${jiraIssueQuery || ""}`.trim()) {
+				params.set("query", `${jiraIssueQuery}`.trim());
+			}
+			const res = await apiRequest(`/integrations/jira/issues/search?${params.toString()}`, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to search JIRA issues");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const issues = Array.isArray(data?.issues) ? data.issues : [];
+			setJiraIssueResults(issues);
+			setSelectedJiraIssueKey((prev) => issues.some((issue) => issue.key === prev) ? prev : (issues[0]?.key || ""));
+			setStatus(issues.length ? `Found ${issues.length} JIRA ${issueTypeLabel}${issues.length === 1 || issueTypeLabel.endsWith("s") ? "" : "s"}.` : `No ${issueTypeLabel} matched that search.`);
+		} catch (error) {
+			setStatus(`JIRA issue search failed: ${error.message}`);
+		} finally {
+			setIsSearchingJiraIssues(false);
+		}
+	};
+
+	const importRequirementsFromJira = async () => {
+		if (requirementWorkflowLocked) {
+			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
+			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
+			return;
+		}
+		if (!selectedJiraIssueKey) {
+			setStatus("Select a JIRA epic or issue before importing requirements.");
+			return;
+		}
+		setIsImportingFromJira(true);
+		setStatus("Importing requirements from JIRA...");
+		resetJiraSyncState();
+		try {
+			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
+			const res = await apiRequest("/integrations/jira/import", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
+				body: JSON.stringify({
+					epic_key: selectedJiraIssueKey,
+					include_children: true,
+					workflow_settings: workflowSettingsPayload,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to import requirements from JIRA");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setRequirementSourceMode("jira");
+			setRawText(data.raw_text || "");
+			setRequirements(data.requirements || []);
+			setRequirementReview(data.review || null);
+			setRequirementCoverageMetrics(data.coverage_metrics || null);
+			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
+			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
+			setRequirementIterationHistory(data.iteration_history || []);
+			setTestCases([]);
+			setRequirementAnalysis([]);
+			setCoveragePlan([]);
+			setCoverageMetrics(null);
+			setTestCaseReview(null);
+			setTestCaseWorkflowDiagnostics(null);
+			setAppliedTestCaseWorkflowSettings(null);
+			setTestCaseIterationHistory([]);
+			resetContextAnalysis();
+			setExpandedRows({});
+			setFeedback("");
+			setReqFeedback("");
+			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
+			setStatus(`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || selectedJiraIssueKey}.`);
+		} catch (error) {
+			setStatus(`JIRA import failed: ${error.message}`);
+		} finally {
+			setIsImportingFromJira(false);
+		}
+	};
+
+	const previewJiraSync = async (requirementsOverride = requirements, options = {}) => {
+		const { clearLastSyncResult = true } = options;
+		const requirementsToSync = Array.isArray(requirementsOverride) ? requirementsOverride : [];
+		if (!requirementsToSync.some((requirement) => isJiraLinkedRequirement(requirement))) {
+			setStatus("Import JIRA requirements before previewing write-back updates.");
+			return;
+		}
+		setIsPreviewingJiraSync(true);
+		setStatus("Previewing JIRA updates...");
+		if (clearLastSyncResult) {
+			setJiraSyncResults(null);
+		}
+		try {
+			const res = await apiRequest("/integrations/jira/sync/preview", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					requirements: requirementsToSync,
+					managed_section_title: jiraManagedSectionTitle.trim() || DEFAULT_JIRA_SYNC_SECTION_TITLE,
+					conflict_strategy: "block",
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to preview JIRA sync");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setJiraSyncPreview(data || null);
+			const readyCount = data?.ready_issue_count || 0;
+			const conflictCount = data?.conflict_count || 0;
+			setStatus(`JIRA preview ready: ${readyCount} issue${readyCount === 1 ? "" : "s"} ready, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}.`);
+		} catch (error) {
+			setStatus(`JIRA preview failed: ${error.message}`);
+		} finally {
+			setIsPreviewingJiraSync(false);
+		}
+	};
+
+	const applyJiraSync = async () => {
+		if (!jiraSyncPreview) {
+			setStatus("Preview JIRA changes before pushing updates.");
+			return;
+		}
+		setIsApplyingJiraSync(true);
+		setStatus("Pushing updates back to JIRA...");
+		try {
+			const res = await apiRequest("/integrations/jira/sync", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					requirements,
+					managed_section_title: jiraManagedSectionTitle.trim() || DEFAULT_JIRA_SYNC_SECTION_TITLE,
+					conflict_strategy: "block",
+					allow_conflicts: false,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to sync requirements to JIRA");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setJiraSyncResults(data || null);
+			const syncedRequirements = mergeRequirementMetadata(data?.requirements || requirements, requirements);
+			setRequirements(syncedRequirements);
+			const updatedCount = data?.updated_issue_count || 0;
+			const conflictCount = data?.conflict_count || 0;
+			setStatus(`JIRA sync complete: ${updatedCount} issue${updatedCount === 1 ? "" : "s"} updated, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} skipped.`);
+			await previewJiraSync(syncedRequirements, { clearLastSyncResult: false });
+		} catch (error) {
+			setStatus(`JIRA sync failed: ${error.message}`);
+		} finally {
+			setIsApplyingJiraSync(false);
+		}
 	};
 
 	const handleProviderSignIn = async (providerKey) => {
@@ -727,6 +1268,7 @@ export default function App() {
 		if (!file && !withFeedback) return;
 		setIsParsing(true);
 		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
+		resetJiraSyncState();
 		try {
 			const formData = new FormData();
 			const requestId = createRequestId();
@@ -747,8 +1289,14 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			const data = await res.json();
+			const nextRequirements = withFeedback
+				? mergeRequirementMetadata(data.requirements || [], requirements)
+				: (data.requirements || []);
+			if (!withFeedback) {
+				setRequirementSourceMode("file");
+			}
 			setRawText(data.raw_text || rawText);
-			setRequirements(data.requirements || []);
+			setRequirements(nextRequirements);
 			setRequirementReview(data.review || null);
 			setRequirementCoverageMetrics(data.coverage_metrics || null);
 			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
@@ -1207,21 +1755,198 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Upload Requirements</h2>
 						<p className="panel-description">
-							Add your requirements file (.md, .docx, or .xlsx) and parse it to extract requirement items.
+							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA.
 						</p>
-						<div className="panel-form">
-							<div className="form-group">
-								<label>Requirements file</label>
-								<input
-									type="file"
-									accept=".md,.docx,.xlsx"
-									onChange={(e) => setFile(e.target.files?.[0] || null)}
-								/>
-							</div>
-							<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
-								{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
+						<div className="source-toggle" role="tablist" aria-label="Requirement source selector">
+							<button
+								type="button"
+								className={`source-toggle-btn ${requirementSourceMode === "file" ? "active" : ""}`}
+								onClick={() => setRequirementSourceMode("file")}
+							>
+								<span className="source-toggle-title">File upload</span>
+								<span className="source-toggle-copy">Markdown, Word, or Excel requirements</span>
+							</button>
+							<button
+								type="button"
+								className={`source-toggle-btn ${requirementSourceMode === "jira" ? "active" : ""}`}
+								onClick={() => setRequirementSourceMode("jira")}
+							>
+								<span className="source-toggle-title">JIRA Cloud</span>
+								<span className="source-toggle-copy">Import epics and child issues, then sync updates back</span>
 							</button>
 						</div>
+
+						{requirementSourceMode === "file" ? (
+							<div className="panel-form">
+								<div className="form-group">
+									<label>Requirements file</label>
+									<input
+										type="file"
+										accept=".md,.docx,.xlsx"
+										onChange={(e) => setFile(e.target.files?.[0] || null)}
+									/>
+								</div>
+								<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
+									{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
+								</button>
+							</div>
+						) : (
+							<div className="jira-workflow-panel">
+								<div className="jira-card">
+									<div className="jira-card-header">
+										<div>
+											<h3>Connect JIRA Cloud</h3>
+											<p>Store a per-user JIRA Cloud connection so you can search epics and sync requirement updates.</p>
+										</div>
+										{jiraConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
+									</div>
+									{jiraConnected && jiraConnection ? (
+										<div className="jira-connection-summary">
+											<span className="jira-summary-pill">{jiraConnection.display_name || jiraConnection.email}</span>
+											<span className="jira-summary-pill">{jiraConnection.base_url}</span>
+											{jiraConnection.api_token_hint && <span className="jira-summary-pill">Token {jiraConnection.api_token_hint}</span>}
+										</div>
+									) : null}
+									{!jiraConnected ? (
+										<div className="panel-form two-cols jira-connection-form">
+											<div className="form-group">
+												<label>JIRA base URL</label>
+												<input
+													placeholder="https://your-team.atlassian.net"
+													value={jiraConnectionForm.baseUrl}
+													onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, baseUrl: event.target.value }))}
+												/>
+											</div>
+											<div className="form-group">
+												<label>JIRA email</label>
+												<input
+													type="email"
+													placeholder="qa@company.com"
+													value={jiraConnectionForm.email}
+													onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, email: event.target.value }))}
+												/>
+											</div>
+											<div className="form-group jira-connection-token-group">
+												<label>JIRA API token</label>
+												<input
+													type="password"
+													placeholder="Paste your Atlassian API token"
+													value={jiraConnectionForm.apiToken}
+													onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, apiToken: event.target.value }))}
+												/>
+											</div>
+											<div className="panel-form button-row jira-connection-actions">
+												<button onClick={saveJiraConnection} disabled={authActionDisabled || isSavingJiraConnection || isJiraConnectionLoading}>
+													{isSavingJiraConnection ? "⏳ Connecting..." : "Connect JIRA"}
+												</button>
+												{isJiraConnectionLoading && <span className="helper-text">Refreshing JIRA connection…</span>}
+											</div>
+										</div>
+									) : (
+										<div className="jira-connected-actions">
+											<button className="secondary" onClick={() => loadJiraProjects(jiraProjectQuery)} disabled={authActionDisabled || isLoadingJiraProjects}>
+												{isLoadingJiraProjects ? "⏳ Refreshing projects..." : "Refresh Projects"}
+											</button>
+											<button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>
+												{isDeletingJiraConnection ? "⏳ Disconnecting..." : "Disconnect"}
+											</button>
+										</div>
+									)}
+								</div>
+
+								<div className="jira-card">
+									<div className="jira-card-header">
+										<div>
+											<h3>Import from JIRA</h3>
+											<p>Pick a project, search for an epic, and import the epic plus child issues into the requirement parser.</p>
+										</div>
+									</div>
+									<div className="panel-form two-cols jira-search-grid">
+										<div className="form-group">
+											<label>Project search</label>
+											<input
+												placeholder="Search JIRA projects"
+												value={jiraProjectQuery}
+												onChange={(event) => setJiraProjectQuery(event.target.value)}
+												disabled={!jiraConnected}
+											/>
+										</div>
+										<div className="form-group jira-inline-action">
+											<label>Project</label>
+											<div className="jira-inline-controls">
+												<select value={selectedJiraProjectKey} onChange={(event) => setSelectedJiraProjectKey(event.target.value)} disabled={!jiraConnected || !jiraProjects.length}>
+													<option value="">Select a JIRA project</option>
+													{jiraProjects.map((project) => (
+														<option key={project.project_id || project.key} value={project.key}>{project.key} — {project.name}</option>
+													))}
+												</select>
+												<button className="secondary" onClick={() => loadJiraProjects(jiraProjectQuery)} disabled={!jiraConnected || isLoadingJiraProjects}>
+													{isLoadingJiraProjects ? "⏳" : "Load"}
+												</button>
+											</div>
+										</div>
+										<div className="form-group">
+											<label>Issue type</label>
+											<select value={jiraIssueType} onChange={(event) => setJiraIssueType(event.target.value)} disabled={!jiraConnected || isLoadingJiraIssueTypes}>
+												<option value="">Any issue type</option>
+												{jiraIssueTypeOptions.map((issueTypeName) => (
+													<option key={issueTypeName} value={issueTypeName}>{issueTypeName}</option>
+												))}
+											</select>
+										</div>
+										<div className="form-group jira-inline-action">
+											<label>Issue search</label>
+											<div className="jira-inline-controls">
+												<input
+													placeholder={`Search ${(jiraIssueType || "issue").toLowerCase()} summaries`}
+													value={jiraIssueQuery}
+													onChange={(event) => setJiraIssueQuery(event.target.value)}
+													disabled={!jiraConnected}
+												/>
+												<button className="secondary" onClick={searchJiraIssues} disabled={!jiraConnected || !selectedJiraProjectKey || isSearchingJiraIssues}>
+													{isSearchingJiraIssues ? "⏳" : "Search"}
+												</button>
+											</div>
+										</div>
+									</div>
+
+									{jiraIssueResults.length > 0 ? (
+										<div className="jira-issue-results">
+											{jiraIssueResults.map((issue) => {
+												const selected = selectedJiraIssueKey === issue.key;
+												return (
+													<button
+														type="button"
+														key={issue.issue_id || issue.key}
+														className={`jira-issue-card ${selected ? "selected" : ""}`}
+														onClick={() => setSelectedJiraIssueKey(issue.key)}
+													>
+														<div className="jira-issue-card-header">
+															<strong>{issue.key}</strong>
+															<span>{issue.issue_type}</span>
+														</div>
+														<div className="jira-issue-card-title">{issue.summary}</div>
+														<div className="jira-issue-card-meta">
+															{issue.parent_key ? <span>Parent {issue.parent_key}</span> : null}
+															{issue.status ? <span>{issue.status}</span> : null}
+														</div>
+													</button>
+												);
+											})}
+										</div>
+									) : (
+										<span className="helper-text">Search visible issues in the selected project to choose an import source.</span>
+									)}
+
+									<div className="panel-form button-row jira-import-actions">
+										<button onClick={importRequirementsFromJira} disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}>
+											{isImportingFromJira ? "⏳ Importing..." : `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
+										</button>
+										{selectedJiraIssue ? <span className="helper-text">Selected source: {selectedJiraIssue.key} — {selectedJiraIssue.summary}</span> : null}
+									</div>
+								</div>
+							</div>
+						)}
 
 						{renderWorkflowSettingsPanel(
 							"Requirements workflow settings",
@@ -1243,12 +1968,112 @@ export default function App() {
 								<ul className="requirements-list">
 									{requirements.map((req, index) => (
 										<li key={req.id || req.text || index}>
-											<strong>{req.id || `REQ-${index + 1}`}:</strong> {req.text || req.title || ""}
+											<div className="requirement-item-copy">
+												<strong>{req.id || `REQ-${index + 1}`}:</strong> {req.text || req.title || ""}
+											</div>
+											{(req.source_issue_key || req.sync_target_issue_key) && (
+												<div className="requirement-source-meta">
+													{req.source_issue_key ? <span className="requirement-source-badge">Source {req.source_issue_key}</span> : null}
+													{req.source_issue_type ? <span className="requirement-source-badge subtle">{req.source_issue_type}</span> : null}
+													{req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key ? <span className="requirement-source-badge warning">Sync target {req.sync_target_issue_key}</span> : null}
+												</div>
+											)}
 										</li>
 									))}
 								</ul>
 							)}
 						</div>
+
+						{hasJiraRequirements && (
+							<div className="jira-sync-panel">
+								<div className="jira-card-header">
+									<div>
+										<h3>JIRA Sync Preview</h3>
+										<p>Preview the managed requirement block that will be written back to JIRA and then push ready updates explicitly.</p>
+									</div>
+									<div className="jira-connection-summary compact">
+										{jiraImportedIssueKeys.map((issueKey) => (
+											<span key={issueKey} className="jira-summary-pill">{issueKey}</span>
+										))}
+									</div>
+								</div>
+								<div className="panel-form two-cols jira-sync-controls">
+									<div className="form-group">
+										<label>Managed section title</label>
+										<input
+											value={jiraManagedSectionTitle}
+											onChange={(event) => setJiraManagedSectionTitle(event.target.value)}
+											placeholder={DEFAULT_JIRA_SYNC_SECTION_TITLE}
+										/>
+									</div>
+									<div className="feedback-actions jira-sync-actions">
+										<button className="secondary" onClick={() => previewJiraSync()} disabled={authActionDisabled || isPreviewingJiraSync || isApplyingJiraSync}>
+											{isPreviewingJiraSync ? "⏳ Previewing..." : "Preview JIRA Update"}
+										</button>
+										<button onClick={applyJiraSync} disabled={authActionDisabled || isApplyingJiraSync || !jiraSyncPreview || !jiraPreviewHasReadyIssue}>
+											{isApplyingJiraSync ? "⏳ Syncing..." : "Push Ready Updates"}
+										</button>
+									</div>
+								</div>
+
+								{jiraSyncPreview && (
+									<div className="jira-sync-results">
+										<div className="workflow-diagnostics-pills">
+											<span className="workflow-diagnostics-pill">Ready {jiraSyncPreview.ready_issue_count || 0}</span>
+											<span className="workflow-diagnostics-pill">Conflicts {jiraSyncPreview.conflict_count || 0}</span>
+											<span className="workflow-diagnostics-pill">Skipped {(jiraSyncPreview.skipped_requirement_ids || []).length}</span>
+										</div>
+										<div className="jira-sync-preview-list">
+											{jiraSyncPreview.issues?.map((issue) => (
+												<div key={issue.issue_key} className={`jira-sync-preview-card ${issue.status}`}>
+													<div className="jira-sync-preview-header">
+														<div>
+															<strong>{issue.issue_key}</strong>
+															<span>{issue.issue_type || "Issue"}</span>
+														</div>
+														<span className={`jira-status-badge ${issue.status}`}>{issue.status}</span>
+													</div>
+													<div className="jira-sync-preview-meta">
+														<span>Requirements: {(issue.requirement_ids || []).join(", ") || "—"}</span>
+														{issue.issue_url ? <a href={issue.issue_url} target="_blank" rel="noreferrer">Open in JIRA ↗</a> : null}
+													</div>
+													{issue.conflict_reason ? <p className="jira-sync-preview-warning">{issue.conflict_reason}</p> : null}
+													{issue.warning ? <p className="jira-sync-preview-warning">{issue.warning}</p> : null}
+													<div className="jira-sync-preview-excerpts">
+														<div>
+															<h4>Current description</h4>
+															<p>{issue.existing_description_excerpt || "No description yet."}</p>
+														</div>
+														<div>
+															<h4>Rendered update</h4>
+															<p>{issue.rendered_description_excerpt || "No rendered update available."}</p>
+														</div>
+													</div>
+												</div>
+											))}
+										</div>
+										{jiraSyncPreview.warnings?.length > 0 && (
+											<ul className="jira-sync-warning-list">
+												{jiraSyncPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+											</ul>
+										)}
+									</div>
+								)}
+
+								{jiraSyncResults && (
+									<div className="jira-sync-results-summary">
+										<h4>Last sync result</h4>
+										<ul className="jira-sync-apply-list">
+											{jiraSyncResults.results?.map((result) => (
+												<li key={`${result.issue_key}-${result.status}`}>
+													<strong>{result.issue_key}</strong> — {result.status}{result.message ? `: ${result.message}` : ""}
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+							</div>
+						)}
 
 						{requirementReview && (
 							<div className={`review-banner ${requirementReview.approved ? "review-approved" : "review-needs-work"}`}>
