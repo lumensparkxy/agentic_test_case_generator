@@ -63,13 +63,32 @@ const DEFAULT_AZURE_DEVOPS_WORK_ITEM_TYPE_OPTIONS = ["Epic", "Feature", "User St
 const DEFAULT_SYNC_SECTION_TITLE = "Agentic Requirements";
 const DEFAULT_JIRA_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITLE;
 const DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITLE;
+const REQUIREMENT_REVIEW_STATUSES = ["Draft", "Needs Review", "Approved", "Rejected"];
+const REQUIREMENT_QUALITY_FLAG_OPTIONS = [
+	"Ambiguous",
+	"Duplicate",
+	"Untestable",
+	"Missing actor",
+	"Missing expected result",
+	"Needs split",
+	"Needs merge",
+	"Out of scope",
+];
 const JIRA_SOURCE_FIELDS = [
 	"source_system",
 	"source_issue_key",
 	"source_issue_type",
 	"source_parent_key",
+	"source_parent_title",
 	"source_issue_url",
 	"source_issue_updated_at",
+	"source_path",
+	"source_section",
+	"source_excerpt",
+	"source_hierarchy",
+	"parent_requirement_id",
+	"review_status",
+	"quality_flags",
 	"sync_target_issue_key",
 	"artifact_set_id",
 	"artifact_item_id",
@@ -100,10 +119,64 @@ const getRequirementSourceLabel = (requirement) => {
 	if (requirement?.source_system === "azure_devops") {
 		return "Azure DevOps";
 	}
+	if (requirement?.source_system === "file") {
+		return "File";
+	}
 	if (requirement?.source_system === "jira" || requirement?.source_issue_key || requirement?.sync_target_issue_key) {
 		return "JIRA";
 	}
 	return "Source";
+};
+
+const normalizeStringArray = (value) => {
+	if (Array.isArray(value)) {
+		return [...new Set(value.map((item) => `${item || ""}`.trim()).filter(Boolean))];
+	}
+	const normalized = `${value || ""}`.trim();
+	return normalized ? [normalized] : [];
+};
+
+const getRequirementReviewStatus = (requirement) => {
+	const status = `${requirement?.review_status || "Draft"}`.trim();
+	return REQUIREMENT_REVIEW_STATUSES.includes(status) ? status : "Draft";
+};
+
+const getRequirementContextPath = (requirement) => {
+	const hierarchy = normalizeStringArray(requirement?.source_hierarchy);
+	if (hierarchy.length) {
+		return hierarchy.join(" › ");
+	}
+	if (requirement?.source_path) {
+		return requirement.source_path;
+	}
+	const sourceKey = requirement?.source_issue_key || requirement?.sync_target_issue_key;
+	if (sourceKey) {
+		return [requirement?.source_parent_key, sourceKey, requirement?.source_section].filter(Boolean).join(" › ");
+	}
+	return "Imported requirements";
+};
+
+const groupRequirementsByContext = (items = []) => {
+	const groups = new Map();
+	items.forEach((requirement, index) => {
+		const contextPath = getRequirementContextPath(requirement);
+		if (!groups.has(contextPath)) {
+			groups.set(contextPath, {
+				id: contextPath || `group-${groups.size + 1}`,
+				label: contextPath || "Imported requirements",
+				sourceLabel: getRequirementSourceLabel(requirement),
+				requirements: [],
+			});
+		}
+		groups.get(contextPath).requirements.push({ ...requirement, __index: index });
+	});
+	return [...groups.values()];
+};
+
+const getTestCaseLinkedRequirementIds = (testCase) => {
+	const explicit = normalizeStringArray(testCase?.linked_requirement_ids);
+	const tagLinks = normalizeStringArray(testCase?.tags).filter((tag) => /^REQ-[A-Za-z0-9_-]+$/i.test(tag));
+	return [...new Set([...explicit, ...tagLinks])];
 };
 
 const mergeRequirementMetadata = (nextRequirements = [], previousRequirements = []) => {
@@ -345,11 +418,10 @@ export default function App() {
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
-	const [draftExportOverride, setDraftExportOverride] = useState(false);
-	const [draftExportReason, setDraftExportReason] = useState("");
 	const [requirementWorkflowSettings, setRequirementWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
 	const [testCaseWorkflowSettings, setTestCaseWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
 	const [expandedRows, setExpandedRows] = useState({});
+	const [activeGenerateResultTab, setActiveGenerateResultTab] = useState("test-cases");
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isParsing, setIsParsing] = useState(false);
 	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
@@ -459,15 +531,93 @@ export default function App() {
 			.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
 			.filter(Boolean)
 	)];
-	const testCasesApprovedForExport = Boolean(testCaseReview?.approved);
-	const draftExportReasonText = draftExportReason.trim();
-	const draftExportOverrideReady = Boolean(draftExportOverride && draftExportReasonText.length >= 10);
-	const exportRequiresOverride = testCases.length > 0 && !testCasesApprovedForExport;
-	const exportLockedByReview = exportRequiresOverride && !draftExportOverrideReady;
-	const exportActionDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportLockedByReview;
+	const requirementStatusCounts = requirements.reduce((acc, requirement) => {
+		const status = getRequirementReviewStatus(requirement);
+		acc[status] = (acc[status] || 0) + 1;
+		return acc;
+	}, {});
+	const approvedRequirements = requirements.filter((requirement) => getRequirementReviewStatus(requirement) === "Approved");
+	const approvedRequirementCount = approvedRequirements.length;
+	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
+	const reviewPendingRequirementCount = requirements.length - approvedRequirementCount - rejectedRequirementCount;
+	const canGenerateFromApprovedRequirements = approvedRequirementCount > 0;
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+	};
+
+	const chooseGenerateResultTab = (data) => {
+		const diagnostics = data?.workflow_diagnostics || null;
+		const metrics = data?.coverage_metrics || null;
+		const hasDiagnosticAttention = Boolean(
+			diagnostics?.failure_reason
+			|| diagnostics?.timed_out
+			|| diagnostics?.stalled
+			|| (diagnostics?.status && diagnostics.status !== "completed")
+			|| diagnostics?.warnings?.length
+			|| diagnostics?.parser_failures?.length
+		);
+
+		if (hasDiagnosticAttention) {
+			return "diagnostics";
+		}
+		if ((metrics?.requirements_without_tests || []).length > 0) {
+			return "traceability";
+		}
+		if ((metrics?.missing_must_have_scenarios || []).length > 0 || (metrics?.missing_scenarios || []).length > 0) {
+			return "coverage";
+		}
+		return "test-cases";
+	};
+
+	const resetGeneratedArtifacts = () => {
+		setTestCases([]);
+		setRequirementAnalysis([]);
+		setCoveragePlan([]);
+		setCoverageMetrics(null);
+		setTestCaseReview(null);
+		setTestCaseWorkflowDiagnostics(null);
+		setAppliedTestCaseWorkflowSettings(null);
+		setTestCaseIterationHistory([]);
+		setExpandedRows({});
+		setActiveGenerateResultTab("test-cases");
+		setFeedback("");
+	};
+
+	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
+		setRequirements((prev) => prev.map((requirement) => (
+			requirement.id === requirementId
+				? { ...requirement, review_status: reviewStatus }
+				: requirement
+		)));
+		resetGeneratedArtifacts();
+		setStatus(`${requirementId} marked ${reviewStatus.toLowerCase()}.`);
+	};
+
+	const bulkUpdateRequirementReviewStatus = (reviewStatus, predicate = () => true) => {
+		const targetIds = new Set(requirements.filter(predicate).map((requirement) => requirement.id));
+		setRequirements((prev) => prev.map((requirement) => (
+			targetIds.has(requirement.id)
+				? { ...requirement, review_status: reviewStatus }
+				: requirement
+		)));
+		resetGeneratedArtifacts();
+		const updatedCount = targetIds.size;
+		setStatus(`${updatedCount} requirement${updatedCount === 1 ? "" : "s"} marked ${reviewStatus.toLowerCase()}.`);
+	};
+
+	const toggleRequirementQualityFlag = (requirementId, flag) => {
+		setRequirements((prev) => prev.map((requirement) => {
+			if (requirement.id !== requirementId) {
+				return requirement;
+			}
+			const currentFlags = normalizeStringArray(requirement.quality_flags);
+			const nextFlags = currentFlags.includes(flag)
+				? currentFlags.filter((item) => item !== flag)
+				: [...currentFlags, flag];
+			return { ...requirement, quality_flags: nextFlags };
+		}));
+		resetGeneratedArtifacts();
 	};
 
 	const resetContextAnalysis = () => {
@@ -475,14 +625,9 @@ export default function App() {
 		setSelectedArtifactSourceIds([]);
 	};
 
-	const resetDraftExportState = () => {
-		setDraftExportOverride(false);
-		setDraftExportReason("");
-	};
-
-	const buildContextPayload = () => {
+	const buildContextPayload = (requirementsOverride = requirements) => {
 		const baseContext = {
-			requirements,
+			requirements: requirementsOverride,
 			app_link: appLink || null,
 			prototype_link: prototypeLink || null,
 			diagram_links: diagramLinks
@@ -1752,7 +1897,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
-			resetDraftExportState();
+			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
@@ -1816,7 +1961,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
-			resetDraftExportState();
+			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
@@ -2072,7 +2217,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
-			resetDraftExportState();
+			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
@@ -2092,19 +2237,24 @@ export default function App() {
 			setStatus(`Test-case workflows are locked. Contact ${contactEmail} to upgrade.`);
 			return;
 		}
+		if (!canGenerateFromApprovedRequirements) {
+			setStatus("Approve at least one requirement before generating test cases.");
+			return;
+		}
+		const requirementsForGeneration = approvedRequirements;
 		setIsGenerating(true);
-		setStatus(withFeedback ? "Refining test cases with feedback..." : "Generating test cases...");
+		setStatus(withFeedback ? "Refining test cases with approved requirements..." : `Generating test cases from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}...`);
 		try {
 			const requestId = createRequestId();
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(testCaseWorkflowSettings);
 			const sharedPayload = {
-				requirements,
+				requirements: requirementsForGeneration,
 				template: {
 					name: templateName,
 					format: templateFormat,
-					fields: ["id", "title", "description", "priority", "type", "status", "preconditions", "steps", "expected_result", "test_data", "estimated_time", "automation_status", "component", "tags"]
+					fields: ["id", "title", "description", "priority", "type", "status", "preconditions", "steps", "expected_result", "test_data", "estimated_time", "automation_status", "component", "linked_requirement_ids", "scenario_refs", "source_refs", "tags"]
 				},
-				context: buildContextPayload(),
+				context: buildContextPayload(requirementsForGeneration),
 				workflow_settings: workflowSettingsPayload,
 			};
 
@@ -2138,14 +2288,14 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
-			resetDraftExportState();
 			setExpandedRows({});
+			setActiveGenerateResultTab(chooseGenerateResultTab(data));
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review
 				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
 				: "";
 			setStatus(
-				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""}.${reviewStatus}`.trim()
+				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
 			);
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setFeedback("");
@@ -2157,20 +2307,10 @@ export default function App() {
 	};
 
 	const exportToFormat = async (format) => {
-		if (exportRequiresOverride && !draftExportOverrideReady) {
-			setStatus("Export is locked until the test-case review is approved or a draft override reason is provided.");
-			return;
-		}
 		setIsExporting(true);
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
-			const payload = {
-				test_cases: testCases,
-				approved: testCasesApprovedForExport,
-				review: testCaseReview || undefined,
-				draft_override_requested: exportRequiresOverride && draftExportOverrideReady,
-				draft_override_reason: exportRequiresOverride && draftExportOverrideReady ? draftExportReasonText : null,
-			};
+			const payload = { test_cases: testCases };
 			const res = await apiRequest(`/export/${format}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -2225,42 +2365,17 @@ export default function App() {
 			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
 		}
 		const summary = coverageMetrics?.requirement_analysis_summary?.[requirementId] || {};
-		const hasItemLevelCoverage = [
-			summary.rules_covered,
-			summary.rules_missing,
-			summary.constraints_covered,
-			summary.constraints_missing,
-			summary.permissions_covered,
-			summary.permissions_missing,
-			summary.transitions_covered,
-			summary.transitions_missing,
-			summary.risks_covered,
-			summary.risks_missing,
-		].some(Array.isArray);
-
-		if (!hasItemLevelCoverage) {
-			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
-		}
-
 		const coveredRules = new Set(summary.rules_covered || []);
-		const missingRules = new Set(summary.rules_missing || []);
 		const coveredConstraints = new Set(summary.constraints_covered || []);
-		const missingConstraints = new Set(summary.constraints_missing || []);
 		const coveredPermissions = new Set(summary.permissions_covered || []);
-		const missingPermissions = new Set(summary.permissions_missing || []);
 		const coveredTransitions = new Set(summary.transitions_covered || []);
-		const missingTransitions = new Set(summary.transitions_missing || []);
 		const coveredRisks = new Set(summary.risks_covered || []);
-		const missingRisks = new Set(summary.risks_missing || []);
-		const isMissing = (item, missingSet, coveredSet) => (
-			missingSet.has(item.id) || (!coveredSet.has(item.id) && missingSet.size > 0)
-		);
 		return {
-			highRisks: (analysis.risk_signals || []).filter((r) => ["Critical", "High"].includes(r.severity) && isMissing(r, missingRisks, coveredRisks)).map((r) => r.title),
-			rules: (analysis.business_rules || []).filter((r) => isMissing(r, missingRules, coveredRules)).map((r) => r.title),
-			constraints: (analysis.field_constraints || []).filter((c) => isMissing(c, missingConstraints, coveredConstraints)).map((c) => c.field_name),
-			permissions: (analysis.role_permissions || []).filter((p) => isMissing(p, missingPermissions, coveredPermissions)).map((p) => `${p.role}: ${p.action}`),
-			transitions: (analysis.state_transitions || []).filter((t) => isMissing(t, missingTransitions, coveredTransitions)).map((t) => `${t.from_state} → ${t.to_state}`),
+			highRisks: (analysis.risk_signals || []).filter((r) => r.severity === "High" && !coveredRisks.has(r.id)).map((r) => r.title),
+			rules: (analysis.business_rules || []).filter((r) => !coveredRules.has(r.id)).map((r) => r.title),
+			constraints: (analysis.field_constraints || []).filter((c) => !coveredConstraints.has(c.id)).map((c) => c.field_name),
+			permissions: (analysis.role_permissions || []).filter((p) => !coveredPermissions.has(p.id)).map((p) => `${p.role}: ${p.action}`),
+			transitions: (analysis.state_transitions || []).filter((t) => !coveredTransitions.has(t.id)).map((t) => `${t.from_state} → ${t.to_state}`),
 		};
 	};
 
@@ -2276,6 +2391,71 @@ export default function App() {
 		const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
 		return sum + Object.values(gaps).reduce((s, arr) => s + arr.length, 0);
 	}, 0);
+	const requirementTraceabilityRows = approvedRequirements.map((requirement) => {
+		const linkedTestCases = testCases.filter((testCase) => getTestCaseLinkedRequirementIds(testCase).includes(requirement.id));
+		const scenarioSummary = getRequirementScenarioSummary(requirement.id);
+		const linkedScenarioTypes = [...new Set(
+			linkedTestCases.flatMap((testCase) => normalizeStringArray(testCase.tags))
+				.filter((tag) => tag.startsWith("scenario:"))
+				.map((tag) => tag.replace("scenario:", "").replace(/-/g, " "))
+		)];
+		return {
+			requirement,
+			linkedTestCases,
+			scenarioSummary,
+			linkedScenarioTypes,
+		};
+	});
+	const tracedRequirementCount = requirementTraceabilityRows.filter((row) => row.linkedTestCases.length > 0).length;
+	const traceabilityGapCount = Math.max(0, approvedRequirements.length - tracedRequirementCount);
+	const diagnosticsWarningCount = (testCaseWorkflowDiagnostics?.warnings?.length || 0) + (testCaseWorkflowDiagnostics?.parser_failures?.length || 0);
+	const diagnosticsNeedsAttention = Boolean(
+		testCaseWorkflowDiagnostics?.failure_reason
+		|| testCaseWorkflowDiagnostics?.timed_out
+		|| testCaseWorkflowDiagnostics?.stalled
+		|| (testCaseWorkflowDiagnostics?.status && testCaseWorkflowDiagnostics.status !== "completed")
+		|| diagnosticsWarningCount > 0
+	);
+	const hasGenerateResults = Boolean(
+		testCases.length
+		|| coveragePlan.length
+		|| requirementAnalysis.length
+		|| testCaseWorkflowDiagnostics
+		|| appliedTestCaseWorkflowSettings
+		|| testCaseReview
+	);
+	const generateResultTabs = [
+		{
+			id: "test-cases",
+			label: "Generated Test Cases",
+			badge: testCases.length ? testCases.length : "—",
+			variant: testCases.length ? "default" : "muted",
+		},
+		{
+			id: "traceability",
+			label: "Traceability Matrix",
+			badge: approvedRequirements.length ? `${tracedRequirementCount}/${approvedRequirements.length}` : "—",
+			variant: traceabilityGapCount > 0 ? "warning" : tracedRequirementCount > 0 ? "success" : "muted",
+		},
+		{
+			id: "coverage",
+			label: "Scenario Coverage",
+			badge: plannedScenarioTotal ? `${coveredScenarioTotal}/${plannedScenarioTotal}` : "—",
+			variant: missingScenarioCount > 0 ? "warning" : plannedScenarioTotal ? "success" : "muted",
+		},
+		{
+			id: "analysis",
+			label: "Requirement Analysis",
+			badge: requirementAnalysisGapCount > 0 ? `${requirementAnalysisGapCount} gaps` : requirementAnalysis.length || "—",
+			variant: requirementAnalysisGapCount > 0 ? "warning" : requirementAnalysis.length ? "success" : "muted",
+		},
+		{
+			id: "diagnostics",
+			label: "Diagnostics",
+			badge: diagnosticsWarningCount || testCaseWorkflowDiagnostics?.status || (appliedTestCaseWorkflowSettings ? "settings" : "—"),
+			variant: diagnosticsNeedsAttention ? "warning" : testCaseWorkflowDiagnostics || appliedTestCaseWorkflowSettings ? "muted" : "muted",
+		},
+	];
 
 	const analyzeContext = async () => {
 		setIsAnalyzingContext(true);
@@ -2805,26 +2985,89 @@ export default function App() {
 						</div>
 
 						<div className="result-section">
-							<h3>Extracted Requirements</h3>
+							<h3>Requirement Review Workbench</h3>
 							{requirements.length === 0 ? (
 								<span className="helper-text">No requirements extracted yet.</span>
 							) : (
-								<ul className="requirements-list">
-									{requirements.map((req, index) => (
-										<li key={req.id || req.text || index}>
-											<div className="requirement-item-copy">
-												<strong>{req.id || `REQ-${index + 1}`}:</strong> {req.text || req.title || ""}
-											</div>
-											{(req.source_issue_key || req.sync_target_issue_key) && (
-												<div className="requirement-source-meta">
-													{req.source_issue_key ? <span className="requirement-source-badge">{getRequirementSourceLabel(req)} {req.source_system === "azure_devops" ? `#${req.source_issue_key}` : req.source_issue_key}</span> : null}
-													{req.source_issue_type ? <span className="requirement-source-badge subtle">{req.source_issue_type}</span> : null}
-													{req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key ? <span className="requirement-source-badge warning">Sync target {req.source_system === "azure_devops" ? `#${req.sync_target_issue_key}` : req.sync_target_issue_key}</span> : null}
+								<div className="requirement-review-workbench">
+									<div className="requirement-review-summary">
+										<div>
+											<strong>{approvedRequirementCount}/{requirements.length} approved for test generation</strong>
+											<p>{reviewPendingRequirementCount} pending review • {rejectedRequirementCount} rejected/out of scope</p>
+										</div>
+										<div className="requirement-review-bulk-actions">
+											<button type="button" className="secondary small" onClick={() => bulkUpdateRequirementReviewStatus("Approved", (requirement) => getRequirementReviewStatus(requirement) !== "Rejected")}>Approve non-rejected</button>
+											<button type="button" className="secondary small" onClick={() => bulkUpdateRequirementReviewStatus("Needs Review")}>Mark all needs review</button>
+										</div>
+									</div>
+									{groupRequirementsByContext(requirements).map((group) => (
+										<div key={group.id} className="requirement-context-group">
+											<div className="requirement-context-header">
+												<div>
+													<span className="requirement-source-badge subtle">{group.sourceLabel}</span>
+													<h4>{group.label}</h4>
 												</div>
-											)}
-										</li>
+												<span className="analysis-summary-pill">{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}</span>
+											</div>
+											<ul className="requirements-list contextual">
+												{group.requirements.map((req) => {
+													const reviewStatus = getRequirementReviewStatus(req);
+													const qualityFlags = normalizeStringArray(req.quality_flags);
+													return (
+														<li key={req.id || req.text || req.__index}>
+															<div className="requirement-review-card-header">
+																<div className="requirement-item-copy">
+																	<strong>{req.id || `REQ-${req.__index + 1}`}:</strong> {req.text || req.title || ""}
+																</div>
+																<span className={`requirement-source-badge status-${reviewStatus.toLowerCase().replace(/\s/g, "-")}`}>{reviewStatus}</span>
+															</div>
+															<div className="requirement-source-meta">
+																{req.source_issue_key ? <span className="requirement-source-badge">{getRequirementSourceLabel(req)} {req.source_system === "azure_devops" ? `#${req.source_issue_key}` : req.source_issue_key}</span> : null}
+																{req.source_issue_type ? <span className="requirement-source-badge subtle">{req.source_issue_type}</span> : null}
+																{req.source_section ? <span className="requirement-source-badge subtle">{req.source_section}</span> : null}
+																{req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key ? <span className="requirement-source-badge warning">Sync target {req.source_system === "azure_devops" ? `#${req.sync_target_issue_key}` : req.sync_target_issue_key}</span> : null}
+															</div>
+															<div className="requirement-review-actions">
+																{REQUIREMENT_REVIEW_STATUSES.filter((statusOption) => statusOption !== "Draft").map((statusOption) => (
+																	<button
+																		type="button"
+																		key={`${req.id}-${statusOption}`}
+																		className={`requirement-review-action ${reviewStatus === statusOption ? "active" : ""}`}
+																		onClick={() => updateRequirementReviewStatus(req.id, statusOption)}
+																	>
+																		{statusOption}
+																	</button>
+																))}
+															</div>
+															<div className="requirement-quality-flags">
+																<span>Quality flags:</span>
+																{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
+																	<button
+																		type="button"
+																		key={`${req.id}-${flag}`}
+																		className={`quality-flag-chip ${qualityFlags.includes(flag) ? "active" : ""}`}
+																		onClick={() => toggleRequirementQualityFlag(req.id, flag)}
+																	>
+																		{flag}
+																	</button>
+																))}
+															</div>
+															{req.source_excerpt ? (
+																<details className="requirement-evidence">
+																	<summary>Source evidence</summary>
+																	<p>{req.source_excerpt}</p>
+																	{req.source_issue_url ? <a href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a> : null}
+																</details>
+															) : req.source_issue_url ? (
+																<a className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a>
+															) : null}
+														</li>
+													);
+												})}
+											</ul>
+										</div>
 									))}
-								</ul>
+								</div>
 							)}
 						</div>
 
@@ -3160,7 +3403,7 @@ export default function App() {
 															}}
 														/>
 														<span>{source.url || source.id}</span>
-														{source.source_type && <span className="artifact-type">{source.source_type}</span>}
+														{source.type && <span className="artifact-type">{source.type}</span>}
 													</label>
 												</li>
 											))}
@@ -3173,7 +3416,7 @@ export default function App() {
 											<h4>UI Elements</h4>
 											<ul className="analysis-detail-list">
 												{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
-													<li key={el.id}>{el.element_type}: {el.name || el.id}</li>
+													<li key={el.id}>{el.element_type}: {el.label || el.id}</li>
 												))}
 											</ul>
 										</div>
@@ -3223,7 +3466,7 @@ export default function App() {
 							</div>
 						</div>
 						<span className="helper-text">
-							Fields used: id, title, description, priority, type, status, preconditions, steps, expected result, test data, estimated time, automation status, component, tags.
+							Fields used: id, title, description, priority, type, status, preconditions, steps, expected result, test data, estimated time, automation status, component, linked requirement IDs, scenario refs, source refs, and tags.
 						</span>
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
@@ -3236,11 +3479,22 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Generate Test Cases</h2>
 						<p className="panel-description">
-							Generate structured test cases from your parsed requirements and context.
+							Generate structured test cases from approved requirements and context.
 						</p>
+						{requirements.length > 0 && (
+							<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
+								<div>
+									<strong>{canGenerateFromApprovedRequirements ? "Ready for approved-requirement generation" : "Approval required before generation"}</strong>
+									<p>{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review • {rejectedRequirementCount} rejected. Only approved requirements are sent to the test-case agents.</p>
+								</div>
+								{!canGenerateFromApprovedRequirements && (
+									<button type="button" className="secondary small" onClick={() => setActiveTab(0)}>Review requirements</button>
+								)}
+							</div>
+						)}
 						<div className="panel-form button-row">
-							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || testCaseActionDisabled}>
-								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
+							<button onClick={() => generateTestCases(false)} disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}>
+								{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
 							</button>
 						</div>
 
@@ -3261,16 +3515,54 @@ export default function App() {
 							</div>
 						)}
 
-						{renderWorkflowDiagnostics(
-							"Test-case workflow diagnostics",
-							testCaseWorkflowDiagnostics,
-							appliedTestCaseWorkflowSettings,
-							testCaseIterationHistory,
-						)}
+						{hasGenerateResults ? (
+							<div className="generate-results-workspace">
+								<div className="generate-results-header">
+									<div>
+										<h3>Generation Results</h3>
+										<p>Review the generated cases, traceability, coverage, analysis, and workflow diagnostics without scrolling through a wall of artifacts.</p>
+									</div>
+									<span className="generate-results-summary-pill">{testCases.length} test case{testCases.length === 1 ? "" : "s"}</span>
+								</div>
+								<div className="generate-results-tabs" role="tablist" aria-label="Generation result sections">
+									{generateResultTabs.map((tab) => (
+										<button
+											type="button"
+											key={tab.id}
+											className={`generate-result-tab ${activeGenerateResultTab === tab.id ? "active" : ""} ${tab.variant ? `generate-result-tab-${tab.variant}` : ""}`}
+											onClick={() => setActiveGenerateResultTab(tab.id)}
+											role="tab"
+											aria-selected={activeGenerateResultTab === tab.id}
+											aria-controls="generate-result-panel"
+										>
+											<span>{tab.label}</span>
+											<span className={`generate-result-tab-badge ${tab.variant ? `generate-result-tab-badge-${tab.variant}` : ""}`}>{tab.badge}</span>
+										</button>
+									))}
+								</div>
+								<div
+									id="generate-result-panel"
+									className="generate-result-panel"
+									role="tabpanel"
+									aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
+								>
+									{activeGenerateResultTab === "diagnostics" && (
+										renderWorkflowDiagnostics(
+											"Test-case workflow diagnostics",
+											testCaseWorkflowDiagnostics,
+											appliedTestCaseWorkflowSettings,
+											testCaseIterationHistory,
+										) || (
+											<div className="generate-result-empty">
+												<h3>Diagnostics</h3>
+												<p>No workflow diagnostics are available for this run.</p>
+											</div>
+										)
+									)}
 
-						{coveragePlan.length > 0 && (
+									{activeGenerateResultTab === "coverage" && (coveragePlan.length > 0 ? (
 							<div className="result-section">
-								<details className="collapsible-panel">
+										<details className="collapsible-panel" open>
 									<summary className="collapsible-panel-summary">
 										<span className="collapsible-panel-copy">
 											<span className="collapsible-panel-title">Scenario Coverage Plan</span>
@@ -3327,11 +3619,16 @@ export default function App() {
 									</div>
 								</details>
 							</div>
-						)}
+									) : (
+										<div className="generate-result-empty">
+											<h3>Scenario Coverage Plan</h3>
+											<p>No scenario coverage plan is available for this run.</p>
+										</div>
+									))}
 
-						{requirementAnalysis.length > 0 && (
+									{activeGenerateResultTab === "analysis" && (requirementAnalysis.length > 0 ? (
 							<div className="result-section">
-								<details className="collapsible-panel">
+										<details className="collapsible-panel" open>
 									<summary className="collapsible-panel-summary">
 										<span className="collapsible-panel-copy">
 											<span className="collapsible-panel-title">Requirement Analysis</span>
@@ -3458,9 +3755,73 @@ export default function App() {
 									</div>
 								</details>
 							</div>
-						)}
+									) : (
+										<div className="generate-result-empty">
+											<h3>Requirement Analysis</h3>
+											<p>No requirement analysis is available for this run.</p>
+										</div>
+									))}
 
-						<div className="result-section">
+									{activeGenerateResultTab === "traceability" && (approvedRequirements.length > 0 ? (
+							<div className="result-section">
+								<h3>Traceability Matrix</h3>
+								<div className="workflow-diagnostics-pills">
+									<span className="workflow-diagnostics-pill">Approved requirements covered {tracedRequirementCount}/{approvedRequirements.length}</span>
+									<span className="workflow-diagnostics-pill">Cases with traceability {coverageMetrics?.cases_with_traceability ?? 0}/{testCases.length}</span>
+									<span className="workflow-diagnostics-pill">Scenario coverage {coverageMetrics?.covered_planned_scenarios ?? 0}/{coverageMetrics?.planned_scenarios_total ?? 0}</span>
+								</div>
+								<div className="traceability-table-wrapper">
+									<table className="traceability-table">
+										<thead>
+											<tr>
+												<th>Requirement</th>
+												<th>Story / source path</th>
+												<th>Linked test cases</th>
+												<th>Scenario coverage</th>
+												<th>Status</th>
+											</tr>
+										</thead>
+										<tbody>
+											{requirementTraceabilityRows.map(({ requirement, linkedTestCases, scenarioSummary, linkedScenarioTypes }) => {
+												const isCovered = linkedTestCases.length > 0;
+												return (
+													<tr key={requirement.id} className={isCovered ? "covered" : "missing"}>
+														<td>
+															<strong>{requirement.id}</strong>
+															<span>{requirement.text}</span>
+														</td>
+														<td>{getRequirementContextPath(requirement)}</td>
+														<td>
+															{linkedTestCases.length ? linkedTestCases.map((testCase) => (
+																<span key={testCase.id} className="tag traceability-case-tag">{testCase.id}</span>
+															)) : <span className="traceability-missing-text">No linked tests</span>}
+														</td>
+														<td>
+															{scenarioSummary ? `${scenarioSummary.covered_scenarios}/${scenarioSummary.planned_scenarios}` : "—"}
+															{linkedScenarioTypes.length > 0 && (
+																<div className="traceability-scenario-tags">
+																	{linkedScenarioTypes.slice(0, 4).map((scenario) => <span key={`${requirement.id}-${scenario}`}>{scenario}</span>)}
+																</div>
+															)}
+														</td>
+														<td><span className={`traceability-status ${isCovered ? "covered" : "missing"}`}>{isCovered ? "Covered" : "Gap"}</span></td>
+													</tr>
+												);
+											})}
+										</tbody>
+									</table>
+								</div>
+							</div>
+									) : (
+										<div className="generate-result-empty">
+											<h3>Traceability Matrix</h3>
+											<p>No approved requirements are available to trace for this run.</p>
+										</div>
+									))}
+
+									{activeGenerateResultTab === "test-cases" && (
+										<>
+											<div className="result-section generate-result-section">
 							<h3>Generated Test Cases</h3>
 							{testCases.length === 0 ? (
 								<span className="helper-text">No test cases generated yet.</span>
@@ -3481,6 +3842,7 @@ export default function App() {
 												<th className="col-time">Est. Time</th>
 												<th className="col-automation">Automation</th>
 												<th className="col-component">Component</th>
+												<th className="col-tags">Linked Reqs</th>
 												<th className="col-tags">Tags</th>
 											</tr>
 										</thead>
@@ -3528,6 +3890,11 @@ export default function App() {
 														</td>
 														<td className="tc-component">{tc.component || "-"}</td>
 														<td className="tc-tags">
+															{getTestCaseLinkedRequirementIds(tc).map((requirementId) => (
+																<span key={`${tc.id}-${requirementId}`} className="tag traceability-case-tag">{requirementId}</span>
+															))}
+														</td>
+														<td className="tc-tags">
 															{tc.tags?.map((tag) => (
 																<span key={tag} className="tag">{tag}</span>
 															))}
@@ -3553,6 +3920,13 @@ export default function App() {
 												<span className={`status-badge ${getStatusClass(tc.status)}`}>{tc.status}</span>
 												<span className="meta-item"><strong>Est:</strong> {tc.estimated_time}</span>
 											</div>
+											{getTestCaseLinkedRequirementIds(tc).length > 0 && (
+												<div className="case-tags traceability-links">
+													{getTestCaseLinkedRequirementIds(tc).map((requirementId) => (
+														<span key={`${tc.id}-linked-${requirementId}`} className="tag traceability-case-tag">{requirementId}</span>
+													))}
+												</div>
+											)}
 											{tc.preconditions && (
 												<div className="case-preconditions">{tc.preconditions}</div>
 											)}
@@ -3608,6 +3982,16 @@ export default function App() {
 								</div>
 							</div>
 						)}
+										</>
+									)}
+								</div>
+							</div>
+						) : (
+							<div className="result-section">
+								<h3>Generated Test Cases</h3>
+								<span className="helper-text">No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis, and diagnostics.</span>
+							</div>
+						)}
 
 						<div className="panel-nav">
 							<button onClick={goPrev} className="secondary">Back</button>
@@ -3620,58 +4004,16 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Export Test Cases</h2>
 						<p className="panel-description">
-							Download approved test cases as CSV, Excel, or JSON. Draft exports require an explicit override reason.
+							Download your generated test cases as CSV, Excel, or JSON.
 						</p>
-						{testCases.length > 0 && (
-							<div className={`export-readiness-card ${testCasesApprovedForExport ? "approved" : "locked"}`}>
-								<div>
-									<strong>{testCasesApprovedForExport ? "Approved for export" : "Export locked by review gate"}</strong>
-									<p>
-										{testCasesApprovedForExport
-											? `Review score ${testCaseReview?.score ?? "—"}/${testCaseReview?.threshold ?? "—"}. These cases are ready for controlled download.`
-											: `Review score ${testCaseReview?.score ?? "—"}/${testCaseReview?.threshold ?? "—"}. Refine the suite, or record a reason to export this draft intentionally.`}
-									</p>
-								</div>
-								{!testCasesApprovedForExport && (
-									<div className="draft-export-override">
-										<label className="draft-export-toggle">
-											<input
-												type="checkbox"
-												checked={draftExportOverride}
-												onChange={(event) => setDraftExportOverride(event.target.checked)}
-											/>
-											<span>Export draft anyway</span>
-										</label>
-										{draftExportOverride && (
-											<>
-												<textarea
-													className="draft-export-reason"
-													placeholder="Reason for exporting this draft, e.g. stakeholder review before final QA approval"
-													value={draftExportReason}
-													onChange={(event) => setDraftExportReason(event.target.value)}
-													rows={3}
-												/>
-												{!draftExportOverrideReady && (
-													<span className="helper-text warning">Enter at least 10 characters explaining why this draft export is needed.</span>
-												)}
-											</>
-										)}
-									</div>
-								)}
-							</div>
-						)}
 						<div className="export-section">
 							<h3 className="section-subtitle">📥 Quick Export</h3>
-							<p className="helper-text">
-								{exportLockedByReview
-									? "Exports are disabled until review approval or a draft override reason is provided."
-									: "Download test cases directly to your computer."}
-							</p>
+							<p className="helper-text">Download test cases directly to your computer.</p>
 							<div className="export-buttons">
 								<button 
 									className="export-btn csv" 
 									onClick={() => exportToFormat("csv")} 
-									disabled={exportActionDisabled}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">📄</span>
 									<span className="export-label">CSV</span>
@@ -3680,7 +4022,7 @@ export default function App() {
 								<button 
 									className="export-btn excel" 
 									onClick={() => exportToFormat("excel")} 
-									disabled={exportActionDisabled}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">📊</span>
 									<span className="export-label">Excel</span>
@@ -3689,7 +4031,7 @@ export default function App() {
 								<button 
 									className="export-btn json" 
 									onClick={() => exportToFormat("json")} 
-									disabled={exportActionDisabled}
+									disabled={testCases.length === 0 || isExporting || authActionDisabled}
 								>
 									<span className="export-icon">🧾</span>
 									<span className="export-label">JSON</span>

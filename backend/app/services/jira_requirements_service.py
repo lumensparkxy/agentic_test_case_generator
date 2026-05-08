@@ -129,8 +129,13 @@ def import_requirements_from_jira(*, current_user: AuthUser, payload: JiraImport
                         "source_issue_key": issue.key,
                         "source_issue_type": issue.issue_type,
                         "source_parent_key": issue.parent_key,
+                        "source_parent_title": issue.parent_key,
                         "source_issue_url": issue.web_url,
                         "source_issue_updated_at": issue.updated_at,
+                        "source_path": _build_issue_source_path(issue),
+                        "source_section": issue.summary,
+                        "source_excerpt": _truncate_source_excerpt(issue_text),
+                        "source_hierarchy": _build_issue_source_hierarchy(issue),
                         "sync_target_issue_key": issue.key,
                     }
                 )
@@ -256,6 +261,26 @@ def _build_issue_source_text(issue: JiraIssueSummary) -> str:
     if issue.description_text:
         sections.append(f"Description:\n{issue.description_text}")
     return "\n".join(sections)
+
+
+def _build_issue_source_path(issue: JiraIssueSummary) -> str:
+    hierarchy = _build_issue_source_hierarchy(issue)
+    return " > ".join(hierarchy) if hierarchy else issue.key
+
+
+def _build_issue_source_hierarchy(issue: JiraIssueSummary) -> list[str]:
+    hierarchy: list[str] = []
+    if issue.parent_key:
+        hierarchy.append(f"{issue.parent_key}")
+    hierarchy.append(f"{issue.key} · {issue.issue_type}: {issue.summary}")
+    return hierarchy
+
+
+def _truncate_source_excerpt(text: str, limit: int = 600) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 1].rstrip()}…"
 
 
 def _renumber_requirements(requirements: Sequence[Requirement]) -> list[Requirement]:

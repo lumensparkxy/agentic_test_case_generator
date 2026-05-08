@@ -122,6 +122,9 @@ class JiraRequirementsServiceTests(unittest.TestCase):
         self.assertEqual([requirement.id for requirement in requirements], ["REQ-001", "REQ-002"])
         self.assertEqual([requirement.source_issue_key for requirement in requirements], ["EPIC-1", "STORY-1"])
         self.assertTrue(all(requirement.source_system == "jira" for requirement in requirements))
+        self.assertEqual(requirements[1].source_path, "EPIC-1 > STORY-1 · Story: Password reset story")
+        self.assertEqual(requirements[1].source_hierarchy, ["EPIC-1", "STORY-1 · Story: Password reset story"])
+        self.assertIn("Password reset story", requirements[1].source_excerpt)
         self.assertEqual(result["source_issue_keys"], ["EPIC-1", "STORY-1"])
         self.assertEqual(result["coverage_metrics"]["source_issue_count"], 2)
 

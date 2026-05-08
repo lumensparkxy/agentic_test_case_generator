@@ -6,12 +6,20 @@ from pydantic import BaseModel, Field, HttpUrl, model_validator
 class Requirement(BaseModel):
     id: str
     text: str
-    source_system: Optional[Literal["jira", "azure_devops"]] = None
+    source_system: Optional[Literal["file", "jira", "azure_devops"]] = None
     source_issue_key: Optional[str] = None
     source_issue_type: Optional[str] = None
     source_parent_key: Optional[str] = None
+    source_parent_title: Optional[str] = None
     source_issue_url: Optional[HttpUrl] = None
     source_issue_updated_at: Optional[datetime] = None
+    source_path: Optional[str] = None
+    source_section: Optional[str] = None
+    source_excerpt: Optional[str] = None
+    source_hierarchy: List[str] = Field(default_factory=list)
+    parent_requirement_id: Optional[str] = None
+    review_status: Literal["Draft", "Needs Review", "Approved", "Rejected"] = "Draft"
+    quality_flags: List[str] = Field(default_factory=list)
     sync_target_issue_key: Optional[str] = None
     artifact_set_id: Optional[str] = None
     artifact_item_id: Optional[str] = None
@@ -298,6 +306,8 @@ class TestCase(BaseModel):
     automation_status: Literal["Manual", "Automated", "To Be Automated"] = "Manual"
     component: Optional[str] = None  # Module/feature area
     tags: Optional[List[str]] = None  # Includes linked requirement IDs
+    linked_requirement_ids: List[str] = Field(default_factory=list)  # Structured requirement traceability
+    scenario_refs: List[str] = Field(default_factory=list)  # Coverage-plan scenario IDs implemented by this case
     source_refs: Optional[List[str]] = None  # Grounded context artifact IDs used by this test case
     artifact_set_id: Optional[str] = None
     artifact_item_id: Optional[str] = None

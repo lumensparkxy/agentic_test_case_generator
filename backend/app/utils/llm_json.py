@@ -79,7 +79,7 @@ def extract_json(text: str) -> Optional[str]:
     return normalized[start : end + 1]
 
 
-def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], Optional[str]]:
+def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse requirements payload from model output and return an error when invalid."""
     if not text or not str(text).strip():
         return [], "empty output"
@@ -97,10 +97,13 @@ def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], O
         data = data["requirements"]
 
     if isinstance(data, list):
-        valid: List[Dict[str, str]] = []
+        valid: List[Dict[str, Any]] = []
         for item in data:
             if isinstance(item, dict) and "id" in item and "text" in item:
-                valid.append({"id": str(item["id"]), "text": str(item["text"])})
+                payload = dict(item)
+                payload["id"] = str(item["id"])
+                payload["text"] = str(item["text"])
+                valid.append(payload)
 
         if valid:
             return valid, None
@@ -111,7 +114,7 @@ def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], O
     return [], "requirements payload must be a JSON array or an object with a requirements array"
 
 
-def parse_requirements_json(text: str) -> List[Dict[str, str]]:
+def parse_requirements_json(text: str) -> List[Dict[str, Any]]:
     """Parse requirements payload from model output."""
     parsed, _ = parse_requirements_json_detailed(text)
     return parsed

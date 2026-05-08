@@ -380,6 +380,47 @@ def _normalize_source_refs(raw_source_refs: Any) -> List[str]:
     return _dedupe_preserve([str(reference).strip() for reference in raw_source_refs if str(reference).strip()])
 
 
+def _normalize_string_list(raw_values: Any) -> List[str]:
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, list):
+        return _dedupe_preserve([str(value).strip() for value in raw_values if str(value).strip()])
+    value = str(raw_values).strip()
+    return [value] if value else []
+
+
+def _extract_linked_requirement_ids_from_test_case(
+    test_case: Dict[str, Any],
+    requirement_id_set: Optional[set[str]] = None,
+) -> List[str]:
+    candidates: List[str] = []
+    candidates.extend(_normalize_string_list(test_case.get("linked_requirement_ids")))
+    candidates.extend(_normalize_string_list(test_case.get("requirement_ids")))
+    candidates.extend(_normalize_string_list(test_case.get("requirement_id")))
+    candidates.extend(_normalize_string_list(test_case.get("tags")))
+
+    linked: List[str] = []
+    for candidate in candidates:
+        value = str(candidate).strip()
+        if not value:
+            continue
+        if requirement_id_set is not None:
+            if value in requirement_id_set:
+                linked.append(value)
+            continue
+        if re.match(r"^REQ-[A-Za-z0-9_-]+$", value, flags=re.IGNORECASE):
+            linked.append(value)
+    return _dedupe_preserve(linked)
+
+
+def _extract_scenario_refs_from_test_case(test_case: Dict[str, Any]) -> List[str]:
+    candidates: List[str] = []
+    candidates.extend(_normalize_string_list(test_case.get("scenario_refs")))
+    candidates.extend(_normalize_string_list(test_case.get("scenario_ids")))
+    candidates.extend(_normalize_string_list(test_case.get("scenario_id")))
+    return _dedupe_preserve(candidates)
+
+
 def _coerce_bool(value: Any, default: bool = True) -> bool:
     if isinstance(value, bool):
         return value
@@ -577,8 +618,7 @@ def _compute_planned_scenario_metrics(
     scenarios_covered_by_requirement: Dict[str, set[str]] = {requirement_id: set() for requirement_id in requirement_ids}
 
     for test_case in test_cases:
-        tags = test_case.get("tags") or []
-        linked_requirements = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        linked_requirements = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         if not linked_requirements:
             continue
 
@@ -658,6 +698,8 @@ def _collect_test_case_text(test_case: Dict[str, Any]) -> str:
             str(test_case.get("expected_result") or ""),
             str(test_case.get("test_data") or ""),
             " ".join(str(tag) for tag in (test_case.get("tags") or [])),
+            " ".join(_normalize_string_list(test_case.get("linked_requirement_ids"))),
+            " ".join(_normalize_string_list(test_case.get("scenario_refs"))),
             step_text,
         ]
     ).lower()
@@ -698,8 +740,7 @@ def _compute_requirement_analysis_metrics(
     test_cases_by_requirement: Dict[str, List[Dict[str, Any]]] = {requirement_id: [] for requirement_id in requirement_ids}
 
     for test_case in test_cases:
-        tags = test_case.get("tags") or []
-        linked_ids = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        linked_ids = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         for requirement_id in linked_ids:
             test_cases_by_requirement[requirement_id].append(test_case)
 
@@ -976,7 +1017,7 @@ def _compute_test_case_coverage_metrics(test_cases: List[Dict[str, Any]], requir
             steps_total += len(steps)
 
         tags = test_case.get("tags") or []
-        tagged_ids = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        tagged_ids = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         if tagged_ids:
             cases_with_traceability += 1
             for tagged_id in tagged_ids:
@@ -1402,7 +1443,7 @@ def _build_review_loop(
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
 2. Steps are executable and expected results are specific.
-    3. Requirement traceability tags cover every requirement.
+    3. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
     4. Every must-have scenario from the coverage plan is represented by at least one test case.
     5. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
     6. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
@@ -1514,13 +1555,15 @@ def _build_generation_pipeline(
 1. Generate 1-3 test cases per requirement.
 2. Implement every must-have planned scenario and as many recommended scenarios as possible.
 3. Reflect business rules, field constraints, role permissions, state transitions, and risks from the requirement analysis whenever they apply.
-4. Tag each test case with at least one requirement ID and one scenario tag using the format scenario:<kebab-case-scenario-type>.
-5. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
-6. Include detailed steps, expected results, realistic priorities, and execution metadata.
-7. Keep each test case centered on one primary scenario from the coverage plan.
-8. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
-9. Never return `steps` as a single string, markdown list, or paragraph.
-10. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+4. Set `linked_requirement_ids` to a JSON array containing every requirement ID covered by the test case.
+5. Also include those requirement IDs in `tags` for backward compatibility, plus one scenario tag using the format scenario:<kebab-case-scenario-type>.
+6. Set `scenario_refs` to the coverage-plan scenario ID(s) implemented by the test case when available.
+7. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
+8. Include detailed steps, expected results, realistic priorities, and execution metadata.
+9. Keep each test case centered on one primary scenario from the coverage plan.
+10. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
+11. Never return `steps` as a single string, markdown list, or paragraph.
+12. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -1579,12 +1622,13 @@ Coverage plan:
 Rules:
 1. Preserve good test cases and improve weak ones.
 2. Add, merge, split, or remove cases as needed.
-3. Keep requirement traceability intact or improve it.
+3. Keep structured `linked_requirement_ids` intact or improve them; also mirror linked requirement IDs in `tags` for backward compatibility.
 4. Ensure each test case includes a scenario tag formatted like scenario:happy-path.
-5. Preserve or improve any grounded-context `source_refs` when grounded context is available.
-6. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
-7. Never return `steps` as a plain string, markdown list, or free-form paragraph.
-8. Output ONLY the JSON object.
+5. Preserve or improve `scenario_refs` from the coverage plan when available.
+6. Preserve or improve any grounded-context `source_refs` when grounded context is available.
+7. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
+8. Never return `steps` as a plain string, markdown list, or free-form paragraph.
+9. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,
@@ -2063,8 +2107,26 @@ def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
     }
 
 
+def _format_requirement_for_prompt(requirement: Requirement) -> str:
+    parts = [f"- {requirement.id}: {requirement.text}"]
+    context_bits: List[str] = []
+    if requirement.source_path:
+        context_bits.append(f"source_path={requirement.source_path}")
+    elif requirement.source_issue_key:
+        context_bits.append(f"source={requirement.source_issue_key}")
+    if requirement.source_issue_type:
+        context_bits.append(f"source_type={requirement.source_issue_type}")
+    if requirement.source_hierarchy:
+        context_bits.append(f"hierarchy={' > '.join(requirement.source_hierarchy)}")
+    if requirement.source_excerpt:
+        context_bits.append(f"source_excerpt={requirement.source_excerpt[:240]}")
+    if context_bits:
+        parts.append(f"  Context: {' | '.join(context_bits)}")
+    return "\n".join(parts)
+
+
 def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[Any], template: Any) -> tuple[str, str, str]:
-    requirements_text = "\n".join([f"- {req.id}: {req.text}" for req in requirements])
+    requirements_text = "\n".join([_format_requirement_for_prompt(req) for req in requirements])
 
     context_parts = []
     if context:
@@ -2134,6 +2196,7 @@ def _fallback_raw_test_cases(
 
         for scenario_offset, scenario in enumerate(selected_scenarios, start=1):
             scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
+            scenario_id = str(scenario.get("id") or f"{requirement.id}-SCN-{scenario_offset:02d}")
             raw_test_cases.append(
                 {
                     "id": f"TC-{len(raw_test_cases) + 1:03d}",
@@ -2169,6 +2232,8 @@ def _fallback_raw_test_cases(
                     "automation_status": "To Be Automated",
                     "component": "General",
                     "tags": [requirement.id, _scenario_tag(scenario_type), "generated", f"plan:{idx:02d}-{scenario_offset:02d}"],
+                    "linked_requirement_ids": [requirement.id],
+                    "scenario_refs": [scenario_id],
                     "source_refs": grounded_source_refs,
                 }
             )
@@ -2265,6 +2330,10 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
     test_cases: List[TestCase] = []
     for index, raw_test_case in enumerate(raw_test_cases, start=1):
         try:
+            tags = _normalize_string_list(raw_test_case.get("tags"))
+            linked_requirement_ids = _extract_linked_requirement_ids_from_test_case({**raw_test_case, "tags": tags})
+            scenario_refs = _extract_scenario_refs_from_test_case(raw_test_case)
+            normalized_tags = _dedupe_preserve(tags + linked_requirement_ids)
             steps = []
             for raw_step in _normalize_raw_steps(raw_test_case.get("steps", [])):
                 if isinstance(raw_step, str):
@@ -2298,7 +2367,9 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     estimated_time=str(raw_test_case["estimated_time"]) if raw_test_case.get("estimated_time") is not None else None,
                     automation_status=_normalize_automation_status(raw_test_case.get("automation_status")),
                     component=raw_test_case.get("component"),
-                    tags=raw_test_case.get("tags", []),
+                    tags=normalized_tags,
+                    linked_requirement_ids=linked_requirement_ids,
+                    scenario_refs=scenario_refs,
                     source_refs=_normalize_source_refs(raw_test_case.get("source_refs")),
                 )
             )
@@ -2335,6 +2406,8 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
                 "automation_status": test_case.automation_status,
                 "component": test_case.component,
                 "tags": test_case.tags or [],
+                "linked_requirement_ids": test_case.linked_requirement_ids or _extract_linked_requirement_ids_from_test_case({"tags": test_case.tags or []}),
+                "scenario_refs": test_case.scenario_refs or [],
                 "source_refs": test_case.source_refs or [],
             }
         )

@@ -82,7 +82,7 @@ def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, d
     }
 
 
-def _compute_requirement_coverage_metrics(requirements: List[Dict[str, str]], document_count: int) -> Dict[str, Any]:
+def _compute_requirement_coverage_metrics(requirements: List[Dict[str, Any]], document_count: int) -> Dict[str, Any]:
     total = len(requirements)
     unique_texts = {str(item.get("text", "")).strip().lower() for item in requirements if item.get("text")}
     shall_format_count = sum(
@@ -106,7 +106,7 @@ def _compute_requirement_coverage_metrics(requirements: List[Dict[str, str]], do
 
 
 def _heuristic_requirement_review(
-    requirements: List[Dict[str, str]],
+    requirements: List[Dict[str, Any]],
     threshold: int,
     document_count: int,
 ) -> Dict[str, Any]:
@@ -187,7 +187,7 @@ def _merge_review_results(model_review: Optional[Dict[str, Any]], heuristic_revi
     }
 
 
-def _make_history_entry(iteration: int, actor: str, review: Dict[str, Any], requirements: List[Dict[str, str]]) -> Dict[str, Any]:
+def _make_history_entry(iteration: int, actor: str, review: Dict[str, Any], requirements: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "iteration": iteration,
         "actor": actor,
@@ -362,6 +362,7 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
 1. If the review JSON indicates approved=true, score >= threshold, and blocking_issues is empty, call 'exit_loop' immediately.
 2. Otherwise, revise the requirements to address all blocking issues, unmet criteria, and suggestions.
 3. Preserve good requirements, renumber sequentially as REQ-001, REQ-002, etc., and output ONLY the refined JSON array.
+4. Preserve any source_path, source_section, source_excerpt, source_hierarchy, parent_requirement_id, and quality_flags fields that are still accurate.
 
 Either call exit_loop OR output the refined JSON array. Never add commentary.
 """,
@@ -391,9 +392,20 @@ def _build_requirement_extraction_pipeline(model: str, max_iterations: int, thre
 2. Use the format 'The system shall...' consistently.
 3. Exclude code snippets, file paths, infrastructure notes, and implementation details.
 4. Merge obvious duplicates and keep the set concise.
-5. Output ONLY a JSON array like:
+5. Preserve storyline context from document headings, source markers, JIRA/DevOps issue metadata, acceptance criteria, or neighboring paragraphs.
+6. Output ONLY a JSON array like:
 [
-  {"id": "REQ-001", "text": "The system shall ..."}
+    {
+        "id": "REQ-001",
+        "text": "The system shall ...",
+        "source_path": "Source file or issue > heading/story/acceptance criteria",
+        "source_section": "Nearest heading, story, or acceptance-criteria label",
+        "source_excerpt": "Short original snippet that supports the extraction",
+        "source_hierarchy": ["Epic or document", "Feature/heading", "Story/subheading"],
+        "parent_requirement_id": null,
+        "review_status": "Draft",
+        "quality_flags": []
+    }
 ]
 """,
         description="Extracts initial requirements from source documents",
@@ -426,7 +438,8 @@ Rules:
 2. Keep requirements in the format 'The system shall...'.
 3. Add, merge, split, or delete requirements as needed.
 4. Renumber sequentially as REQ-001, REQ-002, etc.
-5. Output ONLY the refined JSON array.
+5. Preserve source_path, source_section, source_excerpt, source_hierarchy, parent_requirement_id, and quality_flags whenever they remain accurate.
+6. Output ONLY the refined JSON array.
 """,
         description="Applies human feedback to the existing requirement set before re-review",
         output_key=STATE_REQUIREMENTS,
@@ -504,7 +517,7 @@ Human feedback:
         },
     )
 
-    current_requirements: List[Dict[str, str]] = []
+    current_requirements: List[Dict[str, Any]] = []
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
     previous_review: Optional[Dict[str, Any]] = None

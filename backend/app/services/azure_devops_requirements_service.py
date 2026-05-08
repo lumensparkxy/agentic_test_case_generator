@@ -130,8 +130,13 @@ def import_requirements_from_azure_devops(*, current_user: AuthUser, payload: Az
                         "source_issue_key": str(work_item.work_item_id),
                         "source_issue_type": work_item.work_item_type,
                         "source_parent_key": str(work_item.parent_id) if work_item.parent_id else None,
+                        "source_parent_title": str(work_item.parent_id) if work_item.parent_id else None,
                         "source_issue_url": work_item.web_url,
                         "source_issue_updated_at": work_item.changed_at,
+                        "source_path": _build_work_item_source_path(work_item),
+                        "source_section": work_item.title,
+                        "source_excerpt": _truncate_source_excerpt(item_text),
+                        "source_hierarchy": _build_work_item_source_hierarchy(work_item),
                         "sync_target_issue_key": str(work_item.work_item_id),
                     }
                 )
@@ -281,6 +286,28 @@ def _build_work_item_source_text(work_item: AzureDevOpsWorkItemSummary) -> str:
     if work_item.acceptance_criteria_text:
         sections.append(f"Acceptance Criteria:\n{work_item.acceptance_criteria_text}")
     return "\n".join(sections)
+
+
+def _build_work_item_source_path(work_item: AzureDevOpsWorkItemSummary) -> str:
+    hierarchy = _build_work_item_source_hierarchy(work_item)
+    return " > ".join(hierarchy) if hierarchy else str(work_item.work_item_id)
+
+
+def _build_work_item_source_hierarchy(work_item: AzureDevOpsWorkItemSummary) -> list[str]:
+    hierarchy: list[str] = []
+    if work_item.project:
+        hierarchy.append(work_item.project)
+    if work_item.parent_id:
+        hierarchy.append(f"#{work_item.parent_id}")
+    hierarchy.append(f"#{work_item.work_item_id} · {work_item.work_item_type}: {work_item.title}")
+    return hierarchy
+
+
+def _truncate_source_excerpt(text: str, limit: int = 600) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 1].rstrip()}…"
 
 
 def _renumber_requirements(requirements: Sequence[Requirement]) -> list[Requirement]:

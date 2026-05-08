@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
 import logging
 import re
+from pydantic import ValidationError
 from ..models import Requirement, WorkflowSettings
 from ..config import get_settings
 from ..adk_client import (
@@ -129,8 +130,16 @@ def _build_workflow_response(
             "unmet_criteria": ["Structured review is required before progressing."],
         }
 
+    review_status = "Approved" if bool(workflow.get("approved", False)) else "Needs Review"
+    statused_requirements = [
+        requirement.model_copy(update={"review_status": review_status})
+        if requirement.review_status != "Rejected"
+        else requirement
+        for requirement in requirements
+    ]
+
     return {
-        "requirements": requirements,
+        "requirements": statused_requirements,
         "approved": bool(workflow.get("approved", False)),
         "review": review,
         "iteration_history": list(workflow.get("iteration_history") or []),
@@ -247,9 +256,11 @@ def _convert_to_requirements(extracted: List[Dict[str, Any]]) -> List[Requiremen
         if isinstance(item, dict):
             req_id = item.get("id", f"REQ-{i+1:03d}")
             text = item.get("text", "")
+            metadata = _extract_requirement_metadata(item)
         else:
             req_id = f"REQ-{i+1:03d}"
             text = str(item)
+            metadata = {}
         
         if not text:
             continue
@@ -268,13 +279,57 @@ def _convert_to_requirements(extracted: List[Dict[str, Any]]) -> List[Requiremen
         if not req_id.startswith("REQ-"):
             req_id = f"REQ-{len(requirements)+1:03d}"
         
-        requirements.append(Requirement(id=req_id, text=text))
+        try:
+            requirements.append(Requirement(id=req_id, text=text, **metadata))
+        except ValidationError as exc:
+            logging.warning("Requirement metadata was invalid for %s and will be ignored: %s", req_id, exc)
+            requirements.append(Requirement(id=req_id, text=text))
     
     # Re-number to ensure sequential IDs
+    id_mapping = {req.id: f"REQ-{i+1:03d}" for i, req in enumerate(requirements)}
     for i, req in enumerate(requirements):
-        req.id = f"REQ-{i+1:03d}"
+        parent_requirement_id = req.parent_requirement_id
+        req.id = id_mapping.get(req.id, f"REQ-{i+1:03d}")
+        if parent_requirement_id in id_mapping:
+            req.parent_requirement_id = id_mapping[parent_requirement_id]
     
     return requirements
+
+
+def _extract_requirement_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract optional review/source metadata from model output without trusting arbitrary fields."""
+    allowed_fields = {
+        "source_system",
+        "source_issue_key",
+        "source_issue_type",
+        "source_parent_key",
+        "source_parent_title",
+        "source_issue_url",
+        "source_issue_updated_at",
+        "source_path",
+        "source_section",
+        "source_excerpt",
+        "source_hierarchy",
+        "parent_requirement_id",
+        "review_status",
+        "quality_flags",
+        "sync_target_issue_key",
+        "artifact_set_id",
+        "artifact_item_id",
+        "artifact_version_id",
+        "artifact_version_number",
+    }
+    metadata = {field: item.get(field) for field in allowed_fields if item.get(field) not in (None, "")}
+
+    if "source_hierarchy" in metadata and not isinstance(metadata["source_hierarchy"], list):
+        metadata["source_hierarchy"] = [str(metadata["source_hierarchy"])]
+    if "quality_flags" in metadata and not isinstance(metadata["quality_flags"], list):
+        metadata["quality_flags"] = [str(metadata["quality_flags"])]
+
+    if metadata.get("review_status") not in {"Draft", "Needs Review", "Approved", "Rejected"}:
+        metadata.pop("review_status", None)
+
+    return metadata
 
 
 def _finalize_requirements(candidates: List[str]) -> List[Requirement]:

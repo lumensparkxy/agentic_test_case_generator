@@ -28,6 +28,42 @@ def _build_grounded_context_from_enrich_input(payload: EnrichInput):
     return build_grounded_context(payload)
 
 
+def _parse_docx_to_structured_text(content: bytes) -> str:
+    doc = Document(BytesIO(content))
+    lines: List[str] = []
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        if not text:
+            continue
+        style_name = str(getattr(paragraph.style, "name", "") or "")
+        if style_name.lower().startswith("heading"):
+            level_digits = "".join(char for char in style_name if char.isdigit())
+            level = max(1, min(int(level_digits or "1"), 6))
+            lines.append(f"{'#' * level} {text}")
+        else:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+def _apply_file_source_metadata(requirements: List[Any], source_name: str, source_names: List[str]) -> List[Any]:
+    source_label = source_name or (source_names[0] if source_names else "uploaded file")
+    enriched = []
+    for requirement in requirements:
+        source_hierarchy = list(getattr(requirement, "source_hierarchy", []) or [])
+        if not source_hierarchy:
+            source_hierarchy = [source_label]
+        enriched.append(
+            requirement.model_copy(
+                update={
+                    "source_system": getattr(requirement, "source_system", None) or "file",
+                    "source_path": getattr(requirement, "source_path", None) or source_label,
+                    "source_hierarchy": source_hierarchy,
+                }
+            )
+        )
+    return enriched
+
+
 def _parse_workflow_settings_form(workflow_settings: Optional[str]) -> Optional[WorkflowSettings]:
     if not workflow_settings:
         return None
@@ -283,8 +319,7 @@ async def parse_requirements(
             if filename.endswith(".md") or upload.content_type == "text/markdown":
                 parsed_text = content.decode("utf-8", errors="ignore")
             elif filename.endswith(".docx"):
-                doc = Document(BytesIO(content))
-                parsed_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+                parsed_text = _parse_docx_to_structured_text(content)
             elif filename.endswith(".xlsx"):
                 parsed_text = parse_excel_to_text(content)
             else:
@@ -314,6 +349,7 @@ async def parse_requirements(
             workflow_settings=workflow.get("workflow_settings", {}),
             workflow_diagnostics=workflow.get("workflow_diagnostics", {}),
         )
+        response.requirements = _apply_file_source_metadata(response.requirements, source_name, source_names)
         event_id = _log_success(
             current_user=current_user,
             request=request,
