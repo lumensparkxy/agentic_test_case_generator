@@ -248,9 +248,9 @@ class JiraAdapter:
         except HTTPError as exc:
             payload_text = exc.read().decode("utf-8", errors="ignore")
             parsed_payload = self._parse_json(payload_text)
-            message = self._extract_error_message(parsed_payload) or payload_text or str(exc)
+            message = self._build_http_error_message(exc, parsed_payload, payload_text)
             raise JiraAdapterError(
-                f"JIRA request failed ({exc.code}): {message}",
+                message,
                 status_code=exc.code,
                 payload=parsed_payload or {},
             ) from exc
@@ -379,6 +379,35 @@ class JiraAdapter:
         if isinstance(errors, dict) and errors:
             return "; ".join(f"{key}: {value}" for key, value in errors.items())
         return str(payload.get("message") or payload.get("detail") or "").strip() or None
+
+    def _build_http_error_message(
+        self,
+        exc: HTTPError,
+        payload: Optional[dict[str, Any]],
+        payload_text: str,
+    ) -> str:
+        raw_message = self._extract_error_message(payload) or payload_text or str(exc)
+        normalized = str(raw_message).lower()
+
+        if exc.code == 401:
+            return (
+                f"JIRA Cloud rejected the credentials for {self.email} at {self.base_url}. "
+                "Verify that the Atlassian email and API token belong to the same account and that the token is still active."
+            )
+
+        if exc.code == 403 and (
+            "not permitted to use jira" in normalized
+            or "insufficient permissions" in normalized
+            or "access denied" in normalized
+            or "forbidden" in normalized
+        ):
+            return (
+                f"The Atlassian account {self.email} authenticated, but does not have enough Jira access for {self.base_url}. "
+                "Ask a Jira site admin to grant this user Jira product access. "
+                "If the connection succeeds but no projects appear, also grant Browse Projects permission for the target project."
+            )
+
+        return f"JIRA request failed ({exc.code}): {raw_message}"
 
     def _filter_projects(self, projects: Sequence[dict[str, Any]], query: str) -> list[dict[str, Any]]:
         normalized_query = str(query or "").strip().lower()

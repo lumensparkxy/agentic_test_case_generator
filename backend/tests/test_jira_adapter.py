@@ -1,9 +1,10 @@
 from pathlib import Path
+import io
 import json
 import ssl
 import sys
 import unittest
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -186,6 +187,27 @@ class JiraAdapterTests(unittest.TestCase):
 
         self.assertIn("SSL certificate verification failed", str(raised.exception))
         self.assertIn("https://acme.atlassian.net", str(raised.exception))
+
+    def test_validate_connection_surfaces_permission_guidance_for_forbidden_account(self) -> None:
+        adapter = JiraAdapter(
+            base_url="https://acme.atlassian.net",
+            email="qa@example.com",
+            api_token="token-123",
+        )
+        http_error = HTTPError(
+            url="https://acme.atlassian.net/rest/api/3/myself",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=io.BytesIO(b'{"errorMessages":["Current user not permitted to use Jira"]}'),
+        )
+
+        with patch("app.adapters.jira.urlopen", side_effect=http_error):
+            with self.assertRaises(JiraAdapterError) as raised:
+                adapter.validate_connection()
+
+        self.assertIn("does not have enough Jira access", str(raised.exception))
+        self.assertIn("grant this user Jira product access", str(raised.exception))
 
 
 if __name__ == "__main__":
