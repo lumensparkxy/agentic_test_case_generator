@@ -89,6 +89,14 @@ class JiraSettings(BaseModel):
     issue_page_size: int = 50
 
 
+class AzureDevOpsSettings(BaseModel):
+    connection_secret_key: str = ""
+    api_timeout_seconds: int = 15
+    api_version: str = "7.1"
+    project_page_size: int = 50
+    work_item_page_size: int = 50
+
+
 class BillingSettings(BaseModel):
     pricing_version: str = "pilot-v1"
     token_unit_size: int = 4
@@ -271,6 +279,35 @@ def get_jira_settings() -> JiraSettings:
             os.getenv("JIRA_ISSUE_PAGE_SIZE", "50"),
             default=50,
             env_name="JIRA_ISSUE_PAGE_SIZE",
+        ),
+    )
+
+
+@lru_cache
+def get_azure_devops_settings() -> AzureDevOpsSettings:
+    auth_settings = get_auth_settings()
+    connection_secret_key = (
+        (os.getenv("AZURE_DEVOPS_CONNECTION_SECRET_KEY") or "").strip()
+        or auth_settings.jwt_secret_key
+    )
+    api_version = (os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1").strip() or "7.1"
+    return AzureDevOpsSettings(
+        connection_secret_key=connection_secret_key,
+        api_timeout_seconds=_parse_positive_int_env(
+            os.getenv("AZURE_DEVOPS_API_TIMEOUT_SECONDS", "15"),
+            default=15,
+            env_name="AZURE_DEVOPS_API_TIMEOUT_SECONDS",
+        ),
+        api_version=api_version,
+        project_page_size=_parse_positive_int_env(
+            os.getenv("AZURE_DEVOPS_PROJECT_PAGE_SIZE", "50"),
+            default=50,
+            env_name="AZURE_DEVOPS_PROJECT_PAGE_SIZE",
+        ),
+        work_item_page_size=_parse_positive_int_env(
+            os.getenv("AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE", "50"),
+            default=50,
+            env_name="AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE",
         ),
     )
 

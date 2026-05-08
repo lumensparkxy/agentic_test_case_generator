@@ -55,6 +55,61 @@ class GroundedContextMetricTests(unittest.TestCase):
         self.assertTrue(raw_test_cases)
         self.assertEqual(raw_test_cases[0]["source_refs"], ["ART-APP-01"])
 
+    def test_fallback_raw_test_cases_cover_all_planned_scenarios(self) -> None:
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": self.requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Sign in succeeds",
+                        "objective": "Verify successful sign-in.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-02",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Negative",
+                        "title": "Invalid sign-in fails",
+                        "objective": "Verify invalid credentials are rejected.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-03",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Authorization",
+                        "title": "Authenticated session is required",
+                        "objective": "Verify access control around sign-in state.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-04",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Data Variation",
+                        "title": "Email credential variations",
+                        "objective": "Verify sign-in data variations.",
+                        "priority": "Medium",
+                        "must_have": False,
+                    },
+                ],
+            }
+        ]
+
+        raw_test_cases = _fallback_raw_test_cases(self.requirements, self.context, coverage_plan=coverage_plan)
+        scenario_tags = {tag for test_case in raw_test_cases for tag in test_case.get("tags", []) if tag.startswith("scenario:")}
+
+        self.assertEqual(len(raw_test_cases), 4)
+        self.assertIn("scenario:happy-path", scenario_tags)
+        self.assertIn("scenario:negative", scenario_tags)
+        self.assertIn("scenario:authorization", scenario_tags)
+        self.assertIn("scenario:data-variation", scenario_tags)
+
 
 if __name__ == "__main__":
     unittest.main()

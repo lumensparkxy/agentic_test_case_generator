@@ -49,8 +49,20 @@ const EMPTY_JIRA_CONNECTION_FORM = {
 	email: "",
 	apiToken: "",
 };
+const EMPTY_AZURE_DEVOPS_CONNECTION_STATUS = {
+	connected: false,
+	connection: null,
+};
+const EMPTY_AZURE_DEVOPS_CONNECTION_FORM = {
+	organizationUrl: "",
+	accountEmail: "",
+	personalAccessToken: "",
+};
 const DEFAULT_JIRA_ISSUE_TYPE_OPTIONS = ["Epic", "Story", "Task", "Bug"];
-const DEFAULT_JIRA_SYNC_SECTION_TITLE = "Agentic Requirements";
+const DEFAULT_AZURE_DEVOPS_WORK_ITEM_TYPE_OPTIONS = ["Epic", "Feature", "User Story", "Task", "Bug"];
+const DEFAULT_SYNC_SECTION_TITLE = "Agentic Requirements";
+const DEFAULT_JIRA_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITLE;
+const DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITLE;
 const JIRA_SOURCE_FIELDS = [
 	"source_system",
 	"source_issue_key",
@@ -71,12 +83,28 @@ const buildJiraConnectionForm = (connection, user) => ({
 	apiToken: "",
 });
 
+const buildAzureDevOpsConnectionForm = (connection, user) => ({
+	organizationUrl: connection?.organization_url || "",
+	accountEmail: connection?.account_email || user?.email || "",
+	personalAccessToken: "",
+});
+
 const isJiraLinkedRequirement = (requirement) => Boolean(
 	requirement?.source_system === "jira"
-	|| requirement?.source_issue_key
-	|| requirement?.sync_target_issue_key
-	|| requirement?.artifact_item_id
+	|| (!requirement?.source_system && (requirement?.source_issue_key || requirement?.sync_target_issue_key || requirement?.artifact_item_id))
 );
+
+const isAzureDevOpsLinkedRequirement = (requirement) => Boolean(requirement?.source_system === "azure_devops");
+
+const getRequirementSourceLabel = (requirement) => {
+	if (requirement?.source_system === "azure_devops") {
+		return "Azure DevOps";
+	}
+	if (requirement?.source_system === "jira" || requirement?.source_issue_key || requirement?.sync_target_issue_key) {
+		return "JIRA";
+	}
+	return "Source";
+};
 
 const mergeRequirementMetadata = (nextRequirements = [], previousRequirements = []) => {
 	const previousList = Array.isArray(previousRequirements) ? previousRequirements : [];
@@ -317,6 +345,8 @@ export default function App() {
 	const [status, setStatus] = useState("");
 	const [feedback, setFeedback] = useState("");
 	const [reqFeedback, setReqFeedback] = useState("");
+	const [draftExportOverride, setDraftExportOverride] = useState(false);
+	const [draftExportReason, setDraftExportReason] = useState("");
 	const [requirementWorkflowSettings, setRequirementWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
 	const [testCaseWorkflowSettings, setTestCaseWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
 	const [expandedRows, setExpandedRows] = useState({});
@@ -329,6 +359,8 @@ export default function App() {
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
 	const [activeAuthProvider, setActiveAuthProvider] = useState("");
 	const [isSignInDialogOpen, setIsSignInDialogOpen] = useState(false);
+	const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+	const [settingsSection, setSettingsSection] = useState("workflow");
 	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
 	const [usageSummary, setUsageSummary] = useState(null);
 	const [isUsageLoading, setIsUsageLoading] = useState(false);
@@ -357,6 +389,28 @@ export default function App() {
 	const [jiraManagedSectionTitle, setJiraManagedSectionTitle] = useState(DEFAULT_JIRA_SYNC_SECTION_TITLE);
 	const [isPreviewingJiraSync, setIsPreviewingJiraSync] = useState(false);
 	const [isApplyingJiraSync, setIsApplyingJiraSync] = useState(false);
+	const [azureDevOpsConnectionStatus, setAzureDevOpsConnectionStatus] = useState(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+	const [azureDevOpsConnectionForm, setAzureDevOpsConnectionForm] = useState(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
+	const [isAzureDevOpsConnectionLoading, setIsAzureDevOpsConnectionLoading] = useState(false);
+	const [isSavingAzureDevOpsConnection, setIsSavingAzureDevOpsConnection] = useState(false);
+	const [isDeletingAzureDevOpsConnection, setIsDeletingAzureDevOpsConnection] = useState(false);
+	const [azureDevOpsProjectQuery, setAzureDevOpsProjectQuery] = useState("");
+	const [azureDevOpsProjects, setAzureDevOpsProjects] = useState([]);
+	const [selectedAzureDevOpsProject, setSelectedAzureDevOpsProject] = useState("");
+	const [isLoadingAzureDevOpsProjects, setIsLoadingAzureDevOpsProjects] = useState(false);
+	const [azureDevOpsWorkItemTypes, setAzureDevOpsWorkItemTypes] = useState([]);
+	const [isLoadingAzureDevOpsWorkItemTypes, setIsLoadingAzureDevOpsWorkItemTypes] = useState(false);
+	const [azureDevOpsWorkItemType, setAzureDevOpsWorkItemType] = useState("");
+	const [azureDevOpsWorkItemQuery, setAzureDevOpsWorkItemQuery] = useState("");
+	const [azureDevOpsWorkItemResults, setAzureDevOpsWorkItemResults] = useState([]);
+	const [selectedAzureDevOpsWorkItemId, setSelectedAzureDevOpsWorkItemId] = useState("");
+	const [isSearchingAzureDevOpsWorkItems, setIsSearchingAzureDevOpsWorkItems] = useState(false);
+	const [isImportingFromAzureDevOps, setIsImportingFromAzureDevOps] = useState(false);
+	const [azureDevOpsSyncPreview, setAzureDevOpsSyncPreview] = useState(null);
+	const [azureDevOpsSyncResults, setAzureDevOpsSyncResults] = useState(null);
+	const [azureDevOpsManagedSectionTitle, setAzureDevOpsManagedSectionTitle] = useState(DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE);
+	const [isPreviewingAzureDevOpsSync, setIsPreviewingAzureDevOpsSync] = useState(false);
+	const [isApplyingAzureDevOpsSync, setIsApplyingAzureDevOpsSync] = useState(false);
 
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
@@ -386,9 +440,31 @@ export default function App() {
 		: DEFAULT_JIRA_ISSUE_TYPE_OPTIONS;
 	const jiraImportedIssueKeys = [...new Set(
 		requirements
+			.filter((requirement) => isJiraLinkedRequirement(requirement))
 			.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
 			.filter(Boolean)
 	)];
+	const azureDevOpsConnection = azureDevOpsConnectionStatus?.connection || null;
+	const azureDevOpsConnected = Boolean(azureDevOpsConnectionStatus?.connected && azureDevOpsConnection);
+	const hasAzureDevOpsRequirements = requirements.some((requirement) => isAzureDevOpsLinkedRequirement(requirement));
+	const azureDevOpsSyncWorkItems = Array.isArray(azureDevOpsSyncPreview?.work_items) ? azureDevOpsSyncPreview.work_items : [];
+	const azureDevOpsPreviewHasReadyWorkItem = azureDevOpsSyncWorkItems.some((workItem) => workItem.status === "ready");
+	const selectedAzureDevOpsWorkItem = azureDevOpsWorkItemResults.find((workItem) => `${workItem.work_item_id}` === `${selectedAzureDevOpsWorkItemId}`) || null;
+	const azureDevOpsWorkItemTypeOptions = azureDevOpsWorkItemTypes.length
+		? azureDevOpsWorkItemTypes.map((workItemType) => workItemType.name)
+		: DEFAULT_AZURE_DEVOPS_WORK_ITEM_TYPE_OPTIONS;
+	const azureDevOpsImportedWorkItemIds = [...new Set(
+		requirements
+			.filter((requirement) => isAzureDevOpsLinkedRequirement(requirement))
+			.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
+			.filter(Boolean)
+	)];
+	const testCasesApprovedForExport = Boolean(testCaseReview?.approved);
+	const draftExportReasonText = draftExportReason.trim();
+	const draftExportOverrideReady = Boolean(draftExportOverride && draftExportReasonText.length >= 10);
+	const exportRequiresOverride = testCases.length > 0 && !testCasesApprovedForExport;
+	const exportLockedByReview = exportRequiresOverride && !draftExportOverrideReady;
+	const exportActionDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportLockedByReview;
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -397,6 +473,11 @@ export default function App() {
 	const resetContextAnalysis = () => {
 		setEnrichedContext(null);
 		setSelectedArtifactSourceIds([]);
+	};
+
+	const resetDraftExportState = () => {
+		setDraftExportOverride(false);
+		setDraftExportReason("");
 	};
 
 	const buildContextPayload = () => {
@@ -549,6 +630,16 @@ export default function App() {
 		setSelectedJiraIssueKey("");
 		setJiraSyncPreview(null);
 		setJiraSyncResults(null);
+		setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+		setAzureDevOpsConnectionForm(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
+		setAzureDevOpsProjects([]);
+		setSelectedAzureDevOpsProject("");
+		setAzureDevOpsWorkItemTypes([]);
+		setAzureDevOpsWorkItemType("");
+		setAzureDevOpsWorkItemResults([]);
+		setSelectedAzureDevOpsWorkItemId("");
+		setAzureDevOpsSyncPreview(null);
+		setAzureDevOpsSyncResults(null);
 		localStorage.removeItem(STORAGE_AUTH_TOKEN);
 		localStorage.removeItem(STORAGE_AUTH_USER);
 		if (nextStatus) {
@@ -680,6 +771,21 @@ export default function App() {
 		}
 	};
 
+	const openSettingsDialog = (section = "workflow") => {
+		setSettingsSection(section);
+		setIsSettingsDialogOpen(true);
+	};
+
+	const closeSettingsDialog = () => {
+		setIsSettingsDialogOpen(false);
+	};
+
+	const handleSettingsDialogOverlayClick = (event) => {
+		if (event.target === event.currentTarget) {
+			closeSettingsDialog();
+		}
+	};
+
 	useEffect(() => {
 		if (!firebaseAuth) {
 			const storedToken = localStorage.getItem(STORAGE_AUTH_TOKEN);
@@ -769,6 +875,16 @@ export default function App() {
 			setSelectedJiraIssueKey("");
 			setJiraSyncPreview(null);
 			setJiraSyncResults(null);
+			setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+			setAzureDevOpsConnectionForm(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
+			setAzureDevOpsProjects([]);
+			setSelectedAzureDevOpsProject("");
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			setAzureDevOpsWorkItemResults([]);
+			setSelectedAzureDevOpsWorkItemId("");
+			setAzureDevOpsSyncPreview(null);
+			setAzureDevOpsSyncResults(null);
 			return;
 		}
 
@@ -789,6 +905,16 @@ export default function App() {
 	}, [currentUser?.email, jiraConnected]);
 
 	useEffect(() => {
+		if (!currentUser?.email || azureDevOpsConnected) {
+			return;
+		}
+		setAzureDevOpsConnectionForm((prev) => ({
+			...prev,
+			accountEmail: prev.accountEmail || currentUser.email,
+		}));
+	}, [currentUser?.email, azureDevOpsConnected]);
+
+	useEffect(() => {
 		if (!isSignInDialogOpen) {
 			return undefined;
 		}
@@ -802,6 +928,21 @@ export default function App() {
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [isSignInDialogOpen, isAuthenticating]);
+
+	useEffect(() => {
+		if (!isSettingsDialogOpen) {
+			return undefined;
+		}
+
+		const handleKeyDown = (event) => {
+			if (event.key === "Escape") {
+				closeSettingsDialog();
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [isSettingsDialogOpen]);
 
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = { ...(options.headers || {}) };
@@ -832,6 +973,16 @@ export default function App() {
 	const resetJiraSyncState = () => {
 		setJiraSyncPreview(null);
 		setJiraSyncResults(null);
+	};
+
+	const resetAzureDevOpsSyncState = () => {
+		setAzureDevOpsSyncPreview(null);
+		setAzureDevOpsSyncResults(null);
+	};
+
+	const resetIntegrationSyncState = () => {
+		resetJiraSyncState();
+		resetAzureDevOpsSyncState();
 	};
 
 	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
@@ -867,6 +1018,46 @@ export default function App() {
 		} finally {
 			if (!silent) {
 				setIsJiraConnectionLoading(false);
+			}
+		}
+	};
+
+	const refreshAzureDevOpsConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
+		const user = userOverride || currentUser;
+		if (!user) {
+			setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+			setAzureDevOpsConnectionForm(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
+			return null;
+		}
+
+		if (!silent) {
+			setIsAzureDevOpsConnectionLoading(true);
+		}
+		try {
+			const res = await apiRequest("/integrations/azure-devops/connection", { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load Azure DevOps connection");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setAzureDevOpsConnectionStatus(data || EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+			setAzureDevOpsConnectionForm(buildAzureDevOpsConnectionForm(data?.connection, user));
+			if (data?.connection?.default_project) {
+				setSelectedAzureDevOpsProject((prev) => prev || data.connection.default_project);
+			}
+			return data;
+		} catch (error) {
+			if (!silent) {
+				setStatus(`Azure DevOps connection check failed: ${error.message}`);
+			}
+			setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+			setAzureDevOpsConnectionForm(buildAzureDevOpsConnectionForm(null, user));
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			return null;
+		} finally {
+			if (!silent) {
+				setIsAzureDevOpsConnectionLoading(false);
 			}
 		}
 	};
@@ -909,11 +1100,52 @@ export default function App() {
 		}
 	};
 
+	const loadAzureDevOpsWorkItemTypes = async (projectOverride = selectedAzureDevOpsProject, { silent = false } = {}) => {
+		const normalizedProject = `${projectOverride || ""}`.trim();
+		if (!azureDevOpsConnected || !normalizedProject) {
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			return [];
+		}
+		if (!silent) {
+			setIsLoadingAzureDevOpsWorkItemTypes(true);
+		}
+		try {
+			const res = await apiRequest(`/integrations/azure-devops/projects/${encodeURIComponent(normalizedProject)}/work-item-types`, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load Azure DevOps work item types");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const workItemTypes = Array.isArray(data?.work_item_types) ? data.work_item_types : [];
+			setAzureDevOpsWorkItemTypes(workItemTypes);
+			setAzureDevOpsWorkItemType((prev) => (prev && workItemTypes.some((workItemType) => workItemType.name === prev) ? prev : ""));
+			if (!silent && workItemTypes.length) {
+				setStatus(`Loaded ${workItemTypes.length} Azure DevOps work item type${workItemTypes.length === 1 ? "" : "s"} for ${normalizedProject}.`);
+			}
+			return workItemTypes;
+		} catch (error) {
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			if (!silent) {
+				setStatus(`Azure DevOps work item type load failed: ${error.message}`);
+			}
+			return [];
+		} finally {
+			if (!silent) {
+				setIsLoadingAzureDevOpsWorkItemTypes(false);
+			}
+		}
+	};
+
 	useEffect(() => {
 		if (!isAuthenticated || !currentUser) {
 			return;
 		}
-		void refreshJiraConnectionStatus(currentUser, { silent: true });
+		void Promise.all([
+			refreshJiraConnectionStatus(currentUser, { silent: true }),
+			refreshAzureDevOpsConnectionStatus(currentUser, { silent: true }),
+		]);
 	}, [isAuthenticated, currentUser?.sub]);
 
 	const loadJiraProjects = async (queryOverride = jiraProjectQuery, { silent = false, assumeConnected = false } = {}) => {
@@ -962,12 +1194,68 @@ export default function App() {
 		}
 	};
 
+	const loadAzureDevOpsProjects = async (queryOverride = azureDevOpsProjectQuery, { silent = false, assumeConnected = false } = {}) => {
+		if (!(azureDevOpsConnected || assumeConnected)) {
+			if (!silent) {
+				setStatus("Connect Azure DevOps before loading projects.");
+			}
+			return [];
+		}
+		if (!silent) {
+			setIsLoadingAzureDevOpsProjects(true);
+		}
+		try {
+			const params = new URLSearchParams();
+			if (`${queryOverride || ""}`.trim()) {
+				params.set("query", `${queryOverride}`.trim());
+			}
+			params.set("max_results", "50");
+			const res = await apiRequest(`/integrations/azure-devops/projects?${params.toString()}`, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load Azure DevOps projects");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const projects = Array.isArray(data?.projects) ? data.projects : [];
+			setAzureDevOpsProjects(projects);
+			setSelectedAzureDevOpsProject((prev) => {
+				if (prev && projects.some((project) => project.name === prev)) {
+					return prev;
+				}
+				if (azureDevOpsConnection?.default_project && projects.some((project) => project.name === azureDevOpsConnection.default_project)) {
+					return azureDevOpsConnection.default_project;
+				}
+				return projects[0]?.name || prev || "";
+			});
+			if (!silent) {
+				setStatus(projects.length ? `Loaded ${projects.length} Azure DevOps project${projects.length === 1 ? "" : "s"}.` : "Azure DevOps returned no visible projects for this account.");
+			}
+			return projects;
+		} catch (error) {
+			if (!silent) {
+				setStatus(`Azure DevOps project load failed: ${error.message}`);
+			}
+			return [];
+		} finally {
+			if (!silent) {
+				setIsLoadingAzureDevOpsProjects(false);
+			}
+		}
+	};
+
 	useEffect(() => {
 		if (!jiraConnected || jiraProjects.length > 0 || isLoadingJiraProjects) {
 			return;
 		}
 		void loadJiraProjects("", { silent: true, assumeConnected: true });
 	}, [jiraConnected, jiraProjects.length, isLoadingJiraProjects]);
+
+	useEffect(() => {
+		if (!azureDevOpsConnected || azureDevOpsProjects.length > 0 || isLoadingAzureDevOpsProjects) {
+			return;
+		}
+		void loadAzureDevOpsProjects("", { silent: true, assumeConnected: true });
+	}, [azureDevOpsConnected, azureDevOpsProjects.length, isLoadingAzureDevOpsProjects]);
 
 	useEffect(() => {
 		setJiraIssueResults([]);
@@ -979,6 +1267,17 @@ export default function App() {
 		}
 		void loadJiraProjectIssueTypes(selectedJiraProjectKey, { silent: true });
 	}, [jiraConnected, selectedJiraProjectKey]);
+
+	useEffect(() => {
+		setAzureDevOpsWorkItemResults([]);
+		setSelectedAzureDevOpsWorkItemId("");
+		if (!azureDevOpsConnected || !selectedAzureDevOpsProject) {
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			return;
+		}
+		void loadAzureDevOpsWorkItemTypes(selectedAzureDevOpsProject, { silent: true });
+	}, [azureDevOpsConnected, selectedAzureDevOpsProject]);
 
 	const saveJiraConnection = async () => {
 		if (!jiraConnectionForm.baseUrl.trim() || !jiraConnectionForm.email.trim() || !jiraConnectionForm.apiToken.trim()) {
@@ -1049,6 +1348,293 @@ export default function App() {
 		}
 	};
 
+	const saveAzureDevOpsConnection = async () => {
+		if (!azureDevOpsConnectionForm.organizationUrl.trim() || !azureDevOpsConnectionForm.personalAccessToken.trim()) {
+			setStatus("Enter your Azure DevOps organization/project URL and PAT before connecting.");
+			return;
+		}
+		setIsSavingAzureDevOpsConnection(true);
+		setStatus("Connecting to Azure DevOps...");
+		try {
+			const res = await apiRequest("/integrations/azure-devops/connection", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					organization_url: azureDevOpsConnectionForm.organizationUrl.trim(),
+					personal_access_token: azureDevOpsConnectionForm.personalAccessToken,
+					account_email: azureDevOpsConnectionForm.accountEmail.trim() || currentUser?.email || null,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to connect to Azure DevOps");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setAzureDevOpsConnectionStatus(data || EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+			setAzureDevOpsConnectionForm(buildAzureDevOpsConnectionForm(data?.connection, currentUser));
+			setAzureDevOpsProjects([]);
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			setAzureDevOpsWorkItemResults([]);
+			setSelectedAzureDevOpsWorkItemId("");
+			setSelectedAzureDevOpsProject(data?.connection?.default_project || "");
+			const connectedAs = data?.connection?.display_name || data?.connection?.account_email || data?.connection?.organization || "Azure DevOps";
+			setStatus(`Connected to Azure DevOps as ${connectedAs}. Loading projects...`);
+			const projects = await loadAzureDevOpsProjects("", { silent: true, assumeConnected: true });
+			setStatus(
+				projects.length
+					? `Connected to Azure DevOps as ${connectedAs}. Loaded ${projects.length} project${projects.length === 1 ? "" : "s"}.`
+					: `Connected to Azure DevOps as ${connectedAs}, but no visible projects were returned.`
+			);
+		} catch (error) {
+			setStatus(`Azure DevOps connection failed: ${error.message}`);
+		} finally {
+			setIsSavingAzureDevOpsConnection(false);
+		}
+	};
+
+	const deleteStoredAzureDevOpsConnection = async () => {
+		setIsDeletingAzureDevOpsConnection(true);
+		setStatus("Disconnecting Azure DevOps...");
+		try {
+			const res = await apiRequest("/integrations/azure-devops/connection", { method: "DELETE" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to delete Azure DevOps connection");
+				throw new Error(errorMessage);
+			}
+			setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
+			setAzureDevOpsConnectionForm(buildAzureDevOpsConnectionForm(null, currentUser));
+			setAzureDevOpsProjects([]);
+			setSelectedAzureDevOpsProject("");
+			setAzureDevOpsWorkItemTypes([]);
+			setAzureDevOpsWorkItemType("");
+			setAzureDevOpsWorkItemResults([]);
+			setSelectedAzureDevOpsWorkItemId("");
+			setStatus("Disconnected from Azure DevOps.");
+		} catch (error) {
+			setStatus(`Azure DevOps disconnect failed: ${error.message}`);
+		} finally {
+			setIsDeletingAzureDevOpsConnection(false);
+		}
+	};
+
+	const renderJiraConnectionSettings = () => (
+		<div className="jira-card settings-integration-card">
+			<div className="jira-card-header">
+				<div>
+					<h3>JIRA Cloud</h3>
+					<p>Store a per-user JIRA Cloud connection so imports and managed requirement sync can use it later.</p>
+				</div>
+				{jiraConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
+			</div>
+			{jiraConnected && jiraConnection ? (
+				<div className="jira-connection-summary">
+					<span className="jira-summary-pill">{jiraConnection.display_name || jiraConnection.email}</span>
+					<span className="jira-summary-pill">{jiraConnection.base_url}</span>
+					{jiraConnection.api_token_hint && <span className="jira-summary-pill">Token {jiraConnection.api_token_hint}</span>}
+				</div>
+			) : null}
+			{!jiraConnected ? (
+				<div className="panel-form two-cols jira-connection-form">
+					<div className="form-group">
+						<label>JIRA base URL</label>
+						<input
+							placeholder="https://your-team.atlassian.net"
+							value={jiraConnectionForm.baseUrl}
+							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, baseUrl: event.target.value }))}
+						/>
+					</div>
+					<div className="form-group">
+						<label>JIRA email</label>
+						<input
+							type="email"
+							placeholder="qa@company.com"
+							value={jiraConnectionForm.email}
+							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, email: event.target.value }))}
+						/>
+					</div>
+					<div className="form-group jira-connection-token-group">
+						<label>JIRA API token</label>
+						<input
+							type="password"
+							placeholder="Paste your Atlassian API token"
+							value={jiraConnectionForm.apiToken}
+							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, apiToken: event.target.value }))}
+						/>
+					</div>
+					<div className="panel-form button-row jira-connection-actions">
+						<button onClick={saveJiraConnection} disabled={authActionDisabled || isSavingJiraConnection || isJiraConnectionLoading}>
+							{isSavingJiraConnection ? "⏳ Connecting..." : "Connect JIRA"}
+						</button>
+						{isJiraConnectionLoading && <span className="helper-text">Refreshing JIRA connection…</span>}
+					</div>
+				</div>
+			) : (
+				<div className="jira-connected-actions">
+					<button className="secondary" onClick={() => refreshJiraConnectionStatus(currentUser)} disabled={authActionDisabled || isJiraConnectionLoading}>
+						{isJiraConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
+					</button>
+					<button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>
+						{isDeletingJiraConnection ? "⏳ Disconnecting..." : "Disconnect"}
+					</button>
+				</div>
+			)}
+		</div>
+	);
+
+	const renderAzureDevOpsConnectionSettings = () => (
+		<div className="jira-card settings-integration-card">
+			<div className="jira-card-header">
+				<div>
+					<h3>Azure DevOps</h3>
+					<p>Store a per-user Azure DevOps connection so imports and managed requirement sync can use it later.</p>
+				</div>
+				{azureDevOpsConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
+			</div>
+			{azureDevOpsConnected && azureDevOpsConnection ? (
+				<div className="jira-connection-summary">
+					<span className="jira-summary-pill">{azureDevOpsConnection.display_name || azureDevOpsConnection.organization}</span>
+					<span className="jira-summary-pill">{azureDevOpsConnection.organization_url}</span>
+					{azureDevOpsConnection.default_project && <span className="jira-summary-pill">Default project {azureDevOpsConnection.default_project}</span>}
+					{azureDevOpsConnection.token_hint && <span className="jira-summary-pill">PAT {azureDevOpsConnection.token_hint}</span>}
+				</div>
+			) : null}
+			{!azureDevOpsConnected ? (
+				<div className="panel-form two-cols jira-connection-form">
+					<div className="form-group">
+						<label>Azure DevOps organization or project URL</label>
+						<input
+							placeholder="https://dev.azure.com/{organization}/{project}"
+							value={azureDevOpsConnectionForm.organizationUrl}
+							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, organizationUrl: event.target.value }))}
+						/>
+					</div>
+					<div className="form-group">
+						<label>Account email (optional)</label>
+						<input
+							type="email"
+							placeholder="you@company.com or personal@example.com"
+							value={azureDevOpsConnectionForm.accountEmail}
+							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, accountEmail: event.target.value }))}
+						/>
+					</div>
+					<div className="form-group jira-connection-token-group">
+						<label>Azure DevOps PAT</label>
+						<input
+							type="password"
+							placeholder="Paste your Azure DevOps Personal Access Token"
+							value={azureDevOpsConnectionForm.personalAccessToken}
+							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, personalAccessToken: event.target.value }))}
+						/>
+						<span className="helper-text">Use a minimal PAT with Project/team read and Work Items read/write scopes. Microsoft app sign-in is separate from Azure DevOps API access.</span>
+					</div>
+					<div className="panel-form button-row jira-connection-actions">
+						<button onClick={saveAzureDevOpsConnection} disabled={authActionDisabled || isSavingAzureDevOpsConnection || isAzureDevOpsConnectionLoading}>
+							{isSavingAzureDevOpsConnection ? "⏳ Connecting..." : "Connect Azure DevOps"}
+						</button>
+						{isAzureDevOpsConnectionLoading && <span className="helper-text">Refreshing Azure DevOps connection…</span>}
+					</div>
+				</div>
+			) : (
+				<div className="jira-connected-actions">
+					<button className="secondary" onClick={() => refreshAzureDevOpsConnectionStatus(currentUser)} disabled={authActionDisabled || isAzureDevOpsConnectionLoading}>
+						{isAzureDevOpsConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
+					</button>
+					<button className="secondary" onClick={deleteStoredAzureDevOpsConnection} disabled={authActionDisabled || isDeletingAzureDevOpsConnection}>
+						{isDeletingAzureDevOpsConnection ? "⏳ Disconnecting..." : "Disconnect"}
+					</button>
+				</div>
+			)}
+		</div>
+	);
+
+	const renderSettingsDialog = () => {
+		if (!isSettingsDialogOpen) {
+			return null;
+		}
+
+		return (
+			<div className="auth-dialog-overlay settings-dialog-overlay" onClick={handleSettingsDialogOverlayClick}>
+				<div
+					className="settings-dialog"
+					role="dialog"
+					aria-modal="true"
+					aria-labelledby="settings-dialog-title"
+					onClick={(event) => event.stopPropagation()}
+				>
+					<div className="settings-dialog-header">
+						<div>
+							<h2 id="settings-dialog-title">Settings</h2>
+							<p>Manage one-time connections and advanced workflow tuning without crowding the main pipeline.</p>
+						</div>
+						<button
+							type="button"
+							className="auth-dialog-close"
+							onClick={closeSettingsDialog}
+							aria-label="Close settings dialog"
+						>
+							×
+						</button>
+					</div>
+					<div className="settings-dialog-nav" role="tablist" aria-label="Settings sections">
+						<button
+							type="button"
+							className={`settings-nav-btn ${settingsSection === "workflow" ? "active" : ""}`}
+							onClick={() => setSettingsSection("workflow")}
+						>
+							Workflow tuning
+						</button>
+						<button
+							type="button"
+							className={`settings-nav-btn ${settingsSection === "integrations" ? "active" : ""}`}
+							onClick={() => setSettingsSection("integrations")}
+						>
+							Integrations
+						</button>
+					</div>
+					<div className="settings-dialog-body">
+						{settingsSection === "workflow" ? (
+							<>
+								<div className="settings-section-intro">
+									<h3>Advanced workflow tuning</h3>
+									<p>Leave fields blank for backend defaults. Adjust these only when you need stricter review gates or shorter AI loops.</p>
+								</div>
+								{renderWorkflowSettingsPanel(
+									"Requirements workflow settings",
+									"Tune the requirement review loop when you want stricter gates or shorter runs.",
+									requirementWorkflowSettings,
+									setRequirementWorkflowSettings,
+								)}
+								{renderWorkflowSettingsPanel(
+									"Test-case workflow settings",
+									"Control validation strictness, loop length, and timeout behavior for generation and refinement.",
+									testCaseWorkflowSettings,
+									setTestCaseWorkflowSettings,
+								)}
+							</>
+						) : (
+							<>
+								<div className="settings-section-intro">
+									<h3>Integration connections</h3>
+									<p>Set these up once per user. Import/search/sync actions stay in the Upload workflow where they are used.</p>
+								</div>
+								{!isAuthenticated && (
+									<div className="settings-auth-note">
+										🔐 Sign in to create or manage JIRA and Azure DevOps connections.
+									</div>
+								)}
+								<div className="settings-integration-grid">
+									{renderJiraConnectionSettings()}
+									{renderAzureDevOpsConnectionSettings()}
+								</div>
+							</>
+						)}
+					</div>
+				</div>
+			</div>
+		);
+	};
+
 	const searchJiraIssues = async () => {
 		if (!selectedJiraProjectKey) {
 			setStatus("Choose a JIRA project before searching issues.");
@@ -1082,6 +1668,42 @@ export default function App() {
 			setStatus(`JIRA issue search failed: ${error.message}`);
 		} finally {
 			setIsSearchingJiraIssues(false);
+		}
+	};
+
+	const searchAzureDevOpsWorkItems = async () => {
+		if (!selectedAzureDevOpsProject) {
+			setStatus("Choose an Azure DevOps project before searching work items.");
+			return;
+		}
+		setIsSearchingAzureDevOpsWorkItems(true);
+		const workItemTypeLabel = azureDevOpsWorkItemType ? azureDevOpsWorkItemType.toLowerCase() : "work items";
+		setStatus(`Searching ${workItemTypeLabel} in Azure DevOps...`);
+		try {
+			const params = new URLSearchParams({
+				project: selectedAzureDevOpsProject,
+				max_results: "20",
+			});
+			if (`${azureDevOpsWorkItemType || ""}`.trim()) {
+				params.set("work_item_type", `${azureDevOpsWorkItemType}`.trim());
+			}
+			if (`${azureDevOpsWorkItemQuery || ""}`.trim()) {
+				params.set("query", `${azureDevOpsWorkItemQuery}`.trim());
+			}
+			const res = await apiRequest(`/integrations/azure-devops/work-items/search?${params.toString()}`, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to search Azure DevOps work items");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const workItems = Array.isArray(data?.work_items) ? data.work_items : [];
+			setAzureDevOpsWorkItemResults(workItems);
+			setSelectedAzureDevOpsWorkItemId((prev) => workItems.some((workItem) => `${workItem.work_item_id}` === `${prev}`) ? prev : (workItems[0]?.work_item_id ? `${workItems[0].work_item_id}` : ""));
+			setStatus(workItems.length ? `Found ${workItems.length} Azure DevOps ${workItemTypeLabel}${workItems.length === 1 || workItemTypeLabel.endsWith("s") ? "" : "s"}.` : `No ${workItemTypeLabel} matched that search.`);
+		} catch (error) {
+			setStatus(`Azure DevOps work item search failed: ${error.message}`);
+		} finally {
+			setIsSearchingAzureDevOpsWorkItems(false);
 		}
 	};
 
@@ -1130,6 +1752,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
+			resetDraftExportState();
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
@@ -1140,6 +1763,70 @@ export default function App() {
 			setStatus(`JIRA import failed: ${error.message}`);
 		} finally {
 			setIsImportingFromJira(false);
+		}
+	};
+
+	const importRequirementsFromAzureDevOps = async () => {
+		if (requirementWorkflowLocked) {
+			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
+			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
+			return;
+		}
+		if (!selectedAzureDevOpsProject) {
+			setStatus("Choose an Azure DevOps project before importing requirements.");
+			return;
+		}
+		if (!selectedAzureDevOpsWorkItemId) {
+			setStatus("Select an Azure DevOps work item before importing requirements.");
+			return;
+		}
+		setIsImportingFromAzureDevOps(true);
+		setStatus("Importing requirements from Azure DevOps...");
+		resetAzureDevOpsSyncState();
+		try {
+			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
+			const res = await apiRequest("/integrations/azure-devops/import", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
+				body: JSON.stringify({
+					project: selectedAzureDevOpsProject,
+					work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
+					include_children: true,
+					workflow_settings: workflowSettingsPayload,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to import requirements from Azure DevOps");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setRequirementSourceMode("azure_devops");
+			setRawText(data.raw_text || "");
+			setRequirements(data.requirements || []);
+			setRequirementReview(data.review || null);
+			setRequirementCoverageMetrics(data.coverage_metrics || null);
+			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
+			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
+			setRequirementIterationHistory(data.iteration_history || []);
+			setTestCases([]);
+			setRequirementAnalysis([]);
+			setCoveragePlan([]);
+			setCoverageMetrics(null);
+			setTestCaseReview(null);
+			setTestCaseWorkflowDiagnostics(null);
+			setAppliedTestCaseWorkflowSettings(null);
+			setTestCaseIterationHistory([]);
+			resetDraftExportState();
+			resetContextAnalysis();
+			setExpandedRows({});
+			setFeedback("");
+			setReqFeedback("");
+			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
+			setStatus(`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || `#${selectedAzureDevOpsWorkItemId}`}.`);
+		} catch (error) {
+			setStatus(`Azure DevOps import failed: ${error.message}`);
+		} finally {
+			setIsImportingFromAzureDevOps(false);
 		}
 	};
 
@@ -1218,6 +1905,81 @@ export default function App() {
 		}
 	};
 
+	const previewAzureDevOpsSync = async (requirementsOverride = requirements, options = {}) => {
+		const { clearLastSyncResult = true } = options;
+		const requirementsToSync = Array.isArray(requirementsOverride) ? requirementsOverride : [];
+		if (!requirementsToSync.some((requirement) => isAzureDevOpsLinkedRequirement(requirement))) {
+			setStatus("Import Azure DevOps requirements before previewing write-back updates.");
+			return;
+		}
+		setIsPreviewingAzureDevOpsSync(true);
+		setStatus("Previewing Azure DevOps updates...");
+		if (clearLastSyncResult) {
+			setAzureDevOpsSyncResults(null);
+		}
+		try {
+			const res = await apiRequest("/integrations/azure-devops/sync/preview", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					requirements: requirementsToSync,
+					managed_section_title: azureDevOpsManagedSectionTitle.trim() || DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE,
+					conflict_strategy: "block",
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to preview Azure DevOps sync");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setAzureDevOpsSyncPreview(data || null);
+			const readyCount = data?.ready_work_item_count || 0;
+			const conflictCount = data?.conflict_count || 0;
+			setStatus(`Azure DevOps preview ready: ${readyCount} work item${readyCount === 1 ? "" : "s"} ready, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}.`);
+		} catch (error) {
+			setStatus(`Azure DevOps preview failed: ${error.message}`);
+		} finally {
+			setIsPreviewingAzureDevOpsSync(false);
+		}
+	};
+
+	const applyAzureDevOpsSync = async () => {
+		if (!azureDevOpsSyncPreview) {
+			setStatus("Preview Azure DevOps changes before pushing updates.");
+			return;
+		}
+		setIsApplyingAzureDevOpsSync(true);
+		setStatus("Pushing updates back to Azure DevOps...");
+		try {
+			const res = await apiRequest("/integrations/azure-devops/sync", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					requirements,
+					managed_section_title: azureDevOpsManagedSectionTitle.trim() || DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE,
+					conflict_strategy: "block",
+					allow_conflicts: false,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to sync requirements to Azure DevOps");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setAzureDevOpsSyncResults(data || null);
+			const syncedRequirements = mergeRequirementMetadata(data?.requirements || requirements, requirements);
+			setRequirements(syncedRequirements);
+			const updatedCount = data?.updated_work_item_count || 0;
+			const conflictCount = data?.conflict_count || 0;
+			setStatus(`Azure DevOps sync complete: ${updatedCount} work item${updatedCount === 1 ? "" : "s"} updated, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} skipped.`);
+			await previewAzureDevOpsSync(syncedRequirements, { clearLastSyncResult: false });
+		} catch (error) {
+			setStatus(`Azure DevOps sync failed: ${error.message}`);
+		} finally {
+			setIsApplyingAzureDevOpsSync(false);
+		}
+	};
+
 	const handleProviderSignIn = async (providerKey) => {
 		if (!firebaseAuth) {
 			setStatus("Firebase Auth is not configured.");
@@ -1268,7 +2030,7 @@ export default function App() {
 		if (!file && !withFeedback) return;
 		setIsParsing(true);
 		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
-		resetJiraSyncState();
+		resetIntegrationSyncState();
 		try {
 			const formData = new FormData();
 			const requestId = createRequestId();
@@ -1310,6 +2072,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
+			resetDraftExportState();
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
@@ -1375,6 +2138,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
+			resetDraftExportState();
 			setExpandedRows({});
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review
@@ -1393,10 +2157,20 @@ export default function App() {
 	};
 
 	const exportToFormat = async (format) => {
+		if (exportRequiresOverride && !draftExportOverrideReady) {
+			setStatus("Export is locked until the test-case review is approved or a draft override reason is provided.");
+			return;
+		}
 		setIsExporting(true);
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
-			const payload = { test_cases: testCases };
+			const payload = {
+				test_cases: testCases,
+				approved: testCasesApprovedForExport,
+				review: testCaseReview || undefined,
+				draft_override_requested: exportRequiresOverride && draftExportOverrideReady,
+				draft_override_reason: exportRequiresOverride && draftExportOverrideReady ? draftExportReasonText : null,
+			};
 			const res = await apiRequest(`/export/${format}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -1451,17 +2225,42 @@ export default function App() {
 			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
 		}
 		const summary = coverageMetrics?.requirement_analysis_summary?.[requirementId] || {};
+		const hasItemLevelCoverage = [
+			summary.rules_covered,
+			summary.rules_missing,
+			summary.constraints_covered,
+			summary.constraints_missing,
+			summary.permissions_covered,
+			summary.permissions_missing,
+			summary.transitions_covered,
+			summary.transitions_missing,
+			summary.risks_covered,
+			summary.risks_missing,
+		].some(Array.isArray);
+
+		if (!hasItemLevelCoverage) {
+			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
+		}
+
 		const coveredRules = new Set(summary.rules_covered || []);
+		const missingRules = new Set(summary.rules_missing || []);
 		const coveredConstraints = new Set(summary.constraints_covered || []);
+		const missingConstraints = new Set(summary.constraints_missing || []);
 		const coveredPermissions = new Set(summary.permissions_covered || []);
+		const missingPermissions = new Set(summary.permissions_missing || []);
 		const coveredTransitions = new Set(summary.transitions_covered || []);
+		const missingTransitions = new Set(summary.transitions_missing || []);
 		const coveredRisks = new Set(summary.risks_covered || []);
+		const missingRisks = new Set(summary.risks_missing || []);
+		const isMissing = (item, missingSet, coveredSet) => (
+			missingSet.has(item.id) || (!coveredSet.has(item.id) && missingSet.size > 0)
+		);
 		return {
-			highRisks: (analysis.risk_signals || []).filter((r) => r.severity === "High" && !coveredRisks.has(r.id)).map((r) => r.title),
-			rules: (analysis.business_rules || []).filter((r) => !coveredRules.has(r.id)).map((r) => r.title),
-			constraints: (analysis.field_constraints || []).filter((c) => !coveredConstraints.has(c.id)).map((c) => c.field_name),
-			permissions: (analysis.role_permissions || []).filter((p) => !coveredPermissions.has(p.id)).map((p) => `${p.role}: ${p.action}`),
-			transitions: (analysis.state_transitions || []).filter((t) => !coveredTransitions.has(t.id)).map((t) => `${t.from_state} → ${t.to_state}`),
+			highRisks: (analysis.risk_signals || []).filter((r) => ["Critical", "High"].includes(r.severity) && isMissing(r, missingRisks, coveredRisks)).map((r) => r.title),
+			rules: (analysis.business_rules || []).filter((r) => isMissing(r, missingRules, coveredRules)).map((r) => r.title),
+			constraints: (analysis.field_constraints || []).filter((c) => isMissing(c, missingConstraints, coveredConstraints)).map((c) => c.field_name),
+			permissions: (analysis.role_permissions || []).filter((p) => isMissing(p, missingPermissions, coveredPermissions)).map((p) => `${p.role}: ${p.action}`),
+			transitions: (analysis.state_transitions || []).filter((t) => isMissing(t, missingTransitions, coveredTransitions)).map((t) => `${t.from_state} → ${t.to_state}`),
 		};
 	};
 
@@ -1631,6 +2430,16 @@ export default function App() {
 							</div>
 						)}
 					</div>
+					<button
+						type="button"
+						className="settings-open-btn"
+						data-testid="settings-open-button"
+						onClick={() => openSettingsDialog("workflow")}
+						aria-label="Open settings"
+					>
+						<span aria-hidden="true">⚙</span>
+						Settings
+					</button>
 					<div className="auth-panel">
 						{isVerifyingSession ? (
 							<span className="auth-message">Checking session...</span>
@@ -1737,6 +2546,8 @@ export default function App() {
 				</div>
 			)}
 
+			{renderSettingsDialog()}
+
 			<div className="tabs">
 				{tabs.map((tab) => (
 					<button
@@ -1755,7 +2566,7 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Upload Requirements</h2>
 						<p className="panel-description">
-							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA.
+							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA or Azure DevOps.
 						</p>
 						<div className="source-toggle" role="tablist" aria-label="Requirement source selector">
 							<button
@@ -1774,6 +2585,14 @@ export default function App() {
 								<span className="source-toggle-title">JIRA Cloud</span>
 								<span className="source-toggle-copy">Import epics and child issues, then sync updates back</span>
 							</button>
+							<button
+								type="button"
+								className={`source-toggle-btn ${requirementSourceMode === "azure_devops" ? "active" : ""}`}
+								onClick={() => setRequirementSourceMode("azure_devops")}
+							>
+								<span className="source-toggle-title">Azure DevOps</span>
+								<span className="source-toggle-copy">Import work items and sync managed requirement updates</span>
+							</button>
 						</div>
 
 						{requirementSourceMode === "file" ? (
@@ -1790,70 +2609,8 @@ export default function App() {
 									{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
 								</button>
 							</div>
-						) : (
+						) : requirementSourceMode === "jira" ? (
 							<div className="jira-workflow-panel">
-								<div className="jira-card">
-									<div className="jira-card-header">
-										<div>
-											<h3>Connect JIRA Cloud</h3>
-											<p>Store a per-user JIRA Cloud connection so you can search epics and sync requirement updates.</p>
-										</div>
-										{jiraConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
-									</div>
-									{jiraConnected && jiraConnection ? (
-										<div className="jira-connection-summary">
-											<span className="jira-summary-pill">{jiraConnection.display_name || jiraConnection.email}</span>
-											<span className="jira-summary-pill">{jiraConnection.base_url}</span>
-											{jiraConnection.api_token_hint && <span className="jira-summary-pill">Token {jiraConnection.api_token_hint}</span>}
-										</div>
-									) : null}
-									{!jiraConnected ? (
-										<div className="panel-form two-cols jira-connection-form">
-											<div className="form-group">
-												<label>JIRA base URL</label>
-												<input
-													placeholder="https://your-team.atlassian.net"
-													value={jiraConnectionForm.baseUrl}
-													onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, baseUrl: event.target.value }))}
-												/>
-											</div>
-											<div className="form-group">
-												<label>JIRA email</label>
-												<input
-													type="email"
-													placeholder="qa@company.com"
-													value={jiraConnectionForm.email}
-													onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, email: event.target.value }))}
-												/>
-											</div>
-											<div className="form-group jira-connection-token-group">
-												<label>JIRA API token</label>
-												<input
-													type="password"
-													placeholder="Paste your Atlassian API token"
-													value={jiraConnectionForm.apiToken}
-													onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, apiToken: event.target.value }))}
-												/>
-											</div>
-											<div className="panel-form button-row jira-connection-actions">
-												<button onClick={saveJiraConnection} disabled={authActionDisabled || isSavingJiraConnection || isJiraConnectionLoading}>
-													{isSavingJiraConnection ? "⏳ Connecting..." : "Connect JIRA"}
-												</button>
-												{isJiraConnectionLoading && <span className="helper-text">Refreshing JIRA connection…</span>}
-											</div>
-										</div>
-									) : (
-										<div className="jira-connected-actions">
-											<button className="secondary" onClick={() => loadJiraProjects(jiraProjectQuery)} disabled={authActionDisabled || isLoadingJiraProjects}>
-												{isLoadingJiraProjects ? "⏳ Refreshing projects..." : "Refresh Projects"}
-											</button>
-											<button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>
-												{isDeletingJiraConnection ? "⏳ Disconnecting..." : "Disconnect"}
-											</button>
-										</div>
-									)}
-								</div>
-
 								<div className="jira-card">
 									<div className="jira-card-header">
 										<div>
@@ -1946,13 +2703,100 @@ export default function App() {
 									</div>
 								</div>
 							</div>
-						)}
+						) : (
+							<div className="jira-workflow-panel">
+								<div className="jira-card">
+									<div className="jira-card-header">
+										<div>
+											<h3>Import from Azure DevOps</h3>
+											<p>Pick a project, search work items, and import the selected item plus children into the requirement parser.</p>
+										</div>
+									</div>
+									<div className="panel-form two-cols jira-search-grid">
+										<div className="form-group">
+											<label>Project search</label>
+											<input
+												placeholder="Search Azure DevOps projects"
+												value={azureDevOpsProjectQuery}
+												onChange={(event) => setAzureDevOpsProjectQuery(event.target.value)}
+												disabled={!azureDevOpsConnected}
+											/>
+										</div>
+										<div className="form-group jira-inline-action">
+											<label>Project</label>
+											<div className="jira-inline-controls">
+												<select value={selectedAzureDevOpsProject} onChange={(event) => setSelectedAzureDevOpsProject(event.target.value)} disabled={!azureDevOpsConnected || !azureDevOpsProjects.length}>
+													<option value="">Select an Azure DevOps project</option>
+													{azureDevOpsProjects.map((project) => (
+														<option key={project.project_id || project.name} value={project.name}>{project.name}</option>
+													))}
+												</select>
+												<button className="secondary" onClick={() => loadAzureDevOpsProjects(azureDevOpsProjectQuery)} disabled={!azureDevOpsConnected || isLoadingAzureDevOpsProjects}>
+													{isLoadingAzureDevOpsProjects ? "⏳" : "Load"}
+												</button>
+											</div>
+										</div>
+										<div className="form-group">
+											<label>Work item type</label>
+											<select value={azureDevOpsWorkItemType} onChange={(event) => setAzureDevOpsWorkItemType(event.target.value)} disabled={!azureDevOpsConnected || isLoadingAzureDevOpsWorkItemTypes}>
+												<option value="">Any work item type</option>
+												{azureDevOpsWorkItemTypeOptions.map((workItemTypeName) => (
+													<option key={workItemTypeName} value={workItemTypeName}>{workItemTypeName}</option>
+												))}
+											</select>
+										</div>
+										<div className="form-group jira-inline-action">
+											<label>Work item search</label>
+											<div className="jira-inline-controls">
+												<input
+													placeholder={`Search ${(azureDevOpsWorkItemType || "work item").toLowerCase()} titles/descriptions`}
+													value={azureDevOpsWorkItemQuery}
+													onChange={(event) => setAzureDevOpsWorkItemQuery(event.target.value)}
+													disabled={!azureDevOpsConnected}
+												/>
+												<button className="secondary" onClick={searchAzureDevOpsWorkItems} disabled={!azureDevOpsConnected || !selectedAzureDevOpsProject || isSearchingAzureDevOpsWorkItems}>
+													{isSearchingAzureDevOpsWorkItems ? "⏳" : "Search"}
+												</button>
+											</div>
+										</div>
+									</div>
 
-						{renderWorkflowSettingsPanel(
-							"Requirements workflow settings",
-							"Tune the requirement review loop when you want stricter gates or shorter runs.",
-							requirementWorkflowSettings,
-							setRequirementWorkflowSettings,
+									{azureDevOpsWorkItemResults.length > 0 ? (
+										<div className="jira-issue-results">
+											{azureDevOpsWorkItemResults.map((workItem) => {
+												const selected = `${selectedAzureDevOpsWorkItemId}` === `${workItem.work_item_id}`;
+												return (
+													<button
+														type="button"
+														key={workItem.work_item_id}
+														className={`jira-issue-card ${selected ? "selected" : ""}`}
+														onClick={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
+													>
+														<div className="jira-issue-card-header">
+															<strong>#{workItem.work_item_id}</strong>
+															<span>{workItem.work_item_type}</span>
+														</div>
+														<div className="jira-issue-card-title">{workItem.title}</div>
+														<div className="jira-issue-card-meta">
+															{workItem.parent_id ? <span>Parent #{workItem.parent_id}</span> : null}
+															{workItem.state ? <span>{workItem.state}</span> : null}
+														</div>
+													</button>
+												);
+											})}
+										</div>
+									) : (
+										<span className="helper-text">Search visible work items in the selected project to choose an import source.</span>
+									)}
+
+									<div className="panel-form button-row jira-import-actions">
+										<button onClick={importRequirementsFromAzureDevOps} disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}>
+											{isImportingFromAzureDevOps ? "⏳ Importing..." : `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
+										</button>
+										{selectedAzureDevOpsWorkItem ? <span className="helper-text">Selected source: #{selectedAzureDevOpsWorkItem.work_item_id} — {selectedAzureDevOpsWorkItem.title}</span> : null}
+									</div>
+								</div>
+							</div>
 						)}
 
 						<div className="result-section">
@@ -1973,9 +2817,9 @@ export default function App() {
 											</div>
 											{(req.source_issue_key || req.sync_target_issue_key) && (
 												<div className="requirement-source-meta">
-													{req.source_issue_key ? <span className="requirement-source-badge">Source {req.source_issue_key}</span> : null}
+													{req.source_issue_key ? <span className="requirement-source-badge">{getRequirementSourceLabel(req)} {req.source_system === "azure_devops" ? `#${req.source_issue_key}` : req.source_issue_key}</span> : null}
 													{req.source_issue_type ? <span className="requirement-source-badge subtle">{req.source_issue_type}</span> : null}
-													{req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key ? <span className="requirement-source-badge warning">Sync target {req.sync_target_issue_key}</span> : null}
+													{req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key ? <span className="requirement-source-badge warning">Sync target {req.source_system === "azure_devops" ? `#${req.sync_target_issue_key}` : req.sync_target_issue_key}</span> : null}
 												</div>
 											)}
 										</li>
@@ -2067,6 +2911,97 @@ export default function App() {
 											{jiraSyncResults.results?.map((result) => (
 												<li key={`${result.issue_key}-${result.status}`}>
 													<strong>{result.issue_key}</strong> — {result.status}{result.message ? `: ${result.message}` : ""}
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+							</div>
+						)}
+
+						{hasAzureDevOpsRequirements && (
+							<div className="jira-sync-panel">
+								<div className="jira-card-header">
+									<div>
+										<h3>Azure DevOps Sync Preview</h3>
+										<p>Preview the managed requirements block that will be written back to Azure DevOps work item descriptions.</p>
+									</div>
+									<div className="jira-connection-summary compact">
+										{azureDevOpsImportedWorkItemIds.map((workItemId) => (
+											<span key={workItemId} className="jira-summary-pill">#{workItemId}</span>
+										))}
+									</div>
+								</div>
+								<div className="panel-form two-cols jira-sync-controls">
+									<div className="form-group">
+										<label>Managed section title</label>
+										<input
+											value={azureDevOpsManagedSectionTitle}
+											onChange={(event) => setAzureDevOpsManagedSectionTitle(event.target.value)}
+											placeholder={DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE}
+										/>
+									</div>
+									<div className="feedback-actions jira-sync-actions">
+										<button className="secondary" onClick={() => previewAzureDevOpsSync()} disabled={authActionDisabled || isPreviewingAzureDevOpsSync || isApplyingAzureDevOpsSync}>
+											{isPreviewingAzureDevOpsSync ? "⏳ Previewing..." : "Preview Azure DevOps Update"}
+										</button>
+										<button onClick={applyAzureDevOpsSync} disabled={authActionDisabled || isApplyingAzureDevOpsSync || !azureDevOpsSyncPreview || !azureDevOpsPreviewHasReadyWorkItem}>
+											{isApplyingAzureDevOpsSync ? "⏳ Syncing..." : "Push Ready Updates"}
+										</button>
+									</div>
+								</div>
+
+								{azureDevOpsSyncPreview && (
+									<div className="jira-sync-results">
+										<div className="workflow-diagnostics-pills">
+											<span className="workflow-diagnostics-pill">Ready {azureDevOpsSyncPreview.ready_work_item_count || 0}</span>
+											<span className="workflow-diagnostics-pill">Conflicts {azureDevOpsSyncPreview.conflict_count || 0}</span>
+											<span className="workflow-diagnostics-pill">Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}</span>
+										</div>
+										<div className="jira-sync-preview-list">
+											{azureDevOpsSyncPreview.work_items?.map((workItem) => (
+												<div key={workItem.work_item_id} className={`jira-sync-preview-card ${workItem.status}`}>
+													<div className="jira-sync-preview-header">
+														<div>
+															<strong>#{workItem.work_item_id}</strong>
+															<span>{workItem.work_item_type || "Work Item"}</span>
+														</div>
+														<span className={`jira-status-badge ${workItem.status}`}>{workItem.status}</span>
+													</div>
+													<div className="jira-sync-preview-meta">
+														<span>Requirements: {(workItem.requirement_ids || []).join(", ") || "—"}</span>
+														{workItem.work_item_url ? <a href={workItem.work_item_url} target="_blank" rel="noreferrer">Open in Azure DevOps ↗</a> : null}
+													</div>
+													{workItem.conflict_reason ? <p className="jira-sync-preview-warning">{workItem.conflict_reason}</p> : null}
+													{workItem.warning ? <p className="jira-sync-preview-warning">{workItem.warning}</p> : null}
+													<div className="jira-sync-preview-excerpts">
+														<div>
+															<h4>Current description</h4>
+															<p>{workItem.existing_description_excerpt || "No description yet."}</p>
+														</div>
+														<div>
+															<h4>Rendered update</h4>
+															<p>{workItem.rendered_description_excerpt || "No rendered update available."}</p>
+														</div>
+													</div>
+												</div>
+											))}
+										</div>
+										{azureDevOpsSyncPreview.warnings?.length > 0 && (
+											<ul className="jira-sync-warning-list">
+												{azureDevOpsSyncPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+											</ul>
+										)}
+									</div>
+								)}
+
+								{azureDevOpsSyncResults && (
+									<div className="jira-sync-results-summary">
+										<h4>Last sync result</h4>
+										<ul className="jira-sync-apply-list">
+											{azureDevOpsSyncResults.results?.map((result) => (
+												<li key={`${result.work_item_id}-${result.status}`}>
+													<strong>#{result.work_item_id}</strong> — {result.status}{result.message ? `: ${result.message}` : ""}
 												</li>
 											))}
 										</ul>
@@ -2225,7 +3160,7 @@ export default function App() {
 															}}
 														/>
 														<span>{source.url || source.id}</span>
-														{source.type && <span className="artifact-type">{source.type}</span>}
+														{source.source_type && <span className="artifact-type">{source.source_type}</span>}
 													</label>
 												</li>
 											))}
@@ -2238,7 +3173,7 @@ export default function App() {
 											<h4>UI Elements</h4>
 											<ul className="analysis-detail-list">
 												{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
-													<li key={el.id}>{el.element_type}: {el.label || el.id}</li>
+													<li key={el.id}>{el.element_type}: {el.name || el.id}</li>
 												))}
 											</ul>
 										</div>
@@ -2303,12 +3238,6 @@ export default function App() {
 						<p className="panel-description">
 							Generate structured test cases from your parsed requirements and context.
 						</p>
-						{renderWorkflowSettingsPanel(
-							"Test-case workflow settings",
-							"Control validation strictness, loop length, and timeout behavior for generation and refinement.",
-							testCaseWorkflowSettings,
-							setTestCaseWorkflowSettings,
-						)}
 						<div className="panel-form button-row">
 							<button onClick={() => generateTestCases(false)} disabled={requirements.length === 0 || isGenerating || testCaseActionDisabled}>
 								{isGenerating ? "⏳ Generating..." : "Generate Test Cases"}
@@ -2691,16 +3620,58 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Export Test Cases</h2>
 						<p className="panel-description">
-							Download your generated test cases as CSV, Excel, or JSON.
+							Download approved test cases as CSV, Excel, or JSON. Draft exports require an explicit override reason.
 						</p>
+						{testCases.length > 0 && (
+							<div className={`export-readiness-card ${testCasesApprovedForExport ? "approved" : "locked"}`}>
+								<div>
+									<strong>{testCasesApprovedForExport ? "Approved for export" : "Export locked by review gate"}</strong>
+									<p>
+										{testCasesApprovedForExport
+											? `Review score ${testCaseReview?.score ?? "—"}/${testCaseReview?.threshold ?? "—"}. These cases are ready for controlled download.`
+											: `Review score ${testCaseReview?.score ?? "—"}/${testCaseReview?.threshold ?? "—"}. Refine the suite, or record a reason to export this draft intentionally.`}
+									</p>
+								</div>
+								{!testCasesApprovedForExport && (
+									<div className="draft-export-override">
+										<label className="draft-export-toggle">
+											<input
+												type="checkbox"
+												checked={draftExportOverride}
+												onChange={(event) => setDraftExportOverride(event.target.checked)}
+											/>
+											<span>Export draft anyway</span>
+										</label>
+										{draftExportOverride && (
+											<>
+												<textarea
+													className="draft-export-reason"
+													placeholder="Reason for exporting this draft, e.g. stakeholder review before final QA approval"
+													value={draftExportReason}
+													onChange={(event) => setDraftExportReason(event.target.value)}
+													rows={3}
+												/>
+												{!draftExportOverrideReady && (
+													<span className="helper-text warning">Enter at least 10 characters explaining why this draft export is needed.</span>
+												)}
+											</>
+										)}
+									</div>
+								)}
+							</div>
+						)}
 						<div className="export-section">
 							<h3 className="section-subtitle">📥 Quick Export</h3>
-							<p className="helper-text">Download test cases directly to your computer.</p>
+							<p className="helper-text">
+								{exportLockedByReview
+									? "Exports are disabled until review approval or a draft override reason is provided."
+									: "Download test cases directly to your computer."}
+							</p>
 							<div className="export-buttons">
 								<button 
 									className="export-btn csv" 
 									onClick={() => exportToFormat("csv")} 
-									disabled={testCases.length === 0 || isExporting || authActionDisabled}
+									disabled={exportActionDisabled}
 								>
 									<span className="export-icon">📄</span>
 									<span className="export-label">CSV</span>
@@ -2709,7 +3680,7 @@ export default function App() {
 								<button 
 									className="export-btn excel" 
 									onClick={() => exportToFormat("excel")} 
-									disabled={testCases.length === 0 || isExporting || authActionDisabled}
+									disabled={exportActionDisabled}
 								>
 									<span className="export-icon">📊</span>
 									<span className="export-label">Excel</span>
@@ -2718,7 +3689,7 @@ export default function App() {
 								<button 
 									className="export-btn json" 
 									onClick={() => exportToFormat("json")} 
-									disabled={testCases.length === 0 || isExporting || authActionDisabled}
+									disabled={exportActionDisabled}
 								>
 									<span className="export-icon">🧾</span>
 									<span className="export-label">JSON</span>

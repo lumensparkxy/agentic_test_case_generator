@@ -735,6 +735,16 @@ def _compute_requirement_analysis_metrics(
         permission_hits = 0
         transition_hits = 0
         risk_hits = 0
+        covered_rule_ids: List[str] = []
+        missing_rule_ids: List[str] = []
+        covered_constraint_ids: List[str] = []
+        missing_constraint_ids: List[str] = []
+        covered_permission_ids: List[str] = []
+        missing_permission_ids: List[str] = []
+        covered_transition_ids: List[str] = []
+        missing_transition_ids: List[str] = []
+        covered_risk_ids: List[str] = []
+        missing_risk_ids: List[str] = []
 
         for rule in item.get("business_rules") or []:
             business_rules_total += 1
@@ -744,7 +754,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 business_rules_covered += 1
                 rule_hits += 1
+                covered_rule_ids.append(str(rule.get("id") or ""))
             else:
+                missing_rule_ids.append(str(rule.get("id") or ""))
                 rules_without_tests.append(f"{requirement_id} - {rule.get('title') or 'Untitled rule'}")
 
         for constraint in item.get("field_constraints") or []:
@@ -762,7 +774,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 field_constraints_covered += 1
                 constraint_hits += 1
+                covered_constraint_ids.append(str(constraint.get("id") or ""))
             else:
+                missing_constraint_ids.append(str(constraint.get("id") or ""))
                 constraints_without_tests.append(
                     f"{requirement_id} - {constraint.get('field_name') or 'field'}: {constraint.get('description') or 'constraint'}"
                 )
@@ -774,7 +788,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 role_permissions_covered += 1
                 permission_hits += 1
+                covered_permission_ids.append(str(permission.get("id") or ""))
             else:
+                missing_permission_ids.append(str(permission.get("id") or ""))
                 role_permissions_without_tests.append(
                     f"{requirement_id} - {permission.get('role') or 'Role'} {permission.get('action') or ''}".strip()
                 )
@@ -794,7 +810,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 state_transitions_covered += 1
                 transition_hits += 1
+                covered_transition_ids.append(str(transition.get("id") or ""))
             else:
+                missing_transition_ids.append(str(transition.get("id") or ""))
                 transitions_without_tests.append(
                     f"{requirement_id} - {transition.get('from_state') or 'Unknown'} → {transition.get('to_state') or 'Unknown'}"
                 )
@@ -807,20 +825,34 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 risk_signals_covered += 1
                 risk_hits += 1
+                covered_risk_ids.append(str(risk.get("id") or ""))
             elif str(risk.get("severity") or "Medium") in {"Critical", "High"}:
+                missing_risk_ids.append(str(risk.get("id") or ""))
                 high_risk_items_without_tests.append(f"{requirement_id} - {risk.get('title') or 'Untitled risk'}")
+            else:
+                missing_risk_ids.append(str(risk.get("id") or ""))
 
         requirement_analysis_summary[requirement_id] = {
             "business_rules_total": len(item.get("business_rules") or []),
             "business_rules_covered": rule_hits,
+            "rules_covered": _dedupe_preserve(covered_rule_ids),
+            "rules_missing": _dedupe_preserve(missing_rule_ids),
             "field_constraints_total": len(item.get("field_constraints") or []),
             "field_constraints_covered": constraint_hits,
+            "constraints_covered": _dedupe_preserve(covered_constraint_ids),
+            "constraints_missing": _dedupe_preserve(missing_constraint_ids),
             "role_permissions_total": len(item.get("role_permissions") or []),
             "role_permissions_covered": permission_hits,
+            "permissions_covered": _dedupe_preserve(covered_permission_ids),
+            "permissions_missing": _dedupe_preserve(missing_permission_ids),
             "state_transitions_total": len(item.get("state_transitions") or []),
             "state_transitions_covered": transition_hits,
+            "transitions_covered": _dedupe_preserve(covered_transition_ids),
+            "transitions_missing": _dedupe_preserve(missing_transition_ids),
             "risk_signals_total": len(item.get("risk_signals") or []),
             "risk_signals_covered": risk_hits,
+            "risks_covered": _dedupe_preserve(covered_risk_ids),
+            "risks_missing": _dedupe_preserve(missing_risk_ids),
         }
 
     return {
@@ -2098,11 +2130,9 @@ def _fallback_raw_test_cases(
             continue
 
         planned_scenarios = list(plan_item.get("scenarios") or [])
-        selected_scenarios = [scenario for scenario in planned_scenarios if _coerce_bool(scenario.get("must_have"), default=True)]
-        if not selected_scenarios:
-            selected_scenarios = planned_scenarios[:1]
+        selected_scenarios = planned_scenarios or _default_scenarios_for_requirement(requirement)
 
-        for scenario_offset, scenario in enumerate(selected_scenarios[:2], start=1):
+        for scenario_offset, scenario in enumerate(selected_scenarios, start=1):
             scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
             raw_test_cases.append(
                 {

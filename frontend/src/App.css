@@ -205,6 +205,25 @@ body {
     font-size: 0.8rem;
 }
 
+.settings-open-btn {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-main);
+    box-shadow: var(--shadow-sm);
+    font-size: 0.85rem;
+}
+
+.settings-open-btn:hover:not(:disabled) {
+    background: #f8fafc;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
 .auth-message {
     font-size: 0.8rem;
     color: var(--text-muted);
@@ -327,6 +346,110 @@ body {
 
 .auth-dialog-close:hover:not(:disabled) {
     background: #cbd5e1;
+}
+
+.settings-dialog-overlay {
+    z-index: 45;
+}
+
+.settings-dialog {
+    width: min(100%, 980px);
+    max-height: calc(100vh - 3rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+.settings-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.25rem 1.25rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-dialog-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--text-main);
+}
+
+.settings-dialog-header p {
+    margin: 0.35rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.settings-dialog-nav {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    background: #f8fafc;
+}
+
+.settings-nav-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    padding: 0.65rem 0.9rem;
+    box-shadow: none;
+}
+
+.settings-nav-btn:hover:not(:disabled) {
+    transform: none;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.settings-nav-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.settings-dialog-body {
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+    overflow: auto;
+}
+
+.settings-section-intro h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--text-main);
+}
+
+.settings-section-intro p {
+    margin: 0.35rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.settings-auth-note {
+    padding: 0.75rem 1rem;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-md);
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 0.88rem;
+}
+
+.settings-integration-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+.settings-integration-card {
+    margin: 0;
+    background: #ffffff;
 }
 
 .auth-provider-list {
@@ -549,9 +672,11 @@ body {
 input[type="text"],
 input[type="number"],
 input[type="email"],
+input[type="password"],
 textarea,
 select,
-.panel input:not([type="file"]) {
+.panel input:not([type="file"]),
+.settings-dialog input:not([type="file"]) {
     width: 100%;
     padding: 0.75rem 1rem;
     border: 1px solid var(--border-color);
@@ -1926,6 +2051,10 @@ pre {
         justify-content: flex-start;
     }
 
+    .settings-open-btn {
+        align-self: flex-start;
+    }
+
     .auth-user {
         justify-content: flex-start;
         flex-wrap: wrap;
@@ -1943,6 +2072,26 @@ pre {
     .auth-dialog {
         width: 100%;
         padding: 1rem;
+    }
+
+    .settings-dialog {
+        width: 100%;
+        max-height: calc(100vh - 2rem);
+    }
+
+    .settings-dialog-header,
+    .settings-dialog-nav,
+    .settings-dialog-body {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .settings-dialog-nav {
+        flex-direction: column;
+    }
+
+    .settings-nav-btn {
+        width: 100%;
     }
 
     .status {
@@ -2022,6 +2171,65 @@ pre {
 }
 
 /* Export Section Styles */
+.export-readiness-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+    background: #f8fafc;
+}
+
+.export-readiness-card.approved {
+    border-color: rgba(34, 197, 94, 0.35);
+    background: #f0fdf4;
+}
+
+.export-readiness-card.locked {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: #fffbeb;
+}
+
+.export-readiness-card strong {
+    display: block;
+    color: var(--text-main);
+    margin-bottom: 0.25rem;
+}
+
+.export-readiness-card p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.draft-export-override {
+    min-width: 280px;
+    max-width: 420px;
+}
+
+.draft-export-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 0.75rem;
+}
+
+.draft-export-reason {
+    width: 100%;
+    resize: vertical;
+    min-height: 84px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+    font: inherit;
+    color: var(--text-main);
+    background: white;
+}
+
 .export-section {
     margin-bottom: 1.5rem;
 }

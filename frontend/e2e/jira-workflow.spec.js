@@ -256,15 +256,22 @@ test.describe("JIRA requirements workflow", () => {
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 
-		await page.getByRole("button", { name: /jira cloud/i }).click();
-		await expect(page.getByRole("heading", { name: /connect jira cloud/i })).toBeVisible();
+		await page.getByTestId("settings-open-button").click();
+		await expect(page.getByRole("dialog", { name: /^settings$/i })).toBeVisible();
+		await page.getByRole("button", { name: /integrations/i }).click();
+		await expect(page.getByRole("button", { name: /integrations/i })).toHaveClass(/active/);
+		await expect(page.getByRole("heading", { name: /^jira cloud$/i })).toBeVisible();
 
 		await page.getByPlaceholder("https://your-team.atlassian.net").fill("https://acme.atlassian.net");
 		await page.getByPlaceholder("qa@company.com").fill(user.email);
 		await page.getByPlaceholder("Paste your Atlassian API token").fill("jira-api-token");
 		await page.getByRole("button", { name: /connect jira/i }).click();
 
-		await expect(page.locator(".jira-status-badge.connected")).toBeVisible();
+		await expect(page.locator(".settings-integration-card", { hasText: "JIRA Cloud" }).locator(".jira-status-badge.connected")).toBeVisible();
+		await page.getByRole("button", { name: /close settings dialog/i }).click();
+		await expect(page.getByRole("dialog", { name: /^settings$/i })).toBeHidden();
+
+		await page.getByRole("button", { name: /jira cloud/i }).click();
 		const projectSelect = page.locator(".jira-search-grid select").first();
 		await expect(projectSelect).toContainText("PROJ — Platform Finance");
 		await expect(projectSelect).toHaveValue("PROJ");
@@ -275,7 +282,7 @@ test.describe("JIRA requirements workflow", () => {
 		await page.getByRole("button", { name: /Import PROJ-101/i }).click();
 
 		await expect(page.locator(".requirements-list li")).toHaveCount(2);
-		await expect(page.getByText("Source PROJ-101")).toHaveCount(2);
+		await expect(page.getByText("JIRA PROJ-101")).toHaveCount(2);
 		await expect(page.getByRole("heading", { name: /jira sync preview/i })).toBeVisible();
 
 		await page.getByPlaceholder(/Enter your feedback here/i).fill("Make the approval notifications explicit and tighten the language.");
@@ -283,7 +290,7 @@ test.describe("JIRA requirements workflow", () => {
 
 		await expect(page.getByText(/duplicate checks/i)).toBeVisible();
 		await expect(page.getByText(/notification recipients/i)).toBeVisible();
-		await expect(page.getByText("Source PROJ-101")).toHaveCount(2);
+		await expect(page.getByText("JIRA PROJ-101")).toHaveCount(2);
 
 		await page.getByRole("button", { name: /preview jira update/i }).click();
 		await expect(page.getByText(/Ready 1/)).toBeVisible();
