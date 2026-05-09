@@ -46,20 +46,12 @@ export default function useBillingStatus(billingEntitlements, usageSummary) {
 			lowFamilies.push(`${testCasesRemaining} test-case actions left`);
 		}
 
-		if (!exhaustedFamilies.length && !lowFamilies.length && !billingEntitlements.shadow_mode) {
+		if (billingEntitlements.shadow_mode) {
 			return null;
 		}
 
-		if (billingEntitlements.shadow_mode) {
-			return {
-				variant: "preview",
-				title: "Billing preview is active",
-				message: exhaustedFamilies.length
-					? `Pilot limits would block ${exhaustedFamilies.join(" and ")} once enforcement is enabled.`
-					: lowFamilies.length
-						? `Pilot balances are informational for now: ${lowFamilies.join(" • ")}.`
-						: "Pilot balances are being calculated in shadow mode before hard enforcement is switched on.",
-			};
+		if (!exhaustedFamilies.length && !lowFamilies.length) {
+			return null;
 		}
 
 		if (exhaustedFamilies.length) {

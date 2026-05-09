@@ -50,7 +50,7 @@ class ConfigSettingsTests(unittest.TestCase):
             self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "gemini-only-key")
             self.assertNotIn("GEMINI_API_KEY", os.environ)
 
-    def test_get_settings_prefers_google_key_and_removes_gemini_alias(self) -> None:
+    def test_get_settings_prefers_gemini_alias_and_removes_it_after_normalization(self) -> None:
         with patch.dict(
             os.environ,
             {"GOOGLE_API_KEY": "google-key", "GEMINI_API_KEY": "gemini-key", "MODEL_NAME": DEFAULT_MODEL_NAME},
@@ -60,8 +60,8 @@ class ConfigSettingsTests(unittest.TestCase):
             with patch("app.config._warn_if_dependency_mismatch"), self.assertLogs(level="WARNING") as logs:
                 settings = get_settings()
 
-            self.assertEqual(settings.gemini_api_key, "google-key")
-            self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "google-key")
+            self.assertEqual(settings.gemini_api_key, "gemini-key")
+            self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "gemini-key")
             self.assertNotIn("GEMINI_API_KEY", os.environ)
             self.assertTrue(any("Both GOOGLE_API_KEY and GEMINI_API_KEY are set" in entry for entry in logs.output))
 

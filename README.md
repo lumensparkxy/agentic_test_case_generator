@@ -17,7 +17,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 ### 1) Configure environment
 Copy .env.example to .env and set values:
 - GEMINI_API_KEY (required)
-- MODEL_NAME (default: gemini-2.5-flash)
+- MODEL_NAME (default: gemini-3-flash-preview)
 - GOOGLE_CLIENT_ID (required for login)
 - GOOGLE_CLIENT_IDS (optional comma-separated allow-list for multiple web client IDs)
 - FIREBASE_PROJECT_ID (recommended for Firebase Admin initialization)
@@ -39,7 +39,7 @@ Copy .env.example to .env and set values:
 - AZURE_DEVOPS_API_TIMEOUT_SECONDS, AZURE_DEVOPS_PROJECT_PAGE_SIZE, AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE (optional Azure DevOps client tuning)
 - BILLING_SHADOW_MODE (optional; defaults to true), BILLING_CONTACT_EMAIL, BILLING_ADMIN_EMAILS, BILLING_PILOT_REQUIREMENTS_LIMIT, BILLING_PILOT_TEST_CASE_LIMIT, and related billing tuning values
 
-Note: ADK expects GOOGLE_API_KEY. If only GEMINI_API_KEY is set, the backend normalizes it to GOOGLE_API_KEY at runtime.
+Note: ADK expects GOOGLE_API_KEY. Configure GEMINI_API_KEY in this project; the backend normalizes it to GOOGLE_API_KEY at runtime. If both are set, GEMINI_API_KEY is preferred so the project `.env` does not get shadowed by an older shell-level GOOGLE_API_KEY.
 
 For Google login, set `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` to the same OAuth web client ID. If you intentionally use different client IDs across environments or builds, add all valid IDs to `GOOGLE_CLIENT_IDS`.
 

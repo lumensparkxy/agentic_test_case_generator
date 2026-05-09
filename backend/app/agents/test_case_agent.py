@@ -19,7 +19,9 @@ from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 from pydantic import ValidationError
 
+from .adk_runtime import json_generation_config, tool_generation_config
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
+from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
 from ..config import get_settings
 from ..models import (
     BusinessRule,
@@ -28,12 +30,15 @@ from ..models import (
     RefineTestCasesInput,
     Requirement,
     RequirementAnalysis,
+    RequirementCoveragePlanOutput,
     RequirementCoveragePlan,
+    ReviewResult,
     RiskSignal,
     RolePermission,
     ScenarioIntent,
     StateTransition,
     TestCase,
+    TestCasesOutput,
     TestStep,
     WorkflowSettings,
 )
@@ -53,7 +58,7 @@ APPROVAL_PHRASE = "APPROVED"
 DEFAULT_TEST_CASE_THRESHOLD = 90
 DEFAULT_TEST_CASE_MAX_ITERATIONS = 4
 DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT = 2
-DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 0
+DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 1
 
 ALLOWED_TEST_CASE_TYPES = {
     "Functional",
@@ -1293,17 +1298,59 @@ def _append_unique_message(container: List[str], message: str) -> None:
         container.append(value)
 
 
-def _record_parser_failure(diagnostics: Dict[str, Any], author: str, error: Optional[str]) -> None:
+def _diagnostic_sample(raw_text: Optional[str], *, limit: int = 280) -> str:
+    normalized = " ".join(str(raw_text or "").split())
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}…"
+
+
+def _record_parser_failure(
+    diagnostics: Dict[str, Any],
+    author: str,
+    error: Optional[str],
+    raw_text: Optional[str] = None,
+) -> None:
     if not error:
         return
-    _append_unique_message(diagnostics["parser_failures"], f"{author}: {error}")
+    message = f"{author}: {error}"
+    sample = _diagnostic_sample(raw_text)
+    if sample:
+        message = f"{message} | sample: {sample}"
+    _append_unique_message(diagnostics["parser_failures"], message)
     diagnostics["status"] = "partial"
     diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
     _log_test_case_workflow(
         "parser_failure",
         author=author,
         error=error,
+        sample=sample or None,
         parser_failure_count=len(diagnostics["parser_failures"]),
+        status=diagnostics["status"],
+    )
+
+
+def _record_event_error(diagnostics: Dict[str, Any], author: str, event: Any) -> None:
+    error_code = getattr(event, "error_code", None)
+    error_message = getattr(event, "error_message", None)
+    if not error_code and not error_message:
+        return
+
+    diagnostics["status"] = "partial"
+    diagnostics["failure_reason"] = diagnostics["failure_reason"] or "model_error"
+    warning = f"{author}: model event error"
+    if error_code:
+        warning = f"{warning} ({error_code})"
+    if error_message:
+        warning = f"{warning}: {_diagnostic_sample(str(error_message))}"
+    _append_unique_message(diagnostics["warnings"], warning)
+    _log_test_case_workflow(
+        "event_error",
+        author=author,
+        error_code=error_code,
+        error_message=error_message,
         status=diagnostics["status"],
     )
 
@@ -1346,18 +1393,18 @@ def _build_coverage_planner_agent(
     context_text: str,
     human_feedback: Optional[str] = None,
 ) -> Agent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback to Consider:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback to Consider", human_feedback)
 
     return Agent(
         name="CoveragePlannerAgent",
         model=model,
         include_contents='none',
+        generate_content_config=json_generation_config(max_output_tokens=12000),
+        output_schema=RequirementCoveragePlanOutput,
         instruction=f"""You are a Senior QA Strategist creating a scenario coverage plan before detailed test cases are written.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Requirements:**
 {requirements_text}
@@ -1375,9 +1422,11 @@ def _build_coverage_planner_agent(
 2. Always include a 'Happy Path' scenario for every requirement.
 3. Include at least one non-happy-path scenario per requirement.
 4. Use the requirement analysis to cover business rules, constraints, permissions, risks, and transitions when present.
-4. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
-5. Mark essential scenarios with must_have=true.
-6. Output ONLY a JSON object shaped like:
+5. Add Authorization scenarios when role permissions are present, Boundary/Validation scenarios when field constraints are present, State Transition scenarios when workflow states are present, and Integration/Error Handling scenarios when external systems are present.
+6. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
+7. Mark essential scenarios with must_have=true, especially scenarios that cover Critical/High risks, authorization, data integrity, or required validations.
+8. Make every scenario objective specific enough that a tester can derive expected data, action, and assertion.
+9. Output ONLY a JSON object shaped like:
 {{
     "coverage_plan": [
         {{
@@ -1409,18 +1458,18 @@ def _build_review_loop(
     requirements_text: str,
     human_feedback: Optional[str] = None,
 ) -> LoopAgent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback That Must Be Honored:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback That Must Be Honored", human_feedback)
 
     validator_agent = Agent(
         name="TestCaseValidatorAgent",
         model=model,
         include_contents='none',
+        generate_content_config=json_generation_config(max_output_tokens=4096),
+        output_schema=ReviewResult,
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Current Test Cases:**
 ```
@@ -1443,13 +1492,15 @@ def _build_review_loop(
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
 2. Steps are executable and expected results are specific.
-    3. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
-    4. Every must-have scenario from the coverage plan is represented by at least one test case.
-    5. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
-    6. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
-    7. Priority, type, status, and automation status are valid.
-    8. Test data, preconditions, and overall expected_result are present when needed.
-    9. Human feedback has been addressed.
+3. Steps are sequential, actor-aware, and contain an action plus an observable expected result.
+4. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
+5. Every must-have scenario from the coverage plan is represented by at least one test case.
+6. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
+7. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
+8. Priority, type, status, and automation status are valid.
+9. Test data, preconditions, and overall expected_result are present when needed.
+10. Cases are realistic enough for manual execution and future Playwright automation: no vague steps, TBD values, or unsupported feature invention.
+11. Human feedback has been addressed without treating feedback as an instruction to weaken quality gates.
 
 **Response Rules:**
 - Return ONLY a JSON object with this exact shape:
@@ -1472,7 +1523,10 @@ def _build_review_loop(
         name="TestCaseRefinerAgent",
         model=model,
         include_contents='none',
+        generate_content_config=tool_generation_config(max_output_tokens=16000, temperature=0.15),
         instruction=f"""You are a QA Engineer refining test cases.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
 
 **Current Test Cases:**
 ```
@@ -1498,9 +1552,11 @@ def _build_review_loop(
 **Your Task:**
 1. If the validation JSON indicates approved=true, score >= threshold, and blocking_issues is empty, call 'exit_loop' immediately.
 2. Otherwise, improve the test cases to address all validation issues and human feedback.
-3. Output ONLY a JSON object with the shape {{"test_cases": [...]}}.
+3. Preserve traceability fields and scenario_refs unless the validation result proves they are wrong.
+4. Replace vague or placeholder actions with concrete setup/action/assertion steps grounded in requirements/context.
+5. Output ONLY a JSON object with the shape {{"test_cases": [...]}}.
 
-Either call exit_loop OR output the refined JSON object. Never add commentary.
+Either call exit_loop OR output the refined JSON object. Never do both. Never add commentary.
 """,
         description="Refines generated test cases until the approval threshold is reached",
         tools=[exit_loop],
@@ -1523,18 +1579,18 @@ def _build_generation_pipeline(
     max_iterations: int,
     human_feedback: Optional[str] = None,
 ) -> Agent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback to Address:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback to Address", human_feedback)
 
     generator_agent = Agent(
         name="TestCaseGeneratorAgent",
         model=model,
         include_contents='default',
+        generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
+        output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Requirements to Test:**
 {requirements_text}
@@ -1552,8 +1608,8 @@ def _build_generation_pipeline(
 {{{STATE_COVERAGE_PLAN}}}
 {feedback_section}
 **Rules:**
-1. Generate 1-3 test cases per requirement.
-2. Implement every must-have planned scenario and as many recommended scenarios as possible.
+1. Generate at least one executable test case for every must-have scenario in the coverage plan.
+2. Prefer one test case per planned scenario; combine scenarios only when they share the same actor, setup, and expected outcome.
 3. Reflect business rules, field constraints, role permissions, state transitions, and risks from the requirement analysis whenever they apply.
 4. Set `linked_requirement_ids` to a JSON array containing every requirement ID covered by the test case.
 5. Also include those requirement IDs in `tags` for backward compatibility, plus one scenario tag using the format scenario:<kebab-case-scenario-type>.
@@ -1563,7 +1619,11 @@ def _build_generation_pipeline(
 9. Keep each test case centered on one primary scenario from the coverage plan.
 10. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
 11. Never return `steps` as a single string, markdown list, or paragraph.
-12. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+12. Make steps real-world executable: name the actor/role, setup data, UI/API action, validation point, and observable outcome.
+13. Use concrete but non-sensitive test data. If exact data is unknown, put explicit assumptions in preconditions or test_data; never use TBD/placeholder text.
+14. Include negative, boundary, authorization, and error-handling coverage when the coverage plan or requirement analysis calls for it; do not overproduce only happy paths.
+15. Prefer business-readable test data such as `qa.manager@example.test`, `INV-1001`, or `2026-05-10`; do not use real personal data or secrets.
+16. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -1600,7 +1660,12 @@ def _build_refinement_pipeline(
         name="TestCaseRefinementAgent",
         model=model,
         include_contents='default',
+        generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
+        output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 Use the existing test cases, requirements, context, template, and human feedback in the user message to produce an improved JSON object shaped like {{"test_cases": [...]}}.
 
@@ -1628,7 +1693,9 @@ Rules:
 6. Preserve or improve any grounded-context `source_refs` when grounded context is available.
 7. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
 8. Never return `steps` as a plain string, markdown list, or free-form paragraph.
-9. Output ONLY the JSON object.
+9. Remove generic actions like "navigate to the feature area" when a more concrete UI/API action can be inferred.
+10. Add missing negative, boundary, authorization, state-transition, or integration cases when feedback or coverage gaps require them.
+11. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,
@@ -1762,6 +1829,10 @@ Human feedback:
         ):
             author = getattr(event, 'author', 'unknown')
             _log_test_case_workflow("event_received", session_id=session.id, author=author)
+            _record_event_error(diagnostics, author, event)
+
+            if getattr(event, "partial", False):
+                continue
 
             if not event.content or not event.content.parts:
                 continue
@@ -1776,26 +1847,26 @@ Human feedback:
                     if parsed_test_cases:
                         current_test_cases = parsed_test_cases
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
 
                 if author == "CoveragePlannerAgent":
                     parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
                     if parsed_coverage_plan:
                         current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
 
                 if author == "RequirementAnalysisAgent":
                     parsed_requirement_analysis, parse_error = parse_requirement_analysis_json_detailed(text)
                     if parsed_requirement_analysis:
                         current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
 
                 if author == "TestCaseValidatorAgent":
                     parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
                     if not parsed_review:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
                         continue
 
                     model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
@@ -1888,28 +1959,35 @@ Human feedback:
             completed_iterations=len(iteration_history),
         )
 
-    state_test_cases_raw = session.state.get(STATE_TEST_CASES, "[]")
+    updated_session = await session_service.get_session(
+        app_name="test_case_generator",
+        user_id=user_id,
+        session_id=session.id,
+    )
+    session_state = updated_session.state if updated_session else session.state
+
+    state_test_cases_raw = session_state.get(STATE_TEST_CASES, "[]")
     state_test_cases, state_test_cases_error = parse_test_cases_json_detailed(state_test_cases_raw)
     if state_test_cases:
         current_test_cases = state_test_cases
     elif str(state_test_cases_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error)
+        _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error, state_test_cases_raw)
 
-    state_coverage_plan_raw = session.state.get(STATE_COVERAGE_PLAN, "[]")
+    state_coverage_plan_raw = session_state.get(STATE_COVERAGE_PLAN, "[]")
     state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
     if state_coverage_plan:
         current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
     elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error)
+        _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
 
-    state_requirement_analysis_raw = session.state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
+    state_requirement_analysis_raw = session_state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
     state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(
         state_requirement_analysis_raw
     )
     if state_requirement_analysis:
         current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
     elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error)
+        _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error, state_requirement_analysis_raw)
 
     if not current_requirement_analysis:
         current_requirement_analysis = fallback_requirement_analysis(requirements)
@@ -1917,12 +1995,12 @@ Human feedback:
     if not current_coverage_plan:
         current_coverage_plan = _fallback_coverage_plan(requirements)
 
-    state_review_raw = session.state.get(STATE_VALIDATION_FEEDBACK, "")
+    state_review_raw = session_state.get(STATE_VALIDATION_FEEDBACK, "")
     state_review, state_review_error = parse_review_json_detailed(state_review_raw, default_threshold=threshold)
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Test case validation completed.")
     elif str(state_review_raw).strip():
-        _record_parser_failure(diagnostics, "SessionStateValidationReview", state_review_error)
+        _record_parser_failure(diagnostics, "SessionStateValidationReview", state_review_error, state_review_raw)
 
     heuristic_review = _heuristic_test_case_review(
         current_test_cases,
@@ -1965,9 +2043,9 @@ Human feedback:
             f"Test-case workflow reached the max iteration limit ({max_iterations}).",
         )
 
-    if not current_test_cases and diagnostics["parser_failures"]:
+    if not current_test_cases:
         diagnostics["status"] = "failed"
-        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or ("empty_refinement" if is_refinement else "empty_generation")
     elif not final_review["approved"] and not diagnostics["failure_reason"]:
         diagnostics["failure_reason"] = "quality_rejection"
 

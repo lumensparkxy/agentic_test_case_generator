@@ -4,7 +4,9 @@ from typing import Any, Dict, List, Optional
 
 from google.adk.agents import Agent
 
-from ..models import Requirement
+from .adk_runtime import json_generation_config
+from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
+from ..models import Requirement, RequirementAnalysisOutput
 
 ALLOWED_RULE_TYPES = {
     "Business",
@@ -640,18 +642,18 @@ def build_requirement_analysis_agent(
     output_key: str,
     human_feedback: Optional[str] = None,
 ) -> Agent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback to Consider:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback to Consider", human_feedback)
 
     return Agent(
         name="RequirementAnalysisAgent",
         model=model,
         include_contents='none',
+        generate_content_config=json_generation_config(max_output_tokens=12000),
+        output_schema=RequirementAnalysisOutput,
         instruction=f"""You are a Senior QA Analyst preparing a structured requirement analysis before scenario planning.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Requirements:**
 {requirements_text}
@@ -661,6 +663,7 @@ def build_requirement_analysis_agent(
 {feedback_section}
 **Your task:**
 For each requirement, extract the most relevant test-design intelligence.
+Focus on rules that change expected behavior: validations, boundaries, role permissions, state transitions, data retention/integrity, notifications, integrations, audit/compliance obligations, and user-visible error handling.
 
 **Output rules:**
 1. Return ONLY a JSON object.
@@ -673,6 +676,7 @@ For each requirement, extract the most relevant test-design intelligence.
       "business_rules": [
         {{
           "id": "REQ-001-BR-01",
+                    "requirement_id": "REQ-001",
           "title": "Short rule title",
           "description": "Concrete rule description",
           "rule_type": "Business"
@@ -681,6 +685,7 @@ For each requirement, extract the most relevant test-design intelligence.
       "field_constraints": [
         {{
           "id": "REQ-001-FC-01",
+                    "requirement_id": "REQ-001",
           "field_name": "field name",
           "description": "Constraint description",
           "constraint_type": "Required",
@@ -692,6 +697,7 @@ For each requirement, extract the most relevant test-design intelligence.
       "role_permissions": [
         {{
           "id": "REQ-001-RP-01",
+                    "requirement_id": "REQ-001",
           "role": "Manager",
           "action": "Approve report",
           "effect": "Allow",
@@ -701,6 +707,7 @@ For each requirement, extract the most relevant test-design intelligence.
       "state_transitions": [
         {{
           "id": "REQ-001-ST-01",
+                    "requirement_id": "REQ-001",
           "entity": "Expense report",
           "from_state": "Submitted",
           "to_state": "Approved",
@@ -711,6 +718,7 @@ For each requirement, extract the most relevant test-design intelligence.
       "risk_signals": [
         {{
           "id": "REQ-001-RS-01",
+                    "requirement_id": "REQ-001",
           "title": "Short risk title",
           "rationale": "Why this needs attention",
           "category": "Workflow",
@@ -727,6 +735,8 @@ For each requirement, extract the most relevant test-design intelligence.
 5. Use only these constraint types: Required, Format, Length, Range, File Type, File Size, Allowed Values, Uniqueness, Dependency, Other.
 6. Use only these risk categories: Security, Data Integrity, Availability, Usability, Compliance, Workflow, Validation, Integration, Other.
 7. Use only these severity values: Critical, High, Medium, Low.
+8. Keep every extracted item grounded in the requirement or context; if uncertain, put the uncertainty in risk_signals rather than inventing a rule.
+9. Suggested scenarios should be concise labels that downstream scenario planning can turn into executable cases.
 """,
         description="Extracts structured requirement analysis for downstream coverage planning and generation",
         output_key=output_key,

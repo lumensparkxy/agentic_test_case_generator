@@ -27,6 +27,22 @@ class Requirement(BaseModel):
     artifact_version_number: Optional[int] = None
 
 
+class RequirementExtractionItem(BaseModel):
+    id: str
+    text: str
+    source_path: Optional[str] = None
+    source_section: Optional[str] = None
+    source_excerpt: Optional[str] = None
+    source_hierarchy: List[str] = Field(default_factory=list)
+    parent_requirement_id: Optional[str] = None
+    review_status: Literal["Draft", "Needs Review", "Approved", "Rejected"] = "Draft"
+    quality_flags: List[str] = Field(default_factory=list)
+
+
+class RequirementsOutput(BaseModel):
+    requirements: List[RequirementExtractionItem] = Field(default_factory=list)
+
+
 class BusinessRule(BaseModel):
     id: str
     requirement_id: str
@@ -267,6 +283,14 @@ class RequirementCoveragePlan(BaseModel):
     scenarios: List[ScenarioIntent] = Field(default_factory=list)
 
 
+class RequirementAnalysisOutput(BaseModel):
+    requirement_analysis: List[RequirementAnalysis] = Field(default_factory=list)
+
+
+class RequirementCoveragePlanOutput(BaseModel):
+    coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)
+
+
 class EnrichInput(BaseModel):
     requirements: List[Requirement]
     app_link: Optional[HttpUrl] = None
@@ -313,6 +337,10 @@ class TestCase(BaseModel):
     artifact_item_id: Optional[str] = None
     artifact_version_id: Optional[str] = None
     artifact_version_number: Optional[int] = None
+
+
+class TestCasesOutput(BaseModel):
+    test_cases: List[TestCase] = Field(default_factory=list)
 
 
 class TestCaseTemplate(BaseModel):

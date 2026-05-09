@@ -353,14 +353,14 @@ def get_billing_settings() -> BillingSettings:
 def get_settings() -> Settings:
     google_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None
     gemini_api_key_env = (os.getenv("GEMINI_API_KEY") or "").strip() or None
-    gemini_api_key = google_api_key or gemini_api_key_env
+    gemini_api_key = gemini_api_key_env or google_api_key
     model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is required")
 
     if google_api_key and gemini_api_key_env and google_api_key != gemini_api_key_env:
-        logging.warning("Both GOOGLE_API_KEY and GEMINI_API_KEY are set; using GOOGLE_API_KEY")
+        logging.warning("Both GOOGLE_API_KEY and GEMINI_API_KEY are set; using GEMINI_API_KEY and normalizing it for ADK")
 
     # Keep a single canonical key variable for SDK clients to avoid noisy warnings.
     os.environ["GOOGLE_API_KEY"] = gemini_api_key
