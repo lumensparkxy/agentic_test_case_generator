@@ -11,10 +11,10 @@ import AppHeader, { SignInDialog } from "./components/layout/AppHeader";
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import ExportPanel from "./components/export/ExportPanel";
 import BillingBanner from "./components/layout/BillingBanner";
+import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
 import WorkflowTabs from "./components/layout/WorkflowTabs";
 import WorkflowDiagnostics from "./components/workflow/WorkflowDiagnostics";
-import WorkflowSettingsPanel from "./components/workflow/WorkflowSettingsPanel";
 import useBillingStatus from "./hooks/useBillingStatus";
 import useEscapeToClose from "./hooks/useEscapeToClose";
 import {
@@ -482,15 +482,6 @@ export default function App() {
 			},
 		};
 	};
-
-	const renderWorkflowSettingsPanel = (title, description, settings, setSettings) => (
-		<WorkflowSettingsPanel
-			title={title}
-			description={description}
-			settings={settings}
-			setSettings={setSettings}
-		/>
-	);
 
 	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => (
 		<WorkflowDiagnostics
@@ -1374,223 +1365,6 @@ export default function App() {
 		}
 	};
 
-	const renderJiraConnectionSettings = () => (
-		<div className="jira-card settings-integration-card">
-			<div className="jira-card-header">
-				<div>
-					<h3>JIRA Cloud</h3>
-					<p>Store a per-user JIRA Cloud connection so imports and managed requirement sync can use it later.</p>
-				</div>
-				{jiraConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
-			</div>
-			{jiraConnected && jiraConnection ? (
-				<div className="jira-connection-summary">
-					<span className="jira-summary-pill">{jiraConnection.display_name || jiraConnection.email}</span>
-					<span className="jira-summary-pill">{jiraConnection.base_url}</span>
-					{jiraConnection.api_token_hint && <span className="jira-summary-pill">Token {jiraConnection.api_token_hint}</span>}
-				</div>
-			) : null}
-			{!jiraConnected ? (
-				<div className="panel-form two-cols jira-connection-form">
-					<div className="form-group">
-						<label>JIRA base URL</label>
-						<input
-							placeholder="https://your-team.atlassian.net"
-							value={jiraConnectionForm.baseUrl}
-							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, baseUrl: event.target.value }))}
-						/>
-					</div>
-					<div className="form-group">
-						<label>JIRA email</label>
-						<input
-							type="email"
-							placeholder="qa@company.com"
-							value={jiraConnectionForm.email}
-							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, email: event.target.value }))}
-						/>
-					</div>
-					<div className="form-group jira-connection-token-group">
-						<label>JIRA API token</label>
-						<input
-							type="password"
-							placeholder="Paste your Atlassian API token"
-							value={jiraConnectionForm.apiToken}
-							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, apiToken: event.target.value }))}
-						/>
-					</div>
-					<div className="panel-form button-row jira-connection-actions">
-						<button onClick={saveJiraConnection} disabled={authActionDisabled || isSavingJiraConnection || isJiraConnectionLoading}>
-							{isSavingJiraConnection ? "⏳ Connecting..." : "Connect JIRA"}
-						</button>
-						{isJiraConnectionLoading && <span className="helper-text">Refreshing JIRA connection…</span>}
-					</div>
-				</div>
-			) : (
-				<div className="jira-connected-actions">
-					<button className="secondary" onClick={() => refreshJiraConnectionStatus(currentUser)} disabled={authActionDisabled || isJiraConnectionLoading}>
-						{isJiraConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
-					</button>
-					<button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>
-						{isDeletingJiraConnection ? "⏳ Disconnecting..." : "Disconnect"}
-					</button>
-				</div>
-			)}
-		</div>
-	);
-
-	const renderAzureDevOpsConnectionSettings = () => (
-		<div className="jira-card settings-integration-card">
-			<div className="jira-card-header">
-				<div>
-					<h3>Azure DevOps</h3>
-					<p>Store a per-user Azure DevOps connection so imports and managed requirement sync can use it later.</p>
-				</div>
-				{azureDevOpsConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
-			</div>
-			{azureDevOpsConnected && azureDevOpsConnection ? (
-				<div className="jira-connection-summary">
-					<span className="jira-summary-pill">{azureDevOpsConnection.display_name || azureDevOpsConnection.organization}</span>
-					<span className="jira-summary-pill">{azureDevOpsConnection.organization_url}</span>
-					{azureDevOpsConnection.default_project && <span className="jira-summary-pill">Default project {azureDevOpsConnection.default_project}</span>}
-					{azureDevOpsConnection.token_hint && <span className="jira-summary-pill">PAT {azureDevOpsConnection.token_hint}</span>}
-				</div>
-			) : null}
-			{!azureDevOpsConnected ? (
-				<div className="panel-form two-cols jira-connection-form">
-					<div className="form-group">
-						<label>Azure DevOps organization or project URL</label>
-						<input
-							placeholder="https://dev.azure.com/{organization}/{project}"
-							value={azureDevOpsConnectionForm.organizationUrl}
-							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, organizationUrl: event.target.value }))}
-						/>
-					</div>
-					<div className="form-group">
-						<label>Account email (optional)</label>
-						<input
-							type="email"
-							placeholder="you@company.com or personal@example.com"
-							value={azureDevOpsConnectionForm.accountEmail}
-							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, accountEmail: event.target.value }))}
-						/>
-					</div>
-					<div className="form-group jira-connection-token-group">
-						<label>Azure DevOps PAT</label>
-						<input
-							type="password"
-							placeholder="Paste your Azure DevOps Personal Access Token"
-							value={azureDevOpsConnectionForm.personalAccessToken}
-							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, personalAccessToken: event.target.value }))}
-						/>
-						<span className="helper-text">Use a minimal PAT with Project/team read and Work Items read/write scopes. Microsoft app sign-in is separate from Azure DevOps API access.</span>
-					</div>
-					<div className="panel-form button-row jira-connection-actions">
-						<button onClick={saveAzureDevOpsConnection} disabled={authActionDisabled || isSavingAzureDevOpsConnection || isAzureDevOpsConnectionLoading}>
-							{isSavingAzureDevOpsConnection ? "⏳ Connecting..." : "Connect Azure DevOps"}
-						</button>
-						{isAzureDevOpsConnectionLoading && <span className="helper-text">Refreshing Azure DevOps connection…</span>}
-					</div>
-				</div>
-			) : (
-				<div className="jira-connected-actions">
-					<button className="secondary" onClick={() => refreshAzureDevOpsConnectionStatus(currentUser)} disabled={authActionDisabled || isAzureDevOpsConnectionLoading}>
-						{isAzureDevOpsConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
-					</button>
-					<button className="secondary" onClick={deleteStoredAzureDevOpsConnection} disabled={authActionDisabled || isDeletingAzureDevOpsConnection}>
-						{isDeletingAzureDevOpsConnection ? "⏳ Disconnecting..." : "Disconnect"}
-					</button>
-				</div>
-			)}
-		</div>
-	);
-
-	const renderSettingsDialog = () => {
-		if (!isSettingsDialogOpen) {
-			return null;
-		}
-
-		return (
-			<div className="auth-dialog-overlay settings-dialog-overlay" onClick={handleSettingsDialogOverlayClick}>
-				<div
-					className="settings-dialog"
-					role="dialog"
-					aria-modal="true"
-					aria-labelledby="settings-dialog-title"
-					onClick={(event) => event.stopPropagation()}
-				>
-					<div className="settings-dialog-header">
-						<div>
-							<h2 id="settings-dialog-title">Settings</h2>
-							<p>Manage one-time connections and advanced workflow tuning without crowding the main pipeline.</p>
-						</div>
-						<button
-							type="button"
-							className="auth-dialog-close"
-							onClick={closeSettingsDialog}
-							aria-label="Close settings dialog"
-						>
-							×
-						</button>
-					</div>
-					<div className="settings-dialog-nav" role="tablist" aria-label="Settings sections">
-						<button
-							type="button"
-							className={`settings-nav-btn ${settingsSection === "workflow" ? "active" : ""}`}
-							onClick={() => setSettingsSection("workflow")}
-						>
-							Workflow tuning
-						</button>
-						<button
-							type="button"
-							className={`settings-nav-btn ${settingsSection === "integrations" ? "active" : ""}`}
-							onClick={() => setSettingsSection("integrations")}
-						>
-							Integrations
-						</button>
-					</div>
-					<div className="settings-dialog-body">
-						{settingsSection === "workflow" ? (
-							<>
-								<div className="settings-section-intro">
-									<h3>Advanced workflow tuning</h3>
-									<p>Leave fields blank for backend defaults. Adjust these only when you need stricter review gates or shorter AI loops.</p>
-								</div>
-								{renderWorkflowSettingsPanel(
-									"Requirements workflow settings",
-									"Tune the requirement review loop when you want stricter gates or shorter runs.",
-									requirementWorkflowSettings,
-									setRequirementWorkflowSettings,
-								)}
-								{renderWorkflowSettingsPanel(
-									"Test-case workflow settings",
-									"Control validation strictness, loop length, and timeout behavior for generation and refinement.",
-									testCaseWorkflowSettings,
-									setTestCaseWorkflowSettings,
-								)}
-							</>
-						) : (
-							<>
-								<div className="settings-section-intro">
-									<h3>Integration connections</h3>
-									<p>Set these up once per user. Import/search/sync actions stay in the Upload workflow where they are used.</p>
-								</div>
-								{!isAuthenticated && (
-									<div className="settings-auth-note">
-										🔐 Sign in to create or manage JIRA and Azure DevOps connections.
-									</div>
-								)}
-								<div className="settings-integration-grid">
-									{renderJiraConnectionSettings()}
-									{renderAzureDevOpsConnectionSettings()}
-								</div>
-							</>
-						)}
-					</div>
-				</div>
-			</div>
-		);
-	};
-
 	const searchJiraIssues = async () => {
 		if (!selectedJiraProjectKey) {
 			setStatus("Choose a JIRA project before searching issues.");
@@ -2301,6 +2075,34 @@ export default function App() {
 		pilotAlert,
 	} = useBillingStatus(billingEntitlements, usageSummary);
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
+	const jiraSettings = {
+		jiraConnected,
+		jiraConnection,
+		jiraConnectionForm,
+		setJiraConnectionForm,
+		saveJiraConnection,
+		authActionDisabled,
+		isSavingJiraConnection,
+		isJiraConnectionLoading,
+		refreshJiraConnectionStatus,
+		currentUser,
+		deleteStoredJiraConnection,
+		isDeletingJiraConnection,
+	};
+	const azureDevOpsSettings = {
+		azureDevOpsConnected,
+		azureDevOpsConnection,
+		azureDevOpsConnectionForm,
+		setAzureDevOpsConnectionForm,
+		saveAzureDevOpsConnection,
+		authActionDisabled,
+		isSavingAzureDevOpsConnection,
+		isAzureDevOpsConnectionLoading,
+		refreshAzureDevOpsConnectionStatus,
+		currentUser,
+		deleteStoredAzureDevOpsConnection,
+		isDeletingAzureDevOpsConnection,
+	};
 
 	return (
 		<div className="page">
@@ -2345,7 +2147,20 @@ export default function App() {
 				onProviderSignIn={handleProviderSignIn}
 			/>
 
-			{renderSettingsDialog()}
+			<SettingsDialog
+				isOpen={isSettingsDialogOpen}
+				onOverlayClick={handleSettingsDialogOverlayClick}
+				onClose={closeSettingsDialog}
+				settingsSection={settingsSection}
+				setSettingsSection={setSettingsSection}
+				requirementWorkflowSettings={requirementWorkflowSettings}
+				setRequirementWorkflowSettings={setRequirementWorkflowSettings}
+				testCaseWorkflowSettings={testCaseWorkflowSettings}
+				setTestCaseWorkflowSettings={setTestCaseWorkflowSettings}
+				isAuthenticated={isAuthenticated}
+				jiraSettings={jiraSettings}
+				azureDevOpsSettings={azureDevOpsSettings}
+			/>
 
 			<WorkflowTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
 
