@@ -32,7 +32,7 @@ test.describe("Export approval gate", () => {
 		await page.route("**/requirements/parse", async (route) => jsonResponse(route, {
 			source_name: "sample-requirements.md",
 			raw_text: "The system shall allow users to export reports.",
-			requirements: [{ id: "REQ-001", text: "The system shall allow users to export reports." }],
+			requirements: [{ id: "REQ-001", text: "The system shall allow users to export reports.", review_status: "Approved" }],
 			review: { approved: true, score: 95, threshold: 85, summary: "Requirements approved.", blocking_issues: [] },
 			coverage_metrics: { total_requirements: 1, unique_requirements: 1, duplicate_requirements: 0, shall_format_count: 1, requirements_per_document: 1 },
 			workflow_diagnostics: { status: "completed", warnings: [], parser_failures: [] },
@@ -90,12 +90,12 @@ test.describe("Export approval gate", () => {
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /parse requirements/i }).click();
-		await expect(page.locator(".requirements-list li")).toHaveCount(1);
+		await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(1);
 
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await page.getByRole("button", { name: /^Next$/ }).click();
-		await page.getByRole("button", { name: /generate test cases/i }).click();
+		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
 		await page.getByRole("button", { name: /^Next$/ }).click();
 

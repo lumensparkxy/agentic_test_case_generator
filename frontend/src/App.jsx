@@ -182,6 +182,8 @@ export default function App() {
 	const [isParsing, setIsParsing] = useState(false);
 	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
 	const [isExporting, setIsExporting] = useState(false);
+	const [draftExportOverrideRequested, setDraftExportOverrideRequested] = useState(false);
+	const [draftExportOverrideReason, setDraftExportOverrideReason] = useState("");
 	const [authToken, setAuthToken] = useState("");
 	const [currentUser, setCurrentUser] = useState(null);
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -410,6 +412,8 @@ export default function App() {
 		setExpandedRows({});
 		setActiveGenerateResultTab("test-cases");
 		setFeedback("");
+		setDraftExportOverrideRequested(false);
+		setDraftExportOverrideReason("");
 	};
 
 	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
@@ -1875,6 +1879,8 @@ export default function App() {
 			setTestCaseIterationHistory(data.iteration_history || []);
 			setExpandedRows({});
 			setActiveGenerateResultTab(chooseGenerateResultTab(data));
+			setDraftExportOverrideRequested(false);
+			setDraftExportOverrideReason("");
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review
 				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
@@ -1890,12 +1896,26 @@ export default function App() {
 			setIsGenerating(false);
 		}
 	};
+	const exportReviewApproved = Boolean(testCaseReview?.approved);
+	const exportRequiresOverride = Boolean(testCases.length > 0 && testCaseReview && !testCaseReview.approved);
+	const draftExportOverrideReasonProvided = draftExportOverrideReason.trim().length > 0;
+	const exportGateLocked = Boolean(exportRequiresOverride && (!draftExportOverrideRequested || !draftExportOverrideReasonProvided));
 
 	const exportToFormat = async (format) => {
+		if (exportGateLocked) {
+			setStatus("Export locked by review gate. Add an override reason to export draft test cases.");
+			return;
+		}
 		setIsExporting(true);
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
-			const payload = { test_cases: testCases };
+			const payload = {
+				test_cases: testCases,
+				approved: exportReviewApproved,
+				review: testCaseReview || undefined,
+				draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
+				draft_override_reason: exportRequiresOverride && draftExportOverrideRequested ? draftExportOverrideReason.trim() : null,
+			};
 			const res = await apiRequest(`/export/${format}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -3357,6 +3377,14 @@ export default function App() {
 				{activeTab === 4 && (
 					<ExportPanel
 						testCases={testCases}
+						testCaseReview={testCaseReview}
+						exportReviewApproved={exportReviewApproved}
+						exportRequiresOverride={exportRequiresOverride}
+						exportGateLocked={exportGateLocked}
+						draftExportOverrideRequested={draftExportOverrideRequested}
+						setDraftExportOverrideRequested={setDraftExportOverrideRequested}
+						draftExportOverrideReason={draftExportOverrideReason}
+						setDraftExportOverrideReason={setDraftExportOverrideReason}
 						isExporting={isExporting}
 						authActionDisabled={authActionDisabled}
 						exportToFormat={exportToFormat}
