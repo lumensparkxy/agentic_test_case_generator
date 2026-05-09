@@ -6,6 +6,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from app.adk_client import _merge_review_results
 from app.agents.requirements_agent import _build_fallback_workflow, _convert_to_requirements, _finalize_requirements, _heuristic_extract
 from app.models import Requirement
 
@@ -79,6 +80,63 @@ class RequirementFallbackWorkflowTests(unittest.TestCase):
         self.assertTrue(workflow["workflow_diagnostics"]["used_fallback"])
         self.assertEqual(workflow["workflow_diagnostics"]["failure_reason"], "fallback_generated_artifacts")
         self.assertTrue(any("Existing warning" == warning for warning in workflow["workflow_diagnostics"]["warnings"]))
+
+
+class RequirementReviewMergeTests(unittest.TestCase):
+    def test_merge_uses_heuristic_score_for_approved_reviews(self) -> None:
+        merged = _merge_review_results(
+            {
+                "approved": True,
+                "score": 95,
+                "threshold": 85,
+                "summary": "Reviewer approved the requirements.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+            {
+                "approved": True,
+                "score": 100,
+                "threshold": 85,
+                "summary": "Requirements meet the current quality threshold.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+        )
+
+        self.assertTrue(merged["approved"])
+        self.assertEqual(merged["score"], 100)
+        self.assertEqual(merged["threshold"], 85)
+
+    def test_merge_keeps_failed_reviews_below_threshold(self) -> None:
+        merged = _merge_review_results(
+            {
+                "approved": True,
+                "score": 96,
+                "threshold": 85,
+                "summary": "Reviewer approved the requirements.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+            {
+                "approved": False,
+                "score": 90,
+                "threshold": 85,
+                "summary": "Requirements still need refinement before the workflow can move forward.",
+                "blocking_issues": ["1 requirement(s) are not in the required 'The system shall...' format."],
+                "suggestions": [],
+                "unmet_criteria": ["Normalize all requirements into a consistent, testable format."],
+            },
+        )
+
+        self.assertFalse(merged["approved"])
+        self.assertEqual(merged["score"], 84)
+        self.assertEqual(
+            merged["summary"],
+            "Requirements still need refinement before the workflow can move forward.",
+        )
 
 
 if __name__ == "__main__":

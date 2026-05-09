@@ -7,223 +7,56 @@ import {
 	hasFirebaseAuthConfig,
 	visibleFirebaseAuthProviders,
 } from "./firebase";
+import AppHeader, { SignInDialog } from "./components/layout/AppHeader";
+import ContextInputsPanel from "./components/context/ContextInputsPanel";
+import ExportPanel from "./components/export/ExportPanel";
+import BillingBanner from "./components/layout/BillingBanner";
+import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
+import WorkflowTabs from "./components/layout/WorkflowTabs";
+import WorkflowDiagnostics from "./components/workflow/WorkflowDiagnostics";
+import WorkflowSettingsPanel from "./components/workflow/WorkflowSettingsPanel";
+import useBillingStatus from "./hooks/useBillingStatus";
+import useEscapeToClose from "./hooks/useEscapeToClose";
+import {
+	AUTH_REQUIRED_MESSAGE,
+	DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE,
+	DEFAULT_AZURE_DEVOPS_WORK_ITEM_TYPE_OPTIONS,
+	DEFAULT_JIRA_ISSUE_TYPE_OPTIONS,
+	DEFAULT_JIRA_SYNC_SECTION_TITLE,
+	EMPTY_AZURE_DEVOPS_CONNECTION_FORM,
+	EMPTY_AZURE_DEVOPS_CONNECTION_STATUS,
+	EMPTY_JIRA_CONNECTION_FORM,
+	EMPTY_JIRA_CONNECTION_STATUS,
+	EMPTY_WORKFLOW_SETTINGS,
+	REQUIREMENT_QUALITY_FLAG_OPTIONS,
+	REQUIREMENT_REVIEW_STATUSES,
+	REQUIREMENT_SOURCE_OPTIONS,
+	STORAGE_AUTH_TOKEN,
+	STORAGE_AUTH_USER,
+} from "./constants/workflow";
+import { API_BASE, createRequestId, downloadResponseBlob, parseApiError } from "./services/apiClient";
+import {
+	buildAzureDevOpsConnectionForm,
+	buildJiraConnectionForm,
+	formatSourceIssueKey,
+	getRequirementContextPath,
+	getRequirementEpicCell,
+	getRequirementIssueCell,
+	getRequirementReviewStatus,
+	getRequirementSourceLabel,
+	getTestCaseLinkedRequirementIds,
+	groupRequirementsByContext,
+	isAzureDevOpsLinkedRequirement,
+	isJiraLinkedRequirement,
+	mergeRequirementMetadata,
+	normalizeStringArray,
+} from "./utils/requirements";
+import {
+	buildEmptyUsageSummary,
+	getCurrentUserUsageSummary,
+} from "./utils/usage";
+import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workflow";
 import "./App.css";
-
-const API_BASE = (() => {
-	const configuredApiBase = (import.meta.env.VITE_API_BASE || "").trim();
-	if (!configuredApiBase) {
-		return "http://127.0.0.1:8000";
-	}
-	return configuredApiBase === "http://localhost:8000" ? "http://127.0.0.1:8000" : configuredApiBase;
-})();
-const STORAGE_AUTH_TOKEN = "tcg.auth.token";
-const STORAGE_AUTH_USER = "tcg.auth.user";
-const AUTH_REQUIRED_MESSAGE = "Sign in to continue.";
-const EMPTY_WORKFLOW_SETTINGS = {
-	approval_threshold: "",
-	max_iterations: "",
-	timeout_seconds: "",
-	stall_iteration_limit: "",
-	retry_attempts: "",
-};
-const WORKFLOW_SETTING_FIELDS = [
-	{ key: "approval_threshold", label: "Approval threshold", min: 0, max: 100 },
-	{ key: "max_iterations", label: "Max iterations", min: 1, max: 20 },
-	{ key: "timeout_seconds", label: "Timeout (seconds)", min: 1, max: 900 },
-	{ key: "stall_iteration_limit", label: "Stall limit", min: 1, max: 20 },
-	{ key: "retry_attempts", label: "Retry attempts", min: 0, max: 5 },
-];
-const USAGE_STATUS_ITEMS = [
-	{ key: "requirementsGeneratedCount", label: "Req +" },
-	{ key: "requirementsModifiedCount", label: "Req Δ" },
-	{ key: "testCasesGeneratedCount", label: "TC +" },
-	{ key: "testCasesModifiedCount", label: "TC Δ" },
-];
-const PILOT_WARNING_THRESHOLD = 20;
-const EMPTY_JIRA_CONNECTION_STATUS = {
-	connected: false,
-	connection: null,
-};
-const EMPTY_JIRA_CONNECTION_FORM = {
-	baseUrl: "",
-	email: "",
-	apiToken: "",
-};
-const EMPTY_AZURE_DEVOPS_CONNECTION_STATUS = {
-	connected: false,
-	connection: null,
-};
-const EMPTY_AZURE_DEVOPS_CONNECTION_FORM = {
-	organizationUrl: "",
-	accountEmail: "",
-	personalAccessToken: "",
-};
-const DEFAULT_JIRA_ISSUE_TYPE_OPTIONS = ["Epic", "Story", "Task", "Bug"];
-const DEFAULT_AZURE_DEVOPS_WORK_ITEM_TYPE_OPTIONS = ["Epic", "Feature", "User Story", "Task", "Bug"];
-const DEFAULT_SYNC_SECTION_TITLE = "Agentic Requirements";
-const DEFAULT_JIRA_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITLE;
-const DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITLE;
-const REQUIREMENT_REVIEW_STATUSES = ["Draft", "Needs Review", "Approved", "Rejected"];
-const REQUIREMENT_QUALITY_FLAG_OPTIONS = [
-	"Ambiguous",
-	"Duplicate",
-	"Untestable",
-	"Missing actor",
-	"Missing expected result",
-	"Needs split",
-	"Needs merge",
-	"Out of scope",
-];
-const JIRA_SOURCE_FIELDS = [
-	"source_system",
-	"source_issue_key",
-	"source_issue_type",
-	"source_parent_key",
-	"source_parent_title",
-	"source_issue_url",
-	"source_issue_updated_at",
-	"source_path",
-	"source_section",
-	"source_excerpt",
-	"source_hierarchy",
-	"parent_requirement_id",
-	"review_status",
-	"quality_flags",
-	"sync_target_issue_key",
-	"artifact_set_id",
-	"artifact_item_id",
-	"artifact_version_id",
-	"artifact_version_number",
-];
-
-const buildJiraConnectionForm = (connection, user) => ({
-	baseUrl: connection?.base_url || "",
-	email: connection?.email || user?.email || "",
-	apiToken: "",
-});
-
-const buildAzureDevOpsConnectionForm = (connection, user) => ({
-	organizationUrl: connection?.organization_url || "",
-	accountEmail: connection?.account_email || user?.email || "",
-	personalAccessToken: "",
-});
-
-const isJiraLinkedRequirement = (requirement) => Boolean(
-	requirement?.source_system === "jira"
-	|| (!requirement?.source_system && (requirement?.source_issue_key || requirement?.sync_target_issue_key || requirement?.artifact_item_id))
-);
-
-const isAzureDevOpsLinkedRequirement = (requirement) => Boolean(requirement?.source_system === "azure_devops");
-
-const getRequirementSourceLabel = (requirement) => {
-	if (requirement?.source_system === "azure_devops") {
-		return "Azure DevOps";
-	}
-	if (requirement?.source_system === "file") {
-		return "File";
-	}
-	if (requirement?.source_system === "jira" || requirement?.source_issue_key || requirement?.sync_target_issue_key) {
-		return "JIRA";
-	}
-	return "Source";
-};
-
-const normalizeStringArray = (value) => {
-	if (Array.isArray(value)) {
-		return [...new Set(value.map((item) => `${item || ""}`.trim()).filter(Boolean))];
-	}
-	const normalized = `${value || ""}`.trim();
-	return normalized ? [normalized] : [];
-};
-
-const getRequirementReviewStatus = (requirement) => {
-	const status = `${requirement?.review_status || "Draft"}`.trim();
-	return REQUIREMENT_REVIEW_STATUSES.includes(status) ? status : "Draft";
-};
-
-const getRequirementContextPath = (requirement) => {
-	const hierarchy = normalizeStringArray(requirement?.source_hierarchy);
-	if (hierarchy.length) {
-		return hierarchy.join(" › ");
-	}
-	if (requirement?.source_path) {
-		return requirement.source_path;
-	}
-	const sourceKey = requirement?.source_issue_key || requirement?.sync_target_issue_key;
-	if (sourceKey) {
-		return [requirement?.source_parent_key, sourceKey, requirement?.source_section].filter(Boolean).join(" › ");
-	}
-	return "Imported requirements";
-};
-
-const groupRequirementsByContext = (items = []) => {
-	const groups = new Map();
-	items.forEach((requirement, index) => {
-		const contextPath = getRequirementContextPath(requirement);
-		if (!groups.has(contextPath)) {
-			groups.set(contextPath, {
-				id: contextPath || `group-${groups.size + 1}`,
-				label: contextPath || "Imported requirements",
-				sourceLabel: getRequirementSourceLabel(requirement),
-				requirements: [],
-			});
-		}
-		groups.get(contextPath).requirements.push({ ...requirement, __index: index });
-	});
-	return [...groups.values()];
-};
-
-const getTestCaseLinkedRequirementIds = (testCase) => {
-	const explicit = normalizeStringArray(testCase?.linked_requirement_ids);
-	const tagLinks = normalizeStringArray(testCase?.tags).filter((tag) => /^REQ-[A-Za-z0-9_-]+$/i.test(tag));
-	return [...new Set([...explicit, ...tagLinks])];
-};
-
-const mergeRequirementMetadata = (nextRequirements = [], previousRequirements = []) => {
-	const previousList = Array.isArray(previousRequirements) ? previousRequirements : [];
-	const nextList = Array.isArray(nextRequirements) ? nextRequirements : [];
-	if (!previousList.length || !nextList.length) {
-		return nextList;
-	}
-
-	const previousByArtifactId = new Map();
-	const previousById = new Map();
-	const resolvedTargets = previousList
-		.map((requirement) => requirement?.sync_target_issue_key || requirement?.source_issue_key || "")
-		.filter(Boolean);
-	const uniqueResolvedTargets = [...new Set(resolvedTargets)];
-	const defaultSyncTargetKey = uniqueResolvedTargets.length === 1 ? uniqueResolvedTargets[0] : null;
-
-	previousList.forEach((requirement) => {
-		if (requirement?.artifact_item_id) {
-			previousByArtifactId.set(requirement.artifact_item_id, requirement);
-		}
-		if (requirement?.id) {
-			previousById.set(requirement.id, requirement);
-		}
-	});
-
-	return nextList.map((requirement, index) => {
-		const matchedRequirement = (
-			(requirement?.artifact_item_id && previousByArtifactId.get(requirement.artifact_item_id))
-			|| previousById.get(requirement?.id)
-			|| (nextList.length === previousList.length ? previousList[index] : null)
-		);
-
-		const metadata = JIRA_SOURCE_FIELDS.reduce((acc, field) => {
-			if ((requirement?.[field] == null || requirement?.[field] === "") && matchedRequirement?.[field] != null && matchedRequirement?.[field] !== "") {
-				acc[field] = matchedRequirement[field];
-			}
-			return acc;
-		}, {});
-
-		if (!requirement?.sync_target_issue_key && !metadata.sync_target_issue_key && defaultSyncTargetKey && !matchedRequirement) {
-			metadata.sync_target_issue_key = defaultSyncTargetKey;
-		}
-
-		return Object.keys(metadata).length ? { ...requirement, ...metadata } : requirement;
-	});
-};
 
 const getAuthProviderLabel = (providerKeyOrId) => {
 	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (
@@ -261,132 +94,55 @@ const buildProviderSignInErrorMessage = (providerConfig, error) => {
 	return `Sign-in with ${providerLabel} failed: ${rawMessage}`;
 };
 
-const AuthProviderIcon = ({ providerId }) => {
-	if (providerId === "google") {
-		return (
-			<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
-				<path fill="#4285F4" d="M17.64 9.2045c0-.6382-.0573-1.2518-.1636-1.8409H9v3.4818h4.8436c-.2086 1.125-.8427 2.0782-1.796 2.7164v2.2582h2.9087c1.7018-1.5663 2.6837-3.874 2.6837-6.6155z" />
-				<path fill="#34A853" d="M9 18c2.43 0 4.4673-.8064 5.9564-2.1818l-2.9087-2.2582c-.8063.54-1.8372.8591-3.0477.8591-2.3427 0-4.3241-1.5818-5.0327-3.7091H.96v2.3318C2.4409 15.9836 5.4818 18 9 18z" />
-				<path fill="#FBBC05" d="M3.9673 10.7091c-.18-.54-.2836-1.1164-.2836-1.7091s.1036-1.1691.2836-1.7091V4.9591H.96C.3477 6.1791 0 7.5509 0 9s.3477 2.8209.96 4.0409l3.0073-2.3318z" />
-				<path fill="#EA4335" d="M9 3.5809c1.3214 0 2.5077.4541 3.44 1.3455l2.5818-2.5818C13.4636.8909 11.43 0 9 0 5.4818 0 2.4409 2.0164.96 4.9591l3.0073 2.3318C4.6759 5.1627 6.6573 3.5809 9 3.5809z" />
-			</svg>
-		);
-	}
+const hasMetricValue = (metrics, key) => Boolean(
+	metrics
+	&& Object.prototype.hasOwnProperty.call(metrics, key)
+	&& metrics[key] != null
+);
 
-	if (providerId === "microsoft") {
-		return (
-			<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
-				<rect x="1" y="1" width="7" height="7" fill="#F25022" />
-				<rect x="10" y="1" width="7" height="7" fill="#7FBA00" />
-				<rect x="1" y="10" width="7" height="7" fill="#00A4EF" />
-				<rect x="10" y="10" width="7" height="7" fill="#FFB900" />
-			</svg>
-		);
-	}
-
-	if (providerId === "apple") {
-		return (
-			<svg viewBox="0 0 384 512" aria-hidden="true" focusable="false">
-				<path fill="currentColor" d="M318.7 268.7c-.2-38.2 31.2-56.5 32.6-57.4-17.8-26-45.4-29.6-55.3-30-23.5-2.4-45.8 13.8-57.7 13.8-11.8 0-30-13.4-49.3-13-25.3.4-48.7 14.7-61.7 37.5-26.3 45.6-6.7 113 18.7 149.8 12.4 17.9 27.1 38.1 46.5 37.3 18.7-.8 25.7-12 48.5-12 22.7 0 29 12 48.8 11.6 20.2-.4 33-18.1 45.3-36.1 14.2-20.8 20.1-41 20.3-42-.4-.2-36.8-14.1-37.2-56.5zm-40.6-100.1c10.3-12.5 17.2-29.8 15.3-47.1-14.7.6-32.8 9.8-43.4 22.3-9.5 10.9-17.8 28.4-15.6 45.1 16.5 1.3 33.4-8.4 43.7-20.3z" />
-			</svg>
-		);
-	}
-
-	return null;
-};
-
-const normalizeUsageMetric = (value) => {
-	const parsed = Number.parseInt(`${value ?? 0}`, 10);
-	return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const createRequestId = () => {
-	if (globalThis.crypto?.randomUUID) {
-		return globalThis.crypto.randomUUID();
-	}
-	return `tcg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
-
-const formatPlanLabel = (planTier) => {
-	const normalized = `${planTier || "pilot"}`.trim().toLowerCase();
+const formatWorkflowStatusLabel = (status) => {
+	const normalized = `${status || ""}`.trim();
 	if (!normalized) {
-		return "Pilot";
+		return "";
 	}
-	return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+
+	return normalized
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+		.join(" ");
 };
 
-const buildEmptyUsageSummary = (user) => ({
-	scopeType: "individual",
-	scopeKey: user?.sub ? `user:${user.sub}` : "user:current",
-	displayName: user?.name || user?.email || user?.sub || "Current user",
-	totalEvents: 0,
-	requirementsGeneratedCount: 0,
-	requirementsModifiedCount: 0,
-	testCasesGeneratedCount: 0,
-	testCasesModifiedCount: 0,
-	hasData: false,
-});
-
-const buildUsageSummaryFromSource = (source, user, group, hasData = true) => ({
-	scopeType: group?.scope_type || "individual",
-	scopeKey: group?.scope_key || (user?.sub ? `user:${user.sub}` : "user:current"),
-	displayName: source?.name || source?.email || group?.display_name || user?.name || user?.email || user?.sub || "Current user",
-	totalEvents: normalizeUsageMetric(source?.total_events),
-	requirementsGeneratedCount: normalizeUsageMetric(source?.requirements_generated_count),
-	requirementsModifiedCount: normalizeUsageMetric(source?.requirements_modified_count),
-	testCasesGeneratedCount: normalizeUsageMetric(source?.test_cases_generated_count),
-	testCasesModifiedCount: normalizeUsageMetric(source?.test_cases_modified_count),
-	hasData,
-});
-
-const getCurrentUserUsageSummary = (report, user) => {
-	if (!user) {
-		return null;
+const getRequirementSourceMetricMeta = (coverageMetrics) => {
+	if (hasMetricValue(coverageMetrics, "source_work_item_count")) {
+		return {
+			countLabel: "Source work items",
+			countValue: coverageMetrics.source_work_item_count,
+			perLabel: "Per work item",
+		};
 	}
 
-	const fallback = buildEmptyUsageSummary(user);
-	const subject = `${user.sub || ""}`.trim();
-	const email = `${user.email || ""}`.trim().toLowerCase();
-	const groups = Array.isArray(report?.groups) ? report.groups : [];
-	const matchesUser = (candidate) => {
-		const candidateUserId = `${candidate?.user_id || ""}`.trim();
-		const candidateEmail = `${candidate?.email || ""}`.trim().toLowerCase();
-		return (subject && candidateUserId === subject) || (email && candidateEmail === email);
+	if (hasMetricValue(coverageMetrics, "source_issue_count")) {
+		return {
+			countLabel: "Source issues",
+			countValue: coverageMetrics.source_issue_count,
+			perLabel: "Per issue",
+		};
+	}
+
+	if (hasMetricValue(coverageMetrics, "document_count")) {
+		return {
+			countLabel: "Source docs",
+			countValue: coverageMetrics.document_count,
+			perLabel: "Per doc",
+		};
+	}
+
+	return {
+		countLabel: null,
+		countValue: null,
+		perLabel: "Per source",
 	};
-
-	for (const group of groups) {
-		const users = Array.isArray(group?.users) ? group.users : [];
-		const matchedUser = users.find(matchesUser);
-		if (matchedUser) {
-			return buildUsageSummaryFromSource(matchedUser, user, group, true);
-		}
-
-		if (group?.scope_type === "individual") {
-			const scopeKey = `${group?.scope_key || ""}`.trim();
-			const displayName = `${group?.display_name || ""}`.trim().toLowerCase();
-			if ((subject && scopeKey === `user:${subject}`) || (email && displayName === email)) {
-				return buildUsageSummaryFromSource(group, user, group, true);
-			}
-		}
-	}
-
-	return fallback;
-};
-
-const buildWorkflowSettingsPayload = (settings) => {
-	const payload = Object.entries(settings || {}).reduce((acc, [key, value]) => {
-		const normalized = `${value ?? ""}`.trim();
-		if (!normalized) {
-			return acc;
-		}
-		const parsed = Number.parseInt(normalized, 10);
-		if (Number.isFinite(parsed)) {
-			acc[key] = parsed;
-		}
-		return acc;
-	}, {});
-
-	return Object.keys(payload).length ? payload : null;
 };
 
 export default function App() {
@@ -541,6 +297,78 @@ export default function App() {
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
 	const reviewPendingRequirementCount = requirements.length - approvedRequirementCount - rejectedRequirementCount;
 	const canGenerateFromApprovedRequirements = approvedRequirementCount > 0;
+	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
+	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
+	const requirementSourceMetricMeta = getRequirementSourceMetricMeta(requirementCoverageMetrics);
+	const requirementReportStats = [
+		requirementReview ? {
+			label: "Quality score",
+			value: `${requirementReviewMeta.score}/100`,
+			emphasis: true,
+		} : null,
+		requirementReviewMeta.threshold > 0 ? {
+			label: "Approval threshold",
+			value: requirementReviewMeta.threshold,
+		} : null,
+		(requirementCoverageMetrics || requirements.length > 0) ? {
+			label: "Requirements",
+			value: hasMetricValue(requirementCoverageMetrics, "total_requirements")
+				? requirementCoverageMetrics.total_requirements
+				: requirements.length,
+		} : null,
+		requirementSourceMetricMeta.countLabel ? {
+			label: requirementSourceMetricMeta.countLabel,
+			value: requirementSourceMetricMeta.countValue,
+		} : null,
+		hasMetricValue(requirementCoverageMetrics, "requirements_per_document") ? {
+			label: requirementSourceMetricMeta.perLabel,
+			value: requirementCoverageMetrics.requirements_per_document,
+		} : null,
+		hasMetricValue(requirementCoverageMetrics, "unique_requirements") ? {
+			label: "Unique",
+			value: requirementCoverageMetrics.unique_requirements,
+		} : null,
+		hasMetricValue(requirementCoverageMetrics, "duplicate_requirements") ? {
+			label: "Duplicates",
+			value: requirementCoverageMetrics.duplicate_requirements,
+		} : null,
+		hasMetricValue(requirementCoverageMetrics, "shall_format_count") ? {
+			label: "Shall format",
+			value: hasMetricValue(requirementCoverageMetrics, "total_requirements")
+				? `${requirementCoverageMetrics.shall_format_count}/${requirementCoverageMetrics.total_requirements}`
+				: requirementCoverageMetrics.shall_format_count,
+		} : null,
+		requirementWorkflowDiagnostics?.status ? {
+			label: "Workflow status",
+			value: formatWorkflowStatusLabel(requirementWorkflowDiagnostics.status),
+		} : null,
+		requirementIterationHistory.length ? {
+			label: "Iterations",
+			value: requirementIterationHistory.length,
+		} : null,
+		appliedRequirementWorkflowSettings?.max_iterations != null ? {
+			label: "Max iterations",
+			value: appliedRequirementWorkflowSettings.max_iterations,
+		} : null,
+	].filter(Boolean);
+	const requirementReportFlags = [
+		requirementWorkflowDiagnostics?.timed_out ? { label: "Timed out", tone: "warning" } : null,
+		requirementWorkflowDiagnostics?.stalled ? { label: "Stalled", tone: "warning" } : null,
+		requirementWorkflowDiagnostics?.used_fallback ? { label: "Fallback used", tone: "warning" } : null,
+		requirementWorkflowDiagnostics?.max_iterations_reached ? { label: "Max iterations reached", tone: "warning" } : null,
+		requirementWorkflowDiagnostics?.failure_reason ? {
+			label: `Reason: ${formatWorkflowStatusLabel(requirementWorkflowDiagnostics.failure_reason)}`,
+			tone: "muted",
+		} : null,
+	].filter(Boolean);
+	const requirementWarnings = requirementWorkflowDiagnostics?.warnings || [];
+	const requirementParserFailures = requirementWorkflowDiagnostics?.parser_failures || [];
+	const requirementBlockingIssues = requirementReview?.approved ? [] : (requirementReview?.blocking_issues || []);
+	const requirementReportDetailCount = (
+		requirementBlockingIssues.length
+		+ requirementWarnings.length
+		+ requirementParserFailures.length
+	);
 
 	const toggleRowExpansion = (id) => {
 		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
@@ -655,102 +483,112 @@ export default function App() {
 		};
 	};
 
-	const parseApiError = async (res, fallbackMessage) => {
-		const text = await res.text();
-		if (!text) return fallbackMessage;
-		try {
-			const parsed = JSON.parse(text);
-			if (typeof parsed?.detail === "string") {
-				return parsed.detail;
-			}
-			if (parsed?.detail?.message) {
-				const contactEmail = parsed?.detail?.contact_email;
-				return contactEmail ? `${parsed.detail.message} Contact ${contactEmail}.` : parsed.detail.message;
-			}
-			return parsed?.message || fallbackMessage;
-		} catch {
-			return text;
-		}
-	};
-
-	const updateWorkflowSetting = (setter, key) => (event) => {
-		setter((prev) => ({ ...prev, [key]: event.target.value }));
-	};
-
 	const renderWorkflowSettingsPanel = (title, description, settings, setSettings) => (
-		<div className="workflow-settings-panel">
-			<div className="workflow-settings-header">
-				<div>
-					<h3>{title}</h3>
-					<p>{description}</p>
-				</div>
-				<span className="workflow-settings-badge">Optional</span>
-			</div>
-			<div className="workflow-settings-grid">
-				{WORKFLOW_SETTING_FIELDS.map((field) => (
-					<div className="form-group" key={field.key}>
-						<label>{field.label}</label>
-						<input
-							type="number"
-							min={field.min}
-							max={field.max}
-							placeholder="Use backend default"
-							value={settings[field.key]}
-							onChange={updateWorkflowSetting(setSettings, field.key)}
-						/>
-					</div>
-				))}
-			</div>
-			<p className="workflow-settings-help">Leave any field blank to use the backend default for that workflow.</p>
-		</div>
+		<WorkflowSettingsPanel
+			title={title}
+			description={description}
+			settings={settings}
+			setSettings={setSettings}
+		/>
 	);
 
-	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => {
-		if (!diagnostics && !appliedSettings) {
+	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => (
+		<WorkflowDiagnostics
+			title={title}
+			diagnostics={diagnostics}
+			appliedSettings={appliedSettings}
+			iterationHistory={iterationHistory}
+		/>
+	);
+
+	const renderRequirementReviewReport = () => {
+		if (!requirementReview && !requirementCoverageMetrics && !requirementWorkflowDiagnostics && !appliedRequirementWorkflowSettings) {
 			return null;
 		}
 
-		const warnings = diagnostics?.warnings || [];
-		const parserFailures = diagnostics?.parser_failures || [];
-		const pillEntries = [
-			appliedSettings?.approval_threshold != null ? `Threshold ${appliedSettings.approval_threshold}` : null,
-			appliedSettings?.max_iterations != null ? `Max iter ${appliedSettings.max_iterations}` : null,
-			diagnostics?.status ? `Status ${diagnostics.status}` : null,
-			iterationHistory?.length ? `Iterations ${iterationHistory.length}` : null,
-			diagnostics?.best_iteration ? `Best iter ${diagnostics.best_iteration}` : null,
-			diagnostics?.timed_out ? "Timed out" : null,
-			diagnostics?.stalled ? "Stalled" : null,
-			diagnostics?.used_fallback ? "Fallback used" : null,
-		].filter(Boolean);
-
 		return (
-			<div className="workflow-diagnostics-panel">
-				<div className="workflow-diagnostics-header">
-					<h3>{title}</h3>
-					{diagnostics?.failure_reason && <span className="workflow-diagnostics-reason">Reason: {diagnostics.failure_reason}</span>}
+			<div className={`requirement-report-card ${requirementReview?.approved ? "approved" : "needs-work"}`}>
+				<div className="requirement-report-header">
+					<div className="requirement-report-copy">
+						<div className="requirement-report-title-row">
+							<h3>Requirement review summary</h3>
+							{requirementReview && (
+								<span className={`requirement-report-status ${requirementReview.approved ? "approved" : "needs-work"}`}>
+									{requirementReview.approved ? "Approved" : "Needs refinement"}
+								</span>
+							)}
+						</div>
+						<p>{requirementReview?.summary || "A compact view of quality, coverage, and workflow state for the current requirement set."}</p>
+					</div>
+					{requirementReportFlags.length > 0 && (
+						<div className="requirement-report-flags">
+							{requirementReportFlags.map((flag) => (
+								<span key={flag.label} className={`requirement-report-flag ${flag.tone}`}>
+									{flag.label}
+								</span>
+							))}
+						</div>
+					)}
 				</div>
-				{pillEntries.length > 0 && (
-					<div className="workflow-diagnostics-pills">
-						{pillEntries.map((entry) => (
-							<span className="workflow-diagnostics-pill" key={entry}>{entry}</span>
-						))}
+
+				{requirementReportStats.length > 0 && (
+					<div className="requirement-report-table-wrapper">
+						<table className="requirement-report-table">
+							<thead>
+								<tr>
+									{requirementReportStats.map((stat) => (
+										<th key={stat.label} scope="col">{stat.label}</th>
+									))}
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									{requirementReportStats.map((stat) => (
+										<td key={stat.label} className={stat.emphasis ? "emphasis" : ""}>
+											<strong>{stat.value}</strong>
+										</td>
+									))}
+								</tr>
+							</tbody>
+						</table>
 					</div>
 				)}
-				{warnings.length > 0 && (
-					<div className="workflow-diagnostics-block warning">
-						<strong>Warnings</strong>
-						<ul>
-							{warnings.map((warning) => <li key={warning}>{warning}</li>)}
-						</ul>
-					</div>
-				)}
-				{parserFailures.length > 0 && (
-					<div className="workflow-diagnostics-block alert">
-						<strong>Parser issues</strong>
-						<ul>
-							{parserFailures.map((failure) => <li key={failure}>{failure}</li>)}
-						</ul>
-					</div>
+
+				{requirementReportDetailCount > 0 && (
+					<details className="requirement-report-details">
+						<summary>
+							<span>Workflow notes</span>
+							<span className="requirement-report-details-count">{requirementReportDetailCount} item{requirementReportDetailCount === 1 ? "" : "s"}</span>
+						</summary>
+						<div className="requirement-report-details-body">
+							{requirementBlockingIssues.length > 0 && (
+								<div className="requirement-report-detail-block issue">
+									<strong>Blocking issues</strong>
+									<ul>
+										{requirementBlockingIssues.slice(0, 4).map((issue) => <li key={issue}>{issue}</li>)}
+									</ul>
+								</div>
+							)}
+
+							{requirementWarnings.length > 0 && (
+								<div className="requirement-report-detail-block warning">
+									<strong>Warnings</strong>
+									<ul>
+										{requirementWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+									</ul>
+								</div>
+							)}
+
+							{requirementParserFailures.length > 0 && (
+								<div className="requirement-report-detail-block alert">
+									<strong>Parser issues</strong>
+									<ul>
+										{requirementParserFailures.map((failure) => <li key={failure}>{failure}</li>)}
+									</ul>
+								</div>
+							)}
+						</div>
+					</details>
 				)}
 			</div>
 		);
@@ -1059,35 +897,8 @@ export default function App() {
 		}));
 	}, [currentUser?.email, azureDevOpsConnected]);
 
-	useEffect(() => {
-		if (!isSignInDialogOpen) {
-			return undefined;
-		}
-
-		const handleKeyDown = (event) => {
-			if (event.key === "Escape") {
-				closeSignInDialog();
-			}
-		};
-
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [isSignInDialogOpen, isAuthenticating]);
-
-	useEffect(() => {
-		if (!isSettingsDialogOpen) {
-			return undefined;
-		}
-
-		const handleKeyDown = (event) => {
-			if (event.key === "Escape") {
-				closeSettingsDialog();
-			}
-		};
-
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [isSettingsDialogOpen]);
+	useEscapeToClose(isSignInDialogOpen, closeSignInDialog);
+	useEscapeToClose(isSettingsDialogOpen, closeSettingsDialog);
 
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = { ...(options.headers || {}) };
@@ -2322,17 +2133,8 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			
-			// Download the file
-			const blob = await res.blob();
-			const url = window.URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
 			const extensions = { csv: "csv", excel: "xlsx", json: "json" };
-			a.download = `test_cases.${extensions[format] || format}`;
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			window.URL.revokeObjectURL(url);
+			await downloadResponseBlob(res, `test_cases.${extensions[format] || format}`);
 			setStatus(`✓ Exported to ${format.toUpperCase()} successfully`);
 		} catch (error) {
 			setStatus(`Export failed: ${error.message}`);
@@ -2492,177 +2294,34 @@ export default function App() {
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
-	const billingContactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
-	const billingStatusItems = billingEntitlements
-		? [
-			{ key: "plan", label: "Plan", value: formatPlanLabel(billingEntitlements.account?.plan_tier), variant: "neutral" },
-			...(billingEntitlements.account?.plan_tier === "pilot"
-				? [
-					{ key: "requirementsRemaining", label: "Req left", value: normalizeUsageMetric(billingEntitlements.requirements?.remaining), variant: billingEntitlements.requirements?.exhausted ? "alert" : "default" },
-					{ key: "testCasesRemaining", label: "TC left", value: normalizeUsageMetric(billingEntitlements.test_cases?.remaining), variant: billingEntitlements.test_cases?.exhausted ? "alert" : "default" },
-				]
-				: []),
-			...(billingEntitlements.account?.plan_tier !== "pilot"
-				? [{ key: "walletBalance", label: billingEntitlements.account?.plan_tier === "enterprise" ? "Allocation" : "Credits", value: billingEntitlements.wallet?.balance_token_display || "0", variant: normalizeUsageMetric(billingEntitlements.wallet?.balance_units) > 0 ? "default" : "alert" }]
-				: []),
-		]
-		: [];
-	const statusUsageItems = usageSummary
-		? USAGE_STATUS_ITEMS.map((item) => ({
-			...item,
-			value: normalizeUsageMetric(usageSummary[item.key]),
-			variant: "default",
-		}))
-		: [];
+	const {
+		billingContactEmail,
+		billingStatusItems,
+		statusUsageItems,
+		pilotAlert,
+	} = useBillingStatus(billingEntitlements, usageSummary);
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
-	const pilotAlert = (() => {
-		if (!billingEntitlements || billingEntitlements.account?.plan_tier !== "pilot") {
-			return null;
-		}
-
-		const requirementsRemaining = normalizeUsageMetric(billingEntitlements.requirements?.remaining);
-		const testCasesRemaining = normalizeUsageMetric(billingEntitlements.test_cases?.remaining);
-		const exhaustedFamilies = [];
-		const lowFamilies = [];
-
-		if (billingEntitlements.requirements?.exhausted) {
-			exhaustedFamilies.push("requirements");
-		} else if (requirementsRemaining <= PILOT_WARNING_THRESHOLD) {
-			lowFamilies.push(`${requirementsRemaining} requirement actions left`);
-		}
-
-		if (billingEntitlements.test_cases?.exhausted) {
-			exhaustedFamilies.push("test cases");
-		} else if (testCasesRemaining <= PILOT_WARNING_THRESHOLD) {
-			lowFamilies.push(`${testCasesRemaining} test-case actions left`);
-		}
-
-		if (!exhaustedFamilies.length && !lowFamilies.length && !billingEntitlements.shadow_mode) {
-			return null;
-		}
-
-		if (billingEntitlements.shadow_mode) {
-			return {
-				variant: "preview",
-				title: "Billing preview is active",
-				message: exhaustedFamilies.length
-					? `Pilot limits would block ${exhaustedFamilies.join(" and ")} once enforcement is enabled.`
-					: lowFamilies.length
-						? `Pilot balances are informational for now: ${lowFamilies.join(" • ")}.`
-						: "Pilot balances are being calculated in shadow mode before hard enforcement is switched on.",
-			};
-		}
-
-		if (exhaustedFamilies.length) {
-			return {
-				variant: "locked",
-				title: `Pilot limit reached for ${exhaustedFamilies.join(" and ")}`,
-				message: "Upgrade to premium or contact support to keep processing those workflows.",
-			};
-		}
-
-		if (lowFamilies.length) {
-			return {
-				variant: "warning",
-				title: "Pilot quota running low",
-				message: lowFamilies.join(" • "),
-			};
-		}
-
-		return null;
-	})();
 
 	return (
 		<div className="page">
-			<header className="header">
-				<div>
-					<h1 className="title">Agentic Test Case Generator</h1>
-					<p className="subtitle">
-						A guided pipeline to parse requirements, enrich context, generate test cases,
-						and export polished artifacts.
-					</p>
-				</div>
-				<div className="header-right">
-					<div className={`status ${isAuthenticated ? "status-authenticated" : ""}`}>
-						<strong>Status:</strong>
-						<span className="status-message">{status || "Idle"}</span>
-						{isAuthenticated && (
-							<div className="status-usage" aria-label="Current user usage summary">
-								{billingStatusItems.length > 0 ? (
-									billingStatusItems.map((item) => (
-										<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
-											<span className="status-usage-pill-label">{item.label}</span>
-											<span className="status-usage-pill-value">{item.value}</span>
-										</span>
-									))
-								) : null}
-								{statusUsageItems.length > 0 ? (
-									statusUsageItems.map((item) => (
-										<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
-											<span className="status-usage-pill-label">{item.label}</span>
-											<span className="status-usage-pill-value">{item.value}</span>
-										</span>
-									))
-								) : null}
-								{isUsageLoading || isBillingLoading ? (
-									<span className="status-usage-loading">Loading usage…</span>
-								) : null}
-							</div>
-						)}
-					</div>
-					<button
-						type="button"
-						className="settings-open-btn"
-						data-testid="settings-open-button"
-						onClick={() => openSettingsDialog("workflow")}
-						aria-label="Open settings"
-					>
-						<span aria-hidden="true">⚙</span>
-						Settings
-					</button>
-					<div className="auth-panel">
-						{isVerifyingSession ? (
-							<span className="auth-message">Checking session...</span>
-						) : isAuthenticated ? (
-							<div className="auth-user">
-								{currentUser?.picture && (
-									<img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />
-								)}
-								<div className="auth-user-meta">
-									<strong>{currentUser?.name}</strong>
-									<span>{currentUser?.email || getAuthProviderLabel(currentUser?.provider) || currentUser?.sub}</span>
-								</div>
-								<button
-									type="button"
-									onClick={handleLogout}
-									className="secondary auth-logout-btn"
-									disabled={isAuthenticating}
-								>
-									{isAuthenticating ? "Signing out..." : "Sign Out"}
-								</button>
-							</div>
-						) : hasFirebaseAuthConfig && hasVisibleAuthProviders ? (
-							<div className="auth-login">
-								<button type="button" onClick={openSignInDialog} disabled={isAuthenticating}>
-									{isAuthenticating && currentAuthProviderLabel
-										? `Signing in with ${currentAuthProviderLabel}...`
-										: isAuthenticating
-											? "Signing in..."
-											: "Sign In"}
-								</button>
-							</div>
-						) : hasFirebaseAuthConfig ? (
-							<span className="auth-message auth-config-missing">
-								No Firebase sign-in providers are currently available.
-							</span>
-						) : (
-							<span className="auth-message auth-config-missing">
-								Set the VITE_FIREBASE_* variables to enable Firebase sign-in.
-							</span>
-						)}
-					</div>
-				</div>
-			</header>
+			<AppHeader
+				status={status}
+				isAuthenticated={isAuthenticated}
+				billingStatusItems={billingStatusItems}
+				statusUsageItems={statusUsageItems}
+				isUsageLoading={isUsageLoading}
+				isBillingLoading={isBillingLoading}
+				onOpenSettings={() => openSettingsDialog("workflow")}
+				isVerifyingSession={isVerifyingSession}
+				currentUser={currentUser}
+				getAuthProviderLabel={getAuthProviderLabel}
+				handleLogout={handleLogout}
+				isAuthenticating={isAuthenticating}
+				hasFirebaseAuthConfig={hasFirebaseAuthConfig}
+				hasVisibleAuthProviders={hasVisibleAuthProviders}
+				openSignInDialog={openSignInDialog}
+				currentAuthProviderLabel={currentAuthProviderLabel}
+			/>
 
 			{!isAuthenticated && !isVerifyingSession && (
 				<div className="auth-warning-banner">
@@ -2670,76 +2329,25 @@ export default function App() {
 				</div>
 			)}
 
-			{isAuthenticated && pilotAlert && (
-				<div className={`billing-banner billing-banner-${pilotAlert.variant}`}>
-					<div>
-						<strong>{pilotAlert.title}</strong>
-						<span>{pilotAlert.message}</span>
-					</div>
-					<a href={`mailto:${billingContactEmail}`} className="billing-banner-link">Contact {billingContactEmail}</a>
-				</div>
-			)}
 
-			{isSignInDialogOpen && (
-				<div className="auth-dialog-overlay" onClick={handleSignInDialogOverlayClick}>
-					<div
-						className="auth-dialog"
-						role="dialog"
-						aria-modal="true"
-						aria-labelledby="auth-dialog-title"
-						onClick={(event) => event.stopPropagation()}
-					>
-						<div className="auth-dialog-header">
-							<div>
-								<h2 id="auth-dialog-title">Choose a sign-in method</h2>
-								<p>Select one provider to continue into the workspace.</p>
-							</div>
-							<button
-								type="button"
-								className="auth-dialog-close"
-								onClick={closeSignInDialog}
-								disabled={isAuthenticating}
-								aria-label="Close sign-in dialog"
-							>
-								×
-							</button>
-						</div>
-						<div className="auth-provider-list">
-							{visibleFirebaseAuthProviders.map((provider) => (
-								<button
-									key={provider.id}
-									type="button"
-									className={`auth-provider-option auth-provider-option--${provider.buttonVariant || provider.id}`}
-									onClick={() => handleProviderSignIn(provider.id)}
-									disabled={isAuthenticating}
-								>
-									<span className="auth-provider-option-icon" aria-hidden="true">
-										<AuthProviderIcon providerId={provider.id} />
-									</span>
-									<span className="auth-provider-option-label">
-										{provider.buttonText || `Sign in with ${provider.label}`}
-									</span>
-								</button>
-							))}
-						</div>
-					</div>
-				</div>
-			)}
+			<BillingBanner
+				isAuthenticated={isAuthenticated}
+				pilotAlert={pilotAlert}
+				billingContactEmail={billingContactEmail}
+			/>
+
+			<SignInDialog
+				isOpen={isSignInDialogOpen}
+				onOverlayClick={handleSignInDialogOverlayClick}
+				onClose={closeSignInDialog}
+				isAuthenticating={isAuthenticating}
+				providers={visibleFirebaseAuthProviders}
+				onProviderSignIn={handleProviderSignIn}
+			/>
 
 			{renderSettingsDialog()}
 
-			<div className="tabs">
-				{tabs.map((tab) => (
-					<button
-						key={tab.id}
-						className={`tab ${activeTab === tab.id ? "active" : ""}`}
-						onClick={() => setActiveTab(tab.id)}
-					>
-						<span className="tab-number">{tab.id + 1}</span>
-						<span className="tab-label">{tab.label}</span>
-					</button>
-				))}
-			</div>
+			<WorkflowTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
 
 			<div className="tab-content">
 				{activeTab === 0 && (
@@ -2748,31 +2356,21 @@ export default function App() {
 						<p className="panel-description">
 							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA or Azure DevOps.
 						</p>
-						<div className="source-toggle" role="tablist" aria-label="Requirement source selector">
-							<button
-								type="button"
-								className={`source-toggle-btn ${requirementSourceMode === "file" ? "active" : ""}`}
-								onClick={() => setRequirementSourceMode("file")}
-							>
-								<span className="source-toggle-title">File upload</span>
-								<span className="source-toggle-copy">Markdown, Word, or Excel requirements</span>
-							</button>
-							<button
-								type="button"
-								className={`source-toggle-btn ${requirementSourceMode === "jira" ? "active" : ""}`}
-								onClick={() => setRequirementSourceMode("jira")}
-							>
-								<span className="source-toggle-title">JIRA Cloud</span>
-								<span className="source-toggle-copy">Import epics and child issues, then sync updates back</span>
-							</button>
-							<button
-								type="button"
-								className={`source-toggle-btn ${requirementSourceMode === "azure_devops" ? "active" : ""}`}
-								onClick={() => setRequirementSourceMode("azure_devops")}
-							>
-								<span className="source-toggle-title">Azure DevOps</span>
-								<span className="source-toggle-copy">Import work items and sync managed requirement updates</span>
-							</button>
+						<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
+							{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
+								<label key={option.value} className={`choice-card ${requirementSourceMode === option.value ? "selected" : ""}`}>
+									<input
+										type="radio"
+										name="requirement-source"
+										value={option.value}
+										checked={requirementSourceMode === option.value}
+										onChange={() => setRequirementSourceMode(option.value)}
+									/>
+									<span className="choice-card-copy">
+										<span className="choice-card-title">{option.label}</span>
+									</span>
+								</label>
+							))}
 						</div>
 
 						{requirementSourceMode === "file" ? (
@@ -2848,28 +2446,46 @@ export default function App() {
 									</div>
 
 									{jiraIssueResults.length > 0 ? (
-										<div className="jira-issue-results">
-											{jiraIssueResults.map((issue) => {
-												const selected = selectedJiraIssueKey === issue.key;
-												return (
-													<button
-														type="button"
-														key={issue.issue_id || issue.key}
-														className={`jira-issue-card ${selected ? "selected" : ""}`}
-														onClick={() => setSelectedJiraIssueKey(issue.key)}
-													>
-														<div className="jira-issue-card-header">
-															<strong>{issue.key}</strong>
-															<span>{issue.issue_type}</span>
-														</div>
-														<div className="jira-issue-card-title">{issue.summary}</div>
-														<div className="jira-issue-card-meta">
-															{issue.parent_key ? <span>Parent {issue.parent_key}</span> : null}
-															{issue.status ? <span>{issue.status}</span> : null}
-														</div>
-													</button>
-												);
-											})}
+										<div className="selection-table-wrapper">
+											<table className="selection-table">
+												<thead>
+													<tr>
+														<th>Select</th>
+														<th>Issue</th>
+														<th>Summary</th>
+														<th>Type</th>
+														<th>Status</th>
+														<th>Parent</th>
+													</tr>
+												</thead>
+												<tbody>
+													{jiraIssueResults.map((issue) => {
+														const selected = selectedJiraIssueKey === issue.key;
+														return (
+															<tr
+																key={issue.issue_id || issue.key}
+																className={selected ? "selected" : ""}
+																onClick={() => setSelectedJiraIssueKey(issue.key)}
+															>
+																<td>
+																	<input
+																		type="radio"
+																		name="jira-issue-selection"
+																		checked={selected}
+																		onChange={() => setSelectedJiraIssueKey(issue.key)}
+																		aria-label={`Select JIRA issue ${issue.key}`}
+																	/>
+																</td>
+																<td><strong>{issue.key}</strong></td>
+																<td>{issue.summary}</td>
+																<td>{issue.issue_type || "—"}</td>
+																<td>{issue.status || "—"}</td>
+																<td>{issue.parent_key || "—"}</td>
+															</tr>
+														);
+													})}
+												</tbody>
+											</table>
 										</div>
 									) : (
 										<span className="helper-text">Search visible issues in the selected project to choose an import source.</span>
@@ -2942,28 +2558,46 @@ export default function App() {
 									</div>
 
 									{azureDevOpsWorkItemResults.length > 0 ? (
-										<div className="jira-issue-results">
-											{azureDevOpsWorkItemResults.map((workItem) => {
-												const selected = `${selectedAzureDevOpsWorkItemId}` === `${workItem.work_item_id}`;
-												return (
-													<button
-														type="button"
-														key={workItem.work_item_id}
-														className={`jira-issue-card ${selected ? "selected" : ""}`}
-														onClick={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
-													>
-														<div className="jira-issue-card-header">
-															<strong>#{workItem.work_item_id}</strong>
-															<span>{workItem.work_item_type}</span>
-														</div>
-														<div className="jira-issue-card-title">{workItem.title}</div>
-														<div className="jira-issue-card-meta">
-															{workItem.parent_id ? <span>Parent #{workItem.parent_id}</span> : null}
-															{workItem.state ? <span>{workItem.state}</span> : null}
-														</div>
-													</button>
-												);
-											})}
+										<div className="selection-table-wrapper">
+											<table className="selection-table">
+												<thead>
+													<tr>
+														<th>Select</th>
+														<th>Work item</th>
+														<th>Title</th>
+														<th>Type</th>
+														<th>State</th>
+														<th>Parent</th>
+													</tr>
+												</thead>
+												<tbody>
+													{azureDevOpsWorkItemResults.map((workItem) => {
+														const selected = `${selectedAzureDevOpsWorkItemId}` === `${workItem.work_item_id}`;
+														return (
+															<tr
+																key={workItem.work_item_id}
+																className={selected ? "selected" : ""}
+																onClick={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
+															>
+																<td>
+																	<input
+																		type="radio"
+																		name="azure-devops-work-item-selection"
+																		checked={selected}
+																		onChange={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
+																		aria-label={`Select Azure DevOps work item ${workItem.work_item_id}`}
+																	/>
+																</td>
+																<td><strong>#{workItem.work_item_id}</strong></td>
+																<td>{workItem.title}</td>
+																<td>{workItem.work_item_type || "—"}</td>
+																<td>{workItem.state || "—"}</td>
+																<td>{workItem.parent_id ? `#${workItem.parent_id}` : "—"}</td>
+															</tr>
+														);
+													})}
+												</tbody>
+											</table>
 										</div>
 									) : (
 										<span className="helper-text">Search visible work items in the selected project to choose an import source.</span>
@@ -2979,10 +2613,26 @@ export default function App() {
 							</div>
 						)}
 
-						<div className="result-section">
-							<h3>Raw Text</h3>
-							<pre>{rawText || "No content yet"}</pre>
-						</div>
+
+						{rawText && (
+							<div className="result-section compact-result-section">
+								<details className="collapsible-panel raw-text-panel">
+									<summary className="collapsible-panel-summary">
+										<span className="collapsible-panel-copy">
+											<span className="collapsible-panel-title">Raw extracted text</span>
+											<span className="collapsible-panel-description">Open only when you need to inspect parser input.</span>
+										</span>
+										<span className="collapsible-panel-meta">
+											<span className="analysis-summary-pill">{rawText.length.toLocaleString()} chars</span>
+											<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+										</span>
+									</summary>
+									<div className="collapsible-panel-body">
+										<pre className="raw-text-pre">{rawText}</pre>
+									</div>
+								</details>
+							</div>
+						)}
 
 						<div className="result-section">
 							<h3>Requirement Review Workbench</h3>
@@ -3009,62 +2659,99 @@ export default function App() {
 												</div>
 												<span className="analysis-summary-pill">{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}</span>
 											</div>
-											<ul className="requirements-list contextual">
-												{group.requirements.map((req) => {
-													const reviewStatus = getRequirementReviewStatus(req);
-													const qualityFlags = normalizeStringArray(req.quality_flags);
-													return (
-														<li key={req.id || req.text || req.__index}>
-															<div className="requirement-review-card-header">
-																<div className="requirement-item-copy">
-																	<strong>{req.id || `REQ-${req.__index + 1}`}:</strong> {req.text || req.title || ""}
-																</div>
-																<span className={`requirement-source-badge status-${reviewStatus.toLowerCase().replace(/\s/g, "-")}`}>{reviewStatus}</span>
-															</div>
-															<div className="requirement-source-meta">
-																{req.source_issue_key ? <span className="requirement-source-badge">{getRequirementSourceLabel(req)} {req.source_system === "azure_devops" ? `#${req.source_issue_key}` : req.source_issue_key}</span> : null}
-																{req.source_issue_type ? <span className="requirement-source-badge subtle">{req.source_issue_type}</span> : null}
-																{req.source_section ? <span className="requirement-source-badge subtle">{req.source_section}</span> : null}
-																{req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key ? <span className="requirement-source-badge warning">Sync target {req.source_system === "azure_devops" ? `#${req.sync_target_issue_key}` : req.sync_target_issue_key}</span> : null}
-															</div>
-															<div className="requirement-review-actions">
-																{REQUIREMENT_REVIEW_STATUSES.filter((statusOption) => statusOption !== "Draft").map((statusOption) => (
-																	<button
-																		type="button"
-																		key={`${req.id}-${statusOption}`}
-																		className={`requirement-review-action ${reviewStatus === statusOption ? "active" : ""}`}
-																		onClick={() => updateRequirementReviewStatus(req.id, statusOption)}
-																	>
-																		{statusOption}
-																	</button>
-																))}
-															</div>
-															<div className="requirement-quality-flags">
-																<span>Quality flags:</span>
-																{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
-																	<button
-																		type="button"
-																		key={`${req.id}-${flag}`}
-																		className={`quality-flag-chip ${qualityFlags.includes(flag) ? "active" : ""}`}
-																		onClick={() => toggleRequirementQualityFlag(req.id, flag)}
-																	>
-																		{flag}
-																	</button>
-																))}
-															</div>
-															{req.source_excerpt ? (
-																<details className="requirement-evidence">
-																	<summary>Source evidence</summary>
-																	<p>{req.source_excerpt}</p>
-																	{req.source_issue_url ? <a href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a> : null}
-																</details>
-															) : req.source_issue_url ? (
-																<a className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a>
-															) : null}
-														</li>
-													);
-												})}
-											</ul>
+											<div className="requirement-table-wrapper">
+												<table className="requirement-review-table">
+													<thead>
+														<tr>
+															<th>Epic</th>
+															<th>Issue</th>
+															<th>ID / Source</th>
+															<th>Requirement</th>
+															<th>Review source</th>
+															<th>Review status</th>
+															<th>Quality flags</th>
+														</tr>
+													</thead>
+													<tbody>
+														{group.requirements.map((req) => {
+															const reviewStatus = getRequirementReviewStatus(req);
+															const qualityFlags = normalizeStringArray(req.quality_flags);
+															const requirementId = req.id || `REQ-${req.__index + 1}`;
+															const epicCell = getRequirementEpicCell(req, group.label);
+															const issueCell = getRequirementIssueCell(req);
+															const sourceLabel = getRequirementSourceLabel(req);
+															const hasSyncTarget = req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key;
+															return (
+																<tr key={req.id || req.text || req.__index} className={`requirement-row status-${reviewStatus.toLowerCase().replace(/\s/g, "-")}`}>
+																	<td className="requirement-epic-cell">
+																		<span className="cell-primary">{epicCell.primary}</span>
+																		{epicCell.secondary ? <span className="cell-secondary">{epicCell.secondary}</span> : null}
+																	</td>
+																	<td className="requirement-issue-cell">
+																		<span className="cell-primary">{issueCell.primary}</span>
+																		{issueCell.secondary ? <span className="cell-secondary">{issueCell.secondary}</span> : null}
+																	</td>
+																	<td className="requirement-id-cell">
+																		<strong>{requirementId}</strong>
+																		<span className="requirement-source-system">{sourceLabel}</span>
+																	</td>
+																	<td className="requirement-text-cell">
+																		<div className="requirement-item-copy">{req.text || req.title || ""}</div>
+																	</td>
+																	<td className="requirement-review-source-cell">
+																		{req.source_excerpt ? (
+																			<details className="requirement-evidence compact">
+																				<summary>Source evidence</summary>
+																				<p>{req.source_excerpt}</p>
+																				{req.source_issue_url ? <a href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a> : null}
+																			</details>
+																		) : req.source_issue_url ? (
+																			<a className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a>
+																		) : req.source_path || req.source_section ? (
+																			<span className="cell-secondary">{req.source_path || req.source_section}</span>
+																		) : (
+																			<span className="cell-muted">—</span>
+																		)}
+																		{hasSyncTarget ? (
+																			<div className="requirement-source-meta compact">
+																				<span className="requirement-source-badge warning">Sync target {formatSourceIssueKey(req, req.sync_target_issue_key)}</span>
+																			</div>
+																		) : null}
+																	</td>
+																	<td className="requirement-status-cell">
+																		<select
+																			value={reviewStatus}
+																			onChange={(event) => updateRequirementReviewStatus(req.id, event.target.value)}
+																			aria-label={`Review status for ${requirementId}`}
+																		>
+																			{REQUIREMENT_REVIEW_STATUSES.map((statusOption) => (
+																				<option key={`${requirementId}-${statusOption}`} value={statusOption}>{statusOption}</option>
+																			))}
+																		</select>
+																	</td>
+																	<td className="requirement-flags-cell">
+																		<details className="requirement-quality-details">
+																			<summary>{qualityFlags.length ? `${qualityFlags.length} flag${qualityFlags.length === 1 ? "" : "s"}` : "Add flags"}</summary>
+																			<div className="quality-flag-checklist">
+																				{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
+																					<label key={`${req.id}-${flag}`}>
+																						<input
+																							type="checkbox"
+																							checked={qualityFlags.includes(flag)}
+																							onChange={() => toggleRequirementQualityFlag(req.id, flag)}
+																						/>
+																						<span>{flag}</span>
+																					</label>
+																				))}
+																			</div>
+																		</details>
+																	</td>
+																</tr>
+															);
+														})}
+													</tbody>
+												</table>
+											</div>
 										</div>
 									))}
 								</div>
@@ -3253,42 +2940,7 @@ export default function App() {
 							</div>
 						)}
 
-						{requirementReview && (
-							<div className={`review-banner ${requirementReview.approved ? "review-approved" : "review-needs-work"}`}>
-								<div className="review-banner-header">
-									<strong>{requirementReview.approved ? "Requirements approved" : "Requirements need refinement"}</strong>
-									<span>Score {requirementReview.score}/{requirementReview.threshold}</span>
-								</div>
-								<p>{requirementReview.summary || "The review loop completed without a summary."}</p>
-								{!requirementReview.approved && requirementReview.blocking_issues?.length > 0 && (
-									<ul className="review-issues">
-										{requirementReview.blocking_issues.slice(0, 3).map((issue) => (
-											<li key={issue}>{issue}</li>
-										))}
-									</ul>
-								)}
-							</div>
-						)}
-
-						{requirementCoverageMetrics && (
-							<div className="workflow-metrics-panel">
-								<h3>Requirement coverage snapshot</h3>
-								<div className="workflow-diagnostics-pills">
-									<span className="workflow-diagnostics-pill">Total {requirementCoverageMetrics.total_requirements ?? 0}</span>
-									<span className="workflow-diagnostics-pill">Unique {requirementCoverageMetrics.unique_requirements ?? 0}</span>
-									<span className="workflow-diagnostics-pill">Duplicates {requirementCoverageMetrics.duplicate_requirements ?? 0}</span>
-									<span className="workflow-diagnostics-pill">Shall format {requirementCoverageMetrics.shall_format_count ?? 0}</span>
-									<span className="workflow-diagnostics-pill">Per doc {requirementCoverageMetrics.requirements_per_document ?? 0}</span>
-								</div>
-							</div>
-						)}
-
-						{renderWorkflowDiagnostics(
-							"Requirement workflow diagnostics",
-							requirementWorkflowDiagnostics,
-							appliedRequirementWorkflowSettings,
-							requirementIterationHistory,
-						)}
+						{renderRequirementReviewReport()}
 
 						{requirements.length > 0 && (
 							<div className="feedback-section">
@@ -3324,155 +2976,37 @@ export default function App() {
 				)}
 
 				{activeTab === 1 && (
-					<section className="panel">
-						<h2 className="panel-title">Context Inputs</h2>
-						<p className="panel-description">
-							Add links and references to enrich the test case generation context.
-						</p>
-						<div className="panel-form two-cols">
-							<div className="form-group">
-								<label>Application link</label>
-								<input
-									placeholder="https://your-app"
-									value={appLink}
-									onChange={(e) => setAppLink(e.target.value)}
-								/>
-							</div>
-							<div className="form-group">
-								<label>Prototype link</label>
-								<input
-									placeholder="https://prototype"
-									value={prototypeLink}
-									onChange={(e) => setPrototypeLink(e.target.value)}
-								/>
-							</div>
-							<div className="form-group">
-								<label>Diagram links</label>
-								<input
-									placeholder="Link1; Link2"
-									value={diagramLinks}
-									onChange={(e) => setDiagramLinks(e.target.value)}
-								/>
-							</div>
-							<div className="form-group">
-								<label>Image links</label>
-								<input
-									placeholder="Link1; Link2"
-									value={imageLinks}
-									onChange={(e) => setImageLinks(e.target.value)}
-								/>
-							</div>
-						</div>
-						{hasContextInputs && (
-							<div className="panel-form button-row">
-								<button
-									onClick={analyzeContext}
-									disabled={isAnalyzingContext || authActionDisabled}
-								>
-									{isAnalyzingContext ? "⏳ Analyzing..." : "Analyze Context"}
-								</button>
-								{enrichedContext && (
-									<button
-										className="secondary"
-										onClick={resetContextAnalysis}
-									>
-										Clear Analysis
-									</button>
-								)}
-							</div>
-						)}
-						{enrichedContext?.grounded_context && (
-							<div className="result-section">
-								<h3>Grounded Context</h3>
-								{(enrichedContext.grounded_context.artifact_sources || []).length > 0 && (
-									<div className="artifact-sources">
-										<h4>Artifact Sources</h4>
-										<ul className="artifact-source-list">
-											{enrichedContext.grounded_context.artifact_sources.map((source) => (
-												<li key={source.id} className="artifact-source-item">
-													<label>
-														<input
-															type="checkbox"
-															checked={selectedArtifactSourceIds.includes(source.id)}
-															onChange={(e) => {
-																setSelectedArtifactSourceIds((prev) =>
-																	e.target.checked
-																		? [...prev, source.id]
-																		: prev.filter((id) => id !== source.id)
-																);
-															}}
-														/>
-														<span>{source.url || source.id}</span>
-														{source.type && <span className="artifact-type">{source.type}</span>}
-													</label>
-												</li>
-											))}
-										</ul>
-									</div>
-								)}
-								<div className="analysis-detail-grid">
-									{(enrichedContext.grounded_context.ui_elements || []).length > 0 && (
-										<div className="analysis-detail-block">
-											<h4>UI Elements</h4>
-											<ul className="analysis-detail-list">
-												{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
-													<li key={el.id}>{el.element_type}: {el.label || el.id}</li>
-												))}
-											</ul>
-										</div>
-									)}
-									{(enrichedContext.grounded_context.workflows || []).length > 0 && (
-										<div className="analysis-detail-block">
-											<h4>Workflows</h4>
-											<ul className="analysis-detail-list">
-												{enrichedContext.grounded_context.workflows.slice(0, 4).map((workflow) => (
-													<li key={workflow.id}>{workflow.name}: {(workflow.transitions || []).join(", ") || workflow.description}</li>
-												))}
-											</ul>
-										</div>
-									)}
-								</div>
-							</div>
-						)}
-						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">Back</button>
-							<button onClick={goNext}>Next</button>
-						</div>
-					</section>
+					<ContextInputsPanel
+						appLink={appLink}
+						setAppLink={setAppLink}
+						prototypeLink={prototypeLink}
+						setPrototypeLink={setPrototypeLink}
+						diagramLinks={diagramLinks}
+						setDiagramLinks={setDiagramLinks}
+						imageLinks={imageLinks}
+						setImageLinks={setImageLinks}
+						hasContextInputs={hasContextInputs}
+						analyzeContext={analyzeContext}
+						isAnalyzingContext={isAnalyzingContext}
+						authActionDisabled={authActionDisabled}
+						enrichedContext={enrichedContext}
+						resetContextAnalysis={resetContextAnalysis}
+						selectedArtifactSourceIds={selectedArtifactSourceIds}
+						setSelectedArtifactSourceIds={setSelectedArtifactSourceIds}
+						goPrev={goPrev}
+						goNext={goNext}
+					/>
 				)}
 
 				{activeTab === 2 && (
-					<section className="panel">
-						<h2 className="panel-title">Template Setup</h2>
-						<p className="panel-description">
-							Configure the template name and output format for generated test cases.
-						</p>
-						<div className="panel-form">
-							<div className="form-group">
-								<label>Template name</label>
-								<input
-									placeholder="default"
-									value={templateName}
-									onChange={(e) => setTemplateName(e.target.value)}
-								/>
-							</div>
-							<div className="form-group">
-								<label>Template format</label>
-								<input
-									placeholder="table"
-									value={templateFormat}
-									onChange={(e) => setTemplateFormat(e.target.value)}
-								/>
-							</div>
-						</div>
-						<span className="helper-text">
-							Fields used: id, title, description, priority, type, status, preconditions, steps, expected result, test data, estimated time, automation status, component, linked requirement IDs, scenario refs, source refs, and tags.
-						</span>
-						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">Back</button>
-							<button onClick={goNext}>Next</button>
-						</div>
-					</section>
+					<TemplateSetupPanel
+						templateName={templateName}
+						setTemplateName={setTemplateName}
+						templateFormat={templateFormat}
+						setTemplateFormat={setTemplateFormat}
+						goPrev={goPrev}
+						goNext={goNext}
+					/>
 				)}
 
 				{activeTab === 3 && (
@@ -3502,7 +3036,12 @@ export default function App() {
 							<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
 								<div className="review-banner-header">
 									<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
-									<span>Score {testCaseReview.score}/{testCaseReview.threshold}</span>
+									<div className="review-banner-metrics">
+										<span className="review-metric-pill review-metric-pill-strong">{testCaseReviewMeta.scoreLabel}</span>
+										{testCaseReviewMeta.thresholdLabel && (
+											<span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>
+										)}
+									</div>
 								</div>
 								<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
 								{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
@@ -4001,48 +3540,13 @@ export default function App() {
 				)}
 
 				{activeTab === 4 && (
-					<section className="panel">
-						<h2 className="panel-title">Export Test Cases</h2>
-						<p className="panel-description">
-							Download your generated test cases as CSV, Excel, or JSON.
-						</p>
-						<div className="export-section">
-							<h3 className="section-subtitle">📥 Quick Export</h3>
-							<p className="helper-text">Download test cases directly to your computer.</p>
-							<div className="export-buttons">
-								<button 
-									className="export-btn csv" 
-									onClick={() => exportToFormat("csv")} 
-									disabled={testCases.length === 0 || isExporting || authActionDisabled}
-								>
-									<span className="export-icon">📄</span>
-									<span className="export-label">CSV</span>
-									<span className="export-desc">Excel compatible</span>
-								</button>
-								<button 
-									className="export-btn excel" 
-									onClick={() => exportToFormat("excel")} 
-									disabled={testCases.length === 0 || isExporting || authActionDisabled}
-								>
-									<span className="export-icon">📊</span>
-									<span className="export-label">Excel</span>
-									<span className="export-desc">Formatted .xlsx</span>
-								</button>
-								<button 
-									className="export-btn json" 
-									onClick={() => exportToFormat("json")} 
-									disabled={testCases.length === 0 || isExporting || authActionDisabled}
-								>
-									<span className="export-icon">🧾</span>
-									<span className="export-label">JSON</span>
-									<span className="export-desc">API/Import ready</span>
-								</button>
-							</div>
-						</div>
-						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">Back</button>
-						</div>
-					</section>
+					<ExportPanel
+						testCases={testCases}
+						isExporting={isExporting}
+						authActionDisabled={authActionDisabled}
+						exportToFormat={exportToFormat}
+						goPrev={goPrev}
+					/>
 				)}
 			</div>
 		</div>

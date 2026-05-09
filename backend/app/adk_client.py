@@ -163,6 +163,38 @@ def _heuristic_requirement_review(
     }
 
 
+def _select_merged_requirement_score(
+    normalized_model: Dict[str, Any],
+    heuristic_review: Dict[str, Any],
+    threshold: int,
+    approved: bool,
+) -> int:
+    """Choose a stable display score for merged requirement reviews.
+
+    The LLM reviewer is still authoritative for approval/findings, but its raw
+    numeric score tends to cluster around the same high-water mark. For display,
+    approved requirement sets should use the deterministic heuristic score,
+    while rejected sets should remain below the approval threshold so the UI
+    communicates the failed gate clearly.
+    """
+
+    if approved:
+        return int(heuristic_review["score"])
+
+    score_candidates = [int(heuristic_review["score"])]
+    if threshold > 0:
+        score_candidates.append(max(0, threshold - 1))
+
+    if (
+        normalized_model["score"] < threshold
+        or normalized_model["blocking_issues"]
+        or normalized_model["unmet_criteria"]
+    ):
+        score_candidates.append(int(normalized_model["score"]))
+
+    return max(0, min(score_candidates))
+
+
 def _merge_review_results(model_review: Optional[Dict[str, Any]], heuristic_review: Dict[str, Any]) -> Dict[str, Any]:
     if not model_review:
         return heuristic_review
@@ -171,10 +203,17 @@ def _merge_review_results(model_review: Optional[Dict[str, Any]], heuristic_revi
     combined_blocking = _dedupe_preserve(normalized_model["blocking_issues"] + heuristic_review["blocking_issues"])
     combined_suggestions = _dedupe_preserve(normalized_model["suggestions"] + heuristic_review["suggestions"])
     combined_unmet = _dedupe_preserve(normalized_model["unmet_criteria"] + heuristic_review["unmet_criteria"])
-    score = min(normalized_model["score"], heuristic_review["score"])
     threshold = max(normalized_model["threshold"], heuristic_review["threshold"])
-    approved = normalized_model["approved"] and heuristic_review["approved"] and not combined_blocking and score >= threshold
-    summary = " ".join(_dedupe_preserve([normalized_model["summary"], heuristic_review["summary"]]))
+    approved = normalized_model["approved"] and heuristic_review["approved"] and not combined_blocking
+    score = _select_merged_requirement_score(normalized_model, heuristic_review, threshold, approved)
+    approved = approved and score >= threshold
+
+    if approved:
+        summary = " ".join(_dedupe_preserve([normalized_model["summary"], heuristic_review["summary"]]))
+    elif normalized_model["approved"] != heuristic_review["approved"]:
+        summary = heuristic_review["summary"] or normalized_model["summary"]
+    else:
+        summary = " ".join(_dedupe_preserve([heuristic_review["summary"], normalized_model["summary"]]))
 
     return {
         "approved": approved,
