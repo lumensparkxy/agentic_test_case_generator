@@ -9,7 +9,10 @@ Area: Backend, Frontend, Platform, AI Workflow Operations
 
 - Phase 1 implemented: structured JSON backend logging, request completion/failure logs, request-context binding, and automatic frontend `X-Request-ID` injection through the shared API helper.
 - Phase 2 core workflow propagation implemented: `request_id`, `workflow_run_id`, `actor_user_id`, and `operation` now flow into requirement/test-case ADK workflow logging for direct uploads, refinements, JIRA imports, and Azure DevOps imports.
-- Not yet implemented: metrics endpoint, OpenTelemetry tracing, audit write retry/dead-letter behavior, and broader explicit instrumentation for non-agent admin/auth/reporting flows.
+- Phase 3 implemented: Prometheus-compatible `/metrics` endpoint now exposes HTTP request counts/durations, workflow run counts/durations, agent fallback counts, and audit write failure counts.
+- Phase 4 implemented: optional OpenTelemetry FastAPI tracing can be enabled with `OTEL_ENABLED=true`; incoming W3C `traceparent` IDs are surfaced as `trace_id` in request logs, `X-Trace-ID` response headers, and audit payloads.
+- Phase 5 implemented: audit writes now use bounded retry settings and record exhausted failures into a sanitized local dead-letter buffer with retry/dead-letter metrics.
+- Not yet implemented: broader explicit instrumentation for non-agent admin/auth/reporting flows and a durable external dead-letter queue for compliance deployments.
 
 ## Summary
 

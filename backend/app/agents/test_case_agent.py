@@ -43,6 +43,7 @@ from ..models import (
     WorkflowSettings,
 )
 from ..observability.logging import bind_log_context, get_log_context, reset_log_context
+from ..observability.metrics import record_agent_fallback
 from ..utils.llm_json import (
     parse_coverage_plan_json_detailed,
     parse_requirement_analysis_json_detailed,
@@ -2698,6 +2699,7 @@ def generate_test_cases(
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
+        record_agent_fallback(workflow=operation or "testcases.generate", reason="fallback_generated_artifacts")
         raw_test_cases = _fallback_raw_test_cases(payload.requirements, payload.context, coverage_plan=coverage_plan)
         fallback_review = _heuristic_test_case_review(
             raw_test_cases,
@@ -2782,6 +2784,7 @@ def refine_test_cases(
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if not workflow.get("test_cases"):
         logging.warning("[TestCase Workflow] Refinement returned no test cases, restoring previous set")
+        record_agent_fallback(workflow=operation or "testcases.refine", reason="restored_previous_test_cases")
         fallback_review = _heuristic_test_case_review(
             raw_test_cases,
             payload.requirements,

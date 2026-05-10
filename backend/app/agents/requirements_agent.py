@@ -4,6 +4,7 @@ import re
 from pydantic import ValidationError
 from ..models import Requirement, WorkflowSettings
 from ..config import get_settings
+from ..observability.metrics import record_agent_fallback
 from ..adk_client import (
     DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     DEFAULT_REQUIREMENT_THRESHOLD,
@@ -55,6 +56,7 @@ def extract_requirements(
     
     # Fallback to heuristic if ADK fails
     logging.warning("ADK extraction returned empty; using enhanced heuristic fallback.")
+    record_agent_fallback(workflow=operation or "requirements.parse", reason="heuristic_requirements_fallback")
     candidates = _heuristic_extract(text)
     requirements = _finalize_requirements(candidates)
     fallback_workflow = _build_fallback_workflow(
@@ -106,6 +108,7 @@ def refine_requirements(
     
     # Fallback: return original requirements if refinement fails
     logging.warning("ADK refinement returned empty; returning original requirements.")
+    record_agent_fallback(workflow=operation or "requirements.refine", reason="restored_original_requirements")
     requirements = _convert_to_requirements(existing_requirements)
     fallback_workflow = _build_fallback_workflow(
         requirements=requirements,
