@@ -20,6 +20,7 @@ from google.genai import types
 from .agents.adk_runtime import json_generation_config, text_generation_config, tool_generation_config
 from .agents.prompting import REAL_WORLD_QA_POLICY, REQUIREMENT_PROMPT_GUARDRAILS, human_feedback_section
 from .models import RequirementsOutput, ReviewResult, WorkflowSettings
+from .observability.logging import bind_log_context, get_log_context, reset_log_context
 from .utils.genai_response import extract_response_text
 from .utils.llm_json import extract_json, parse_requirements_json_detailed, parse_review_json_detailed
 
@@ -36,8 +37,20 @@ APPROVAL_PHRASE = "APPROVED"
 
 
 def _log_requirement_workflow(event_type: str, **fields: Any) -> None:
-    payload = {"event": event_type, **fields}
+    payload = {**get_log_context(), "event": event_type, **fields}
     logging.info("[Requirement Workflow] %s", json.dumps(payload, sort_keys=True, default=str))
+
+
+def _requirement_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    operation = kwargs.get("operation")
+    if not operation:
+        operation = "requirements.refine" if kwargs.get("existing_requirements") is not None else "requirements.parse"
+    return {
+        "request_id": kwargs.get("request_id"),
+        "workflow_run_id": kwargs.get("workflow_run_id"),
+        "actor_user_id": kwargs.get("actor_user_id"),
+        "operation": operation,
+    }
 
 
 def _dedupe_preserve(items: List[str]) -> List[str]:
@@ -568,6 +581,9 @@ async def _run_requirement_workflow_async(
     document_count: int = 1,
     workflow_settings: Optional[WorkflowSettings] = None,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_requirement_workflow_settings(workflow_settings, max_iterations=max_iterations)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_REQUIREMENT_THRESHOLD)
@@ -864,6 +880,14 @@ Human feedback:
 
 
 def _run_requirement_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
+    context_token = bind_log_context(**_requirement_workflow_context(kwargs))
+    try:
+        return _run_requirement_workflow_sync_inner(**kwargs)
+    finally:
+        reset_log_context(context_token)
+
+
+def _run_requirement_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
     resolved_settings = _resolve_requirement_workflow_settings(
         kwargs.get("workflow_settings"),
         max_iterations=kwargs.get("max_iterations", DEFAULT_REQUIREMENT_MAX_ITERATIONS),
@@ -942,6 +966,9 @@ def run_requirement_extraction_workflow_sync(
     document_count: int = 1,
     workflow_settings: Optional[WorkflowSettings] = None,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
 ) -> Dict[str, Any]:
     return _run_requirement_workflow_sync(
         document_text=document_text,
@@ -950,6 +977,9 @@ def run_requirement_extraction_workflow_sync(
         document_count=document_count,
         workflow_settings=workflow_settings,
         actor_user_id=actor_user_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        operation=operation,
     )
 
 
@@ -960,6 +990,9 @@ def run_requirement_refinement_workflow_sync(
     max_iterations: int = DEFAULT_REQUIREMENT_MAX_ITERATIONS,
     workflow_settings: Optional[WorkflowSettings] = None,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
 ) -> Dict[str, Any]:
     return _run_requirement_workflow_sync(
         existing_requirements=existing_requirements,
@@ -969,6 +1002,9 @@ def run_requirement_refinement_workflow_sync(
         document_count=1,
         workflow_settings=workflow_settings,
         actor_user_id=actor_user_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        operation=operation,
     )
 
 
@@ -977,8 +1013,17 @@ def run_requirement_extraction_loop_sync(
     model: str = DEFAULT_MODEL,
     max_iterations: int = 3,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
 ) -> List[Dict[str, str]]:
-    result = run_requirement_extraction_workflow_sync(document_text, model, max_iterations, actor_user_id=actor_user_id)
+    result = run_requirement_extraction_workflow_sync(
+        document_text,
+        model,
+        max_iterations,
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+    )
     return result.get("requirements", [])
 
 
@@ -988,6 +1033,8 @@ def run_requirement_refinement_sync(
     model: str = DEFAULT_MODEL,
     max_iterations: int = 3,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     result = run_requirement_refinement_workflow_sync(
         existing_requirements,
@@ -995,6 +1042,8 @@ def run_requirement_refinement_sync(
         model,
         max_iterations,
         actor_user_id=actor_user_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
     )
     return result.get("requirements", [])
 

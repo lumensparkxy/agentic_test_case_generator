@@ -13,6 +13,17 @@ export const createRequestId = () => {
 	return `tcg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+export const ensureRequestIdHeader = (headers = {}) => {
+	const normalizedHeaders = headers instanceof Headers
+		? Object.fromEntries(headers.entries())
+		: { ...headers };
+	const hasRequestId = Object.keys(normalizedHeaders).some((headerName) => headerName.toLowerCase() === "x-request-id");
+	if (!hasRequestId) {
+		normalizedHeaders["X-Request-ID"] = createRequestId();
+	}
+	return normalizedHeaders;
+};
+
 export const parseApiError = async (res, fallbackMessage) => {
 	const text = await res.text();
 	if (!text) return fallbackMessage;

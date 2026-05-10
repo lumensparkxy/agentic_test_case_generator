@@ -302,7 +302,13 @@ async def azure_devops_import_requirements_endpoint(
         },
     )
     try:
-        workflow = await run_in_threadpool(import_requirements_from_azure_devops, current_user=current_user, payload=payload)
+        workflow = await run_in_threadpool(
+            import_requirements_from_azure_devops,
+            current_user=current_user,
+            payload=payload,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+        )
         response = RequirementsWorkflowResponse(
             source_name=workflow.get("source_name") or "Azure DevOps import",
             source_names=workflow.get("source_names") or [],

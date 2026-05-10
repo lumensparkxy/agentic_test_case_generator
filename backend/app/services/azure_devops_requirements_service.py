@@ -93,7 +93,13 @@ def search_azure_devops_work_items(
     return AzureDevOpsWorkItemSearchResponse(work_items=work_items, total=total)
 
 
-def import_requirements_from_azure_devops(*, current_user: AuthUser, payload: AzureDevOpsImportInput) -> dict[str, Any]:
+def import_requirements_from_azure_devops(
+    *,
+    current_user: AuthUser,
+    payload: AzureDevOpsImportInput,
+    request_id: str | None = None,
+    workflow_run_id: str | None = None,
+) -> dict[str, Any]:
     settings = get_azure_devops_settings()
     adapter = get_azure_devops_adapter_for_user(current_user=current_user)
     project = _resolve_project(adapter=adapter, project=payload.project)
@@ -117,7 +123,10 @@ def import_requirements_from_azure_devops(*, current_user: AuthUser, payload: Az
             item_text,
             1,
             payload.workflow_settings,
-            current_user.sub,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="requirements.import.azure_devops",
         )
         item_workflows.append((work_item, workflow))
 

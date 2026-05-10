@@ -59,7 +59,10 @@ class MainAuditLoggingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         extract.assert_called_once()
-        self.assertEqual(extract.call_args.args[3], "firebase-uid-999")
+        self.assertEqual(extract.call_args.kwargs["actor_user_id"], "firebase-uid-999")
+        self.assertTrue(extract.call_args.kwargs["request_id"])
+        self.assertEqual(extract.call_args.kwargs["workflow_run_id"], "run-parse-1")
+        self.assertEqual(extract.call_args.kwargs["operation"], "requirements.parse")
         start_run.assert_called_once()
         complete_run.assert_called_once()
         record_event.assert_called_once()
@@ -107,7 +110,10 @@ class MainAuditLoggingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         generate.assert_called_once()
-        self.assertEqual(generate.call_args.args[1], "firebase-uid-999")
+        self.assertEqual(generate.call_args.kwargs["actor_user_id"], "firebase-uid-999")
+        self.assertTrue(generate.call_args.kwargs["request_id"])
+        self.assertEqual(generate.call_args.kwargs["workflow_run_id"], "run-generate-1")
+        self.assertEqual(generate.call_args.kwargs["operation"], "testcases.generate")
         start_run.assert_called_once()
         complete_run.assert_called_once()
         record_event.assert_called_once()

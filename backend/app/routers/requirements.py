@@ -226,7 +226,10 @@ async def parse_requirements(
                 existing_reqs,
                 feedback,
                 parsed_workflow_settings,
-                current_user.sub,
+                actor_user_id=current_user.sub,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                operation="requirements.refine",
             )
             response = RequirementsWorkflowResponse(
                 source_name="refined",
@@ -334,7 +337,10 @@ async def parse_requirements(
             raw_text,
             len(source_names),
             parsed_workflow_settings,
-            current_user.sub,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="requirements.parse",
         )
         source_name = source_names[0] if len(source_names) == 1 else f"{len(source_names)} documents"
         response = RequirementsWorkflowResponse(

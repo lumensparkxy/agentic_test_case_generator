@@ -42,6 +42,7 @@ from ..models import (
     TestStep,
     WorkflowSettings,
 )
+from ..observability.logging import bind_log_context, get_log_context, reset_log_context
 from ..utils.llm_json import (
     parse_coverage_plan_json_detailed,
     parse_requirement_analysis_json_detailed,
@@ -1288,8 +1289,20 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
 
 
 def _log_test_case_workflow(event_type: str, **fields: Any) -> None:
-    payload = {"event": event_type, **fields}
+    payload = {**get_log_context(), "event": event_type, **fields}
     logging.info("[TestCase Workflow] %s", json.dumps(payload, sort_keys=True, default=str))
+
+
+def _test_case_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    operation = kwargs.get("operation")
+    if not operation:
+        operation = "testcases.refine" if kwargs.get("existing_test_cases") is not None else "testcases.generate"
+    return {
+        "request_id": kwargs.get("request_id"),
+        "workflow_run_id": kwargs.get("workflow_run_id"),
+        "actor_user_id": kwargs.get("actor_user_id"),
+        "operation": operation,
+    }
 
 
 def _append_unique_message(container: List[str], message: str) -> None:
@@ -1731,6 +1744,9 @@ async def _run_test_case_workflow_async(
     existing_test_cases: Optional[List[Dict[str, Any]]] = None,
     workflow_settings: Optional[WorkflowSettings] = None,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
@@ -2102,6 +2118,14 @@ Human feedback:
 
 
 def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
+    context_token = bind_log_context(**_test_case_workflow_context(kwargs))
+    try:
+        return _run_workflow_sync_inner(**kwargs)
+    finally:
+        reset_log_context(context_token)
+
+
+def _run_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(kwargs.get("workflow_settings"))
     attempt_total = int(resolved_settings["retry_attempts"] or 0) + 1
     last_error: Optional[Exception] = None
@@ -2641,7 +2665,13 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
     }
-def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
+def generate_test_cases(
+    payload: GenerateTestCasesInput,
+    actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
+) -> Dict[str, Any]:
     settings = get_settings()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -2656,6 +2686,9 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
         existing_test_cases=None,
         workflow_settings=payload.workflow_settings,
         actor_user_id=actor_user_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        operation=operation,
     )
 
     raw_test_cases = workflow.get("test_cases", [])
@@ -2715,7 +2748,13 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
     return _build_response(test_cases, workflow, payload.requirements, payload.context)
 
 
-def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
+def refine_test_cases(
+    payload: RefineTestCasesInput,
+    actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
+) -> Dict[str, Any]:
     settings = get_settings()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -2731,6 +2770,9 @@ def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str
         existing_test_cases=existing_test_cases,
         workflow_settings=payload.workflow_settings,
         actor_user_id=actor_user_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        operation=operation,
     )
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases

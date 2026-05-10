@@ -98,7 +98,13 @@ def search_jira_issues(
     return JiraIssueSearchResponse(issues=issues, total=total)
 
 
-def import_requirements_from_jira(*, current_user: AuthUser, payload: JiraImportInput) -> dict[str, Any]:
+def import_requirements_from_jira(
+    *,
+    current_user: AuthUser,
+    payload: JiraImportInput,
+    request_id: str | None = None,
+    workflow_run_id: str | None = None,
+) -> dict[str, Any]:
     settings = get_jira_settings()
     adapter = get_jira_adapter_for_user(current_user=current_user)
     issues = _resolve_import_issues(adapter=adapter, payload=payload, page_size=settings.issue_page_size)
@@ -116,7 +122,10 @@ def import_requirements_from_jira(*, current_user: AuthUser, payload: JiraImport
             issue_text,
             1,
             payload.workflow_settings,
-            current_user.sub,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="requirements.import.jira",
         )
         issue_workflows.append((issue, workflow))
 

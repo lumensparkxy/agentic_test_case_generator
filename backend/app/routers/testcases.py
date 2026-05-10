@@ -142,7 +142,14 @@ async def generate_test_cases_endpoint(
         metadata={"requirement_count": len(payload.requirements)},
     )
     try:
-        result = await run_in_threadpool(generate_test_cases, payload, current_user.sub)
+        result = await run_in_threadpool(
+            generate_test_cases,
+            payload,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.generate",
+        )
         response = GenerateTestCasesResponse(**result)
         event_id = _log_success(
             current_user=current_user,
@@ -213,7 +220,14 @@ async def refine_test_cases_endpoint(
         metadata={"existing_test_case_count": len(payload.test_cases)},
     )
     try:
-        result = await run_in_threadpool(refine_test_cases, payload, current_user.sub)
+        result = await run_in_threadpool(
+            refine_test_cases,
+            payload,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.refine",
+        )
         response = GenerateTestCasesResponse(**result)
         modified_count = _count_snapshot_changes(
             _test_case_snapshot(payload.test_cases),

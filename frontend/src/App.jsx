@@ -37,7 +37,7 @@ import {
 	STORAGE_AUTH_TOKEN,
 	STORAGE_AUTH_USER,
 } from "./constants/workflow";
-import { API_BASE, createRequestId, downloadResponseBlob, parseApiError } from "./services/apiClient";
+import { API_BASE, createRequestId, downloadResponseBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
 import {
 	buildAzureDevOpsConnectionForm,
 	buildJiraConnectionForm,
@@ -893,7 +893,7 @@ export default function App() {
 	useEscapeToClose(isSettingsDialogOpen, closeSettingsDialog);
 
 	const apiRequest = async (path, options = {}, authRequired = true) => {
-		const headers = { ...(options.headers || {}) };
+		const headers = ensureRequestIdHeader(options.headers || {});
 
 		if (authRequired) {
 			const token = await getCurrentAccessToken();
