@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "acquire-codebase-knowledge": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/acquire-codebase-knowledge/SKILL.md",
+      "computedHash": "06b7a3d0bb44b70b470247aacc2ffffe37c8ce64cc3f9178be6f392c81cb6d22"
+    },
+    "cloud-run-basics": {
+      "source": "google/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/cloud-run-basics/SKILL.md",
+      "computedHash": "d04d21b683f404fcd6c3b798095c0399d61e5e9d84cb913da46a09e0aa90c708"
+    },
+    "cloud-sql-basics": {
+      "source": "google/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/cloud-sql-basics/SKILL.md",
+      "computedHash": "09cfa905a960ef0c416d57fb7830cafeec554d8093341861abbdf2f9f36c440c"
+    },
+    "firebase-basics": {
+      "source": "google/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/firebase-basics/SKILL.md",
+      "computedHash": "cd410eb41f3f0c32aeb2b31ac3f665d54c700d3f40b8ec18f3e571e9687b0f13"
+    },
+    "gemini-api": {
+      "source": "google/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/gemini-api/SKILL.md",
+      "computedHash": "c8cd9e6bd860dcfeb65b6d8a3efaab8b6d93ea7ad666d24d1f4f04c7e34e116b"
+    },
+    "gke-basics": {
+      "source": "google/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/gke-basics/SKILL.md",
+      "computedHash": "7173c6f30a0d80414b87eb32c0de219d1f6a1479e40a7775da14febf94b15c46"
+    }
+  }
+}
