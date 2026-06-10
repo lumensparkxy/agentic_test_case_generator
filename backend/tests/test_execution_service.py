@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import ExecutionSettings
 from app.models import TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
+from plain_english_test_framework.compiler import compile_spec_file
 from plain_english_test_framework.local_runner import _node_resolution_env
 
 
@@ -124,6 +125,104 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('Given I open "https://playwright.dev/python/"', candidate.spec["steps"])
         self.assertIn('Then "Playwright Test" should be visible', candidate.spec["steps"])
         self.assertIn('And URL should be "https://playwright.dev/python/"', candidate.spec["steps"])
+
+    def test_preview_drops_weak_non_visual_landing_assertions(self) -> None:
+        weak_case = TestCase(
+            id="TC-WEAK",
+            title="Verify docs landing page",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action="Open https://playwright.dev/python/",
+                    expected="Landing page is visible and page loads successfully with HTTP status 200.",
+                ),
+            ],
+        )
+
+        response = preview_execution([weak_case], target_base_url="https://playwright.dev/python/")
+
+        self.assertEqual(response.summary.executable, 0)
+        self.assertEqual(response.summary.unsupported, 1)
+        self.assertEqual(response.unsupported[0].unsupported_steps[0].reason_code, "missing_assertion")
+
+    def test_preview_preserves_meaningful_assertion_after_dropping_landing_text(self) -> None:
+        docs_case = TestCase(
+            id="TC-DOC-CLI",
+            title="Verify CLI docs section",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action="Open https://playwright.dev/python/",
+                    expected="Landing page is visible.",
+                ),
+                TestStep(
+                    step=2,
+                    action="Verify the Playwright CLI section on the landing page.",
+                    expected="CLI is visible.",
+                ),
+            ],
+        )
+
+        response = preview_execution([docs_case], target_base_url="https://playwright.dev/python/")
+
+        self.assertEqual(response.summary.executable, 1)
+        generated_steps = response.executable[0].spec["steps"]
+        self.assertNotIn('Then "Landing" should be visible', generated_steps)
+        self.assertIn('Then "CLI" should be visible', generated_steps)
+
+    def test_preview_normalizes_documentation_click_labels_to_real_link_names(self) -> None:
+        docs_case = TestCase(
+            id="TC-DOC-LINK",
+            title="Navigate to Python CLI documentation",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action="Open https://playwright.dev/python/",
+                    expected='"Playwright CLI" is visible.',
+                ),
+                TestStep(
+                    step=2,
+                    action="Click link/button for Python CLI documentation on the landing page",
+                    expected="",
+                ),
+            ],
+        )
+
+        response = preview_execution([docs_case], target_base_url="https://playwright.dev/python/")
+
+        self.assertEqual(response.summary.executable, 1)
+        generated_steps = response.executable[0].spec["steps"]
+        self.assertIn('When I click "CLI documentation"', generated_steps)
+        self.assertNotIn('When I click "link/button for Python CLI documentation"', generated_steps)
+
+    def test_compiler_uses_link_role_for_documentation_clicks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "spec.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(
+                "\n".join(
+                    [
+                        "schemaVersion: '1.0'",
+                        "id: tc_docs_link",
+                        "title: Navigate to CLI documentation",
+                        "steps:",
+                        '- Given I open "https://playwright.dev/python/"',
+                        '- When I click "CLI documentation"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env_path.write_text("baseUrl: https://playwright.dev/python/\n", encoding="utf-8")
+
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        click_step = ir.raw["cases"][0]["steps"][1]
+        self.assertEqual(click_step["action"], "click")
+        self.assertEqual(click_step["locator"]["role"], "link")
 
     def test_preview_does_not_treat_launch_command_text_as_navigation(self) -> None:
         command_case = TestCase(

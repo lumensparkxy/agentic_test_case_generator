@@ -227,6 +227,7 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
 
     if match := CLICK_PATTERN.match(body):
         name = _resolve_text(match.group("name"), environment, data, path=f"$.steps[{source_step_index}]")
+        role = "link" if _looks_like_link_target(name) else "button"
         return {
             "id": _slug_identifier(f"click {name}"),
             "sourceStepIndex": source_step_index,
@@ -234,7 +235,7 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "action": "click",
             "locator": {
                 "strategy": "role",
-                "role": "button",
+                "role": role,
                 "value": name,
             },
         }
@@ -293,6 +294,10 @@ def _resolve_text(text: str, environment: Mapping[str, Any], data: Mapping[str, 
     if not isinstance(resolved, str):
         return str(resolved)
     return resolved
+
+
+def _looks_like_link_target(name: str) -> bool:
+    return bool(re.search(r"\b(?:documentation|docs|api|guide|reference|learn more|get started)\b", name, re.IGNORECASE))
 
 
 def _resolve_value(text: str, environment: Mapping[str, Any], data: Mapping[str, Any], *, path: str) -> Any:

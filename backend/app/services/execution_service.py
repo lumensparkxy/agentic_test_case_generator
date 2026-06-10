@@ -55,6 +55,28 @@ VISIBLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOADS_PATTERN = re.compile(r"(?P<text>.+?)\s+loads\s+successfully\b", re.IGNORECASE)
+NON_VISUAL_ASSERTION_PATTERN = re.compile(
+    r"\b(?:loads?\s+successfully|http\s+status|status\s+200|authentication\s+prompts?|no\s+authentication|no\s+auth)\b",
+    re.IGNORECASE,
+)
+WEAK_VISIBLE_TEXTS = {
+    "content",
+    "features",
+    "home",
+    "landing",
+    "page",
+    "screen",
+    "section",
+}
+DOCUMENTATION_LINK_LABELS = {
+    "testing documentation": "Testing documentation",
+    "test documentation": "Testing documentation",
+    "python testing documentation": "Testing documentation",
+    "cli documentation": "CLI documentation",
+    "python cli documentation": "CLI documentation",
+    "mcp documentation": "MCP documentation",
+    "python mcp documentation": "MCP documentation",
+}
 UNSUPPORTED_DOMAIN_TERMS = (
     "sap gui",
     "hana studio",
@@ -376,6 +398,9 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
         if match := URL_PATTERN.search(text):
             return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(match.group(0))}"')
 
+    if _is_non_visual_assertion(text):
+        return None
+
     if match := TEXT_EQUALS_PATTERN.search(text):
         label = _clean_label(match.group("label"))
         expected = _clean_value(match.group("expected"))
@@ -384,7 +409,10 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
 
     quoted_values = QUOTED_PATTERN.findall(text)
     if quoted_values and re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
-        return _ConvertedStep("assert_visible", f'"{_escape_step_text(quoted_values[-1])}" should be visible')
+        visible_text = _clean_visible_text(quoted_values[-1])
+        if visible_text:
+            return _ConvertedStep("assert_visible", f'"{_escape_step_text(visible_text)}" should be visible')
+        return None
 
     for pattern in (VISIBLE_PATTERN, LOADS_PATTERN):
         if match := pattern.search(text):
@@ -609,6 +637,10 @@ def _clean_label(value: str) -> str:
     normalized = _clean_value(value)
     normalized = re.sub(r"^(?:the|a|an)\s+", "", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\s+(?:field|input|button|control|link|option)$", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"^(?:link/button|button/link|link|button)\s+for\s+", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s+on\s+the\s+landing\s+page$", "", normalized, flags=re.IGNORECASE)
+    if mapped_label := DOCUMENTATION_LINK_LABELS.get(normalized.lower()):
+        return mapped_label
     return normalized.strip()
 
 
@@ -616,11 +648,19 @@ def _clean_visible_text(value: str) -> str:
     normalized = _clean_value(value)
     normalized = re.sub(r"^(?:the|a|an)\s+", "", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\b(?:page|screen|message|form|label|section)$", "", normalized, flags=re.IGNORECASE).strip()
+    if _is_non_visual_assertion(normalized):
+        return ""
+    if normalized.lower() in WEAK_VISIBLE_TEXTS:
+        return ""
     return normalized
 
 
 def _escape_step_text(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _is_non_visual_assertion(text: str) -> bool:
+    return bool(NON_VISUAL_ASSERTION_PATTERN.search(text))
 
 
 def _slug_identifier(value: str) -> str:
