@@ -6,8 +6,17 @@ from fastapi.concurrency import run_in_threadpool
 
 from ..agents.automation_agent import generate_playwright_pom
 from ..auth.jwt_auth import get_current_user
-from ..models import AuthUser, AutomationInput, AutomationResponse
+from ..models import (
+    AuthUser,
+    AutomationInput,
+    AutomationResponse,
+    ExecutionPreviewInput,
+    ExecutionPreviewResponse,
+    ExecutionRunInput,
+    ExecutionRunResponse,
+)
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
+from ..services.execution_service import preview_execution, run_execution
 
 router = APIRouter()
 
@@ -112,5 +121,114 @@ async def automation_playwright(
             billing_key="automation.playwright.generate",
             error_message=str(exc),
             metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@router.post("/automation/execution/preview", response_model=ExecutionPreviewResponse)
+async def automation_execution_preview(
+    request: Request,
+    payload: ExecutionPreviewInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> ExecutionPreviewResponse:
+    request_id = _get_request_id(request)
+    workflow_run_id = start_workflow_run(
+        operation="automation.execution.preview",
+        actor=current_user,
+        request_id=request_id,
+        metadata={"test_case_count": len(payload.test_cases)},
+    )
+    try:
+        response = await run_in_threadpool(
+            preview_execution,
+            payload.test_cases,
+            target_base_url=str(payload.target_base_url) if payload.target_base_url else None,
+        )
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.preview",
+            event_type="automation.execution.previewed",
+            billing_key="automation.execution.preview",
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            result_metadata={
+                "executable_count": response.summary.executable,
+                "manual_count": response.summary.manual,
+                "unsupported_count": response.summary.unsupported,
+                "invalid_count": response.summary.invalid,
+            },
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.preview",
+            event_type="automation.execution.previewed",
+            billing_key="automation.execution.preview",
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@router.post("/automation/execution/run", response_model=ExecutionRunResponse)
+async def automation_execution_run(
+    request: Request,
+    payload: ExecutionRunInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> ExecutionRunResponse:
+    request_id = _get_request_id(request)
+    workflow_run_id = start_workflow_run(
+        operation="automation.execution.run",
+        actor=current_user,
+        request_id=request_id,
+        metadata={
+            "test_case_count": len(payload.test_cases),
+            "selected_test_case_count": len(payload.selected_test_case_ids),
+        },
+    )
+    try:
+        response = await run_in_threadpool(
+            run_execution,
+            payload.test_cases,
+            selected_test_case_ids=payload.selected_test_case_ids,
+            target_base_url=str(payload.target_base_url) if payload.target_base_url else None,
+        )
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.run",
+            event_type="automation.execution.ran",
+            billing_key="automation.execution.run",
+            quantity=len(response.results),
+            unit="test_case",
+            result_metadata={
+                "status": response.status,
+                "run_id": response.run_id,
+                "passed_count": response.summary.passed,
+                "failed_count": response.summary.failed,
+                "invalid_count": response.summary.invalid,
+                "skipped_count": response.summary.skipped,
+            },
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.run",
+            event_type="automation.execution.ran",
+            billing_key="automation.execution.run",
+            error_message=str(exc),
+            metadata={
+                "test_case_count": len(payload.test_cases),
+                "selected_test_case_count": len(payload.selected_test_case_ids),
+            },
         )
         raise

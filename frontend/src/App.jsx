@@ -8,6 +8,7 @@ import {
 	visibleFirebaseAuthProviders,
 } from "./firebase";
 import AppHeader, { SignInDialog } from "./components/layout/AppHeader";
+import AutomationPanel from "./components/automation/AutomationPanel";
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import ExportPanel from "./components/export/ExportPanel";
 import GeneratedTestCasesView from "./components/generation/GeneratedTestCasesView";
@@ -181,6 +182,11 @@ export default function App() {
 	const [isExporting, setIsExporting] = useState(false);
 	const [draftExportOverrideRequested, setDraftExportOverrideRequested] = useState(false);
 	const [draftExportOverrideReason, setDraftExportOverrideReason] = useState("");
+	const [executionTargetBaseUrl, setExecutionTargetBaseUrl] = useState("");
+	const [executionPreview, setExecutionPreview] = useState(null);
+	const [executionRunResult, setExecutionRunResult] = useState(null);
+	const [isPreviewingExecution, setIsPreviewingExecution] = useState(false);
+	const [isRunningExecution, setIsRunningExecution] = useState(false);
 	const [authToken, setAuthToken] = useState("");
 	const [currentUser, setCurrentUser] = useState(null);
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -411,6 +417,8 @@ export default function App() {
 		setFeedback("");
 		setDraftExportOverrideRequested(false);
 		setDraftExportOverrideReason("");
+		setExecutionPreview(null);
+		setExecutionRunResult(null);
 	};
 
 	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
@@ -605,6 +613,8 @@ export default function App() {
 		setSelectedJiraIssueKey("");
 		setJiraSyncPreview(null);
 		setJiraSyncResults(null);
+		setExecutionPreview(null);
+		setExecutionRunResult(null);
 		setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
 		setAzureDevOpsConnectionForm(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
 		setAzureDevOpsProjects([]);
@@ -1487,6 +1497,8 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
+			setExecutionPreview(null);
+			setExecutionRunResult(null);
 			setReqFeedback("");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			setStatus(`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || selectedJiraIssueKey}.`);
@@ -1551,6 +1563,8 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
+			setExecutionPreview(null);
+			setExecutionRunResult(null);
 			setReqFeedback("");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			setStatus(`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || `#${selectedAzureDevOpsWorkItemId}`}.`);
@@ -1807,6 +1821,8 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
+			setExecutionPreview(null);
+			setExecutionRunResult(null);
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setReqFeedback("");
@@ -1814,6 +1830,88 @@ export default function App() {
 			setStatus(`Parse failed: ${error.message}`);
 		} finally {
 			setIsParsing(false);
+		}
+	};
+
+	const buildExecutionPayload = (casesOverride = testCases) => ({
+		test_cases: casesOverride,
+		target_base_url: executionTargetBaseUrl.trim() || appLink || null,
+	});
+
+	const previewExecution = async (casesOverride = testCases, options = {}) => {
+		const { updateStatus = true } = options;
+		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
+		if (!casesToPreview.length) {
+			if (updateStatus) {
+				setStatus("Generate test cases before previewing execution.");
+			}
+			return null;
+		}
+
+		setIsPreviewingExecution(true);
+		if (updateStatus) {
+			setStatus("Previewing execution readiness...");
+		}
+		try {
+			const res = await apiRequest("/automation/execution/preview", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(buildExecutionPayload(casesToPreview)),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to preview execution");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setExecutionPreview(data || null);
+			setExecutionRunResult(null);
+			if (updateStatus) {
+				const summary = data?.summary || {};
+				setStatus(`Execution preview ready: ${summary.executable || 0} executable, ${summary.manual || 0} manual, ${summary.unsupported || 0} unsupported.`);
+			}
+			return data;
+		} catch (error) {
+			if (updateStatus) {
+				setStatus(`Execution preview failed: ${error.message}`);
+			}
+			return null;
+		} finally {
+			setIsPreviewingExecution(false);
+		}
+	};
+
+	const runApprovedExecution = async () => {
+		const preview = executionPreview || await previewExecution(testCases, { updateStatus: false });
+		const executableCandidates = preview?.executable || [];
+		if (!executableCandidates.length) {
+			setStatus("No executable candidates are available to run.");
+			return;
+		}
+
+		setIsRunningExecution(true);
+		setStatus(`Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`);
+		try {
+			const res = await apiRequest("/automation/execution/run", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					...buildExecutionPayload(testCases),
+					selected_test_case_ids: executableCandidates.map((candidate) => candidate.source_test_case_id),
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to run execution candidates");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setExecutionRunResult(data || null);
+			setExecutionPreview(data?.preview || preview);
+			const summary = data?.summary || {};
+			setStatus(`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`);
+		} catch (error) {
+			setStatus(`Execution run failed: ${error.message}`);
+		} finally {
+			setIsRunningExecution(false);
 		}
 	};
 
@@ -1878,6 +1976,8 @@ export default function App() {
 			setActiveGenerateResultTab(chooseGenerateResultTab(data));
 			setDraftExportOverrideRequested(false);
 			setDraftExportOverrideReason("");
+			setExecutionPreview(null);
+			setExecutionRunResult(null);
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review
 				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
@@ -1885,6 +1985,9 @@ export default function App() {
 			setStatus(
 				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
 			);
+			if (generatedCount > 0) {
+				await previewExecution(data.test_cases || [], { updateStatus: false });
+			}
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setFeedback("");
 		} catch (error) {
@@ -2070,7 +2173,8 @@ export default function App() {
 		{ id: 1, label: "Context", title: "Context Inputs" },
 		{ id: 2, label: "Template", title: "Template Setup" },
 		{ id: 3, label: "Generate", title: "Generate Test Cases" },
-		{ id: 4, label: "Export", title: "Export Test Cases" }
+		{ id: 4, label: "Automation", title: "Automation" },
+		{ id: 5, label: "Export", title: "Export Test Cases" }
 	];
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
@@ -2870,6 +2974,23 @@ export default function App() {
 				)}
 
 				{activeTab === 4 && (
+					<AutomationPanel
+						testCases={testCases}
+						executionTargetBaseUrl={executionTargetBaseUrl}
+						setExecutionTargetBaseUrl={setExecutionTargetBaseUrl}
+						executionPreview={executionPreview}
+						executionRunResult={executionRunResult}
+						isPreviewingExecution={isPreviewingExecution}
+						isRunningExecution={isRunningExecution}
+						authActionDisabled={authActionDisabled}
+						previewExecution={previewExecution}
+						runApprovedExecution={runApprovedExecution}
+						goPrev={goPrev}
+						goNext={goNext}
+					/>
+				)}
+
+				{activeTab === 5 && (
 					<ExportPanel
 						testCases={testCases}
 						testCaseReview={testCaseReview}

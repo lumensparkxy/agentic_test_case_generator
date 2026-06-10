@@ -10,6 +10,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - Import and sync requirements from Azure DevOps Services work items
 - Analyze context links (app, prototype, diagrams, images) into grounded UI/API/workflow facts
 - Generate test cases from a user template with requirement-analysis, scenario-plan, and coverage diagnostics
+- Preview generated test cases for browser automation readiness and run approved executable candidates with Playwright
 - No document retention (in-memory processing only)
 
 ## Setup
@@ -37,6 +38,10 @@ Copy .env.example to .env and set values:
 - AZURE_DEVOPS_CONNECTION_SECRET_KEY (optional dedicated encryption key for stored Azure DevOps PATs; falls back to JWT_SECRET_KEY)
 - AZURE_DEVOPS_API_VERSION (optional; defaults to 7.1)
 - AZURE_DEVOPS_API_TIMEOUT_SECONDS, AZURE_DEVOPS_PROJECT_PAGE_SIZE, AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE (optional Azure DevOps client tuning)
+- EXECUTION_ENABLED (optional; defaults to true)
+- EXECUTION_ARTIFACT_ROOT (optional; defaults to `.execution_artifacts`)
+- EXECUTION_DEFAULT_BASE_URL (optional browser execution target)
+- EXECUTION_PLAYWRIGHT_CONFIG, EXECUTION_RUNTIME_CWD, EXECUTION_MAX_CASES_PER_REQUEST (optional execution runtime tuning)
 - BILLING_SHADOW_MODE (optional; defaults to true), BILLING_CONTACT_EMAIL, BILLING_ADMIN_EMAILS, BILLING_PILOT_REQUIREMENTS_LIMIT, BILLING_PILOT_TEST_CASE_LIMIT, and related billing tuning values
 
 Note: ADK expects GOOGLE_API_KEY. Configure GEMINI_API_KEY in this project; the backend normalizes it to GOOGLE_API_KEY at runtime. If both are set, GEMINI_API_KEY is preferred so the project `.env` does not get shadowed by an older shell-level GOOGLE_API_KEY.
@@ -90,6 +95,19 @@ Run UI:
 - `npm run dev` in frontend
 
 Open http://localhost:5173
+
+### 3.0.1) Install the execution runtime
+
+The Automation tab uses the backend execution runtime under `backend/execution_runtime`.
+
+- `cd backend/execution_runtime`
+- `npm ci`
+
+The Playwright config uses your installed Microsoft Edge browser by default through `channel: "msedge"`. If Edge is not already installed on the machine, install Microsoft Edge or run:
+
+- `npx playwright install msedge`
+
+Generated execution files are written under `EXECUTION_ARTIFACT_ROOT` and ignored by git. The internal handoff is generated `TestCase` JSON from the webapp, not Excel.
 
 ### 3.1) Evaluate generation quality with benchmark fixtures
 

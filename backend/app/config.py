@@ -109,6 +109,15 @@ class BillingSettings(BaseModel):
     max_overdraft_units: int = 0
 
 
+class ExecutionSettings(BaseModel):
+    enabled: bool = True
+    artifact_root: Path = REPO_ROOT / ".execution_artifacts"
+    default_base_url: str = "http://127.0.0.1:5173"
+    playwright_config_path: Path = REPO_ROOT / "backend" / "execution_runtime" / "playwright.config.ts"
+    runtime_cwd: Path = REPO_ROOT / "backend" / "execution_runtime"
+    max_cases_per_request: int = 20
+
+
 def get_cors_allow_origins() -> list[str]:
     raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
     if not raw_origins.strip():
@@ -197,6 +206,11 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
+
+
+def _resolve_repo_path(raw_value: str | Path) -> Path:
+    path = Path(raw_value)
+    return path if path.is_absolute() else REPO_ROOT / path
 
 
 def _warn_if_dependency_mismatch() -> None:
@@ -345,6 +359,40 @@ def get_billing_settings() -> BillingSettings:
             os.getenv("BILLING_MAX_OVERDRAFT_UNITS", "0"),
             default=0,
             env_name="BILLING_MAX_OVERDRAFT_UNITS",
+        ),
+    )
+
+
+@lru_cache
+def get_execution_settings() -> ExecutionSettings:
+    default_settings = ExecutionSettings()
+    artifact_root = _resolve_repo_path(
+        (os.getenv("EXECUTION_ARTIFACT_ROOT") or "").strip()
+        or default_settings.artifact_root
+    )
+    playwright_config_path = _resolve_repo_path(
+        (os.getenv("EXECUTION_PLAYWRIGHT_CONFIG") or "").strip()
+        or default_settings.playwright_config_path
+    )
+    runtime_cwd = _resolve_repo_path(
+        (os.getenv("EXECUTION_RUNTIME_CWD") or "").strip()
+        or default_settings.runtime_cwd
+    )
+    default_base_url = (
+        (os.getenv("EXECUTION_DEFAULT_BASE_URL") or "").strip()
+        or default_settings.default_base_url
+    )
+
+    return ExecutionSettings(
+        enabled=_parse_bool_env(os.getenv("EXECUTION_ENABLED", "true"), default=True),
+        artifact_root=artifact_root,
+        default_base_url=default_base_url,
+        playwright_config_path=playwright_config_path,
+        runtime_cwd=runtime_cwd,
+        max_cases_per_request=_parse_positive_int_env(
+            os.getenv("EXECUTION_MAX_CASES_PER_REQUEST", str(default_settings.max_cases_per_request)),
+            default=default_settings.max_cases_per_request,
+            env_name="EXECUTION_MAX_CASES_PER_REQUEST",
         ),
     )
 

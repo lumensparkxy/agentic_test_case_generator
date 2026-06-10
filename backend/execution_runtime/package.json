@@ -1,0 +1,12 @@
+{
+  "name": "agentic-test-case-generator-execution-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Playwright runtime for approved generated execution candidates.",
+  "scripts": {
+    "test:playwright": "playwright test --pass-with-no-tests"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
+  }
+}
