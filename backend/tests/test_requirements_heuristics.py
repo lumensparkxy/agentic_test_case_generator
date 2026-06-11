@@ -10,6 +10,27 @@ from unittest.mock import patch
 
 from app.agents.requirements_agent import _build_fallback_workflow, _finalize_requirements, _heuristic_extract, extract_requirements
 from app.models import Requirement
+from app.utils.requirements_text import normalize_requirement_payloads, normalize_requirement_text
+
+
+class RequirementTextNormalizationTests(unittest.TestCase):
+    def test_normalizes_user_capability_to_shall_format(self) -> None:
+        self.assertEqual(
+            normalize_requirement_text("Users can reset their password via email link."),
+            "The system shall allow users to reset their password via email link.",
+        )
+
+    def test_normalizes_requirement_payloads_before_quality_scoring(self) -> None:
+        normalized = normalize_requirement_payloads(
+            [
+                {"id": "auth", "text": "Users can sign in using email and password."},
+                {"id": "auth-copy", "text": "The system shall allow users to sign in using email and password."},
+            ]
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["id"], "REQ-001")
+        self.assertTrue(normalized[0]["text"].startswith("The system shall"))
 
 
 class RequirementHeuristicExtractionTests(unittest.TestCase):
