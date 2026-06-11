@@ -98,6 +98,8 @@ test.describe("Export approval gate", () => {
 		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
 		await page.getByRole("button", { name: /^Next$/ }).click();
+		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
+		await page.getByRole("button", { name: /^Next$/ }).click();
 
 		const jsonButton = page.getByRole("button", { name: /json/i }).first();
 		await expect(page.getByText(/Export locked by review gate/i)).toBeVisible();
