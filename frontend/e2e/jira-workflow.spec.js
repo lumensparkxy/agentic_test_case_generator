@@ -271,18 +271,22 @@ test.describe("JIRA requirements workflow", () => {
 		await page.getByRole("button", { name: /close settings dialog/i }).click();
 		await expect(page.getByRole("dialog", { name: /^settings$/i })).toBeHidden();
 
-		await page.getByRole("button", { name: /jira cloud/i }).click();
+		await page.getByRole("radio", { name: /jira cloud/i }).check();
+		await expect(page.getByRole("heading", { name: /import from jira/i })).toBeVisible();
 		const projectSelect = page.locator(".jira-search-grid select").first();
 		await expect(projectSelect).toContainText("PROJ — Platform Finance");
 		await expect(projectSelect).toHaveValue("PROJ");
 
 		await page.getByRole("button", { name: /^Search$/ }).click();
-		await expect(page.locator(".jira-issue-card")).toContainText(["PROJ-101"]);
-		await page.locator(".jira-issue-card", { hasText: "PROJ-101" }).click();
+		const jiraIssueOption = page.getByRole("radio", { name: /select jira issue proj-101/i });
+		await expect(jiraIssueOption).toBeVisible();
+		await jiraIssueOption.check();
 		await page.getByRole("button", { name: /Import PROJ-101/i }).click();
 
-		await expect(page.locator(".requirements-list li")).toHaveCount(2);
-		await expect(page.getByText("JIRA PROJ-101")).toHaveCount(2);
+		const requirementRows = page.locator(".requirement-review-table tbody tr");
+		await expect(requirementRows).toHaveCount(2);
+		await expect(requirementRows.nth(0)).toContainText("REQ-101");
+		await expect(requirementRows.nth(1)).toContainText("REQ-102");
 		await expect(page.getByRole("heading", { name: /jira sync preview/i })).toBeVisible();
 
 		await page.getByPlaceholder(/Enter your feedback here/i).fill("Make the approval notifications explicit and tighten the language.");
@@ -290,7 +294,9 @@ test.describe("JIRA requirements workflow", () => {
 
 		await expect(page.getByText(/duplicate checks/i)).toBeVisible();
 		await expect(page.getByText(/notification recipients/i)).toBeVisible();
-		await expect(page.getByText("JIRA PROJ-101")).toHaveCount(2);
+		await expect(requirementRows).toHaveCount(2);
+		await expect(requirementRows.nth(0)).toContainText("PROJ-101");
+		await expect(requirementRows.nth(1)).toContainText("PROJ-101");
 
 		await page.getByRole("button", { name: /preview jira update/i }).click();
 		await expect(page.getByText(/Ready 1/)).toBeVisible();

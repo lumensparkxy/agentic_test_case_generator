@@ -93,6 +93,8 @@ test.describe("Agentic Test Case Generator E2E", () => {
 		await generatedTestCasesTab.click();
 
 		await page.getByRole("button", { name: /^Next$/ }).click();
+		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
+		await page.getByRole("button", { name: /^Next$/ }).click();
 		const draftExportToggle = page.getByLabel(/export draft anyway/i);
 		if (await draftExportToggle.isVisible().catch(() => false)) {
 			await draftExportToggle.check();
