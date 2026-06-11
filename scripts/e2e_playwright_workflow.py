@@ -510,8 +510,74 @@ def step_playwright_pom(generate_result: dict) -> dict:
     return result
 
 
-def _print_summary(parse: dict, refined: dict, enriched: dict, generated: dict) -> None:
+def step_execution_report(generate_result: dict) -> dict:
+    """Step 7 – Preview executable browser specs and run selected cases when enabled."""
+    _print("\n[bold cyan]STEP 7 – Execution Preview and Report[/bold cyan]")
+
+    payload = {
+        "test_cases": generate_result.get("test_cases", []),
+        "target_base_url": PLAYWRIGHT_DOCS_URL,
+    }
+
+    status, preview = _post_json("/automation/execution/preview", payload)
+    _print(f"  Preview status: {status}")
+    if status != 200 or not isinstance(preview, dict):
+        _print(f"  [red]Preview error: {preview}[/red]")
+        return {"preview": preview, "run": None}
+
+    summary = preview.get("summary", {})
+    _print(
+        "  Preview summary: "
+        f"executable={summary.get('executable', 0)}, "
+        f"manual={summary.get('manual', 0)}, "
+        f"unsupported={summary.get('unsupported', 0)}, "
+        f"invalid={summary.get('invalid', 0)}"
+    )
+    _save_json("7a_execution_preview.json", preview)
+
+    executable = preview.get("executable", [])
+    selected_ids = [
+        str(item.get("source_test_case_id") or item.get("id"))
+        for item in executable[:5]
+        if isinstance(item, dict) and (item.get("source_test_case_id") or item.get("id"))
+    ]
+    if not selected_ids:
+        _print("  [yellow]No executable cases available for execution run.[/yellow]")
+        return {"preview": preview, "run": None}
+
+    run_payload = {
+        **payload,
+        "selected_test_case_ids": selected_ids,
+    }
+    run_status, run_result = _post_json("/automation/execution/run", run_payload)
+    _print(f"  Run status: {run_status}")
+    if run_status != 200 or not isinstance(run_result, dict):
+        _print(f"  [red]Run error: {run_result}[/red]")
+        return {"preview": preview, "run": run_result}
+
+    run_summary = run_result.get("summary", {})
+    _print(
+        "  Run summary: "
+        f"status={run_result.get('status')}, "
+        f"passed={run_summary.get('passed', 0)}, "
+        f"failed={run_summary.get('failed', 0)}, "
+        f"invalid={run_summary.get('invalid', 0)}, "
+        f"skipped={run_summary.get('skipped', 0)}"
+    )
+    if artifacts_root := run_result.get("artifacts_root"):
+        _print(f"  Artifacts root: {artifacts_root}")
+
+    _save_json("7b_execution_run.json", run_result)
+    return {"preview": preview, "run": run_result}
+
+
+def _print_summary(parse: dict, refined: dict, enriched: dict, generated: dict, execution: dict | None = None) -> None:
     """Final consolidated summary."""
+    execution = execution or {}
+    execution_preview = execution.get("preview") if isinstance(execution, dict) else None
+    execution_run = execution.get("run") if isinstance(execution, dict) else None
+    preview_summary = execution_preview.get("summary", {}) if isinstance(execution_preview, dict) else {}
+    run_summary = execution_run.get("summary", {}) if isinstance(execution_run, dict) else {}
     _print("\n")
     _panel(
         "WORKFLOW COMPLETE – Summary",
@@ -520,6 +586,10 @@ def _print_summary(parse: dict, refined: dict, enriched: dict, generated: dict) 
             f"Requirements refined  : {len(refined.get('requirements', []))}",
             f"Requirements enriched : {len(enriched.get('requirements', []))}",
             f"Test cases generated  : {len(generated.get('test_cases', []))}",
+            f"Executable preview    : {preview_summary.get('executable', 0)} executable, "
+            f"{preview_summary.get('unsupported', 0)} unsupported, {preview_summary.get('invalid', 0)} invalid",
+            f"Execution run         : {execution_run.get('status', 'not run') if isinstance(execution_run, dict) else 'not run'} "
+            f"({run_summary.get('passed', 0)} passed, {run_summary.get('failed', 0)} failed)",
             f"",
             f"Output directory      : {OUTPUT_DIR}",
             f"Files produced:",
@@ -531,6 +601,8 @@ def _print_summary(parse: dict, refined: dict, enriched: dict, generated: dict) 
             f"  5b_test_cases.xlsx – Excel export",
             f"  5c_test_cases.json – JSON export",
             f"  6_playwright_pom.py– Playwright POM stubs",
+            f"  7a_execution_preview.json – executable case preview",
+            f"  7b_execution_run.json     – execution report when enabled",
         ]),
         style="green",
     )
@@ -583,8 +655,11 @@ def main() -> None:
     # Step 6 – Playwright POM stubs
     step_playwright_pom(generated_result)
 
+    # Step 7 – Execution preview/report
+    execution_result = step_execution_report(generated_result)
+
     # Final summary
-    _print_summary(parse_result, refined_result, enriched_result, generated_result)
+    _print_summary(parse_result, refined_result, enriched_result, generated_result, execution_result)
 
 
 if __name__ == "__main__":

@@ -115,8 +115,19 @@ class GroundedUIElement(BaseModel):
     id: str
     source_id: Optional[str] = None
     name: str
-    element_type: Literal["Page", "Form", "Field", "Button", "Message", "Filter", "Navigation", "Other"] = "Other"
+    element_type: Literal[
+        "Page",
+        "Heading",
+        "Form",
+        "Field",
+        "Button",
+        "Message",
+        "Filter",
+        "Navigation",
+        "Other",
+    ] = "Other"
     description: str
+    href: Optional[str] = None
 
 
 class GroundedApiSurface(BaseModel):

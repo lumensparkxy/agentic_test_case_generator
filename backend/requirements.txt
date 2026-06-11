@@ -7,6 +7,7 @@ pydantic>=2.12.5
 python-dotenv>=1.0.1
 PyYAML>=6.0.3
 jsonschema>=4.25.1
+certifi>=2026.5.20
 google-auth>=2.40.0
 firebase-admin>=6.8.0
 PyJWT>=2.10.1

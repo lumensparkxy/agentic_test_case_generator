@@ -19,7 +19,9 @@ PLACEHOLDER_PATTERN = re.compile(r"\{(?P<namespace>env|data)\.(?P<path>[A-Za-z_]
 STEP_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+(?P<body>.+)$")
 OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into "(?P<label>[^"]+)"$')
+CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
+HEADING_VISIBLE_PATTERN = re.compile(r'^heading "(?P<text>[^"]+)" should be visible$')
 VISIBLE_PATTERN = re.compile(r'^"(?P<text>[^"]+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
 URL_EQUALS_PATTERN = re.compile(r'^URL should be "(?P<url>[^"]+)"$')
@@ -225,6 +227,20 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "value": value,
         }
 
+    if match := CLICK_LINK_PATTERN.match(body):
+        name = _resolve_text(match.group("name"), environment, data, path=f"$.steps[{source_step_index}]")
+        return {
+            "id": _slug_identifier(f"click link {name}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "click",
+            "locator": {
+                "strategy": "role",
+                "role": "link",
+                "value": name,
+            },
+        }
+
     if match := CLICK_PATTERN.match(body):
         name = _resolve_text(match.group("name"), environment, data, path=f"$.steps[{source_step_index}]")
         return {
@@ -236,6 +252,20 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
                 "strategy": "role",
                 "role": "button",
                 "value": name,
+            },
+        }
+
+    if match := HEADING_VISIBLE_PATTERN.match(body):
+        text = _resolve_text(match.group("text"), environment, data, path=f"$.steps[{source_step_index}]")
+        return {
+            "id": _slug_identifier(f"assert heading {text}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_visible",
+            "locator": {
+                "strategy": "role",
+                "role": "heading",
+                "value": text,
             },
         }
 
