@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
@@ -13,7 +15,9 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import ExecutionSettings
 from app.models import TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
+from plain_english_test_framework.compiler import compile_spec_file
 from plain_english_test_framework.local_runner import _node_resolution_env
+from plain_english_test_framework.playwright_generator import generate_playwright_spec
 
 
 def _browser_case(case_id: str = "TC-001") -> TestCase:
@@ -65,6 +69,30 @@ def _documentation_case(case_id: str = "TC-DOC") -> TestCase:
                 step=3,
                 action="Scan the text content and feature list within the Playwright Test section.",
                 expected="The text explicitly describes auto-waiting and assertions.",
+            ),
+        ],
+    )
+
+
+def _link_navigation_case(case_id: str = "TC-LINK") -> TestCase:
+    return TestCase(
+        id=case_id,
+        title="Navigate to exact documentation link",
+        description="Checks link-role navigation generated from grounded context.",
+        priority="Medium",
+        type="E2E",
+        status="Ready",
+        automation_status="Automated",
+        component="Documentation",
+        tags=["docs"],
+        linked_requirement_ids=["REQ-DOC-LINK"],
+        source_refs=["ART-APP-01"],
+        steps=[
+            TestStep(step=1, action="Open https://playwright.dev/python/", expected='"Get started" is visible'),
+            TestStep(
+                step=2,
+                action='Click the "Get started" link',
+                expected='URL is exactly "https://playwright.dev/python/docs/intro"',
             ),
         ],
     )
@@ -124,6 +152,57 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('Given I open "https://playwright.dev/python/"', candidate.spec["steps"])
         self.assertIn('Then "Playwright Test" should be visible', candidate.spec["steps"])
         self.assertIn('And URL should be "https://playwright.dev/python/"', candidate.spec["steps"])
+
+    def test_preview_and_compiler_preserve_link_role_clicks(self) -> None:
+        response = preview_execution([_link_navigation_case()], target_base_url="https://playwright.dev/python/")
+
+        self.assertEqual(response.summary.executable, 1)
+        candidate = response.executable[0]
+        self.assertIn('When I click link "Get started"', candidate.spec["steps"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "link_case.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://playwright.dev/python/"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        click_step = next(step for step in ir.raw["cases"][0]["steps"] if step["action"] == "click")
+        self.assertEqual(click_step["locator"]["role"], "link")
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("link", { name: "Get started" }).click();', generated)
+
+    def test_preview_and_compiler_preserve_heading_role_assertions(self) -> None:
+        heading_case = TestCase(
+            id="TC-HEADING",
+            title="Assert exact documentation heading",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action="Open https://playwright.dev/python/docs/running-tests",
+                    expected='heading "Running and debugging tests" is visible',
+                )
+            ],
+        )
+
+        response = preview_execution([heading_case], target_base_url="https://playwright.dev/python/")
+        candidate = response.executable[0]
+        self.assertIn('Then heading "Running and debugging tests" should be visible', candidate.spec["steps"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "heading_case.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://playwright.dev/python/"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        assertion_step = next(step for step in ir.raw["cases"][0]["steps"] if step["action"] == "assert_visible")
+        self.assertEqual(assertion_step["locator"]["role"], "heading")
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("heading", { name: "Running and debugging tests" })', generated)
 
     def test_preview_does_not_treat_launch_command_text_as_navigation(self) -> None:
         command_case = TestCase(

@@ -1,8 +1,11 @@
 import ipaddress
+import ssl
 from typing import Any, Dict, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+import certifi
 
 MAX_FETCH_BYTES = 512 * 1024
 FETCH_TIMEOUT_SECONDS = 8
@@ -64,7 +67,7 @@ def fetch_artifact(
     )
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout, context=ssl.create_default_context(cafile=certifi.where())) as response:
             content_type_header = response.headers.get("Content-Type", "")
             content_type = content_type_header.split(";", 1)[0].strip().lower() or None
             payload = response.read(max_bytes + 1)

@@ -1387,6 +1387,7 @@ def _build_review_loop(
     7. Priority, type, status, and automation status are valid.
     8. Test data, preconditions, and overall expected_result are present when needed.
     9. Human feedback has been addressed.
+    10. Browser/documentation cases use exact grounded headings, link names, and hrefs when grounded context provides them.
 
 **Response Rules:**
 - Return ONLY a JSON object with this exact shape:
@@ -1497,8 +1498,10 @@ def _build_generation_pipeline(
 6. Include detailed steps, expected results, realistic priorities, and execution metadata.
 7. Keep each test case centered on one primary scenario from the coverage plan.
 8. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
-9. Never return `steps` as a single string, markdown list, or paragraph.
-10. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+9. For browser or documentation workflows, assertions MUST prefer exact grounded headings, visible text, accessible link names, and hrefs from the context instead of inferred marketing phrases or synthetic labels.
+10. Navigation steps MUST use real accessible link text from grounded context or direct href URLs; never invent labels such as "link/button for ...".
+11. Never return `steps` as a single string, markdown list, or paragraph.
+12. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -1561,8 +1564,9 @@ Rules:
 4. Ensure each test case includes a scenario tag formatted like scenario:happy-path.
 5. Preserve or improve any grounded-context `source_refs` when grounded context is available.
 6. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
-7. Never return `steps` as a plain string, markdown list, or free-form paragraph.
-8. Output ONLY the JSON object.
+7. For browser or documentation workflows, replace inferred assertions or synthetic click labels with exact grounded headings, accessible link names, and hrefs from the context whenever available.
+8. Never return `steps` as a plain string, markdown list, or free-form paragraph.
+9. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,
@@ -2068,8 +2072,11 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
                 context_parts.append(f"Grounded artifact sources: {sources}")
             if grounded_context.ui_elements:
                 ui_elements = ", ".join(
-                    f"{element.element_type}: {element.name}"
-                    for element in grounded_context.ui_elements[:8]
+                    (
+                        f"{element.element_type}: exact text \"{element.name}\""
+                        + (f" -> {element.href}" if getattr(element, "href", None) else "")
+                    )
+                    for element in grounded_context.ui_elements[:12]
                 )
                 context_parts.append(f"Grounded UI elements: {ui_elements}")
             if grounded_context.api_surfaces:
@@ -2088,6 +2095,213 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
 
     template_text = f"Name: {template.name}, Format: {template.format}, Fields: {', '.join(template.fields)}"
     return requirements_text, context_text, template_text
+
+
+GROUNDING_STOPWORDS = {
+    "about",
+    "after",
+    "allow",
+    "allows",
+    "and",
+    "are",
+    "before",
+    "can",
+    "for",
+    "from",
+    "into",
+    "shall",
+    "should",
+    "system",
+    "test",
+    "tests",
+    "that",
+    "the",
+    "their",
+    "this",
+    "to",
+    "using",
+    "user",
+    "users",
+    "via",
+    "when",
+    "with",
+}
+
+
+def _grounded_sources(context: Optional[Any]) -> List[Any]:
+    grounded_context = getattr(context, "grounded_context", None) if context else None
+    return list(getattr(grounded_context, "artifact_sources", []) or [])
+
+
+def _grounded_ui_elements(context: Optional[Any]) -> List[Any]:
+    grounded_context = getattr(context, "grounded_context", None) if context else None
+    return list(getattr(grounded_context, "ui_elements", []) or [])
+
+
+def _tokenize_grounding_text(value: Any) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+        if len(token) > 2 and token not in GROUNDING_STOPWORDS
+    }
+
+
+def _score_grounded_text(requirement_tokens: set[str], *values: Any) -> int:
+    candidate_tokens: set[str] = set()
+    for value in values:
+        candidate_tokens.update(_tokenize_grounding_text(value))
+    return len(requirement_tokens & candidate_tokens)
+
+
+def _source_url(source: Any) -> str:
+    return str(getattr(source, "url", "") or "").strip()
+
+
+def _select_grounded_source(requirement: Requirement, context: Optional[Any]) -> Any | None:
+    all_sources = [source for source in _grounded_sources(context) if getattr(source, "id", None)]
+    elements = _grounded_ui_elements(context)
+    sources = [
+        source
+        for source in all_sources
+        if _source_url(source)
+        or any(str(getattr(element, "source_id", "") or "") == str(getattr(source, "id", "") or "") for element in elements)
+    ]
+    if not sources:
+        return None
+
+    requirement_tokens = _tokenize_grounding_text(requirement.text)
+
+    def score(source: Any) -> int:
+        source_id = str(getattr(source, "id", "") or "")
+        related_elements = [element for element in elements if str(getattr(element, "source_id", "") or "") == source_id]
+        values: List[Any] = [
+            source_id,
+            getattr(source, "label", ""),
+            _source_url(source),
+            getattr(source, "notes", ""),
+        ]
+        for element in related_elements:
+            values.extend([getattr(element, "name", ""), getattr(element, "description", ""), getattr(element, "href", "")])
+        return _score_grounded_text(requirement_tokens, *values)
+
+    return max(sources, key=score)
+
+
+def _elements_for_source(context: Optional[Any], source_id: str, element_type: str) -> List[Any]:
+    return [
+        element
+        for element in _grounded_ui_elements(context)
+        if str(getattr(element, "source_id", "") or "") == source_id
+        and str(getattr(element, "element_type", "") or "") == element_type
+    ]
+
+
+def _select_grounded_element(requirement: Requirement, elements: List[Any]) -> Any | None:
+    if not elements:
+        return None
+    requirement_tokens = _tokenize_grounding_text(requirement.text)
+    return max(
+        elements,
+        key=lambda element: _score_grounded_text(
+            requirement_tokens,
+            getattr(element, "name", ""),
+            getattr(element, "description", ""),
+            getattr(element, "href", ""),
+        ),
+    )
+
+
+def _fallback_context_url(context: Optional[Any]) -> str:
+    for attr_name in ("app_link", "prototype_link"):
+        value = getattr(context, attr_name, None) if context else None
+        if value:
+            return str(value)
+    return ""
+
+
+def _grounded_browser_step_details(requirement: Requirement, context: Optional[Any]) -> Dict[str, Any] | None:
+    source = _select_grounded_source(requirement, context)
+    if not source:
+        return None
+
+    source_id = str(getattr(source, "id", "") or "").strip()
+    if not source_id:
+        return None
+
+    headings = _elements_for_source(context, source_id, "Heading")
+    navigation_links = [element for element in _elements_for_source(context, source_id, "Navigation") if getattr(element, "href", None)]
+    heading = _select_grounded_element(requirement, headings)
+    navigation = _select_grounded_element(requirement, navigation_links)
+    source_url = _source_url(source)
+    target_url = str(source_url or getattr(navigation, "href", "") or _fallback_context_url(context)).strip()
+
+    if not target_url and not heading:
+        return None
+
+    assertion_text = str(getattr(heading, "name", "") or getattr(navigation, "name", "") or "").strip()
+    if not assertion_text:
+        return None
+
+    source_label = str(getattr(source, "label", "") or "Grounded artifact").strip()
+    return {
+        "source_id": source_id,
+        "source_label": source_label,
+        "target_url": target_url,
+        "assertion_text": assertion_text,
+        "navigation_name": str(getattr(navigation, "name", "") or "").strip(),
+    }
+
+
+def _fallback_steps_for_grounded_browser_requirement(
+    requirement: Requirement,
+    scenario_type: str,
+    context: Optional[Any],
+) -> List[Dict[str, Any]] | None:
+    details = _grounded_browser_step_details(requirement, context)
+    if not details:
+        return None
+
+    assertion_text = details["assertion_text"]
+    target_url = details["target_url"]
+    steps: List[Dict[str, Any]] = []
+    if target_url:
+        steps.append(
+            {
+                "step": 1,
+                "action": f"Open {target_url}",
+                "expected": f'heading "{assertion_text}" is visible',
+                "test_data": f"source:{details['source_id']}",
+            }
+        )
+
+    steps.append(
+        {
+            "step": len(steps) + 1,
+            "action": f'Record the exact grounded heading "{assertion_text}".',
+            "expected": f'heading "{assertion_text}" is visible',
+            "test_data": None,
+        }
+    )
+
+    if details.get("navigation_name") and target_url:
+        steps.append(
+            {
+                "step": len(steps) + 1,
+                "action": f'Record the grounded navigation reference "{details["navigation_name"]}".',
+                "expected": "The real accessible link name is documented for traceability without inventing a label.",
+                "test_data": f"href:{target_url}",
+            }
+        )
+
+    steps.append(
+        {
+            "step": len(steps) + 1,
+            "action": "Record the observed browser behavior for this scenario.",
+            "expected": f"The observed page behavior supports the {scenario_type.lower()} coverage objective for {requirement.id}.",
+            "test_data": None,
+        }
+    )
+    return steps
 
 
 def _fallback_raw_test_cases(
@@ -2113,6 +2327,15 @@ def _fallback_raw_test_cases(
 
         for scenario_offset, scenario in enumerate(selected_scenarios, start=1):
             scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
+            grounded_details = _grounded_browser_step_details(requirement, context)
+            grounded_steps = _fallback_steps_for_grounded_browser_requirement(requirement, scenario_type, context)
+            source_refs = [grounded_details["source_id"]] if grounded_details else grounded_source_refs
+            component = grounded_details["source_label"] if grounded_details else "General"
+            expected_result = (
+                f'Exact grounded browser text "{grounded_details["assertion_text"]}" is verified for {requirement.id}.'
+                if grounded_details
+                else f"Requirement {requirement.id} is satisfied for the planned {scenario_type.lower()} scenario."
+            )
             raw_test_cases.append(
                 {
                     "id": f"TC-{len(raw_test_cases) + 1:03d}",
@@ -2122,7 +2345,7 @@ def _fallback_raw_test_cases(
                     "type": "Functional",
                     "status": "Draft",
                     "preconditions": context.notes if context else None,
-                    "steps": [
+                    "steps": grounded_steps or [
                         {
                             "step": 1,
                             "action": f"Navigate to the feature area that implements {requirement.id}",
@@ -2142,13 +2365,13 @@ def _fallback_raw_test_cases(
                             "test_data": None,
                         },
                     ],
-                    "expected_result": f"Requirement {requirement.id} is satisfied for the planned {scenario_type.lower()} scenario.",
+                    "expected_result": expected_result,
                     "test_data": None,
                     "estimated_time": "5 mins",
                     "automation_status": "To Be Automated",
-                    "component": "General",
+                    "component": component,
                     "tags": [requirement.id, _scenario_tag(scenario_type), "generated", f"plan:{idx:02d}-{scenario_offset:02d}"],
-                    "source_refs": grounded_source_refs,
+                    "source_refs": source_refs,
                 }
             )
     return raw_test_cases

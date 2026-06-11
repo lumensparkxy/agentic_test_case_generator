@@ -16,6 +16,7 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 - [#10](https://github.com/lumensparkxy/agentic_test_case_generator/issues/10) — Phase 2: add context analysis preview and review controls to the UI
 - [#11](https://github.com/lumensparkxy/agentic_test_case_generator/issues/11) — Phase 2: expand backend and E2E regression coverage
 - [#15](https://github.com/lumensparkxy/agentic_test_case_generator/issues/15) — Validate Playwright docs E2E workflow through reporting
+- [#16](https://github.com/lumensparkxy/agentic_test_case_generator/issues/16) — Improve generated browser assertions for documentation workflows
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 

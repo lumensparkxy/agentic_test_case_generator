@@ -11,12 +11,13 @@ from app.services.context_grounding import build_grounded_context, extract_api_s
 
 
 class ContextGroundingTests(unittest.TestCase):
-    def test_extract_ui_elements_from_html_discovers_headings_buttons_and_fields(self) -> None:
+    def test_extract_ui_elements_from_html_discovers_headings_links_buttons_and_fields(self) -> None:
         html = """
         <html>
           <head><title>Login</title></head>
           <body>
             <h1>Sign In</h1>
+            <a href="/docs/getting-started">Get started</a>
             <form>
               <input name=\"email\" />
               <button>Submit</button>
@@ -25,13 +26,17 @@ class ContextGroundingTests(unittest.TestCase):
         </html>
         """
 
-        elements = extract_ui_elements_from_html("ART-APP-01", html)
+        elements = extract_ui_elements_from_html("ART-APP-01", html, base_url="https://example.com/app")
 
         element_names = [element.name for element in elements]
         self.assertIn("Login", element_names)
         self.assertIn("Sign In", element_names)
+        self.assertIn("Get started", element_names)
         self.assertIn("Submit", element_names)
         self.assertIn("email", element_names)
+        navigation = next(element for element in elements if element.name == "Get started")
+        self.assertEqual(navigation.element_type, "Navigation")
+        self.assertEqual(navigation.href, "https://example.com/docs/getting-started")
 
     def test_extract_api_surfaces_from_json_reads_openapi_paths(self) -> None:
         raw_json = '{"paths": {"/health": {"get": {"summary": "Health check"}}}}'

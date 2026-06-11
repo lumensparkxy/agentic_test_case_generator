@@ -43,7 +43,7 @@ FILL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CLICK_PATTERN = re.compile(
-    r"\b(?:click|press|tap|select)\b\s+(?:the\s+)?(?P<name>.+?)(?:\s+(?:button|control|link|option))?\.?$",
+    r"\b(?:click|press|tap|select)\b\s+(?:the\s+)?(?P<name>.+?)(?:\s+(?P<role>button|control|link|option))?\.?$",
     re.IGNORECASE,
 )
 TEXT_EQUALS_PATTERN = re.compile(
@@ -52,6 +52,10 @@ TEXT_EQUALS_PATTERN = re.compile(
 )
 VISIBLE_PATTERN = re.compile(
     r"(?P<text>.+?)\s+(?:is|are|should be)\s+(?:displayed|visible|shown|present)\b",
+    re.IGNORECASE,
+)
+HEADING_VISIBLE_PATTERN = re.compile(
+    r"\bheading\s+['\"](?P<text>[^'\"]+)['\"]\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
     re.IGNORECASE,
 )
 LOADS_PATTERN = re.compile(r"(?P<text>.+?)\s+loads\s+successfully\b", re.IGNORECASE)
@@ -357,7 +361,11 @@ def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:
     elif match := CLICK_PATTERN.search(action):
         name = _clean_label(match.group("name"))
         if name:
-            converted.append(_ConvertedStep("click", f'I click "{_escape_step_text(name)}"'))
+            role = str(match.group("role") or "").lower()
+            if role == "link":
+                converted.append(_ConvertedStep("click", f'I click link "{_escape_step_text(name)}"'))
+            else:
+                converted.append(_ConvertedStep("click", f'I click "{_escape_step_text(name)}"'))
     elif assertion := _convert_assertion(action):
         converted.append(assertion)
     elif lookup_assertion := _convert_visual_lookup(action):
@@ -375,6 +383,11 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
     if re.search(r"\bURL\b", text, re.IGNORECASE):
         if match := URL_PATTERN.search(text):
             return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(match.group(0))}"')
+
+    if match := HEADING_VISIBLE_PATTERN.search(text):
+        heading_text = _clean_value(match.group("text"))
+        if heading_text:
+            return _ConvertedStep("assert_visible", f'heading "{_escape_step_text(heading_text)}" should be visible')
 
     if match := TEXT_EQUALS_PATTERN.search(text):
         label = _clean_label(match.group("label"))

@@ -1,6 +1,8 @@
 import json
 import re
+from html import unescape
 from typing import Callable, List
+from urllib.parse import urljoin
 
 from ..models import ArtifactSource, EnrichInput, GroundedApiSurface, GroundedContext, GroundedUIElement, GroundedWorkflow
 from .artifact_fetcher import fetch_artifact
@@ -9,10 +11,37 @@ FetchArtifactFn = Callable[[str], dict]
 
 
 def _strip_html(text: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text or "")).strip()
+    normalized = re.sub(r"<[^>]+>", " ", unescape(text or ""))
+    normalized = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
-def extract_ui_elements_from_html(source_id: str, html_text: str) -> List[GroundedUIElement]:
+def _html_attr(attrs: str, name: str) -> str:
+    match = re.search(rf"\b{name}\s*=\s*(['\"])(.*?)\1", attrs, re.IGNORECASE | re.DOTALL)
+    if match:
+        return unescape(match.group(2)).strip()
+
+    unquoted = re.search(rf"\b{name}\s*=\s*([^\s>]+)", attrs, re.IGNORECASE)
+    return unescape(unquoted.group(1)).strip() if unquoted else ""
+
+
+def _normalize_link_href(href: str, base_url: str | None) -> str:
+    normalized = href.strip()
+    if not normalized or normalized.startswith("#"):
+        return ""
+    if re.match(r"^(?:javascript|mailto|tel):", normalized, re.IGNORECASE):
+        return ""
+    if base_url:
+        return urljoin(base_url, normalized)
+    return normalized
+
+
+def extract_ui_elements_from_html(
+    source_id: str,
+    html_text: str,
+    *,
+    base_url: str | None = None,
+) -> List[GroundedUIElement]:
     elements: List[GroundedUIElement] = []
 
     title_match = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.IGNORECASE | re.DOTALL)
@@ -35,14 +64,39 @@ def extract_ui_elements_from_html(source_id: str, html_text: str) -> List[Ground
             continue
         elements.append(
             GroundedUIElement(
-                id=f"{source_id}-UI-H-{index:02d}",
+                    id=f"{source_id}-UI-H-{index:02d}",
+                    source_id=source_id,
+                    name=label,
+                    element_type="Heading",
+                    description=f"Heading extracted from artifact: {label}",
+                )
+            )
+        if index >= 4:
+            break
+
+    for index, link in enumerate(
+        re.finditer(r"<a\b(?P<attrs>[^>]*)>(?P<label>.*?)</a>", html_text, re.IGNORECASE | re.DOTALL),
+        start=1,
+    ):
+        label = _strip_html(link.group("label"))
+        href = _normalize_link_href(_html_attr(link.group("attrs"), "href"), base_url)
+        if not label and not href:
+            continue
+        name = label or href
+        description = f"Navigation link extracted from artifact: {name}"
+        if href:
+            description = f"{description} -> {href}"
+        elements.append(
+            GroundedUIElement(
+                id=f"{source_id}-UI-L-{index:02d}",
                 source_id=source_id,
-                name=label,
-                element_type="Page",
-                description=f"Heading extracted from artifact: {label}",
+                name=name,
+                element_type="Navigation",
+                description=description,
+                href=href or None,
             )
         )
-        if index >= 4:
+        if index >= 12:
             break
 
     for index, button in enumerate(re.findall(r"<button[^>]*>(.*?)</button>", html_text, re.IGNORECASE | re.DOTALL), start=1):
@@ -191,7 +245,7 @@ def build_grounded_context(payload: EnrichInput, fetcher: FetchArtifactFn = fetc
         text = str(result.get("text") or "")
         content_type = str(result.get("content_type") or "")
         if "html" in content_type:
-            ui_elements.extend(extract_ui_elements_from_html(source.id, text))
+            ui_elements.extend(extract_ui_elements_from_html(source.id, text, base_url=str(source.url) if source.url else None))
         if "json" in content_type:
             api_surfaces.extend(extract_api_surfaces_from_json(source.id, text))
 
