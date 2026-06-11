@@ -43,6 +43,12 @@ from ..utils.llm_json import (
     parse_review_json_detailed,
     parse_test_cases_json_detailed,
 )
+from ..utils.workflow_diagnostics import (
+    has_retryable_parser_failure,
+    mark_retryable_parser_failure,
+    public_workflow_diagnostics,
+    retry_reason,
+)
 
 STATE_TEST_CASES = "current_test_cases"
 STATE_VALIDATION_FEEDBACK = "validation_feedback"
@@ -1230,16 +1236,26 @@ def _append_unique_message(container: List[str], message: str) -> None:
         container.append(value)
 
 
-def _record_parser_failure(diagnostics: Dict[str, Any], author: str, error: Optional[str]) -> None:
+def _record_parser_failure(
+    diagnostics: Dict[str, Any],
+    author: str,
+    error: Optional[str],
+    *,
+    retryable: bool = False,
+) -> None:
     if not error:
         return
-    _append_unique_message(diagnostics["parser_failures"], f"{author}: {error}")
+    message = f"{author}: {error}"
+    _append_unique_message(diagnostics["parser_failures"], message)
     diagnostics["status"] = "partial"
     diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+    if retryable:
+        mark_retryable_parser_failure(diagnostics, message)
     _log_test_case_workflow(
         "parser_failure",
         author=author,
         error=error,
+        retryable=retryable,
         parser_failure_count=len(diagnostics["parser_failures"]),
         status=diagnostics["status"],
     )
@@ -1733,7 +1749,7 @@ Human feedback:
                 if author == "TestCaseValidatorAgent":
                     parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
                     if not parsed_review:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, retryable=True)
                         continue
 
                     model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
@@ -1860,7 +1876,7 @@ Human feedback:
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Test case validation completed.")
     elif str(state_review_raw).strip():
-        _record_parser_failure(diagnostics, "SessionStateValidationReview", state_review_error)
+        _record_parser_failure(diagnostics, "SessionStateValidationReview", state_review_error, retryable=True)
 
     heuristic_review = _heuristic_test_case_review(
         current_test_cases,
@@ -1994,6 +2010,16 @@ def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
                 )
                 continue
 
+            if has_retryable_parser_failure(diagnostics) and attempt < attempt_total:
+                _log_test_case_workflow(
+                    "workflow_retry",
+                    attempt=attempt,
+                    attempt_total=attempt_total,
+                    retry_reason=retry_reason(diagnostics),
+                )
+                continue
+
+            result["workflow_diagnostics"] = public_workflow_diagnostics(diagnostics)
             return result
         except Exception as exc:
             last_error = exc
@@ -2750,7 +2776,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "requirement_analysis": requirement_analysis,
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
-        "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
+        "workflow_diagnostics": public_workflow_diagnostics(dict(workflow.get("workflow_diagnostics") or {})),
     }
 def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)

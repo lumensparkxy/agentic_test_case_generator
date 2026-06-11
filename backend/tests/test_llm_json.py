@@ -163,6 +163,33 @@ class DetailedPayloadParserTests(unittest.TestCase):
         self.assertEqual(parsed, [])
         self.assertEqual(error, "test_cases list was empty")
 
+    def test_test_case_parser_extracts_json_from_fenced_large_payload(self) -> None:
+        payload = """
+        The generated suite follows.
+
+        ```json
+        {
+          "test_cases": [
+            {
+              "id": "TC-001",
+              "title": "Sign in succeeds",
+              "steps": [
+                {"step": 1, "action": "Open the sign-in page", "expected": "The form is visible"}
+              ]
+            }
+          ]
+        }
+        ```
+
+        End of response.
+        """
+
+        parsed, error = parse_test_cases_json_detailed(payload)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["id"], "TC-001")
+
 
 if __name__ == "__main__":
     unittest.main()

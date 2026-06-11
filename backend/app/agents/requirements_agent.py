@@ -9,6 +9,8 @@ from ..adk_client import (
     run_requirement_extraction_workflow_sync,
     run_requirement_refinement_workflow_sync,
 )
+from ..utils.requirements_text import clean_requirement_text, normalize_requirement_text
+from ..utils.workflow_diagnostics import public_workflow_diagnostics
 
 MAX_ITERATIONS = DEFAULT_REQUIREMENT_MAX_ITERATIONS
 
@@ -163,7 +165,7 @@ def _build_workflow_response(
         "iteration_history": list(workflow.get("iteration_history") or []),
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
-        "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
+        "workflow_diagnostics": public_workflow_diagnostics(dict(workflow.get("workflow_diagnostics") or {})),
     }
 
 
@@ -230,7 +232,7 @@ def _build_fallback_workflow(
         "iteration_history": history,
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
-        "workflow_diagnostics": diagnostics,
+        "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
     }
 
 
@@ -282,7 +284,7 @@ def _convert_to_requirements(extracted: List[Dict[str, Any]]) -> List[Requiremen
             continue
         
         # Clean and deduplicate
-        text = _clean_requirement_text(text)
+        text = normalize_requirement_text(text)
         if not text or len(text) < 20:
             continue
         
@@ -310,7 +312,7 @@ def _finalize_requirements(candidates: List[str]) -> List[Requirement]:
     seen = set()
     
     for line in candidates:
-        clean_text = _clean_requirement_text(line)
+        clean_text = normalize_requirement_text(line)
         if not clean_text:
             continue
         
@@ -336,26 +338,7 @@ def _finalize_requirements(candidates: List[str]) -> List[Requirement]:
 
 def _clean_requirement_text(text: str) -> str:
     """Clean up formatting artifacts from requirement text."""
-    if not text:
-        return ""
-    
-    # Remove markdown bold/italic
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)
-    text = re.sub(r'__([^_]+)__', r'\1', text)
-    text = re.sub(r'_([^_]+)_', r'\1', text)
-    
-    # Remove leading markers
-    text = re.sub(r'^[-*•│├└]\s*', '', text)
-    text = re.sub(r'^\d+\.\s*', '', text)
-    
-    # Remove stub markers
-    text = text.replace(" (stub)", "").replace("(stub)", "")
-    
-    # Remove leading/trailing colons
-    text = text.strip().strip(':').strip()
-    
-    return text
+    return clean_requirement_text(text)
 
 
 def _is_noise(text: str) -> bool:

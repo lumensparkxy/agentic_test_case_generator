@@ -20,6 +20,13 @@ from google.genai import types
 from .models import WorkflowSettings
 from .utils.genai_response import extract_response_text
 from .utils.llm_json import extract_json, parse_requirements_json_detailed, parse_review_json_detailed
+from .utils.requirements_text import normalize_requirement_payloads
+from .utils.workflow_diagnostics import (
+    has_retryable_parser_failure,
+    mark_retryable_parser_failure,
+    public_workflow_diagnostics,
+    retry_reason,
+)
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_REQUIREMENT_THRESHOLD = 85
@@ -252,16 +259,26 @@ def _append_unique_message(container: List[str], message: str) -> None:
         container.append(value)
 
 
-def _record_parser_failure(diagnostics: Dict[str, Any], author: str, error: Optional[str]) -> None:
+def _record_parser_failure(
+    diagnostics: Dict[str, Any],
+    author: str,
+    error: Optional[str],
+    *,
+    retryable: bool = False,
+) -> None:
     if not error:
         return
-    _append_unique_message(diagnostics["parser_failures"], f"{author}: {error}")
+    message = f"{author}: {error}"
+    _append_unique_message(diagnostics["parser_failures"], message)
     diagnostics["status"] = "partial"
     diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+    if retryable:
+        mark_retryable_parser_failure(diagnostics, message)
     _log_requirement_workflow(
         "parser_failure",
         author=author,
         error=error,
+        retryable=retryable,
         parser_failure_count=len(diagnostics["parser_failures"]),
         status=diagnostics["status"],
     )
@@ -542,14 +559,19 @@ Human feedback:
                 if author in {"InitialExtractorAgent", "HumanFeedbackRefinerAgent", "RefinerAgent"}:
                     parsed_requirements, parse_error = parse_requirements_json_detailed(text)
                     if parsed_requirements:
-                        current_requirements = parsed_requirements
+                        current_requirements = normalize_requirement_payloads(parsed_requirements)
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(
+                            diagnostics,
+                            author,
+                            parse_error,
+                            retryable=author in {"HumanFeedbackRefinerAgent", "RefinerAgent"},
+                        )
 
                 if author == "ReviewerAgent":
                     parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
                     if not parsed_review:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, retryable=True)
                         continue
 
                     model_review = _normalize_review_result(parsed_review, threshold, "Requirement review completed.")
@@ -638,16 +660,18 @@ Human feedback:
     state_requirements_raw = session.state.get(STATE_REQUIREMENTS, "[]")
     state_requirements, state_requirements_error = parse_requirements_json_detailed(state_requirements_raw)
     if state_requirements:
-        current_requirements = state_requirements
+        current_requirements = normalize_requirement_payloads(state_requirements)
     elif str(state_requirements_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateRequirements", state_requirements_error)
+        _record_parser_failure(diagnostics, "SessionStateRequirements", state_requirements_error, retryable=True)
+
+    current_requirements = normalize_requirement_payloads(current_requirements)
 
     state_review_raw = session.state.get(STATE_REVIEW_FEEDBACK, "")
     state_review, state_review_error = parse_review_json_detailed(state_review_raw, default_threshold=threshold)
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Requirement review completed.")
     elif str(state_review_raw).strip():
-        _record_parser_failure(diagnostics, "SessionStateReview", state_review_error)
+        _record_parser_failure(diagnostics, "SessionStateReview", state_review_error, retryable=True)
 
     heuristic_review = _heuristic_requirement_review(current_requirements, threshold, document_count)
     final_review = _merge_review_results(model_review, heuristic_review)
@@ -773,6 +797,16 @@ def _run_requirement_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
                 )
                 continue
 
+            if has_retryable_parser_failure(diagnostics) and attempt < attempt_total:
+                _log_requirement_workflow(
+                    "workflow_retry",
+                    attempt=attempt,
+                    attempt_total=attempt_total,
+                    retry_reason=retry_reason(diagnostics),
+                )
+                continue
+
+            result["workflow_diagnostics"] = public_workflow_diagnostics(diagnostics)
             return result
         except Exception as exc:
             last_error = exc
