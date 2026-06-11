@@ -52,3 +52,4 @@ npm-debug.log*
 
 /.playwright-mcp
 /.execution_artifacts/
+/client_submission/
