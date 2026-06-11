@@ -10,6 +10,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from app.adk_client import DEFAULT_MODEL as DEFAULT_ADK_MODEL
 from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, _load_environment_file, get_billing_settings, get_settings
 
 
@@ -17,6 +18,10 @@ class ConfigSettingsTests(unittest.TestCase):
     def tearDown(self) -> None:
         get_settings.cache_clear()
         get_billing_settings.cache_clear()
+
+    def test_default_model_name_is_current_gemini_default(self) -> None:
+        self.assertEqual(DEFAULT_MODEL_NAME, "gemini-3.5-flash")
+        self.assertEqual(DEFAULT_ADK_MODEL, DEFAULT_MODEL_NAME)
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:

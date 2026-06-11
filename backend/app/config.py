@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover - dependency fallback
     load_dotenv = None
 
 
-DEFAULT_MODEL_NAME = "gemini-3-flash-preview"
+DEFAULT_MODEL_NAME = "gemini-3.5-flash"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://localhost:5173",
