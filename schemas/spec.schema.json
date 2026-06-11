@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lumensparkxy/google_adk_testing_automation/schemas/spec.schema.json",
+  "title": "Plain-English Test Spec",
+  "description": "MVP1 structured YAML spec contract for executable plain-English tests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "steps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Spec contract version."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Stable machine-readable scenario id."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable scenario title."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional human-readable context. Not executable."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
+      "uniqueItems": true,
+      "description": "Filtering and reporting tags."
+    },
+    "dataSet": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Named data set used by {data.*} placeholders."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^(Given|When|Then|And|But)\\s+\\S.*$"
+      },
+      "description": "Ordered structured-English executable steps."
+    }
+  }
+}

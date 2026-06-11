@@ -8,13 +8,14 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - Parse and extract requirement items
 - Add context links (app, prototype, diagrams, images)
 - Generate test cases from a user template
+- Preview generated browser-test readiness and run executable candidates with Playwright
 - No document retention (in-memory processing only)
 
 ## Setup
 
 ### 1) Configure environment
 Copy .env.example to .env and set values:
-- GEMINI_API_KEY (required)
+- GEMINI_API_KEY (required for model-backed generation; deterministic fallback workflows run without it)
 - MODEL_NAME (default: gemini-2.5-flash)
 - GOOGLE_CLIENT_ID (required for login)
 - GOOGLE_CLIENT_IDS (optional comma-separated allow-list for multiple web client IDs)
@@ -30,8 +31,12 @@ Copy .env.example to .env and set values:
 - VITE_FIREBASE_PROJECT_ID (required for frontend sign-in button)
 - VITE_FIREBASE_APP_ID (required for frontend sign-in button)
 - VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_MEASUREMENT_ID (recommended to mirror your Firebase web app config)
+- EXECUTION_ENABLED (optional; defaults to true)
+- EXECUTION_ARTIFACT_ROOT (optional; defaults to `.execution_artifacts`)
+- EXECUTION_DEFAULT_BASE_URL (optional browser execution target)
+- EXECUTION_PLAYWRIGHT_CONFIG, EXECUTION_RUNTIME_CWD, EXECUTION_MAX_CASES_PER_REQUEST, EXECUTION_BROWSER_CHANNEL (optional execution runtime tuning)
 
-Note: ADK expects GOOGLE_API_KEY. If only GEMINI_API_KEY is set, the backend normalizes it to GOOGLE_API_KEY at runtime.
+Note: ADK expects GOOGLE_API_KEY. If only GEMINI_API_KEY is set, the backend normalizes it to GOOGLE_API_KEY at runtime. When neither key is configured, requirement and test-case workflows use deterministic fallback generation.
 
 For Google login, set `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` to the same OAuth web client ID. If you intentionally use different client IDs across environments or builds, add all valid IDs to `GOOGLE_CLIENT_IDS`.
 
@@ -65,6 +70,19 @@ Run UI:
 - `npm run dev` in frontend
 
 Open http://localhost:5173
+
+### 3.0.1) Install the execution runtime
+
+The Automation tab uses the backend execution runtime under `backend/execution_runtime`.
+
+- `cd backend/execution_runtime`
+- `npm ci`
+
+The Playwright config uses your installed Microsoft Edge browser by default through `channel: "msedge"`. If Edge is not already installed on the machine, install Microsoft Edge or run:
+
+- `npx playwright install msedge`
+
+Generated execution files are written under `EXECUTION_ARTIFACT_ROOT` and ignored by git. The internal handoff is generated `TestCase` JSON from the webapp, not Excel.
 
 ### 3.1) Evaluate generation quality with benchmark fixtures
 
@@ -178,7 +196,7 @@ If you use Firebase Authentication with popup or redirect flows, also add the de
 Frontend stores the access token in `localStorage` for the current MVP.
 
 ## Troubleshooting
-- Backend fails with auth errors: verify `GEMINI_API_KEY` is set in [.env.example](.env.example) (copied to `.env`). The backend maps it to `GOOGLE_API_KEY` at runtime for ADK.
+- Backend model-backed generation fails: verify `GEMINI_API_KEY` is set in [.env.example](.env.example) (copied to `.env`). The backend maps it to `GOOGLE_API_KEY` at runtime for ADK; without a key, deterministic fallback mode is used.
 - Frontend cannot reach API: set `VITE_API_BASE` in `.env` or use the default from [.env.example](.env.example).
 - Import errors after install: re-run `python -m pip install -r backend/requirements.txt` inside your active virtual environment.
 - Google sign-in fails with audience/issuer errors: verify `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` exactly match the same web OAuth client ID, or list every valid web client ID in `GOOGLE_CLIENT_IDS`.
@@ -186,6 +204,6 @@ Frontend stores the access token in `localStorage` for the current MVP.
 - Requests return 401 after login: token may be expired or invalid; sign out/in again and confirm backend `JWT_SECRET_KEY` is set.
 
 ## Notes
-- JIRA export and Playwright automation stubs remain in the backend but are hidden in the current UI until they are implemented.
+- JIRA export remains backend-only. Playwright automation preview and execution are available in the Automation tab.
 - Uploaded documents are processed in-memory and not stored
 - Upload size is capped at 16 MB per file

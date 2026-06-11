@@ -65,6 +65,7 @@ OUTPUT_DIR = Path("/tmp/pw_workflow_out")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 BASE_URL = "http://127.0.0.1:8000"
+PLAYWRIGHT_DOCS_URL = "https://playwright.dev/python/"
 TIMEOUT = 600  # seconds – LLM pipeline may be slow
 
 
@@ -323,7 +324,7 @@ def step_enrich_requirements(requirements: list[dict]) -> dict:
 
     payload = {
         "requirements": requirements,
-        "app_link": "https://playwright.dev/python/docs/intro",
+        "app_link": PLAYWRIGHT_DOCS_URL,
         "prototype_link": "https://playwright.dev/python/docs/writing-tests",
         "diagram_links": [
             "https://playwright.dev/python/docs/running-tests",
@@ -370,7 +371,7 @@ def step_generate_test_cases(enriched: dict) -> dict:
     # Build context as EnrichInput-compatible dict
     context = {
         "requirements": enriched.get("requirements", []),
-        "app_link": "https://playwright.dev/python/docs/intro",
+        "app_link": PLAYWRIGHT_DOCS_URL,
         "prototype_link": "https://playwright.dev/python/docs/writing-tests",
         "diagram_links": [
             "https://playwright.dev/python/docs/running-tests",
@@ -481,7 +482,7 @@ def step_playwright_pom(generate_result: dict) -> dict:
 
     payload = {
         "test_cases": generate_result.get("test_cases", []),
-        "target_base_url": "https://playwright.dev/python/",
+        "target_base_url": PLAYWRIGHT_DOCS_URL,
     }
 
     status, result = _post_json("/automation/playwright", payload)

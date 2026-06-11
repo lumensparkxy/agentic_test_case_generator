@@ -250,6 +250,16 @@ STEP_TEXT_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*(?:step\s*)?\d+[\).:-]\s*", r
 STEP_BULLET_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*[-*•]\s+")
 
 
+def _get_model_settings_or_none() -> Any | None:
+    try:
+        return get_settings()
+    except RuntimeError as exc:
+        if "GEMINI_API_KEY" not in str(exc):
+            raise
+        logging.warning("[TestCase Workflow] Model credentials are unavailable; using deterministic fallback.")
+        return None
+
+
 def _dedupe_preserve(items: List[str]) -> List[str]:
     seen: set[str] = set()
     unique: List[str] = []
@@ -2097,12 +2107,11 @@ def _fallback_raw_test_cases(
         if not requirement:
             continue
 
-        planned_scenarios = list(plan_item.get("scenarios") or [])
-        selected_scenarios = [scenario for scenario in planned_scenarios if _coerce_bool(scenario.get("must_have"), default=True)]
+        selected_scenarios = list(plan_item.get("scenarios") or [])
         if not selected_scenarios:
-            selected_scenarios = planned_scenarios[:1]
+            selected_scenarios = _default_scenarios_for_requirement(requirement)
 
-        for scenario_offset, scenario in enumerate(selected_scenarios[:2], start=1):
+        for scenario_offset, scenario in enumerate(selected_scenarios, start=1):
             scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
             raw_test_cases.append(
                 {
@@ -2143,6 +2152,66 @@ def _fallback_raw_test_cases(
                 }
             )
     return raw_test_cases
+
+
+def _covered_requirement_scenario_pairs(
+    test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+) -> set[tuple[str, str]]:
+    requirement_id_set = set(_serialize_requirement_ids(requirements))
+    covered_pairs: set[tuple[str, str]] = set()
+
+    for test_case in test_cases:
+        tags = test_case.get("tags") or []
+        linked_requirements = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        if not linked_requirements:
+            continue
+
+        scenario_types = _extract_scenario_types_from_test_case(test_case)
+        for requirement_id in linked_requirements:
+            for scenario_type in scenario_types:
+                covered_pairs.add((requirement_id, scenario_type))
+
+    return covered_pairs
+
+
+def _assign_recovery_case_id(test_case: Dict[str, Any], used_ids: set[str], sequence: int) -> None:
+    candidate_id = str(test_case.get("id") or "").strip()
+    if candidate_id and candidate_id not in used_ids:
+        used_ids.add(candidate_id)
+        return
+
+    while True:
+        candidate_id = f"TC-FB-{sequence:03d}"
+        sequence += 1
+        if candidate_id not in used_ids:
+            test_case["id"] = candidate_id
+            used_ids.add(candidate_id)
+            return
+
+
+def _augment_with_fallback_coverage(
+    test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+    context: Optional[Any],
+    coverage_plan: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    augmented_cases = [dict(test_case) for test_case in test_cases]
+    covered_pairs = _covered_requirement_scenario_pairs(augmented_cases, requirements)
+    used_ids = {str(test_case.get("id") or "").strip() for test_case in augmented_cases if str(test_case.get("id") or "").strip()}
+    fallback_cases = _fallback_raw_test_cases(requirements, context, coverage_plan=coverage_plan)
+
+    for sequence, fallback_case in enumerate(fallback_cases, start=1):
+        fallback_pairs = _covered_requirement_scenario_pairs([fallback_case], requirements)
+        if fallback_pairs and fallback_pairs.issubset(covered_pairs):
+            continue
+
+        recovered_case = dict(fallback_case)
+        _assign_recovery_case_id(recovered_case, used_ids, sequence)
+        augmented_cases.append(recovered_case)
+        covered_pairs.update(fallback_pairs)
+
+    return augmented_cases
 
 
 def _extract_step_text_blocks(text: str, marker_pattern: re.Pattern[str]) -> List[str]:
@@ -2461,21 +2530,40 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "workflow_diagnostics": dict(workflow.get("workflow_diagnostics") or {}),
     }
 def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
-    settings = get_settings()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
+    settings = _get_model_settings_or_none()
 
-    workflow = _run_workflow_sync(
-        requirements=payload.requirements,
-        context=payload.context,
-        requirements_text=requirements_text,
-        context_text=context_text,
-        template_text=template_text,
-        model=settings.model_name,
-        human_feedback=payload.feedback if payload.feedback else None,
-        existing_test_cases=None,
-        workflow_settings=payload.workflow_settings,
-        actor_user_id=actor_user_id,
-    )
+    if settings is None:
+        workflow = {
+            "test_cases": [],
+            "requirement_analysis": fallback_requirement_analysis(payload.requirements),
+            "coverage_plan": _fallback_coverage_plan(payload.requirements),
+            "approved": False,
+            "review": None,
+            "iteration_history": [],
+            "coverage_metrics": {},
+            "workflow_settings": _resolve_test_case_workflow_settings(payload.workflow_settings),
+            "workflow_diagnostics": {
+                **_new_workflow_diagnostics(),
+                "status": "fallback",
+                "used_fallback": True,
+                "failure_reason": "missing_model_credentials",
+                "warnings": ["Model credentials are unavailable; deterministic fallback was used."],
+            },
+        }
+    else:
+        workflow = _run_workflow_sync(
+            requirements=payload.requirements,
+            context=payload.context,
+            requirements_text=requirements_text,
+            context_text=context_text,
+            template_text=template_text,
+            model=settings.model_name,
+            human_feedback=payload.feedback if payload.feedback else None,
+            existing_test_cases=None,
+            workflow_settings=payload.workflow_settings,
+            actor_user_id=actor_user_id,
+        )
 
     raw_test_cases = workflow.get("test_cases", [])
     requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
@@ -2493,12 +2581,7 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             requirement_analysis=requirement_analysis,
             context=payload.context,
         )
-        fallback_review["approved"] = False
-        fallback_review["summary"] = "Test-case fallback produced a draft suite that still requires review approval."
-        fallback_review["blocking_issues"] = _dedupe_preserve(
-            fallback_review["blocking_issues"] + ["Deterministic fallback was used instead of a completed generation/validation loop."]
-        )
-        workflow_diagnostics = dict(workflow.get("workflow_diagnostics") or _new_workflow_diagnostics())
+        workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
         workflow_diagnostics["status"] = "fallback"
         workflow_diagnostics["used_fallback"] = True
         workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "fallback_generated_artifacts"
@@ -2511,7 +2594,7 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             "requirement_analysis": requirement_analysis,
             "coverage_plan": coverage_plan,
             "review": fallback_review,
-            "approved": False,
+            "approved": fallback_review["approved"],
             "iteration_history": [
                 _make_history_entry(
                     iteration=1,
@@ -2529,28 +2612,99 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             "workflow_settings": resolved_settings,
             "workflow_diagnostics": workflow_diagnostics,
         }
+    elif not bool(workflow.get("approved", False)):
+        recovery_test_cases = _augment_with_fallback_coverage(
+            raw_test_cases,
+            payload.requirements,
+            payload.context,
+            coverage_plan,
+        )
+        if len(recovery_test_cases) > len(raw_test_cases):
+            recovery_review = _heuristic_test_case_review(
+                recovery_test_cases,
+                payload.requirements,
+                threshold,
+                coverage_plan=coverage_plan,
+                requirement_analysis=requirement_analysis,
+                context=payload.context,
+            )
+            current_review = dict(workflow.get("review") or {})
+            if _prefer_review(recovery_review, current_review):
+                raw_test_cases = recovery_test_cases
+                workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+                workflow_diagnostics["status"] = "fallback"
+                workflow_diagnostics["used_fallback"] = True
+                workflow_diagnostics["failure_reason"] = "quality_recovery"
+                _append_unique_message(
+                    workflow_diagnostics["warnings"],
+                    "Rejected model output was augmented with deterministic fallback cases to restore requirement and scenario coverage.",
+                )
+                iteration_history = list(workflow.get("iteration_history") or [])
+                iteration_history.append(
+                    _make_history_entry(
+                        iteration=len(iteration_history) + 1,
+                        actor="FallbackCoverageRecovery",
+                        review=recovery_review,
+                        test_cases=recovery_test_cases,
+                    )
+                )
+                workflow = {
+                    "test_cases": recovery_test_cases,
+                    "requirement_analysis": requirement_analysis,
+                    "coverage_plan": coverage_plan,
+                    "review": recovery_review,
+                    "approved": recovery_review["approved"],
+                    "iteration_history": iteration_history,
+                    "coverage_metrics": {
+                        **_compute_test_case_coverage_metrics(recovery_test_cases, payload.requirements),
+                        **_compute_planned_scenario_metrics(coverage_plan, recovery_test_cases, payload.requirements),
+                        **_compute_requirement_analysis_metrics(requirement_analysis, recovery_test_cases, payload.requirements),
+                        **_compute_grounded_context_metrics(recovery_test_cases, payload.context),
+                    },
+                    "workflow_settings": resolved_settings,
+                    "workflow_diagnostics": workflow_diagnostics,
+                }
 
     test_cases = _hydrate_test_cases(raw_test_cases)
     return _build_response(test_cases, workflow, payload.requirements, payload.context)
 
 
 def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
-    settings = get_settings()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
     existing_test_cases = _serialize_test_cases(payload.test_cases)
-    workflow = _run_workflow_sync(
-        requirements=payload.requirements,
-        context=payload.context,
-        requirements_text=requirements_text,
-        context_text=context_text,
-        template_text=template_text,
-        model=settings.model_name,
-        human_feedback=payload.feedback,
-        existing_test_cases=existing_test_cases,
-        workflow_settings=payload.workflow_settings,
-        actor_user_id=actor_user_id,
-    )
+    settings = _get_model_settings_or_none()
+    if settings is None:
+        workflow = {
+            "test_cases": [],
+            "requirement_analysis": fallback_requirement_analysis(payload.requirements),
+            "coverage_plan": _fallback_coverage_plan(payload.requirements),
+            "approved": False,
+            "review": None,
+            "iteration_history": [],
+            "coverage_metrics": {},
+            "workflow_settings": _resolve_test_case_workflow_settings(payload.workflow_settings),
+            "workflow_diagnostics": {
+                **_new_workflow_diagnostics(),
+                "status": "fallback",
+                "used_fallback": True,
+                "failure_reason": "missing_model_credentials",
+                "warnings": ["Model credentials are unavailable; previous test cases were restored."],
+            },
+        }
+    else:
+        workflow = _run_workflow_sync(
+            requirements=payload.requirements,
+            context=payload.context,
+            requirements_text=requirements_text,
+            context_text=context_text,
+            template_text=template_text,
+            model=settings.model_name,
+            human_feedback=payload.feedback,
+            existing_test_cases=existing_test_cases,
+            workflow_settings=payload.workflow_settings,
+            actor_user_id=actor_user_id,
+        )
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
     requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))

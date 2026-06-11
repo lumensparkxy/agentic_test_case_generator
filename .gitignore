@@ -8,6 +8,7 @@ __pycache__/
 venv/
 ENV/
 .env/
+.agents/
 
 # Distribution / packaging
 build/
@@ -31,10 +32,14 @@ htmlcov/
 .env.local
 .env.*.local
 
+
+backend/execution_runtime/artifacts/
+
 /node_modules/
 npm-debug.log*
 
 /frontend/node_modules/
+/backend/execution_runtime/node_modules/
 /frontend/build/
 /frontend/dist/
 /frontend/playwright-report/
@@ -46,3 +51,4 @@ npm-debug.log*
 
 
 /.playwright-mcp
+/.execution_artifacts/

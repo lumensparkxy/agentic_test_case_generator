@@ -23,6 +23,10 @@ from .models import (
     BillingOrgSummaryResponse,
     EnrichInput,
     EnrichResponse,
+    ExecutionPreviewInput,
+    ExecutionPreviewResponse,
+    ExecutionRunInput,
+    ExecutionRunResponse,
     GenerateTestCasesInput,
     GenerateTestCasesResponse,
     GoogleLoginRequest,
@@ -59,6 +63,7 @@ from .services.billing_service import (
     resolve_billing_entitlements,
 )
 from .services.context_grounding import build_grounded_context
+from .services.execution_service import preview_execution, run_execution
 from .services.reporting_service import build_usage_report
 from .services.versioning_service import persist_requirement_versions, persist_test_case_versions
 from .utils.excel_parser import parse_excel_to_text
@@ -353,7 +358,6 @@ async def parse_requirements(
     existing_requirements: Optional[str] = Form(None),
     workflow_settings: Optional[str] = Form(None),
 ) -> RequirementsWorkflowResponse:
-    _settings = get_settings()
     parsed_workflow_settings = _parse_workflow_settings_form(workflow_settings)
     request_id = _get_request_id(request)
     is_refinement_request = bool(feedback and existing_requirements)
@@ -990,5 +994,114 @@ async def automation_playwright(
             billing_key="automation.playwright.generate",
             error_message=str(exc),
             metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@app.post("/automation/execution/preview", response_model=ExecutionPreviewResponse)
+async def automation_execution_preview(
+    request: Request,
+    payload: ExecutionPreviewInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> ExecutionPreviewResponse:
+    request_id = _get_request_id(request)
+    workflow_run_id = start_workflow_run(
+        operation="automation.execution.preview",
+        actor=current_user,
+        request_id=request_id,
+        metadata={"test_case_count": len(payload.test_cases)},
+    )
+    try:
+        response = await run_in_threadpool(
+            preview_execution,
+            payload.test_cases,
+            target_base_url=str(payload.target_base_url) if payload.target_base_url else None,
+        )
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.preview",
+            event_type="automation.execution.previewed",
+            billing_key="automation.execution.preview",
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            result_metadata={
+                "executable_count": response.summary.executable,
+                "manual_count": response.summary.manual,
+                "unsupported_count": response.summary.unsupported,
+                "invalid_count": response.summary.invalid,
+            },
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.preview",
+            event_type="automation.execution.previewed",
+            billing_key="automation.execution.preview",
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@app.post("/automation/execution/run", response_model=ExecutionRunResponse)
+async def automation_execution_run(
+    request: Request,
+    payload: ExecutionRunInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> ExecutionRunResponse:
+    request_id = _get_request_id(request)
+    workflow_run_id = start_workflow_run(
+        operation="automation.execution.run",
+        actor=current_user,
+        request_id=request_id,
+        metadata={
+            "test_case_count": len(payload.test_cases),
+            "selected_test_case_count": len(payload.selected_test_case_ids),
+        },
+    )
+    try:
+        response = await run_in_threadpool(
+            run_execution,
+            payload.test_cases,
+            selected_test_case_ids=payload.selected_test_case_ids,
+            target_base_url=str(payload.target_base_url) if payload.target_base_url else None,
+        )
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.run",
+            event_type="automation.execution.ran",
+            billing_key="automation.execution.run",
+            quantity=len(response.results),
+            unit="test_case",
+            result_metadata={
+                "status": response.status,
+                "run_id": response.run_id,
+                "passed_count": response.summary.passed,
+                "failed_count": response.summary.failed,
+                "invalid_count": response.summary.invalid,
+                "skipped_count": response.summary.skipped,
+            },
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="automation.execution.run",
+            event_type="automation.execution.ran",
+            billing_key="automation.execution.run",
+            error_message=str(exc),
+            metadata={
+                "test_case_count": len(payload.test_cases),
+                "selected_test_case_count": len(payload.selected_test_case_ids),
+            },
         )
         raise

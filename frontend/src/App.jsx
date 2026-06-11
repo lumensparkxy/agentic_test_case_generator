@@ -7,6 +7,7 @@ import {
 	hasFirebaseAuthConfig,
 	visibleFirebaseAuthProviders,
 } from "./firebase";
+import AutomationPanel from "./components/automation/AutomationPanel";
 import "./App.css";
 
 const API_BASE = (() => {
@@ -229,6 +230,9 @@ export default function App() {
 	const [testCaseWorkflowDiagnostics, setTestCaseWorkflowDiagnostics] = useState(null);
 	const [appliedTestCaseWorkflowSettings, setAppliedTestCaseWorkflowSettings] = useState(null);
 	const [testCaseIterationHistory, setTestCaseIterationHistory] = useState([]);
+	const [executionTargetBaseUrl, setExecutionTargetBaseUrl] = useState("");
+	const [executionPreview, setExecutionPreview] = useState(null);
+	const [executionRunResult, setExecutionRunResult] = useState(null);
 	const [enrichedContext, setEnrichedContext] = useState(null);
 	const [selectedArtifactSourceIds, setSelectedArtifactSourceIds] = useState([]);
 	const [status, setStatus] = useState("");
@@ -241,6 +245,8 @@ export default function App() {
 	const [isParsing, setIsParsing] = useState(false);
 	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
 	const [isExporting, setIsExporting] = useState(false);
+	const [isPreviewingExecution, setIsPreviewingExecution] = useState(false);
+	const [isRunningExecution, setIsRunningExecution] = useState(false);
 	const [authToken, setAuthToken] = useState("");
 	const [currentUser, setCurrentUser] = useState(null);
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -765,6 +771,8 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
+			setExecutionPreview(null);
+			setExecutionRunResult(null);
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setReqFeedback("");
@@ -828,6 +836,8 @@ export default function App() {
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
 			setExpandedRows({});
+			setExecutionPreview(null);
+			setExecutionRunResult(null);
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review
 				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
@@ -836,11 +846,96 @@ export default function App() {
 				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""}.${reviewStatus}`.trim()
 			);
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
+			if (generatedCount > 0) {
+				await previewExecution(data.test_cases || [], { updateStatus: false });
+			}
 			if (withFeedback) setFeedback("");
 		} catch (error) {
 			setStatus(`Generation failed: ${error.message}`);
 		} finally {
 			setIsGenerating(false);
+		}
+	};
+
+	const buildExecutionPayload = (casesOverride = testCases) => ({
+		test_cases: Array.isArray(casesOverride) ? casesOverride : [],
+		target_base_url: executionTargetBaseUrl.trim() || appLink || null,
+	});
+
+	const previewExecution = async (casesOverride = testCases, options = {}) => {
+		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
+		const { updateStatus = true } = options;
+		if (!casesToPreview.length) {
+			if (updateStatus) {
+				setStatus("Generate test cases before previewing execution.");
+			}
+			return null;
+		}
+
+		setIsPreviewingExecution(true);
+		if (updateStatus) {
+			setStatus("Previewing execution readiness...");
+		}
+		try {
+			const res = await apiRequest("/automation/execution/preview", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(buildExecutionPayload(casesToPreview)),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to preview execution");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setExecutionPreview(data || null);
+			setExecutionRunResult(null);
+			if (updateStatus) {
+				const summary = data?.summary || {};
+				setStatus(`Execution preview ready: ${summary.executable || 0} executable, ${summary.manual || 0} manual, ${summary.unsupported || 0} unsupported.`);
+			}
+			return data;
+		} catch (error) {
+			if (updateStatus) {
+				setStatus(`Execution preview failed: ${error.message}`);
+			}
+			return null;
+		} finally {
+			setIsPreviewingExecution(false);
+		}
+	};
+
+	const runApprovedExecution = async () => {
+		const preview = executionPreview || await previewExecution(testCases, { updateStatus: false });
+		const executableCandidates = preview?.executable || [];
+		if (!executableCandidates.length) {
+			setStatus("No executable candidates are available to run.");
+			return;
+		}
+
+		setIsRunningExecution(true);
+		setStatus("Running executable candidates...");
+		try {
+			const res = await apiRequest("/automation/execution/run", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					...buildExecutionPayload(testCases),
+					selected_test_case_ids: executableCandidates.map((candidate) => candidate.source_test_case_id),
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to run execution candidates");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setExecutionRunResult(data || null);
+			setExecutionPreview(data?.preview || preview);
+			const summary = data?.summary || {};
+			setStatus(`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`);
+		} catch (error) {
+			setStatus(`Execution run failed: ${error.message}`);
+		} finally {
+			setIsRunningExecution(false);
 		}
 	};
 
@@ -960,7 +1055,8 @@ export default function App() {
 		{ id: 1, label: "Context", title: "Context Inputs" },
 		{ id: 2, label: "Template", title: "Template Setup" },
 		{ id: 3, label: "Generate", title: "Generate Test Cases" },
-		{ id: 4, label: "Export", title: "Export Test Cases" }
+		{ id: 4, label: "Automation", title: "Automation" },
+		{ id: 5, label: "Export", title: "Export Test Cases" }
 	];
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
@@ -1863,6 +1959,23 @@ export default function App() {
 				)}
 
 				{activeTab === 4 && (
+					<AutomationPanel
+						testCases={testCases}
+						executionTargetBaseUrl={executionTargetBaseUrl}
+						setExecutionTargetBaseUrl={setExecutionTargetBaseUrl}
+						executionPreview={executionPreview}
+						executionRunResult={executionRunResult}
+						isPreviewingExecution={isPreviewingExecution}
+						isRunningExecution={isRunningExecution}
+						authActionDisabled={authActionDisabled}
+						previewExecution={previewExecution}
+						runApprovedExecution={runApprovedExecution}
+						goPrev={goPrev}
+						goNext={goNext}
+					/>
+				)}
+
+				{activeTab === 5 && (
 					<section className="panel">
 						<h2 className="panel-title">Export Test Cases</h2>
 						<p className="panel-description">
