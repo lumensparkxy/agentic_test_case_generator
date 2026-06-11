@@ -90,7 +90,7 @@ cd frontend && npm run dev
 Copy `.env.example` to `.env` and configure:
 ```
 GEMINI_API_KEY=your_key_here
-MODEL_NAME=gemini-3-flash-preview
+MODEL_NAME=gemini-3.5-flash
 ```
 
 Note: The backend maps `GEMINI_API_KEY` to `GOOGLE_API_KEY` for ADK compatibility.

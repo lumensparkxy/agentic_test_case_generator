@@ -16,7 +16,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 ### 1) Configure environment
 Copy .env.example to .env and set values:
 - GEMINI_API_KEY (required for model-backed generation; deterministic fallback workflows run without it)
-- MODEL_NAME (default: gemini-2.5-flash)
+- MODEL_NAME (default: gemini-3.5-flash)
 - GOOGLE_CLIENT_ID (required for login)
 - GOOGLE_CLIENT_IDS (optional comma-separated allow-list for multiple web client IDs)
 - FIREBASE_PROJECT_ID (recommended for Firebase Admin initialization)

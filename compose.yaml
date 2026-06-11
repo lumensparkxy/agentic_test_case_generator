@@ -7,7 +7,7 @@ services:
     ports:
       - "8000:8080"
     environment:
-      MODEL_NAME: ${MODEL_NAME:-gemini-3-flash-preview}
+      MODEL_NAME: ${MODEL_NAME:-gemini-3.5-flash}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-test-secret}

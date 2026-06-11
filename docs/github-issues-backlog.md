@@ -19,6 +19,7 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 - [#16](https://github.com/lumensparkxy/agentic_test_case_generator/issues/16) — Improve generated browser assertions for documentation workflows
 - [#17](https://github.com/lumensparkxy/agentic_test_case_generator/issues/17) — Update project dependencies to latest compatible versions
 - [#18](https://github.com/lumensparkxy/agentic_test_case_generator/issues/18) — Harden ADK workflow parsing, retries, and requirement normalization
+- [#19](https://github.com/lumensparkxy/agentic_test_case_generator/issues/19) — Update default Gemini model configuration
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
