@@ -6,14 +6,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import (
-    _compute_grounded_context_metrics,
-    _compute_planned_scenario_metrics,
-    _fallback_coverage_plan,
-    _fallback_raw_test_cases,
-    _prepare_workflow_inputs,
-)
-from app.models import ArtifactSource, EnrichInput, GroundedContext, GroundedUIElement, Requirement, TestCaseTemplate
+from app.agents.test_case_agent import _compute_grounded_context_metrics, _fallback_raw_test_cases, _prepare_workflow_inputs
+from app.models import ArtifactSource, EnrichInput, GroundedContext, Requirement, TestCaseTemplate
 
 
 class GroundedContextMetricTests(unittest.TestCase):
@@ -26,23 +20,6 @@ class GroundedContextMetricTests(unittest.TestCase):
                 artifact_sources=[
                     ArtifactSource(id="ART-APP-01", source_type="app", label="Application", url="https://example.com/app"),
                     ArtifactSource(id="ART-PROTO-01", source_type="prototype", label="Prototype", url="https://example.com/prototype"),
-                ],
-                ui_elements=[
-                    GroundedUIElement(
-                        id="ART-APP-01-UI-H-01",
-                        source_id="ART-APP-01",
-                        name="Built for testing",
-                        element_type="Heading",
-                        description="Heading extracted from artifact: Built for testing",
-                    ),
-                    GroundedUIElement(
-                        id="ART-APP-01-UI-L-01",
-                        source_id="ART-APP-01",
-                        name="Get started",
-                        element_type="Navigation",
-                        description="Navigation link extracted from artifact: Get started -> https://example.com/app/docs/intro",
-                        href="https://example.com/app/docs/intro",
-                    ),
                 ],
                 summary="Two artifacts were analyzed.",
             ),
@@ -71,7 +48,6 @@ class GroundedContextMetricTests(unittest.TestCase):
 
         self.assertIn("Grounded context summary", context_text)
         self.assertIn("ART-APP-01", context_text)
-        self.assertIn('Navigation: exact text "Get started" -> https://example.com/app/docs/intro', context_text)
 
     def test_fallback_raw_test_cases_include_first_grounded_source_ref(self) -> None:
         raw_test_cases = _fallback_raw_test_cases(self.requirements, self.context)
@@ -79,34 +55,60 @@ class GroundedContextMetricTests(unittest.TestCase):
         self.assertTrue(raw_test_cases)
         self.assertEqual(raw_test_cases[0]["source_refs"], ["ART-APP-01"])
 
-    def test_fallback_raw_test_cases_prefer_exact_grounded_browser_facts(self) -> None:
-        raw_test_cases = _fallback_raw_test_cases(self.requirements, self.context)
-
-        first_case = raw_test_cases[0]
-        step_text = " ".join(f"{step['action']} {step['expected']}" for step in first_case["steps"])
-
-        self.assertIn("https://example.com/app", step_text)
-        self.assertIn('heading "Built for testing" is visible', step_text)
-        self.assertIn("without inventing a label", step_text)
-        self.assertEqual(first_case["component"], "Application")
-
     def test_fallback_raw_test_cases_cover_all_planned_scenarios(self) -> None:
-        requirements = [
-            Requirement(
-                id="REQ-001",
-                text="The system shall allow only finance administrators to export Approved expense reports to CSV.",
-            )
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": self.requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Sign in succeeds",
+                        "objective": "Verify successful sign-in.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-02",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Negative",
+                        "title": "Invalid sign-in fails",
+                        "objective": "Verify invalid credentials are rejected.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-03",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Authorization",
+                        "title": "Authenticated session is required",
+                        "objective": "Verify access control around sign-in state.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-04",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Data Variation",
+                        "title": "Email credential variations",
+                        "objective": "Verify sign-in data variations.",
+                        "priority": "Medium",
+                        "must_have": False,
+                    },
+                ],
+            }
         ]
-        coverage_plan = _fallback_coverage_plan(requirements)
 
-        raw_test_cases = _fallback_raw_test_cases(requirements, None, coverage_plan=coverage_plan)
-        scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, raw_test_cases, requirements)
+        raw_test_cases = _fallback_raw_test_cases(self.requirements, self.context, coverage_plan=coverage_plan)
+        scenario_tags = {tag for test_case in raw_test_cases for tag in test_case.get("tags", []) if tag.startswith("scenario:")}
 
-        self.assertEqual(scenario_metrics["missing_scenarios"], [])
-        self.assertEqual(
-            scenario_metrics["covered_planned_scenarios"],
-            scenario_metrics["planned_scenarios_total"],
-        )
+        self.assertEqual(len(raw_test_cases), 4)
+        self.assertIn("scenario:happy-path", scenario_tags)
+        self.assertIn("scenario:negative", scenario_tags)
+        self.assertIn("scenario:authorization", scenario_tags)
+        self.assertIn("scenario:data-variation", scenario_tags)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ if str(BACKEND_DIR) not in sys.path:
   sys.path.insert(0, str(BACKEND_DIR))
 
 from app.utils.llm_json import (
+  parse_coverage_plan_json_detailed,
   parse_requirement_analysis_json,
   parse_requirement_analysis_json_detailed,
   parse_requirements_json_detailed,
@@ -163,32 +164,58 @@ class DetailedPayloadParserTests(unittest.TestCase):
         self.assertEqual(parsed, [])
         self.assertEqual(error, "test_cases list was empty")
 
-    def test_test_case_parser_extracts_json_from_fenced_large_payload(self) -> None:
-        payload = """
-        The generated suite follows.
+    def test_test_case_detailed_parser_rejects_items_without_minimum_shape(self) -> None:
+      parsed, error = parse_test_cases_json_detailed('{"test_cases": [{"id": "TC-001"}]}')
 
-        ```json
-        {
-          "test_cases": [
-            {
-              "id": "TC-001",
-              "title": "Sign in succeeds",
-              "steps": [
-                {"step": 1, "action": "Open the sign-in page", "expected": "The form is visible"}
-              ]
-            }
-          ]
-        }
-        ```
+      self.assertEqual(parsed, [])
+      self.assertEqual(error, "test_cases payload did not contain valid id/title/steps objects")
 
-        End of response.
-        """
+    def test_parsers_accept_structured_adk_output_schema_state(self) -> None:
+      test_cases, test_case_error = parse_test_cases_json_detailed({
+        "test_cases": [
+          {
+            "id": "TC-001",
+            "title": "Invite valid user",
+            "steps": [{"step": 1, "action": "Submit invite", "expected": "Invite is sent"}],
+          }
+        ]
+      })
+      coverage_plan, coverage_error = parse_coverage_plan_json_detailed({
+        "coverage_plan": [
+          {
+            "requirement_id": "REQ-001",
+            "requirement_text": "Invite users",
+            "scenarios": [{"id": "REQ-001-SCN-01", "title": "Happy path"}],
+          }
+        ]
+      })
+      analysis, analysis_error = parse_requirement_analysis_json_detailed({
+        "requirement_analysis": [
+          {
+            "requirement_id": "REQ-001",
+            "requirement_text": "Invite users",
+            "suggested_scenarios": ["Happy Path"],
+          }
+        ]
+      })
+      review, review_error = parse_review_json_detailed({
+        "approved": True,
+        "score": 95,
+        "threshold": 90,
+        "summary": "Ready.",
+        "blocking_issues": [],
+        "suggestions": [],
+        "unmet_criteria": [],
+      })
 
-        parsed, error = parse_test_cases_json_detailed(payload)
-
-        self.assertIsNone(error)
-        self.assertEqual(len(parsed), 1)
-        self.assertEqual(parsed[0]["id"], "TC-001")
+      self.assertEqual(test_case_error, None)
+      self.assertEqual(len(test_cases), 1)
+      self.assertEqual(coverage_error, None)
+      self.assertEqual(len(coverage_plan), 1)
+      self.assertEqual(analysis_error, None)
+      self.assertEqual(len(analysis), 1)
+      self.assertEqual(review_error, None)
+      self.assertEqual(review["score"], 95)
 
 
 if __name__ == "__main__":

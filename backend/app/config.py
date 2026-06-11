@@ -82,6 +82,21 @@ class FirebaseSettings(BaseModel):
     service_account_json: str = ""
 
 
+class JiraSettings(BaseModel):
+    connection_secret_key: str = ""
+    api_timeout_seconds: int = 15
+    project_page_size: int = 50
+    issue_page_size: int = 50
+
+
+class AzureDevOpsSettings(BaseModel):
+    connection_secret_key: str = ""
+    api_timeout_seconds: int = 15
+    api_version: str = "7.1"
+    project_page_size: int = 50
+    work_item_page_size: int = 50
+
+
 class BillingSettings(BaseModel):
     pricing_version: str = "pilot-v1"
     token_unit_size: int = 4
@@ -210,14 +225,14 @@ def _warn_if_dependency_mismatch() -> None:
     adk_major, adk_minor = _parse_major_minor(adk_version)
     genai_major, genai_minor = _parse_major_minor(genai_version)
 
-    if adk_major != 1:
+    if adk_major != 2:
         logging.warning("Untested google-adk major version detected: %s", adk_version)
-    if genai_major != 1:
+    if genai_major != 2:
         logging.warning("Untested google-genai major version detected: %s", genai_version)
     # Track a known-good floor for current pipelines and model usage.
-    if (adk_major, adk_minor) < (1, 25):
+    if (adk_major, adk_minor) < (2, 2):
         logging.warning("google-adk version may be too old for current workflow patterns: %s", adk_version)
-    if (genai_major, genai_minor) < (1, 64):
+    if (genai_major, genai_minor) < (2, 8):
         logging.warning("google-genai version may be too old for current SDK behavior: %s", genai_version)
 
 
@@ -256,6 +271,62 @@ def get_firebase_settings() -> FirebaseSettings:
 
 
 @lru_cache
+def get_jira_settings() -> JiraSettings:
+    auth_settings = get_auth_settings()
+    connection_secret_key = (
+        (os.getenv("JIRA_CONNECTION_SECRET_KEY") or "").strip()
+        or auth_settings.jwt_secret_key
+    )
+    return JiraSettings(
+        connection_secret_key=connection_secret_key,
+        api_timeout_seconds=_parse_positive_int_env(
+            os.getenv("JIRA_API_TIMEOUT_SECONDS", "15"),
+            default=15,
+            env_name="JIRA_API_TIMEOUT_SECONDS",
+        ),
+        project_page_size=_parse_positive_int_env(
+            os.getenv("JIRA_PROJECT_PAGE_SIZE", "50"),
+            default=50,
+            env_name="JIRA_PROJECT_PAGE_SIZE",
+        ),
+        issue_page_size=_parse_positive_int_env(
+            os.getenv("JIRA_ISSUE_PAGE_SIZE", "50"),
+            default=50,
+            env_name="JIRA_ISSUE_PAGE_SIZE",
+        ),
+    )
+
+
+@lru_cache
+def get_azure_devops_settings() -> AzureDevOpsSettings:
+    auth_settings = get_auth_settings()
+    connection_secret_key = (
+        (os.getenv("AZURE_DEVOPS_CONNECTION_SECRET_KEY") or "").strip()
+        or auth_settings.jwt_secret_key
+    )
+    api_version = (os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1").strip() or "7.1"
+    return AzureDevOpsSettings(
+        connection_secret_key=connection_secret_key,
+        api_timeout_seconds=_parse_positive_int_env(
+            os.getenv("AZURE_DEVOPS_API_TIMEOUT_SECONDS", "15"),
+            default=15,
+            env_name="AZURE_DEVOPS_API_TIMEOUT_SECONDS",
+        ),
+        api_version=api_version,
+        project_page_size=_parse_positive_int_env(
+            os.getenv("AZURE_DEVOPS_PROJECT_PAGE_SIZE", "50"),
+            default=50,
+            env_name="AZURE_DEVOPS_PROJECT_PAGE_SIZE",
+        ),
+        work_item_page_size=_parse_positive_int_env(
+            os.getenv("AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE", "50"),
+            default=50,
+            env_name="AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE",
+        ),
+    )
+
+
+@lru_cache
 def get_billing_settings() -> BillingSettings:
     pricing_version = (os.getenv("BILLING_PRICING_VERSION") or "pilot-v1").strip() or "pilot-v1"
     default_contact_email = BillingSettings().contact_email
@@ -263,23 +334,23 @@ def get_billing_settings() -> BillingSettings:
     launch_date = _parse_datetime_env(os.getenv("BILLING_LAUNCH_DATE", ""))
     shadow_mode = _parse_bool_env(os.getenv("BILLING_SHADOW_MODE", "true"), default=True)
 
-    def _parse_positive_int(env_name: str, default: int) -> int:
-        raw_value = os.getenv(env_name, str(default))
-        try:
-            parsed = int(raw_value)
-        except ValueError:
-            logging.warning("Invalid %s=%s. Falling back to %s.", env_name, raw_value, default)
-            return default
-        if parsed <= 0:
-            logging.warning("Non-positive %s=%s. Falling back to %s.", env_name, raw_value, default)
-            return default
-        return parsed
-
     return BillingSettings(
         pricing_version=pricing_version,
-        token_unit_size=_parse_positive_int("BILLING_TOKEN_UNIT_SIZE", 4),
-        pilot_requirements_limit=_parse_positive_int("BILLING_PILOT_REQUIREMENTS_LIMIT", 200),
-        pilot_test_cases_limit=_parse_positive_int("BILLING_PILOT_TEST_CASE_LIMIT", 200),
+        token_unit_size=_parse_positive_int_env(
+            os.getenv("BILLING_TOKEN_UNIT_SIZE", "4"),
+            default=4,
+            env_name="BILLING_TOKEN_UNIT_SIZE",
+        ),
+        pilot_requirements_limit=_parse_positive_int_env(
+            os.getenv("BILLING_PILOT_REQUIREMENTS_LIMIT", "200"),
+            default=200,
+            env_name="BILLING_PILOT_REQUIREMENTS_LIMIT",
+        ),
+        pilot_test_cases_limit=_parse_positive_int_env(
+            os.getenv("BILLING_PILOT_TEST_CASE_LIMIT", "200"),
+            default=200,
+            env_name="BILLING_PILOT_TEST_CASE_LIMIT",
+        ),
         contact_email=contact_email,
         launch_date=launch_date,
         shadow_mode=shadow_mode,
@@ -330,14 +401,14 @@ def get_execution_settings() -> ExecutionSettings:
 def get_settings() -> Settings:
     google_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None
     gemini_api_key_env = (os.getenv("GEMINI_API_KEY") or "").strip() or None
-    gemini_api_key = google_api_key or gemini_api_key_env
+    gemini_api_key = gemini_api_key_env or google_api_key
     model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is required")
 
     if google_api_key and gemini_api_key_env and google_api_key != gemini_api_key_env:
-        logging.warning("Both GOOGLE_API_KEY and GEMINI_API_KEY are set; using GOOGLE_API_KEY")
+        logging.warning("Both GOOGLE_API_KEY and GEMINI_API_KEY are set; using GEMINI_API_KEY and normalizing it for ADK")
 
     # Keep a single canonical key variable for SDK clients to avoid noisy warnings.
     os.environ["GOOGLE_API_KEY"] = gemini_api_key

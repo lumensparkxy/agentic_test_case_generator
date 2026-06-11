@@ -50,7 +50,9 @@ def _coerce_test_case(item: TestCase | Dict[str, Any]) -> TestCase:
 
 
 def _requirement_payload(requirement: Requirement) -> Dict[str, Any]:
-    return {"id": requirement.id, "text": requirement.text}
+    return requirement.model_dump(
+        exclude={"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
+    )
 
 
 def _test_case_payload(test_case: TestCase) -> Dict[str, Any]:

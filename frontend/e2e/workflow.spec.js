@@ -29,13 +29,14 @@ async function openGenerateTab(page) {
 	await page.getByRole("button", { name: /parse requirements/i }).click();
 
 	await expect
-		.poll(async () => page.locator(".requirements-list li").count(), {
+		.poll(async () => page.locator(".requirement-review-table tbody tr").count(), {
 			timeout: 120_000,
 			message: "Expected parsed requirements to appear after uploading the sample file.",
 		})
 		.toBeGreaterThan(0);
+	await page.getByRole("button", { name: /approve non-rejected/i }).click();
 
-	await expect(page.getByRole("heading", { name: /requirement workflow diagnostics/i })).toBeVisible();
+	await expect(page.getByText(/approved for test generation/i)).toBeVisible();
 
 	await page.getByRole("button", { name: /^Next$/ }).click();
 	await page.locator('input[placeholder="https://your-app"]').fill("https://example.com/app");
@@ -69,7 +70,10 @@ test.describe("Agentic Test Case Generator E2E", () => {
 		await seedAuthenticatedSession(page);
 		await openGenerateTab(page);
 
-		await page.getByRole("button", { name: /generate test cases/i }).click();
+		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
+		const generatedTestCasesTab = page.getByRole("tab", { name: /generated test cases/i });
+		await expect(generatedTestCasesTab).toBeVisible({ timeout: 360_000 });
+		await generatedTestCasesTab.click();
 
 		await expect
 			.poll(async () => {
@@ -82,12 +86,21 @@ test.describe("Agentic Test Case Generator E2E", () => {
 			})
 			.toBeGreaterThan(0);
 
+		await page.getByRole("tab", { name: /requirement analysis/i }).click();
 		await expect(page.locator(".collapsible-panel-title", { hasText: /requirement analysis/i })).toBeVisible();
+		await page.getByRole("tab", { name: /diagnostics/i }).click();
 		await expect(page.getByRole("heading", { name: /test-case workflow diagnostics/i })).toBeVisible();
+		await generatedTestCasesTab.click();
 
 		await page.getByRole("button", { name: /^Next$/ }).click();
+		const draftExportToggle = page.getByLabel(/export draft anyway/i);
+		if (await draftExportToggle.isVisible().catch(() => false)) {
+			await draftExportToggle.check();
+			await page.getByLabel(/reason for exporting this draft/i).fill("E2E quality validation export after reviewing generated draft output.");
+		}
 
 		const jsonButton = page.getByRole("button", { name: /json/i }).first();
+		await expect(jsonButton).toBeEnabled({ timeout: 30_000 });
 		const download = await Promise.all([
 			page.waitForEvent("download"),
 			jsonButton.click(),

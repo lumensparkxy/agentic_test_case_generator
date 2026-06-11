@@ -1,0 +1,281 @@
+import io
+from typing import Any, Optional
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
+
+from ..agents.export_agent import export_to_csv, export_to_excel, export_to_jira, export_to_json
+from ..auth.jwt_auth import get_current_user
+from ..models import AuthUser, ExportTestCasesInput, JiraExportInput, JiraExportResponse
+from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
+
+router = APIRouter()
+
+
+def _get_request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", "") or uuid4())
+
+
+def _export_audit_metadata(payload: ExportTestCasesInput) -> dict[str, Any]:
+    review = payload.review or None
+    override_reason = (payload.draft_override_reason or "").strip()
+    metadata: dict[str, Any] = {
+        "test_case_count": len(payload.test_cases),
+        "approved": bool(payload.approved),
+        "draft_override_requested": bool(payload.draft_override_requested),
+    }
+    if review:
+        metadata.update(
+            {
+                "review_approved": bool(review.approved),
+                "review_score": review.score,
+                "review_threshold": review.threshold,
+            }
+        )
+    if override_reason:
+        metadata["draft_override_reason"] = override_reason[:500]
+    return metadata
+
+
+def _log_success(
+    *,
+    current_user: AuthUser,
+    request: Request,
+    workflow_run_id: str,
+    operation: str,
+    event_type: str,
+    billing_key: str,
+    quantity: int,
+    unit: str,
+    result_metadata: dict[str, Any],
+) -> str:
+    request_id = _get_request_id(request)
+    complete_workflow_run(workflow_run_id, status="completed", metadata=result_metadata)
+    return record_usage_event(
+        event_type=event_type,
+        billing_key=billing_key,
+        quantity=quantity,
+        unit=unit,
+        actor=current_user,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        status="completed",
+        metadata={"operation": operation, **result_metadata},
+    )
+
+
+def _log_failure(
+    *,
+    current_user: AuthUser,
+    request: Request,
+    workflow_run_id: str,
+    operation: str,
+    event_type: str,
+    billing_key: str,
+    error_message: str,
+    metadata: Optional[dict[str, Any]] = None,
+) -> None:
+    request_id = _get_request_id(request)
+    failure_metadata = {"operation": operation, **(metadata or {})}
+    complete_workflow_run(
+        workflow_run_id,
+        status="failed",
+        metadata=failure_metadata,
+        error_message=error_message,
+    )
+    record_usage_event(
+        event_type=event_type,
+        billing_key=billing_key,
+        quantity=0,
+        unit="request",
+        actor=current_user,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        status="failed",
+        metadata=failure_metadata,
+        error_message=error_message,
+    )
+
+
+@router.post("/export/jira", response_model=JiraExportResponse)
+async def export_jira(
+    request: Request,
+    payload: JiraExportInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> JiraExportResponse:
+    request_id = _get_request_id(request)
+    workflow_run_id = start_workflow_run(
+        operation="export.jira",
+        actor=current_user,
+        request_id=request_id,
+        metadata={"test_case_count": len(payload.test_cases)},
+    )
+    try:
+        response = await run_in_threadpool(export_to_jira, payload)
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.jira",
+            event_type="export.jira",
+            billing_key="export.jira",
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            result_metadata={"status": response.status, "test_case_count": len(payload.test_cases)},
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.jira",
+            event_type="export.jira",
+            billing_key="export.jira",
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@router.post("/export/csv")
+async def export_csv(
+    request: Request,
+    payload: ExportTestCasesInput,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Export test cases to CSV format."""
+    request_id = _get_request_id(request)
+    export_metadata = _export_audit_metadata(payload)
+    workflow_run_id = start_workflow_run(
+        operation="export.csv",
+        actor=current_user,
+        request_id=request_id,
+        metadata=export_metadata,
+    )
+    try:
+        csv_content = export_to_csv(payload.test_cases)
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.csv",
+            event_type="export.csv",
+            billing_key="export.csv",
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            result_metadata={**export_metadata, "content_length": len(csv_content)},
+        )
+        return StreamingResponse(
+            io.StringIO(csv_content),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=test_cases.csv"},
+        )
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.csv",
+            event_type="export.csv",
+            billing_key="export.csv",
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@router.post("/export/excel")
+async def export_excel_endpoint(
+    request: Request,
+    payload: ExportTestCasesInput,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Export test cases to Excel format."""
+    request_id = _get_request_id(request)
+    export_metadata = _export_audit_metadata(payload)
+    workflow_run_id = start_workflow_run(
+        operation="export.excel",
+        actor=current_user,
+        request_id=request_id,
+        metadata=export_metadata,
+    )
+    try:
+        excel_bytes = export_to_excel(payload.test_cases)
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.excel",
+            event_type="export.excel",
+            billing_key="export.excel",
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            result_metadata={**export_metadata, "byte_count": len(excel_bytes)},
+        )
+        return StreamingResponse(
+            io.BytesIO(excel_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=test_cases.xlsx"},
+        )
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.excel",
+            event_type="export.excel",
+            billing_key="export.excel",
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+
+@router.post("/export/json")
+async def export_json_endpoint(
+    request: Request,
+    payload: ExportTestCasesInput,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Export test cases to JSON format."""
+    request_id = _get_request_id(request)
+    export_metadata = _export_audit_metadata(payload)
+    workflow_run_id = start_workflow_run(
+        operation="export.json",
+        actor=current_user,
+        request_id=request_id,
+        metadata=export_metadata,
+    )
+    try:
+        json_content = export_to_json(payload.test_cases)
+        _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.json",
+            event_type="export.json",
+            billing_key="export.json",
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            result_metadata={**export_metadata, "content_length": len(json_content)},
+        )
+        return StreamingResponse(
+            io.StringIO(json_content),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=test_cases.json"},
+        )
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="export.json",
+            event_type="export.json",
+            billing_key="export.json",
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise

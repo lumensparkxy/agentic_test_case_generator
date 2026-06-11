@@ -10,18 +10,24 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.adk_client import DEFAULT_MODEL as DEFAULT_ADK_MODEL
-from app.config import DEFAULT_MODEL_NAME, _SuppressNonTextPartsWarning, _load_environment_file, get_billing_settings, get_settings
+from app.config import (
+    DEFAULT_MODEL_NAME,
+    _SuppressNonTextPartsWarning,
+    _load_environment_file,
+    _warn_if_dependency_mismatch,
+    get_auth_settings,
+    get_billing_settings,
+    get_jira_settings,
+    get_settings,
+)
 
 
 class ConfigSettingsTests(unittest.TestCase):
     def tearDown(self) -> None:
+        get_auth_settings.cache_clear()
         get_settings.cache_clear()
         get_billing_settings.cache_clear()
-
-    def test_default_model_name_is_current_gemini_default(self) -> None:
-        self.assertEqual(DEFAULT_MODEL_NAME, "gemini-3.5-flash")
-        self.assertEqual(DEFAULT_ADK_MODEL, DEFAULT_MODEL_NAME)
+        get_jira_settings.cache_clear()
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -45,7 +51,7 @@ class ConfigSettingsTests(unittest.TestCase):
             self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "gemini-only-key")
             self.assertNotIn("GEMINI_API_KEY", os.environ)
 
-    def test_get_settings_prefers_google_key_and_removes_gemini_alias(self) -> None:
+    def test_get_settings_prefers_gemini_alias_and_removes_it_after_normalization(self) -> None:
         with patch.dict(
             os.environ,
             {"GOOGLE_API_KEY": "google-key", "GEMINI_API_KEY": "gemini-key", "MODEL_NAME": DEFAULT_MODEL_NAME},
@@ -55,8 +61,8 @@ class ConfigSettingsTests(unittest.TestCase):
             with patch("app.config._warn_if_dependency_mismatch"), self.assertLogs(level="WARNING") as logs:
                 settings = get_settings()
 
-            self.assertEqual(settings.gemini_api_key, "google-key")
-            self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "google-key")
+            self.assertEqual(settings.gemini_api_key, "gemini-key")
+            self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "gemini-key")
             self.assertNotIn("GEMINI_API_KEY", os.environ)
             self.assertTrue(any("Both GOOGLE_API_KEY and GEMINI_API_KEY are set" in entry for entry in logs.output))
 
@@ -84,6 +90,26 @@ class ConfigSettingsTests(unittest.TestCase):
 
         self.assertFalse(log_filter.filter(noisy_record))
         self.assertTrue(log_filter.filter(normal_record))
+
+    def test_dependency_mismatch_accepts_current_adk_and_genai_versions(self) -> None:
+        versions = {"google-adk": "2.2.0", "google-genai": "2.8.0"}
+
+        with patch("app.config.version", side_effect=lambda package_name: versions[package_name]):
+            with patch("app.config.logging.warning") as warning:
+                _warn_if_dependency_mismatch()
+
+        warning.assert_not_called()
+
+    def test_dependency_mismatch_warns_for_versions_below_current_floor(self) -> None:
+        versions = {"google-adk": "2.1.0", "google-genai": "2.7.0"}
+
+        with patch("app.config.version", side_effect=lambda package_name: versions[package_name]):
+            with patch("app.config.logging.warning") as warning:
+                _warn_if_dependency_mismatch()
+
+        warning_messages = [call.args[0] for call in warning.call_args_list]
+        self.assertIn("google-adk version may be too old for current workflow patterns: %s", warning_messages)
+        self.assertIn("google-genai version may be too old for current SDK behavior: %s", warning_messages)
 
     def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
         with patch.dict(
@@ -114,6 +140,27 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertEqual(settings.max_overdraft_units, 8)
         self.assertIsNotNone(settings.launch_date)
         self.assertEqual(settings.launch_date.isoformat(), "2026-04-17T00:00:00+00:00")
+
+    def test_get_jira_settings_falls_back_to_jwt_secret_and_parses_limits(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "JWT_SECRET_KEY": "jwt-secret-key",
+                "JIRA_CONNECTION_SECRET_KEY": "",
+                "JIRA_API_TIMEOUT_SECONDS": "18",
+                "JIRA_PROJECT_PAGE_SIZE": "25",
+                "JIRA_ISSUE_PAGE_SIZE": "40",
+            },
+            clear=False,
+        ):
+            get_auth_settings.cache_clear()
+            get_jira_settings.cache_clear()
+            settings = get_jira_settings()
+
+        self.assertEqual(settings.connection_secret_key, "jwt-secret-key")
+        self.assertEqual(settings.api_timeout_seconds, 18)
+        self.assertEqual(settings.project_page_size, 25)
+        self.assertEqual(settings.issue_page_size, 40)
 
 
 if __name__ == "__main__":

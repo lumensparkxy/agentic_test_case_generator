@@ -19,7 +19,9 @@ from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 from pydantic import ValidationError
 
+from .adk_runtime import json_generation_config, tool_generation_config
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
+from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
 from ..config import get_settings
 from ..models import (
     BusinessRule,
@@ -28,15 +30,20 @@ from ..models import (
     RefineTestCasesInput,
     Requirement,
     RequirementAnalysis,
+    RequirementCoveragePlanOutput,
     RequirementCoveragePlan,
+    ReviewResult,
     RiskSignal,
     RolePermission,
     ScenarioIntent,
     StateTransition,
     TestCase,
+    TestCasesOutput,
     TestStep,
     WorkflowSettings,
 )
+from ..observability.logging import bind_log_context, get_log_context, reset_log_context
+from ..observability.metrics import record_agent_fallback
 from ..utils.llm_json import (
     parse_coverage_plan_json_detailed,
     parse_requirement_analysis_json_detailed,
@@ -59,7 +66,7 @@ APPROVAL_PHRASE = "APPROVED"
 DEFAULT_TEST_CASE_THRESHOLD = 90
 DEFAULT_TEST_CASE_MAX_ITERATIONS = 4
 DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT = 2
-DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 0
+DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 1
 
 ALLOWED_TEST_CASE_TYPES = {
     "Functional",
@@ -262,7 +269,6 @@ def _get_model_settings_or_none() -> Any | None:
     except RuntimeError as exc:
         if "GEMINI_API_KEY" not in str(exc):
             raise
-        logging.warning("[TestCase Workflow] Model credentials are unavailable; using deterministic fallback.")
         return None
 
 
@@ -394,6 +400,47 @@ def _normalize_source_refs(raw_source_refs: Any) -> List[str]:
     if not isinstance(raw_source_refs, list):
         return []
     return _dedupe_preserve([str(reference).strip() for reference in raw_source_refs if str(reference).strip()])
+
+
+def _normalize_string_list(raw_values: Any) -> List[str]:
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, list):
+        return _dedupe_preserve([str(value).strip() for value in raw_values if str(value).strip()])
+    value = str(raw_values).strip()
+    return [value] if value else []
+
+
+def _extract_linked_requirement_ids_from_test_case(
+    test_case: Dict[str, Any],
+    requirement_id_set: Optional[set[str]] = None,
+) -> List[str]:
+    candidates: List[str] = []
+    candidates.extend(_normalize_string_list(test_case.get("linked_requirement_ids")))
+    candidates.extend(_normalize_string_list(test_case.get("requirement_ids")))
+    candidates.extend(_normalize_string_list(test_case.get("requirement_id")))
+    candidates.extend(_normalize_string_list(test_case.get("tags")))
+
+    linked: List[str] = []
+    for candidate in candidates:
+        value = str(candidate).strip()
+        if not value:
+            continue
+        if requirement_id_set is not None:
+            if value in requirement_id_set:
+                linked.append(value)
+            continue
+        if re.match(r"^REQ-[A-Za-z0-9_-]+$", value, flags=re.IGNORECASE):
+            linked.append(value)
+    return _dedupe_preserve(linked)
+
+
+def _extract_scenario_refs_from_test_case(test_case: Dict[str, Any]) -> List[str]:
+    candidates: List[str] = []
+    candidates.extend(_normalize_string_list(test_case.get("scenario_refs")))
+    candidates.extend(_normalize_string_list(test_case.get("scenario_ids")))
+    candidates.extend(_normalize_string_list(test_case.get("scenario_id")))
+    return _dedupe_preserve(candidates)
 
 
 def _coerce_bool(value: Any, default: bool = True) -> bool:
@@ -593,8 +640,7 @@ def _compute_planned_scenario_metrics(
     scenarios_covered_by_requirement: Dict[str, set[str]] = {requirement_id: set() for requirement_id in requirement_ids}
 
     for test_case in test_cases:
-        tags = test_case.get("tags") or []
-        linked_requirements = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        linked_requirements = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         if not linked_requirements:
             continue
 
@@ -674,6 +720,8 @@ def _collect_test_case_text(test_case: Dict[str, Any]) -> str:
             str(test_case.get("expected_result") or ""),
             str(test_case.get("test_data") or ""),
             " ".join(str(tag) for tag in (test_case.get("tags") or [])),
+            " ".join(_normalize_string_list(test_case.get("linked_requirement_ids"))),
+            " ".join(_normalize_string_list(test_case.get("scenario_refs"))),
             step_text,
         ]
     ).lower()
@@ -714,8 +762,7 @@ def _compute_requirement_analysis_metrics(
     test_cases_by_requirement: Dict[str, List[Dict[str, Any]]] = {requirement_id: [] for requirement_id in requirement_ids}
 
     for test_case in test_cases:
-        tags = test_case.get("tags") or []
-        linked_ids = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        linked_ids = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         for requirement_id in linked_ids:
             test_cases_by_requirement[requirement_id].append(test_case)
 
@@ -751,6 +798,16 @@ def _compute_requirement_analysis_metrics(
         permission_hits = 0
         transition_hits = 0
         risk_hits = 0
+        covered_rule_ids: List[str] = []
+        missing_rule_ids: List[str] = []
+        covered_constraint_ids: List[str] = []
+        missing_constraint_ids: List[str] = []
+        covered_permission_ids: List[str] = []
+        missing_permission_ids: List[str] = []
+        covered_transition_ids: List[str] = []
+        missing_transition_ids: List[str] = []
+        covered_risk_ids: List[str] = []
+        missing_risk_ids: List[str] = []
 
         for rule in item.get("business_rules") or []:
             business_rules_total += 1
@@ -760,7 +817,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 business_rules_covered += 1
                 rule_hits += 1
+                covered_rule_ids.append(str(rule.get("id") or ""))
             else:
+                missing_rule_ids.append(str(rule.get("id") or ""))
                 rules_without_tests.append(f"{requirement_id} - {rule.get('title') or 'Untitled rule'}")
 
         for constraint in item.get("field_constraints") or []:
@@ -778,7 +837,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 field_constraints_covered += 1
                 constraint_hits += 1
+                covered_constraint_ids.append(str(constraint.get("id") or ""))
             else:
+                missing_constraint_ids.append(str(constraint.get("id") or ""))
                 constraints_without_tests.append(
                     f"{requirement_id} - {constraint.get('field_name') or 'field'}: {constraint.get('description') or 'constraint'}"
                 )
@@ -790,7 +851,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 role_permissions_covered += 1
                 permission_hits += 1
+                covered_permission_ids.append(str(permission.get("id") or ""))
             else:
+                missing_permission_ids.append(str(permission.get("id") or ""))
                 role_permissions_without_tests.append(
                     f"{requirement_id} - {permission.get('role') or 'Role'} {permission.get('action') or ''}".strip()
                 )
@@ -810,7 +873,9 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 state_transitions_covered += 1
                 transition_hits += 1
+                covered_transition_ids.append(str(transition.get("id") or ""))
             else:
+                missing_transition_ids.append(str(transition.get("id") or ""))
                 transitions_without_tests.append(
                     f"{requirement_id} - {transition.get('from_state') or 'Unknown'} → {transition.get('to_state') or 'Unknown'}"
                 )
@@ -823,20 +888,34 @@ def _compute_requirement_analysis_metrics(
             if covered:
                 risk_signals_covered += 1
                 risk_hits += 1
+                covered_risk_ids.append(str(risk.get("id") or ""))
             elif str(risk.get("severity") or "Medium") in {"Critical", "High"}:
+                missing_risk_ids.append(str(risk.get("id") or ""))
                 high_risk_items_without_tests.append(f"{requirement_id} - {risk.get('title') or 'Untitled risk'}")
+            else:
+                missing_risk_ids.append(str(risk.get("id") or ""))
 
         requirement_analysis_summary[requirement_id] = {
             "business_rules_total": len(item.get("business_rules") or []),
             "business_rules_covered": rule_hits,
+            "rules_covered": _dedupe_preserve(covered_rule_ids),
+            "rules_missing": _dedupe_preserve(missing_rule_ids),
             "field_constraints_total": len(item.get("field_constraints") or []),
             "field_constraints_covered": constraint_hits,
+            "constraints_covered": _dedupe_preserve(covered_constraint_ids),
+            "constraints_missing": _dedupe_preserve(missing_constraint_ids),
             "role_permissions_total": len(item.get("role_permissions") or []),
             "role_permissions_covered": permission_hits,
+            "permissions_covered": _dedupe_preserve(covered_permission_ids),
+            "permissions_missing": _dedupe_preserve(missing_permission_ids),
             "state_transitions_total": len(item.get("state_transitions") or []),
             "state_transitions_covered": transition_hits,
+            "transitions_covered": _dedupe_preserve(covered_transition_ids),
+            "transitions_missing": _dedupe_preserve(missing_transition_ids),
             "risk_signals_total": len(item.get("risk_signals") or []),
             "risk_signals_covered": risk_hits,
+            "risks_covered": _dedupe_preserve(covered_risk_ids),
+            "risks_missing": _dedupe_preserve(missing_risk_ids),
         }
 
     return {
@@ -960,7 +1039,7 @@ def _compute_test_case_coverage_metrics(test_cases: List[Dict[str, Any]], requir
             steps_total += len(steps)
 
         tags = test_case.get("tags") or []
-        tagged_ids = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        tagged_ids = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         if tagged_ids:
             cases_with_traceability += 1
             for tagged_id in tagged_ids:
@@ -1226,8 +1305,20 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
 
 
 def _log_test_case_workflow(event_type: str, **fields: Any) -> None:
-    payload = {"event": event_type, **fields}
+    payload = {**get_log_context(), "event": event_type, **fields}
     logging.info("[TestCase Workflow] %s", json.dumps(payload, sort_keys=True, default=str))
+
+
+def _test_case_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    operation = kwargs.get("operation")
+    if not operation:
+        operation = "testcases.refine" if kwargs.get("existing_test_cases") is not None else "testcases.generate"
+    return {
+        "request_id": kwargs.get("request_id"),
+        "workflow_run_id": kwargs.get("workflow_run_id"),
+        "actor_user_id": kwargs.get("actor_user_id"),
+        "operation": operation,
+    }
 
 
 def _append_unique_message(container: List[str], message: str) -> None:
@@ -1236,16 +1327,29 @@ def _append_unique_message(container: List[str], message: str) -> None:
         container.append(value)
 
 
+def _diagnostic_sample(raw_text: Optional[str], *, limit: int = 280) -> str:
+    normalized = " ".join(str(raw_text or "").split())
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}…"
+
+
 def _record_parser_failure(
     diagnostics: Dict[str, Any],
     author: str,
     error: Optional[str],
+    raw_text: Optional[str] = None,
     *,
     retryable: bool = False,
 ) -> None:
     if not error:
         return
     message = f"{author}: {error}"
+    sample = _diagnostic_sample(raw_text)
+    if sample:
+        message = f"{message} | sample: {sample}"
     _append_unique_message(diagnostics["parser_failures"], message)
     diagnostics["status"] = "partial"
     diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
@@ -1256,7 +1360,31 @@ def _record_parser_failure(
         author=author,
         error=error,
         retryable=retryable,
+        sample=sample or None,
         parser_failure_count=len(diagnostics["parser_failures"]),
+        status=diagnostics["status"],
+    )
+
+
+def _record_event_error(diagnostics: Dict[str, Any], author: str, event: Any) -> None:
+    error_code = getattr(event, "error_code", None)
+    error_message = getattr(event, "error_message", None)
+    if not error_code and not error_message:
+        return
+
+    diagnostics["status"] = "partial"
+    diagnostics["failure_reason"] = diagnostics["failure_reason"] or "model_error"
+    warning = f"{author}: model event error"
+    if error_code:
+        warning = f"{warning} ({error_code})"
+    if error_message:
+        warning = f"{warning}: {_diagnostic_sample(str(error_message))}"
+    _append_unique_message(diagnostics["warnings"], warning)
+    _log_test_case_workflow(
+        "event_error",
+        author=author,
+        error_code=error_code,
+        error_message=error_message,
         status=diagnostics["status"],
     )
 
@@ -1299,18 +1427,18 @@ def _build_coverage_planner_agent(
     context_text: str,
     human_feedback: Optional[str] = None,
 ) -> Agent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback to Consider:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback to Consider", human_feedback)
 
     return Agent(
         name="CoveragePlannerAgent",
         model=model,
         include_contents='none',
+        generate_content_config=json_generation_config(max_output_tokens=12000),
+        output_schema=RequirementCoveragePlanOutput,
         instruction=f"""You are a Senior QA Strategist creating a scenario coverage plan before detailed test cases are written.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Requirements:**
 {requirements_text}
@@ -1328,9 +1456,11 @@ def _build_coverage_planner_agent(
 2. Always include a 'Happy Path' scenario for every requirement.
 3. Include at least one non-happy-path scenario per requirement.
 4. Use the requirement analysis to cover business rules, constraints, permissions, risks, and transitions when present.
-4. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
-5. Mark essential scenarios with must_have=true.
-6. Output ONLY a JSON object shaped like:
+5. Add Authorization scenarios when role permissions are present, Boundary/Validation scenarios when field constraints are present, State Transition scenarios when workflow states are present, and Integration/Error Handling scenarios when external systems are present.
+6. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
+7. Mark essential scenarios with must_have=true, especially scenarios that cover Critical/High risks, authorization, data integrity, or required validations.
+8. Make every scenario objective specific enough that a tester can derive expected data, action, and assertion.
+9. Output ONLY a JSON object shaped like:
 {{
     "coverage_plan": [
         {{
@@ -1362,18 +1492,18 @@ def _build_review_loop(
     requirements_text: str,
     human_feedback: Optional[str] = None,
 ) -> LoopAgent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback That Must Be Honored:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback That Must Be Honored", human_feedback)
 
     validator_agent = Agent(
         name="TestCaseValidatorAgent",
         model=model,
         include_contents='none',
+        generate_content_config=json_generation_config(max_output_tokens=4096),
+        output_schema=ReviewResult,
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Current Test Cases:**
 ```
@@ -1396,14 +1526,16 @@ def _build_review_loop(
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
 2. Steps are executable and expected results are specific.
-    3. Requirement traceability tags cover every requirement.
-    4. Every must-have scenario from the coverage plan is represented by at least one test case.
-    5. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
-    6. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
-    7. Priority, type, status, and automation status are valid.
-    8. Test data, preconditions, and overall expected_result are present when needed.
-    9. Human feedback has been addressed.
-    10. Browser/documentation cases use exact grounded headings, link names, and hrefs when grounded context provides them.
+3. Steps are sequential, actor-aware, and contain an action plus an observable expected result.
+4. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
+5. Every must-have scenario from the coverage plan is represented by at least one test case.
+6. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
+7. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
+8. Priority, type, status, and automation status are valid.
+9. Test data, preconditions, and overall expected_result are present when needed.
+10. Browser/documentation cases use exact grounded headings, link names, and hrefs when grounded context provides them.
+11. Cases are realistic enough for manual execution and future Playwright automation: no vague steps, TBD values, or unsupported feature invention.
+12. Human feedback has been addressed without treating feedback as an instruction to weaken quality gates.
 
 **Response Rules:**
 - Return ONLY a JSON object with this exact shape:
@@ -1426,7 +1558,10 @@ def _build_review_loop(
         name="TestCaseRefinerAgent",
         model=model,
         include_contents='none',
+        generate_content_config=tool_generation_config(max_output_tokens=16000, temperature=0.15),
         instruction=f"""You are a QA Engineer refining test cases.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
 
 **Current Test Cases:**
 ```
@@ -1452,9 +1587,11 @@ def _build_review_loop(
 **Your Task:**
 1. If the validation JSON indicates approved=true, score >= threshold, and blocking_issues is empty, call 'exit_loop' immediately.
 2. Otherwise, improve the test cases to address all validation issues and human feedback.
-3. Output ONLY a JSON object with the shape {{"test_cases": [...]}}.
+3. Preserve traceability fields and scenario_refs unless the validation result proves they are wrong.
+4. Replace vague or placeholder actions with concrete setup/action/assertion steps grounded in requirements/context.
+5. Output ONLY a JSON object with the shape {{"test_cases": [...]}}.
 
-Either call exit_loop OR output the refined JSON object. Never add commentary.
+Either call exit_loop OR output the refined JSON object. Never do both. Never add commentary.
 """,
         description="Refines generated test cases until the approval threshold is reached",
         tools=[exit_loop],
@@ -1477,18 +1614,18 @@ def _build_generation_pipeline(
     max_iterations: int,
     human_feedback: Optional[str] = None,
 ) -> Agent:
-    feedback_section = ""
-    if human_feedback:
-        feedback_section = f"""
-**Human Feedback to Address:**
-{human_feedback}
-"""
+    feedback_section = human_feedback_section("Human Feedback to Address", human_feedback)
 
     generator_agent = Agent(
         name="TestCaseGeneratorAgent",
         model=model,
         include_contents='default',
+        generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
+        output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 **Requirements to Test:**
 {requirements_text}
@@ -1506,18 +1643,24 @@ def _build_generation_pipeline(
 {{{STATE_COVERAGE_PLAN}}}
 {feedback_section}
 **Rules:**
-1. Generate 1-3 test cases per requirement.
-2. Implement every must-have planned scenario and as many recommended scenarios as possible.
+1. Generate at least one executable test case for every must-have scenario in the coverage plan.
+2. Prefer one test case per planned scenario; combine scenarios only when they share the same actor, setup, and expected outcome.
 3. Reflect business rules, field constraints, role permissions, state transitions, and risks from the requirement analysis whenever they apply.
-4. Tag each test case with at least one requirement ID and one scenario tag using the format scenario:<kebab-case-scenario-type>.
-5. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
-6. Include detailed steps, expected results, realistic priorities, and execution metadata.
-7. Keep each test case centered on one primary scenario from the coverage plan.
-8. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
-9. For browser or documentation workflows, assertions MUST prefer exact grounded headings, visible text, accessible link names, and hrefs from the context instead of inferred marketing phrases or synthetic labels.
-10. Navigation steps MUST use real accessible link text from grounded context or direct href URLs; never invent labels such as "link/button for ...".
-11. Never return `steps` as a single string, markdown list, or paragraph.
-12. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+4. Set `linked_requirement_ids` to a JSON array containing every requirement ID covered by the test case.
+5. Also include those requirement IDs in `tags` for backward compatibility, plus one scenario tag using the format scenario:<kebab-case-scenario-type>.
+6. Set `scenario_refs` to the coverage-plan scenario ID(s) implemented by the test case when available.
+7. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
+8. Include detailed steps, expected results, realistic priorities, and execution metadata.
+9. Keep each test case centered on one primary scenario from the coverage plan.
+10. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
+11. For browser or documentation workflows, assertions MUST prefer exact grounded headings, visible text, accessible link names, and hrefs from the context instead of inferred marketing phrases or synthetic labels.
+12. Navigation steps MUST use real accessible link text from grounded context or direct href URLs; never invent labels such as "link/button for ...".
+13. Never return `steps` as a single string, markdown list, or paragraph.
+14. Make steps real-world executable: name the actor/role, setup data, UI/API action, validation point, and observable outcome.
+15. Use concrete but non-sensitive test data. If exact data is unknown, put explicit assumptions in preconditions or test_data; never use TBD/placeholder text.
+16. Include negative, boundary, authorization, and error-handling coverage when the coverage plan or requirement analysis calls for it; do not overproduce only happy paths.
+17. Prefer business-readable test data such as `qa.manager@example.test`, `INV-1001`, or `2026-05-10`; do not use real personal data or secrets.
+18. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -1554,7 +1697,12 @@ def _build_refinement_pipeline(
         name="TestCaseRefinementAgent",
         model=model,
         include_contents='default',
+        generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
+        output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
+
+    {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {REAL_WORLD_QA_POLICY}
 
 Use the existing test cases, requirements, context, template, and human feedback in the user message to produce an improved JSON object shaped like {{"test_cases": [...]}}.
 
@@ -1576,13 +1724,16 @@ Coverage plan:
 Rules:
 1. Preserve good test cases and improve weak ones.
 2. Add, merge, split, or remove cases as needed.
-3. Keep requirement traceability intact or improve it.
+3. Keep structured `linked_requirement_ids` intact or improve them; also mirror linked requirement IDs in `tags` for backward compatibility.
 4. Ensure each test case includes a scenario tag formatted like scenario:happy-path.
-5. Preserve or improve any grounded-context `source_refs` when grounded context is available.
-6. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
-7. For browser or documentation workflows, replace inferred assertions or synthetic click labels with exact grounded headings, accessible link names, and hrefs from the context whenever available.
-8. Never return `steps` as a plain string, markdown list, or free-form paragraph.
-9. Output ONLY the JSON object.
+5. Preserve or improve `scenario_refs` from the coverage plan when available.
+6. Preserve or improve any grounded-context `source_refs` when grounded context is available.
+7. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
+8. For browser or documentation workflows, replace inferred assertions or synthetic click labels with exact grounded headings, accessible link names, and hrefs from the context whenever available.
+9. Never return `steps` as a plain string, markdown list, or free-form paragraph.
+10. Remove generic actions like "navigate to the feature area" when a more concrete UI/API action can be inferred.
+11. Add missing negative, boundary, authorization, state-transition, or integration cases when feedback or coverage gaps require them.
+12. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,
@@ -1618,6 +1769,9 @@ async def _run_test_case_workflow_async(
     existing_test_cases: Optional[List[Dict[str, Any]]] = None,
     workflow_settings: Optional[WorkflowSettings] = None,
     actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
@@ -1716,6 +1870,10 @@ Human feedback:
         ):
             author = getattr(event, 'author', 'unknown')
             _log_test_case_workflow("event_received", session_id=session.id, author=author)
+            _record_event_error(diagnostics, author, event)
+
+            if getattr(event, "partial", False):
+                continue
 
             if not event.content or not event.content.parts:
                 continue
@@ -1730,26 +1888,26 @@ Human feedback:
                     if parsed_test_cases:
                         current_test_cases = parsed_test_cases
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
 
                 if author == "CoveragePlannerAgent":
                     parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
                     if parsed_coverage_plan:
                         current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
 
                 if author == "RequirementAnalysisAgent":
                     parsed_requirement_analysis, parse_error = parse_requirement_analysis_json_detailed(text)
                     if parsed_requirement_analysis:
                         current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
                     else:
-                        _record_parser_failure(diagnostics, author, parse_error)
+                        _record_parser_failure(diagnostics, author, parse_error, text)
 
                 if author == "TestCaseValidatorAgent":
                     parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
                     if not parsed_review:
-                        _record_parser_failure(diagnostics, author, parse_error, retryable=True)
+                        _record_parser_failure(diagnostics, author, parse_error, text, retryable=True)
                         continue
 
                     model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
@@ -1842,28 +2000,35 @@ Human feedback:
             completed_iterations=len(iteration_history),
         )
 
-    state_test_cases_raw = session.state.get(STATE_TEST_CASES, "[]")
+    updated_session = await session_service.get_session(
+        app_name="test_case_generator",
+        user_id=user_id,
+        session_id=session.id,
+    )
+    session_state = updated_session.state if updated_session else session.state
+
+    state_test_cases_raw = session_state.get(STATE_TEST_CASES, "[]")
     state_test_cases, state_test_cases_error = parse_test_cases_json_detailed(state_test_cases_raw)
     if state_test_cases:
         current_test_cases = state_test_cases
     elif str(state_test_cases_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error)
+        _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error, state_test_cases_raw)
 
-    state_coverage_plan_raw = session.state.get(STATE_COVERAGE_PLAN, "[]")
+    state_coverage_plan_raw = session_state.get(STATE_COVERAGE_PLAN, "[]")
     state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
     if state_coverage_plan:
         current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
     elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error)
+        _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
 
-    state_requirement_analysis_raw = session.state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
+    state_requirement_analysis_raw = session_state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
     state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(
         state_requirement_analysis_raw
     )
     if state_requirement_analysis:
         current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
     elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error)
+        _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error, state_requirement_analysis_raw)
 
     if not current_requirement_analysis:
         current_requirement_analysis = fallback_requirement_analysis(requirements)
@@ -1871,12 +2036,18 @@ Human feedback:
     if not current_coverage_plan:
         current_coverage_plan = _fallback_coverage_plan(requirements)
 
-    state_review_raw = session.state.get(STATE_VALIDATION_FEEDBACK, "")
+    state_review_raw = session_state.get(STATE_VALIDATION_FEEDBACK, "")
     state_review, state_review_error = parse_review_json_detailed(state_review_raw, default_threshold=threshold)
     if state_review:
         model_review = _normalize_review_result(state_review, threshold, "Test case validation completed.")
     elif str(state_review_raw).strip():
-        _record_parser_failure(diagnostics, "SessionStateValidationReview", state_review_error, retryable=True)
+        _record_parser_failure(
+            diagnostics,
+            "SessionStateValidationReview",
+            state_review_error,
+            state_review_raw,
+            retryable=True,
+        )
 
     heuristic_review = _heuristic_test_case_review(
         current_test_cases,
@@ -1919,9 +2090,9 @@ Human feedback:
             f"Test-case workflow reached the max iteration limit ({max_iterations}).",
         )
 
-    if not current_test_cases and diagnostics["parser_failures"]:
+    if not current_test_cases:
         diagnostics["status"] = "failed"
-        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "parser_failure"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or ("empty_refinement" if is_refinement else "empty_generation")
     elif not final_review["approved"] and not diagnostics["failure_reason"]:
         diagnostics["failure_reason"] = "quality_rejection"
 
@@ -1978,6 +2149,14 @@ Human feedback:
 
 
 def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
+    context_token = bind_log_context(**_test_case_workflow_context(kwargs))
+    try:
+        return _run_workflow_sync_inner(**kwargs)
+    finally:
+        reset_log_context(context_token)
+
+
+def _run_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(kwargs.get("workflow_settings"))
     attempt_total = int(resolved_settings["retry_attempts"] or 0) + 1
     last_error: Optional[Exception] = None
@@ -2071,8 +2250,26 @@ def _run_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
     }
 
 
+def _format_requirement_for_prompt(requirement: Requirement) -> str:
+    parts = [f"- {requirement.id}: {requirement.text}"]
+    context_bits: List[str] = []
+    if requirement.source_path:
+        context_bits.append(f"source_path={requirement.source_path}")
+    elif requirement.source_issue_key:
+        context_bits.append(f"source={requirement.source_issue_key}")
+    if requirement.source_issue_type:
+        context_bits.append(f"source_type={requirement.source_issue_type}")
+    if requirement.source_hierarchy:
+        context_bits.append(f"hierarchy={' > '.join(requirement.source_hierarchy)}")
+    if requirement.source_excerpt:
+        context_bits.append(f"source_excerpt={requirement.source_excerpt[:240]}")
+    if context_bits:
+        parts.append(f"  Context: {' | '.join(context_bits)}")
+    return "\n".join(parts)
+
+
 def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[Any], template: Any) -> tuple[str, str, str]:
-    requirements_text = "\n".join([f"- {req.id}: {req.text}" for req in requirements])
+    requirements_text = "\n".join([_format_requirement_for_prompt(req) for req in requirements])
 
     context_parts = []
     if context:
@@ -2347,12 +2544,12 @@ def _fallback_raw_test_cases(
         if not requirement:
             continue
 
-        selected_scenarios = list(plan_item.get("scenarios") or [])
-        if not selected_scenarios:
-            selected_scenarios = _default_scenarios_for_requirement(requirement)
+        planned_scenarios = list(plan_item.get("scenarios") or [])
+        selected_scenarios = planned_scenarios or _default_scenarios_for_requirement(requirement)
 
         for scenario_offset, scenario in enumerate(selected_scenarios, start=1):
             scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
+            scenario_id = str(scenario.get("id") or f"{requirement.id}-SCN-{scenario_offset:02d}")
             grounded_details = _grounded_browser_step_details(requirement, context)
             grounded_steps = _fallback_steps_for_grounded_browser_requirement(requirement, scenario_type, context)
             source_refs = [grounded_details["source_id"]] if grounded_details else grounded_source_refs
@@ -2397,6 +2594,8 @@ def _fallback_raw_test_cases(
                     "automation_status": "To Be Automated",
                     "component": component,
                     "tags": [requirement.id, _scenario_tag(scenario_type), "generated", f"plan:{idx:02d}-{scenario_offset:02d}"],
+                    "linked_requirement_ids": [requirement.id],
+                    "scenario_refs": [scenario_id],
                     "source_refs": source_refs,
                 }
             )
@@ -2411,8 +2610,7 @@ def _covered_requirement_scenario_pairs(
     covered_pairs: set[tuple[str, str]] = set()
 
     for test_case in test_cases:
-        tags = test_case.get("tags") or []
-        linked_requirements = {str(tag).strip() for tag in tags if str(tag).strip() in requirement_id_set}
+        linked_requirements = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         if not linked_requirements:
             continue
 
@@ -2553,6 +2751,10 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
     test_cases: List[TestCase] = []
     for index, raw_test_case in enumerate(raw_test_cases, start=1):
         try:
+            tags = _normalize_string_list(raw_test_case.get("tags"))
+            linked_requirement_ids = _extract_linked_requirement_ids_from_test_case({**raw_test_case, "tags": tags})
+            scenario_refs = _extract_scenario_refs_from_test_case(raw_test_case)
+            normalized_tags = _dedupe_preserve(tags + linked_requirement_ids)
             steps = []
             for raw_step in _normalize_raw_steps(raw_test_case.get("steps", [])):
                 if isinstance(raw_step, str):
@@ -2586,7 +2788,9 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     estimated_time=str(raw_test_case["estimated_time"]) if raw_test_case.get("estimated_time") is not None else None,
                     automation_status=_normalize_automation_status(raw_test_case.get("automation_status")),
                     component=raw_test_case.get("component"),
-                    tags=raw_test_case.get("tags", []),
+                    tags=normalized_tags,
+                    linked_requirement_ids=linked_requirement_ids,
+                    scenario_refs=scenario_refs,
                     source_refs=_normalize_source_refs(raw_test_case.get("source_refs")),
                 )
             )
@@ -2623,6 +2827,8 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
                 "automation_status": test_case.automation_status,
                 "component": test_case.component,
                 "tags": test_case.tags or [],
+                "linked_requirement_ids": test_case.linked_requirement_ids or _extract_linked_requirement_ids_from_test_case({"tags": test_case.tags or []}),
+                "scenario_refs": test_case.scenario_refs or [],
                 "source_refs": test_case.source_refs or [],
             }
         )
@@ -2778,9 +2984,15 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": public_workflow_diagnostics(dict(workflow.get("workflow_diagnostics") or {})),
     }
-def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
-    requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
+def generate_test_cases(
+    payload: GenerateTestCasesInput,
+    actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
+) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
+    requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
     if settings is None:
         workflow = {
@@ -2812,6 +3024,9 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             existing_test_cases=None,
             workflow_settings=payload.workflow_settings,
             actor_user_id=actor_user_id,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation=operation,
         )
 
     raw_test_cases = workflow.get("test_cases", [])
@@ -2821,6 +3036,7 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
+        record_agent_fallback(workflow=operation or "testcases.generate", reason="fallback_generated_artifacts")
         raw_test_cases = _fallback_raw_test_cases(payload.requirements, payload.context, coverage_plan=coverage_plan)
         fallback_review = _heuristic_test_case_review(
             raw_test_cases,
@@ -2831,6 +3047,13 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             context=payload.context,
         )
         workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+        missing_model_credentials = workflow_diagnostics.get("failure_reason") == "missing_model_credentials"
+        if not missing_model_credentials:
+            fallback_review["approved"] = False
+            fallback_review["summary"] = "Test-case fallback produced a draft suite that still requires review approval."
+            fallback_review["blocking_issues"] = _dedupe_preserve(
+                fallback_review["blocking_issues"] + ["Deterministic fallback was used instead of a completed generation/validation loop."]
+            )
         workflow_diagnostics["status"] = "fallback"
         workflow_diagnostics["used_fallback"] = True
         workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "fallback_generated_artifacts"
@@ -2843,7 +3066,7 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             "requirement_analysis": requirement_analysis,
             "coverage_plan": coverage_plan,
             "review": fallback_review,
-            "approved": fallback_review["approved"],
+            "approved": bool(fallback_review["approved"]),
             "iteration_history": [
                 _make_history_entry(
                     iteration=1,
@@ -2879,6 +3102,7 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
             )
             current_review = dict(workflow.get("review") or {})
             if _prefer_review(recovery_review, current_review):
+                record_agent_fallback(workflow=operation or "testcases.generate", reason="quality_recovery")
                 raw_test_cases = recovery_test_cases
                 workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
                 workflow_diagnostics["status"] = "fallback"
@@ -2918,7 +3142,13 @@ def generate_test_cases(payload: GenerateTestCasesInput, actor_user_id: Optional
     return _build_response(test_cases, workflow, payload.requirements, payload.context)
 
 
-def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str] = None) -> Dict[str, Any]:
+def refine_test_cases(
+    payload: RefineTestCasesInput,
+    actor_user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    workflow_run_id: Optional[str] = None,
+    operation: Optional[str] = None,
+) -> Dict[str, Any]:
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
     existing_test_cases = _serialize_test_cases(payload.test_cases)
@@ -2953,6 +3183,9 @@ def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str
             existing_test_cases=existing_test_cases,
             workflow_settings=payload.workflow_settings,
             actor_user_id=actor_user_id,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation=operation,
         )
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
@@ -2962,6 +3195,7 @@ def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if not workflow.get("test_cases"):
         logging.warning("[TestCase Workflow] Refinement returned no test cases, restoring previous set")
+        record_agent_fallback(workflow=operation or "testcases.refine", reason="restored_previous_test_cases")
         fallback_review = _heuristic_test_case_review(
             raw_test_cases,
             payload.requirements,
@@ -2975,7 +3209,7 @@ def refine_test_cases(payload: RefineTestCasesInput, actor_user_id: Optional[str
         fallback_review["blocking_issues"] = _dedupe_preserve(
             fallback_review["blocking_issues"] + ["Refinement loop did not return an updated test-case set."]
         )
-        workflow_diagnostics = dict(workflow.get("workflow_diagnostics") or _new_workflow_diagnostics())
+        workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
         workflow_diagnostics["status"] = "fallback"
         workflow_diagnostics["used_fallback"] = True
         workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "fallback_generated_artifacts"

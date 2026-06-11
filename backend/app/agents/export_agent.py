@@ -25,7 +25,7 @@ def export_to_csv(test_cases: List[TestCase]) -> str:
     headers = [
         "ID", "Title", "Description", "Priority", "Type", "Status",
         "Preconditions", "Steps", "Expected Result", "Test Data",
-        "Estimated Time", "Automation Status", "Component", "Tags"
+        "Estimated Time", "Automation Status", "Component", "Linked Requirements", "Scenario Refs", "Source Refs", "Tags"
     ]
     
     writer = csv.writer(output, quoting=csv.QUOTE_ALL)
@@ -53,6 +53,9 @@ def export_to_csv(test_cases: List[TestCase]) -> str:
             tc.estimated_time or "",
             tc.automation_status,
             tc.component or "",
+            ", ".join(tc.linked_requirement_ids or []),
+            ", ".join(tc.scenario_refs or []),
+            ", ".join(tc.source_refs or []),
             ", ".join(tc.tags) if tc.tags else ""
         ]
         writer.writerow(row)
@@ -78,7 +81,7 @@ def export_to_excel(test_cases: List[TestCase]) -> bytes:
     headers = [
         "ID", "Title", "Description", "Priority", "Type", "Status",
         "Preconditions", "Steps", "Expected Result", "Test Data",
-        "Estimated Time", "Automation Status", "Component", "Tags"
+        "Estimated Time", "Automation Status", "Component", "Linked Requirements", "Scenario Refs", "Source Refs", "Tags"
     ]
     
     # Styling
@@ -130,6 +133,9 @@ def export_to_excel(test_cases: List[TestCase]) -> bytes:
             tc.estimated_time or "",
             tc.automation_status,
             tc.component or "",
+            ", ".join(tc.linked_requirement_ids or []),
+            ", ".join(tc.scenario_refs or []),
+            ", ".join(tc.source_refs or []),
             ", ".join(tc.tags) if tc.tags else ""
         ]
         
@@ -145,7 +151,7 @@ def export_to_excel(test_cases: List[TestCase]) -> bytes:
                                         fill_type="solid")
     
     # Adjust column widths
-    column_widths = [12, 40, 50, 10, 15, 12, 40, 60, 40, 30, 15, 18, 20, 30]
+    column_widths = [12, 40, 50, 10, 15, 12, 40, 60, 40, 30, 15, 18, 20, 24, 24, 24, 30]
     for col, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
     
@@ -188,6 +194,9 @@ def export_to_json(test_cases: List[TestCase]) -> str:
                 "estimated_time": tc.estimated_time,
                 "automation_status": tc.automation_status,
                 "component": tc.component,
+                "linked_requirement_ids": tc.linked_requirement_ids,
+                "scenario_refs": tc.scenario_refs,
+                "source_refs": tc.source_refs,
                 "tags": tc.tags
             }
             for tc in test_cases

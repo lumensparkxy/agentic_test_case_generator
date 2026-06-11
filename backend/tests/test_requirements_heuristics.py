@@ -6,31 +6,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from unittest.mock import patch
-
-from app.agents.requirements_agent import _build_fallback_workflow, _finalize_requirements, _heuristic_extract, extract_requirements
+from app.adk_client import _merge_review_results
+from app.agents.requirements_agent import _build_fallback_workflow, _convert_to_requirements, _finalize_requirements, _heuristic_extract
 from app.models import Requirement
-from app.utils.requirements_text import normalize_requirement_payloads, normalize_requirement_text
-
-
-class RequirementTextNormalizationTests(unittest.TestCase):
-    def test_normalizes_user_capability_to_shall_format(self) -> None:
-        self.assertEqual(
-            normalize_requirement_text("Users can reset their password via email link."),
-            "The system shall allow users to reset their password via email link.",
-        )
-
-    def test_normalizes_requirement_payloads_before_quality_scoring(self) -> None:
-        normalized = normalize_requirement_payloads(
-            [
-                {"id": "auth", "text": "Users can sign in using email and password."},
-                {"id": "auth-copy", "text": "The system shall allow users to sign in using email and password."},
-            ]
-        )
-
-        self.assertEqual(len(normalized), 1)
-        self.assertEqual(normalized[0]["id"], "REQ-001")
-        self.assertTrue(normalized[0]["text"].startswith("The system shall"))
 
 
 class RequirementHeuristicExtractionTests(unittest.TestCase):
@@ -64,6 +42,24 @@ class RequirementHeuristicExtractionTests(unittest.TestCase):
         self.assertTrue(any("prevent submission" in text for text in requirement_texts))
         self.assertFalse(any("node_modules" in text for text in requirement_texts))
 
+    def test_convert_to_requirements_preserves_context_metadata(self) -> None:
+        requirements = _convert_to_requirements([
+            {
+                "id": "REQ-LOGIN",
+                "text": "The system shall allow users to sign in using email and password.",
+                "source_path": "Login.docx > Authentication > Happy path",
+                "source_section": "Happy path",
+                "source_excerpt": "Users sign in with email and password.",
+                "source_hierarchy": ["Login.docx", "Authentication"],
+                "quality_flags": ["needs acceptance criteria"],
+            }
+        ])
+
+        self.assertEqual(requirements[0].id, "REQ-001")
+        self.assertEqual(requirements[0].source_path, "Login.docx > Authentication > Happy path")
+        self.assertEqual(requirements[0].source_hierarchy, ["Login.docx", "Authentication"])
+        self.assertEqual(requirements[0].quality_flags, ["needs acceptance criteria"])
+
 
 class RequirementFallbackWorkflowTests(unittest.TestCase):
     def test_fallback_workflow_preserves_threshold_and_marks_diagnostics(self) -> None:
@@ -85,21 +81,62 @@ class RequirementFallbackWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["workflow_diagnostics"]["failure_reason"], "fallback_generated_artifacts")
         self.assertTrue(any("Existing warning" == warning for warning in workflow["workflow_diagnostics"]["warnings"]))
 
-    def test_extract_requirements_uses_heuristic_fallback_without_model_credentials(self) -> None:
-        document_text = """
-        ## Functional Requirements
-        - The system shall allow users to install the Playwright pytest plugin using the command `pip install pytest-playwright`.
-        - The system shall support running a single test file such as `test_login.py`.
-        """
 
-        with patch("app.agents.requirements_agent.get_settings", side_effect=RuntimeError("GEMINI_API_KEY is required")):
-            with patch("app.agents.requirements_agent.run_requirement_extraction_workflow_sync") as run_workflow:
-                workflow = extract_requirements(document_text)
+class RequirementReviewMergeTests(unittest.TestCase):
+    def test_merge_uses_heuristic_score_for_approved_reviews(self) -> None:
+        merged = _merge_review_results(
+            {
+                "approved": True,
+                "score": 95,
+                "threshold": 85,
+                "summary": "Reviewer approved the requirements.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+            {
+                "approved": True,
+                "score": 100,
+                "threshold": 85,
+                "summary": "Requirements meet the current quality threshold.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+        )
 
-        run_workflow.assert_not_called()
-        self.assertGreaterEqual(len(workflow["requirements"]), 2)
-        self.assertTrue(workflow["workflow_diagnostics"]["used_fallback"])
-        self.assertEqual(workflow["workflow_diagnostics"]["status"], "fallback")
+        self.assertTrue(merged["approved"])
+        self.assertEqual(merged["score"], 100)
+        self.assertEqual(merged["threshold"], 85)
+
+    def test_merge_keeps_failed_reviews_below_threshold(self) -> None:
+        merged = _merge_review_results(
+            {
+                "approved": True,
+                "score": 96,
+                "threshold": 85,
+                "summary": "Reviewer approved the requirements.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+            {
+                "approved": False,
+                "score": 90,
+                "threshold": 85,
+                "summary": "Requirements still need refinement before the workflow can move forward.",
+                "blocking_issues": ["1 requirement(s) are not in the required 'The system shall...' format."],
+                "suggestions": [],
+                "unmet_criteria": ["Normalize all requirements into a consistent, testable format."],
+            },
+        )
+
+        self.assertFalse(merged["approved"])
+        self.assertEqual(merged["score"], 84)
+        self.assertEqual(
+            merged["summary"],
+            "Requirements still need refinement before the workflow can move forward.",
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,284 @@
+import json
+import logging
+from typing import Any, Optional
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
+
+from ..agents.test_case_agent import generate_test_cases, refine_test_cases
+from ..auth.jwt_auth import get_current_user
+from ..models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse, RefineTestCasesInput
+from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
+from ..services.billing_service import enforce_billing_access, record_billing_consumption
+from ..services.versioning_service import persist_test_case_versions
+
+router = APIRouter()
+
+
+def _get_request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", "") or uuid4())
+
+
+def _test_case_snapshot(test_cases: list[Any]) -> dict[str, str]:
+    snapshot: dict[str, str] = {}
+    for index, item in enumerate(test_cases or []):
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        case_id = str((item or {}).get("id") or f"TC-{index + 1:03d}")
+        snapshot[case_id] = json.dumps(item or {}, sort_keys=True, default=str)
+    return snapshot
+
+
+def _count_snapshot_changes(previous: dict[str, str], current: dict[str, str]) -> int:
+    changed = sum(1 for key, value in current.items() if previous.get(key) != value)
+    removed = sum(1 for key in previous.keys() if key not in current)
+    return changed + removed
+
+
+def _log_success(
+    *,
+    current_user: AuthUser,
+    request: Request,
+    workflow_run_id: str,
+    operation: str,
+    event_type: str,
+    billing_key: str,
+    quantity: int,
+    unit: str,
+    result_metadata: dict[str, Any],
+) -> str:
+    request_id = _get_request_id(request)
+    complete_workflow_run(workflow_run_id, status="completed", metadata=result_metadata)
+    return record_usage_event(
+        event_type=event_type,
+        billing_key=billing_key,
+        quantity=quantity,
+        unit=unit,
+        actor=current_user,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        status="completed",
+        metadata={"operation": operation, **result_metadata},
+    )
+
+
+def _log_failure(
+    *,
+    current_user: AuthUser,
+    request: Request,
+    workflow_run_id: str,
+    operation: str,
+    event_type: str,
+    billing_key: str,
+    error_message: str,
+    metadata: Optional[dict[str, Any]] = None,
+) -> None:
+    request_id = _get_request_id(request)
+    failure_metadata = {"operation": operation, **(metadata or {})}
+    complete_workflow_run(
+        workflow_run_id,
+        status="failed",
+        metadata=failure_metadata,
+        error_message=error_message,
+    )
+    record_usage_event(
+        event_type=event_type,
+        billing_key=billing_key,
+        quantity=0,
+        unit="request",
+        actor=current_user,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        status="failed",
+        metadata={**failure_metadata, "error_message": error_message},
+    )
+
+
+def _record_billing_consumption_safe(
+    *,
+    current_user: AuthUser,
+    billing_context,
+    source_event_id: str,
+    request: Request,
+    workflow_run_id: str,
+    billing_key: str,
+    quantity: int,
+    unit: str,
+    metadata: Optional[dict[str, Any]] = None,
+) -> None:
+    try:
+        record_billing_consumption(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=source_event_id,
+            request_id=_get_request_id(request),
+            workflow_run_id=workflow_run_id,
+            billing_key=billing_key,
+            quantity=quantity,
+            unit=unit,
+            metadata=metadata,
+        )
+    except Exception as exc:  # pragma: no cover - defensive billing isolation
+        logging.warning("Billing consumption recording failed for %s: %s", billing_key, exc)
+
+
+@router.post("/testcases/generate", response_model=GenerateTestCasesResponse)
+async def generate_test_cases_endpoint(
+    request: Request,
+    payload: GenerateTestCasesInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> GenerateTestCasesResponse:
+    request_id = _get_request_id(request)
+    billing_context = await run_in_threadpool(
+        enforce_billing_access,
+        current_user=current_user,
+        billing_key="testcases.generate",
+    )
+    workflow_run_id = start_workflow_run(
+        operation="testcases.generate",
+        actor=current_user,
+        request_id=request_id,
+        metadata={"requirement_count": len(payload.requirements)},
+    )
+    try:
+        result = await run_in_threadpool(
+            generate_test_cases,
+            payload,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.generate",
+        )
+        response = GenerateTestCasesResponse(**result)
+        event_id = _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.generate",
+            event_type="testcases.generated",
+            billing_key="testcases.generate",
+            quantity=len(response.test_cases),
+            unit="test_case",
+            result_metadata={
+                "test_cases_generated_count": len(response.test_cases),
+                "requirement_count": len(payload.requirements),
+                "approved": response.approved,
+            },
+        )
+        _record_billing_consumption_safe(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=event_id,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            billing_key="testcases.generate",
+            quantity=len(response.test_cases),
+            unit="test_case",
+            metadata={"approved": response.approved, "requirement_count": len(payload.requirements)},
+        )
+        response.test_cases = persist_test_case_versions(
+            current_test_cases=response.test_cases,
+            actor=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            operation="testcases.generate",
+            approved=response.approved,
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.generate",
+            event_type="testcases.generated",
+            billing_key="testcases.generate",
+            error_message=str(exc),
+            metadata={"requirement_count": len(payload.requirements)},
+        )
+        raise
+
+
+@router.post("/testcases/refine", response_model=GenerateTestCasesResponse)
+async def refine_test_cases_endpoint(
+    request: Request,
+    payload: RefineTestCasesInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> GenerateTestCasesResponse:
+    request_id = _get_request_id(request)
+    billing_context = await run_in_threadpool(
+        enforce_billing_access,
+        current_user=current_user,
+        billing_key="testcases.refine",
+    )
+    workflow_run_id = start_workflow_run(
+        operation="testcases.refine",
+        actor=current_user,
+        request_id=request_id,
+        metadata={"existing_test_case_count": len(payload.test_cases)},
+    )
+    try:
+        result = await run_in_threadpool(
+            refine_test_cases,
+            payload,
+            actor_user_id=current_user.sub,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.refine",
+        )
+        response = GenerateTestCasesResponse(**result)
+        modified_count = _count_snapshot_changes(
+            _test_case_snapshot(payload.test_cases),
+            _test_case_snapshot(response.test_cases),
+        )
+        event_id = _log_success(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.refine",
+            event_type="testcases.refined",
+            billing_key="testcases.refine",
+            quantity=max(1, modified_count),
+            unit="test_case",
+            result_metadata={
+                "test_cases_modified_count": modified_count,
+                "test_cases_total": len(response.test_cases),
+                "approved": response.approved,
+            },
+        )
+        _record_billing_consumption_safe(
+            current_user=current_user,
+            billing_context=billing_context,
+            source_event_id=event_id,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            billing_key="testcases.refine",
+            quantity=max(1, modified_count),
+            unit="test_case",
+            metadata={"approved": response.approved},
+        )
+        response.test_cases = persist_test_case_versions(
+            current_test_cases=response.test_cases,
+            previous_test_cases=payload.test_cases,
+            actor=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            operation="testcases.refine",
+            approved=response.approved,
+        )
+        return response
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.refine",
+            event_type="testcases.refined",
+            billing_key="testcases.refine",
+            error_message=str(exc),
+            metadata={"existing_test_case_count": len(payload.test_cases)},
+        )
+        raise

@@ -37,10 +37,10 @@ class MainAuditLoggingTests(unittest.TestCase):
             "workflow_diagnostics": {},
         }
 
-        with patch("app.main.start_workflow_run", return_value="run-parse-1") as start_run:
-            with patch("app.main.complete_workflow_run") as complete_run:
-                with patch("app.main.record_usage_event", return_value="event-parse-1") as record_event:
-                    with patch("app.main.persist_requirement_versions", return_value=[
+        with patch("app.routers.requirements.start_workflow_run", return_value="run-parse-1") as start_run:
+            with patch("app.routers.requirements.complete_workflow_run") as complete_run:
+                with patch("app.routers.requirements.record_usage_event", return_value="event-parse-1") as record_event:
+                    with patch("app.routers.requirements.persist_requirement_versions", return_value=[
                         Requirement(
                             id="REQ-1",
                             text="The system shall allow login",
@@ -50,7 +50,7 @@ class MainAuditLoggingTests(unittest.TestCase):
                             artifact_version_number=1,
                         )
                     ]) as persist_requirements:
-                        with patch("app.main.extract_requirements", return_value=workflow_result) as extract:
+                        with patch("app.routers.requirements.extract_requirements", return_value=workflow_result) as extract:
                             with TestClient(app) as client:
                                 response = client.post(
                                     "/requirements/parse",
@@ -59,7 +59,10 @@ class MainAuditLoggingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         extract.assert_called_once()
-        self.assertEqual(extract.call_args.args[3], "firebase-uid-999")
+        self.assertEqual(extract.call_args.kwargs["actor_user_id"], "firebase-uid-999")
+        self.assertTrue(extract.call_args.kwargs["request_id"])
+        self.assertEqual(extract.call_args.kwargs["workflow_run_id"], "run-parse-1")
+        self.assertEqual(extract.call_args.kwargs["operation"], "requirements.parse")
         start_run.assert_called_once()
         complete_run.assert_called_once()
         record_event.assert_called_once()
@@ -87,10 +90,10 @@ class MainAuditLoggingTests(unittest.TestCase):
             "workflow_settings": None,
         }
 
-        with patch("app.main.start_workflow_run", return_value="run-generate-1") as start_run:
-            with patch("app.main.complete_workflow_run") as complete_run:
-                with patch("app.main.record_usage_event", return_value="event-generate-1") as record_event:
-                    with patch("app.main.persist_test_case_versions", return_value=[
+        with patch("app.routers.testcases.start_workflow_run", return_value="run-generate-1") as start_run:
+            with patch("app.routers.testcases.complete_workflow_run") as complete_run:
+                with patch("app.routers.testcases.record_usage_event", return_value="event-generate-1") as record_event:
+                    with patch("app.routers.testcases.persist_test_case_versions", return_value=[
                         TestCase(
                             id="TC-1",
                             title="Login test",
@@ -101,13 +104,16 @@ class MainAuditLoggingTests(unittest.TestCase):
                             artifact_version_number=1,
                         )
                     ]) as persist_test_cases:
-                        with patch("app.main.generate_test_cases", return_value=workflow_result) as generate:
+                        with patch("app.routers.testcases.generate_test_cases", return_value=workflow_result) as generate:
                             with TestClient(app) as client:
                                 response = client.post("/testcases/generate", json=payload)
 
         self.assertEqual(response.status_code, 200)
         generate.assert_called_once()
-        self.assertEqual(generate.call_args.args[1], "firebase-uid-999")
+        self.assertEqual(generate.call_args.kwargs["actor_user_id"], "firebase-uid-999")
+        self.assertTrue(generate.call_args.kwargs["request_id"])
+        self.assertEqual(generate.call_args.kwargs["workflow_run_id"], "run-generate-1")
+        self.assertEqual(generate.call_args.kwargs["operation"], "testcases.generate")
         start_run.assert_called_once()
         complete_run.assert_called_once()
         record_event.assert_called_once()

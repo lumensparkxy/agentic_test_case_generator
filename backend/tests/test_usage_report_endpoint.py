@@ -67,7 +67,7 @@ class UsageReportEndpointTests(unittest.TestCase):
             "warnings": [],
         }
 
-        with patch("app.main.build_usage_report", return_value=service_payload) as build_report:
+        with patch("app.routers.reports.build_usage_report", return_value=service_payload) as build_report:
             with TestClient(app) as client:
                 response = client.get("/reports/usage/me")
 
@@ -125,7 +125,7 @@ class UsageReportEndpointTests(unittest.TestCase):
             "warnings": [],
         }
 
-        with patch("app.main.build_usage_report", return_value=service_payload) as build_report:
+        with patch("app.routers.reports.build_usage_report", return_value=service_payload) as build_report:
             with TestClient(app) as client:
                 response = client.get("/reports/usage/org")
 
