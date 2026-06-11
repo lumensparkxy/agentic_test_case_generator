@@ -6,7 +6,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.requirements_agent import _build_fallback_workflow, _finalize_requirements, _heuristic_extract
+from unittest.mock import patch
+
+from app.agents.requirements_agent import _build_fallback_workflow, _finalize_requirements, _heuristic_extract, extract_requirements
 from app.models import Requirement
 
 
@@ -61,6 +63,22 @@ class RequirementFallbackWorkflowTests(unittest.TestCase):
         self.assertTrue(workflow["workflow_diagnostics"]["used_fallback"])
         self.assertEqual(workflow["workflow_diagnostics"]["failure_reason"], "fallback_generated_artifacts")
         self.assertTrue(any("Existing warning" == warning for warning in workflow["workflow_diagnostics"]["warnings"]))
+
+    def test_extract_requirements_uses_heuristic_fallback_without_model_credentials(self) -> None:
+        document_text = """
+        ## Functional Requirements
+        - The system shall allow users to install the Playwright pytest plugin using the command `pip install pytest-playwright`.
+        - The system shall support running a single test file such as `test_login.py`.
+        """
+
+        with patch("app.agents.requirements_agent.get_settings", side_effect=RuntimeError("GEMINI_API_KEY is required")):
+            with patch("app.agents.requirements_agent.run_requirement_extraction_workflow_sync") as run_workflow:
+                workflow = extract_requirements(document_text)
+
+        run_workflow.assert_not_called()
+        self.assertGreaterEqual(len(workflow["requirements"]), 2)
+        self.assertTrue(workflow["workflow_diagnostics"]["used_fallback"])
+        self.assertEqual(workflow["workflow_diagnostics"]["status"], "fallback")
 
 
 if __name__ == "__main__":

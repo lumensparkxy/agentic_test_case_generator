@@ -70,6 +70,7 @@ def _generate_offline_fallback(payload: Any) -> dict[str, Any]:
         payload.requirements,
         DEFAULT_TEST_CASE_THRESHOLD,
         coverage_plan=coverage_plan,
+        context=payload.context,
     )
     workflow = {
         "test_cases": raw_test_cases,
@@ -90,7 +91,7 @@ def _generate_offline_fallback(payload: Any) -> dict[str, Any]:
         },
     }
     test_cases = _hydrate_test_cases(raw_test_cases)
-    return _build_response(test_cases, workflow, payload.requirements)
+    return _build_response(test_cases, workflow, payload.requirements, payload.context)
 
 
 def _test_cases_to_dicts(test_cases: list[Any]) -> list[dict[str, Any]]:

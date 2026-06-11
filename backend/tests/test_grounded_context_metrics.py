@@ -6,7 +6,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import _compute_grounded_context_metrics, _fallback_raw_test_cases, _prepare_workflow_inputs
+from app.agents.test_case_agent import (
+    _compute_grounded_context_metrics,
+    _compute_planned_scenario_metrics,
+    _fallback_coverage_plan,
+    _fallback_raw_test_cases,
+    _prepare_workflow_inputs,
+)
 from app.models import ArtifactSource, EnrichInput, GroundedContext, Requirement, TestCaseTemplate
 
 
@@ -54,6 +60,24 @@ class GroundedContextMetricTests(unittest.TestCase):
 
         self.assertTrue(raw_test_cases)
         self.assertEqual(raw_test_cases[0]["source_refs"], ["ART-APP-01"])
+
+    def test_fallback_raw_test_cases_cover_all_planned_scenarios(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall allow only finance administrators to export Approved expense reports to CSV.",
+            )
+        ]
+        coverage_plan = _fallback_coverage_plan(requirements)
+
+        raw_test_cases = _fallback_raw_test_cases(requirements, None, coverage_plan=coverage_plan)
+        scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, raw_test_cases, requirements)
+
+        self.assertEqual(scenario_metrics["missing_scenarios"], [])
+        self.assertEqual(
+            scenario_metrics["covered_planned_scenarios"],
+            scenario_metrics["planned_scenarios_total"],
+        )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # Playwright for Python – Feature Requirements
 
 ## Source
-https://playwright.dev/python/docs/intro
+https://playwright.dev/python/
 
 ## Overview
 Playwright for Python is a browser automation and end-to-end testing library that supports Chromium, WebKit, and Firefox. It is designed for test reliability through auto-waiting, web-first assertions, and test isolation via browser contexts.

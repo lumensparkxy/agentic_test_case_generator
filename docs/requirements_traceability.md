@@ -1,0 +1,7 @@
+# Requirements Traceability
+
+This matrix links requirement issues to implementation, tests, and validation evidence.
+
+| Issue | Requirement | Implementation | Acceptance Tests | Validation Evidence |
+| --- | --- | --- | --- | --- |
+| [#15](https://github.com/lumensparkxy/agentic_test_case_generator/issues/15) | Validate the Playwright Python documentation workflow through execution preview, local Playwright run support, and report artifact generation. | `backend/app/services/execution_service.py`, `backend/plain_english_test_framework/`, `backend/execution_runtime/`, `frontend/src/components/automation/AutomationPanel.jsx`, `frontend/src/App.jsx`, deterministic fallback hardening in `backend/app/agents/` | `backend/tests/test_execution_service.py`, `backend/tests/test_automation_endpoint.py`, `backend/tests/test_generation_recovery.py`, `backend/tests/test_automation_agent.py`, `backend/tests/test_requirements_heuristics.py` | Focused tests passed; backend suite `python -m unittest discover -s backend/tests -p 'test_*.py'` passed 105 tests; strict requirement and generation evaluations passed; `scripts/export_openapi.py` wrote `/tmp/agentic-tcg-openapi.json`; frontend `npm run build` passed; execution runtime `npm run test:playwright -- --list` passed; `scripts/e2e_playwright_workflow.py` against `https://playwright.dev/python/` parsed 10 requirements, generated 31 approved test cases at 97/90, exported CSV/XLSX/JSON, and generated Playwright POM stubs. |

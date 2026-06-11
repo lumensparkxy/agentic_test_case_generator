@@ -13,6 +13,16 @@ from ..adk_client import (
 MAX_ITERATIONS = DEFAULT_REQUIREMENT_MAX_ITERATIONS
 
 
+def _get_model_settings_or_none() -> Any | None:
+    try:
+        return get_settings()
+    except RuntimeError as exc:
+        if "GEMINI_API_KEY" not in str(exc):
+            raise
+        logging.warning("Model credentials are unavailable; using deterministic requirement fallback.")
+        return None
+
+
 def extract_requirements(
     text: str,
     document_count: int = 1,
@@ -26,7 +36,16 @@ def extract_requirements(
     3. RefinerAgent: Refines based on feedback or exits when approved
     Loop continues until requirements pass review or max iterations reached.
     """
-    settings = get_settings()
+    settings = _get_model_settings_or_none()
+    if settings is None:
+        candidates = _heuristic_extract(text)
+        requirements = _finalize_requirements(candidates)
+        fallback_workflow = _build_fallback_workflow(
+            requirements=requirements,
+            summary="Model credentials are unavailable. Heuristic fallback produced draft requirements that still need approval.",
+            document_count=document_count,
+        )
+        return _build_workflow_response(requirements, fallback_workflow, document_count=document_count)
     
     logging.info("Starting ADK multi-agent requirement extraction loop...")
     
@@ -71,7 +90,15 @@ def refine_requirements(
     """
     Refine existing requirements based on human feedback using ADK agent loop.
     """
-    settings = get_settings()
+    settings = _get_model_settings_or_none()
+    if settings is None:
+        requirements = _convert_to_requirements(existing_requirements)
+        fallback_workflow = _build_fallback_workflow(
+            requirements=requirements,
+            summary="Model credentials are unavailable. The previous requirement draft was restored and needs re-review.",
+            document_count=1,
+        )
+        return _build_workflow_response(requirements, fallback_workflow, document_count=1)
     
     logging.info(f"Refining {len(existing_requirements)} requirements with feedback: {feedback[:100]}...")
     
@@ -418,21 +445,24 @@ def _heuristic_extract(text: str) -> List[str]:
             in_features_section = False
             continue
         
-        # Skip obvious noise
-        if noise_re.search(line):
-            continue
-        
-        # Skip very short or very long lines
-        if len(line) < 15 or len(line) > 300:
-            continue
-        
         # Clean the line
         cleaned = _clean_requirement_text(line)
         if not cleaned or len(cleaned) < 15:
             continue
+
+        has_requirement_signal = bool(requirement_re.search(cleaned))
+        has_feature_signal = bool(feature_start_re.match(cleaned))
+
+        # Skip obvious noise unless the line is already a strong requirement.
+        if noise_re.search(line) and not has_requirement_signal and not (in_features_section and has_feature_signal):
+            continue
+
+        # Skip very short or very long lines
+        if len(line) < 15 or len(line) > 300:
+            continue
         
         # Check if it's valid after cleaning
-        if _is_noise(cleaned):
+        if _is_noise(cleaned) and not has_requirement_signal:
             continue
         
         # Score this candidate
@@ -443,11 +473,11 @@ def _heuristic_extract(text: str) -> List[str]:
             score += 3
         
         # Has requirement verb patterns = high score
-        if requirement_re.search(cleaned):
+        if has_requirement_signal:
             score += 4
         
         # Starts with action verb = good feature candidate
-        if feature_start_re.match(cleaned):
+        if has_feature_signal:
             score += 3
         
         # Is a bullet point in features section = boost

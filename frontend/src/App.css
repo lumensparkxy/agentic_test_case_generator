@@ -803,6 +803,129 @@ input[type="file"]::file-selector-button:hover {
     color: #9a3412;
 }
 
+.workflow-diagnostics-pill.success {
+    background: #f0fdf4;
+    border-color: #86efac;
+    color: #166534;
+}
+
+.workflow-diagnostics-pill.warning {
+    background: #fff7ed;
+    border-color: #fdba74;
+    color: #9a3412;
+}
+
+.generate-results-workspace {
+    display: grid;
+    gap: 1rem;
+}
+
+.generate-results-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.generate-results-header h3 {
+    margin: 0;
+}
+
+.generate-results-header p {
+    margin: 0.35rem 0 0;
+    color: var(--text-muted);
+}
+
+.selection-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.selection-table {
+    width: 100%;
+    min-width: 720px;
+    border-collapse: collapse;
+    background: white;
+}
+
+.selection-table th,
+.selection-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: top;
+}
+
+.selection-table th {
+    background: #f8fafc;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.selection-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.jira-sync-apply-list,
+.jira-sync-warning-list {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.jira-sync-apply-list li,
+.jira-sync-warning-list li {
+    margin-bottom: 0.45rem;
+}
+
+.jira-sync-preview-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.jira-sync-preview-card {
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: #f8fafc;
+}
+
+.jira-sync-preview-card.conflict {
+    background: #fff7ed;
+    border-color: #fdba74;
+}
+
+.jira-sync-preview-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.jira-sync-preview-header span {
+    display: block;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+}
+
+.jira-status-badge {
+    align-self: flex-start;
+    padding: 0.25rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: white;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+}
+
+.jira-status-badge.conflict {
+    color: #9a3412;
+    border-color: #fdba74;
+}
+
 .coverage-plan-list {
     display: grid;
     gap: 1rem;
