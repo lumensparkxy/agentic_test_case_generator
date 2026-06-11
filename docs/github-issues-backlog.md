@@ -21,6 +21,7 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 - [#18](https://github.com/lumensparkxy/agentic_test_case_generator/issues/18) — Harden ADK workflow parsing, retries, and requirement normalization
 - [#19](https://github.com/lumensparkxy/agentic_test_case_generator/issues/19) — Update default Gemini model configuration
 - [#20](https://github.com/lumensparkxy/agentic_test_case_generator/issues/20) — Add repository agent instructions and refresh skill lock
+- [#21](https://github.com/lumensparkxy/agentic_test_case_generator/issues/21) — Prepare client submission workflow artifacts and brief
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
