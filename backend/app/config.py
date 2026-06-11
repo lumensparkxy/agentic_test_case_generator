@@ -225,14 +225,14 @@ def _warn_if_dependency_mismatch() -> None:
     adk_major, adk_minor = _parse_major_minor(adk_version)
     genai_major, genai_minor = _parse_major_minor(genai_version)
 
-    if adk_major != 1:
+    if adk_major != 2:
         logging.warning("Untested google-adk major version detected: %s", adk_version)
-    if genai_major != 1:
+    if genai_major != 2:
         logging.warning("Untested google-genai major version detected: %s", genai_version)
     # Track a known-good floor for current pipelines and model usage.
-    if (adk_major, adk_minor) < (1, 25):
+    if (adk_major, adk_minor) < (2, 2):
         logging.warning("google-adk version may be too old for current workflow patterns: %s", adk_version)
-    if (genai_major, genai_minor) < (1, 64):
+    if (genai_major, genai_minor) < (2, 8):
         logging.warning("google-genai version may be too old for current SDK behavior: %s", genai_version)
 
 

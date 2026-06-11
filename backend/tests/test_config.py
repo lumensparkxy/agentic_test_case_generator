@@ -14,6 +14,7 @@ from app.config import (
     DEFAULT_MODEL_NAME,
     _SuppressNonTextPartsWarning,
     _load_environment_file,
+    _warn_if_dependency_mismatch,
     get_auth_settings,
     get_billing_settings,
     get_jira_settings,
@@ -89,6 +90,26 @@ class ConfigSettingsTests(unittest.TestCase):
 
         self.assertFalse(log_filter.filter(noisy_record))
         self.assertTrue(log_filter.filter(normal_record))
+
+    def test_dependency_mismatch_accepts_current_adk_and_genai_versions(self) -> None:
+        versions = {"google-adk": "2.2.0", "google-genai": "2.8.0"}
+
+        with patch("app.config.version", side_effect=lambda package_name: versions[package_name]):
+            with patch("app.config.logging.warning") as warning:
+                _warn_if_dependency_mismatch()
+
+        warning.assert_not_called()
+
+    def test_dependency_mismatch_warns_for_versions_below_current_floor(self) -> None:
+        versions = {"google-adk": "2.1.0", "google-genai": "2.7.0"}
+
+        with patch("app.config.version", side_effect=lambda package_name: versions[package_name]):
+            with patch("app.config.logging.warning") as warning:
+                _warn_if_dependency_mismatch()
+
+        warning_messages = [call.args[0] for call in warning.call_args_list]
+        self.assertIn("google-adk version may be too old for current workflow patterns: %s", warning_messages)
+        self.assertIn("google-genai version may be too old for current SDK behavior: %s", warning_messages)
 
     def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
         with patch.dict(
