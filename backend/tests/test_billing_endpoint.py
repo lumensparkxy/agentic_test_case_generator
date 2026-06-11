@@ -65,7 +65,7 @@ class BillingEndpointTests(unittest.TestCase):
             "warnings": ["Billing is currently in shadow mode; balances are informational until enforcement is enabled."],
         }
 
-        with patch("app.main.resolve_billing_entitlements", return_value=service_payload) as resolve_entitlements:
+        with patch("app.routers.billing.resolve_billing_entitlements", return_value=service_payload) as resolve_entitlements:
             with TestClient(app) as client:
                 response = client.get("/entitlements/me")
 
@@ -102,7 +102,7 @@ class BillingEndpointTests(unittest.TestCase):
             ],
         }
 
-        with patch("app.main.get_my_billing_ledger", return_value=service_payload):
+        with patch("app.routers.billing.get_my_billing_ledger", return_value=service_payload):
             with TestClient(app) as client:
                 response = client.get("/billing/ledger/me")
 
@@ -135,7 +135,7 @@ class BillingEndpointTests(unittest.TestCase):
             },
         }
 
-        with patch("app.main.grant_billing_credits", return_value=service_payload):
+        with patch("app.routers.billing.grant_billing_credits", return_value=service_payload):
             with TestClient(app) as client:
                 response = client.post(
                     "/billing/admin/credits/grant",
@@ -146,8 +146,8 @@ class BillingEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["granted_units"], 12)
 
     def test_parse_requirements_returns_402_when_billing_access_is_blocked(self) -> None:
-        with patch("app.main.enforce_billing_access", side_effect=HTTPException(status_code=402, detail={"code": "pilot_quota_exhausted", "message": "Blocked"})):
-            with patch("app.main.extract_requirements") as extract_requirements:
+        with patch("app.routers.requirements.enforce_billing_access", side_effect=HTTPException(status_code=402, detail={"code": "pilot_quota_exhausted", "message": "Blocked"})):
+            with patch("app.routers.requirements.extract_requirements") as extract_requirements:
                 with TestClient(app) as client:
                     response = client.post(
                         "/requirements/parse",
@@ -166,8 +166,8 @@ class BillingEndpointTests(unittest.TestCase):
             "workflow_settings": None,
         }
 
-        with patch("app.main.enforce_billing_access", side_effect=HTTPException(status_code=402, detail={"code": "insufficient_credits", "message": "Blocked"})):
-            with patch("app.main.generate_test_cases") as generate_test_cases:
+        with patch("app.routers.testcases.enforce_billing_access", side_effect=HTTPException(status_code=402, detail={"code": "insufficient_credits", "message": "Blocked"})):
+            with patch("app.routers.testcases.generate_test_cases") as generate_test_cases:
                 with TestClient(app) as client:
                     response = client.post("/testcases/generate", json=payload)
 

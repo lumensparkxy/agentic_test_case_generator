@@ -23,6 +23,16 @@ def _clean_object_list(values: Any) -> List[Dict[str, Any]]:
     return [value for value in values if isinstance(value, dict)]
 
 
+def _is_blank_output(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _valid_test_case_shape(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return bool(str(item.get("id") or "").strip()) and bool(str(item.get("title") or "").strip()) and "steps" in item
+
+
 def _coerce_int(value: Any, default: int = 0) -> int:
     if value is None:
         return default
@@ -47,12 +57,18 @@ def _coerce_int(value: Any, default: int = 0) -> int:
             return default
 
 
-def extract_json(text: str) -> Optional[str]:
+def extract_json(text: Any) -> Optional[str]:
     """Extract JSON from text that may contain markdown fences."""
     if not text:
         return None
 
-    normalized = text.strip()
+    if hasattr(text, "model_dump"):
+        text = text.model_dump()
+
+    if isinstance(text, (dict, list)):
+        return json.dumps(text, default=str)
+
+    normalized = str(text).strip()
     if normalized.startswith("```json"):
         normalized = normalized[7:]
     elif normalized.startswith("```"):
@@ -79,9 +95,9 @@ def extract_json(text: str) -> Optional[str]:
     return normalized[start : end + 1]
 
 
-def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], Optional[str]]:
+def parse_requirements_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse requirements payload from model output and return an error when invalid."""
-    if not text or not str(text).strip():
+    if _is_blank_output(text):
         return [], "empty output"
 
     json_text = extract_json(text)
@@ -97,10 +113,13 @@ def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], O
         data = data["requirements"]
 
     if isinstance(data, list):
-        valid: List[Dict[str, str]] = []
+        valid: List[Dict[str, Any]] = []
         for item in data:
             if isinstance(item, dict) and "id" in item and "text" in item:
-                valid.append({"id": str(item["id"]), "text": str(item["text"])})
+                payload = dict(item)
+                payload["id"] = str(item["id"])
+                payload["text"] = str(item["text"])
+                valid.append(payload)
 
         if valid:
             return valid, None
@@ -111,15 +130,15 @@ def parse_requirements_json_detailed(text: str) -> tuple[List[Dict[str, str]], O
     return [], "requirements payload must be a JSON array or an object with a requirements array"
 
 
-def parse_requirements_json(text: str) -> List[Dict[str, str]]:
+def parse_requirements_json(text: Any) -> List[Dict[str, Any]]:
     """Parse requirements payload from model output."""
     parsed, _ = parse_requirements_json_detailed(text)
     return parsed
 
 
-def parse_test_cases_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
+def parse_test_cases_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse test-case payload from model output and return an error when invalid."""
-    if not text or not str(text).strip():
+    if _is_blank_output(text):
         return [], "empty output"
 
     json_text = extract_json(text)
@@ -132,27 +151,33 @@ def parse_test_cases_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Opt
         return [], f"invalid JSON payload: {exc.msg}"
 
     if isinstance(data, list):
+        valid = [item for item in data if _valid_test_case_shape(item)]
+        if valid:
+            return valid, None
         if data:
-            return data, None
+            return [], "test_cases payload did not contain valid id/title/steps objects"
         return [], "test_cases list was empty"
 
     if isinstance(data, dict) and "test_cases" in data and isinstance(data["test_cases"], list):
+        valid = [item for item in data["test_cases"] if _valid_test_case_shape(item)]
+        if valid:
+            return valid, None
         if data["test_cases"]:
-            return data["test_cases"], None
+            return [], "test_cases payload did not contain valid id/title/steps objects"
         return [], "test_cases list was empty"
 
     return [], "test-case payload must be a JSON array or an object with a test_cases array"
 
 
-def parse_test_cases_json(text: str) -> List[Dict[str, Any]]:
+def parse_test_cases_json(text: Any) -> List[Dict[str, Any]]:
     """Parse test-case payload from model output."""
     parsed, _ = parse_test_cases_json_detailed(text)
     return parsed
 
 
-def parse_coverage_plan_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
+def parse_coverage_plan_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse requirement coverage plan payload from model output and return an error when invalid."""
-    if not text or not str(text).strip():
+    if _is_blank_output(text):
         return [], "empty output"
 
     json_text = extract_json(text)
@@ -195,15 +220,15 @@ def parse_coverage_plan_json_detailed(text: str) -> tuple[List[Dict[str, Any]], 
     return [], "coverage_plan payload did not contain valid requirement_id/scenarios entries"
 
 
-def parse_coverage_plan_json(text: str) -> List[Dict[str, Any]]:
+def parse_coverage_plan_json(text: Any) -> List[Dict[str, Any]]:
     """Parse requirement coverage plan payload from model output."""
     parsed, _ = parse_coverage_plan_json_detailed(text)
     return parsed
 
 
-def parse_requirement_analysis_json_detailed(text: str) -> tuple[List[Dict[str, Any]], Optional[str]]:
+def parse_requirement_analysis_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse requirement analysis payload from model output and return an error when invalid."""
-    if not text or not str(text).strip():
+    if _is_blank_output(text):
         return [], "empty output"
 
     json_text = extract_json(text)
@@ -256,18 +281,18 @@ def parse_requirement_analysis_json_detailed(text: str) -> tuple[List[Dict[str, 
     return [], "requirement-analysis payload did not contain valid requirement_id entries"
 
 
-def parse_requirement_analysis_json(text: str) -> List[Dict[str, Any]]:
+def parse_requirement_analysis_json(text: Any) -> List[Dict[str, Any]]:
     """Parse requirement analysis payload from model output."""
     parsed, _ = parse_requirement_analysis_json_detailed(text)
     return parsed
 
 
-def parse_review_json_detailed(text: str, default_threshold: int = 0) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+def parse_review_json_detailed(text: Any, default_threshold: int = 0) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse a structured reviewer/validator result from model output and return an error when invalid."""
-    if not text:
+    if _is_blank_output(text):
         return None, "empty output"
 
-    normalized = text.strip()
+    normalized = str(text).strip() if isinstance(text, str) else ""
     if normalized.upper() == "APPROVED":
         return {
             "approved": True,
@@ -279,7 +304,7 @@ def parse_review_json_detailed(text: str, default_threshold: int = 0) -> tuple[O
             "unmet_criteria": [],
         }, None
 
-    json_text = extract_json(normalized)
+    json_text = extract_json(normalized or text)
     if not json_text:
         return None, "no JSON payload found"
 
@@ -322,7 +347,7 @@ def parse_review_json_detailed(text: str, default_threshold: int = 0) -> tuple[O
     }, None
 
 
-def parse_review_json(text: str, default_threshold: int = 0) -> Optional[Dict[str, Any]]:
+def parse_review_json(text: Any, default_threshold: int = 0) -> Optional[Dict[str, Any]]:
     """Parse a structured reviewer/validator result from model output."""
     parsed, _ = parse_review_json_detailed(text, default_threshold=default_threshold)
     return parsed

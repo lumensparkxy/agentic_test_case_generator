@@ -2,6 +2,8 @@
 
 ## Summary
 
+**Status as of 2026-05-08:** the original coverage-intelligence and grounded-context phases are largely implemented. Treat this document as both implementation history and a baseline for the next hardening phase: contract alignment, modularization, CI, external-sync maturity, and export/automation productization.
+
 This plan delivers two high-impact upgrades to the test case generation engine:
 
 1. **Coverage intelligence** between requirement extraction and test case generation.
@@ -16,9 +18,9 @@ The existing architecture already provides strong insertion points:
 - Requirement extraction and refinement are handled in `backend/app/adk_client.py` and `backend/app/agents/requirements_agent.py`.
 - Test-case generation already has a staged pipeline in `backend/app/agents/test_case_agent.py`.
 - Scenario planning already exists and is surfaced in `frontend/src/App.jsx`.
-- `/requirements/enrich` exists in `backend/app/main.py`, but is currently a pass-through.
+- `/requirements/enrich` now returns grounded context using `backend/app/services/artifact_fetcher.py` and `backend/app/services/context_grounding.py`.
 
-That means the next step is not a rewrite. It is a targeted evolution of the current pipeline.
+That means the next step is not a rewrite. It is a targeted stabilization and hardening pass on the current pipeline.
 
 ## Goals
 
@@ -58,10 +60,11 @@ Baseline values should be captured in Phase 0 before any scoring target is enfor
 
 ### Gaps
 
-- Coverage planning is still mostly prompt-driven and scenario-type based.
-- Validators do not yet reason about extracted business rules, constraints, roles, or state transitions.
-- Context links are serialized as plain text instead of being analyzed into structured facts.
-- The UI cannot preview or curate grounded context before generation.
+- Large modules remain a maintainability risk (`frontend/src/App.jsx`, `frontend/src/App.css`, `backend/app/main.py`, and `backend/app/agents/test_case_agent.py`).
+- Frontend/backend contracts still need generated/shared types to prevent response-shape drift.
+- Requirement import/sync is implemented for JIRA/Azure DevOps, but test-case lifecycle sync/export is not productized.
+- Artifact fetching needs stronger SSRF hardening before broad production use.
+- CI should run backend unittest, offline benchmark scripts, frontend build, and mocked Playwright checks on every PR.
 
 ## Delivery phases
 
@@ -232,13 +235,13 @@ Update `frontend/src/App.jsx` to support:
 | `backend/app/utils/llm_json.py` | Add parsers for requirement analysis and grounded context payloads |
 | `backend/app/agents/analysis_agent.py` | New analysis pipeline for rule/constraint/risk extraction |
 | `backend/app/agents/test_case_agent.py` | Consume requirement analysis and grounded context; expand validation metrics |
-| `backend/app/main.py` | Upgrade `/requirements/enrich`; return richer generation payloads if needed |
-| `backend/requirements.txt` | Add networking/parsing libraries such as `httpx` and `beautifulsoup4` if selected |
-| `backend/app/services/artifact_fetcher.py` | New safe artifact retrieval service |
-| `backend/app/services/context_grounding.py` | New grounding and normalization service |
-| `frontend/src/App.jsx` | Add analysis visibility, context preview, and grounding review UI |
-| `frontend/e2e/workflow.spec.js` | Add regression checks for new analysis and grounding behavior |
-| `scripts/evaluate_generation.py` | New evaluation harness for before/after quality measurement |
+| `backend/app/main.py` | Hosts `/requirements/enrich`, generation/refinement, integrations, billing, and export endpoints; should be split into routers next |
+| `backend/requirements.txt` | Includes runtime dependencies for ADK, document parsing, FastAPI, integrations, and Firestore-backed services |
+| `backend/app/services/artifact_fetcher.py` | Implemented safe artifact retrieval service with timeouts and size caps |
+| `backend/app/services/context_grounding.py` | Implemented grounding and normalization service |
+| `frontend/src/App.jsx` | Implements analysis visibility, context preview, integration import/sync, and workflow UI; should be split next |
+| `frontend/e2e/workflow.spec.js` | Contains authenticated happy-path checks; add more focused analysis/grounding assertions |
+| `scripts/evaluate_generation.py` | Implemented evaluation harness for generation quality |
 
 ## Testing strategy
 
@@ -307,15 +310,37 @@ The issue-ready backlog is in `docs/github-issues-backlog.md`.
 
 ## Recommended implementation order
 
-1. Phase 0 benchmark harness
-2. Phase 1 data contracts and parsers
-3. Phase 1 analysis agent integration
-4. Phase 1 validator upgrade
-5. Phase 1 UI visibility
-6. Phase 2 grounded-context contract
-7. Phase 2 fetch and grounding services
-8. Phase 2 generator and validator integration
-9. Phase 2 UI preview and regression coverage
+1. Stabilize current contracts and benchmark scripts.
+2. Add CI for unittest, offline benchmark scripts, frontend build, and mocked E2E checks.
+3. Split `backend/app/main.py` into routers and `frontend/src/App.jsx` into workflow components.
+4. Split `backend/app/agents/test_case_agent.py` into orchestration, coverage, normalization, fallback, and prompt modules.
+5. Introduce shared/generated frontend API types from FastAPI OpenAPI.
+6. Harden artifact fetching and integration URL validation.
+7. Productize export approval gates, draft overrides, and test-case lifecycle integrations.
+
+## Modularization roadmap
+
+Use behavior-preserving slices so each refactor can be validated by the same CI suite:
+
+1. **Backend routers** — move route groups from `backend/app/main.py` into `backend/app/routers/` while keeping endpoint paths and response models unchanged.
+	- Completed first slice: export endpoints now live in `backend/app/routers/export.py` and are registered from `backend/app/main.py`.
+	- Completed second slice: test-case generation/refinement endpoints now live in `backend/app/routers/testcases.py`.
+	- Completed third slice: requirement parsing/refinement/enrichment endpoints now live in `backend/app/routers/requirements.py`.
+	- Completed fourth slice: JIRA connection/import/sync endpoints now live in `backend/app/routers/integrations_jira.py`.
+	- Completed fifth slice: Azure DevOps connection/import/sync endpoints now live in `backend/app/routers/integrations_azure_devops.py`.
+	- Completed sixth slice: authentication endpoints now live in `backend/app/routers/auth.py`.
+	- Completed seventh slice: billing entitlement, ledger, credit grant, allocation, and org-summary endpoints now live in `backend/app/routers/billing.py`.
+	- Completed eighth slice: usage reporting endpoints now live in `backend/app/routers/reports.py`.
+	- Completed ninth slice: Playwright automation generation endpoint now lives in `backend/app/routers/automation.py`.
+	- `testcases.py`
+	- `requirements.py`
+	- `export.py`
+2. **Test-case agent internals** — split `backend/app/agents/test_case_agent.py` into orchestration, prompt builders, normalization, coverage metrics, fallback generation, and response hydration modules.
+3. **Frontend workflow modules** — extract API calls into `frontend/src/api/`, shared workflow state into hooks, and large tab bodies into focused components.
+4. **Shared contract generation** — use `scripts/export_openapi.py` in CI and generate frontend TypeScript types from that schema before larger UI refactors.
+5. **Integration provider abstraction** — introduce a common provider interface after router extraction so Jira/Azure DevOps sync stays behavior-compatible.
+
+Do not combine these steps in one pull request. Each slice should pass backend unittest, offline benchmarks, frontend build, and the relevant mocked Playwright tests.
 
 ## Definition of done
 

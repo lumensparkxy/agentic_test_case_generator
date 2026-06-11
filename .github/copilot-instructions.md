@@ -6,6 +6,7 @@ This is a **full-stack web application** for AI-powered test case generation. It
 - Parsing requirements from Word/Markdown documents
 - Generating comprehensive test cases using Google ADK multi-agent pipelines
 - Exporting to CSV, Excel, JSON, and JIRA
+- Importing and syncing managed requirements with JIRA Cloud and Azure DevOps Services
 - Generating Playwright (Python) Page Object Model stubs
 
 ## Tech Stack
@@ -36,13 +37,13 @@ The backend uses sophisticated agent orchestration:
    - Supports human feedback refinement
 
 2. **Test Case Agent** (`app/agents/test_case_agent.py`)
-   - `TestCaseGeneratorAgent` → `ValidationLoop` (Validator + Refiner)
+   - `RequirementAnalysisAgent` → `CoveragePlannerAgent` → `TestCaseGeneratorAgent` → `ValidationLoop` (Validator + Refiner)
    - Generates industry-standard test cases (JIRA/Xray/TestRail compatible)
    - Iterative validation until quality approved
 
 3. **Export Agent** (`app/agents/export_agent.py`)
    - CSV, Excel (styled), JSON export
-   - JIRA integration (stub - needs credentials)
+   - JIRA test-case export is still a stub; requirement import/sync is implemented separately
 
 4. **Automation Agent** (`app/agents/automation_agent.py`)
    - Playwright POM stub generation
@@ -51,6 +52,8 @@ The backend uses sophisticated agent orchestration:
 
 Key models follow industry standards:
 - `Requirement`: id, text
+- `RequirementAnalysis`: extracted business rules, field constraints, role permissions, state transitions, risks, and scenario hints
+- `GroundedContext`: analyzed artifact sources, UI elements, API surfaces, and workflows from context links
 - `TestCase`: id, title, description, priority, type, status, preconditions, steps, expected_result, test_data, estimated_time, automation_status, component, tags
 - `TestStep`: step number, action, expected, test_data
 
@@ -67,6 +70,9 @@ Key models follow industry standards:
 | POST | `/export/json` | Download as JSON |
 | POST | `/export/jira` | Export to JIRA (stub) |
 | POST | `/automation/playwright` | Generate POM stubs |
+| GET/POST/DELETE | `/integrations/jira/*` | Store connection, search/import issues, preview/apply requirement sync |
+| GET/POST/DELETE | `/integrations/azure-devops/*` | Store connection, search/import work items, preview/apply requirement sync |
+| GET/POST | `/entitlements/*`, `/billing/*`, `/reports/*` | Billing, grants, allocations, and usage reports |
 
 ## Development Workflow
 
@@ -75,7 +81,7 @@ Key models follow industry standards:
 **Backend** (Terminal 1):
 ```bash
 source .venv/bin/activate
-uvicorn app.main:app --reload --app-dir backend
+uvicorn app.main:app --reload --app-dir backend --reload-dir backend
 ```
 
 **Frontend** (Terminal 2):
@@ -84,6 +90,19 @@ cd frontend && npm run dev
 ```
 
 **VS Code Tasks**: Use pre-configured tasks `Run backend (uvicorn)` and `Run frontend (vite)`
+
+**Backend tests**:
+```bash
+source .venv/bin/activate
+python -m unittest discover -s backend/tests -p 'test_*.py'
+```
+
+**Offline quality benchmarks**:
+```bash
+source .venv/bin/activate
+python scripts/evaluate_requirements.py --offline
+python scripts/evaluate_generation.py --offline
+```
 
 ### Environment Setup
 
@@ -157,6 +176,7 @@ Note: The backend maps `GEMINI_API_KEY` to `GOOGLE_API_KEY` for ADK compatibilit
 
 ## Future Enhancements (Stubs)
 
-- [ ] JIRA integration - implement `app/adapters/jira.py`
-- [ ] Playwright POM generation - expand `automation_agent.py`
-- [ ] Additional integrations: Xray, TestRail, qTest, Azure DevOps
+- [ ] JIRA test-case export / Xray lifecycle integration - implement real issue/test creation instead of the current stub
+- [ ] Playwright POM generation - expand `automation_agent.py` and surface it in the UI when productized
+- [ ] Additional test-management integrations: TestRail, qTest, Azure Test Plans
+- [ ] Shared/generated frontend API types to prevent response-contract drift

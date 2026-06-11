@@ -6,7 +6,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import _hydrate_test_cases, _normalize_test_case_type
+from app.agents.test_case_agent import _compute_test_case_coverage_metrics, _hydrate_test_cases, _normalize_test_case_type
+from app.models import Requirement
 
 
 class TestCaseHydrationTests(unittest.TestCase):
@@ -98,6 +99,44 @@ class TestCaseHydrationTests(unittest.TestCase):
         self.assertEqual(len(hydrated), 2)
         self.assertEqual(hydrated[0].type, "Functional")
         self.assertEqual(hydrated[1].type, "Security")
+
+    def test_hydrate_test_cases_derives_structured_links_from_tags(self) -> None:
+        raw_test_cases = [
+            {
+                "id": "TC-005",
+                "title": "Traceable legacy case",
+                "steps": [{"step": 1, "action": "Run scenario", "expected": "Scenario passes"}],
+                "tags": ["REQ-001", "scenario:happy-path", "generated"],
+            }
+        ]
+
+        hydrated = _hydrate_test_cases(raw_test_cases)
+
+        self.assertEqual(hydrated[0].linked_requirement_ids, ["REQ-001"])
+        self.assertIn("REQ-001", hydrated[0].tags)
+
+    def test_coverage_metrics_use_explicit_linked_requirement_ids(self) -> None:
+        requirements = [
+            Requirement(id="REQ-001", text="The system shall allow users to sign in."),
+            Requirement(id="REQ-002", text="The system shall allow users to sign out."),
+        ]
+        test_cases = [
+            {
+                "id": "TC-001",
+                "title": "Sign-in happy path",
+                "description": "Validates sign-in.",
+                "expected_result": "Signed in",
+                "steps": [{"step": 1, "action": "Sign in", "expected": "Session starts"}],
+                "linked_requirement_ids": ["REQ-001"],
+                "tags": ["scenario:happy-path"],
+            }
+        ]
+
+        metrics = _compute_test_case_coverage_metrics(test_cases, requirements)
+
+        self.assertEqual(metrics["requirements_covered"], 1)
+        self.assertEqual(metrics["requirements_without_tests"], ["REQ-002"])
+        self.assertEqual(metrics["test_cases_per_requirement"], {"REQ-001": 1, "REQ-002": 0})
 
 
 if __name__ == "__main__":

@@ -9,10 +9,23 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.models import AuthUser
-from app.services.audit_service import build_actor_snapshot, complete_workflow_run, record_usage_event, start_workflow_run
+from app.services.audit_service import (
+    build_actor_snapshot,
+    clear_audit_dead_letters,
+    complete_workflow_run,
+    get_audit_dead_letters,
+    record_usage_event,
+    start_workflow_run,
+)
 
 
 class AuditServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        clear_audit_dead_letters()
+
+    def tearDown(self) -> None:
+        clear_audit_dead_letters()
+
     def test_build_actor_snapshot_returns_minimal_identity_projection(self) -> None:
         user = AuthUser(
             sub="firebase-uid-123",
@@ -140,6 +153,70 @@ class AuditServiceTests(unittest.TestCase):
 
         self.assertTrue(event_id)
         collection.document.assert_called_once_with(event_id)
+
+    def test_start_workflow_run_retries_transient_firestore_write_failure(self) -> None:
+        collection = MagicMock()
+        document = MagicMock()
+        document.set.side_effect = [RuntimeError("temporary outage"), None]
+        collection.document.return_value = document
+        user = AuthUser(sub="user-5", email="user5@example.com", name="User Five")
+
+        with patch.dict(
+            "os.environ",
+            {"AUDIT_WRITE_RETRY_ATTEMPTS": "1", "AUDIT_WRITE_RETRY_DELAY_SECONDS": "0"},
+            clear=False,
+        ):
+            with patch("app.services.audit_service.get_firestore_client") as get_client:
+                get_client.return_value.collection.return_value = collection
+                run_id = start_workflow_run(
+                    operation="requirements.parse",
+                    actor=user,
+                    request_id="req-retry",
+                )
+
+        self.assertTrue(run_id)
+        collection.document.assert_called_once_with(run_id)
+        self.assertEqual(document.set.call_count, 2)
+        self.assertEqual(get_audit_dead_letters(), [])
+
+    def test_record_usage_event_dead_letters_after_exhausted_retries(self) -> None:
+        collection = MagicMock()
+        document = MagicMock()
+        document.set.side_effect = RuntimeError("firestore unavailable")
+        collection.document.return_value = document
+        user = AuthUser(sub="user-6", email="user6@example.com", name="User Six")
+
+        with patch.dict(
+            "os.environ",
+            {"AUDIT_WRITE_RETRY_ATTEMPTS": "1", "AUDIT_WRITE_RETRY_DELAY_SECONDS": "0"},
+            clear=False,
+        ):
+            with patch("app.services.audit_service.get_firestore_client") as get_client:
+                get_client.return_value.collection.return_value = collection
+                event_id = record_usage_event(
+                    event_type="requirements.parsed",
+                    billing_key="requirements.parse",
+                    quantity=1,
+                    unit="requirement",
+                    actor=user,
+                    request_id="req-dead-letter",
+                    workflow_run_id="run-dead-letter",
+                    status="failed",
+                    metadata={"error_message": "example"},
+                )
+
+        self.assertTrue(event_id)
+        collection.document.assert_called_once_with(event_id)
+        self.assertEqual(document.set.call_count, 2)
+        dead_letters = get_audit_dead_letters()
+        self.assertEqual(len(dead_letters), 1)
+        self.assertEqual(dead_letters[0]["collection_name"], "usage_events")
+        self.assertEqual(dead_letters[0]["operation"], "usage_event_record")
+        self.assertEqual(dead_letters[0]["attempts"], 2)
+        self.assertEqual(dead_letters[0]["payload"]["request_id"], "req-dead-letter")
+        self.assertEqual(dead_letters[0]["payload"]["workflow_run_id"], "run-dead-letter")
+        self.assertIn("payload_hash", dead_letters[0]["payload"])
+        self.assertNotIn("metadata", dead_letters[0]["payload"])
 
 
 if __name__ == "__main__":

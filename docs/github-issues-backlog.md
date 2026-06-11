@@ -15,13 +15,7 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 - [#9](https://github.com/lumensparkxy/agentic_test_case_generator/issues/9) — Phase 2: use grounded context during generation and validation
 - [#10](https://github.com/lumensparkxy/agentic_test_case_generator/issues/10) — Phase 2: add context analysis preview and review controls to the UI
 - [#11](https://github.com/lumensparkxy/agentic_test_case_generator/issues/11) — Phase 2: expand backend and E2E regression coverage
-- [#15](https://github.com/lumensparkxy/agentic_test_case_generator/issues/15) — Validate Playwright docs E2E workflow through reporting
-- [#16](https://github.com/lumensparkxy/agentic_test_case_generator/issues/16) — Improve generated browser assertions for documentation workflows
 - [#17](https://github.com/lumensparkxy/agentic_test_case_generator/issues/17) — Update project dependencies to latest compatible versions
-- [#18](https://github.com/lumensparkxy/agentic_test_case_generator/issues/18) — Harden ADK workflow parsing, retries, and requirement normalization
-- [#19](https://github.com/lumensparkxy/agentic_test_case_generator/issues/19) — Update default Gemini model configuration
-- [#20](https://github.com/lumensparkxy/agentic_test_case_generator/issues/20) — Add repository agent instructions and refresh skill lock
-- [#21](https://github.com/lumensparkxy/agentic_test_case_generator/issues/21) — Prepare client submission workflow artifacts and brief
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 

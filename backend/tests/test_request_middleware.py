@@ -27,6 +27,25 @@ class RequestIdMiddlewareTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("X-Request-ID"), "req-from-test")
 
+    def test_request_completion_is_logged_with_request_context(self) -> None:
+        with self.assertLogs("app.main", level="INFO") as captured:
+            with TestClient(app) as client:
+                response = client.get("/health", headers={"X-Request-ID": "req-log-test"})
+
+        self.assertEqual(response.status_code, 200)
+        completion_records = [
+            record
+            for record in captured.records
+            if getattr(record, "event", "") == "http.request.completed"
+        ]
+        self.assertTrue(completion_records)
+        record = completion_records[-1]
+        self.assertEqual(record.request_id, "req-log-test")
+        self.assertEqual(record.method, "GET")
+        self.assertEqual(record.path, "/health")
+        self.assertEqual(record.status_code, 200)
+        self.assertGreaterEqual(record.duration_ms, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
