@@ -13,6 +13,7 @@ from .firestore_repository import get_optional_firestore_collection
 
 DEFAULT_AUDIT_WRITE_RETRY_ATTEMPTS = 1
 DEFAULT_AUDIT_WRITE_RETRY_DELAY_SECONDS = 0.05
+DEFAULT_AUDIT_DEAD_LETTER_COLLECTION = "audit_dead_letters"
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,12 @@ class AuditRepository(Protocol):
     def record_workflow_run_complete(self, run_id: str, payload: Dict[str, Any]) -> AuditWriteFailure | None: ...
 
     def record_usage_event(self, event_id: str, payload: Dict[str, Any]) -> AuditWriteFailure | None: ...
+
+
+class AuditDeadLetterSink(Protocol):
+    backend: str
+
+    def record_dead_letter(self, dead_letter_id: str, payload: Dict[str, Any]) -> None: ...
 
 
 def _parse_non_negative_int_env(name: str, default: int) -> int:
@@ -62,6 +69,42 @@ def _audit_write_retry_attempts() -> int:
 
 def _audit_write_retry_delay_seconds() -> float:
     return _parse_non_negative_float_env("AUDIT_WRITE_RETRY_DELAY_SECONDS", DEFAULT_AUDIT_WRITE_RETRY_DELAY_SECONDS)
+
+
+def _audit_dead_letter_collection_name() -> str:
+    configured = os.getenv("AUDIT_DEAD_LETTER_COLLECTION", DEFAULT_AUDIT_DEAD_LETTER_COLLECTION).strip()
+    return configured or DEFAULT_AUDIT_DEAD_LETTER_COLLECTION
+
+
+class FirestoreAuditDeadLetterSink:
+    backend = "firestore"
+
+    def __init__(self, *, collection_name: str | None = None) -> None:
+        self.collection_name = collection_name or _audit_dead_letter_collection_name()
+
+    def record_dead_letter(self, dead_letter_id: str, payload: Dict[str, Any]) -> None:
+        collection = get_optional_firestore_collection(
+            self.collection_name,
+            unavailable_message=f"Firestore client unavailable for {self.collection_name} audit dead-letter writes",
+        )
+        if collection is None:
+            raise RuntimeError("collection_unavailable")
+
+        collection.document(dead_letter_id).set(payload)
+
+
+def build_audit_dead_letter_sink_from_env() -> AuditDeadLetterSink | None:
+    backend = os.getenv("AUDIT_DEAD_LETTER_BACKEND", "local").strip().lower()
+    if backend in {"", "local", "memory", "none", "disabled"}:
+        return None
+    if backend == "firestore":
+        return FirestoreAuditDeadLetterSink()
+
+    logging.warning(
+        "Invalid AUDIT_DEAD_LETTER_BACKEND=%s. Falling back to local dead-letter buffer only.",
+        backend,
+    )
+    return None
 
 
 class FirestoreAuditRepository:

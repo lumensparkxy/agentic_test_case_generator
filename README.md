@@ -42,6 +42,8 @@ Copy .env.example to .env and set values:
 - AUTH_TOKEN_MODE (`firebase-only` for production; `firebase-or-backend-jwt` only for local/E2E compatibility)
 - METRICS_ENABLED (defaults to true locally; Cloud Run deploy helper defaults to false)
 - METRICS_ACCESS_TOKEN (optional bearer token required for `/metrics` when set; required by the deploy helper if `METRICS_ENABLED=true`)
+- AUDIT_DEAD_LETTER_BACKEND (optional; defaults to local in-memory summaries; set to `firestore` for a durable Firestore sink)
+- AUDIT_DEAD_LETTER_COLLECTION (optional Firestore collection for sanitized dead-letter summaries; defaults to `audit_dead_letters`)
 - VITE_GOOGLE_CLIENT_ID (optional compatibility-mode Google client ID hint)
 - VITE_FIREBASE_API_KEY (required for frontend sign-in button)
 - VITE_FIREBASE_AUTH_DOMAIN (required for frontend sign-in button)

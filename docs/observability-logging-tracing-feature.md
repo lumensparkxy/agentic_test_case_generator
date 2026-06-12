@@ -11,8 +11,8 @@ Area: Backend, Frontend, Platform, AI Workflow Operations
 - Phase 2 core workflow propagation implemented: `request_id`, `workflow_run_id`, `actor_user_id`, and `operation` now flow into requirement/test-case ADK workflow logging for direct uploads, refinements, JIRA imports, and Azure DevOps imports.
 - Phase 3 implemented: Prometheus-compatible `/metrics` endpoint now exposes HTTP request counts/durations, workflow run counts/durations, agent fallback counts, audit write failure counts, and JIRA/Azure DevOps integration request counts/durations. Exposure is controlled by `METRICS_ENABLED`; optional `METRICS_ACCESS_TOKEN` requires a bearer token, and Cloud Run deployments default metrics off unless explicitly token-protected.
 - Phase 4 implemented: optional OpenTelemetry FastAPI tracing can be enabled with `OTEL_ENABLED=true`; incoming W3C `traceparent` IDs are surfaced as `trace_id` in request logs, `X-Trace-ID` response headers, and audit payloads.
-- Phase 5 implemented: audit writes now use bounded retry settings and record exhausted failures into a sanitized local dead-letter buffer with retry/dead-letter metrics.
-- Not yet implemented: broader explicit instrumentation for non-agent admin/auth/reporting flows and a durable external dead-letter queue for compliance deployments.
+- Phase 5 implemented: audit writes now use bounded retry settings and record exhausted failures into a sanitized local dead-letter buffer with retry/dead-letter metrics. Compliance deployments can opt into a Firestore durable dead-letter sink with success/failure metrics and safe structured logs.
+- Not yet implemented: broader explicit instrumentation for non-agent admin/auth/reporting flows.
 
 ## Summary
 
@@ -75,8 +75,8 @@ Current limitations:
 
 - Some routes, especially auth/reporting/admin reads, have thinner explicit instrumentation
   than the core generation and integration workflows.
-- Compliance deployments still need a durable external dead-letter queue instead of
-  only the sanitized local dead-letter buffer.
+- Compliance deployments can enable the Firestore dead-letter sink instead of
+  relying only on the sanitized local dead-letter buffer.
 - Production metrics scraping remains deployment-specific; Cloud Run disables
   `/metrics` by default unless it is intentionally token-protected or placed behind
   an approved private monitoring path.
@@ -209,6 +209,8 @@ Recommended metrics:
 - `agent_iterations_total{workflow,agent}`
 - `agent_fallbacks_total{workflow,reason}`
 - `audit_write_failures_total{collection,operation}`
+- `audit_dead_letter_sink_writes_total{backend,collection,operation,status}`
+- `audit_dead_letter_sink_duration_seconds{backend,collection,operation,status}`
 - `integration_requests_total{provider,operation,status}`
 - `integration_request_duration_seconds{provider,operation,status}`
 - `billing_consumption_total{billing_key,status}`
@@ -222,7 +224,7 @@ Options:
 - Count audit write failures in metrics.
 - Log audit failures with structured fields.
 - Add retry with bounded backoff for transient Firestore failures.
-- Add a future dead-letter queue for compliance-critical deployments.
+- Add an optional durable dead-letter sink for compliance-critical deployments.
 
 ## User Stories
 
@@ -384,7 +386,7 @@ Tasks:
 1. Add structured audit failure logs.
 2. Add bounded retry for transient audit persistence failures.
 3. Emit metrics for skipped/failed audit writes.
-4. Define future dead-letter queue approach for compliance deployments.
+4. Add a durable dead-letter sink option for compliance deployments.
 
 ## Privacy and Security Requirements
 
@@ -453,6 +455,6 @@ Audit events:
 - A developer can take a failing `request_id` and find the request log, workflow run, usage event, billing record, and agent workflow logs.
 - Every core workflow has correlated request, workflow, actor, and operation metadata.
 - Logs are structured and safe for centralized aggregation.
-- Metrics show request volume, workflow success/failure rates, latency, fallback counts, audit write failures, and JIRA/Azure DevOps integration request outcomes and durations.
+- Metrics show request volume, workflow success/failure rates, latency, fallback counts, audit write failures, audit dead-letter sink outcomes, and JIRA/Azure DevOps integration request outcomes and durations.
 - Tracing can be enabled without code changes using environment variables.
 - Existing backend tests pass, and new observability tests cover the implemented behavior.

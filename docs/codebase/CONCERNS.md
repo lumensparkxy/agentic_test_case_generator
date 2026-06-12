@@ -8,7 +8,7 @@ git/history checks. It is not a full bug backlog.
 | Severity | Concern | Evidence | Impact | Suggested action |
 |----------|---------|----------|--------|------------------|
 | High | Large, high-churn orchestration and contract files remain central to the app | `frontend/src/App.jsx`, `backend/app/agents/test_case_agent.py`, `backend/app/models.py`, recent git history | Higher regression and merge risk for UI workflow, prompt orchestration, and API contracts | Continue behavior-preserving extraction under issue-scoped frontend, agent, and contract refactor tasks |
-| High | PostgreSQL persistence adapter, schema, and migration plan are not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firestore_repository.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_repository.py` | Audit, billing, and reporting now have repository seams but still use Firestore as the transitional runtime store | Define PostgreSQL schema/migrations and add a PostgreSQL adapter behind the #49 boundaries |
+| High | PostgreSQL persistence adapter, schema, and migration plan are not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firestore_repository.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_repository.py` | Audit, audit dead letters, billing, and reporting now have repository seams but still use Firestore as the transitional runtime store | Define PostgreSQL schema/migrations and add a PostgreSQL adapter behind the #49 boundaries |
 | Medium | Auth compatibility mode must stay out of production deployments | `docs/production-auth-policy-decision.md`, `backend/app/auth/jwt_auth.py`, `backend/app/routers/auth.py`, `scripts/deploy_cloud_run.sh` | Manual deployments using `firebase-or-backend-jwt` would re-enable backend JWT compatibility outside local/E2E workflows | Keep Cloud Run on `AUTH_TOKEN_MODE=firebase-only` and treat compatibility mode as local/test only |
 | Medium | Metrics endpoint exposure must stay intentionally scoped | `backend/app/main.py`, `backend/app/observability/metrics.py`, `scripts/deploy_cloud_run.sh` | `/metrics` exposes operational metadata and should not be accidentally public in production | Keep production deployments on `METRICS_ENABLED=false` or require `METRICS_ACCESS_TOKEN` plus an appropriate network perimeter |
 
@@ -75,6 +75,7 @@ git/history checks. It is not a full bug backlog.
 - `backend/app/services/execution_service.py`
 - `backend/app/services/firestore_repository.py`
 - `backend/app/services/audit_repository.py`
+- `backend/app/services/audit_service.py`
 - `backend/app/services/billing_repository.py`
 - `backend/app/services/reporting_service.py`
 - `backend/app/observability/integrations.py`

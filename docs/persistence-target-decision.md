@@ -81,7 +81,7 @@ PostgreSQL transaction isolation behavior.
 | Area | Current source | Data involved |
 | --- | --- | --- |
 | Firebase client access | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py` | Firebase Admin app and Firestore collection adapter |
-| Workflow audit | `backend/app/services/audit_service.py`, `backend/app/services/audit_repository.py` | `workflow_runs`, `usage_events`, local dead-letter summaries |
+| Workflow audit | `backend/app/services/audit_service.py`, `backend/app/services/audit_repository.py` | `workflow_runs`, `usage_events`, local dead-letter summaries, optional `audit_dead_letters` Firestore sink |
 | Billing repository | `backend/app/services/billing_repository.py`, `backend/app/services/firestore_repository.py` | `user_profiles`, `billing_accounts`, `billing_wallet_ledger`, `billing_allocations`, `billing_consumption` |
 | Reporting | `backend/app/services/reporting_service.py`, `backend/app/services/usage_event_repository.py` | streamed `usage_events` grouped by user, organization, and event type |
 | Artifact versioning | `backend/app/services/versioning_service.py`, `backend/app/services/firestore_repository.py` | `requirements_sets`, `test_case_sets`, item subcollections, version subcollections |
@@ -112,8 +112,8 @@ Existing issue state after this decision and the first implementation slice:
   introduced explicit repository/adapter seams while preserving current
   Firestore behavior.
 - [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56)
-  remains ready and should use the same audit repository boundary for a durable
-  dead-letter sink.
+  added an optional Firestore dead-letter sink behind the audit repository
+  boundary while preserving local-only behavior by default.
 
 Issue-ready follow-ups to create before implementation:
 

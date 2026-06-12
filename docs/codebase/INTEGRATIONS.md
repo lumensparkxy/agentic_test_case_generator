@@ -11,13 +11,13 @@ used by the tracked source.
 | Firebase Authentication | External identity provider | Frontend sign-in and backend Firebase ID token verification | Firebase ID token bearer token | High | `frontend/src/firebase.js`, `backend/app/auth/firebase_auth.py`, `backend/app/services/firebase_admin.py` |
 | Backend-issued JWT | Local/test auth compatibility path | Legacy/local API token support and E2E helper token minting; accepted only behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt` | `JWT_SECRET_KEY`, `JWT_ALGORITHM` | Medium | `backend/app/auth/jwt_auth.py`, `scripts/e2e_playwright_workflow.py`, `docs/production-auth-policy-decision.md` |
 | Google Identity credential verification | Local/test compatibility identity path | `/auth/google/login` exchanges Google credential for backend JWT only in compatibility mode | Google ID token verified against allowed audiences | Medium | `backend/app/auth/google_auth.py`, `backend/app/routers/auth.py`, `docs/production-auth-policy-decision.md` |
-| Firestore | External data store | Audit events, workflow runs, version records, connection records, billing repository, reporting data | Firebase Admin SDK credentials | High | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, `backend/app/services/audit_repository.py`, `backend/app/services/versioning_service.py`, `backend/app/services/billing_repository.py`, `backend/app/services/usage_event_repository.py` |
+| Firestore | External data store | Audit events, workflow runs, optional audit dead-letter summaries, version records, connection records, billing repository, reporting data | Firebase Admin SDK credentials | High | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, `backend/app/services/audit_repository.py`, `backend/app/services/versioning_service.py`, `backend/app/services/billing_repository.py`, `backend/app/services/usage_event_repository.py` |
 | JIRA Cloud | External API | Store user JIRA connection, import requirements, sync managed requirement blocks, export tests placeholder | User email plus API token, token encrypted before storage | High | `backend/app/adapters/jira.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py`, `backend/app/routers/integrations_jira.py` |
 | Azure DevOps Services | External API | Store user Azure DevOps connection, import work items, sync managed requirement blocks | Personal Access Token, encrypted before storage | High | `backend/app/adapters/azure_devops.py`, `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py`, `backend/app/routers/integrations_azure_devops.py` |
 | Remote artifact URLs | External HTTP(S) resources | Ground app/prototype/diagram/image links into UI/API/workflow context | Public HTTP(S), no user-supplied auth | Medium | `backend/app/services/artifact_fetcher.py`, `backend/app/services/context_grounding.py`, `backend/app/routers/requirements.py` |
 | Playwright Test execution runtime | Local subprocess/runtime | Convert executable candidates into generated specs, run selected cases, collect reports | Local process, environment config | High for automation feature | `backend/app/services/execution_service.py`, `backend/plain_english_test_framework/local_runner.py`, `backend/execution_runtime/playwright.config.ts` |
 | Cloud Run / Artifact Registry / Secret Manager | Deployment platform | Deploy backend and frontend containers to managed infrastructure | `gcloud` credentials and Secret Manager | Medium | `scripts/deploy_cloud_run.sh`, `backend/Dockerfile`, `frontend/Dockerfile` |
-| Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, audit failure, and integration request counters/durations when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `backend/app/observability/integrations.py`, `scripts/deploy_cloud_run.sh` |
+| Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, audit failure, audit dead-letter sink, and integration request counters/durations when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `backend/app/observability/integrations.py`, `scripts/deploy_cloud_run.sh` |
 | OpenTelemetry | Optional tracing | FastAPI tracing and trace ID propagation | `OTEL_*` environment variables | Medium | `backend/app/observability/tracing.py`, `backend/requirements.txt` |
 
 ## 2) Data Stores
@@ -26,7 +26,7 @@ used by the tracked source.
 |-------|------|--------------|----------|----------|
 | Firestore | Current transitional store for workflow/audit/version/reporting/billing/integration metadata | `backend/app/services/firestore_repository.py` plus domain repositories/services | Runtime behavior depends on Firebase credentials; several services degrade or warn when Firestore is unavailable | `backend/app/services/*.py`, `backend/tests/test_persistence_boundaries.py`, `backend/tests/test_reporting_service.py`, `docs/persistence-target-decision.md` |
 | PostgreSQL | Accepted target for compliance-grade audit, billing ledger, reporting, and versioned artifacts | Future adapters behind the repository boundaries introduced for #49 | Not implemented yet; requires schema, migrations, idempotency, transaction tests, and migration planning | `docs/persistence-target-decision.md`, `docs/firebase-auth-audit-architecture.md` |
-| In-memory process state | Fallback/dead-letter and local billing repository behavior in selected paths | Service module globals and test fakes | Not durable across processes or restarts | `backend/app/services/audit_service.py`, `backend/app/services/billing_repository.py` |
+| In-memory process state | Fallback/dead-letter and local billing repository behavior in selected paths | Service module globals and test fakes | Local audit dead-letter summaries are not durable unless `AUDIT_DEAD_LETTER_BACKEND=firestore` is enabled | `backend/app/services/audit_service.py`, `backend/app/services/billing_repository.py` |
 | Browser localStorage | Frontend access token and user session persistence | `frontend/src/App.jsx`, `frontend/src/constants/workflow.js` | XSS would expose token; current MVP stores token client-side | `frontend/src/App.jsx`, `README.md` |
 | Local filesystem | Execution artifacts, exported E2E outputs, generated client outputs | `backend/app/services/execution_service.py`, scripts under `scripts/` | Local artifacts can grow and leak data if ignored boundaries are bypassed | `.gitignore`, `scripts/e2e_playwright_workflow.py`, `scripts/cleanup_generated_artifacts.py`, `docs/artifact-retention-policy.md`, `docs/client-submission-workflow.md` |
 
@@ -76,7 +76,9 @@ Rotation/lifecycle notes:
 - Artifact fetching has request timeout, byte limit, redirect limit, and partial
   failure behavior.
 - Audit writes use bounded retry settings and sanitized local dead-letter
-  summaries.
+  summaries. Compliance deployments can set
+  `AUDIT_DEAD_LETTER_BACKEND=firestore` to also write the same sanitized
+  summary shape to the `AUDIT_DEAD_LETTER_COLLECTION` Firestore collection.
 - JIRA and Azure DevOps connection services encrypt tokens and surface status
   summaries with token hints.
 - Execution preview classifies candidates as executable, manual, unsupported,
@@ -102,7 +104,6 @@ Rotation/lifecycle notes:
 
 Missing visibility gaps:
 
-- [TODO] No durable external dead-letter queue is implemented for audit failures.
 - [TODO] Broader explicit instrumentation for non-agent admin/auth/reporting
   flows is still listed as not fully implemented in the observability feature
   document.

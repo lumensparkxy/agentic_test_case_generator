@@ -104,7 +104,7 @@ Logging strategy:
 - Workflow agents add `request_id`, `workflow_run_id`, `actor_user_id`, and
   operation context to workflow logs.
 - Audit writes are retried and dead-letter summaries are sanitized before
-  storage in memory.
+  storage in memory or the optional Firestore durable dead-letter sink.
 
 Sensitive-data rules visible in code:
 
