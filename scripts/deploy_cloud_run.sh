@@ -69,11 +69,14 @@ FRONTEND_SERVICE="${FRONTEND_SERVICE:-tcg-frontend}"
 SECRET_GEMINI_NAME="${SECRET_GEMINI_NAME:-tcg-gemini-api-key}"
 SECRET_JWT_NAME="${SECRET_JWT_NAME:-tcg-jwt-secret-key}"
 SECRET_FIREBASE_SA_NAME="${SECRET_FIREBASE_SA_NAME:-tcg-firebase-service-account-json}"
+SECRET_METRICS_NAME="${SECRET_METRICS_NAME:-tcg-metrics-access-token}"
 RUNTIME_SERVICE_ACCOUNT="${RUNTIME_SERVICE_ACCOUNT:-}"
 MODEL_NAME="${MODEL_NAME:-gemini-3.5-flash}"
 JWT_ALGORITHM="${JWT_ALGORITHM:-HS256}"
 JWT_EXPIRATION_MINUTES="${JWT_EXPIRATION_MINUTES:-60}"
 AUTH_TOKEN_MODE="${AUTH_TOKEN_MODE:-firebase-only}"
+METRICS_ENABLED="${METRICS_ENABLED:-false}"
+METRICS_ACCESS_TOKEN="${METRICS_ACCESS_TOKEN:-}"
 TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-${VITE_GOOGLE_CLIENT_ID:-}}"
 GOOGLE_CLIENT_IDS="${GOOGLE_CLIENT_IDS:-}"
@@ -102,6 +105,23 @@ require_var GEMINI_API_KEY
 if [[ "$AUTH_TOKEN_MODE" != "firebase-only" ]]; then
   echo "Cloud Run deployment requires AUTH_TOKEN_MODE=firebase-only." >&2
   echo "Use firebase-or-backend-jwt only for local development and E2E compatibility." >&2
+  exit 1
+fi
+case "$METRICS_ENABLED" in
+  true|1|yes|on)
+    METRICS_ENABLED=true
+    ;;
+  false|0|no|off)
+    METRICS_ENABLED=false
+    ;;
+  *)
+    echo "Invalid METRICS_ENABLED=$METRICS_ENABLED. Use true or false." >&2
+    exit 1
+    ;;
+esac
+if [[ "$METRICS_ENABLED" == "true" && -z "$METRICS_ACCESS_TOKEN" ]]; then
+  echo "Cloud Run deployment requires METRICS_ACCESS_TOKEN when METRICS_ENABLED=true." >&2
+  echo "Leave METRICS_ENABLED=false to disable the public metrics endpoint." >&2
   exit 1
 fi
 
@@ -163,6 +183,7 @@ build_env_var_arg() {
     "JWT_ALGORITHM=$JWT_ALGORITHM"
     "JWT_EXPIRATION_MINUTES=$JWT_EXPIRATION_MINUTES"
     "AUTH_TOKEN_MODE=$AUTH_TOKEN_MODE"
+    "METRICS_ENABLED=$METRICS_ENABLED"
     "CORS_ALLOW_ORIGINS=$cors_allow_origins"
   )
 
@@ -188,6 +209,9 @@ build_secret_arg() {
 
   if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]]; then
     secret_entries+=("FIREBASE_SERVICE_ACCOUNT_JSON=${SECRET_FIREBASE_SA_NAME}:latest")
+  fi
+  if [[ -n "$METRICS_ACCESS_TOKEN" ]]; then
+    secret_entries+=("METRICS_ACCESS_TOKEN=${SECRET_METRICS_NAME}:latest")
   fi
 
   join_with_delimiter ',' "${secret_entries[@]}"
@@ -246,12 +270,18 @@ upsert_secret "$SECRET_JWT_NAME" "$JWT_SECRET_KEY"
 if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]]; then
   upsert_secret "$SECRET_FIREBASE_SA_NAME" "$FIREBASE_SERVICE_ACCOUNT_JSON"
 fi
+if [[ -n "$METRICS_ACCESS_TOKEN" ]]; then
+  upsert_secret "$SECRET_METRICS_NAME" "$METRICS_ACCESS_TOKEN"
+fi
 
 printf 'Granting Secret Manager access to runtime service account...\n'
 grant_secret_accessor "$SECRET_GEMINI_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
 grant_secret_accessor "$SECRET_JWT_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
 if [[ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]]; then
   grant_secret_accessor "$SECRET_FIREBASE_SA_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
+fi
+if [[ -n "$METRICS_ACCESS_TOKEN" ]]; then
+  grant_secret_accessor "$SECRET_METRICS_NAME" "$EFFECTIVE_RUNTIME_SERVICE_ACCOUNT"
 fi
 
 printf 'Building backend image...\n'

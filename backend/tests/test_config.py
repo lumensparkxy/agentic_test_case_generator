@@ -20,6 +20,7 @@ from app.config import (
     get_auth_settings,
     get_billing_settings,
     get_jira_settings,
+    get_metrics_settings,
     get_settings,
 )
 
@@ -30,6 +31,7 @@ class ConfigSettingsTests(unittest.TestCase):
         get_settings.cache_clear()
         get_billing_settings.cache_clear()
         get_jira_settings.cache_clear()
+        get_metrics_settings.cache_clear()
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -137,6 +139,22 @@ class ConfigSettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.auth_token_mode, AUTH_TOKEN_MODE_FIREBASE_ONLY)
         self.assertTrue(any("Invalid AUTH_TOKEN_MODE=backend-jwt-only" in entry for entry in logs.output))
+
+    def test_get_metrics_settings_defaults_to_enabled_without_token(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            get_metrics_settings.cache_clear()
+            settings = get_metrics_settings()
+
+        self.assertTrue(settings.enabled)
+        self.assertEqual(settings.access_token, "")
+
+    def test_get_metrics_settings_parses_disablement_and_token(self) -> None:
+        with patch.dict(os.environ, {"METRICS_ENABLED": "false", "METRICS_ACCESS_TOKEN": "metrics-secret"}, clear=True):
+            get_metrics_settings.cache_clear()
+            settings = get_metrics_settings()
+
+        self.assertFalse(settings.enabled)
+        self.assertEqual(settings.access_token, "metrics-secret")
 
     def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
         with patch.dict(

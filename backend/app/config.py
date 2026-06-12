@@ -89,6 +89,11 @@ class FirebaseSettings(BaseModel):
     service_account_json: str = ""
 
 
+class MetricsSettings(BaseModel):
+    enabled: bool = True
+    access_token: str = ""
+
+
 class JiraSettings(BaseModel):
     connection_secret_key: str = ""
     api_timeout_seconds: int = 15
@@ -294,6 +299,14 @@ def get_firebase_settings() -> FirebaseSettings:
     return FirebaseSettings(
         project_id=(os.getenv("FIREBASE_PROJECT_ID") or "").strip(),
         service_account_json=(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip(),
+    )
+
+
+@lru_cache
+def get_metrics_settings() -> MetricsSettings:
+    return MetricsSettings(
+        enabled=_parse_bool_env(os.getenv("METRICS_ENABLED", "true"), default=True),
+        access_token=(os.getenv("METRICS_ACCESS_TOKEN") or "").strip(),
     )
 
 

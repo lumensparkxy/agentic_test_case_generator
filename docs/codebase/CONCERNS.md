@@ -10,7 +10,7 @@ git/history checks. It is not a full bug backlog.
 | High | Large, high-churn orchestration and contract files remain central to the app | `frontend/src/App.jsx`, `backend/app/agents/test_case_agent.py`, `backend/app/models.py`, recent git history | Higher regression and merge risk for UI workflow, prompt orchestration, and API contracts | Continue behavior-preserving extraction under issue-scoped frontend, agent, and contract refactor tasks |
 | High | PostgreSQL persistence adapter, schema, and migration plan are not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firestore_repository.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_repository.py` | Audit, billing, and reporting now have repository seams but still use Firestore as the transitional runtime store | Define PostgreSQL schema/migrations and add a PostgreSQL adapter behind the #49 boundaries |
 | Medium | Auth compatibility mode must stay out of production deployments | `docs/production-auth-policy-decision.md`, `backend/app/auth/jwt_auth.py`, `backend/app/routers/auth.py`, `scripts/deploy_cloud_run.sh` | Manual deployments using `firebase-or-backend-jwt` would re-enable backend JWT compatibility outside local/E2E workflows | Keep Cloud Run on `AUTH_TOKEN_MODE=firebase-only` and treat compatibility mode as local/test only |
-| Medium | Metrics endpoint exposure depends on deployment perimeter | `backend/app/main.py`, `backend/app/observability/metrics.py` | `/metrics` may expose operational metadata if public deployments do not protect it | Decide deployment access policy for `/metrics` |
+| Medium | Metrics endpoint exposure must stay intentionally scoped | `backend/app/main.py`, `backend/app/observability/metrics.py`, `scripts/deploy_cloud_run.sh` | `/metrics` exposes operational metadata and should not be accidentally public in production | Keep production deployments on `METRICS_ENABLED=false` or require `METRICS_ACCESS_TOKEN` plus an appropriate network perimeter |
 
 ## 2) Technical Debt
 
@@ -29,7 +29,7 @@ git/history checks. It is not a full bug backlog.
 | Stored integration credentials | A02 Cryptographic Failures | `jira_connection_service.py`, `azure_devops_connection_service.py` | Fernet encryption using dedicated secret or JWT secret fallback; token hints only | Rotation and secret lifecycle are not documented |
 | SSRF through artifact URLs | A10 Server-Side Request Forgery | `artifact_fetcher.py` | Blocks local/private/non-routable hosts, unsafe schemes, and redirect abuse | Continued hardening needed before broad production use with authenticated/internal artifacts |
 | Browser token storage | A07 Identification and Authentication Failures | `frontend/src/App.jsx`, `README.md` | Firebase token verification and backend auth checks | `localStorage` token storage remains MVP-level risk |
-| Metrics endpoint exposure | A05 Security Misconfiguration | `backend/app/main.py` | Endpoint is schema-hidden and contains operational metrics rather than secrets | Deployment access control is not documented |
+| Metrics endpoint exposure | A05 Security Misconfiguration | `backend/app/main.py`, `scripts/deploy_cloud_run.sh` | Endpoint is schema-hidden, can be disabled, and can require a bearer token | Network perimeter remains deployment-specific |
 | Generated artifacts may contain sensitive content if real data is used | A01 Broken Access Control / data exposure | `.gitignore`, `docs/client-submission-workflow.md`, `execution_service.py` | Generated directories are ignored; docs warn against committing client data | Local retention and cleanup policy is not formalized |
 
 ## 4) Performance and Scaling Concerns
@@ -56,7 +56,7 @@ git/history checks. It is not a full bug backlog.
 ## 6) `[ASK USER]` Questions
 
 1. [ASK USER] What retention window should apply to `.execution_artifacts/` and `/tmp/pw_workflow_out` outputs when real client data is used locally?
-2. [ASK USER] Should `/metrics` be publicly reachable in deployed environments, or should it require network/auth protection?
+2. [ASK USER] Which production monitoring system should receive metrics, and should it scrape through Cloud Run ingress, a private network path, or a token-protected endpoint?
 
 ## 7) Evidence
 

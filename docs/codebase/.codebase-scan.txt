@@ -8,8 +8,8 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 - Files scanned: 251
 - Files excluded after `git ls-files`: 70
-- Total bytes: 1940034
-- Text lines counted: 51135
+- Total bytes: 1948057
+- Text lines counted: 51258
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -82,8 +82,8 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/models.py` | 33206 | 1048 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
+| `docs/requirements_traceability.md` | 27201 | 28 |
 | `scripts/e2e_playwright_workflow.py` | 26113 | 682 |
-| `docs/requirements_traceability.md` | 25776 | 27 |
 | `backend/app/adapters/azure_devops.py` | 24984 | 551 |
 | `backend/app/agents/requirements_agent.py` | 23657 | 583 |
 | `backend/app/services/execution_service.py` | 23645 | 635 |

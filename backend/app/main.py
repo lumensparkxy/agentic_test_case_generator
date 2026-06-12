@@ -1,10 +1,10 @@
 import logging
 import time
 from uuid import uuid4
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import get_cors_allow_origins
+from .config import get_cors_allow_origins, get_metrics_settings
 from .auth.jwt_auth import get_current_user
 from .observability.logging import bind_log_context, configure_logging, reset_log_context
 from .observability.metrics import record_http_request, render_prometheus_metrics
@@ -121,5 +121,17 @@ async def health() -> dict:
 
 
 @app.get("/metrics", include_in_schema=False)
-async def metrics() -> Response:
+async def metrics(request: Request) -> Response:
+    settings = get_metrics_settings()
+    if not settings.enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metrics endpoint is disabled")
+    if settings.access_token:
+        authorization = request.headers.get("Authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or token != settings.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Metrics authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
     return Response(content=render_prometheus_metrics(), media_type=METRICS_CONTENT_TYPE)

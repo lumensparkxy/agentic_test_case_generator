@@ -52,7 +52,7 @@ flowchart LR
     jira["JIRA Cloud API"]
     ado["Azure DevOps API"]
     artifacts["Local generated artifacts\n.execution_artifacts\n/tmp/pw_workflow_out"]
-    metrics["/metrics\nPrometheus format"]
+    metrics["/metrics\nPrometheus format\nconfig-gated"]
 
     user --> browser
     browser --> apiClient

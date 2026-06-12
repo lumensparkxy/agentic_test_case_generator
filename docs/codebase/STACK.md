@@ -105,6 +105,8 @@ Required or important backend variables:
 - `JWT_EXPIRATION_MINUTES`
 - `AUTH_TOKEN_MODE`: `firebase-only` for production,
   `firebase-or-backend-jwt` for local/E2E compatibility.
+- `METRICS_ENABLED`
+- `METRICS_ACCESS_TOKEN`
 - `CORS_ALLOW_ORIGINS`
 - `FIREBASE_PROJECT_ID`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
