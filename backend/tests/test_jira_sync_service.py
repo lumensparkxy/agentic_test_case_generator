@@ -58,12 +58,14 @@ class JiraSyncServiceTests(unittest.TestCase):
         )
         adapter = FakeJiraAdapter([live_issue])
 
-        with patch("app.services.jira_sync_service.get_jira_adapter_for_user", return_value=adapter):
-            response = preview_jira_requirement_sync(
-                current_user=self.user,
-                payload=JiraSyncPreviewInput(requirements=[requirement]),
-            )
+        with patch("app.services.jira_sync_service.get_firestore_client") as get_firestore_client:
+            with patch("app.services.jira_sync_service.get_jira_adapter_for_user", return_value=adapter):
+                response = preview_jira_requirement_sync(
+                    current_user=self.user,
+                    payload=JiraSyncPreviewInput(requirements=[requirement]),
+                )
 
+        get_firestore_client.assert_not_called()
         self.assertEqual(response.conflict_count, 1)
         self.assertEqual(response.issues[0].status, "conflict")
         self.assertIn("REQ-001", response.issues[0].rendered_description_excerpt)
@@ -114,12 +116,14 @@ class JiraSyncServiceTests(unittest.TestCase):
         )
         adapter = FakeJiraAdapter([before_update, after_update])
 
-        with patch("app.services.jira_sync_service.get_jira_adapter_for_user", return_value=adapter):
-            response = apply_jira_requirement_sync(
-                current_user=self.user,
-                payload=JiraSyncApplyInput(requirements=[requirement]),
-            )
+        with patch("app.services.jira_sync_service.get_firestore_client") as get_firestore_client:
+            with patch("app.services.jira_sync_service.get_jira_adapter_for_user", return_value=adapter):
+                response = apply_jira_requirement_sync(
+                    current_user=self.user,
+                    payload=JiraSyncApplyInput(requirements=[requirement]),
+                )
 
+        get_firestore_client.assert_not_called()
         self.assertEqual(response.updated_issue_count, 1)
         self.assertEqual(response.results[0].status, "updated")
         self.assertEqual(len(adapter.updated_payloads), 1)

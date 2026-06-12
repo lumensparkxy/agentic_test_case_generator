@@ -330,7 +330,11 @@ def _group_requirements_by_work_item(
 
 
 def _load_mapping_payloads(requirements: Sequence[Requirement]) -> dict[str, dict[str, Any]]:
-    item_ids = [str(requirement.artifact_item_id or "").strip() for requirement in requirements if str(requirement.artifact_item_id or "").strip()]
+    item_ids = [
+        str(requirement.artifact_item_id or "").strip()
+        for requirement in requirements
+        if _requires_mapping_lookup(requirement)
+    ]
     if not item_ids:
         return {}
     try:
@@ -350,6 +354,18 @@ def _load_mapping_payloads(requirements: Sequence[Requirement]) -> dict[str, dic
         if getattr(snapshot, "exists", False):
             payloads[item_id] = snapshot.to_dict() or {}
     return payloads
+
+
+def _requires_mapping_lookup(requirement: Requirement) -> bool:
+    item_id = str(requirement.artifact_item_id or "").strip()
+    if not item_id:
+        return False
+
+    has_azure_source = requirement.source_system == "azure_devops"
+    has_work_item_target = bool(_coerce_optional_int(requirement.sync_target_issue_key or requirement.source_issue_key))
+    has_project = bool(_extract_project_from_work_item_url(str(requirement.source_issue_url or "")))
+    has_baseline = requirement.source_issue_updated_at is not None
+    return not (has_azure_source and has_work_item_target and has_project and has_baseline)
 
 
 def _resolve_group_baseline_changed_at(contexts: Sequence[_SyncRequirementContext]) -> Optional[datetime]:
