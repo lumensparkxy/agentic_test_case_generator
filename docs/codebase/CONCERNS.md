@@ -30,7 +30,7 @@ git/history checks. It is not a full bug backlog.
 | SSRF through artifact URLs | A10 Server-Side Request Forgery | `artifact_fetcher.py` | Blocks local/private/non-routable hosts, unsafe schemes, and redirect abuse | Continued hardening needed before broad production use with authenticated/internal artifacts |
 | Browser token storage | A07 Identification and Authentication Failures | `frontend/src/App.jsx`, `README.md` | Firebase token verification and backend auth checks | `localStorage` token storage remains MVP-level risk |
 | Metrics endpoint exposure | A05 Security Misconfiguration | `backend/app/main.py`, `scripts/deploy_cloud_run.sh` | Endpoint is schema-hidden, can be disabled, and can require a bearer token | Network perimeter remains deployment-specific |
-| Generated artifacts may contain sensitive content if real data is used | A01 Broken Access Control / data exposure | `.gitignore`, `docs/client-submission-workflow.md`, `execution_service.py` | Generated directories are ignored; docs warn against committing client data | Local retention and cleanup policy is not formalized |
+| Generated artifacts may contain sensitive content if real data is used | A01 Broken Access Control / data exposure | `.gitignore`, `docs/artifact-retention-policy.md`, `scripts/cleanup_generated_artifacts.py`, `execution_service.py` | Generated directories are ignored; cleanup is dry-run by default; tracked files are skipped | Durable archival policy for approved client deliverables remains out of scope |
 
 ## 4) Performance and Scaling Concerns
 
@@ -40,7 +40,7 @@ git/history checks. It is not a full bug backlog.
 | In-process execution subprocesses | `execution_service.py`, `local_runner.py` | Backend shells out to `npx playwright test` | CPU/browser resource contention in multi-user deployments | Add queueing, concurrency limits, and artifact retention policy |
 | Firestore reads for reporting/billing | `usage_event_repository.py`, `reporting_service.py`, `billing_repository.py`, `docs/persistence-target-decision.md` | Tests cover repository-boundary fallback/warning behavior | Large usage-event history may become expensive or slow | Add PostgreSQL query/rollup adapters behind the accepted repository boundary |
 | Large frontend state tree | `frontend/src/App.jsx` | Many workflow states in one component | Re-renders and maintenance overhead | Move domain state into hooks/reducers and memoize expensive derived views if needed |
-| Local artifact growth | `.execution_artifacts/`, `client_submission/` | Generated outputs are ignored but not auto-pruned | Disk growth and noisy local scans | Add cleanup command or retention guidance |
+| Local artifact growth | `.execution_artifacts/`, `client_submission/`, `/tmp/pw_workflow_out` | Generated outputs are ignored and covered by the dry-run cleanup command | Disk growth if maintainers never run cleanup | Run `python scripts/cleanup_generated_artifacts.py` before applying age-based cleanup |
 
 ## 5) Fragile/High-Churn Areas
 
@@ -55,13 +55,14 @@ git/history checks. It is not a full bug backlog.
 
 ## 6) `[ASK USER]` Questions
 
-1. [ASK USER] What retention window should apply to `.execution_artifacts/` and `/tmp/pw_workflow_out` outputs when real client data is used locally?
+1. [ASK USER] Should any future approved client deliverable archives live outside local ignored directories, and what retention owner should govern them?
 2. [ASK USER] Which production monitoring system should receive metrics, and should it scrape through Cloud Run ingress, a private network path, or a token-protected endpoint?
 
 ## 7) Evidence
 
 - `docs/firebase-auth-audit-architecture.md`
 - `docs/production-auth-policy-decision.md`
+- `docs/artifact-retention-policy.md`
 - `docs/persistence-target-decision.md`
 - `docs/implementation-plan.md`
 - `docs/frontend-refactor-github-issues.md`

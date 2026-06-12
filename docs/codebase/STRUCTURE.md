@@ -108,10 +108,14 @@ Do not document generated files as source conventions and do not commit them.
   IR, Playwright results, reports, traces, videos, and environment files.
 - `client_submission/` is ignored and contains generated client screenshots,
   downloaded exports, and generated briefs.
+- `/tmp/pw_workflow_out` is used by the full local Playwright documentation
+  workflow for JSON snapshots and exported files.
 - `frontend/dist/`, `frontend/test-results/`, `frontend/playwright-report/`,
   Node modules, Python caches, and `.venv/` are ignored.
 - Backend execution runtime artifacts under `backend/execution_runtime/artifacts/`
   are ignored.
+- Use `python scripts/cleanup_generated_artifacts.py` for a dry-run cleanup
+  plan before deleting ignored generated artifacts.
 
 ## 6) Evidence
 

@@ -136,6 +136,36 @@ The Playwright config uses your installed Microsoft Edge browser by default thro
 
 Generated execution files are written under `EXECUTION_ARTIFACT_ROOT` and ignored by git. The internal handoff is generated `TestCase` JSON from the webapp, not Excel.
 
+### 3.0.2) Clean generated artifacts
+
+Generated execution and client-submission outputs can contain screenshots,
+traces, reports, exports, generated specs, or client-sensitive data. Keep them
+out of git and use the dry-run cleanup command before deleting anything:
+
+```bash
+python scripts/cleanup_generated_artifacts.py
+```
+
+The command scans `.execution_artifacts/`, `client_submission/`, and
+`/tmp/pw_workflow_out` by default and selects files older than 14 days. Delete
+the dry-run matches only after review:
+
+```bash
+python scripts/cleanup_generated_artifacts.py --apply
+```
+
+For real client or operational data, prefer a stricter window and delete local
+artifacts as soon as the handoff is complete:
+
+```bash
+python scripts/cleanup_generated_artifacts.py --max-age-days 7 --apply
+```
+
+Use `--target` to override or add generated directories. In-repository targets
+must be ignored by git unless `--allow-unignored-target` is passed, and tracked
+files are skipped even with that override. See
+[docs/artifact-retention-policy.md](docs/artifact-retention-policy.md).
+
 ### 3.1) Evaluate generation quality with benchmark fixtures
 
 To measure the current test-case generator against the benchmark fixtures in `scripts/benchmark_inputs/`, run:

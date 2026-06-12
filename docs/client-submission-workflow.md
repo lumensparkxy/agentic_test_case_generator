@@ -20,6 +20,29 @@ Do not commit real client data, credentials, local browser profiles,
 screenshots, downloaded exports, or generated briefs unless a future issue
 explicitly approves a publication path.
 
+## Retention and Cleanup
+
+Use synthetic fixture data for client-submission artifacts unless a linked issue
+explicitly approves real client data. Delete generated local outputs as soon as
+the review or handoff is complete; real client or operational data should not
+remain in ignored local directories for more than 7 days without a follow-up
+retention issue.
+
+Dry-run cleanup from the repository root:
+
+```bash
+python scripts/cleanup_generated_artifacts.py --target client_submission
+```
+
+Delete dry-run matches after review:
+
+```bash
+python scripts/cleanup_generated_artifacts.py --target client_submission --max-age-days 7 --apply
+```
+
+The broader policy and default cleanup targets are documented in
+`docs/artifact-retention-policy.md`.
+
 ## Local Reproduction
 
 From the repository root:

@@ -158,6 +158,19 @@ Expected outputs:
 - Console summary showing parsed/refined/enriched requirements, generated test
   cases, executable preview counts, and execution run status.
 
+Generated E2E and execution outputs are ignored by git but can contain
+screenshots, traces, reports, exports, and generated specs. Review the dry-run
+cleanup plan before deleting old outputs:
+
+```bash
+python scripts/cleanup_generated_artifacts.py
+```
+
+The command defaults to files older than 14 days across `.execution_artifacts/`,
+`client_submission/`, and `/tmp/pw_workflow_out`. Use `--apply` only after
+reviewing the dry-run output, and use `--max-age-days 7 --apply` for approved
+real-data cleanup. See `docs/artifact-retention-policy.md`.
+
 Recorded validation evidence:
 
 - Issue #15 evidence in `docs/requirements_traceability.md` records a full
