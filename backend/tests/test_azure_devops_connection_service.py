@@ -81,7 +81,7 @@ class AzureDevOpsConnectionServiceTests(unittest.TestCase):
             account_email="qa@acme.com",
         )
 
-        with patch("app.services.azure_devops_connection_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             with patch("app.services.azure_devops_connection_service.get_azure_devops_settings", return_value=self.settings):
                 with patch("app.services.azure_devops_connection_service.AzureDevOpsAdapter.validate_connection", return_value={"organization": "acme"}):
                     response = upsert_azure_devops_connection(current_user=self.user, payload=payload)
@@ -99,7 +99,7 @@ class AzureDevOpsConnectionServiceTests(unittest.TestCase):
     def test_connection_status_returns_disconnected_when_no_document_exists(self) -> None:
         client = FakeFirestoreClient()
 
-        with patch("app.services.azure_devops_connection_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             response = get_azure_devops_connection_status(current_user=self.user)
 
         self.assertFalse(response.connected)
@@ -112,7 +112,7 @@ class AzureDevOpsConnectionServiceTests(unittest.TestCase):
             personal_access_token="azure-pat-1234",
         )
 
-        with patch("app.services.azure_devops_connection_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             with patch("app.services.azure_devops_connection_service.get_azure_devops_settings", return_value=self.settings):
                 with patch("app.services.azure_devops_connection_service.AzureDevOpsAdapter.validate_connection", return_value={"organization": "acme"}):
                     upsert_azure_devops_connection(current_user=self.user, payload=payload)

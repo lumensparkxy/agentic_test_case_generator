@@ -193,7 +193,7 @@ class AzureDevOpsRequirementsServiceTests(unittest.TestCase):
             )
         ]
 
-        with patch("app.services.azure_devops_requirements_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             persisted = persist_azure_devops_requirement_mappings(
                 requirements=requirements,
                 actor=self.user,

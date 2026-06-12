@@ -122,8 +122,9 @@ Sensitive-data rules visible in code:
 - Tests use `unittest`, `fastapi.testclient.TestClient`, `unittest.mock.patch`,
   and local fake clients instead of real remote services.
 - Integration tests for JIRA/Azure DevOps patch service and adapter boundaries.
-- Firestore-dependent tests patch `get_firestore_client` or use fake clients to
-  isolate behavior.
+- Firestore-dependent tests patch
+  `app.services.firestore_repository.get_firestore_client`, swap repository
+  test hooks, or use fake clients to isolate behavior.
 - Frontend E2E specs live in `frontend/e2e/`.
 - Execution runtime smoke checks use `npm run test:playwright -- --list` under
   `backend/execution_runtime`.

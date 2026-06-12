@@ -6,7 +6,7 @@ from typing import Any, Optional
 from ..auth.identity import resolve_organization_domain
 from ..config import BillingSettings
 from ..models import AuthUser, BillingAccount, BillingAllocation, BillingConsumptionRecord, BillingLedgerEntry, BillingUserProfile
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection
 
 USER_PROFILES_COLLECTION = "user_profiles"
 BILLING_ACCOUNTS_COLLECTION = "billing_accounts"
@@ -36,13 +36,10 @@ def _serialize_value(value: Any) -> Any:
 
 
 def _get_collection(collection_name: str):
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime config
-        logging.warning("Firestore client unavailable for %s reads/writes: %s", collection_name, exc)
-        return None
-
-    return client.collection(collection_name)
+    return get_optional_firestore_collection(
+        collection_name,
+        unavailable_message=f"Firestore client unavailable for {collection_name} reads/writes",
+    )
 
 
 def _safe_set(document_ref, payload: dict[str, Any], *, operation: str, merge: bool = False) -> None:

@@ -6,8 +6,9 @@
 Status note as of 2026-06-12: the persistence recommendation is clarified by
 `docs/persistence-target-decision.md`. PostgreSQL is the accepted target for
 compliance-grade audit, billing, reporting, and versioned artifacts, while the
-current Firestore-backed behavior remains the transitional runtime until
-repository boundaries and migration stories are implemented.
+current Firestore-backed behavior remains the transitional runtime. The #49
+persistence boundary introduces Firestore adapter/repository seams; PostgreSQL
+schema, adapter, migration, and runbook stories remain future work.
 
 For this repository, **Firebase Auth** should be the canonical identity provider. The backend must verify Firebase ID tokens directly using the Firebase Admin SDK. Backend-issued JWTs should not be the default; session cookies are only an optional browser optimization, not a primary auth mechanism.
 
@@ -17,8 +18,8 @@ For this repository, **Firebase Auth** should be the canonical identity provider
 
 - `backend/app/routers/auth.py` exposes `/auth/google/login`; protected endpoints use `AuthUser` at the FastAPI layer.
 - `backend/app/auth/firebase_auth.py` verifies Firebase ID tokens, while `backend/app/auth/jwt_auth.py` keeps legacy/local JWT compatibility.
-- Firestore-backed service paths exist for audit, billing, reporting, versioning, JIRA/Azure DevOps connection metadata, and sync mappings through `backend/app/services/firebase_admin.py` and domain service modules.
-- Local tests patch Firestore clients or use fakes so default validation does not require real Firebase credentials.
+- Firestore-backed service paths exist for audit, billing, reporting, versioning, JIRA/Azure DevOps connection metadata, and sync mappings through `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, and domain service modules.
+- Local tests patch `app.services.firestore_repository.get_firestore_client`, swap repository hooks, or use fakes so default validation does not require real Firebase credentials.
 - `frontend/src/App.jsx` and `frontend/src/main.jsx` are wired to Firebase/Google login flows and store the auth token in `localStorage`.
 
 ## Target Authentication Flow

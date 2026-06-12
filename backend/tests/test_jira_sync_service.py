@@ -56,7 +56,7 @@ class JiraSyncServiceTests(unittest.TestCase):
         )
         adapter = FakeJiraAdapter([live_issue])
 
-        with patch("app.services.jira_sync_service.get_firestore_client") as get_firestore_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_firestore_client:
             with patch("app.services.jira_sync_service.get_jira_adapter_for_user", return_value=adapter):
                 response = preview_jira_requirement_sync(
                     current_user=self.user,
@@ -110,7 +110,7 @@ class JiraSyncServiceTests(unittest.TestCase):
         )
         adapter = FakeJiraAdapter([before_update, after_update])
 
-        with patch("app.services.jira_sync_service.get_firestore_client") as get_firestore_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_firestore_client:
             with patch("app.services.jira_sync_service.get_jira_adapter_for_user", return_value=adapter):
                 response = apply_jira_requirement_sync(
                     current_user=self.user,

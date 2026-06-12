@@ -18,7 +18,7 @@ from ..models import (
     AzureDevOpsWorkItemSummary,
     Requirement,
 )
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection
 from .azure_devops_connection_service import get_azure_devops_adapter_for_user
 
 AZURE_DEVOPS_REQUIREMENT_MAPPINGS_COLLECTION = "azure_devops_requirement_mappings"
@@ -33,12 +33,10 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 
 
 def _get_collection() -> Optional[object]:
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        logging.warning("Firestore unavailable for Azure DevOps requirement mapping writes: %s", exc)
-        return None
-    return client.collection(AZURE_DEVOPS_REQUIREMENT_MAPPINGS_COLLECTION)
+    return get_optional_firestore_collection(
+        AZURE_DEVOPS_REQUIREMENT_MAPPINGS_COLLECTION,
+        unavailable_message="Firestore unavailable for Azure DevOps requirement mapping writes",
+    )
 
 
 def list_azure_devops_projects(

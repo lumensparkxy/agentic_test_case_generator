@@ -2,7 +2,6 @@ import logging
 import hashlib
 import json
 import os
-import time
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Dict, Optional
@@ -11,22 +10,22 @@ from uuid import uuid4
 from ..models import AuthUser
 from ..observability.metrics import (
     record_audit_dead_letter,
-    record_audit_write_failure,
-    record_audit_write_retry,
     record_workflow_completed,
     record_workflow_started,
 )
 from ..observability.tracing import get_current_trace_id
-from .firebase_admin import get_firestore_client
+from .audit_repository import AuditRepository, AuditWriteFailure, FirestoreAuditRepository
 
 WORKFLOW_RUNS_COLLECTION = "workflow_runs"
 USAGE_EVENTS_COLLECTION = "usage_events"
-DEFAULT_AUDIT_WRITE_RETRY_ATTEMPTS = 1
-DEFAULT_AUDIT_WRITE_RETRY_DELAY_SECONDS = 0.05
 DEFAULT_AUDIT_DEAD_LETTER_LIMIT = 100
 
 _AUDIT_DEAD_LETTERS: list[Dict[str, Any]] = []
 _AUDIT_DEAD_LETTER_LOCK = RLock()
+_AUDIT_REPOSITORY: AuditRepository = FirestoreAuditRepository(
+    workflow_runs_collection=WORKFLOW_RUNS_COLLECTION,
+    usage_events_collection=USAGE_EVENTS_COLLECTION,
+)
 
 
 def _utcnow() -> datetime:
@@ -43,26 +42,6 @@ def _parse_non_negative_int_env(name: str, default: int) -> int:
         logging.warning("Invalid %s=%s. Falling back to %s.", name, raw_value, default)
         return default
     return max(0, parsed)
-
-
-def _parse_non_negative_float_env(name: str, default: float) -> float:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-    try:
-        parsed = float(raw_value)
-    except ValueError:
-        logging.warning("Invalid %s=%s. Falling back to %s.", name, raw_value, default)
-        return default
-    return max(0.0, parsed)
-
-
-def _audit_write_retry_attempts() -> int:
-    return _parse_non_negative_int_env("AUDIT_WRITE_RETRY_ATTEMPTS", DEFAULT_AUDIT_WRITE_RETRY_ATTEMPTS)
-
-
-def _audit_write_retry_delay_seconds() -> float:
-    return _parse_non_negative_float_env("AUDIT_WRITE_RETRY_DELAY_SECONDS", DEFAULT_AUDIT_WRITE_RETRY_DELAY_SECONDS)
 
 
 def _audit_dead_letter_limit() -> int:
@@ -156,6 +135,24 @@ def clear_audit_dead_letters() -> None:
         _AUDIT_DEAD_LETTERS.clear()
 
 
+def get_audit_repository() -> AuditRepository:
+    return _AUDIT_REPOSITORY
+
+
+def set_audit_repository_for_testing(repository: AuditRepository) -> None:
+    global _AUDIT_REPOSITORY
+    _AUDIT_REPOSITORY = repository
+
+
+def reset_audit_repository_for_testing() -> None:
+    set_audit_repository_for_testing(
+        FirestoreAuditRepository(
+            workflow_runs_collection=WORKFLOW_RUNS_COLLECTION,
+            usage_events_collection=USAGE_EVENTS_COLLECTION,
+        )
+    )
+
+
 def build_actor_snapshot(user: Optional[AuthUser]) -> Dict[str, Any]:
     if user is None:
         return {}
@@ -180,69 +177,15 @@ def _attach_trace_id(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _get_collection(collection_name: str):
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime config
-        logging.warning("Firestore client unavailable for %s writes: %s", collection_name, exc)
-        return None
-
-    return client.collection(collection_name)
-
-
-def _write_with_retries(*, write, payload: Dict[str, Any], collection_name: str, operation: str) -> None:
-    max_attempts = _audit_write_retry_attempts() + 1
-    retry_delay = _audit_write_retry_delay_seconds()
-    last_error: Exception | None = None
-
-    for attempt in range(1, max_attempts + 1):
-        try:
-            write()
-            if attempt > 1:
-                record_audit_write_retry(collection=collection_name, operation=operation, outcome="success")
-            return
-        except Exception as exc:  # pragma: no cover - depends on Firestore runtime state
-            last_error = exc
-            if attempt < max_attempts:
-                record_audit_write_retry(collection=collection_name, operation=operation, outcome="scheduled")
-                logging.warning(
-                    "Firestore %s write attempt %s/%s failed; retrying: %s",
-                    operation,
-                    attempt,
-                    max_attempts,
-                    exc,
-                )
-                if retry_delay > 0:
-                    time.sleep(retry_delay)
-                continue
-
-    if last_error is not None:
-        record_audit_write_failure(collection=collection_name, operation=operation)
-        _record_dead_letter(
-            collection_name=collection_name,
-            operation=operation,
-            payload=payload,
-            error=last_error,
-            attempts=max_attempts,
-        )
-        logging.warning("Firestore %s skipped because write failed: %s", operation, last_error)
-
-
-def _safe_set(document_ref, payload: Dict[str, Any], *, collection_name: str, operation: str) -> None:
-    _write_with_retries(
-        write=lambda: document_ref.set(payload),
-        payload=payload,
-        collection_name=collection_name,
-        operation=operation,
-    )
-
-
-def _safe_update(document_ref, payload: Dict[str, Any], *, collection_name: str, operation: str) -> None:
-    _write_with_retries(
-        write=lambda: document_ref.update(payload),
-        payload=payload,
-        collection_name=collection_name,
-        operation=operation,
+def _record_repository_failure(failure: AuditWriteFailure | None) -> None:
+    if failure is None:
+        return
+    _record_dead_letter(
+        collection_name=failure.collection_name,
+        operation=failure.operation,
+        payload=failure.payload,
+        error=failure.error,
+        attempts=failure.attempts,
     )
 
 
@@ -273,24 +216,7 @@ def start_workflow_run(
             "metadata": _serialize_value(metadata or {}),
         }
     )
-    collection = _get_collection(WORKFLOW_RUNS_COLLECTION)
-
-    if collection is not None:
-        _safe_set(
-            collection.document(run_id),
-            payload,
-            collection_name=WORKFLOW_RUNS_COLLECTION,
-            operation="workflow_run_start",
-        )
-    else:
-        record_audit_write_failure(collection=WORKFLOW_RUNS_COLLECTION, operation="workflow_run_start")
-        _record_dead_letter(
-            collection_name=WORKFLOW_RUNS_COLLECTION,
-            operation="workflow_run_start",
-            payload=payload,
-            error="collection_unavailable",
-            attempts=0,
-        )
+    _record_repository_failure(get_audit_repository().record_workflow_run_start(run_id, payload))
 
     return run_id
 
@@ -312,23 +238,7 @@ def complete_workflow_run(
             "result": _serialize_value(metadata or {}),
         }
     )
-    collection = _get_collection(WORKFLOW_RUNS_COLLECTION)
-    if collection is None:
-        record_audit_write_failure(collection=WORKFLOW_RUNS_COLLECTION, operation="workflow_run_complete")
-        _record_dead_letter(
-            collection_name=WORKFLOW_RUNS_COLLECTION,
-            operation="workflow_run_complete",
-            payload=payload,
-            error="collection_unavailable",
-            attempts=0,
-        )
-        return
-    _safe_update(
-        collection.document(run_id),
-        payload,
-        collection_name=WORKFLOW_RUNS_COLLECTION,
-        operation="workflow_run_complete",
-    )
+    _record_repository_failure(get_audit_repository().record_workflow_run_complete(run_id, payload))
 
 
 def record_usage_event(
@@ -364,23 +274,6 @@ def record_usage_event(
             "metadata": _serialize_value(metadata or {}),
         }
     )
-    collection = _get_collection(USAGE_EVENTS_COLLECTION)
-
-    if collection is not None:
-        _safe_set(
-            collection.document(event_id),
-            payload,
-            collection_name=USAGE_EVENTS_COLLECTION,
-            operation="usage_event_record",
-        )
-    else:
-        record_audit_write_failure(collection=USAGE_EVENTS_COLLECTION, operation="usage_event_record")
-        _record_dead_letter(
-            collection_name=USAGE_EVENTS_COLLECTION,
-            operation="usage_event_record",
-            payload=payload,
-            error="collection_unavailable",
-            attempts=0,
-        )
+    _record_repository_failure(get_audit_repository().record_usage_event(event_id, payload))
 
     return event_id

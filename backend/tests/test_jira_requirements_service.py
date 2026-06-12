@@ -219,7 +219,7 @@ class JiraRequirementsServiceTests(unittest.TestCase):
             )
         ]
 
-        with patch("app.services.jira_requirements_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             persisted = persist_jira_requirement_mappings(
                 requirements=requirements,
                 actor=self.user,

@@ -6,21 +6,26 @@ from typing import Any, Dict, Iterable, Literal, Optional
 
 from ..models import AuthUser, UsageReportGroup, UsageReportResponse, UsageReportUserSummary
 from ..auth.identity import extract_email_domain, is_public_email_domain, normalize_email, resolve_organization_domain
-from .audit_service import USAGE_EVENTS_COLLECTION
-from .firebase_admin import get_firestore_client
+from .usage_event_repository import FirestoreUsageEventRepository, UsageEventRepository
+
+_USAGE_EVENT_REPOSITORY: UsageEventRepository = FirestoreUsageEventRepository()
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _get_usage_events_collection():
-    try:
-        client = get_firestore_client()
-    except Exception:
-        return None
+def get_usage_event_repository() -> UsageEventRepository:
+    return _USAGE_EVENT_REPOSITORY
 
-    return client.collection(USAGE_EVENTS_COLLECTION)
+
+def set_usage_event_repository_for_testing(repository: UsageEventRepository) -> None:
+    global _USAGE_EVENT_REPOSITORY
+    _USAGE_EVENT_REPOSITORY = repository
+
+
+def reset_usage_event_repository_for_testing() -> None:
+    set_usage_event_repository_for_testing(FirestoreUsageEventRepository())
 
 
 def _normalize_datetime(value: Any) -> Optional[datetime]:
@@ -137,14 +142,7 @@ def _derive_scope(actor: Dict[str, Any], fallback_user_id: str, *, force_individ
 
 
 def _iter_usage_events() -> tuple[Iterable[Any], list[str]]:
-    collection = _get_usage_events_collection()
-    if collection is None:
-        return [], ["Firestore usage report collection is unavailable."]
-
-    try:
-        return collection.stream(), []
-    except Exception as exc:  # pragma: no cover - depends on Firestore runtime state
-        return [], [f"Firestore usage report query failed: {exc}"]
+    return get_usage_event_repository().iter_usage_events()
 
 
 def build_usage_report(

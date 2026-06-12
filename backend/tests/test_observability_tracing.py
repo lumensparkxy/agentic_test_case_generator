@@ -63,7 +63,7 @@ class ObservabilityTracingTests(unittest.TestCase):
         user = AuthUser(sub="user-trace", email="trace@example.com", name="Trace User")
         token = bind_log_context(trace_id=VALID_TRACE_ID)
         try:
-            with patch("app.services.audit_service.get_firestore_client") as get_client:
+            with patch("app.services.firestore_repository.get_firestore_client") as get_client:
                 get_client.return_value.collection.return_value = collection
                 run_id = start_workflow_run(
                     operation="requirements.parse",

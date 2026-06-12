@@ -74,7 +74,7 @@ class ReportingServiceTests(unittest.TestCase):
             },
         ]
 
-        with patch("app.services.reporting_service.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
             report = build_usage_report()
 
         self.assertEqual(report.total_groups, 3)
@@ -127,7 +127,7 @@ class ReportingServiceTests(unittest.TestCase):
 
         viewer = AuthUser(sub="report-user", email="reporter@acme.com", name="Reporter")
 
-        with patch("app.services.reporting_service.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
             report = build_usage_report(current_user=viewer, scope="organization")
 
         self.assertEqual(report.total_groups, 1)
@@ -167,7 +167,7 @@ class ReportingServiceTests(unittest.TestCase):
 
         viewer = AuthUser(sub="carol-id", email="carol@gmail.com", name="Carol")
 
-        with patch("app.services.reporting_service.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
             report = build_usage_report(current_user=viewer, scope="self")
 
         self.assertEqual(report.total_groups, 1)
@@ -199,7 +199,7 @@ class ReportingServiceTests(unittest.TestCase):
 
         viewer = AuthUser(sub="alice-id", email="alice@acme.com", name="Alice")
 
-        with patch("app.services.reporting_service.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
             report = build_usage_report(current_user=viewer, scope="self")
 
         self.assertEqual(report.total_groups, 1)
@@ -209,7 +209,7 @@ class ReportingServiceTests(unittest.TestCase):
         self.assertEqual(report.groups[0].test_cases_generated_count, 5)
 
     def test_build_usage_report_returns_warning_when_firestore_unavailable(self) -> None:
-        with patch("app.services.reporting_service.get_firestore_client", side_effect=RuntimeError("firestore unavailable")):
+        with patch("app.services.firestore_repository.get_firestore_client", side_effect=RuntimeError("firestore unavailable")):
             report = build_usage_report()
 
         self.assertEqual(report.total_groups, 0)
@@ -236,7 +236,7 @@ class ReportingServiceTests(unittest.TestCase):
             },
         ]
 
-        with patch("app.services.reporting_service.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=FakeFirestoreClient(payloads)):
             report = build_usage_report(start_at=datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc))
 
         self.assertEqual(report.total_events, 1)

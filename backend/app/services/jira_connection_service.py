@@ -17,7 +17,7 @@ from ..models import (
     JiraConnectionSummary,
     JiraStoredConnection,
 )
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection, get_required_firestore_collection
 
 JIRA_CONNECTIONS_COLLECTION = "jira_user_connections"
 
@@ -27,14 +27,15 @@ def _utcnow() -> datetime:
 
 
 def _get_collection(*, required: bool) -> Optional[object]:
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        if required:
-            raise RuntimeError("Firestore client unavailable for JIRA connection persistence") from exc
-        logging.warning("Firestore unavailable for JIRA connection reads: %s", exc)
-        return None
-    return client.collection(JIRA_CONNECTIONS_COLLECTION)
+    if required:
+        return get_required_firestore_collection(
+            JIRA_CONNECTIONS_COLLECTION,
+            unavailable_message="Firestore client unavailable for JIRA connection persistence",
+        )
+    return get_optional_firestore_collection(
+        JIRA_CONNECTIONS_COLLECTION,
+        unavailable_message="Firestore unavailable for JIRA connection reads",
+    )
 
 
 def _build_fernet() -> Fernet:

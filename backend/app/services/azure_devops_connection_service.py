@@ -17,7 +17,7 @@ from ..models import (
     AzureDevOpsConnectionSummary,
     AzureDevOpsStoredConnection,
 )
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection, get_required_firestore_collection
 
 AZURE_DEVOPS_CONNECTIONS_COLLECTION = "azure_devops_user_connections"
 
@@ -27,14 +27,15 @@ def _utcnow() -> datetime:
 
 
 def _get_collection(*, required: bool) -> Optional[object]:
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        if required:
-            raise RuntimeError("Firestore client unavailable for Azure DevOps connection persistence") from exc
-        logging.warning("Firestore unavailable for Azure DevOps connection reads: %s", exc)
-        return None
-    return client.collection(AZURE_DEVOPS_CONNECTIONS_COLLECTION)
+    if required:
+        return get_required_firestore_collection(
+            AZURE_DEVOPS_CONNECTIONS_COLLECTION,
+            unavailable_message="Firestore client unavailable for Azure DevOps connection persistence",
+        )
+    return get_optional_firestore_collection(
+        AZURE_DEVOPS_CONNECTIONS_COLLECTION,
+        unavailable_message="Firestore unavailable for Azure DevOps connection reads",
+    )
 
 
 def _build_fernet() -> Fernet:
