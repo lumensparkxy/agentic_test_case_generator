@@ -16,6 +16,7 @@ import RequirementAnalysisPanel from "./components/generation/RequirementAnalysi
 import ScenarioCoveragePanel from "./components/generation/ScenarioCoveragePanel";
 import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
+import ProjectWorkspacePanel from "./components/projects/ProjectWorkspacePanel";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
@@ -28,6 +29,7 @@ import useEscapeToClose from "./hooks/useEscapeToClose";
 import useExecutionWorkflowState from "./hooks/useExecutionWorkflowState";
 import useExportWorkflowState from "./hooks/useExportWorkflowState";
 import useIntegrationWorkflowState from "./hooks/useIntegrationWorkflowState";
+import useProjectWorkspaceState from "./hooks/useProjectWorkspaceState";
 import useRequirementWorkflowState from "./hooks/useRequirementWorkflowState";
 import useTestCaseWorkflowState from "./hooks/useTestCaseWorkflowState";
 import useWorkflowNavigationState from "./hooks/useWorkflowNavigationState";
@@ -65,6 +67,11 @@ const EXPORT_API_PATHS = Object.freeze({
 	csv: API_CONTRACT_ENDPOINTS.exportCsv.path,
 	excel: API_CONTRACT_ENDPOINTS.exportExcel.path,
 	json: API_CONTRACT_ENDPOINTS.exportJson.path,
+});
+
+const PROJECT_API_PATHS = Object.freeze({
+	projects: "/projects",
+	project: (projectId) => `/projects/${projectId}`,
 });
 
 const getAuthProviderLabel = (providerKeyOrId) => {
@@ -249,6 +256,20 @@ export default function App() {
 		resetExportWorkflowState,
 	} = useExportWorkflowState();
 	const {
+		projects,
+		setProjects,
+		currentProject,
+		setCurrentProject,
+		newProjectName,
+		setNewProjectName,
+		isLoadingProjects,
+		setIsLoadingProjects,
+		isCreatingProject,
+		setIsCreatingProject,
+		isOpeningProject,
+		setIsOpeningProject,
+	} = useProjectWorkspaceState();
+	const {
 		status,
 		setStatus,
 		authToken,
@@ -373,6 +394,8 @@ export default function App() {
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
+	const currentProjectId = currentProject?.project_id || "";
+	const currentProjectRevision = Number.isInteger(currentProject?.current_revision) ? currentProject.current_revision : null;
 	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
 	const billingEnforcementEnabled = Boolean(billingEntitlements && !billingEntitlements.shadow_mode);
 	const requirementWorkflowLocked = Boolean(
@@ -605,6 +628,8 @@ export default function App() {
 						.filter(Boolean)
 				: null,
 			notes: "Generated via UI",
+			project_id: currentProjectId || null,
+			base_project_revision: currentProjectRevision,
 		};
 
 		if (!enrichedContext?.grounded_context) {
@@ -1062,6 +1087,194 @@ export default function App() {
 
 		return res;
 	};
+
+	const hydrateProjectWorkflow = (project) => {
+		const snapshots = project?.current_snapshots || {};
+		const requirementPayload = snapshots.requirements?.payload || null;
+		const contextPayload = snapshots.context?.payload || null;
+		const useCasePayload = snapshots.use_cases?.payload || null;
+		const testCasePayload = snapshots.test_cases?.payload || null;
+		const executionPayload = snapshots.execution?.payload || null;
+
+		setFile(null);
+		setReqFeedback("");
+		setFeedback("");
+		setRawText("");
+		setRequirements(requirementPayload?.requirements || []);
+		setRequirementReview(requirementPayload?.review || null);
+		setRequirementCoverageMetrics(requirementPayload?.coverage_metrics || null);
+		setRequirementWorkflowDiagnostics(requirementPayload?.workflow_diagnostics || null);
+		setAppliedRequirementWorkflowSettings(requirementPayload?.workflow_settings || null);
+		setRequirementIterationHistory(requirementPayload?.iteration_history || []);
+
+		setAppLink(contextPayload?.app_link || "");
+		setPrototypeLink(contextPayload?.prototype_link || "");
+		setDiagramLinks((contextPayload?.diagram_links || []).join("; "));
+		setImageLinks((contextPayload?.image_links || []).join("; "));
+		if (contextPayload?.grounded_context) {
+			setEnrichedContext({
+				requirements: contextPayload.requirements || requirementPayload?.requirements || [],
+				app_link: contextPayload.app_link || null,
+				prototype_link: contextPayload.prototype_link || null,
+				diagram_links: contextPayload.diagram_links || [],
+				image_links: contextPayload.image_links || [],
+				notes: contextPayload.notes || null,
+				grounded_context: contextPayload.grounded_context,
+			});
+			setSelectedArtifactSourceIds((contextPayload.grounded_context.artifact_sources || []).map((source) => source.id));
+		} else {
+			resetContextAnalysis();
+		}
+
+		const generationPayload = testCasePayload || {};
+		const useCases = useCasePayload || generationPayload;
+		setRequirementAnalysis(useCases.requirement_analysis || []);
+		setCoveragePlan(useCases.coverage_plan || []);
+		setCoverageMetrics(useCases.coverage_metrics || null);
+		setTestCases(generationPayload.test_cases || []);
+		setTestCaseReview(generationPayload.review || useCases.review || null);
+		setTestCaseWorkflowDiagnostics(generationPayload.workflow_diagnostics || useCases.workflow_diagnostics || null);
+		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
+		setTestCaseIterationHistory(generationPayload.iteration_history || []);
+		setExpandedRows({});
+		setActiveGenerateResultTab((generationPayload.test_cases || []).length ? "test-cases" : "analysis");
+		resetExportWorkflowState();
+
+		setExecutionTargetBaseUrl(executionPayload?.target_base_url || "");
+		if (executionPayload?.run_id) {
+			setExecutionRunResult({
+				status: executionPayload.status,
+				run_id: executionPayload.run_id,
+				results: executionPayload.results || [],
+				warnings: executionPayload.warnings || [],
+				summary: executionPayload.summary || {},
+				preview: null,
+			});
+			setExecutionPreview(null);
+		} else if (executionPayload?.summary) {
+			setExecutionPreview({
+				executable: [],
+				manual: [],
+				unsupported: [],
+				invalid: [],
+				warnings: executionPayload.warnings || [],
+				summary: executionPayload.summary || {},
+			});
+			setExecutionRunResult(null);
+		} else {
+			resetExecutionWorkflowState();
+		}
+	};
+
+	const loadProjects = async ({ silent = false } = {}) => {
+		if (!isAuthenticated) {
+			setProjects([]);
+			setCurrentProject(null);
+			return [];
+		}
+		if (!silent) {
+			setIsLoadingProjects(true);
+		}
+		try {
+			const res = await apiRequest(PROJECT_API_PATHS.projects, { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to load projects");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			const nextProjects = data.projects || [];
+			setProjects(nextProjects);
+			return nextProjects;
+		} catch (error) {
+			if (!silent) {
+				setStatus(`Project load failed: ${error.message}`);
+			}
+			return [];
+		} finally {
+			if (!silent) {
+				setIsLoadingProjects(false);
+			}
+		}
+	};
+
+	const openProject = async (projectId, { hydrate = true, silent = false } = {}) => {
+		if (!projectId) {
+			setCurrentProject(null);
+			return null;
+		}
+		if (!silent) {
+			setIsOpeningProject(true);
+		}
+		try {
+			const res = await apiRequest(PROJECT_API_PATHS.project(projectId), { method: "GET" });
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to open project");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setCurrentProject(data || null);
+			if (hydrate && data) {
+				hydrateProjectWorkflow(data);
+			}
+			if (!silent) {
+				setStatus(data ? `Opened ${data.name}.` : "Project opened.");
+			}
+			return data;
+		} catch (error) {
+			if (!silent) {
+				setStatus(`Project open failed: ${error.message}`);
+			}
+			return null;
+		} finally {
+			if (!silent) {
+				setIsOpeningProject(false);
+			}
+		}
+	};
+
+	const refreshCurrentProject = async ({ hydrate = false } = {}) => {
+		if (!currentProjectId) {
+			return null;
+		}
+		return openProject(currentProjectId, { hydrate, silent: true });
+	};
+
+	const createProject = async () => {
+		const name = newProjectName.trim();
+		if (!name) return;
+		setIsCreatingProject(true);
+		setStatus("Creating QA project...");
+		try {
+			const res = await apiRequest(PROJECT_API_PATHS.projects, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name }),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to create project");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setCurrentProject(data || null);
+			hydrateProjectWorkflow(data);
+			setNewProjectName("");
+			await loadProjects({ silent: true });
+			setStatus(`Created ${data.name}.`);
+		} catch (error) {
+			setStatus(`Project create failed: ${error.message}`);
+		} finally {
+			setIsCreatingProject(false);
+		}
+	};
+
+	useEffect(() => {
+		if (!isAuthenticated) {
+			setProjects([]);
+			setCurrentProject(null);
+			return;
+		}
+		loadProjects({ silent: true });
+	}, [isAuthenticated, currentUser?.sub]);
 
 	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
 		const user = userOverride || currentUser;
@@ -1943,6 +2156,8 @@ export default function App() {
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
 			if (file) formData.append("file", file);
 			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
+			if (currentProjectId) formData.append("project_id", currentProjectId);
+			if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
 			if (withFeedback && reqFeedback) {
 				formData.append("feedback", reqFeedback);
 				formData.append("existing_requirements", JSON.stringify(requirements));
@@ -1984,6 +2199,7 @@ export default function App() {
 			setExecutionRunResult(null);
 			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
+			await refreshCurrentProject({ hydrate: false });
 			if (withFeedback) setReqFeedback("");
 		} catch (error) {
 			setStatus(`Parse failed: ${error.message}`);
@@ -1992,13 +2208,16 @@ export default function App() {
 		}
 	};
 
-	const buildExecutionPayload = (casesOverride = testCases) => ({
+	const buildExecutionPayload = (casesOverride = testCases, { includeProject = true } = {}) => ({
 		test_cases: casesOverride,
 		target_base_url: executionTargetBaseUrl.trim() || appLink || null,
+		target_environment: executionTargetBaseUrl.trim() ? "custom" : appLink ? "application" : "default",
+		project_id: includeProject && currentProjectId ? currentProjectId : null,
+		base_project_revision: includeProject ? currentProjectRevision : null,
 	});
 
 	const previewExecution = async (casesOverride = testCases, options = {}) => {
-		const { updateStatus = true } = options;
+		const { updateStatus = true, persistProject = true } = options;
 		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
 		if (!casesToPreview.length) {
 			if (updateStatus) {
@@ -2015,7 +2234,7 @@ export default function App() {
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildExecutionPayload(casesToPreview)),
+				body: JSON.stringify(buildExecutionPayload(casesToPreview, { includeProject: persistProject })),
 			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to preview execution");
@@ -2030,6 +2249,9 @@ export default function App() {
 					`Execution preview ready: ${summary.executable || 0} executable, ${summary.manual || 0} manual, ${summary.unsupported || 0} unsupported.`
 				);
 			}
+			if (persistProject) {
+				await refreshCurrentProject({ hydrate: false });
+			}
 			return data;
 		} catch (error) {
 			if (updateStatus) {
@@ -2042,7 +2264,7 @@ export default function App() {
 	};
 
 	const runApprovedExecution = async () => {
-		const preview = executionPreview || (await previewExecution(testCases, { updateStatus: false }));
+		const preview = executionPreview || (await previewExecution(testCases, { updateStatus: false, persistProject: false }));
 		const executableCandidates = preview?.executable || [];
 		if (!executableCandidates.length) {
 			setStatus("No executable candidates are available to run.");
@@ -2071,6 +2293,7 @@ export default function App() {
 			setStatus(
 				`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`
 			);
+			await refreshCurrentProject({ hydrate: false });
 		} catch (error) {
 			setStatus(`Execution run failed: ${error.message}`);
 		} finally {
@@ -2125,6 +2348,8 @@ export default function App() {
 				},
 				context: buildContextPayload(requirementsForGeneration),
 				workflow_settings: workflowSettingsPayload,
+				project_id: currentProjectId || null,
+				base_project_revision: currentProjectRevision,
 			};
 
 			const useRefineEndpoint = withFeedback && testCases.length > 0;
@@ -2172,7 +2397,8 @@ export default function App() {
 				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
 			);
 			if (generatedCount > 0) {
-				await previewExecution(data.test_cases || [], { updateStatus: false });
+				await refreshCurrentProject({ hydrate: false });
+				await previewExecution(data.test_cases || [], { updateStatus: false, persistProject: false });
 			}
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (withFeedback) setFeedback("");
@@ -2201,6 +2427,8 @@ export default function App() {
 				review: testCaseReview || undefined,
 				draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
 				draft_override_reason: exportRequiresOverride && draftExportOverrideRequested ? draftExportOverrideReason.trim() : null,
+				project_id: currentProjectId || null,
+				base_project_revision: currentProjectRevision,
 			};
 			const exportPath = EXPORT_API_PATHS[format];
 			if (!exportPath) {
@@ -2219,6 +2447,7 @@ export default function App() {
 
 			const extensions = { csv: "csv", excel: "xlsx", json: "json" };
 			await downloadResponseBlob(res, `test_cases.${extensions[format] || format}`);
+			await refreshCurrentProject({ hydrate: false });
 			setStatus(`✓ Exported to ${format.toUpperCase()} successfully`);
 		} catch (error) {
 			setStatus(`Export failed: ${error.message}`);
@@ -2361,6 +2590,7 @@ export default function App() {
 			const data = await res.json();
 			setEnrichedContext(data);
 			setSelectedArtifactSourceIds((data.grounded_context?.artifact_sources || []).map((source) => source.id));
+			await refreshCurrentProject({ hydrate: false });
 			setStatus("Context analyzed.");
 		} catch (error) {
 			setStatus(`Context analysis failed: ${error.message}`);
@@ -2461,6 +2691,20 @@ export default function App() {
 				isAuthenticated={isAuthenticated}
 				jiraSettings={jiraSettings}
 				azureDevOpsSettings={azureDevOpsSettings}
+			/>
+
+			<ProjectWorkspacePanel
+				projects={projects}
+				currentProject={currentProject}
+				newProjectName={newProjectName}
+				setNewProjectName={setNewProjectName}
+				isLoadingProjects={isLoadingProjects}
+				isCreatingProject={isCreatingProject}
+				isOpeningProject={isOpeningProject}
+				authActionDisabled={authActionDisabled}
+				onCreateProject={createProject}
+				onOpenProject={(projectId) => openProject(projectId)}
+				onRefreshProjects={() => loadProjects()}
 			/>
 
 			<WorkflowTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />

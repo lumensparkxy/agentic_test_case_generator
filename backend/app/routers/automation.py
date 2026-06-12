@@ -18,6 +18,7 @@ from ..models import (
 )
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.execution_service import preview_execution, run_execution
+from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http, record_execution_run
 
 router = APIRouter()
 
@@ -94,6 +95,80 @@ def _log_failure(
     )
 
 
+def _model_payload(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_model_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _model_payload(item) for key, item in value.items()}
+    return value
+
+
+def _target_environment(payload: ExecutionPreviewInput) -> str:
+    configured = str(payload.target_environment or "").strip()
+    if configured:
+        return configured
+    if payload.target_base_url:
+        return str(payload.target_base_url.host or "default")
+    return "default"
+
+
+def _preview_project_payload(response: ExecutionPreviewResponse, *, target_environment: str, target_base_url: Optional[str]) -> dict[str, Any]:
+    return {
+        "target_environment": target_environment,
+        "target_base_url": target_base_url,
+        "summary": _model_payload(response.summary),
+        "warnings": list(response.warnings or []),
+        "candidate_counts": {
+            "executable": len(response.executable),
+            "manual": len(response.manual),
+            "unsupported": len(response.unsupported),
+            "invalid": len(response.invalid),
+        },
+        "candidates": {
+            "executable": [
+                {"id": candidate.id, "source_test_case_id": candidate.source_test_case_id, "title": candidate.title, "status": candidate.status}
+                for candidate in response.executable
+            ],
+            "manual": [
+                {"id": candidate.id, "source_test_case_id": candidate.source_test_case_id, "title": candidate.title, "status": candidate.status}
+                for candidate in response.manual
+            ],
+            "unsupported": [
+                {"id": candidate.id, "source_test_case_id": candidate.source_test_case_id, "title": candidate.title, "status": candidate.status}
+                for candidate in response.unsupported
+            ],
+            "invalid": [
+                {"id": candidate.id, "source_test_case_id": candidate.source_test_case_id, "title": candidate.title, "status": candidate.status}
+                for candidate in response.invalid
+            ],
+        },
+    }
+
+
+def _run_project_payload(response: ExecutionRunResponse, *, target_environment: str, target_base_url: Optional[str]) -> dict[str, Any]:
+    return {
+        "target_environment": target_environment,
+        "target_base_url": target_base_url,
+        "run_id": response.run_id,
+        "status": response.status,
+        "summary": _model_payload(response.summary),
+        "warnings": list(response.warnings or []),
+        "results": [
+            {
+                "id": item.id,
+                "source_test_case_id": item.source_test_case_id,
+                "title": item.title,
+                "status": item.status,
+                "returncode": item.returncode,
+                "issues": _model_payload(item.issues),
+            }
+            for item in response.results
+        ],
+    }
+
+
 @router.post("/automation/playwright", response_model=AutomationResponse)
 async def automation_playwright(
     request: Request,
@@ -149,12 +224,14 @@ async def automation_execution_preview(
         metadata={"test_case_count": len(payload.test_cases)},
     )
     try:
+        target_base_url = str(payload.target_base_url) if payload.target_base_url else None
+        target_environment = _target_environment(payload)
         response = await run_in_threadpool(
             _resolve_main_callable("preview_execution", preview_execution),
             payload.test_cases,
-            target_base_url=str(payload.target_base_url) if payload.target_base_url else None,
+            target_base_url=target_base_url,
         )
-        _log_success(
+        event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
@@ -170,6 +247,30 @@ async def automation_execution_preview(
                 "invalid_count": response.summary.invalid,
             },
         )
+        if payload.project_id:
+            try:
+                append_stage_snapshot(
+                    project_id=payload.project_id,
+                    stage="execution",
+                    payload=_preview_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
+                    operation="automation.execution.preview",
+                    actor=current_user,
+                    request_id=request_id,
+                    workflow_run_id=workflow_run_id,
+                    source_event_id=event_id,
+                    approved=True,
+                    title=f"{target_environment} execution preview",
+                    metadata={
+                        "target_environment": target_environment,
+                        "executable_count": response.summary.executable,
+                        "manual_count": response.summary.manual,
+                        "unsupported_count": response.summary.unsupported,
+                        "invalid_count": response.summary.invalid,
+                    },
+                    base_project_revision=payload.base_project_revision,
+                )
+            except Exception as project_exc:
+                raise project_error_to_http(project_exc) from project_exc
         return response
     except Exception as exc:
         _log_failure(
@@ -202,13 +303,15 @@ async def automation_execution_run(
         },
     )
     try:
+        target_base_url = str(payload.target_base_url) if payload.target_base_url else None
+        target_environment = _target_environment(payload)
         response = await run_in_threadpool(
             _resolve_main_callable("run_execution", run_execution),
             payload.test_cases,
             selected_test_case_ids=payload.selected_test_case_ids,
-            target_base_url=str(payload.target_base_url) if payload.target_base_url else None,
+            target_base_url=target_base_url,
         )
-        _log_success(
+        event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
@@ -226,6 +329,65 @@ async def automation_execution_run(
                 "skipped_count": response.summary.skipped,
             },
         )
+        if payload.project_id:
+            try:
+                execution_snapshot = append_stage_snapshot(
+                    project_id=payload.project_id,
+                    stage="execution",
+                    payload=_run_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
+                    operation="automation.execution.run",
+                    actor=current_user,
+                    request_id=request_id,
+                    workflow_run_id=workflow_run_id,
+                    source_event_id=event_id,
+                    approved=response.status == "passed",
+                    title=f"{target_environment} execution run",
+                    metadata={
+                        "target_environment": target_environment,
+                        "run_id": response.run_id,
+                        "status": response.status,
+                        "passed_count": response.summary.passed,
+                        "failed_count": response.summary.failed,
+                        "invalid_count": response.summary.invalid,
+                    },
+                    base_project_revision=payload.base_project_revision,
+                )
+                record_execution_run(
+                    project_id=payload.project_id,
+                    actor=current_user,
+                    request_id=request_id,
+                    run_id=response.run_id,
+                    target_environment=target_environment,
+                    status_value=response.status,
+                    summary=_model_payload(response.summary),
+                    test_case_count=len(payload.test_cases),
+                    snapshot_id=execution_snapshot.snapshot_id,
+                    workflow_run_id=workflow_run_id,
+                    source_event_id=event_id,
+                    project_revision=execution_snapshot.project_revision,
+                )
+                append_stage_snapshot(
+                    project_id=payload.project_id,
+                    stage="reports",
+                    payload={
+                        "source": "execution",
+                        "run_id": response.run_id,
+                        "target_environment": target_environment,
+                        "status": response.status,
+                        "summary": _model_payload(response.summary),
+                    },
+                    operation="reports.execution_summary",
+                    actor=current_user,
+                    request_id=request_id,
+                    workflow_run_id=workflow_run_id,
+                    source_event_id=event_id,
+                    approved=response.status == "passed",
+                    source_snapshot_id=execution_snapshot.snapshot_id,
+                    title=f"{target_environment} execution report",
+                    metadata={"run_id": response.run_id, "target_environment": target_environment, "status": response.status},
+                )
+            except Exception as project_exc:
+                raise project_error_to_http(project_exc) from project_exc
         return response
     except Exception as exc:
         _log_failure(

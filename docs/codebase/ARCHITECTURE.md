@@ -21,6 +21,8 @@ Primary constraints:
 - User-facing workflow is human-in-the-loop: requirements are parsed/reviewed,
   context can be enriched, test cases are generated/reviewed, exports are gated,
   and execution candidates are previewed before running.
+- Durable QA projects can now wrap the staged workflow so requirement, context,
+  use-case, test-case, execution, and report snapshots survive browser reloads.
 - Agent output must be resilient: parsers, deterministic fallbacks, retry
   diagnostics, and heuristic quality gates protect the workflow from malformed
   model output.
@@ -37,12 +39,12 @@ flowchart LR
 
     app["FastAPI app\nbackend/app/main.py"]
     middleware["Request middleware\nrequest_id, trace_id,\nlogging, metrics"]
-    routers["Feature routers\nrequirements, testcases,\nautomation, export,\nintegrations, billing, reports"]
+    routers["Feature routers\nprojects, requirements,\ntestcases, automation, export,\nintegrations, billing, reports"]
     auth["Auth layer\nFirebase ID token\nlegacy JWT\nGoogle credential login"]
     models["Pydantic contracts\nbackend/app/models.py"]
 
     agents["Agent workflows\nADK/Gemini\nrequirements, analysis,\ntest generation, automation"]
-    services["Domain services\naudit, billing, versioning,\ngrounding, execution, reporting"]
+    services["Domain services\naudit, billing, versioning,\nproject lifecycle, grounding,\nexecution, reporting"]
     adapters["Provider adapters\nJIRA Cloud\nAzure DevOps"]
     petf["Plain-English test framework\nspec parser -> IR ->\nPlaywright generator"]
     runtime["Execution runtime\nbackend/execution_runtime\nnpx playwright test"]
@@ -112,6 +114,18 @@ Typical generate flow:
    response models for the frontend to render diagnostics, coverage,
    traceability, exports, or execution results.
 
+Project-scoped workflow flow:
+
+```text
+QA Project -> requirements snapshot -> context snapshot -> use-case snapshot -> test-case snapshot -> execution runs by environment -> report/export snapshots
+```
+
+When a request includes `project_id`, the relevant router appends an immutable
+snapshot through `backend/app/services/workflow_project_service.py`. Upstream
+changes mark downstream stages stale without deleting old versions, execution
+runs, or report/export records. Calls without `project_id` keep the earlier
+one-shot behavior.
+
 Next-version execution flow:
 
 ```text
@@ -132,7 +146,7 @@ The conversion and run path is implemented by
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
 | Agents | Requirement extraction, analysis, test-case generation orchestration, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
-| Services | Billing, audit, versioning, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
+| Services | Billing, audit, versioning, project lifecycle, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
@@ -148,6 +162,7 @@ The conversion and run path is implemented by
 | Pydantic boundary models | `backend/app/models.py` | Keeps backend API, integration, billing, execution, and export payloads explicit |
 | Workflow audit lifecycle | `start_workflow_run()`, `complete_workflow_run()`, `record_usage_event()` | Links operations to request IDs, users, billing, reports, and trace metadata |
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
+| Durable project aggregate | `projects.py`, `workflow_project_service.py`, project models in `models.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe or unsupported public URLs and returns partial enrichment warnings instead of crashing |
 | Provider adapter plus service | JIRA and Azure DevOps adapter/service pairs plus shared credential crypto helper | Separates remote API mechanics, credential storage/rotation, and import/sync workflow policy |
@@ -176,7 +191,7 @@ The conversion and run path is implemented by
   `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production uses
   `AUTH_TOKEN_MODE=firebase-only`.
 - Firestore is the current durable service path for audit, versioning, billing,
-  integration mappings, and reports. `docs/persistence-target-decision.md`
+  integration mappings, QA project snapshots, and reports. `docs/persistence-target-decision.md`
   accepts a staged approach: keep Firestore as the transitional runtime store
   and target PostgreSQL for compliance-grade audit, billing, reporting, and
   versioned artifacts. Repository boundaries now isolate audit writes,
@@ -193,6 +208,7 @@ The conversion and run path is implemented by
 - `backend/app/main.py`
 - `backend/app/models.py`
 - `backend/app/routers/requirements.py`
+- `backend/app/routers/projects.py`
 - `backend/app/routers/testcases.py`
 - `backend/app/routers/automation.py`
 - `backend/app/agents/test_case_agent.py`
@@ -210,6 +226,7 @@ The conversion and run path is implemented by
 - `backend/app/services/audit_repository.py`
 - `backend/app/services/firestore_repository.py`
 - `backend/app/services/usage_event_repository.py`
+- `backend/app/services/workflow_project_service.py`
 - `backend/app/services/billing_service.py`
 - `frontend/src/App.jsx`
 - `frontend/src/components/`

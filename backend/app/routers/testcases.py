@@ -12,6 +12,7 @@ from ..models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.versioning_service import persist_test_case_versions
+from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http
 
 router = APIRouter()
 
@@ -34,6 +35,90 @@ def _count_snapshot_changes(previous: dict[str, str], current: dict[str, str]) -
     changed = sum(1 for key, value in current.items() if previous.get(key) != value)
     removed = sum(1 for key in previous.keys() if key not in current)
     return changed + removed
+
+
+def _model_payload(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_model_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _model_payload(item) for key, item in value.items()}
+    return value
+
+
+def _use_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, Any]:
+    return {
+        "requirement_analysis": _model_payload(response.requirement_analysis),
+        "coverage_plan": _model_payload(response.coverage_plan),
+        "review": _model_payload(response.review),
+        "coverage_metrics": _model_payload(response.coverage_metrics),
+        "workflow_settings": _model_payload(response.workflow_settings),
+        "workflow_diagnostics": _model_payload(response.workflow_diagnostics),
+    }
+
+
+def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, Any]:
+    return {
+        "test_cases": _model_payload(response.test_cases),
+        "approved": response.approved,
+        "review": _model_payload(response.review),
+        "iteration_history": _model_payload(response.iteration_history),
+        "coverage_plan": _model_payload(response.coverage_plan),
+        "requirement_analysis": _model_payload(response.requirement_analysis),
+        "coverage_metrics": _model_payload(response.coverage_metrics),
+        "workflow_settings": _model_payload(response.workflow_settings),
+        "workflow_diagnostics": _model_payload(response.workflow_diagnostics),
+    }
+
+
+def _append_project_generation_snapshots(
+    *,
+    project_id: str | None,
+    response: GenerateTestCasesResponse,
+    operation: str,
+    actor: AuthUser,
+    request_id: str,
+    workflow_run_id: str,
+    source_event_id: str,
+    base_project_revision: int | None,
+) -> None:
+    if not project_id:
+        return
+    try:
+        use_case_snapshot = append_stage_snapshot(
+            project_id=project_id,
+            stage="use_cases",
+            payload=_use_case_project_payload(response),
+            operation=f"{operation}.use_cases",
+            actor=actor,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=source_event_id,
+            approved=response.approved,
+            title="Use cases updated",
+            metadata={
+                "requirement_analysis_count": len(response.requirement_analysis),
+                "coverage_plan_count": len(response.coverage_plan),
+            },
+            base_project_revision=base_project_revision,
+        )
+        append_stage_snapshot(
+            project_id=project_id,
+            stage="test_cases",
+            payload=_test_case_project_payload(response),
+            operation=operation,
+            actor=actor,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=source_event_id,
+            approved=response.approved,
+            source_snapshot_id=use_case_snapshot.snapshot_id,
+            title="Test cases updated",
+            metadata={"test_case_count": len(response.test_cases), "approved": response.approved},
+        )
+    except Exception as project_exc:
+        raise project_error_to_http(project_exc) from project_exc
 
 
 def _log_success(
@@ -186,6 +271,16 @@ async def generate_test_cases_endpoint(
             operation="testcases.generate",
             approved=response.approved,
         )
+        _append_project_generation_snapshots(
+            project_id=payload.project_id,
+            response=response,
+            operation="testcases.generate",
+            actor=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            base_project_revision=payload.base_project_revision,
+        )
         return response
     except Exception as exc:
         _log_failure(
@@ -268,6 +363,16 @@ async def refine_test_cases_endpoint(
             source_event_id=event_id,
             operation="testcases.refine",
             approved=response.approved,
+        )
+        _append_project_generation_snapshots(
+            project_id=payload.project_id,
+            response=response,
+            operation="testcases.refine",
+            actor=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            base_project_revision=payload.base_project_revision,
         )
         return response
     except Exception as exc:

@@ -27,6 +27,12 @@ class SelectedOperation(NamedTuple):
 
 
 SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
+    SelectedOperation("projectsCreate", "post", "/projects", "ProjectsCreateRequest", "ProjectsCreateResponse"),
+    SelectedOperation("projectsList", "get", "/projects", "ProjectsListRequest", "ProjectsListResponse"),
+    SelectedOperation("projectGet", "get", "/projects/{project_id}", "ProjectGetRequest", "ProjectGetResponse"),
+    SelectedOperation("projectUpdate", "patch", "/projects/{project_id}", "ProjectUpdateRequest", "ProjectUpdateResponse"),
+    SelectedOperation("projectTimeline", "get", "/projects/{project_id}/timeline", "ProjectTimelineRequest", "ProjectTimelineResponse"),
+    SelectedOperation("projectUseCasesSave", "post", "/projects/{project_id}/use-cases", "ProjectUseCasesSaveRequest", "ProjectUseCasesSaveResponse"),
     SelectedOperation("requirementsParse", "post", "/requirements/parse", "RequirementsParseRequest", "RequirementsParseResponse"),
     SelectedOperation("requirementsEnrich", "post", "/requirements/enrich", "RequirementsEnrichRequest", "RequirementsEnrichResponse"),
     SelectedOperation("testCasesGenerate", "post", "/testcases/generate", "TestCasesGenerateRequest", "TestCasesGenerateResponse"),
