@@ -51,9 +51,18 @@ Hardcoding checks:
 
 Rotation/lifecycle notes:
 
-- [TODO] No credential rotation workflow is documented for JIRA/Azure DevOps
-  connection secrets.
-- [TODO] No Secret Manager rotation automation is tracked.
+- `docs/credential-rotation-runbook.md` documents per-user JIRA API token and
+  Azure DevOps PAT rotation, `JIRA_CONNECTION_SECRET_KEY`,
+  `AZURE_DEVOPS_CONNECTION_SECRET_KEY`, `JWT_SECRET_KEY`, `GEMINI_API_KEY`,
+  Firebase Admin credential, metrics token, and Cloud Run Secret Manager
+  rotation steps.
+- Existing encrypted JIRA/Azure DevOps records do not store a key id and cannot
+  be decrypted after the configured integration encryption key changes. Issue
+  [#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77)
+  tracks seamless previous-key and re-encryption support.
+- `scripts/deploy_cloud_run.sh` creates new Secret Manager versions for managed
+  secrets and now includes optional dedicated JIRA/Azure DevOps connection
+  encryption-key secrets when those values are set.
 - `docs/production-auth-policy-decision.md` defines Firebase ID tokens as the
   production protected-endpoint token type and backend JWTs as local/test
   compatibility tokens.
@@ -116,4 +125,5 @@ Missing visibility gaps:
 - `backend/app/adapters/azure_devops.py`
 - `backend/execution_runtime/playwright.config.ts`
 - `scripts/deploy_cloud_run.sh`
+- `docs/credential-rotation-runbook.md`
 - `docs/observability-logging-tracing-feature.md`

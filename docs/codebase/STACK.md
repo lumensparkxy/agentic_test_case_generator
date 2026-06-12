@@ -95,6 +95,7 @@ python scripts/generate_frontend_api_types.py --check
 - Frontend build-time config: `frontend/src/firebase.js`, `frontend/src/services/apiClient.js`, `frontend/Dockerfile`.
 - Local container config: `compose.yaml`.
 - Cloud Run deployment helper: `scripts/deploy_cloud_run.sh`.
+- Credential rotation runbook: `docs/credential-rotation-runbook.md`.
 
 Required or important backend variables:
 
@@ -145,6 +146,11 @@ Deployment/runtime constraints:
   `python scripts/cleanup_generated_artifacts.py` before deletion. The cleanup
   command is dry-run by default and targets `.execution_artifacts/`,
   `client_submission/`, and `/tmp/pw_workflow_out`.
+- `scripts/deploy_cloud_run.sh` stores required Gemini/JWT secrets, optional
+  Firebase Admin and metrics secrets, and optional dedicated
+  JIRA/Azure DevOps connection encryption keys in Secret Manager when those
+  values are set locally. See `docs/credential-rotation-runbook.md` before
+  rotating production secrets.
 
 ## 6) Evidence
 
@@ -161,3 +167,5 @@ Deployment/runtime constraints:
 - `backend/Dockerfile`
 - `frontend/Dockerfile`
 - `compose.yaml`
+- `scripts/deploy_cloud_run.sh`
+- `docs/credential-rotation-runbook.md`

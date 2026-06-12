@@ -23,6 +23,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - `docs/codebase/TESTING.md` lists validation gates and folds in the reproducible Playwright documentation E2E workflow for the next version.
 - `docs/codebase/CONCERNS.md` records high-churn areas, technical debt, security/scaling concerns, and open architecture questions.
 - `docs/production-auth-policy-decision.md` records the accepted production auth policy: Firebase ID tokens in production, backend JWTs only for explicit local/E2E compatibility.
+- `docs/credential-rotation-runbook.md` documents rotation steps for JIRA tokens, Azure DevOps PATs, JWT/Gemini/Firebase secrets, and Cloud Run Secret Manager entries.
 
 ## Setup
 
@@ -64,6 +65,11 @@ Production protected endpoints use Firebase ID tokens. Local and E2E workflows
 that mint backend JWTs require `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; keep
 production deployments on `AUTH_TOKEN_MODE=firebase-only`.
 
+Credential rotation procedures for user integration tokens, encryption keys,
+Gemini keys, Firebase credentials, JWT secrets, metrics tokens, and Cloud Run
+Secret Manager entries are documented in
+[docs/credential-rotation-runbook.md](docs/credential-rotation-runbook.md).
+
 For compatibility-mode Google login, set `GOOGLE_CLIENT_ID` and
 `VITE_GOOGLE_CLIENT_ID` to the same OAuth web client ID. If you intentionally
 use different client IDs across environments or builds, add all valid IDs to
@@ -103,6 +109,8 @@ For each user connection:
 4. If a project URL is supplied, the backend normalizes it to the organization URL and remembers the project as the default project for that connection.
 
 The backend encrypts stored PATs using `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when set, otherwise `JWT_SECRET_KEY`. Do not commit PATs to `.env.example`, tests, logs, or documentation.
+See [docs/credential-rotation-runbook.md](docs/credential-rotation-runbook.md)
+for per-user PAT rotation and encryption-key rotation behavior.
 
 ### 2) Backend
 
@@ -262,6 +270,7 @@ Prerequisites:
 	- `JWT_SECRET_KEY`
 	- `AUTH_TOKEN_MODE=firebase-only`
 	- `METRICS_ENABLED=false` or `METRICS_ENABLED=true` with `METRICS_ACCESS_TOKEN`
+	- `JIRA_CONNECTION_SECRET_KEY` and `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when production should use dedicated integration encryption keys
 
 Set your target project and optionally the region/repository/service names:
 
@@ -283,6 +292,7 @@ What the script does:
 - requires and deploys `AUTH_TOKEN_MODE=firebase-only`
 - deploys `METRICS_ENABLED=false` by default, or stores `METRICS_ACCESS_TOKEN` in Secret Manager when metrics are explicitly enabled
 - optionally stores `FIREBASE_SERVICE_ACCOUNT_JSON` in Secret Manager when provided
+- optionally stores `JIRA_CONNECTION_SECRET_KEY` and `AZURE_DEVOPS_CONNECTION_SECRET_KEY` in Secret Manager when provided
 - if `GOOGLE_APPLICATION_CREDENTIALS` points to a local Firebase Admin SDK JSON file, the deploy script reads that file and uploads it as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret automatically
 - builds and pushes the backend container
 - deploys the backend to Cloud Run
