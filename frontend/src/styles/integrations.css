@@ -1,0 +1,310 @@
+
+.jira-workflow-panel,
+.jira-sync-panel {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.jira-card,
+.jira-sync-panel {
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+    background: #f8fafc;
+}
+
+.jira-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.9rem;
+}
+
+.jira-card-header h3,
+.jira-sync-results-summary h4,
+.jira-sync-preview-excerpts h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-main);
+}
+
+.jira-card-header p {
+    margin: 0.35rem 0 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.jira-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.32rem 0.7rem;
+    border-radius: 9999px;
+    border: 1px solid var(--border-color);
+    background: white;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: capitalize;
+    white-space: nowrap;
+}
+
+.jira-status-badge.connected,
+.jira-status-badge.ready {
+    background: #dcfce7;
+    border-color: #86efac;
+    color: #166534;
+}
+
+.jira-status-badge.conflict,
+.jira-status-badge.failed {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #b91c1c;
+}
+
+.jira-status-badge.missing,
+.jira-status-badge.skipped {
+    background: #fff7ed;
+    border-color: #fdba74;
+    color: #9a3412;
+}
+
+.jira-connection-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+}
+
+.jira-connection-summary.compact {
+    margin-bottom: 0;
+    justify-content: flex-end;
+}
+
+.jira-summary-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.7rem;
+    border-radius: 9999px;
+    background: white;
+    border: 1px solid var(--border-color);
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.jira-connected-actions,
+.jira-import-actions,
+.jira-sync-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.jira-connection-form,
+.jira-search-grid,
+.jira-sync-controls {
+    max-width: 100%;
+}
+
+.jira-connection-token-group {
+    grid-column: 1 / -1;
+}
+
+.jira-inline-action {
+    align-self: end;
+}
+
+.jira-inline-controls {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.jira-inline-controls input,
+.jira-inline-controls select {
+    flex: 1;
+}
+
+.jira-issue-results {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.jira-issue-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+    padding: 0.95rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: white;
+    color: var(--text-main);
+    box-shadow: none;
+    text-align: left;
+}
+
+.jira-issue-card:hover:not(:disabled) {
+    transform: none;
+    border-color: #93c5fd;
+    background: #eff6ff;
+}
+
+.jira-issue-card.selected {
+    border-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.jira-issue-card-header,
+.jira-sync-preview-header,
+.jira-sync-preview-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.jira-issue-card-header strong,
+.jira-sync-preview-header strong {
+    color: #1d4ed8;
+}
+
+.jira-issue-card-header span,
+.jira-sync-preview-header span,
+.jira-sync-preview-meta span,
+.jira-sync-preview-meta a {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.jira-issue-card-title {
+    font-weight: 600;
+}
+
+.jira-issue-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.requirement-item-copy {
+    color: var(--text-main);
+}
+
+.requirement-source-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+}
+
+.requirement-source-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.55rem;
+    border-radius: 9999px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #1d4ed8;
+}
+
+.requirement-source-badge.subtle {
+    background: white;
+    border-color: var(--border-color);
+    color: var(--text-muted);
+}
+
+.requirement-source-badge.warning {
+    background: #fff7ed;
+    border-color: #fdba74;
+    color: #9a3412;
+}
+
+.jira-sync-results {
+    display: grid;
+    gap: 1rem;
+}
+
+.jira-sync-preview-list {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.jira-sync-preview-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.95rem 1rem;
+}
+
+.jira-sync-preview-card.ready {
+    border-color: #86efac;
+}
+
+.jira-sync-preview-card.conflict {
+    border-color: #fecaca;
+    background: #fffafa;
+}
+
+.jira-sync-preview-card.missing {
+    border-color: #fdba74;
+    background: #fffaf5;
+}
+
+.jira-sync-preview-meta a {
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.jira-sync-preview-meta a:hover {
+    text-decoration: underline;
+}
+
+.jira-sync-preview-warning {
+    margin: 0.75rem 0 0;
+    color: #b91c1c;
+    font-size: 0.84rem;
+}
+
+.jira-sync-preview-excerpts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.85rem;
+    margin-top: 0.85rem;
+}
+
+.jira-sync-preview-excerpts div {
+    padding: 0.8rem;
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.jira-sync-preview-excerpts p,
+.jira-sync-warning-list,
+.jira-sync-apply-list {
+    margin: 0.5rem 0 0;
+    font-size: 0.84rem;
+    color: var(--text-muted);
+}
+
+.jira-sync-warning-list,
+.jira-sync-apply-list {
+    padding-left: 1.1rem;
+}
+
+.jira-sync-results-summary {
+    padding: 0.95rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: white;
+}

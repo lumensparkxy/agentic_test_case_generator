@@ -1,0 +1,122 @@
+/* Feedback Section */
+.feedback-section {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-radius: var(--radius-lg);
+    border: 1px solid #bae6fd;
+}
+
+.feedback-section h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+    color: #0369a1;
+}
+
+.feedback-description {
+    font-size: 0.875rem;
+    color: #0c4a6e;
+    margin-bottom: 1rem;
+}
+
+.feedback-textarea {
+    width: 100%;
+    padding: 1rem;
+    border: 1px solid #7dd3fc;
+    border-radius: var(--radius-md);
+    background-color: white;
+    color: var(--text-main);
+    font-size: 0.95rem;
+    resize: vertical;
+    font-family: var(--font-sans);
+    box-sizing: border-box;
+}
+
+.feedback-textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.feedback-textarea::placeholder {
+    color: #94a3b8;
+}
+
+.feedback-actions {
+    margin-top: 1rem;
+    display: flex;
+    gap: 1rem;
+}
+
+.context-actions {
+    margin-top: 1.5rem;
+}
+
+.context-summary-banner {
+    margin-bottom: 1rem;
+    padding: 0.85rem 1rem;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-md);
+    color: #1d4ed8;
+    font-size: 0.9rem;
+}
+
+.artifact-review-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.artifact-review-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.artifact-review-item.selected {
+    border-color: #93c5fd;
+    background: #eff6ff;
+}
+
+.artifact-review-item input[type="checkbox"] {
+    margin-top: 0.2rem;
+}
+
+.artifact-review-title {
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.artifact-review-meta {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+}
+
+.artifact-review-notes {
+    font-size: 0.82rem;
+    color: var(--text-main);
+    margin-top: 0.35rem;
+}
+
+.context-preview-grid {
+    margin-top: 1rem;
+}
+
+.feedback-button {
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    color: white;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.feedback-button:hover:not(:disabled) {
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+}

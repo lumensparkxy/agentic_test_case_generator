@@ -23,6 +23,7 @@ should preserve when changing the application.
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/services/` | Frontend API helper functions | `frontend/src/services/apiClient.js` |
 | `frontend/src/hooks/` | Reusable React hooks, including domain workflow state hooks for requirements, context, generation, integrations, execution, export, and app session state | `frontend/src/hooks/*.js` |
+| `frontend/src/styles/` | Shared CSS entry point, design tokens, base rules, layout styles, and feature-owned selector modules | `frontend/src/styles/index.css`, `frontend/src/styles/*.css` |
 | `frontend/src/utils/` | Pure frontend helpers | `frontend/src/utils/*.js` |
 | `frontend/e2e/` | Playwright browser workflow tests and screenshot capture script | `frontend/e2e/*.js`, `frontend/e2e/*.mjs` |
 | `schemas/` | JSON schemas for the plain-English spec and IR contracts | `schemas/spec.schema.json`, `schemas/ir.schema.json` |
@@ -37,6 +38,7 @@ should preserve when changing the application.
 - Main backend runtime entry: `backend/app/main.py`.
 - Frontend runtime entry: `frontend/src/main.jsx`.
 - Frontend orchestration component: `frontend/src/App.jsx`.
+- Frontend style entry point: `frontend/src/styles/index.css`.
 - Backend execution runtime config: `backend/execution_runtime/playwright.config.ts`.
 - Frontend E2E config: `frontend/playwright.config.js`.
 - Backend container entry: `backend/Dockerfile`.
@@ -62,6 +64,7 @@ exposes `/metrics`.
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
 | `frontend/src/components/` | Presentational and workflow UI components receiving props | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/styles/` | Design tokens, base styles, layout styles, and selectors grouped by feature ownership | React state, API calls, or unrelated visual redesigns |
 | `frontend/src/services/` | API base URL, request ID, API error parsing, download helpers | Large workflow state or JSX markup |
 | `frontend/src/utils/` | Pure formatting, requirement, usage, and workflow helpers | React state or network side effects |
 | `scripts/` | Local, CI, deployment, evaluation, and reproducibility utilities | Runtime API code imported by production paths unless intentionally shared |
@@ -86,6 +89,9 @@ exposes `/metrics`.
 - Frontend component directories are grouped by feature or layout, for example
   `automation/`, `generation/`, `integrations/`, `requirements/`, and
   `layout/`.
+- Frontend CSS is imported through `frontend/src/styles/index.css`; shared
+  foundations live in `tokens.css` and `base.css`, while feature selectors live
+  in the closest named style module.
 - There are no tracked TypeScript path aliases. Backend imports use relative
   package imports inside `backend/app/`; frontend imports use relative paths.
 
@@ -113,6 +119,7 @@ Do not document generated files as source conventions and do not commit them.
 - `backend/execution_runtime/package.json`
 - `frontend/src/App.jsx`
 - `frontend/src/components/`
+- `frontend/src/styles/`
 - `frontend/src/services/apiClient.js`
 - `frontend/e2e/`
 - `.gitignore`

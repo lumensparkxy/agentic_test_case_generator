@@ -60,7 +60,10 @@ Baseline values should be captured in Phase 0 before any scoring target is enfor
 
 ### Gaps
 
-- Large modules remain a maintainability risk (`frontend/src/App.jsx`, `frontend/src/App.css`, `backend/app/main.py`, and `backend/app/agents/test_case_agent.py`).
+- Large modules remain a maintainability risk (`frontend/src/App.jsx`,
+  `backend/app/main.py`, and `backend/app/agents/test_case_agent.py`);
+  frontend styles are now split under `frontend/src/styles/` behind a shared
+  cascade entry point.
 - Frontend/backend contracts still need generated/shared types to prevent response-shape drift.
 - Requirement import/sync is implemented for JIRA/Azure DevOps, but test-case lifecycle sync/export is not productized.
 - Artifact fetching needs stronger SSRF hardening before broad production use.

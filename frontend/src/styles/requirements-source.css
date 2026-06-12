@@ -1,0 +1,144 @@
+
+.selection-table-wrapper,
+.requirement-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: white;
+}
+
+.selection-table,
+.requirement-review-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+}
+
+.selection-table {
+    min-width: 760px;
+}
+
+.requirement-review-table {
+    min-width: 1180px;
+}
+
+.selection-table th,
+.selection-table td,
+.requirement-review-table th,
+.requirement-review-table td {
+    padding: 0.85rem 1rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.selection-table th,
+.requirement-review-table th {
+    background: #f1f5f9;
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.selection-table tbody tr,
+.requirement-review-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.selection-table tbody tr {
+    cursor: pointer;
+}
+
+.selection-table tbody tr:hover,
+.requirement-review-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.selection-table tbody tr.selected {
+    background: #eff6ff;
+}
+
+.selection-table tbody tr:last-child td,
+.requirement-review-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.selection-table input[type="radio"],
+.quality-flag-checklist input[type="checkbox"] {
+    accent-color: var(--primary);
+}
+
+.compact-result-section {
+    margin-top: 1rem;
+    padding-top: 0;
+    border-top: none;
+}
+
+.collapsible-panel {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.collapsible-panel-summary {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.95rem 1.1rem;
+    cursor: pointer;
+    list-style: none;
+    background: #f8fafc;
+}
+
+.collapsible-panel-summary::-webkit-details-marker {
+    display: none;
+}
+
+.collapsible-panel-copy,
+.collapsible-panel-meta {
+    display: flex;
+    gap: 0.45rem;
+}
+
+.collapsible-panel-copy {
+    flex-direction: column;
+}
+
+.collapsible-panel-meta {
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.collapsible-panel-title {
+    color: var(--text-main);
+    font-weight: 800;
+}
+
+.collapsible-panel-description {
+    color: var(--text-muted);
+    font-size: 0.84rem;
+}
+
+.collapsible-panel-icon {
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.collapsible-panel[open] .collapsible-panel-icon {
+    transform: rotate(180deg);
+}
+
+.collapsible-panel-body {
+    padding: 1rem;
+}
+
+.raw-text-pre {
+    margin-top: 0;
+    max-height: 240px;
+}

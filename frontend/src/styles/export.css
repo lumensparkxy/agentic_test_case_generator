@@ -1,0 +1,162 @@
+/* Export Section Styles */
+.export-readiness-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+    background: #f8fafc;
+}
+
+.export-readiness-card.approved {
+    border-color: rgba(34, 197, 94, 0.35);
+    background: #f0fdf4;
+}
+
+.export-readiness-card.locked {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: #fffbeb;
+}
+
+.export-readiness-card strong {
+    display: block;
+    color: var(--text-main);
+    margin-bottom: 0.25rem;
+}
+
+.export-readiness-card p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.draft-export-override {
+    min-width: 280px;
+    max-width: 420px;
+}
+
+.draft-export-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 0.75rem;
+}
+
+.draft-export-reason {
+    width: 100%;
+    resize: vertical;
+    min-height: 84px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+    font: inherit;
+    color: var(--text-main);
+    background: white;
+}
+
+.export-section {
+    margin-bottom: 1.5rem;
+}
+
+.section-subtitle {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 0.5rem;
+}
+
+.section-divider {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 2rem 0;
+}
+
+.export-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.export-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.25rem 1rem;
+    border-radius: var(--radius-md);
+    border: 2px solid var(--border-color);
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.export-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.export-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.export-btn.csv:hover:not(:disabled) {
+    border-color: #22c55e;
+    background: #f0fdf4;
+}
+
+.export-btn.excel:hover:not(:disabled) {
+    border-color: #16a34a;
+    background: #f0fdf4;
+}
+
+.export-btn.json:hover:not(:disabled) {
+    border-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.export-btn.jira {
+    flex-direction: row;
+    gap: 0.5rem;
+    padding: 0.875rem 1.5rem;
+    background: var(--primary);
+    color: white;
+    border: none;
+    font-weight: 600;
+}
+
+.export-btn.jira:hover:not(:disabled) {
+    background: var(--primary-dark);
+}
+
+.export-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.export-label {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.export-btn.jira .export-label {
+    color: white;
+}
+
+.export-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.helper-text.warning {
+    color: #b45309;
+    display: block;
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+}

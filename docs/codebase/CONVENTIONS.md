@@ -15,6 +15,7 @@ invent rules that are not enforced by configuration.
 | Frontend components | PascalCase file and function names | `AutomationPanel.jsx`, `GeneratedTestCasesView.jsx` | `frontend/src/components/` |
 | Frontend hooks | `use*` camelCase | `useBillingStatus.js`, `useEscapeToClose.js` | `frontend/src/hooks/` |
 | Frontend helpers | camelCase exports in domain helper files | `createRequestId`, `downloadResponseBlob` | `frontend/src/services/apiClient.js` |
+| Frontend style modules | lower-case domain names imported through `styles/index.css` | `requirements-source.css`, `generation-results.css` | `frontend/src/styles/` |
 
 ## 2) Formatting and Linting
 
@@ -49,6 +50,9 @@ npm run test:playwright -- --list
 - Backend tests import application modules through `app.*` when run with
   `backend` on the Python import path.
 - Frontend modules use relative imports. No path alias is configured.
+- Frontend CSS enters the app through `frontend/src/styles/index.css`.
+  Shared foundations live in `tokens.css` and `base.css`; feature-specific
+  selectors stay in the nearest owned style module.
 - Router modules expose a module-level `router = APIRouter()`.
 - Service modules mostly expose functions rather than classes; provider-specific
   remote behavior lives in adapter modules.
