@@ -21,6 +21,7 @@ python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
 python scripts/generate_frontend_api_types.py --check
+python scripts/scan_codebase.py
 
 cd frontend
 npm ci
@@ -61,6 +62,8 @@ Evidence: `.github/workflows/ci.yml`.
   `schemas/ir.schema.json`.
 - Benchmark inputs and expectations: `scripts/benchmark_*`.
 - API payload fixtures: `scripts/api_payloads/`.
+- Source-focused codebase scan: `scripts/scan_codebase.py`, with output in
+  `docs/codebase/.codebase-scan.txt`.
 
 ## 3) Test Scope Matrix
 
@@ -72,6 +75,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Backend format check | Yes | Ruff formatter baseline | `python -m ruff format --check backend scripts` |
 | Offline quality benchmarks | Yes | Requirement extraction and test-case generation quality | `--offline --strict` avoids live model dependency |
 | OpenAPI contract | Yes | FastAPI schema export and generated frontend contract types | `scripts/export_openapi.py`, `scripts/generate_frontend_api_types.py --check` |
+| Codebase scan | Yes | Tracked source and relevant config/docs | `scripts/scan_codebase.py` uses `git ls-files` plus explicit generated-output exclusions |
 | Frontend lint | Yes | JavaScript/JSX baseline linting | `npm run lint` |
 | Frontend format check | Yes | Prettier formatting baseline | `npm run format:check` |
 | Frontend build | Yes | React/Vite production build | `npm run build` |
