@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import {
 	createFirebaseAuthProvider,
@@ -21,8 +21,16 @@ import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
 import WorkflowTabs from "./components/layout/WorkflowTabs";
 import WorkflowDiagnostics from "./components/workflow/WorkflowDiagnostics";
+import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
+import useContextWorkflowState from "./hooks/useContextWorkflowState";
 import useEscapeToClose from "./hooks/useEscapeToClose";
+import useExecutionWorkflowState from "./hooks/useExecutionWorkflowState";
+import useExportWorkflowState from "./hooks/useExportWorkflowState";
+import useIntegrationWorkflowState from "./hooks/useIntegrationWorkflowState";
+import useRequirementWorkflowState from "./hooks/useRequirementWorkflowState";
+import useTestCaseWorkflowState from "./hooks/useTestCaseWorkflowState";
+import useWorkflowNavigationState from "./hooks/useWorkflowNavigationState";
 import {
 	AUTH_REQUIRED_MESSAGE,
 	DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE,
@@ -33,7 +41,6 @@ import {
 	EMPTY_AZURE_DEVOPS_CONNECTION_STATUS,
 	EMPTY_JIRA_CONNECTION_FORM,
 	EMPTY_JIRA_CONNECTION_STATUS,
-	EMPTY_WORKFLOW_SETTINGS,
 	REQUIREMENT_SOURCE_OPTIONS,
 	STORAGE_AUTH_TOKEN,
 	STORAGE_AUTH_USER,
@@ -144,106 +151,229 @@ const getRequirementSourceMetricMeta = (coverageMetrics) => {
 };
 
 export default function App() {
-	const [file, setFile] = useState(null);
-	const [rawText, setRawText] = useState("");
-	const [requirements, setRequirements] = useState([]);
-	const [requirementReview, setRequirementReview] = useState(null);
-	const [requirementCoverageMetrics, setRequirementCoverageMetrics] = useState(null);
-	const [requirementWorkflowDiagnostics, setRequirementWorkflowDiagnostics] = useState(null);
-	const [appliedRequirementWorkflowSettings, setAppliedRequirementWorkflowSettings] = useState(null);
-	const [requirementIterationHistory, setRequirementIterationHistory] = useState([]);
-	const [activeTab, setActiveTab] = useState(0);
-	const [appLink, setAppLink] = useState("");
-	const [prototypeLink, setPrototypeLink] = useState("");
-	const [diagramLinks, setDiagramLinks] = useState("");
-	const [imageLinks, setImageLinks] = useState("");
-	const [templateName, setTemplateName] = useState("default");
-	const [templateFormat, setTemplateFormat] = useState("table");
-	const [testCases, setTestCases] = useState([]);
-	const [requirementAnalysis, setRequirementAnalysis] = useState([]);
-	const [coveragePlan, setCoveragePlan] = useState([]);
-	const [coverageMetrics, setCoverageMetrics] = useState(null);
-	const [testCaseReview, setTestCaseReview] = useState(null);
-	const [testCaseWorkflowDiagnostics, setTestCaseWorkflowDiagnostics] = useState(null);
-	const [appliedTestCaseWorkflowSettings, setAppliedTestCaseWorkflowSettings] = useState(null);
-	const [testCaseIterationHistory, setTestCaseIterationHistory] = useState([]);
-	const [enrichedContext, setEnrichedContext] = useState(null);
-	const [selectedArtifactSourceIds, setSelectedArtifactSourceIds] = useState([]);
-	const [status, setStatus] = useState("");
-	const [feedback, setFeedback] = useState("");
-	const [reqFeedback, setReqFeedback] = useState("");
-	const [requirementWorkflowSettings, setRequirementWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
-	const [testCaseWorkflowSettings, setTestCaseWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
-	const [expandedRows, setExpandedRows] = useState({});
-	const [activeGenerateResultTab, setActiveGenerateResultTab] = useState("test-cases");
-	const [isGenerating, setIsGenerating] = useState(false);
-	const [isParsing, setIsParsing] = useState(false);
-	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
-	const [isExporting, setIsExporting] = useState(false);
-	const [draftExportOverrideRequested, setDraftExportOverrideRequested] = useState(false);
-	const [draftExportOverrideReason, setDraftExportOverrideReason] = useState("");
-	const [executionTargetBaseUrl, setExecutionTargetBaseUrl] = useState("");
-	const [executionPreview, setExecutionPreview] = useState(null);
-	const [executionRunResult, setExecutionRunResult] = useState(null);
-	const [isPreviewingExecution, setIsPreviewingExecution] = useState(false);
-	const [isRunningExecution, setIsRunningExecution] = useState(false);
-	const [authToken, setAuthToken] = useState("");
-	const [currentUser, setCurrentUser] = useState(null);
-	const [isAuthenticating, setIsAuthenticating] = useState(false);
-	const [activeAuthProvider, setActiveAuthProvider] = useState("");
-	const [isSignInDialogOpen, setIsSignInDialogOpen] = useState(false);
-	const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
-	const [settingsSection, setSettingsSection] = useState("workflow");
-	const [isVerifyingSession, setIsVerifyingSession] = useState(true);
-	const [usageSummary, setUsageSummary] = useState(null);
-	const [isUsageLoading, setIsUsageLoading] = useState(false);
-	const [billingEntitlements, setBillingEntitlements] = useState(null);
-	const [isBillingLoading, setIsBillingLoading] = useState(false);
-	const [requirementSourceMode, setRequirementSourceMode] = useState("file");
-	const [jiraConnectionStatus, setJiraConnectionStatus] = useState(EMPTY_JIRA_CONNECTION_STATUS);
-	const [jiraConnectionForm, setJiraConnectionForm] = useState(EMPTY_JIRA_CONNECTION_FORM);
-	const [isJiraConnectionLoading, setIsJiraConnectionLoading] = useState(false);
-	const [isSavingJiraConnection, setIsSavingJiraConnection] = useState(false);
-	const [isDeletingJiraConnection, setIsDeletingJiraConnection] = useState(false);
-	const [jiraProjectQuery, setJiraProjectQuery] = useState("");
-	const [jiraProjects, setJiraProjects] = useState([]);
-	const [selectedJiraProjectKey, setSelectedJiraProjectKey] = useState("");
-	const [isLoadingJiraProjects, setIsLoadingJiraProjects] = useState(false);
-	const [jiraProjectIssueTypes, setJiraProjectIssueTypes] = useState([]);
-	const [isLoadingJiraIssueTypes, setIsLoadingJiraIssueTypes] = useState(false);
-	const [jiraIssueType, setJiraIssueType] = useState("");
-	const [jiraIssueQuery, setJiraIssueQuery] = useState("");
-	const [jiraIssueResults, setJiraIssueResults] = useState([]);
-	const [selectedJiraIssueKey, setSelectedJiraIssueKey] = useState("");
-	const [isSearchingJiraIssues, setIsSearchingJiraIssues] = useState(false);
-	const [isImportingFromJira, setIsImportingFromJira] = useState(false);
-	const [jiraSyncPreview, setJiraSyncPreview] = useState(null);
-	const [jiraSyncResults, setJiraSyncResults] = useState(null);
-	const [jiraManagedSectionTitle, setJiraManagedSectionTitle] = useState(DEFAULT_JIRA_SYNC_SECTION_TITLE);
-	const [isPreviewingJiraSync, setIsPreviewingJiraSync] = useState(false);
-	const [isApplyingJiraSync, setIsApplyingJiraSync] = useState(false);
-	const [azureDevOpsConnectionStatus, setAzureDevOpsConnectionStatus] = useState(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
-	const [azureDevOpsConnectionForm, setAzureDevOpsConnectionForm] = useState(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
-	const [isAzureDevOpsConnectionLoading, setIsAzureDevOpsConnectionLoading] = useState(false);
-	const [isSavingAzureDevOpsConnection, setIsSavingAzureDevOpsConnection] = useState(false);
-	const [isDeletingAzureDevOpsConnection, setIsDeletingAzureDevOpsConnection] = useState(false);
-	const [azureDevOpsProjectQuery, setAzureDevOpsProjectQuery] = useState("");
-	const [azureDevOpsProjects, setAzureDevOpsProjects] = useState([]);
-	const [selectedAzureDevOpsProject, setSelectedAzureDevOpsProject] = useState("");
-	const [isLoadingAzureDevOpsProjects, setIsLoadingAzureDevOpsProjects] = useState(false);
-	const [azureDevOpsWorkItemTypes, setAzureDevOpsWorkItemTypes] = useState([]);
-	const [isLoadingAzureDevOpsWorkItemTypes, setIsLoadingAzureDevOpsWorkItemTypes] = useState(false);
-	const [azureDevOpsWorkItemType, setAzureDevOpsWorkItemType] = useState("");
-	const [azureDevOpsWorkItemQuery, setAzureDevOpsWorkItemQuery] = useState("");
-	const [azureDevOpsWorkItemResults, setAzureDevOpsWorkItemResults] = useState([]);
-	const [selectedAzureDevOpsWorkItemId, setSelectedAzureDevOpsWorkItemId] = useState("");
-	const [isSearchingAzureDevOpsWorkItems, setIsSearchingAzureDevOpsWorkItems] = useState(false);
-	const [isImportingFromAzureDevOps, setIsImportingFromAzureDevOps] = useState(false);
-	const [azureDevOpsSyncPreview, setAzureDevOpsSyncPreview] = useState(null);
-	const [azureDevOpsSyncResults, setAzureDevOpsSyncResults] = useState(null);
-	const [azureDevOpsManagedSectionTitle, setAzureDevOpsManagedSectionTitle] = useState(DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE);
-	const [isPreviewingAzureDevOpsSync, setIsPreviewingAzureDevOpsSync] = useState(false);
-	const [isApplyingAzureDevOpsSync, setIsApplyingAzureDevOpsSync] = useState(false);
+	const {
+		activeTab,
+		setActiveTab,
+	} = useWorkflowNavigationState();
+	const {
+		file,
+		setFile,
+		rawText,
+		setRawText,
+		requirements,
+		setRequirements,
+		requirementReview,
+		setRequirementReview,
+		requirementCoverageMetrics,
+		setRequirementCoverageMetrics,
+		requirementWorkflowDiagnostics,
+		setRequirementWorkflowDiagnostics,
+		appliedRequirementWorkflowSettings,
+		setAppliedRequirementWorkflowSettings,
+		requirementIterationHistory,
+		setRequirementIterationHistory,
+		reqFeedback,
+		setReqFeedback,
+		requirementWorkflowSettings,
+		setRequirementWorkflowSettings,
+		requirementSourceMode,
+		setRequirementSourceMode,
+		isParsing,
+		setIsParsing,
+	} = useRequirementWorkflowState();
+	const {
+		appLink,
+		setAppLink,
+		prototypeLink,
+		setPrototypeLink,
+		diagramLinks,
+		setDiagramLinks,
+		imageLinks,
+		setImageLinks,
+		enrichedContext,
+		setEnrichedContext,
+		selectedArtifactSourceIds,
+		setSelectedArtifactSourceIds,
+		isAnalyzingContext,
+		setIsAnalyzingContext,
+		resetContextAnalysis,
+	} = useContextWorkflowState();
+	const {
+		templateName,
+		setTemplateName,
+		templateFormat,
+		setTemplateFormat,
+		testCases,
+		setTestCases,
+		requirementAnalysis,
+		setRequirementAnalysis,
+		coveragePlan,
+		setCoveragePlan,
+		coverageMetrics,
+		setCoverageMetrics,
+		testCaseReview,
+		setTestCaseReview,
+		testCaseWorkflowDiagnostics,
+		setTestCaseWorkflowDiagnostics,
+		appliedTestCaseWorkflowSettings,
+		setAppliedTestCaseWorkflowSettings,
+		testCaseIterationHistory,
+		setTestCaseIterationHistory,
+		feedback,
+		setFeedback,
+		testCaseWorkflowSettings,
+		setTestCaseWorkflowSettings,
+		expandedRows,
+		setExpandedRows,
+		activeGenerateResultTab,
+		setActiveGenerateResultTab,
+		isGenerating,
+		setIsGenerating,
+		resetTestCaseWorkflowState,
+	} = useTestCaseWorkflowState();
+	const {
+		executionTargetBaseUrl,
+		setExecutionTargetBaseUrl,
+		executionPreview,
+		setExecutionPreview,
+		executionRunResult,
+		setExecutionRunResult,
+		isPreviewingExecution,
+		setIsPreviewingExecution,
+		isRunningExecution,
+		setIsRunningExecution,
+		resetExecutionWorkflowState,
+	} = useExecutionWorkflowState();
+	const {
+		isExporting,
+		setIsExporting,
+		draftExportOverrideRequested,
+		setDraftExportOverrideRequested,
+		draftExportOverrideReason,
+		setDraftExportOverrideReason,
+		resetExportWorkflowState,
+	} = useExportWorkflowState();
+	const {
+		status,
+		setStatus,
+		authToken,
+		setAuthToken,
+		currentUser,
+		setCurrentUser,
+		isAuthenticating,
+		setIsAuthenticating,
+		activeAuthProvider,
+		setActiveAuthProvider,
+		isSignInDialogOpen,
+		setIsSignInDialogOpen,
+		isSettingsDialogOpen,
+		setIsSettingsDialogOpen,
+		settingsSection,
+		setSettingsSection,
+		isVerifyingSession,
+		setIsVerifyingSession,
+		usageSummary,
+		setUsageSummary,
+		isUsageLoading,
+		setIsUsageLoading,
+		billingEntitlements,
+		setBillingEntitlements,
+		isBillingLoading,
+		setIsBillingLoading,
+	} = useAppSessionState();
+	const {
+		jiraConnectionStatus,
+		setJiraConnectionStatus,
+		jiraConnectionForm,
+		setJiraConnectionForm,
+		isJiraConnectionLoading,
+		setIsJiraConnectionLoading,
+		isSavingJiraConnection,
+		setIsSavingJiraConnection,
+		isDeletingJiraConnection,
+		setIsDeletingJiraConnection,
+		jiraProjectQuery,
+		setJiraProjectQuery,
+		jiraProjects,
+		setJiraProjects,
+		selectedJiraProjectKey,
+		setSelectedJiraProjectKey,
+		isLoadingJiraProjects,
+		setIsLoadingJiraProjects,
+		jiraProjectIssueTypes,
+		setJiraProjectIssueTypes,
+		isLoadingJiraIssueTypes,
+		setIsLoadingJiraIssueTypes,
+		jiraIssueType,
+		setJiraIssueType,
+		jiraIssueQuery,
+		setJiraIssueQuery,
+		jiraIssueResults,
+		setJiraIssueResults,
+		selectedJiraIssueKey,
+		setSelectedJiraIssueKey,
+		isSearchingJiraIssues,
+		setIsSearchingJiraIssues,
+		isImportingFromJira,
+		setIsImportingFromJira,
+		jiraSyncPreview,
+		setJiraSyncPreview,
+		jiraSyncResults,
+		setJiraSyncResults,
+		jiraManagedSectionTitle,
+		setJiraManagedSectionTitle,
+		isPreviewingJiraSync,
+		setIsPreviewingJiraSync,
+		isApplyingJiraSync,
+		setIsApplyingJiraSync,
+		azureDevOpsConnectionStatus,
+		setAzureDevOpsConnectionStatus,
+		azureDevOpsConnectionForm,
+		setAzureDevOpsConnectionForm,
+		isAzureDevOpsConnectionLoading,
+		setIsAzureDevOpsConnectionLoading,
+		isSavingAzureDevOpsConnection,
+		setIsSavingAzureDevOpsConnection,
+		isDeletingAzureDevOpsConnection,
+		setIsDeletingAzureDevOpsConnection,
+		azureDevOpsProjectQuery,
+		setAzureDevOpsProjectQuery,
+		azureDevOpsProjects,
+		setAzureDevOpsProjects,
+		selectedAzureDevOpsProject,
+		setSelectedAzureDevOpsProject,
+		isLoadingAzureDevOpsProjects,
+		setIsLoadingAzureDevOpsProjects,
+		azureDevOpsWorkItemTypes,
+		setAzureDevOpsWorkItemTypes,
+		isLoadingAzureDevOpsWorkItemTypes,
+		setIsLoadingAzureDevOpsWorkItemTypes,
+		azureDevOpsWorkItemType,
+		setAzureDevOpsWorkItemType,
+		azureDevOpsWorkItemQuery,
+		setAzureDevOpsWorkItemQuery,
+		azureDevOpsWorkItemResults,
+		setAzureDevOpsWorkItemResults,
+		selectedAzureDevOpsWorkItemId,
+		setSelectedAzureDevOpsWorkItemId,
+		isSearchingAzureDevOpsWorkItems,
+		setIsSearchingAzureDevOpsWorkItems,
+		isImportingFromAzureDevOps,
+		setIsImportingFromAzureDevOps,
+		azureDevOpsSyncPreview,
+		setAzureDevOpsSyncPreview,
+		azureDevOpsSyncResults,
+		setAzureDevOpsSyncResults,
+		azureDevOpsManagedSectionTitle,
+		setAzureDevOpsManagedSectionTitle,
+		isPreviewingAzureDevOpsSync,
+		setIsPreviewingAzureDevOpsSync,
+		isApplyingAzureDevOpsSync,
+		setIsApplyingAzureDevOpsSync,
+		resetJiraSyncState,
+		resetAzureDevOpsSyncState,
+		resetIntegrationSyncState,
+	} = useIntegrationWorkflowState();
 
 	const isAuthenticated = Boolean(authToken && currentUser);
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
@@ -404,21 +534,9 @@ export default function App() {
 	};
 
 	const resetGeneratedArtifacts = () => {
-		setTestCases([]);
-		setRequirementAnalysis([]);
-		setCoveragePlan([]);
-		setCoverageMetrics(null);
-		setTestCaseReview(null);
-		setTestCaseWorkflowDiagnostics(null);
-		setAppliedTestCaseWorkflowSettings(null);
-		setTestCaseIterationHistory([]);
-		setExpandedRows({});
-		setActiveGenerateResultTab("test-cases");
-		setFeedback("");
-		setDraftExportOverrideRequested(false);
-		setDraftExportOverrideReason("");
-		setExecutionPreview(null);
-		setExecutionRunResult(null);
+		resetTestCaseWorkflowState();
+		resetExportWorkflowState();
+		resetExecutionWorkflowState();
 	};
 
 	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
@@ -455,11 +573,6 @@ export default function App() {
 			return { ...requirement, quality_flags: nextFlags };
 		}));
 		resetGeneratedArtifacts();
-	};
-
-	const resetContextAnalysis = () => {
-		setEnrichedContext(null);
-		setSelectedArtifactSourceIds([]);
 	};
 
 	const buildContextPayload = (requirementsOverride = requirements) => {
@@ -926,21 +1039,6 @@ export default function App() {
 		}
 
 		return res;
-	};
-
-	const resetJiraSyncState = () => {
-		setJiraSyncPreview(null);
-		setJiraSyncResults(null);
-	};
-
-	const resetAzureDevOpsSyncState = () => {
-		setAzureDevOpsSyncPreview(null);
-		setAzureDevOpsSyncResults(null);
-	};
-
-	const resetIntegrationSyncState = () => {
-		resetJiraSyncState();
-		resetAzureDevOpsSyncState();
 	};
 
 	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
