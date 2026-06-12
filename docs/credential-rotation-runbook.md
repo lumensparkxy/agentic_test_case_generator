@@ -10,7 +10,9 @@ This runbook covers:
 - JIRA Cloud API tokens stored per user.
 - Azure DevOps Personal Access Tokens stored per user.
 - `JIRA_CONNECTION_SECRET_KEY`
+- `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS`
 - `AZURE_DEVOPS_CONNECTION_SECRET_KEY`
+- `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS`
 - `JWT_SECRET_KEY`
 - `GEMINI_API_KEY`
 - Firebase Admin credentials through `FIREBASE_SERVICE_ACCOUNT_JSON` or
@@ -30,12 +32,24 @@ The backend derives a Fernet key from:
 - `AZURE_DEVOPS_CONNECTION_SECRET_KEY` for Azure DevOps, falling back to
   `JWT_SECRET_KEY`.
 
-Existing records do not store a key id and the backend does not currently accept
-previous decryption keys. If one of these encryption keys changes, records
-encrypted with the old key cannot be decrypted until the user connection is
-deleted and recreated, or until follow-up issue
-[#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77)
-adds seamless multi-key re-encryption support.
+New and re-encrypted records store ciphertext plus a non-secret key identifier
+so operators can tell which configured key version encrypted the record without
+exposing token material. Legacy records without a key id remain supported during
+rotation.
+
+During planned encryption-key rotation, configure:
+
+- `JIRA_CONNECTION_SECRET_KEY` or `AZURE_DEVOPS_CONNECTION_SECRET_KEY` with the
+  new primary key used for all new writes.
+- `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` or
+  `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` with comma-separated previous
+  keys used only for read/decrypt.
+
+The backend first uses matching key metadata when available, then tries the
+primary and previous keys. After verification, re-encrypt old records with the
+primary key by running `python scripts/reencrypt_integration_credentials.py`
+for a dry run and `python scripts/reencrypt_integration_credentials.py --apply`
+for the write pass.
 
 For production, prefer dedicated `JIRA_CONNECTION_SECRET_KEY` and
 `AZURE_DEVOPS_CONNECTION_SECRET_KEY` values instead of relying on
@@ -57,9 +71,10 @@ Per-user JIRA rotation:
 5. Revoke the old Atlassian API token after the new connection is verified.
 
 If the JIRA encryption key was already rotated and the existing record no
-longer decrypts, delete the user connection first through
-`DELETE /integrations/jira/connection` or by an approved admin Firestore cleanup,
-then reconnect with the new token.
+longer decrypts, first restore the previous key through
+`JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` and run the re-encryption command. Delete
+and recreate the user connection only when the old encryption key is unavailable
+or the provider API token itself must be replaced.
 
 ## Azure DevOps PAT Rotation
 
@@ -78,38 +93,63 @@ Per-user Azure DevOps rotation:
 5. Revoke the old PAT after the new connection is verified.
 
 If the Azure DevOps encryption key was already rotated and the existing record
-no longer decrypts, delete the user connection first through
-`DELETE /integrations/azure-devops/connection` or by an approved admin Firestore
-cleanup, then reconnect with the new PAT.
+no longer decrypts, first restore the previous key through
+`AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` and run the re-encryption command.
+Delete and recreate the user connection only when the old encryption key is
+unavailable or the provider PAT itself must be replaced.
 
 ## Integration Encryption Key Rotation
 
 Use this for `JIRA_CONNECTION_SECRET_KEY` or
 `AZURE_DEVOPS_CONNECTION_SECRET_KEY`.
 
-Planned rotation with current code:
+Planned rotation:
 
-1. Schedule a maintenance window and notify users that stored JIRA/Azure DevOps
-   connections may need to be recreated.
-2. Keep provider tokens/PATs active until users verify reconnection.
-3. Set the new dedicated connection secret in the runtime environment.
-   - For Cloud Run, `scripts/deploy_cloud_run.sh` stores these variables in
-     Secret Manager when `JIRA_CONNECTION_SECRET_KEY` or
-     `AZURE_DEVOPS_CONNECTION_SECRET_KEY` are set locally.
-   - Override Secret Manager names with `SECRET_JIRA_CONNECTION_NAME` or
-     `SECRET_AZURE_DEVOPS_CONNECTION_NAME` when needed.
+1. Schedule a maintenance window. The provider tokens/PATs can remain active;
+   users should not need to reconnect solely because the encryption key changes.
+2. Generate the new dedicated connection secret.
+3. Configure the runtime with:
+   - New primary key in `JIRA_CONNECTION_SECRET_KEY` or
+     `AZURE_DEVOPS_CONNECTION_SECRET_KEY`.
+   - Current old key in `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` or
+     `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS`.
+   - For Cloud Run, `scripts/deploy_cloud_run.sh` stores primary and previous
+     key variables in Secret Manager when set locally.
+   - Override Secret Manager names with `SECRET_JIRA_CONNECTION_NAME`,
+     `SECRET_JIRA_CONNECTION_PREVIOUS_NAME`,
+     `SECRET_AZURE_DEVOPS_CONNECTION_NAME`, or
+     `SECRET_AZURE_DEVOPS_CONNECTION_PREVIOUS_NAME` when needed.
 4. Redeploy or restart the backend.
-5. Existing records encrypted with the old key will fail decrypting. Users
-   should delete and recreate affected connections, or an approved admin should
-   delete stale Firestore connection documents before users reconnect.
-6. Verify representative JIRA and Azure DevOps connection status, import, and
-   sync-preview flows.
-7. Revoke old provider tokens/PATs after new encrypted records are verified.
+5. Verify representative JIRA and Azure DevOps connection status, import, and
+   sync-preview flows. Reads should continue because the old key is configured
+   as previous.
+6. Run a dry-run re-encryption report:
+
+   ```bash
+   source .venv/bin/activate
+   python scripts/reencrypt_integration_credentials.py
+   ```
+
+7. If the dry run reports no failed records, apply the migration:
+
+   ```bash
+   source .venv/bin/activate
+   python scripts/reencrypt_integration_credentials.py --apply
+   ```
+
+   Use `--provider jira` or `--provider azure-devops` to rotate one provider at
+   a time.
+8. Review the JSON summary. `failed` must be `0`; `reencrypted` and
+   `metadata_updated` describe records written with primary-key metadata.
+9. Remove the old key from the previous-key environment variable and redeploy.
+10. Verify representative provider status/import/sync-preview flows again.
+11. Disable or destroy old Secret Manager versions only after rollback is no
+    longer needed.
 
 Do not rotate `JWT_SECRET_KEY` as a substitute for dedicated integration keys
 when existing integration records still depend on the fallback. First introduce
-dedicated integration keys and plan user reconnection or #77-style
-re-encryption.
+dedicated integration keys, include the old `JWT_SECRET_KEY` in the relevant
+previous-key variable, and re-encrypt records with the dedicated primary key.
 
 ## JWT Secret Rotation
 
@@ -120,9 +160,9 @@ Production protected endpoints should use Firebase ID tokens with
 Rotation steps:
 
 1. Confirm production is using `AUTH_TOKEN_MODE=firebase-only`.
-2. Confirm JIRA and Azure DevOps use dedicated connection secrets, or accept
-   that records encrypted with `JWT_SECRET_KEY` fallback will need deletion and
-   reconnection after rotation.
+2. Confirm JIRA and Azure DevOps use dedicated connection secrets, or stage the
+   old `JWT_SECRET_KEY` as a previous key and re-encrypt integration records
+   before removing fallback dependency.
 3. Generate a new long random `JWT_SECRET_KEY`.
 4. Update the runtime secret:
    - Local: update `.env`.
@@ -180,8 +220,12 @@ Managed by the helper when set:
 - `FIREBASE_SERVICE_ACCOUNT_JSON` through `SECRET_FIREBASE_SA_NAME`
 - `METRICS_ACCESS_TOKEN` through `SECRET_METRICS_NAME`
 - `JIRA_CONNECTION_SECRET_KEY` through `SECRET_JIRA_CONNECTION_NAME`
+- `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` through
+  `SECRET_JIRA_CONNECTION_PREVIOUS_NAME`
 - `AZURE_DEVOPS_CONNECTION_SECRET_KEY` through
   `SECRET_AZURE_DEVOPS_CONNECTION_NAME`
+- `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` through
+  `SECRET_AZURE_DEVOPS_CONNECTION_PREVIOUS_NAME`
 
 Rotation steps:
 

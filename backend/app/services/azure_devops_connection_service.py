@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-
-from cryptography.fernet import Fernet, InvalidToken
 
 from ..adapters.azure_devops import AzureDevOpsAdapter, normalize_azure_devops_url
 from ..config import get_azure_devops_settings
@@ -17,9 +13,11 @@ from ..models import (
     AzureDevOpsConnectionSummary,
     AzureDevOpsStoredConnection,
 )
+from .credential_crypto import CredentialCipher, DecryptedCredential, EncryptedCredential
 from .firestore_repository import get_optional_firestore_collection, get_required_firestore_collection
 
 AZURE_DEVOPS_CONNECTIONS_COLLECTION = "azure_devops_user_connections"
+AZURE_DEVOPS_TOKEN_KEY_ID_FIELD = "personal_access_token_key_id"
 
 
 def _utcnow() -> datetime:
@@ -38,24 +36,23 @@ def _get_collection(*, required: bool) -> Optional[object]:
     )
 
 
-def _build_fernet() -> Fernet:
+def _build_cipher() -> CredentialCipher:
     settings = get_azure_devops_settings()
-    raw_secret = str(settings.connection_secret_key or "").strip()
-    if not raw_secret:
-        raise RuntimeError("Azure DevOps connection encryption is not configured. Set AZURE_DEVOPS_CONNECTION_SECRET_KEY or JWT_SECRET_KEY.")
-    derived_key = base64.urlsafe_b64encode(hashlib.sha256(raw_secret.encode("utf-8")).digest())
-    return Fernet(derived_key)
+    return CredentialCipher(
+        provider="azure_devops",
+        primary_secret=settings.connection_secret_key,
+        previous_secrets=settings.previous_connection_secret_keys,
+        missing_secret_message="Azure DevOps connection encryption is not configured. Set AZURE_DEVOPS_CONNECTION_SECRET_KEY or JWT_SECRET_KEY.",
+        decrypt_failure_message="Stored Azure DevOps PAT could not be decrypted with the configured secret",
+    )
 
 
-def _encrypt_pat(personal_access_token: str) -> str:
-    return _build_fernet().encrypt(str(personal_access_token or "").encode("utf-8")).decode("utf-8")
+def _encrypt_pat(personal_access_token: str) -> EncryptedCredential:
+    return _build_cipher().encrypt(personal_access_token)
 
 
-def _decrypt_pat(ciphertext: str) -> str:
-    try:
-        return _build_fernet().decrypt(str(ciphertext or "").encode("utf-8")).decode("utf-8")
-    except InvalidToken as exc:
-        raise RuntimeError("Stored Azure DevOps PAT could not be decrypted with the configured secret") from exc
+def _decrypt_pat(ciphertext: str, *, key_id: str | None = None) -> DecryptedCredential:
+    return _build_cipher().decrypt(ciphertext, key_id=key_id)
 
 
 def _token_hint(personal_access_token: str) -> str:
@@ -103,11 +100,16 @@ def get_decrypted_azure_devops_connection(
             raise LookupError("No stored Azure DevOps connection was found for this user")
         return None
 
+    decrypted_token = _decrypt_pat(
+        encrypted_token,
+        key_id=payload.get(AZURE_DEVOPS_TOKEN_KEY_ID_FIELD) or payload.get("credential_key_id") or None,
+    )
+
     return AzureDevOpsStoredConnection(
         organization_url=payload.get("organization_url"),
         organization=payload.get("organization"),
         default_project=payload.get("default_project") or None,
-        personal_access_token=_decrypt_pat(encrypted_token),
+        personal_access_token=decrypted_token.plaintext,
         auth_type=payload.get("auth_type") or "pat",
         display_name=payload.get("display_name") or None,
         account_email=payload.get("account_email") or None,
@@ -154,6 +156,7 @@ def upsert_azure_devops_connection(
         updated_at=now,
         last_validated_at=now,
     )
+    encrypted_token = _encrypt_pat(payload.personal_access_token)
 
     collection = _get_collection(required=True)
     collection.document(_document_id(current_user)).set(
@@ -165,7 +168,8 @@ def upsert_azure_devops_connection(
             "auth_type": "pat",
             "display_name": connection_summary.display_name,
             "account_email": connection_summary.account_email,
-            "encrypted_personal_access_token": _encrypt_pat(payload.personal_access_token),
+            "encrypted_personal_access_token": encrypted_token.ciphertext,
+            AZURE_DEVOPS_TOKEN_KEY_ID_FIELD: encrypted_token.key_id,
             "token_hint": connection_summary.token_hint,
             "connected_at": connection_summary.connected_at,
             "updated_at": connection_summary.updated_at,
@@ -177,6 +181,62 @@ def upsert_azure_devops_connection(
     )
 
     return AzureDevOpsConnectionStatusResponse(connected=True, connection=connection_summary)
+
+
+def reencrypt_azure_devops_connection_credentials(*, dry_run: bool = False) -> dict[str, int | str | bool]:
+    collection = _get_collection(required=True)
+    cipher = _build_cipher()
+    result: dict[str, int | str | bool] = {
+        "provider": "azure_devops",
+        "dry_run": dry_run,
+        "checked": 0,
+        "reencrypted": 0,
+        "metadata_updated": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+
+    for snapshot in collection.stream():
+        result["checked"] = int(result["checked"]) + 1
+        payload = snapshot.to_dict() or {}
+        encrypted_token = str(payload.get("encrypted_personal_access_token") or "").strip()
+        if not encrypted_token:
+            result["skipped"] = int(result["skipped"]) + 1
+            continue
+
+        stored_key_id = str(payload.get(AZURE_DEVOPS_TOKEN_KEY_ID_FIELD) or payload.get("credential_key_id") or "").strip() or None
+        try:
+            decrypted = cipher.decrypt(encrypted_token, key_id=stored_key_id)
+        except RuntimeError:
+            result["failed"] = int(result["failed"]) + 1
+            continue
+
+        updates: dict[str, object] = {}
+        if decrypted.used_primary:
+            if stored_key_id != cipher.primary_key_id:
+                updates[AZURE_DEVOPS_TOKEN_KEY_ID_FIELD] = cipher.primary_key_id
+                updates["credential_reencrypted_at"] = _utcnow()
+                result["metadata_updated"] = int(result["metadata_updated"]) + 1
+            else:
+                result["skipped"] = int(result["skipped"]) + 1
+        else:
+            encrypted = cipher.encrypt(decrypted.plaintext)
+            updates.update(
+                {
+                    "encrypted_personal_access_token": encrypted.ciphertext,
+                    AZURE_DEVOPS_TOKEN_KEY_ID_FIELD: encrypted.key_id,
+                    "credential_reencrypted_at": _utcnow(),
+                }
+            )
+            result["reencrypted"] = int(result["reencrypted"]) + 1
+
+        if updates and not dry_run:
+            collection.document(snapshot.id).set(updates, merge=True)
+
+    if int(result["failed"]):
+        logging.warning("Azure DevOps credential re-encryption skipped %s record(s) that could not be decrypted.", result["failed"])
+
+    return result
 
 
 def delete_azure_devops_connection(*, current_user: AuthUser) -> None:

@@ -31,7 +31,7 @@ generated client submission outputs.
 | `firebase-admin` | `>=7.4.0` | Firebase ID token verification and Firestore client access | `backend/requirements.txt`, `backend/app/auth/firebase_auth.py`, `backend/app/services/firebase_admin.py` |
 | `PyJWT` | `>=2.13.0` | Backend-issued legacy/local JWT support and E2E helper token minting | `backend/requirements.txt`, `backend/app/auth/jwt_auth.py`, `scripts/e2e_playwright_workflow.py` |
 | `google-auth` | `>=2.53.0` | Google credential verification for `/auth/google/login` | `backend/requirements.txt`, `backend/app/auth/google_auth.py` |
-| `cryptography` | `>=48.0.1` | Fernet encryption for stored JIRA tokens and Azure DevOps PATs | `backend/requirements.txt`, `backend/app/services/jira_connection_service.py`, `backend/app/services/azure_devops_connection_service.py` |
+| `cryptography` | `>=48.0.1` | Fernet encryption and key-rotation support for stored JIRA tokens and Azure DevOps PATs | `backend/requirements.txt`, `backend/app/services/credential_crypto.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/azure_devops_connection_service.py` |
 | `python-docx` | `>=1.2.0` | Word requirement parsing and client brief generation | `backend/requirements.txt`, `backend/app/routers/requirements.py`, `scripts/build_client_solution_brief.py` |
 | `openpyxl` | `>=3.1.5` | Excel requirement parsing and XLSX export | `backend/requirements.txt`, `backend/app/utils/excel_parser.py`, `backend/app/agents/export_agent.py` |
 | `PyYAML` | `>=6.0.3` | Plain-English spec, IR, environment, and data fixture handling | `backend/requirements.txt`, `backend/plain_english_test_framework/compiler.py` |
@@ -114,7 +114,9 @@ Required or important backend variables:
 - `FIREBASE_PROJECT_ID`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `JIRA_CONNECTION_SECRET_KEY`
+- `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS`
 - `AZURE_DEVOPS_CONNECTION_SECRET_KEY`
+- `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS`
 - `EXECUTION_ENABLED`
 - `EXECUTION_ARTIFACT_ROOT`
 - `EXECUTION_DEFAULT_BASE_URL`
@@ -149,10 +151,10 @@ Deployment/runtime constraints:
   command is dry-run by default and targets `.execution_artifacts/`,
   `client_submission/`, and `/tmp/pw_workflow_out`.
 - `scripts/deploy_cloud_run.sh` stores required Gemini/JWT secrets, optional
-  Firebase Admin and metrics secrets, and optional dedicated
-  JIRA/Azure DevOps connection encryption keys in Secret Manager when those
-  values are set locally. See `docs/credential-rotation-runbook.md` before
-  rotating production secrets.
+  Firebase Admin and metrics secrets, optional dedicated JIRA/Azure DevOps
+  connection encryption keys, and optional previous-key rotation lists in
+  Secret Manager when those values are set locally. See
+  `docs/credential-rotation-runbook.md` before rotating production secrets.
 
 ## 6) Evidence
 
@@ -164,10 +166,12 @@ Deployment/runtime constraints:
 - `backend/execution_runtime/package.json`
 - `backend/app/config.py`
 - `backend/app/main.py`
+- `backend/app/services/credential_crypto.py`
 - `.env.example`
 - `.github/workflows/ci.yml`
 - `backend/Dockerfile`
 - `frontend/Dockerfile`
 - `compose.yaml`
 - `scripts/deploy_cloud_run.sh`
+- `scripts/reencrypt_integration_credentials.py`
 - `docs/credential-rotation-runbook.md`

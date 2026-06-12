@@ -150,7 +150,7 @@ The conversion and run path is implemented by
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe or unsupported public URLs and returns partial enrichment warnings instead of crashing |
-| Provider adapter plus service | JIRA and Azure DevOps adapter/service pairs | Separates remote API mechanics from import/sync workflow policy |
+| Provider adapter plus service | JIRA and Azure DevOps adapter/service pairs plus shared credential crypto helper | Separates remote API mechanics, credential storage/rotation, and import/sync workflow policy |
 | Local fake/patch tests | `backend/tests/test_*` | Keeps tests independent from real Firestore, JIRA, Azure DevOps, Firebase, and model calls |
 | Generated artifact isolation | `.execution_artifacts/`, `client_submission/`, runtime artifact directories | Prevents local outputs, traces, screenshots, and exports from becoming source |
 

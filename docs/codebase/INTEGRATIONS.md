@@ -40,7 +40,7 @@ Credential sources:
 - Firebase Admin credentials through `FIREBASE_SERVICE_ACCOUNT_JSON` or
   `GOOGLE_APPLICATION_CREDENTIALS`.
 - User JIRA API tokens and Azure DevOps PATs are submitted through protected
-  endpoints and encrypted before Firestore storage.
+  endpoints and encrypted before Firestore storage with non-secret key metadata.
 
 Hardcoding checks:
 
@@ -56,13 +56,15 @@ Rotation/lifecycle notes:
   `AZURE_DEVOPS_CONNECTION_SECRET_KEY`, `JWT_SECRET_KEY`, `GEMINI_API_KEY`,
   Firebase Admin credential, metrics token, and Cloud Run Secret Manager
   rotation steps.
-- Existing encrypted JIRA/Azure DevOps records do not store a key id and cannot
-  be decrypted after the configured integration encryption key changes. Issue
-  [#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77)
-  tracks seamless previous-key and re-encryption support.
+- JIRA/Azure DevOps connection services encrypt new writes with a primary
+  connection secret, can read records encrypted with configured previous keys
+  during a rotation window, and expose
+  `scripts/reencrypt_integration_credentials.py` to re-encrypt records with the
+  primary key before previous keys are removed.
 - `scripts/deploy_cloud_run.sh` creates new Secret Manager versions for managed
   secrets and now includes optional dedicated JIRA/Azure DevOps connection
-  encryption-key secrets when those values are set.
+  encryption-key secrets plus previous-key rotation secrets when those values
+  are set.
 - `docs/production-auth-policy-decision.md` defines Firebase ID tokens as the
   production protected-endpoint token type and backend JWTs as local/test
   compatibility tokens.
@@ -83,7 +85,7 @@ Rotation/lifecycle notes:
   `AUDIT_DEAD_LETTER_BACKEND=firestore` to also write the same sanitized
   summary shape to the `AUDIT_DEAD_LETTER_COLLECTION` Firestore collection.
 - JIRA and Azure DevOps connection services encrypt tokens and surface status
-  summaries with token hints.
+  summaries with token hints and non-secret encryption-key metadata.
 - Execution preview classifies candidates as executable, manual, unsupported,
   or invalid before any subprocess run.
 - Execution run limits cases per request by `EXECUTION_MAX_CASES_PER_REQUEST`.
@@ -125,6 +127,7 @@ Missing visibility gaps:
 - `backend/app/services/usage_event_repository.py`
 - `backend/app/services/artifact_fetcher.py`
 - `backend/app/services/context_grounding.py`
+- `backend/app/services/credential_crypto.py`
 - `docs/artifact-fetching-threat-model.md`
 - `backend/app/services/audit_service.py`
 - `backend/app/services/billing_repository.py`
@@ -134,5 +137,6 @@ Missing visibility gaps:
 - `backend/app/adapters/azure_devops.py`
 - `backend/execution_runtime/playwright.config.ts`
 - `scripts/deploy_cloud_run.sh`
+- `scripts/reencrypt_integration_credentials.py`
 - `docs/credential-rotation-runbook.md`
 - `docs/observability-logging-tracing-feature.md`

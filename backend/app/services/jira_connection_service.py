@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-
-from cryptography.fernet import Fernet, InvalidToken
 
 from ..adapters.jira import JiraAdapter
 from ..config import get_jira_settings
@@ -17,9 +13,11 @@ from ..models import (
     JiraConnectionSummary,
     JiraStoredConnection,
 )
+from .credential_crypto import CredentialCipher, DecryptedCredential, EncryptedCredential
 from .firestore_repository import get_optional_firestore_collection, get_required_firestore_collection
 
 JIRA_CONNECTIONS_COLLECTION = "jira_user_connections"
+JIRA_TOKEN_KEY_ID_FIELD = "api_token_key_id"
 
 
 def _utcnow() -> datetime:
@@ -38,24 +36,23 @@ def _get_collection(*, required: bool) -> Optional[object]:
     )
 
 
-def _build_fernet() -> Fernet:
+def _build_cipher() -> CredentialCipher:
     settings = get_jira_settings()
-    raw_secret = str(settings.connection_secret_key or "").strip()
-    if not raw_secret:
-        raise RuntimeError("JIRA connection encryption is not configured. Set JIRA_CONNECTION_SECRET_KEY or JWT_SECRET_KEY.")
-    derived_key = base64.urlsafe_b64encode(hashlib.sha256(raw_secret.encode("utf-8")).digest())
-    return Fernet(derived_key)
+    return CredentialCipher(
+        provider="jira",
+        primary_secret=settings.connection_secret_key,
+        previous_secrets=settings.previous_connection_secret_keys,
+        missing_secret_message="JIRA connection encryption is not configured. Set JIRA_CONNECTION_SECRET_KEY or JWT_SECRET_KEY.",
+        decrypt_failure_message="Stored JIRA API token could not be decrypted with the configured secret",
+    )
 
 
-def _encrypt_api_token(api_token: str) -> str:
-    return _build_fernet().encrypt(str(api_token or "").encode("utf-8")).decode("utf-8")
+def _encrypt_api_token(api_token: str) -> EncryptedCredential:
+    return _build_cipher().encrypt(api_token)
 
 
-def _decrypt_api_token(ciphertext: str) -> str:
-    try:
-        return _build_fernet().decrypt(str(ciphertext or "").encode("utf-8")).decode("utf-8")
-    except InvalidToken as exc:
-        raise RuntimeError("Stored JIRA API token could not be decrypted with the configured secret") from exc
+def _decrypt_api_token(ciphertext: str, *, key_id: str | None = None) -> DecryptedCredential:
+    return _build_cipher().decrypt(ciphertext, key_id=key_id)
 
 
 def _token_hint(api_token: str) -> str:
@@ -99,10 +96,12 @@ def get_decrypted_jira_connection(*, current_user: AuthUser, required: bool = Tr
             raise LookupError("No stored JIRA connection was found for this user")
         return None
 
+    decrypted_token = _decrypt_api_token(encrypted_token, key_id=payload.get(JIRA_TOKEN_KEY_ID_FIELD) or payload.get("credential_key_id") or None)
+
     return JiraStoredConnection(
         base_url=payload.get("base_url"),
         email=payload.get("email"),
-        api_token=_decrypt_api_token(encrypted_token),
+        api_token=decrypted_token.plaintext,
         account_id=payload.get("account_id") or None,
         display_name=payload.get("display_name") or None,
         api_token_hint=payload.get("api_token_hint") or None,
@@ -134,6 +133,7 @@ def upsert_jira_connection(*, current_user: AuthUser, payload: JiraConnectionInp
         updated_at=now,
         last_validated_at=now,
     )
+    encrypted_token = _encrypt_api_token(payload.api_token)
 
     collection = _get_collection(required=True)
     collection.document(_document_id(current_user)).set(
@@ -141,7 +141,8 @@ def upsert_jira_connection(*, current_user: AuthUser, payload: JiraConnectionInp
             "user_id": current_user.sub,
             "base_url": str(connection_summary.base_url).rstrip("/"),
             "email": connection_summary.email,
-            "encrypted_api_token": _encrypt_api_token(payload.api_token),
+            "encrypted_api_token": encrypted_token.ciphertext,
+            JIRA_TOKEN_KEY_ID_FIELD: encrypted_token.key_id,
             "api_token_hint": connection_summary.api_token_hint,
             "account_id": connection_summary.account_id,
             "display_name": connection_summary.display_name,
@@ -155,6 +156,62 @@ def upsert_jira_connection(*, current_user: AuthUser, payload: JiraConnectionInp
     )
 
     return JiraConnectionStatusResponse(connected=True, connection=connection_summary)
+
+
+def reencrypt_jira_connection_credentials(*, dry_run: bool = False) -> dict[str, int | str | bool]:
+    collection = _get_collection(required=True)
+    cipher = _build_cipher()
+    result: dict[str, int | str | bool] = {
+        "provider": "jira",
+        "dry_run": dry_run,
+        "checked": 0,
+        "reencrypted": 0,
+        "metadata_updated": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+
+    for snapshot in collection.stream():
+        result["checked"] = int(result["checked"]) + 1
+        payload = snapshot.to_dict() or {}
+        encrypted_token = str(payload.get("encrypted_api_token") or "").strip()
+        if not encrypted_token:
+            result["skipped"] = int(result["skipped"]) + 1
+            continue
+
+        stored_key_id = str(payload.get(JIRA_TOKEN_KEY_ID_FIELD) or payload.get("credential_key_id") or "").strip() or None
+        try:
+            decrypted = cipher.decrypt(encrypted_token, key_id=stored_key_id)
+        except RuntimeError:
+            result["failed"] = int(result["failed"]) + 1
+            continue
+
+        updates: dict[str, object] = {}
+        if decrypted.used_primary:
+            if stored_key_id != cipher.primary_key_id:
+                updates[JIRA_TOKEN_KEY_ID_FIELD] = cipher.primary_key_id
+                updates["credential_reencrypted_at"] = _utcnow()
+                result["metadata_updated"] = int(result["metadata_updated"]) + 1
+            else:
+                result["skipped"] = int(result["skipped"]) + 1
+        else:
+            encrypted = cipher.encrypt(decrypted.plaintext)
+            updates.update(
+                {
+                    "encrypted_api_token": encrypted.ciphertext,
+                    JIRA_TOKEN_KEY_ID_FIELD: encrypted.key_id,
+                    "credential_reencrypted_at": _utcnow(),
+                }
+            )
+            result["reencrypted"] = int(result["reencrypted"]) + 1
+
+        if updates and not dry_run:
+            collection.document(snapshot.id).set(updates, merge=True)
+
+    if int(result["failed"]):
+        logging.warning("JIRA credential re-encryption skipped %s record(s) that could not be decrypted.", result["failed"])
+
+    return result
 
 
 def delete_jira_connection(*, current_user: AuthUser) -> None:

@@ -18,6 +18,7 @@ from app.config import (
     _load_environment_file,
     _warn_if_dependency_mismatch,
     get_auth_settings,
+    get_azure_devops_settings,
     get_billing_settings,
     get_jira_settings,
     get_metrics_settings,
@@ -31,6 +32,7 @@ class ConfigSettingsTests(unittest.TestCase):
         get_settings.cache_clear()
         get_billing_settings.cache_clear()
         get_jira_settings.cache_clear()
+        get_azure_devops_settings.cache_clear()
         get_metrics_settings.cache_clear()
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
@@ -193,6 +195,7 @@ class ConfigSettingsTests(unittest.TestCase):
                 "JWT_SECRET_KEY": "jwt-secret-key",
                 "AUTH_TOKEN_MODE": AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT,
                 "JIRA_CONNECTION_SECRET_KEY": "",
+                "JIRA_CONNECTION_PREVIOUS_SECRET_KEYS": "old-jira-1, old-jira-2, old-jira-1",
                 "JIRA_API_TIMEOUT_SECONDS": "18",
                 "JIRA_PROJECT_PAGE_SIZE": "25",
                 "JIRA_ISSUE_PAGE_SIZE": "40",
@@ -204,9 +207,36 @@ class ConfigSettingsTests(unittest.TestCase):
             settings = get_jira_settings()
 
         self.assertEqual(settings.connection_secret_key, "jwt-secret-key")
+        self.assertEqual(settings.previous_connection_secret_keys, ["old-jira-1", "old-jira-2"])
         self.assertEqual(settings.api_timeout_seconds, 18)
         self.assertEqual(settings.project_page_size, 25)
         self.assertEqual(settings.issue_page_size, 40)
+
+    def test_get_azure_devops_settings_parses_previous_keys_and_limits(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "JWT_SECRET_KEY": "jwt-secret-key",
+                "AUTH_TOKEN_MODE": AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT,
+                "AZURE_DEVOPS_CONNECTION_SECRET_KEY": "azure-primary",
+                "AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS": "old-azure-1, old-azure-2",
+                "AZURE_DEVOPS_API_TIMEOUT_SECONDS": "19",
+                "AZURE_DEVOPS_API_VERSION": "7.2-preview",
+                "AZURE_DEVOPS_PROJECT_PAGE_SIZE": "30",
+                "AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE": "45",
+            },
+            clear=False,
+        ):
+            get_auth_settings.cache_clear()
+            get_azure_devops_settings.cache_clear()
+            settings = get_azure_devops_settings()
+
+        self.assertEqual(settings.connection_secret_key, "azure-primary")
+        self.assertEqual(settings.previous_connection_secret_keys, ["old-azure-1", "old-azure-2"])
+        self.assertEqual(settings.api_timeout_seconds, 19)
+        self.assertEqual(settings.api_version, "7.2-preview")
+        self.assertEqual(settings.project_page_size, 30)
+        self.assertEqual(settings.work_item_page_size, 45)
 
 
 if __name__ == "__main__":
