@@ -17,7 +17,7 @@ used by the tracked source.
 | Remote artifact URLs | External HTTP(S) resources | Ground app/prototype/diagram/image links into UI/API/workflow context | Public HTTP(S), no user-supplied auth | Medium | `backend/app/services/artifact_fetcher.py`, `backend/app/services/context_grounding.py`, `backend/app/routers/requirements.py` |
 | Playwright Test execution runtime | Local subprocess/runtime | Convert executable candidates into generated specs, run selected cases, collect reports | Local process, environment config | High for automation feature | `backend/app/services/execution_service.py`, `backend/plain_english_test_framework/local_runner.py`, `backend/execution_runtime/playwright.config.ts` |
 | Cloud Run / Artifact Registry / Secret Manager | Deployment platform | Deploy backend and frontend containers to managed infrastructure | `gcloud` credentials and Secret Manager | Medium | `scripts/deploy_cloud_run.sh`, `backend/Dockerfile`, `frontend/Dockerfile` |
-| Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, and audit failure counters | Public route unless deployment protects it | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py` |
+| Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, and audit failure counters when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `scripts/deploy_cloud_run.sh` |
 | OpenTelemetry | Optional tracing | FastAPI tracing and trace ID propagation | `OTEL_*` environment variables | Medium | `backend/app/observability/tracing.py`, `backend/requirements.txt` |
 
 ## 2) Data Stores
@@ -82,7 +82,8 @@ Rotation/lifecycle notes:
   trace ID, method, path, status, and duration.
 - Agent workflow logs carry request/workflow/user/operation context.
 - `/metrics` exposes Prometheus-compatible counters and durations through
-  `backend/app/observability/metrics.py`.
+  `backend/app/observability/metrics.py` when `METRICS_ENABLED=true`. Cloud Run
+  deployments default it off and require `METRICS_ACCESS_TOKEN` if enabled.
 - Optional OpenTelemetry tracing is configured through
   `backend/app/observability/tracing.py`.
 

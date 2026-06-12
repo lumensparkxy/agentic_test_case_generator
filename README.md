@@ -39,6 +39,8 @@ Copy .env.example to .env and set values:
 - JWT_ALGORITHM (default: HS256)
 - JWT_EXPIRATION_MINUTES (default: 60)
 - AUTH_TOKEN_MODE (`firebase-only` for production; `firebase-or-backend-jwt` only for local/E2E compatibility)
+- METRICS_ENABLED (defaults to true locally; Cloud Run deploy helper defaults to false)
+- METRICS_ACCESS_TOKEN (optional bearer token required for `/metrics` when set; required by the deploy helper if `METRICS_ENABLED=true`)
 - VITE_GOOGLE_CLIENT_ID (optional compatibility-mode Google client ID hint)
 - VITE_FIREBASE_API_KEY (required for frontend sign-in button)
 - VITE_FIREBASE_AUTH_DOMAIN (required for frontend sign-in button)
@@ -229,6 +231,7 @@ Prerequisites:
 	- `VITE_FIREBASE_APP_ID`
 	- `JWT_SECRET_KEY`
 	- `AUTH_TOKEN_MODE=firebase-only`
+	- `METRICS_ENABLED=false` or `METRICS_ENABLED=true` with `METRICS_ACCESS_TOKEN`
 
 Set your target project and optionally the region/repository/service names:
 
@@ -248,6 +251,7 @@ What the script does:
 - creates the Docker Artifact Registry repository if needed
 - stores `GEMINI_API_KEY` and `JWT_SECRET_KEY` in Secret Manager
 - requires and deploys `AUTH_TOKEN_MODE=firebase-only`
+- deploys `METRICS_ENABLED=false` by default, or stores `METRICS_ACCESS_TOKEN` in Secret Manager when metrics are explicitly enabled
 - optionally stores `FIREBASE_SERVICE_ACCOUNT_JSON` in Secret Manager when provided
 - if `GOOGLE_APPLICATION_CREDENTIALS` points to a local Firebase Admin SDK JSON file, the deploy script reads that file and uploads it as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret automatically
 - builds and pushes the backend container
@@ -274,6 +278,7 @@ Backend-issued JWTs and `/auth/google/login` are available only in
 	- `POST /auth/google/login` (compatibility mode only)
 	- `GET /auth/me`
 	- `POST /auth/logout`
+	- `GET /metrics` only when `METRICS_ENABLED=true`; requires `Authorization: Bearer <METRICS_ACCESS_TOKEN>` when a metrics token is configured
 - Protected endpoints (Bearer token required):
 	- `/requirements/*`
 	- `/testcases/*`
@@ -292,6 +297,7 @@ Frontend stores the access token in `localStorage` for the current MVP.
 - Compatibility-mode Google sign-in fails with audience/issuer errors: verify `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` exactly match the same web OAuth client ID, or list every valid web client ID in `GOOGLE_CLIENT_IDS`.
 - Login button missing: verify the Firebase web variables are present in `.env` and restart the frontend dev server.
 - Requests return 401 after login: token may be expired or invalid; sign out/in again. For local JWT workflows, confirm `AUTH_TOKEN_MODE=firebase-or-backend-jwt` and `JWT_SECRET_KEY` are set.
+- `/metrics` returns 404: set `METRICS_ENABLED=true` for local diagnostics or configure the deployment perimeter/token intentionally. `/metrics` returns 401 when `METRICS_ACCESS_TOKEN` is set and the bearer token is missing or wrong.
 - Azure DevOps connection fails with 401/403: verify the PAT is active, belongs to an account with access to the organization, and includes Project/team read plus Work Items read/write scopes.
 - Azure DevOps project import requires a project: use a project URL during connection or select/provide a project before searching/importing work items.
 

@@ -51,7 +51,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-12.
   - Done: [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50) - Spike: define production auth policy for Firebase and JWT
   - Done: [#51](https://github.com/lumensparkxy/agentic_test_case_generator/issues/51) - Enforce accepted production auth mode explicitly
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
-  - Ready: [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
+  - Done: [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
   - Ready: [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command
   - Ready: [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
   - Ready: [#55](https://github.com/lumensparkxy/agentic_test_case_generator/issues/55) - Add integration latency and error metrics for JIRA and Azure DevOps
