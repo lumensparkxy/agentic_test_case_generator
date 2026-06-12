@@ -23,6 +23,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - `docs/codebase/TESTING.md` lists validation gates and folds in the reproducible Playwright documentation E2E workflow for the next version.
 - `docs/codebase/CONCERNS.md` records high-churn areas, technical debt, security/scaling concerns, and open architecture questions.
 - `docs/production-auth-policy-decision.md` records the accepted production auth policy: Firebase ID tokens in production, backend JWTs only for explicit local/E2E compatibility.
+- `docs/artifact-fetching-threat-model.md` defines the accepted public, unauthenticated remote artifact fetching boundary and SSRF controls.
 - `docs/credential-rotation-runbook.md` documents rotation steps for JIRA tokens, Azure DevOps PATs, JWT/Gemini/Firebase secrets, and Cloud Run Secret Manager entries.
 
 ## Setup

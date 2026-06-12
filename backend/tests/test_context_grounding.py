@@ -71,6 +71,34 @@ class ContextGroundingTests(unittest.TestCase):
         self.assertTrue(grounded_context.workflows)
         self.assertIn("Draft → Submitted", grounded_context.workflows[0].transitions)
 
+    def test_build_grounded_context_preserves_partial_warnings_when_fetching_fails(self) -> None:
+        payload = EnrichInput(
+            requirements=[Requirement(id="REQ-001", text="The system shall show the app dashboard.")],
+            app_link="https://example.com/app",
+            prototype_link="https://example.com/prototype",
+        )
+
+        def fake_fetcher(url: str) -> dict:
+            if url.endswith("/prototype"):
+                raise TimeoutError("raw timeout detail")
+            return {
+                "url": url,
+                "status": "Skipped",
+                "content_type": "application/pdf",
+                "text": None,
+                "error": "Unsupported artifact content type: application/pdf.",
+            }
+
+        grounded_context = build_grounded_context(payload, fetcher=fake_fetcher)
+
+        self.assertEqual(len(grounded_context.artifact_sources), 2)
+        self.assertEqual(grounded_context.artifact_sources[0].status, "Skipped")
+        self.assertIn("Unsupported artifact content type", grounded_context.artifact_sources[0].notes)
+        self.assertEqual(grounded_context.artifact_sources[1].status, "Unavailable")
+        self.assertEqual(grounded_context.artifact_sources[1].notes, "Artifact fetch failed: TimeoutError")
+        self.assertIn("skipped 1", grounded_context.summary)
+        self.assertIn("unavailable 1", grounded_context.summary)
+
 
 if __name__ == "__main__":
     unittest.main()

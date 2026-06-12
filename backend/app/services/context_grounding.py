@@ -226,10 +226,20 @@ def build_grounded_context(payload: EnrichInput, fetcher: FetchArtifactFn = fetc
 
     analyzed_count = 0
     unavailable_count = 0
+    skipped_count = 0
     for index, source in enumerate(list(artifact_sources)):
         if not source.url:
             continue
-        result = fetcher(str(source.url))
+        try:
+            result = fetcher(str(source.url))
+        except Exception as exc:  # pragma: no cover - defensive around injected fetchers
+            result = {
+                "url": str(source.url),
+                "status": "Unavailable",
+                "content_type": None,
+                "text": None,
+                "error": f"Artifact fetch failed: {exc.__class__.__name__}",
+            }
         artifact_sources[index] = source.model_copy(
             update={
                 "status": result.get("status") or source.status,
@@ -240,6 +250,8 @@ def build_grounded_context(payload: EnrichInput, fetcher: FetchArtifactFn = fetc
             analyzed_count += 1
         elif result.get("status") == "Unavailable":
             unavailable_count += 1
+        elif result.get("status") == "Skipped":
+            skipped_count += 1
 
         if result.get("status") != "Analyzed" or not result.get("text"):
             continue
@@ -252,7 +264,8 @@ def build_grounded_context(payload: EnrichInput, fetcher: FetchArtifactFn = fetc
             api_surfaces.extend(extract_api_surfaces_from_json(source.id, text))
 
     summary = (
-        f"Registered {len(artifact_sources)} artifact reference(s); analyzed {analyzed_count}, unavailable {unavailable_count}. "
+        f"Registered {len(artifact_sources)} artifact reference(s); analyzed {analyzed_count}, unavailable {unavailable_count}, "
+        f"skipped {skipped_count}. "
         f"Extracted {len(ui_elements)} UI element(s), {len(api_surfaces)} API surface(s), and {len(workflows)} workflow(s)."
     )
 

@@ -14,7 +14,7 @@ used by the tracked source.
 | Firestore | External data store | Audit events, workflow runs, optional audit dead-letter summaries, version records, connection records, billing repository, reporting data | Firebase Admin SDK credentials | High | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, `backend/app/services/audit_repository.py`, `backend/app/services/versioning_service.py`, `backend/app/services/billing_repository.py`, `backend/app/services/usage_event_repository.py` |
 | JIRA Cloud | External API | Store user JIRA connection, import requirements, sync managed requirement blocks, export tests placeholder | User email plus API token, token encrypted before storage | High | `backend/app/adapters/jira.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py`, `backend/app/routers/integrations_jira.py` |
 | Azure DevOps Services | External API | Store user Azure DevOps connection, import work items, sync managed requirement blocks | Personal Access Token, encrypted before storage | High | `backend/app/adapters/azure_devops.py`, `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py`, `backend/app/routers/integrations_azure_devops.py` |
-| Remote artifact URLs | External HTTP(S) resources | Ground app/prototype/diagram/image links into UI/API/workflow context | Public HTTP(S), no user-supplied auth | Medium | `backend/app/services/artifact_fetcher.py`, `backend/app/services/context_grounding.py`, `backend/app/routers/requirements.py` |
+| Remote artifact URLs | External HTTP(S) resources | Ground app/prototype/diagram/image links into UI/API/workflow context | Public unauthenticated HTTP(S), textual content only, no embedded credentials | Medium | `backend/app/services/artifact_fetcher.py`, `backend/app/services/context_grounding.py`, `backend/app/routers/requirements.py`, `docs/artifact-fetching-threat-model.md` |
 | Playwright Test execution runtime | Local subprocess/runtime | Convert executable candidates into generated specs, run selected cases, collect reports | Local process, environment config | High for automation feature | `backend/app/services/execution_service.py`, `backend/plain_english_test_framework/local_runner.py`, `backend/execution_runtime/playwright.config.ts` |
 | Cloud Run / Artifact Registry / Secret Manager | Deployment platform | Deploy backend and frontend containers to managed infrastructure | `gcloud` credentials and Secret Manager | Medium | `scripts/deploy_cloud_run.sh`, `backend/Dockerfile`, `frontend/Dockerfile` |
 | Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, audit failure, audit dead-letter sink, and integration request counters/durations when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `backend/app/observability/integrations.py`, `scripts/deploy_cloud_run.sh` |
@@ -71,10 +71,13 @@ Rotation/lifecycle notes:
 
 - Agent workflows include parser diagnostics, retryable parser failure checks,
   deterministic fallback output, and public workflow diagnostics.
-- Artifact fetching blocks non-HTTP(S), loopback, local, private, reserved,
-  multicast, and unresolved hosts before fetch.
-- Artifact fetching has request timeout, byte limit, redirect limit, and partial
-  failure behavior.
+- Artifact fetching blocks non-HTTP(S), embedded credentials, loopback, local,
+  private, reserved, multicast, unresolved, and DNS-to-private hosts before
+  fetch.
+- Artifact fetching has request timeout, byte limit, redirect limit,
+  unsupported-content rejection, and partial failure behavior. Authenticated or
+  internal artifact fetching is out of scope without a separate allow-list or
+  proxy design.
 - Audit writes use bounded retry settings and sanitized local dead-letter
   summaries. Compliance deployments can set
   `AUDIT_DEAD_LETTER_BACKEND=firestore` to also write the same sanitized
@@ -122,6 +125,7 @@ Missing visibility gaps:
 - `backend/app/services/usage_event_repository.py`
 - `backend/app/services/artifact_fetcher.py`
 - `backend/app/services/context_grounding.py`
+- `docs/artifact-fetching-threat-model.md`
 - `backend/app/services/audit_service.py`
 - `backend/app/services/billing_repository.py`
 - `backend/app/observability/integrations.py`

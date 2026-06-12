@@ -11,6 +11,8 @@ import certifi
 MAX_FETCH_BYTES = 512 * 1024
 FETCH_TIMEOUT_SECONDS = 8
 MAX_REDIRECTS = 3
+SUPPORTED_TEXT_CONTENT_TYPES = ("text/",)
+SUPPORTED_STRUCTURED_CONTENT_MARKERS = ("json", "xml")
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -54,6 +56,9 @@ def is_safe_artifact_url(url: str, *, resolver: Optional[Any] = None) -> Tuple[b
     if parsed.scheme not in {"http", "https"}:
         return False, "Only http and https artifact URLs are allowed."
 
+    if parsed.username or parsed.password:
+        return False, "Embedded credentials in artifact URLs are blocked."
+
     hostname = (parsed.hostname or "").strip().lower()
     if not hostname:
         return False, "Artifact URL must include a hostname."
@@ -77,6 +82,12 @@ def is_safe_artifact_url(url: str, *, resolver: Optional[Any] = None) -> Tuple[b
             return False, "Artifact hostname resolves to a private or non-routable address."
 
     return True, None
+
+
+def _content_type_is_supported(content_type: str | None) -> bool:
+    if not content_type:
+        return False
+    return content_type.startswith(SUPPORTED_TEXT_CONTENT_TYPES) or any(marker in content_type for marker in SUPPORTED_STRUCTURED_CONTENT_MARKERS)
 
 
 def fetch_artifact(
@@ -148,13 +159,25 @@ def fetch_artifact(
             "text": None,
             "error": f"HTTP {exc.code}",
         }
-    except URLError as exc:
+    except TimeoutError:
         return {
             "url": current_url,
             "status": "Unavailable",
             "content_type": None,
             "text": None,
-            "error": str(exc.reason),
+            "error": "Artifact fetch timed out.",
+        }
+    except URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            error = "Artifact fetch timed out."
+        else:
+            error = str(exc.reason)
+        return {
+            "url": current_url,
+            "status": "Unavailable",
+            "content_type": None,
+            "text": None,
+            "error": error,
         }
     except Exception as exc:  # pragma: no cover - defensive catch for network stack errors
         return {
@@ -174,10 +197,16 @@ def fetch_artifact(
             "error": f"Artifact exceeded the {max_bytes} byte size limit.",
         }
 
-    if content_type and (content_type.startswith("text/") or "json" in content_type or "xml" in content_type):
-        text = payload.decode("utf-8", errors="replace")
-    else:
-        text = None
+    if not _content_type_is_supported(content_type):
+        return {
+            "url": current_url,
+            "status": "Skipped",
+            "content_type": content_type,
+            "text": None,
+            "error": f"Unsupported artifact content type: {content_type or 'missing'}.",
+        }
+
+    text = payload.decode("utf-8", errors="replace")
 
     return {
         "url": current_url,
