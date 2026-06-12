@@ -9,7 +9,7 @@ git/history checks. It is not a full bug backlog.
 |----------|---------|----------|--------|------------------|
 | High | Large, high-churn orchestration and contract files remain central to the app | `frontend/src/App.jsx`, `backend/app/agents/test_case_agent.py`, `backend/app/models.py`, recent git history | Higher regression and merge risk for UI workflow, prompt orchestration, and API contracts | Continue behavior-preserving extraction under issue-scoped frontend, agent, and contract refactor tasks |
 | High | PostgreSQL persistence adapter, schema, and migration plan are not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firestore_repository.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_repository.py` | Audit, billing, and reporting now have repository seams but still use Firestore as the transitional runtime store | Define PostgreSQL schema/migrations and add a PostgreSQL adapter behind the #49 boundaries |
-| Medium | Dual auth support can blur production policy | `backend/app/auth/jwt_auth.py`, `backend/app/auth/firebase_auth.py`, `backend/app/routers/auth.py`, `frontend/src/App.jsx` | Local/E2E JWT compatibility is useful, but production paths need clear accepted-token policy | Document deployment auth mode and eventually remove or isolate legacy JWT if no longer needed |
+| Medium | Accepted auth policy is documented but not enforced yet | `docs/production-auth-policy-decision.md`, `backend/app/auth/jwt_auth.py`, `backend/app/auth/firebase_auth.py`, `backend/app/routers/auth.py`, `frontend/src/App.jsx` | Production should accept Firebase ID tokens only, while local/E2E backend JWT compatibility remains explicit | Implement #51 with `AUTH_TOKEN_MODE=firebase-only` and `AUTH_TOKEN_MODE=firebase-or-backend-jwt` |
 | Medium | Metrics endpoint exposure depends on deployment perimeter | `backend/app/main.py`, `backend/app/observability/metrics.py` | `/metrics` may expose operational metadata if public deployments do not protect it | Decide deployment access policy for `/metrics` |
 
 ## 2) Technical Debt
@@ -55,13 +55,13 @@ git/history checks. It is not a full bug backlog.
 
 ## 6) `[ASK USER]` Questions
 
-1. [ASK USER] Should backend-issued JWT support stay as a supported local/E2E compatibility mode after Firebase Auth becomes the default production identity path?
-2. [ASK USER] What retention window should apply to `.execution_artifacts/` and `/tmp/pw_workflow_out` outputs when real client data is used locally?
-3. [ASK USER] Should `/metrics` be publicly reachable in deployed environments, or should it require network/auth protection?
+1. [ASK USER] What retention window should apply to `.execution_artifacts/` and `/tmp/pw_workflow_out` outputs when real client data is used locally?
+2. [ASK USER] Should `/metrics` be publicly reachable in deployed environments, or should it require network/auth protection?
 
 ## 7) Evidence
 
 - `docs/firebase-auth-audit-architecture.md`
+- `docs/production-auth-policy-decision.md`
 - `docs/persistence-target-decision.md`
 - `docs/implementation-plan.md`
 - `docs/frontend-refactor-github-issues.md`

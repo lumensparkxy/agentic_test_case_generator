@@ -10,6 +10,11 @@ current Firestore-backed behavior remains the transitional runtime. The #49
 persistence boundary introduces Firestore adapter/repository seams; PostgreSQL
 schema, adapter, migration, and runbook stories remain future work.
 
+Auth policy note as of 2026-06-12: `docs/production-auth-policy-decision.md`
+accepts Firebase ID tokens as the production-only protected endpoint token type.
+Backend-issued JWTs and `/auth/google/login` are local/test compatibility paths
+that must be isolated behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt` by #51.
+
 For this repository, **Firebase Auth** should be the canonical identity provider. The backend must verify Firebase ID tokens directly using the Firebase Admin SDK. Backend-issued JWTs should not be the default; session cookies are only an optional browser optimization, not a primary auth mechanism.
 
 **Postgres** is the recommended durable store for audit, billing, and versioned artifacts. Firestore is a poor fit for this app’s invoice aggregation and audit joins due to its lack of relational joins, transactional consistency, and efficient rollup support.
@@ -189,18 +194,20 @@ All events are immutable (append-only). All versioned artifacts are linked to th
 
 ## What Must Change First in Code
 
-- `backend/app/main.py`: Remove `/auth/google/login`; require Firebase ID token on all protected endpoints; propagate `firebase_uid` into all workflow and agent calls; add DB session management.
-- `backend/app/auth/jwt_auth.py`: Remove Google ID verification; verify Firebase ID tokens with Firebase Admin SDK; use `firebase_uid` as canonical user key; optionally issue session cookies.
+- `backend/app/config.py`: Add `AUTH_TOKEN_MODE` with `firebase-only` as the safe default and `firebase-or-backend-jwt` as the explicit local/test compatibility mode.
+- `backend/app/routers/auth.py`: Gate `/auth/google/login`; disable backend JWT minting in `firebase-only` and preserve it only in compatibility mode.
+- `backend/app/auth/jwt_auth.py`: In `firebase-only`, verify Firebase ID tokens directly; in compatibility mode, continue accepting backend JWTs for local/E2E workflows.
+- `backend/app/auth/firebase_auth.py`: Continue verifying Firebase ID tokens with Firebase Admin SDK and revocation checks; use `firebase_uid` as canonical user key.
 - `backend/app/adk_client.py`: Accept and propagate user identity; use for all workflow and session records.
 - `backend/app/agents/requirements_agent.py` & `backend/app/agents/test_case_agent.py`: Accept and persist user identity; log workflow_runs and usage_events.
-- `frontend/src/App.jsx`, `frontend/src/main.jsx`: Integrate Firebase Auth SDK; pass ID token to backend on all requests; remove Google login wiring.
+- `frontend/src/App.jsx`: Keep Firebase Auth provider sign-in as the production flow; retain stored local JWT restoration only as compatibility behavior.
 - `backend/requirements.txt`: Add `firebase-admin`, `psycopg2` or `asyncpg`.
 - `frontend/package.json`: Add `firebase`.
 
 ## Migration Plan
 
 1. **Introduce persistence and request correlation**: Add Postgres, implement user and event tables, propagate request IDs.
-2. **Switch auth verification to Firebase**: Require and verify Firebase ID tokens in backend, use `firebase_uid` as canonical key, upsert users on login.
+2. **Enforce accepted auth mode**: Require Firebase ID tokens in production, isolate backend JWT support behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt`, use `firebase_uid` as canonical key, and upsert users on login.
 3. **Propagate identity into workflow runners**: Pass user identity into all agent and workflow calls, log workflow_runs and usage_events.
 4. **Add versioned requirement/test-case artifacts**: Implement version tables, link to usage events and users.
 5. **Enable extra providers and mobile clients**: Expand Firebase Auth providers, add mobile support, extend audit/billing as needed.

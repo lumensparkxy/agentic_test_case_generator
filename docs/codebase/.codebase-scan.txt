@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 250
+- Files scanned: 251
 - Files excluded after `git ls-files`: 70
-- Total bytes: 1917519
-- Text lines counted: 50737
+- Total bytes: 1927687
+- Text lines counted: 50922
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -35,7 +35,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend` | 124 |
 | `frontend` | 71 |
 | `scripts` | 25 |
-| `docs` | 17 |
+| `docs` | 18 |
 | `.github` | 2 |
 | `schemas` | 2 |
 | `.dockerignore` | 1 |
@@ -54,7 +54,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | --- | ---: |
 | `.py` | 127 |
 | `.js` | 25 |
-| `.md` | 21 |
+| `.md` | 22 |
 | `.json` | 21 |
 | `.jsx` | 20 |
 | `.css` | 17 |
@@ -84,10 +84,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/services/billing_service.py` | 28086 | 672 |
 | `scripts/e2e_playwright_workflow.py` | 25371 | 667 |
 | `backend/app/adapters/azure_devops.py` | 24984 | 551 |
+| `docs/requirements_traceability.md` | 24187 | 26 |
 | `backend/app/agents/requirements_agent.py` | 23657 | 583 |
 | `backend/app/services/execution_service.py` | 23645 | 635 |
 | `backend/app/routers/integrations_azure_devops.py` | 23560 | 582 |
-| `docs/requirements_traceability.md` | 22781 | 25 |
 | `backend/app/routers/integrations_jira.py` | 21792 | 570 |
 | `backend/app/services/azure_devops_sync_service.py` | 20434 | 496 |
 | `backend/app/services/billing_repository.py` | 20291 | 540 |
