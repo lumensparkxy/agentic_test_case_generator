@@ -8,7 +8,7 @@ git/history checks. It is not a full bug backlog.
 | Severity | Concern | Evidence | Impact | Suggested action |
 |----------|---------|----------|--------|------------------|
 | High | Large, high-churn orchestration and contract files remain central to the app | `frontend/src/App.jsx`, `backend/app/agents/test_case_agent.py`, `backend/app/models.py`, recent git history | Higher regression and merge risk for UI workflow, prompt orchestration, and API contracts | Continue behavior-preserving extraction under issue-scoped frontend, agent, and contract refactor tasks |
-| High | Persistence target is not fully settled in docs versus code | `docs/firebase-auth-audit-architecture.md`, `backend/app/services/firebase_admin.py`, `backend/app/services/billing_repository.py` | Architecture decisions can drift between Firestore current state and Postgres target recommendations | Decide whether Firestore remains the near-term durable store or whether Postgres migration is active |
+| High | PostgreSQL persistence boundary is accepted but not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firebase_admin.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_service.py` | Audit, billing, and reporting stay coupled to Firestore until repository boundaries and migration stories are implemented | Implement the #49 persistence boundary while preserving current Firestore behavior behind an adapter |
 | Medium | Dual auth support can blur production policy | `backend/app/auth/jwt_auth.py`, `backend/app/auth/firebase_auth.py`, `backend/app/routers/auth.py`, `frontend/src/App.jsx` | Local/E2E JWT compatibility is useful, but production paths need clear accepted-token policy | Document deployment auth mode and eventually remove or isolate legacy JWT if no longer needed |
 | Medium | Metrics endpoint exposure depends on deployment perimeter | `backend/app/main.py`, `backend/app/observability/metrics.py` | `/metrics` may expose operational metadata if public deployments do not protect it | Decide deployment access policy for `/metrics` |
 
@@ -38,7 +38,7 @@ git/history checks. It is not a full bug backlog.
 |---------|----------|-----------------|-------------|-----------------------|
 | Long-running agent workflows | `adk_client.py`, `test_case_agent.py`, `scripts/e2e_playwright_workflow.py` | E2E script sets a 600 second timeout | Request/response flows can tie up workers under load | Consider background jobs or async workflow state once product usage grows |
 | In-process execution subprocesses | `execution_service.py`, `local_runner.py` | Backend shells out to `npx playwright test` | CPU/browser resource contention in multi-user deployments | Add queueing, concurrency limits, and artifact retention policy |
-| Firestore reads for reporting/billing | `reporting_service.py`, `billing_repository.py` | Tests cover fallback/warning behavior | Large usage-event history may become expensive or slow | Add rollups or a relational analytics store if usage grows |
+| Firestore reads for reporting/billing | `reporting_service.py`, `billing_repository.py`, `docs/persistence-target-decision.md` | Tests cover fallback/warning behavior | Large usage-event history may become expensive or slow | Move reporting and billing ledger reads behind the accepted PostgreSQL-ready repository boundary |
 | Large frontend state tree | `frontend/src/App.jsx` | Many workflow states in one component | Re-renders and maintenance overhead | Move domain state into hooks/reducers and memoize expensive derived views if needed |
 | Local artifact growth | `.execution_artifacts/`, `client_submission/` | Generated outputs are ignored but not auto-pruned | Disk growth and noisy local scans | Add cleanup command or retention guidance |
 
@@ -55,14 +55,14 @@ git/history checks. It is not a full bug backlog.
 
 ## 6) `[ASK USER]` Questions
 
-1. [ASK USER] Should Firestore remain the durable store for the next release, or is the Postgres target in `docs/firebase-auth-audit-architecture.md` an active migration requirement?
-2. [ASK USER] Should backend-issued JWT support stay as a supported local/E2E compatibility mode after Firebase Auth becomes the default production identity path?
-3. [ASK USER] What retention window should apply to `.execution_artifacts/` and `/tmp/pw_workflow_out` outputs when real client data is used locally?
-4. [ASK USER] Should `/metrics` be publicly reachable in deployed environments, or should it require network/auth protection?
+1. [ASK USER] Should backend-issued JWT support stay as a supported local/E2E compatibility mode after Firebase Auth becomes the default production identity path?
+2. [ASK USER] What retention window should apply to `.execution_artifacts/` and `/tmp/pw_workflow_out` outputs when real client data is used locally?
+3. [ASK USER] Should `/metrics` be publicly reachable in deployed environments, or should it require network/auth protection?
 
 ## 7) Evidence
 
 - `docs/firebase-auth-audit-architecture.md`
+- `docs/persistence-target-decision.md`
 - `docs/implementation-plan.md`
 - `docs/frontend-refactor-github-issues.md`
 - `.env.example`

@@ -3,17 +3,23 @@
 
 ## Recommendation: Firebase Auth as Identity Provider
 
+Status note as of 2026-06-12: the persistence recommendation is clarified by
+`docs/persistence-target-decision.md`. PostgreSQL is the accepted target for
+compliance-grade audit, billing, reporting, and versioned artifacts, while the
+current Firestore-backed behavior remains the transitional runtime until
+repository boundaries and migration stories are implemented.
+
 For this repository, **Firebase Auth** should be the canonical identity provider. The backend must verify Firebase ID tokens directly using the Firebase Admin SDK. Backend-issued JWTs should not be the default; session cookies are only an optional browser optimization, not a primary auth mechanism.
 
 **Postgres** is the recommended durable store for audit, billing, and versioned artifacts. Firestore is a poor fit for this app’s invoice aggregation and audit joins due to its lack of relational joins, transactional consistency, and efficient rollup support.
 
-## Verified Current State (April 2026)
+## Verified Current State (June 2026)
 
-- `backend/app/main.py` exposes `/auth/google/login`; protected endpoints use `AuthUser` only at the FastAPI layer.
-- `backend/app/auth/jwt_auth.py` signs its own JWT after Google ID verification.
-- `backend/app/adk_client.py` and `backend/app/agents/test_case_agent.py` generate random `user_id` values for ADK sessions; identity is not propagated.
-- `frontend/src/App.jsx` and `frontend/src/main.jsx` are wired to Google login and store the auth token in `localStorage`.
-- **No durable backend database exists today**; all state is in memory.
+- `backend/app/routers/auth.py` exposes `/auth/google/login`; protected endpoints use `AuthUser` at the FastAPI layer.
+- `backend/app/auth/firebase_auth.py` verifies Firebase ID tokens, while `backend/app/auth/jwt_auth.py` keeps legacy/local JWT compatibility.
+- Firestore-backed service paths exist for audit, billing, reporting, versioning, JIRA/Azure DevOps connection metadata, and sync mappings through `backend/app/services/firebase_admin.py` and domain service modules.
+- Local tests patch Firestore clients or use fakes so default validation does not require real Firebase credentials.
+- `frontend/src/App.jsx` and `frontend/src/main.jsx` are wired to Firebase/Google login flows and store the auth token in `localStorage`.
 
 ## Target Authentication Flow
 
