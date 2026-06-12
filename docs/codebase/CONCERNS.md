@@ -26,7 +26,7 @@ git/history checks. It is not a full bug backlog.
 
 | Risk | OWASP category | Evidence | Current mitigation | Gap |
 |------|----------------|----------|--------------------|-----|
-| Stored integration credentials | A02 Cryptographic Failures | `jira_connection_service.py`, `azure_devops_connection_service.py` | Fernet encryption using dedicated secret or JWT secret fallback; token hints only | Rotation and secret lifecycle are not documented |
+| Stored integration credentials | A02 Cryptographic Failures | `jira_connection_service.py`, `azure_devops_connection_service.py`, `docs/credential-rotation-runbook.md` | Fernet encryption using dedicated secret or JWT secret fallback; token hints only; rotation runbook documented | Seamless previous-key decryption and re-encryption support remains a follow-up in #77 |
 | SSRF through artifact URLs | A10 Server-Side Request Forgery | `artifact_fetcher.py` | Blocks local/private/non-routable hosts, unsafe schemes, and redirect abuse | Continued hardening needed before broad production use with authenticated/internal artifacts |
 | Browser token storage | A07 Identification and Authentication Failures | `frontend/src/App.jsx`, `README.md` | Firebase token verification and backend auth checks | `localStorage` token storage remains MVP-level risk |
 | Metrics endpoint exposure | A05 Security Misconfiguration | `backend/app/main.py`, `scripts/deploy_cloud_run.sh` | Endpoint is schema-hidden, can be disabled, and can require a bearer token | Network perimeter remains deployment-specific |
@@ -63,6 +63,7 @@ git/history checks. It is not a full bug backlog.
 - `docs/firebase-auth-audit-architecture.md`
 - `docs/production-auth-policy-decision.md`
 - `docs/artifact-retention-policy.md`
+- `docs/credential-rotation-runbook.md`
 - `docs/persistence-target-decision.md`
 - `docs/implementation-plan.md`
 - `docs/frontend-refactor-github-issues.md`

@@ -129,7 +129,9 @@ Issue-ready follow-ups to create before implementation:
 5. Plan Firestore-to-PostgreSQL migration/export tooling and rollback behavior
    for existing deployments.
 6. Decide whether integration connection metadata remains in Firestore or moves
-   to PostgreSQL after credential rotation and retention policy are documented.
+   to PostgreSQL after credential rotation operations prove out, including the
+   seamless re-encryption support tracked by
+   [#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77).
 
 ## Non-Goals
 

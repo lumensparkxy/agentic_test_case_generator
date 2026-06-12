@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 254
+- Files scanned: 255
 - Files excluded after `git ls-files`: 70
-- Total bytes: 1970920
-- Text lines counted: 51850
+- Total bytes: 1984330
+- Text lines counted: 52108
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -35,7 +35,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend` | 125 |
 | `frontend` | 71 |
 | `scripts` | 26 |
-| `docs` | 19 |
+| `docs` | 20 |
 | `.github` | 2 |
 | `schemas` | 2 |
 | `.dockerignore` | 1 |
@@ -54,7 +54,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | --- | ---: |
 | `.py` | 129 |
 | `.js` | 25 |
-| `.md` | 23 |
+| `.md` | 24 |
 | `.json` | 21 |
 | `.jsx` | 20 |
 | `.css` | 17 |
@@ -80,7 +80,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/adk_client.py` | 44434 | 1106 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
 | `backend/app/models.py` | 33206 | 1048 |
-| `docs/requirements_traceability.md` | 28889 | 29 |
+| `docs/requirements_traceability.md` | 29651 | 30 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
 | `scripts/e2e_playwright_workflow.py` | 26113 | 682 |

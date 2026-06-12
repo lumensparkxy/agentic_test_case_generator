@@ -53,10 +53,11 @@ Status markers below reflect the GitHub issue state as of 2026-06-12.
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
   - Done: [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
   - Done: [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command
-  - Ready: [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
+  - Done: [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
   - Ready: [#55](https://github.com/lumensparkxy/agentic_test_case_generator/issues/55) - Add integration latency and error metrics for JIRA and Azure DevOps
   - Ready: [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56) - Add durable audit dead-letter sink for compliance deployments
   - Ready: [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57) - Harden artifact fetching threat model and validation
+  - Ready: [#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77) - Add seamless integration credential key rotation and re-encryption support
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
