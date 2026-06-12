@@ -32,6 +32,12 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
     SelectedOperation("projectGet", "get", "/projects/{project_id}", "ProjectGetRequest", "ProjectGetResponse"),
     SelectedOperation("projectUpdate", "patch", "/projects/{project_id}", "ProjectUpdateRequest", "ProjectUpdateResponse"),
     SelectedOperation("projectTimeline", "get", "/projects/{project_id}/timeline", "ProjectTimelineRequest", "ProjectTimelineResponse"),
+    SelectedOperation(
+        "projectImpactAnalysis", "post", "/projects/{project_id}/impact-analysis", "ProjectImpactAnalysisRequest", "ProjectImpactAnalysisResponse"
+    ),
+    SelectedOperation(
+        "projectImpactUpdateApply", "post", "/projects/{project_id}/impact-update/apply", "ProjectImpactUpdateApplyRequest", "ProjectImpactUpdateApplyResponse"
+    ),
     SelectedOperation("projectUseCasesSave", "post", "/projects/{project_id}/use-cases", "ProjectUseCasesSaveRequest", "ProjectUseCasesSaveResponse"),
     SelectedOperation("requirementsParse", "post", "/requirements/parse", "RequirementsParseRequest", "RequirementsParseResponse"),
     SelectedOperation("requirementsEnrich", "post", "/requirements/enrich", "RequirementsEnrichRequest", "RequirementsEnrichResponse"),

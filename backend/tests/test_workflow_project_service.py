@@ -100,6 +100,16 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
         append_stage_snapshot(
             project_id=project.project_id,
+            stage="impact_analysis",
+            payload={"summary": {"changed_item_count": 1}},
+            operation="impact.analysis",
+            actor=self.actor,
+            request_id="req-impact",
+            approved=False,
+            title="Impact analysis saved",
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
             stage="test_cases",
             payload={"test_cases": [{"id": "TC-1"}]},
             operation="testcases.generate",
@@ -123,6 +133,8 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         loaded = get_project(project.project_id, actor=self.actor)
         self.assertEqual(requirement_snapshot.version, 1)
         self.assertEqual(loaded.stage_state["requirements"].current_snapshot_id, requirement_snapshot.snapshot_id)
+        self.assertTrue(loaded.stage_state["impact_analysis"].stale)
+        self.assertIn("requirements changed", loaded.stage_state["impact_analysis"].stale_reason)
         self.assertTrue(loaded.stage_state["test_cases"].stale)
         self.assertIn("requirements changed", loaded.stage_state["test_cases"].stale_reason)
 

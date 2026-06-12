@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import {
 	createFirebaseAuthProvider,
@@ -72,6 +72,8 @@ const EXPORT_API_PATHS = Object.freeze({
 const PROJECT_API_PATHS = Object.freeze({
 	projects: "/projects",
 	project: (projectId) => `/projects/${projectId}`,
+	impactAnalysis: (projectId) => `/projects/${projectId}/impact-analysis`,
+	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
 
 const getAuthProviderLabel = (providerKeyOrId) => {
@@ -155,6 +157,40 @@ const getRequirementSourceMetricMeta = (coverageMetrics) => {
 	};
 };
 
+const normalizeImpactText = (value) => `${value || ""}`.trim().replace(/\s+/g, " ").toLowerCase();
+
+const estimateChangedRequirementCount = (snapshots) => {
+	const requirements = snapshots?.requirements?.payload?.requirements || [];
+	const coveragePlan = snapshots?.test_cases?.payload?.coverage_plan || [];
+	if (!requirements.length || !coveragePlan.length) {
+		return null;
+	}
+	const baselineByRequirementId = new Map(
+		coveragePlan
+			.map((plan) => [`${plan.requirement_id || ""}`.trim(), normalizeImpactText(plan.requirement_text)])
+			.filter(([requirementId]) => requirementId)
+	);
+	const currentIds = new Set();
+	let changedCount = 0;
+	for (const requirement of requirements) {
+		const requirementId = `${requirement.id || ""}`.trim();
+		if (!requirementId) {
+			continue;
+		}
+		currentIds.add(requirementId);
+		const baselineText = baselineByRequirementId.get(requirementId);
+		if (baselineText == null || baselineText !== normalizeImpactText(requirement.text)) {
+			changedCount += 1;
+		}
+	}
+	for (const requirementId of baselineByRequirementId.keys()) {
+		if (!currentIds.has(requirementId)) {
+			changedCount += 1;
+		}
+	}
+	return changedCount;
+};
+
 export default function App() {
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const {
@@ -233,6 +269,9 @@ export default function App() {
 		setIsGenerating,
 		resetTestCaseWorkflowState,
 	} = useTestCaseWorkflowState();
+	const [impactAnalysis, setImpactAnalysis] = useState(null);
+	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
+	const [isApplyingImpactUpdate, setIsApplyingImpactUpdate] = useState(false);
 	const {
 		executionTargetBaseUrl,
 		setExecutionTargetBaseUrl,
@@ -451,6 +490,35 @@ export default function App() {
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
 	const reviewPendingRequirementCount = requirements.length - approvedRequirementCount - rejectedRequirementCount;
 	const canGenerateFromApprovedRequirements = approvedRequirementCount > 0;
+	const projectStageState = currentProject?.stage_state || {};
+	const projectSnapshots = currentProject?.current_snapshots || {};
+	const persistedTestCaseCount = projectSnapshots.test_cases?.payload?.test_cases?.length || 0;
+	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount);
+	const impactStageState = projectStageState.impact_analysis || {};
+	const testCaseStageState = projectStageState.test_cases || {};
+	const upstreamChangedForImpact = Boolean(hasExistingTestCaseBaseline && (testCaseStageState.stale || impactStageState.stale));
+	const estimatedImpactChangedRequirementCount = estimateChangedRequirementCount(projectSnapshots);
+	const impactChangedItemCount =
+		impactAnalysis?.summary?.changed_item_count ??
+		impactStageState?.metadata?.changed_item_count ??
+		impactAnalysis?.changed_items?.length ??
+		estimatedImpactChangedRequirementCount;
+	const impactRecommendationCounts = impactAnalysis?.summary?.recommendation_counts || {};
+	const impactRecommendations = impactAnalysis?.recommendations || [];
+	const acceptedImpactRecommendationIds = impactRecommendations
+		.filter((recommendation) => recommendation.accepted)
+		.map((recommendation) => recommendation.recommendation_id);
+	const impactApplyBlockedByApproval = Boolean(
+		(impactAnalysis?.changed_items || []).some((item) => ["added", "modified"].includes(item.change_type) && !item.approved)
+	);
+	const canAnalyzeImpact = Boolean(currentProjectId && hasExistingTestCaseBaseline && upstreamChangedForImpact);
+	const canApplyImpactUpdate = Boolean(
+		currentProjectId &&
+		impactAnalysis &&
+		!impactApplyBlockedByApproval &&
+		acceptedImpactRecommendationIds.length > 0 &&
+		!isApplyingImpactUpdate
+	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
 	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
 	const requirementSourceMetricMeta = getRequirementSourceMetricMeta(requirementCoverageMetrics);
@@ -574,6 +642,7 @@ export default function App() {
 
 	const resetGeneratedArtifacts = () => {
 		resetTestCaseWorkflowState();
+		setImpactAnalysis(null);
 		resetExportWorkflowState();
 		resetExecutionWorkflowState();
 	};
@@ -1093,6 +1162,7 @@ export default function App() {
 		const requirementPayload = snapshots.requirements?.payload || null;
 		const contextPayload = snapshots.context?.payload || null;
 		const useCasePayload = snapshots.use_cases?.payload || null;
+		const impactPayload = snapshots.impact_analysis?.payload || null;
 		const testCasePayload = snapshots.test_cases?.payload || null;
 		const executionPayload = snapshots.execution?.payload || null;
 
@@ -1136,6 +1206,7 @@ export default function App() {
 		setTestCaseWorkflowDiagnostics(generationPayload.workflow_diagnostics || useCases.workflow_diagnostics || null);
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
+		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
 		setExpandedRows({});
 		setActiveGenerateResultTab((generationPayload.test_cases || []).length ? "test-cases" : "analysis");
 		resetExportWorkflowState();
@@ -1855,6 +1926,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
+			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
 			setExpandedRows({});
@@ -1923,6 +1995,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
+			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
 			setExpandedRows({});
@@ -2191,6 +2264,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(null);
 			setAppliedTestCaseWorkflowSettings(null);
 			setTestCaseIterationHistory([]);
+			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
 			setExpandedRows({});
@@ -2408,6 +2482,89 @@ export default function App() {
 			setIsGenerating(false);
 		}
 	};
+
+	const analyzeImpact = async () => {
+		if (!currentProjectId) {
+			setStatus("Open a QA project before running impact analysis.");
+			return;
+		}
+		if (!hasExistingTestCaseBaseline) {
+			setStatus("Generate an initial test-case suite before running impact analysis.");
+			return;
+		}
+		setIsAnalyzingImpact(true);
+		setStatus("Analyzing impact against the current test-case baseline...");
+		try {
+			const res = await apiRequest(PROJECT_API_PATHS.impactAnalysis(currentProjectId), {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
+				body: JSON.stringify({ base_project_revision: currentProjectRevision }),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to analyze impact");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setCurrentProject(data || null);
+			if (data) {
+				hydrateProjectWorkflow(data);
+			}
+			const analysis = data?.current_snapshots?.impact_analysis?.payload || null;
+			const changedCount = analysis?.summary?.changed_item_count || 0;
+			const directCount = analysis?.summary?.directly_impacted_test_case_count || 0;
+			setStatus(
+				`Impact analysis found ${changedCount} changed item${changedCount === 1 ? "" : "s"} and ${directCount} directly impacted test case${directCount === 1 ? "" : "s"}.`
+			);
+		} catch (error) {
+			setStatus(`Impact analysis failed: ${error.message}`);
+		} finally {
+			setIsAnalyzingImpact(false);
+		}
+	};
+
+	const applyImpactUpdate = async () => {
+		if (!impactAnalysis) {
+			setStatus("Run impact analysis before applying updates.");
+			return;
+		}
+		if (impactApplyBlockedByApproval) {
+			setStatus("Approve changed requirements/use cases before applying impact updates.");
+			return;
+		}
+		setIsApplyingImpactUpdate(true);
+		setStatus("Applying accepted impact recommendations...");
+		try {
+			const res = await apiRequest(PROJECT_API_PATHS.impactUpdateApply(currentProjectId), {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
+				body: JSON.stringify({
+					accepted_recommendation_ids: acceptedImpactRecommendationIds,
+					base_project_revision: currentProjectRevision,
+				}),
+			});
+			if (!res.ok) {
+				const errorMessage = await parseApiError(res, "Failed to apply impact update");
+				throw new Error(errorMessage);
+			}
+			const data = await res.json();
+			setCurrentProject(data || null);
+			if (data) {
+				hydrateProjectWorkflow(data);
+			}
+			const nextTestCases = data?.current_snapshots?.test_cases?.payload?.test_cases || [];
+			const result = data?.current_snapshots?.test_cases?.payload?.impact_update_result || {};
+			setStatus(
+				`Impact update applied: ${result.preserved_count || 0} preserved, ${result.updated_count || 0} updated, ${result.added_count || 0} added, ${result.deprecated_count || 0} deprecated.`
+			);
+			if (nextTestCases.length > 0) {
+				await previewExecution(nextTestCases, { updateStatus: false, persistProject: false });
+			}
+		} catch (error) {
+			setStatus(`Impact update failed: ${error.message}`);
+		} finally {
+			setIsApplyingImpactUpdate(false);
+		}
+	};
 	const exportReviewApproved = Boolean(testCaseReview?.approved);
 	const exportRequiresOverride = Boolean(testCases.length > 0 && testCaseReview && !testCaseReview.approved);
 	const draftExportOverrideReasonProvided = draftExportOverrideReason.trim().length > 0;
@@ -2573,6 +2730,122 @@ export default function App() {
 			variant: diagnosticsNeedsAttention ? "warning" : testCaseWorkflowDiagnostics || appliedTestCaseWorkflowSettings ? "muted" : "muted",
 		},
 	];
+
+	const renderImpactAnalysisPanel = () => {
+		if (!impactAnalysis) {
+			return null;
+		}
+		const changedItems = impactAnalysis.changed_items || [];
+		const impactedCases = impactAnalysis.impacted_test_cases || [];
+		const recommendations = impactAnalysis.recommendations || [];
+		const actionLabels = {
+			keep: "Keep",
+			update: "Update",
+			add: "Add",
+			deprecate: "Deprecate",
+		};
+		return (
+			<div className="impact-analysis-panel">
+				<div className="impact-analysis-header">
+					<div>
+						<h3>Impact Analysis</h3>
+						<p>
+							{changedItems.length} changed item{changedItems.length === 1 ? "" : "s"} • {impactedCases.length} impacted test case
+							{impactedCases.length === 1 ? "" : "s"} • {recommendations.length} recommendation
+							{recommendations.length === 1 ? "" : "s"}
+						</p>
+					</div>
+					<div className="impact-summary-pills">
+						<span>Keep {impactRecommendationCounts.keep || 0}</span>
+						<span>Update {impactRecommendationCounts.update || 0}</span>
+						<span>Add {impactRecommendationCounts.add || 0}</span>
+						<span>Deprecate {impactRecommendationCounts.deprecate || 0}</span>
+					</div>
+				</div>
+
+				{changedItems.length > 0 && (
+					<div className="impact-table-block">
+						<h4>Changed Inputs</h4>
+						<div className="selection-table-wrapper">
+							<table className="selection-table impact-table">
+								<thead>
+									<tr>
+										<th>Item</th>
+										<th>Type</th>
+										<th>Change</th>
+										<th>Approval</th>
+									</tr>
+								</thead>
+								<tbody>
+									{changedItems.map((item) => (
+										<tr key={`${item.kind}-${item.item_id}`}>
+											<td>
+												<strong>{item.item_id}</strong>
+												<span>{item.title}</span>
+											</td>
+											<td>{item.kind === "use_case" ? "Use case" : "Requirement"}</td>
+											<td>{item.change_type}</td>
+											<td>{item.change_type === "removed" ? "Not required" : item.approved ? "Approved" : "Pending"}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					</div>
+				)}
+
+				{impactedCases.length > 0 && (
+					<div className="impact-table-block">
+						<h4>Impacted Test Cases</h4>
+						<div className="impact-case-list">
+							{impactedCases.slice(0, 8).map((testCase) => (
+								<div key={`${testCase.impact_source}-${testCase.test_case_id}`} className="impact-case-row">
+									<div>
+										<strong>{testCase.test_case_id}</strong>
+										<span>{testCase.title}</span>
+									</div>
+									<span className={`impact-source-badge ${testCase.impact_source}`}>{testCase.impact_source.replace("_", " ")}</span>
+								</div>
+							))}
+						</div>
+					</div>
+				)}
+
+				<div className="impact-table-block">
+					<h4>Recommendations</h4>
+					<div className="impact-recommendation-list">
+						{recommendations.map((recommendation) => (
+							<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
+								<div>
+									<strong>{actionLabels[recommendation.action] || recommendation.action}</strong>
+									<span>{recommendation.title}</span>
+									<p>{recommendation.reason}</p>
+								</div>
+								<div className="impact-recommendation-meta">
+									<span>{Math.round((recommendation.confidence || 0) * 100)}%</span>
+									<span>{recommendation.accepted ? "Accepted" : "Review"}</span>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+
+				{impactApplyBlockedByApproval && (
+					<div className="review-banner review-needs-work">
+						<strong>Approval required</strong>
+						<p>Approve changed requirements/use cases before applying impact updates.</p>
+					</div>
+				)}
+				<div className="panel-form button-row impact-actions">
+					<button onClick={applyImpactUpdate} disabled={!canApplyImpactUpdate || testCaseActionDisabled}>
+						{isApplyingImpactUpdate
+							? "⏳ Applying..."
+							: `Apply ${acceptedImpactRecommendationIds.length} Accepted Recommendation${acceptedImpactRecommendationIds.length === 1 ? "" : "s"}`}
+					</button>
+				</div>
+			</div>
+		);
+	};
 
 	const analyzeContext = async () => {
 		setIsAnalyzingContext(true);
@@ -3355,18 +3628,25 @@ export default function App() {
 				{activeTab === 3 && (
 					<section className="panel">
 						<h2 className="panel-title">Generate Test Cases</h2>
-						<p className="panel-description">Generate structured test cases from approved requirements and context.</p>
+						<p className="panel-description">
+							Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
+						</p>
 						{requirements.length > 0 && (
 							<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
 								<div>
 									<strong>
-										{canGenerateFromApprovedRequirements
-											? "Ready for approved-requirement generation"
-											: "Approval required before generation"}
+										{upstreamChangedForImpact
+											? "Existing suite needs impact analysis"
+											: canGenerateFromApprovedRequirements
+												? "Ready for approved-requirement generation"
+												: "Approval required before generation"}
 									</strong>
 									<p>
 										{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review • {rejectedRequirementCount}{" "}
-										rejected. Only approved requirements are sent to the test-case agents.
+										rejected
+										{upstreamChangedForImpact
+											? ". The current suite is preserved while impact analysis reviews changed inputs."
+											: ". Only approved requirements are sent to the test-case agents."}
 									</p>
 								</div>
 								{!canGenerateFromApprovedRequirements && (
@@ -3377,13 +3657,34 @@ export default function App() {
 							</div>
 						)}
 						<div className="panel-form button-row">
-							<button
-								onClick={() => generateTestCases(false)}
-								disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
-							>
-								{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
-							</button>
+							{upstreamChangedForImpact ? (
+								<>
+									<button onClick={analyzeImpact} disabled={!canAnalyzeImpact || isAnalyzingImpact || testCaseActionDisabled}>
+										{isAnalyzingImpact
+											? "⏳ Analyzing impact..."
+											: impactChangedItemCount
+												? `Analyze Impact for ${impactChangedItemCount} Changed Item${impactChangedItemCount === 1 ? "" : "s"}`
+												: "Analyze Impact for Changed Items"}
+									</button>
+									<button
+										className="secondary"
+										onClick={() => generateTestCases(false)}
+										disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
+									>
+										{isGenerating ? "⏳ Regenerating..." : `Full Regenerate from ${approvedRequirementCount || 0} Approved`}
+									</button>
+								</>
+							) : (
+								<button
+									onClick={() => generateTestCases(false)}
+									disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
+								>
+									{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
+								</button>
+							)}
 						</div>
+
+						{renderImpactAnalysisPanel()}
 
 						{testCaseReview && (
 							<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>

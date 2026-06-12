@@ -107,6 +107,46 @@ class VersioningServiceTests(unittest.TestCase):
         version_paths = [path for _, path, _, _ in client.calls if "/versions/" in path]
         self.assertTrue(any(path.startswith("test_case_sets/") for path in version_paths))
 
+    def test_persist_test_case_versions_reuses_unchanged_metadata_when_requested(self) -> None:
+        client = FakeFirestoreClient()
+        actor = AuthUser(sub="firebase-user-2", email="user2@example.com", name="User Two")
+        previous = TestCase(
+            id="TC-1",
+            title="Login test",
+            steps=[TestStep(step=1, action="Act", expected="Observe")],
+            artifact_set_id="tc-set-1",
+            artifact_item_id="tc-item-1",
+            artifact_version_id="tc-version-1",
+            artifact_version_number=3,
+        )
+        current = [
+            TestCase(
+                id="TC-1",
+                title="Login test",
+                steps=[TestStep(step=1, action="Act", expected="Observe")],
+            )
+        ]
+
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
+            result = persist_test_case_versions(
+                current_test_cases=current,
+                previous_test_cases=[previous],
+                actor=actor,
+                request_id="req-457",
+                workflow_run_id="run-457",
+                source_event_id="event-457",
+                operation="impact.update.apply",
+                approved=True,
+                reuse_unchanged_versions=True,
+            )
+
+        self.assertEqual(result[0].artifact_set_id, "tc-set-1")
+        self.assertEqual(result[0].artifact_item_id, "tc-item-1")
+        self.assertEqual(result[0].artifact_version_id, "tc-version-1")
+        self.assertEqual(result[0].artifact_version_number, 3)
+        version_paths = [path for _, path, _, _ in client.calls if "/versions/" in path]
+        self.assertEqual(version_paths, [])
+
     def test_persist_requirement_versions_returns_original_models_when_firestore_unavailable(self) -> None:
         current = [Requirement(id="REQ-1", text="The system shall do something")]
 

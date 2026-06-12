@@ -38,6 +38,145 @@
 	border-color: #fcd34d;
 }
 
+.impact-analysis-panel {
+	display: grid;
+	gap: 1rem;
+	margin-top: 1rem;
+	padding: 1rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-lg);
+	background: #ffffff;
+	box-shadow: var(--shadow-sm);
+}
+
+.impact-analysis-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 1rem;
+}
+
+.impact-analysis-header h3,
+.impact-table-block h4 {
+	margin: 0;
+	color: var(--text-main);
+	font-size: 1rem;
+}
+
+.impact-analysis-header p {
+	margin: 0.35rem 0 0;
+	color: var(--text-muted);
+	font-size: 0.88rem;
+}
+
+.impact-summary-pills {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 0.4rem;
+}
+
+.impact-summary-pills span,
+.impact-source-badge,
+.impact-recommendation-meta span {
+	display: inline-flex;
+	align-items: center;
+	white-space: nowrap;
+	padding: 0.25rem 0.55rem;
+	border-radius: 9999px;
+	background: #f1f5f9;
+	color: #475569;
+	font-size: 0.74rem;
+	font-weight: 800;
+}
+
+.impact-table-block {
+	display: grid;
+	gap: 0.65rem;
+}
+
+.impact-table td:first-child {
+	display: grid;
+	gap: 0.2rem;
+}
+
+.impact-table td:first-child span,
+.impact-case-row span,
+.impact-recommendation span,
+.impact-recommendation p {
+	color: var(--text-muted);
+	font-size: 0.82rem;
+}
+
+.impact-case-list,
+.impact-recommendation-list {
+	display: grid;
+	gap: 0.55rem;
+}
+
+.impact-case-row,
+.impact-recommendation {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.75rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	background: #f8fafc;
+}
+
+.impact-case-row > div,
+.impact-recommendation > div:first-child {
+	display: grid;
+	gap: 0.2rem;
+	min-width: 0;
+}
+
+.impact-source-badge.direct {
+	background: #dcfce7;
+	color: #166534;
+}
+
+.impact-source-badge.semantic_neighbor {
+	background: #e0f2fe;
+	color: #075985;
+}
+
+.impact-recommendation.update {
+	border-color: #bfdbfe;
+	background: #eff6ff;
+}
+
+.impact-recommendation.add {
+	border-color: #86efac;
+	background: #f0fdf4;
+}
+
+.impact-recommendation.deprecate {
+	border-color: #fecaca;
+	background: #fef2f2;
+}
+
+.impact-recommendation.keep {
+	background: #ffffff;
+}
+
+.impact-recommendation p {
+	margin: 0;
+}
+
+.impact-recommendation-meta {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 0.35rem;
+}
+
+.impact-actions {
+	margin-top: 0;
+}
+
 .generate-results-workspace {
 	margin-top: 1.5rem;
 	border: 1px solid var(--border-color);

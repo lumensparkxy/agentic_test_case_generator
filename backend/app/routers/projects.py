@@ -6,6 +6,8 @@ from fastapi.concurrency import run_in_threadpool
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
+    ImpactAnalysisInput,
+    ImpactUpdateApplyInput,
     QaProjectCreateInput,
     QaProjectDetail,
     QaProjectListResponse,
@@ -13,6 +15,7 @@ from ..models import (
     QaProjectUpdateInput,
     QaProjectUseCaseSnapshotInput,
 )
+from ..services.impact_update_service import analyze_project_impact, apply_project_impact_update, impact_error_to_http
 from ..services.workflow_project_service import (
     append_stage_snapshot,
     create_project,
@@ -102,6 +105,45 @@ async def get_qa_project_timeline(
         return project.timeline
     except Exception as exc:
         raise project_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/impact-analysis", response_model=QaProjectDetail)
+async def analyze_qa_project_impact(
+    project_id: str,
+    request: Request,
+    payload: ImpactAnalysisInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectDetail:
+    try:
+        return await run_in_threadpool(
+            analyze_project_impact,
+            project_id=project_id,
+            actor=current_user,
+            request_id=_get_request_id(request),
+            base_project_revision=payload.base_project_revision,
+        )
+    except Exception as exc:
+        raise impact_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/impact-update/apply", response_model=QaProjectDetail)
+async def apply_qa_project_impact_update(
+    project_id: str,
+    request: Request,
+    payload: ImpactUpdateApplyInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectDetail:
+    try:
+        return await run_in_threadpool(
+            apply_project_impact_update,
+            project_id=project_id,
+            actor=current_user,
+            request_id=_get_request_id(request),
+            accepted_recommendation_ids=payload.accepted_recommendation_ids,
+            base_project_revision=payload.base_project_revision,
+        )
+    except Exception as exc:
+        raise impact_error_to_http(exc) from exc
 
 
 @router.post("/projects/{project_id}/use-cases", response_model=QaProjectDetail)

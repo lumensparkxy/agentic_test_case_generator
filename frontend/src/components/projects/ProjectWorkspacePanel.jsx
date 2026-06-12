@@ -2,6 +2,7 @@ const STAGES = [
 	{ key: "requirements", label: "Requirements" },
 	{ key: "context", label: "Context" },
 	{ key: "use_cases", label: "Use Cases" },
+	{ key: "impact_analysis", label: "Impact Analysis" },
 	{ key: "test_cases", label: "Test Cases" },
 	{ key: "execution", label: "Execution" },
 	{ key: "reports", label: "Reports" },
