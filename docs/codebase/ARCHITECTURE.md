@@ -172,8 +172,9 @@ The conversion and run path is implemented by
   contracts discoverable but increases merge and review risk as the API grows.
 - `docs/production-auth-policy-decision.md` accepts Firebase ID tokens as the
   production protected-endpoint token type. Backend-issued JWTs and
-  `/auth/google/login` remain local/test compatibility paths until #51 isolates
-  them behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt`.
+  `/auth/google/login` are isolated to local/test compatibility mode through
+  `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production uses
+  `AUTH_TOKEN_MODE=firebase-only`.
 - Firestore is the current durable service path for audit, versioning, billing,
   integration mappings, and reports. `docs/persistence-target-decision.md`
   accepts a staged approach: keep Firestore as the transitional runtime store

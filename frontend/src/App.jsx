@@ -962,7 +962,7 @@ export default function App() {
 					persistAuthState(storedToken, data || storedUser);
 					setStatus(`Welcome back, ${(data || storedUser).name}.`);
 				} catch {
-					clearAuthState("Session expired. Please sign in again.");
+					clearAuthState("Stored compatibility session expired or is disabled. Please sign in again.");
 				} finally {
 					setIsVerifyingSession(false);
 				}

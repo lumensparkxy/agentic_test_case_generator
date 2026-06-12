@@ -5,7 +5,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ..config import get_auth_settings
+from ..config import AUTH_TOKEN_MODE_FIREBASE_ONLY, AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT, get_auth_settings
 from ..models import AuthUser
 from .identity import normalize_roles
 from .firebase_auth import verify_firebase_access_token
@@ -95,12 +95,37 @@ def try_decode_legacy_access_token(token: str) -> Optional[AuthUser]:
         raise
 
 
+def _token_matches_backend_jwt(token: str) -> bool:
+    settings = get_auth_settings()
+    if not settings.jwt_secret_key:
+        return False
+
+    try:
+        decode_access_token(token)
+    except HTTPException as exc:
+        if exc.detail in {"Access token has expired", "Invalid access token payload"}:
+            return True
+        if exc.detail == "Invalid access token":
+            return False
+        raise
+    return True
+
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> AuthUser:
     """FastAPI dependency that resolves the current user from Authorization Bearer token."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _auth_error("Missing bearer access token")
+
+    settings = get_auth_settings()
+    if settings.auth_token_mode == AUTH_TOKEN_MODE_FIREBASE_ONLY:
+        if _token_matches_backend_jwt(credentials.credentials):
+            raise _auth_error("Backend-issued access tokens are disabled in AUTH_TOKEN_MODE=firebase-only")
+        return verify_firebase_access_token(credentials.credentials)
+
+    if settings.auth_token_mode != AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT:
+        raise _auth_error("Unsupported authentication token mode")
 
     legacy_user = try_decode_legacy_access_token(credentials.credentials)
     if legacy_user is not None:

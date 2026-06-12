@@ -11,6 +11,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import (
+    AUTH_TOKEN_MODE_FIREBASE_ONLY,
+    AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT,
     DEFAULT_MODEL_NAME,
     _SuppressNonTextPartsWarning,
     _load_environment_file,
@@ -111,6 +113,31 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertIn("google-adk version may be too old for current workflow patterns: %s", warning_messages)
         self.assertIn("google-genai version may be too old for current SDK behavior: %s", warning_messages)
 
+    def test_get_auth_settings_parses_auth_token_mode(self) -> None:
+        with patch.dict(os.environ, {"AUTH_TOKEN_MODE": AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT}, clear=True):
+            get_auth_settings.cache_clear()
+            settings = get_auth_settings()
+
+        self.assertEqual(settings.auth_token_mode, AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT)
+
+    def test_get_auth_settings_defaults_missing_auth_token_mode_with_warning(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            get_auth_settings.cache_clear()
+            with self.assertLogs(level="WARNING") as logs:
+                settings = get_auth_settings()
+
+        self.assertEqual(settings.auth_token_mode, AUTH_TOKEN_MODE_FIREBASE_ONLY)
+        self.assertTrue(any("AUTH_TOKEN_MODE is not configured" in entry for entry in logs.output))
+
+    def test_get_auth_settings_defaults_invalid_auth_token_mode_with_warning(self) -> None:
+        with patch.dict(os.environ, {"AUTH_TOKEN_MODE": "backend-jwt-only"}, clear=True):
+            get_auth_settings.cache_clear()
+            with self.assertLogs(level="WARNING") as logs:
+                settings = get_auth_settings()
+
+        self.assertEqual(settings.auth_token_mode, AUTH_TOKEN_MODE_FIREBASE_ONLY)
+        self.assertTrue(any("Invalid AUTH_TOKEN_MODE=backend-jwt-only" in entry for entry in logs.output))
+
     def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
         with patch.dict(
             os.environ,
@@ -146,6 +173,7 @@ class ConfigSettingsTests(unittest.TestCase):
             os.environ,
             {
                 "JWT_SECRET_KEY": "jwt-secret-key",
+                "AUTH_TOKEN_MODE": AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT,
                 "JIRA_CONNECTION_SECRET_KEY": "",
                 "JIRA_API_TIMEOUT_SECONDS": "18",
                 "JIRA_PROJECT_PAGE_SIZE": "25",

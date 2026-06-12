@@ -9,6 +9,7 @@ from pathlib import Path
 BASE = "http://127.0.0.1:8000"
 OUT_DIR = "/tmp/tcagent_api_verify"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT = "firebase-or-backend-jwt"
 
 
 def _mint_auth_token() -> str:
@@ -19,24 +20,31 @@ def _mint_auth_token() -> str:
     secret = os.getenv("JWT_SECRET_KEY", "").strip()
     algorithm = os.getenv("JWT_ALGORITHM", "HS256").strip() or "HS256"
     minutes_raw = os.getenv("JWT_EXPIRATION_MINUTES", "60").strip() or "60"
+    auth_token_mode = os.getenv("AUTH_TOKEN_MODE", "").strip()
 
-    if not secret:
-        env_path = REPO_ROOT / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                if key == "JWT_SECRET_KEY" and not secret:
-                    secret = value.strip()
-                elif key == "JWT_ALGORITHM" and not os.getenv("JWT_ALGORITHM"):
-                    algorithm = value.strip() or algorithm
-                elif key == "JWT_EXPIRATION_MINUTES" and not os.getenv("JWT_EXPIRATION_MINUTES"):
-                    minutes_raw = value.strip() or minutes_raw
+    env_path = REPO_ROOT / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key == "JWT_SECRET_KEY" and not secret:
+                secret = value.strip()
+            elif key == "JWT_ALGORITHM" and not os.getenv("JWT_ALGORITHM"):
+                algorithm = value.strip() or algorithm
+            elif key == "JWT_EXPIRATION_MINUTES" and not os.getenv("JWT_EXPIRATION_MINUTES"):
+                minutes_raw = value.strip() or minutes_raw
+            elif key == "AUTH_TOKEN_MODE" and not auth_token_mode:
+                auth_token_mode = value.strip()
 
     if not secret:
         return ""
+    if auth_token_mode != AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT:
+        raise RuntimeError(
+            "Local JWT minting for e2e_api_verify.py requires "
+            f"AUTH_TOKEN_MODE={AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT}, or provide AUTH_TOKEN with a real Firebase ID token."
+        )
 
     try:
         import jwt

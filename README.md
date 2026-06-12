@@ -22,7 +22,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - `docs/codebase/INTEGRATIONS.md` inventories Firebase, Gemini/ADK, Firestore, JIRA, Azure DevOps, Playwright, and observability integrations.
 - `docs/codebase/TESTING.md` lists validation gates and folds in the reproducible Playwright documentation E2E workflow for the next version.
 - `docs/codebase/CONCERNS.md` records high-churn areas, technical debt, security/scaling concerns, and open architecture questions.
-- `docs/production-auth-policy-decision.md` records the accepted production auth policy: Firebase ID tokens in production, backend JWTs only for explicit local/E2E compatibility after #51.
+- `docs/production-auth-policy-decision.md` records the accepted production auth policy: Firebase ID tokens in production, backend JWTs only for explicit local/E2E compatibility.
 
 ## Setup
 
@@ -30,15 +30,16 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 Copy .env.example to .env and set values:
 - GEMINI_API_KEY (required)
 - MODEL_NAME (default: gemini-3.5-flash)
-- GOOGLE_CLIENT_ID (required for login)
-- GOOGLE_CLIENT_IDS (optional comma-separated allow-list for multiple web client IDs)
+- GOOGLE_CLIENT_ID (optional; required only for compatibility-mode `/auth/google/login`)
+- GOOGLE_CLIENT_IDS (optional compatibility-mode comma-separated allow-list for multiple web client IDs)
 - FIREBASE_PROJECT_ID (recommended for Firebase Admin initialization)
 - FIREBASE_SERVICE_ACCOUNT_JSON (optional for local containers or non-GCP runtimes)
 - GOOGLE_APPLICATION_CREDENTIALS (optional alternative for the deploy helper; use an absolute path to a local Firebase Admin SDK JSON file)
-- JWT_SECRET_KEY (required for backend-issued access tokens)
+- JWT_SECRET_KEY (required for local/E2E compatibility tokens and fallback integration-secret encryption)
 - JWT_ALGORITHM (default: HS256)
 - JWT_EXPIRATION_MINUTES (default: 60)
-- VITE_GOOGLE_CLIENT_ID (required for frontend sign-in button)
+- AUTH_TOKEN_MODE (`firebase-only` for production; `firebase-or-backend-jwt` only for local/E2E compatibility)
+- VITE_GOOGLE_CLIENT_ID (optional compatibility-mode Google client ID hint)
 - VITE_FIREBASE_API_KEY (required for frontend sign-in button)
 - VITE_FIREBASE_AUTH_DOMAIN (required for frontend sign-in button)
 - VITE_FIREBASE_PROJECT_ID (required for frontend sign-in button)
@@ -57,9 +58,21 @@ Copy .env.example to .env and set values:
 
 Note: ADK expects GOOGLE_API_KEY. Configure GEMINI_API_KEY in this project; the backend normalizes it to GOOGLE_API_KEY at runtime. If both are set, GEMINI_API_KEY is preferred so the project `.env` does not get shadowed by an older shell-level GOOGLE_API_KEY.
 
-For Google login, set `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` to the same OAuth web client ID. If you intentionally use different client IDs across environments or builds, add all valid IDs to `GOOGLE_CLIENT_IDS`.
+Production protected endpoints use Firebase ID tokens. Local and E2E workflows
+that mint backend JWTs require `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; keep
+production deployments on `AUTH_TOKEN_MODE=firebase-only`.
 
-### 1.1) Google Cloud Console quick setup (for local dev)
+For compatibility-mode Google login, set `GOOGLE_CLIENT_ID` and
+`VITE_GOOGLE_CLIENT_ID` to the same OAuth web client ID. If you intentionally
+use different client IDs across environments or builds, add all valid IDs to
+`GOOGLE_CLIENT_IDS`.
+
+### 1.1) Compatibility-mode Google OAuth quick setup (local dev only)
+
+Use this only if you intentionally test `/auth/google/login` with
+`AUTH_TOKEN_MODE=firebase-or-backend-jwt`. Production sign-in uses Firebase Auth
+provider configuration instead.
+
 1. Create/select a Google Cloud project.
 2. Configure OAuth consent screen.
 3. Create OAuth 2.0 Client ID of type **Web application**.
@@ -190,7 +203,7 @@ This publishes:
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8000`
 
-This is useful for Google OAuth because you only need to authorize the standard local dev origins:
+This is useful for compatibility-mode Google OAuth because you only need to authorize the standard local dev origins:
 
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
@@ -210,13 +223,12 @@ Prerequisites:
 - Billing enabled on your GCP project
 - A `.env` file with at least these values set:
 	- `GEMINI_API_KEY`
-	- `GOOGLE_CLIENT_ID`
-	- `VITE_GOOGLE_CLIENT_ID`
 	- `VITE_FIREBASE_API_KEY`
 	- `VITE_FIREBASE_AUTH_DOMAIN`
 	- `VITE_FIREBASE_PROJECT_ID`
 	- `VITE_FIREBASE_APP_ID`
 	- `JWT_SECRET_KEY`
+	- `AUTH_TOKEN_MODE=firebase-only`
 
 Set your target project and optionally the region/repository/service names:
 
@@ -235,6 +247,7 @@ What the script does:
 - enables Cloud Run, Artifact Registry, and Secret Manager APIs
 - creates the Docker Artifact Registry repository if needed
 - stores `GEMINI_API_KEY` and `JWT_SECRET_KEY` in Secret Manager
+- requires and deploys `AUTH_TOKEN_MODE=firebase-only`
 - optionally stores `FIREBASE_SERVICE_ACCOUNT_JSON` in Secret Manager when provided
 - if `GOOGLE_APPLICATION_CREDENTIALS` points to a local Firebase Admin SDK JSON file, the deploy script reads that file and uploads it as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret automatically
 - builds and pushes the backend container
@@ -244,18 +257,21 @@ What the script does:
 - updates backend CORS to allow the deployed frontend URL
 - runs a CORS preflight smoke check against the deployed backend
 
-After deployment, add the frontend Cloud Run URL as an Authorized JavaScript origin in your Google OAuth web client.
-
 If you use Firebase Authentication with popup or redirect flows, also add the deployed frontend hostname (without `https://`) to Firebase Console -> Authentication -> Settings -> Authorized domains. For Cloud Run, this is typically both the canonical `*.a.run.app` hostname and the region-scoped `*.run.app` hostname shown by the deploy script.
+
+If you intentionally test compatibility-mode Google OAuth in a non-production
+environment, add that frontend URL as an Authorized JavaScript origin in the
+Google OAuth web client used for the compatibility route.
 
 ## API Authentication
 Accepted production policy is documented in `docs/production-auth-policy-decision.md`.
-Current code still accepts Firebase ID tokens and backend-issued JWTs until #51
-adds explicit `AUTH_TOKEN_MODE` enforcement.
+Protected endpoints accept Firebase ID tokens in `AUTH_TOKEN_MODE=firebase-only`.
+Backend-issued JWTs and `/auth/google/login` are available only in
+`AUTH_TOKEN_MODE=firebase-or-backend-jwt` for local/E2E compatibility.
 
 - Public endpoints:
 	- `GET /health`
-	- `POST /auth/google/login`
+	- `POST /auth/google/login` (compatibility mode only)
 	- `GET /auth/me`
 	- `POST /auth/logout`
 - Protected endpoints (Bearer token required):
@@ -273,9 +289,9 @@ Frontend stores the access token in `localStorage` for the current MVP.
 - Frontend cannot reach API: set `VITE_API_BASE` in `.env` or use the default from [.env.example](.env.example).
 - Import errors after install: re-run `python -m pip install -r backend/requirements.txt` inside your active virtual environment.
 - Backend restarts or crashes unexpectedly in local dev: make sure Uvicorn reload is limited to the backend source tree (`--reload-dir backend`) so it does not watch `.venv` or other workspace folders.
-- Google sign-in fails with audience/issuer errors: verify `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` exactly match the same web OAuth client ID, or list every valid web client ID in `GOOGLE_CLIENT_IDS`.
-- Login button missing: verify `VITE_GOOGLE_CLIENT_ID` is present in `.env` and restart frontend dev server.
-- Requests return 401 after login: token may be expired or invalid; sign out/in again and confirm backend `JWT_SECRET_KEY` is set.
+- Compatibility-mode Google sign-in fails with audience/issuer errors: verify `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` exactly match the same web OAuth client ID, or list every valid web client ID in `GOOGLE_CLIENT_IDS`.
+- Login button missing: verify the Firebase web variables are present in `.env` and restart the frontend dev server.
+- Requests return 401 after login: token may be expired or invalid; sign out/in again. For local JWT workflows, confirm `AUTH_TOKEN_MODE=firebase-or-backend-jwt` and `JWT_SECRET_KEY` are set.
 - Azure DevOps connection fails with 401/403: verify the PAT is active, belongs to an account with access to the organization, and includes Project/team read plus Work Items read/write scopes.
 - Azure DevOps project import requires a project: use a project URL during connection or select/provide a project before searching/importing work items.
 

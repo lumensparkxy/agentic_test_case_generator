@@ -1,6 +1,6 @@
 # Production Auth Policy Decision
 
-Status: accepted for implementation by #51.
+Status: accepted by #50 and enforced by #51.
 
 Issue: [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50)
 
@@ -12,7 +12,7 @@ Production protected endpoints must accept Firebase ID tokens only. Backend-issu
 JWTs and the `/auth/google/login` backend-token exchange are compatibility paths
 for local development, deterministic E2E tests, and migration only.
 
-The implementation issue should add one explicit backend environment variable:
+The backend uses one explicit environment variable:
 
 ```text
 AUTH_TOKEN_MODE=firebase-only
@@ -73,24 +73,24 @@ References:
 - [Firebase Admin: Manage User Sessions](https://firebase.google.com/docs/auth/admin/manage-sessions)
 - [Firebase Admin: Manage Session Cookies](https://firebase.google.com/docs/auth/admin/manage-cookies)
 
-## Required Code Changes For #51
+## Implemented Code Changes
 
 `backend/app/config.py`
 
-- Add `auth_token_mode` to `AuthSettings`.
-- Parse `AUTH_TOKEN_MODE`.
+- `AuthSettings` includes `auth_token_mode`.
+- `get_auth_settings()` parses `AUTH_TOKEN_MODE`.
 - Accept only `firebase-only` and `firebase-or-backend-jwt`.
 - Default to `firebase-only` when the variable is omitted or invalid.
 
 `backend/app/auth/jwt_auth.py`
 
-- Make `get_current_user` branch on `AuthSettings.auth_token_mode`.
+- `get_current_user` branches on `AuthSettings.auth_token_mode`.
 - In `firebase-only`, call `verify_firebase_access_token` directly and do not
   attempt backend JWT decoding.
 - In `firebase-or-backend-jwt`, preserve compatibility with backend JWTs and
   Firebase ID tokens.
 - Keep expired backend JWTs as hard failures only in compatibility mode.
-- Add focused tests for Firebase-only rejection of backend JWTs and compatibility
+- Focused tests cover Firebase-only rejection of backend JWTs and compatibility
   acceptance of backend JWTs.
 
 `backend/app/auth/firebase_auth.py`
@@ -101,7 +101,7 @@ References:
 
 `backend/app/routers/auth.py`
 
-- Gate `/auth/google/login` by `AUTH_TOKEN_MODE`.
+- `/auth/google/login` is gated by `AUTH_TOKEN_MODE`.
 - In `firebase-only`, return a clear disabled response instead of minting a
   backend JWT.
 - In `firebase-or-backend-jwt`, preserve the existing Google credential exchange
@@ -111,55 +111,52 @@ References:
 
 `frontend/src/App.jsx`
 
-- Keep Firebase provider sign-in as the production path.
-- Continue sending Firebase ID tokens from `firebaseAuth.currentUser.getIdToken()`
+- Keeps Firebase provider sign-in as the production path.
+- Continues sending Firebase ID tokens from `firebaseAuth.currentUser.getIdToken()`
   when Firebase Auth is configured.
-- Treat stored local JWT session restoration as compatibility behavior that only
+- Treats stored local JWT session restoration as compatibility behavior that only
   works when the backend is running `firebase-or-backend-jwt`.
-- Keep the 401 path clearing local auth state when stored compatibility tokens no
+- Keeps the 401 path clearing local auth state when stored compatibility tokens no
   longer pass backend verification.
 
 E2E and script changes:
 
-- `frontend/e2e/support/auth.js` should keep local JWT minting but document that
+- `frontend/e2e/support/auth.js` keeps local JWT minting and can assert that
   the backend under test must be in `AUTH_TOKEN_MODE=firebase-or-backend-jwt`.
-- `scripts/e2e_api_verify.py` and `scripts/e2e_playwright_workflow.py` should
-  fail early or print a clear setup message when no `AUTH_TOKEN` is provided and
-  the backend is not running compatibility mode.
+- `scripts/e2e_api_verify.py` and `scripts/e2e_playwright_workflow.py` fail
+  early when no `AUTH_TOKEN` is provided and local JWT minting is not in
+  compatibility mode.
 - Mocked frontend E2E specs that route `/auth/me` can stay unchanged unless they
   switch to a real backend.
 
-## Documentation Changes For #51
+## Documentation
 
-Update these documents when enforcement is implemented:
+Enforcement documentation now covers:
 
-- `README.md`: describe `AUTH_TOKEN_MODE`, production `firebase-only`, local/E2E
+- `README.md`: `AUTH_TOKEN_MODE`, production `firebase-only`, local/E2E
   compatibility, and the fact that `/auth/google/login` is compatibility-only.
-- `.env.example`: show the local developer value explicitly and warn against
-  using it in production, or default to `firebase-only` and add an E2E setup
-  note.
-- `scripts/deploy_cloud_run.sh`: set or require `AUTH_TOKEN_MODE=firebase-only`
+- `.env.example`: local developer value with a warning against production use.
+- `scripts/deploy_cloud_run.sh`: requires `AUTH_TOKEN_MODE=firebase-only`
   for Cloud Run deployments.
-- `docs/codebase/STACK.md`: list `AUTH_TOKEN_MODE`.
-- `docs/codebase/INTEGRATIONS.md`: mark backend-issued JWT and
+- `docs/codebase/STACK.md`: lists `AUTH_TOKEN_MODE`.
+- `docs/codebase/INTEGRATIONS.md`: marks backend-issued JWT and
   `/auth/google/login` as compatibility-only.
-- `docs/codebase/TESTING.md`: document the local/E2E compatibility requirement.
+- `docs/codebase/TESTING.md`: documents the local/E2E compatibility requirement.
 
 ## Migration Behavior
 
 1. Merge this decision record.
-2. Update #51 to reference `AUTH_TOKEN_MODE` and remove its blocker.
-3. Implement `firebase-only` as the safe runtime default.
-4. Keep local/E2E workflows green by setting `AUTH_TOKEN_MODE=firebase-or-backend-jwt`
+2. #51 enforces `AUTH_TOKEN_MODE`.
+3. `firebase-only` is the safe runtime default.
+4. Local/E2E workflows stay green by setting `AUTH_TOKEN_MODE=firebase-or-backend-jwt`
    only in local/test contexts.
-5. Deploy production with `AUTH_TOKEN_MODE=firebase-only`.
+5. Production deploys with `AUTH_TOKEN_MODE=firebase-only`.
 6. After real deployments no longer call `/auth/google/login`, consider a future
    cleanup issue to remove the route and backend JWT login exchange entirely.
 
 ## Non-Goals
 
-- Do not change token validation behavior in #50.
-- Do not add Firebase session cookies in #51 unless a later issue explicitly
-  chooses that browser-session model.
+- Do not add Firebase session cookies unless a later issue explicitly chooses
+  that browser-session model.
 - Do not store real user tokens or operational credentials in docs, tests, or
   fixtures.

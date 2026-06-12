@@ -13,7 +13,7 @@ schema, adapter, migration, and runbook stories remain future work.
 Auth policy note as of 2026-06-12: `docs/production-auth-policy-decision.md`
 accepts Firebase ID tokens as the production-only protected endpoint token type.
 Backend-issued JWTs and `/auth/google/login` are local/test compatibility paths
-that must be isolated behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt` by #51.
+isolated behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt`.
 
 For this repository, **Firebase Auth** should be the canonical identity provider. The backend must verify Firebase ID tokens directly using the Firebase Admin SDK. Backend-issued JWTs should not be the default; session cookies are only an optional browser optimization, not a primary auth mechanism.
 
@@ -194,9 +194,9 @@ All events are immutable (append-only). All versioned artifacts are linked to th
 
 ## What Must Change First in Code
 
-- `backend/app/config.py`: Add `AUTH_TOKEN_MODE` with `firebase-only` as the safe default and `firebase-or-backend-jwt` as the explicit local/test compatibility mode.
-- `backend/app/routers/auth.py`: Gate `/auth/google/login`; disable backend JWT minting in `firebase-only` and preserve it only in compatibility mode.
-- `backend/app/auth/jwt_auth.py`: In `firebase-only`, verify Firebase ID tokens directly; in compatibility mode, continue accepting backend JWTs for local/E2E workflows.
+- `backend/app/config.py`: `AUTH_TOKEN_MODE` has `firebase-only` as the safe default and `firebase-or-backend-jwt` as the explicit local/test compatibility mode.
+- `backend/app/routers/auth.py`: `/auth/google/login` disables backend JWT minting in `firebase-only` and preserves it only in compatibility mode.
+- `backend/app/auth/jwt_auth.py`: In `firebase-only`, protected endpoints verify Firebase ID tokens directly and reject backend JWTs; in compatibility mode, they continue accepting backend JWTs for local/E2E workflows.
 - `backend/app/auth/firebase_auth.py`: Continue verifying Firebase ID tokens with Firebase Admin SDK and revocation checks; use `firebase_uid` as canonical user key.
 - `backend/app/adk_client.py`: Accept and propagate user identity; use for all workflow and session records.
 - `backend/app/agents/requirements_agent.py` & `backend/app/agents/test_case_agent.py`: Accept and persist user identity; log workflow_runs and usage_events.

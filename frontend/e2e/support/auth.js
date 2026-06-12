@@ -13,6 +13,7 @@ dotenv.config({ path: path.join(repoRoot, ".env") });
 export const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 export const STORAGE_AUTH_USER = "tcg.auth.user";
 export const sampleRequirementsFile = path.join(repoRoot, "sample-requirements.md");
+export const AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT = "firebase-or-backend-jwt";
 
 export function buildTestUser(overrides = {}) {
 	return {
@@ -24,7 +25,19 @@ export function buildTestUser(overrides = {}) {
 	};
 }
 
-export function buildTestAccessToken(user = buildTestUser()) {
+export function assertLocalJwtCompatibilityMode() {
+	if (process.env.AUTH_TOKEN_MODE !== AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT) {
+		throw new Error(
+			`Local JWT authentication requires AUTH_TOKEN_MODE=${AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT} when tests exercise a real backend.`
+		);
+	}
+}
+
+export function buildTestAccessToken(user = buildTestUser(), { requireBackendCompatibility = false } = {}) {
+	if (requireBackendCompatibility) {
+		assertLocalJwtCompatibilityMode();
+	}
+
 	const secret = process.env.JWT_SECRET_KEY;
 	if (!secret) {
 		throw new Error("JWT_SECRET_KEY must be available in the repo .env for authenticated E2E tests.");

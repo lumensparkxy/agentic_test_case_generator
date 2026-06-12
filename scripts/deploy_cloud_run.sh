@@ -73,6 +73,7 @@ RUNTIME_SERVICE_ACCOUNT="${RUNTIME_SERVICE_ACCOUNT:-}"
 MODEL_NAME="${MODEL_NAME:-gemini-3.5-flash}"
 JWT_ALGORITHM="${JWT_ALGORITHM:-HS256}"
 JWT_EXPIRATION_MINUTES="${JWT_EXPIRATION_MINUTES:-60}"
+AUTH_TOKEN_MODE="${AUTH_TOKEN_MODE:-firebase-only}"
 TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-${VITE_GOOGLE_CLIENT_ID:-}}"
 GOOGLE_CLIENT_IDS="${GOOGLE_CLIENT_IDS:-}"
@@ -91,14 +92,18 @@ JWT_SECRET_KEY="${JWT_SECRET_KEY:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
 
 require_var PROJECT_ID
-require_var GOOGLE_CLIENT_ID
-require_var VITE_GOOGLE_CLIENT_ID
 require_var VITE_FIREBASE_API_KEY
 require_var VITE_FIREBASE_AUTH_DOMAIN
 require_var VITE_FIREBASE_PROJECT_ID
 require_var VITE_FIREBASE_APP_ID
 require_var JWT_SECRET_KEY
 require_var GEMINI_API_KEY
+
+if [[ "$AUTH_TOKEN_MODE" != "firebase-only" ]]; then
+  echo "Cloud Run deployment requires AUTH_TOKEN_MODE=firebase-only." >&2
+  echo "Use firebase-or-backend-jwt only for local development and E2E compatibility." >&2
+  exit 1
+fi
 
 if [[ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" && -n "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
   if [[ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
@@ -155,12 +160,15 @@ build_env_var_arg() {
   local cors_allow_origins="$1"
   local env_entries=(
     "MODEL_NAME=$MODEL_NAME"
-    "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
     "JWT_ALGORITHM=$JWT_ALGORITHM"
     "JWT_EXPIRATION_MINUTES=$JWT_EXPIRATION_MINUTES"
+    "AUTH_TOKEN_MODE=$AUTH_TOKEN_MODE"
     "CORS_ALLOW_ORIGINS=$cors_allow_origins"
   )
 
+  if [[ -n "$GOOGLE_CLIENT_ID" ]]; then
+    env_entries+=("GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID")
+  fi
   if [[ -n "$GOOGLE_CLIENT_IDS" ]]; then
     env_entries+=("GOOGLE_CLIENT_IDS=$GOOGLE_CLIENT_IDS")
   fi
@@ -326,15 +334,13 @@ Frontend URL: ${FRONTEND_URL}
 Backend URL:  ${BACKEND_URL}
 
 Next steps:
-1. In Google Cloud Console, open the OAuth 2.0 Web Client used by this app.
-2. Add these Authorized JavaScript origins:
-   ${FRONTEND_URL}
-  ${FRONTEND_SERVICE_URL}
-3. In Firebase Console -> Authentication -> Settings -> Authorized domains, add:
+1. In Firebase Console -> Authentication -> Settings -> Authorized domains, add:
    ${FRONTEND_DOMAIN}
   ${FRONTEND_SERVICE_DOMAIN}
-4. If you later attach a custom domain, add that origin/domain too and rerun this script.
-5. Verify sign-in and the full app flow in the deployed frontend.
+2. If you later attach a custom domain, add that origin/domain too and rerun this script.
+3. Verify sign-in and the full app flow in the deployed frontend.
+4. If you intentionally test compatibility-mode Google OAuth outside production,
+   add the frontend URL as an Authorized JavaScript origin in that OAuth client.
 
 You can rerun this script anytime after changing the app:
   PROJECT_ID=${PROJECT_ID} REGION=${REGION} ./scripts/deploy_cloud_run.sh

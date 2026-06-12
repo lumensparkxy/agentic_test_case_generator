@@ -67,6 +67,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 BASE_URL = "http://127.0.0.1:8000"
 PLAYWRIGHT_DOCS_URL = "https://playwright.dev/python/"
 TIMEOUT = 600  # seconds – LLM pipeline may be slow
+AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT = "firebase-or-backend-jwt"
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +75,10 @@ TIMEOUT = 600  # seconds – LLM pipeline may be slow
 # ---------------------------------------------------------------------------
 def _mint_jwt() -> str:
     """Create a signed JWT that the backend will accept as a valid user token."""
+    configured_token = os.getenv("AUTH_TOKEN", "").strip()
+    if configured_token:
+        return configured_token
+
     try:
         import jwt  # PyJWT is in the project venv
     except ImportError:
@@ -83,6 +88,7 @@ def _mint_jwt() -> str:
     env_path = REPO_ROOT / ".env"
     secret = ""
     algorithm = "HS256"
+    auth_token_mode = os.getenv("AUTH_TOKEN_MODE", "").strip()
     if env_path.exists():
         for line in env_path.read_text().splitlines():
             line = line.strip()
@@ -90,11 +96,20 @@ def _mint_jwt() -> str:
                 secret = line.split("=", 1)[1].strip()
             if line.startswith("JWT_ALGORITHM="):
                 algorithm = line.split("=", 1)[1].strip()
+            if line.startswith("AUTH_TOKEN_MODE=") and not auth_token_mode:
+                auth_token_mode = line.split("=", 1)[1].strip()
 
     if not secret:
         secret = os.getenv("JWT_SECRET_KEY", "")
     if not secret:
         _print("[red]JWT_SECRET_KEY not found in .env or environment.[/red]")
+        sys.exit(1)
+    if auth_token_mode != AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT:
+        _print(
+            "[red]Local JWT minting requires "
+            f"AUTH_TOKEN_MODE={AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT}. "
+            "Set compatibility mode for local/E2E backends or provide AUTH_TOKEN with a real Firebase ID token.[/red]"
+        )
         sys.exit(1)
 
     now = datetime.now(timezone.utc)
