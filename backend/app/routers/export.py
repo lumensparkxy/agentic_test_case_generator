@@ -10,6 +10,7 @@ from ..agents.export_agent import export_to_csv, export_to_excel, export_to_jira
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, ExportTestCasesInput, JiraExportInput, JiraExportResponse
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
+from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http
 
 router = APIRouter()
 
@@ -37,6 +38,56 @@ def _export_audit_metadata(payload: ExportTestCasesInput) -> dict[str, Any]:
     if override_reason:
         metadata["draft_override_reason"] = override_reason[:500]
     return metadata
+
+
+def _model_payload(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_model_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _model_payload(item) for key, item in value.items()}
+    return value
+
+
+def _record_project_export_snapshot(
+    *,
+    payload: ExportTestCasesInput,
+    export_format: str,
+    current_user: AuthUser,
+    request_id: str,
+    workflow_run_id: str,
+    source_event_id: str,
+    result_metadata: dict[str, Any],
+) -> None:
+    if not payload.project_id:
+        return
+    try:
+        append_stage_snapshot(
+            project_id=payload.project_id,
+            stage="reports",
+            payload={
+                "source": "export",
+                "format": export_format,
+                "test_case_count": len(payload.test_cases),
+                "approved": payload.approved,
+                "review": _model_payload(payload.review),
+                "draft_override_requested": payload.draft_override_requested,
+                "draft_override_reason": payload.draft_override_reason,
+                "result_metadata": result_metadata,
+            },
+            operation=f"export.{export_format}",
+            actor=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=source_event_id,
+            approved=payload.approved,
+            title=f"{export_format.upper()} export",
+            metadata={"format": export_format, "test_case_count": len(payload.test_cases)},
+            base_project_revision=payload.base_project_revision,
+        )
+    except Exception as project_exc:
+        raise project_error_to_http(project_exc) from project_exc
 
 
 def _log_success(
@@ -157,7 +208,8 @@ async def export_csv(
     )
     try:
         csv_content = export_to_csv(payload.test_cases)
-        _log_success(
+        result_metadata = {**export_metadata, "content_length": len(csv_content)}
+        event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
@@ -166,7 +218,16 @@ async def export_csv(
             billing_key="export.csv",
             quantity=len(payload.test_cases),
             unit="test_case",
-            result_metadata={**export_metadata, "content_length": len(csv_content)},
+            result_metadata=result_metadata,
+        )
+        _record_project_export_snapshot(
+            payload=payload,
+            export_format="csv",
+            current_user=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            result_metadata=result_metadata,
         )
         return StreamingResponse(
             io.StringIO(csv_content),
@@ -204,7 +265,8 @@ async def export_excel_endpoint(
     )
     try:
         excel_bytes = export_to_excel(payload.test_cases)
-        _log_success(
+        result_metadata = {**export_metadata, "byte_count": len(excel_bytes)}
+        event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
@@ -213,7 +275,16 @@ async def export_excel_endpoint(
             billing_key="export.excel",
             quantity=len(payload.test_cases),
             unit="test_case",
-            result_metadata={**export_metadata, "byte_count": len(excel_bytes)},
+            result_metadata=result_metadata,
+        )
+        _record_project_export_snapshot(
+            payload=payload,
+            export_format="excel",
+            current_user=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            result_metadata=result_metadata,
         )
         return StreamingResponse(
             io.BytesIO(excel_bytes),
@@ -251,7 +322,8 @@ async def export_json_endpoint(
     )
     try:
         json_content = export_to_json(payload.test_cases)
-        _log_success(
+        result_metadata = {**export_metadata, "content_length": len(json_content)}
+        event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
@@ -260,7 +332,16 @@ async def export_json_endpoint(
             billing_key="export.json",
             quantity=len(payload.test_cases),
             unit="test_case",
-            result_metadata={**export_metadata, "content_length": len(json_content)},
+            result_metadata=result_metadata,
+        )
+        _record_project_export_snapshot(
+            payload=payload,
+            export_format="json",
+            current_user=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            source_event_id=event_id,
+            result_metadata=result_metadata,
         )
         return StreamingResponse(
             io.StringIO(json_content),

@@ -1,5 +1,6 @@
 from io import BytesIO
 from typing import Any, List, Optional
+import hashlib
 import json
 import logging
 from uuid import uuid4
@@ -17,6 +18,7 @@ from ..services.audit_service import complete_workflow_run, record_usage_event, 
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.context_grounding import build_grounded_context
 from ..services.versioning_service import persist_requirement_versions
+from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http
 from ..utils.excel_parser import parse_excel_to_text
 
 router = APIRouter()
@@ -79,6 +81,15 @@ def _parse_workflow_settings_form(workflow_settings: Optional[str]) -> Optional[
         raise HTTPException(status_code=422, detail="workflow_settings payload is invalid") from exc
 
 
+def _parse_project_revision_form(base_project_revision: Optional[str]) -> Optional[int]:
+    if base_project_revision is None or str(base_project_revision).strip() == "":
+        return None
+    try:
+        return int(base_project_revision)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="base_project_revision must be an integer") from exc
+
+
 def _get_request_id(request: Request) -> str:
     return str(getattr(request.state, "request_id", "") or uuid4())
 
@@ -98,6 +109,44 @@ def _count_snapshot_changes(previous: dict[str, str], current: dict[str, str]) -
     changed = sum(1 for key, value in current.items() if previous.get(key) != value)
     removed = sum(1 for key in previous.keys() if key not in current)
     return changed + removed
+
+
+def _model_payload(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_model_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _model_payload(item) for key, item in value.items()}
+    return value
+
+
+def _requirements_project_payload(response: RequirementsWorkflowResponse) -> dict[str, Any]:
+    raw_text = response.raw_text or ""
+    return {
+        "source_name": response.source_name,
+        "source_names": list(response.source_names or []),
+        "raw_text_hash": hashlib.sha256(raw_text.encode("utf-8")).hexdigest() if raw_text else None,
+        "requirements": _model_payload(response.requirements),
+        "approved": response.approved,
+        "review": _model_payload(response.review),
+        "iteration_history": _model_payload(response.iteration_history),
+        "coverage_metrics": _model_payload(response.coverage_metrics),
+        "workflow_settings": _model_payload(response.workflow_settings),
+        "workflow_diagnostics": _model_payload(response.workflow_diagnostics),
+    }
+
+
+def _context_project_payload(response: EnrichResponse) -> dict[str, Any]:
+    return {
+        "requirements": _model_payload(response.requirements),
+        "app_link": str(response.app_link) if response.app_link else None,
+        "prototype_link": str(response.prototype_link) if response.prototype_link else None,
+        "diagram_links": [str(item) for item in response.diagram_links or []],
+        "image_links": [str(item) for item in response.image_links or []],
+        "notes": response.notes,
+        "grounded_context": _model_payload(response.grounded_context),
+    }
 
 
 def _log_success(
@@ -196,9 +245,12 @@ async def parse_requirements(
     feedback: Optional[str] = Form(None),
     existing_requirements: Optional[str] = Form(None),
     workflow_settings: Optional[str] = Form(None),
+    project_id: Optional[str] = Form(None),
+    base_project_revision: Optional[str] = Form(None),
 ) -> RequirementsWorkflowResponse:
     _settings = get_settings()
     parsed_workflow_settings = _parse_workflow_settings_form(workflow_settings)
+    parsed_project_revision = _parse_project_revision_form(base_project_revision)
     request_id = _get_request_id(request)
     is_refinement_request = bool(feedback and existing_requirements)
     billing_context = await run_in_threadpool(
@@ -283,7 +335,30 @@ async def parse_requirements(
                 operation="requirements.refine",
                 approved=response.approved,
             )
+            if project_id:
+                try:
+                    append_stage_snapshot(
+                        project_id=project_id,
+                        stage="requirements",
+                        payload=_requirements_project_payload(response),
+                        operation="requirements.refine",
+                        actor=current_user,
+                        request_id=request_id,
+                        workflow_run_id=workflow_run_id,
+                        source_event_id=event_id,
+                        approved=response.approved,
+                        title="Requirements refined",
+                        metadata={
+                            "requirements_modified_count": modified_count,
+                            "requirements_total": len(response.requirements),
+                        },
+                        base_project_revision=parsed_project_revision,
+                    )
+                except Exception as project_exc:
+                    raise project_error_to_http(project_exc) from project_exc
             return response
+        except HTTPException:
+            raise
         except Exception as exc:
             logging.exception("Requirement refinement failed")
             _log_failure(
@@ -395,6 +470,27 @@ async def parse_requirements(
             raw_text=raw_text,
             approved=response.approved,
         )
+        if project_id:
+            try:
+                append_stage_snapshot(
+                    project_id=project_id,
+                    stage="requirements",
+                    payload=_requirements_project_payload(response),
+                    operation="requirements.parse",
+                    actor=current_user,
+                    request_id=request_id,
+                    workflow_run_id=workflow_run_id,
+                    source_event_id=event_id,
+                    approved=response.approved,
+                    title="Requirements parsed",
+                    metadata={
+                        "requirements_generated_count": len(response.requirements),
+                        "document_count": len(source_names),
+                    },
+                    base_project_revision=parsed_project_revision,
+                )
+            except Exception as project_exc:
+                raise project_error_to_http(project_exc) from project_exc
         return response
     except HTTPException:
         _log_failure(
@@ -446,8 +542,10 @@ async def enrich_requirements(
             image_links=payload.image_links,
             notes=payload.notes,
             grounded_context=grounded_context,
+            project_id=payload.project_id,
+            base_project_revision=payload.base_project_revision,
         )
-        _log_success(
+        event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
@@ -462,6 +560,27 @@ async def enrich_requirements(
                 "ui_element_count": len(response.grounded_context.ui_elements),
             },
         )
+        if payload.project_id:
+            try:
+                append_stage_snapshot(
+                    project_id=payload.project_id,
+                    stage="context",
+                    payload=_context_project_payload(response),
+                    operation="requirements.enrich",
+                    actor=current_user,
+                    request_id=request_id,
+                    workflow_run_id=workflow_run_id,
+                    source_event_id=event_id,
+                    approved=True,
+                    title="Context analyzed",
+                    metadata={
+                        "artifact_source_count": len(response.grounded_context.artifact_sources),
+                        "ui_element_count": len(response.grounded_context.ui_elements),
+                    },
+                    base_project_revision=payload.base_project_revision,
+                )
+            except Exception as project_exc:
+                raise project_error_to_http(project_exc) from project_exc
         return response
     except Exception as exc:
         _log_failure(

@@ -23,7 +23,7 @@ should preserve when changing the application.
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/api/` | Generated frontend API contract declarations and endpoint constants | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/api/generated/api-contracts.js` |
 | `frontend/src/services/` | Frontend API helper functions | `frontend/src/services/apiClient.js` |
-| `frontend/src/hooks/` | Reusable React hooks, including domain workflow state hooks for requirements, context, generation, integrations, execution, export, and app session state | `frontend/src/hooks/*.js` |
+| `frontend/src/hooks/` | Reusable React hooks, including domain workflow state hooks for projects, requirements, context, generation, integrations, execution, export, and app session state | `frontend/src/hooks/*.js` |
 | `frontend/src/styles/` | Shared CSS entry point, design tokens, base rules, layout styles, and feature-owned selector modules | `frontend/src/styles/index.css`, `frontend/src/styles/*.css` |
 | `frontend/src/utils/` | Pure frontend helpers | `frontend/src/utils/*.js` |
 | `frontend/e2e/` | Playwright browser workflow tests and screenshot capture script | `frontend/e2e/*.js`, `frontend/e2e/*.mjs` |
@@ -60,7 +60,7 @@ exposes `/metrics`.
 |----------|-------------------|------------------------|
 | `backend/app/routers/` | HTTP request parsing, FastAPI dependencies, workflow audit start/complete calls, response assembly | Low-level external API request code, raw SDK setup, large agent prompts |
 | `backend/app/agents/` | ADK/Gemini workflow orchestration, prompt construction, deterministic fallbacks, test-design review logic, coverage metrics, and agent response hydration | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
-| `backend/app/services/` | Domain services for billing, audit, versioning, execution, grounding, reporting, integration connection storage, and storage adapter boundaries | FastAPI route decorators, JSX/UI behavior |
+| `backend/app/services/` | Domain services for billing, audit, versioning, QA project lifecycle, execution, grounding, reporting, integration connection storage, and storage adapter boundaries | FastAPI route decorators, JSX/UI behavior |
 | `backend/app/adapters/` | Provider-specific JIRA and Azure DevOps HTTP semantics | App-wide workflow decisions or billing policy |
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
@@ -88,11 +88,11 @@ exposes `/metrics`.
 - Frontend helper files use camelCase or lower-case domain names, for example
   `apiClient.js`, `useBillingStatus.js`, and `workflow.js`.
 - Backend route modules are grouped by product area, for example
-  `requirements.py`, `testcases.py`, `integrations_jira.py`, and
+  `projects.py`, `requirements.py`, `testcases.py`, `integrations_jira.py`, and
   `integrations_azure_devops.py`.
 - Frontend component directories are grouped by feature or layout, for example
-  `automation/`, `generation/`, `integrations/`, `requirements/`, and
-  `layout/`.
+  `automation/`, `generation/`, `integrations/`, `projects/`,
+  `requirements/`, and `layout/`.
 - Frontend generated API contracts live under `frontend/src/api/generated/` and
   are refreshed with `python scripts/generate_frontend_api_types.py`.
 - Frontend CSS is imported through `frontend/src/styles/index.css`; shared

@@ -9,6 +9,12 @@ export interface ApiOperation<Request, Response, Method extends string, Path ext
 }
 
 export interface ApiContractOperations {
+	projectsCreate: ApiOperation<ProjectsCreateRequest, ProjectsCreateResponse, "POST", "/projects">;
+	projectsList: ApiOperation<ProjectsListRequest, ProjectsListResponse, "GET", "/projects">;
+	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
+	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
+	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
+	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	requirementsParse: ApiOperation<RequirementsParseRequest, RequirementsParseResponse, "POST", "/requirements/parse">;
 	requirementsEnrich: ApiOperation<RequirementsEnrichRequest, RequirementsEnrichResponse, "POST", "/requirements/enrich">;
 	testCasesGenerate: ApiOperation<TestCasesGenerateRequest, TestCasesGenerateResponse, "POST", "/testcases/generate">;
@@ -22,6 +28,18 @@ export interface ApiContractOperations {
 	billingEntitlementsMe: ApiOperation<BillingEntitlementsMeRequest, BillingEntitlementsMeResponse, "GET", "/entitlements/me">;
 }
 
+export type ProjectsCreateRequest = QaProjectCreateInput;
+export type ProjectsCreateResponse = QaProjectDetail;
+export type ProjectsListRequest = undefined;
+export type ProjectsListResponse = QaProjectListResponse;
+export type ProjectGetRequest = undefined;
+export type ProjectGetResponse = QaProjectDetail;
+export type ProjectUpdateRequest = QaProjectUpdateInput;
+export type ProjectUpdateResponse = QaProjectDetail;
+export type ProjectTimelineRequest = undefined;
+export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
+export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
+export type ProjectUseCasesSaveResponse = QaProjectDetail;
 export type RequirementsParseRequest = Body_parse_requirements_requirements_parse_post;
 export type RequirementsParseResponse = RequirementsWorkflowResponse;
 export type RequirementsEnrichRequest = EnrichInput;
@@ -122,10 +140,12 @@ export interface BillingWalletSummary {
 }
 
 export interface Body_parse_requirements_requirements_parse_post {
+	base_project_revision?: string | null;
 	existing_requirements?: string | null;
 	feedback?: string | null;
 	file?: Blob | File | string | null;
 	files?: Array<Blob | File | string> | null;
+	project_id?: string | null;
 	workflow_settings?: string | null;
 }
 
@@ -139,20 +159,24 @@ export interface BusinessRule {
 
 export interface EnrichInput {
 	app_link?: string | null;
+	base_project_revision?: number | null;
 	diagram_links?: Array<string> | null;
 	grounded_context?: GroundedContext | null;
 	image_links?: Array<string> | null;
 	notes?: string | null;
+	project_id?: string | null;
 	prototype_link?: string | null;
 	requirements: Array<Requirement>;
 }
 
 export interface EnrichResponse {
 	app_link?: string | null;
+	base_project_revision?: number | null;
 	diagram_links?: Array<string> | null;
 	grounded_context?: GroundedContext;
 	image_links?: Array<string> | null;
 	notes?: string | null;
+	project_id?: string | null;
 	prototype_link?: string | null;
 	requirements: Array<Requirement>;
 }
@@ -176,7 +200,10 @@ export interface ExecutionIssue {
 }
 
 export interface ExecutionPreviewInput {
+	base_project_revision?: number | null;
+	project_id?: string | null;
 	target_base_url?: string | null;
+	target_environment?: string | null;
 	test_cases?: Array<TestCase>;
 }
 
@@ -197,8 +224,11 @@ export interface ExecutionPreviewSummary {
 }
 
 export interface ExecutionRunInput {
+	base_project_revision?: number | null;
+	project_id?: string | null;
 	selected_test_case_ids?: Array<string>;
 	target_base_url?: string | null;
+	target_environment?: string | null;
 	test_cases?: Array<TestCase>;
 }
 
@@ -247,8 +277,10 @@ export interface ExecutionUnsupportedStep {
 
 export interface ExportTestCasesInput {
 	approved?: boolean;
+	base_project_revision?: number | null;
 	draft_override_reason?: string | null;
 	draft_override_requested?: boolean;
+	project_id?: string | null;
 	review?: ReviewResult;
 	test_cases: Array<TestCase>;
 }
@@ -265,8 +297,10 @@ export interface FieldConstraint {
 }
 
 export interface GenerateTestCasesInput {
+	base_project_revision?: number | null;
 	context?: EnrichInput | null;
 	feedback?: string | null;
+	project_id?: string | null;
 	requirements: Array<Requirement>;
 	template: TestCaseTemplate;
 	workflow_settings?: WorkflowSettings | null;
@@ -332,9 +366,128 @@ export interface JiraExportResponse {
 	status: string;
 }
 
+export interface QaProjectCreateInput {
+	description?: string | null;
+	name: string;
+}
+
+export interface QaProjectDetail {
+	created_at: string;
+	current_revision?: number;
+	current_snapshots?: Record<string, QaProjectStageSnapshot>;
+	description?: string | null;
+	execution_runs?: Array<QaProjectExecutionRun>;
+	name: string;
+	owner_user_id: string;
+	project_id: string;
+	stage_state?: Record<string, QaProjectStageState>;
+	status?: "active" | "archived";
+	timeline?: Array<QaProjectTimelineEvent>;
+	updated_at: string;
+}
+
+export interface QaProjectExecutionRun {
+	actor_user_id?: string | null;
+	created_at: string;
+	project_id: string;
+	project_revision: number;
+	request_id?: string | null;
+	run_id: string;
+	run_record_id: string;
+	snapshot_id?: string | null;
+	source_event_id?: string | null;
+	status: string;
+	summary?: Record<string, unknown>;
+	target_environment: string;
+	test_case_count?: number;
+	workflow_run_id?: string | null;
+}
+
+export interface QaProjectListResponse {
+	projects?: Array<QaProjectSummary>;
+}
+
+export interface QaProjectStageSnapshot {
+	actor_user_id?: string | null;
+	approved?: boolean;
+	created_at: string;
+	metadata?: Record<string, unknown>;
+	operation: string;
+	payload?: Record<string, unknown>;
+	project_id: string;
+	project_revision: number;
+	request_id?: string | null;
+	snapshot_id: string;
+	source_event_id?: string | null;
+	source_snapshot_id?: string | null;
+	stage: "requirements" | "context" | "use_cases" | "test_cases" | "execution" | "reports";
+	title?: string | null;
+	version: number;
+	workflow_run_id?: string | null;
+}
+
+export interface QaProjectStageState {
+	approved?: boolean;
+	current_snapshot_id?: string | null;
+	metadata?: Record<string, unknown>;
+	operation?: string | null;
+	source_snapshot_id?: string | null;
+	stale?: boolean;
+	stale_reason?: string | null;
+	updated_at?: string | null;
+	version?: number;
+}
+
+export interface QaProjectSummary {
+	created_at: string;
+	current_revision?: number;
+	description?: string | null;
+	name: string;
+	owner_user_id: string;
+	project_id: string;
+	stage_state?: Record<string, QaProjectStageState>;
+	status?: "active" | "archived";
+	updated_at: string;
+}
+
+export interface QaProjectTimelineEvent {
+	actor_user_id?: string | null;
+	event_id: string;
+	event_type: string;
+	metadata?: Record<string, unknown>;
+	occurred_at: string;
+	project_id: string;
+	project_revision: number;
+	run_id?: string | null;
+	snapshot_id?: string | null;
+	stage?: "requirements" | "context" | "use_cases" | "test_cases" | "execution" | "reports" | null;
+	summary: string;
+}
+
+export interface QaProjectUpdateInput {
+	base_project_revision?: number | null;
+	description?: string | null;
+	name?: string | null;
+	status?: "active" | "archived" | null;
+}
+
+export interface QaProjectUseCaseSnapshotInput {
+	approved?: boolean;
+	base_project_revision?: number | null;
+	coverage_metrics?: Record<string, unknown>;
+	coverage_plan?: Array<RequirementCoveragePlan>;
+	requirement_analysis?: Array<RequirementAnalysis>;
+	review?: ReviewResult;
+	source_snapshot_id?: string | null;
+	workflow_diagnostics?: WorkflowDiagnostics;
+	workflow_settings?: WorkflowSettings;
+}
+
 export interface RefineTestCasesInput {
+	base_project_revision?: number | null;
 	context?: EnrichInput | null;
 	feedback: string;
+	project_id?: string | null;
 	requirements: Array<Requirement>;
 	template: TestCaseTemplate;
 	test_cases: Array<TestCase>;

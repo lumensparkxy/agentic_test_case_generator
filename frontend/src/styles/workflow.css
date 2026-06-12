@@ -12,6 +12,148 @@
 	color: var(--text-main);
 }
 
+.project-workspace {
+	margin-bottom: 1.25rem;
+	padding: 1rem 1.1rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	background: #ffffff;
+	box-shadow: var(--shadow-sm);
+}
+
+.project-workspace-header,
+.project-workspace-actions,
+.project-create-row,
+.project-stage-grid,
+.project-history-grid {
+	display: flex;
+	gap: 0.75rem;
+}
+
+.project-workspace-header {
+	align-items: flex-start;
+	justify-content: space-between;
+}
+
+.project-workspace h2,
+.project-history-block h3 {
+	margin: 0;
+	color: var(--text-main);
+}
+
+.project-workspace h2 {
+	font-size: 1rem;
+	font-weight: 700;
+}
+
+.project-workspace p {
+	margin: 0.25rem 0 0;
+	color: var(--text-muted);
+	font-size: 0.84rem;
+}
+
+.project-workspace-actions {
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+}
+
+.project-workspace-actions select {
+	min-width: 240px;
+}
+
+.project-create-row {
+	margin-top: 0.8rem;
+	align-items: center;
+}
+
+.project-create-row input {
+	max-width: 360px;
+}
+
+.project-stage-grid {
+	margin-top: 0.9rem;
+	display: grid;
+	grid-template-columns: repeat(6, minmax(120px, 1fr));
+}
+
+.project-stage-pill {
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+	min-height: 58px;
+	padding: 0.65rem 0.7rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-sm);
+	background: #f8fafc;
+}
+
+.project-stage-pill.ready {
+	border-color: #86efac;
+	background: #f0fdf4;
+}
+
+.project-stage-pill.stale {
+	border-color: #fbbf24;
+	background: #fffbeb;
+}
+
+.project-stage-label {
+	font-size: 0.78rem;
+	font-weight: 700;
+	color: var(--text-main);
+}
+
+.project-stage-meta {
+	font-size: 0.76rem;
+	color: var(--text-muted);
+}
+
+.project-history-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	margin-top: 0.9rem;
+}
+
+.project-history-block {
+	padding-top: 0.8rem;
+	border-top: 1px solid var(--border-color);
+	min-width: 0;
+}
+
+.project-history-block h3 {
+	font-size: 0.86rem;
+	font-weight: 700;
+	margin-bottom: 0.5rem;
+}
+
+.project-run-list,
+.project-timeline-list {
+	display: grid;
+	gap: 0.35rem;
+}
+
+.project-run-row,
+.project-timeline-row {
+	display: grid;
+	grid-template-columns: minmax(90px, 0.8fr) minmax(90px, 1fr) minmax(120px, 1.2fr);
+	gap: 0.55rem;
+	align-items: center;
+	font-size: 0.78rem;
+	color: var(--text-muted);
+}
+
+.project-timeline-row {
+	grid-template-columns: minmax(110px, 0.8fr) minmax(160px, 2fr);
+}
+
+.project-run-row strong,
+.project-timeline-row strong {
+	color: var(--text-main);
+	font-weight: 650;
+	overflow-wrap: anywhere;
+}
+
 .workflow-settings-panel,
 .workflow-metrics-panel,
 .workflow-diagnostics-panel {
