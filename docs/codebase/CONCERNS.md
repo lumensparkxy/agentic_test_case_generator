@@ -27,7 +27,7 @@ git/history checks. It is not a full bug backlog.
 | Risk | OWASP category | Evidence | Current mitigation | Gap |
 |------|----------------|----------|--------------------|-----|
 | Stored integration credentials | A02 Cryptographic Failures | `jira_connection_service.py`, `azure_devops_connection_service.py`, `docs/credential-rotation-runbook.md` | Fernet encryption using dedicated secret or JWT secret fallback; token hints only; rotation runbook documented | Seamless previous-key decryption and re-encryption support remains a follow-up in #77 |
-| SSRF through artifact URLs | A10 Server-Side Request Forgery | `artifact_fetcher.py` | Blocks local/private/non-routable hosts, unsafe schemes, and redirect abuse | Continued hardening needed before broad production use with authenticated/internal artifacts |
+| SSRF through artifact URLs | A10 Server-Side Request Forgery | `artifact_fetcher.py`, `docs/artifact-fetching-threat-model.md` | Blocks local/private/non-routable hosts, unsafe schemes, embedded credentials, redirect abuse, oversized responses, and unsupported content types | Authenticated/internal artifact fetching remains out of scope and requires a separate allow-list or proxy design before implementation |
 | Browser token storage | A07 Identification and Authentication Failures | `frontend/src/App.jsx`, `README.md` | Firebase token verification and backend auth checks | `localStorage` token storage remains MVP-level risk |
 | Metrics endpoint exposure | A05 Security Misconfiguration | `backend/app/main.py`, `scripts/deploy_cloud_run.sh` | Endpoint is schema-hidden, can be disabled, and can require a bearer token | Network perimeter remains deployment-specific |
 | Generated artifacts may contain sensitive content if real data is used | A01 Broken Access Control / data exposure | `.gitignore`, `docs/artifact-retention-policy.md`, `scripts/cleanup_generated_artifacts.py`, `execution_service.py` | Generated directories are ignored; cleanup is dry-run by default; tracked files are skipped | Durable archival policy for approved client deliverables remains out of scope |
@@ -63,6 +63,7 @@ git/history checks. It is not a full bug backlog.
 - `docs/firebase-auth-audit-architecture.md`
 - `docs/production-auth-policy-decision.md`
 - `docs/artifact-retention-policy.md`
+- `docs/artifact-fetching-threat-model.md`
 - `docs/credential-rotation-runbook.md`
 - `docs/persistence-target-decision.md`
 - `docs/implementation-plan.md`

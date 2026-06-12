@@ -68,7 +68,9 @@ Baseline values should be captured in Phase 0 before any scoring target is enfor
   freshness checks; broader low-traffic API surfaces still need incremental
   coverage.
 - Requirement import/sync is implemented for JIRA/Azure DevOps, but test-case lifecycle sync/export is not productized.
-- Artifact fetching needs stronger SSRF hardening before broad production use.
+- Artifact fetching now has a public, unauthenticated source threat model and
+  hardened validation; authenticated/internal artifact fetching remains out of
+  scope without a separate allow-list or proxy design.
 - CI runs backend lint, backend unittest, offline benchmark scripts, API
   contract checks, backend/frontend format checks, frontend lint, frontend
   build, and mocked Playwright checks on every PR.
@@ -331,7 +333,7 @@ issues below.
 3. Split `backend/app/main.py` into routers and `frontend/src/App.jsx` into workflow components. Backend route groups now live in `backend/app/routers/`; frontend workflow state extraction completed under [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) and CSS modularization completed under [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40).
 4. Split `backend/app/agents/test_case_agent.py` into orchestration, coverage, normalization, fallback, and prompt modules. The first behavior-preserving split completed under [#41](https://github.com/lumensparkxy/agentic_test_case_generator/issues/41).
 5. Introduce shared/generated frontend API types from FastAPI OpenAPI. Completed for high-traffic workflow contracts under [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43).
-6. Harden artifact fetching and integration URL validation. Production threat-model follow-up is tracked by [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57).
+6. Harden artifact fetching and integration URL validation. The artifact-fetching threat-model follow-up was completed by [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57); authenticated/internal artifact fetching remains out of scope without a separate allow-list or proxy design.
 7. Productize export approval gates, draft overrides, and test-case lifecycle integrations. Operational follow-ups are tracked by the Phase 4 issues in `docs/github-issues-backlog.md`.
 
 ## Modularization roadmap
