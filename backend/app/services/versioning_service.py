@@ -186,6 +186,7 @@ def persist_test_case_versions(
     source_event_id: Optional[str],
     operation: str,
     approved: Optional[bool] = None,
+    reuse_unchanged_versions: bool = False,
 ) -> list[TestCase]:
     test_cases = [test_case if isinstance(test_case, TestCase) else TestCase.model_validate(test_case) for test_case in current_test_cases]
     previous = [_coerce_test_case(test_case) for test_case in (previous_test_cases or [])]
@@ -235,12 +236,34 @@ def persist_test_case_versions(
         elif test_case.id in previous_by_case_id:
             previous_test_case = previous_by_case_id[test_case.id]
 
+        test_case_payload = _test_case_payload(test_case)
+        previous_payload = _test_case_payload(previous_test_case) if previous_test_case else None
+        if (
+            reuse_unchanged_versions
+            and previous_test_case
+            and previous_test_case.artifact_set_id
+            and previous_test_case.artifact_item_id
+            and previous_test_case.artifact_version_id
+            and previous_payload is not None
+            and _hash_payload(previous_payload) == _hash_payload(test_case_payload)
+        ):
+            updated_test_cases.append(
+                test_case.model_copy(
+                    update={
+                        "artifact_set_id": previous_test_case.artifact_set_id,
+                        "artifact_item_id": previous_test_case.artifact_item_id,
+                        "artifact_version_id": previous_test_case.artifact_version_id,
+                        "artifact_version_number": previous_test_case.artifact_version_number,
+                    }
+                )
+            )
+            continue
+
         item_id = test_case.artifact_item_id or (previous_test_case.artifact_item_id if previous_test_case else None) or str(uuid4())
         previous_version_id = previous_test_case.artifact_version_id if previous_test_case else None
         version_number = int(previous_test_case.artifact_version_number or 0) + 1 if previous_test_case else 1
         version_id = str(uuid4())
         item_doc = set_doc.collection("items").document(item_id)
-        test_case_payload = _test_case_payload(test_case)
         item_success = _safe_set(
             item_doc,
             {

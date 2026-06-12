@@ -33,7 +33,7 @@ committed files are stale. CI runs this after the OpenAPI export gate.
 
 The first slice covers the payloads that the UI calls most often:
 
-- QA project create/list/open/update/timeline/use-case snapshot endpoints
+- QA project create/list/open/update/timeline/use-case snapshot and impact update endpoints
 - requirements parse and context enrichment
 - test-case generation and refinement
 - CSV, Excel, JSON, and JIRA export inputs

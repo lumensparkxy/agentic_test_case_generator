@@ -1,5 +1,6 @@
 import json
 import logging
+import hashlib
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -12,7 +13,7 @@ from ..models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.versioning_service import persist_test_case_versions
-from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http
+from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http
 
 router = APIRouter()
 
@@ -45,6 +46,36 @@ def _model_payload(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _model_payload(item) for key, item in value.items()}
     return value
+
+
+def _content_hash(value: Any) -> str:
+    encoded = json.dumps(_model_payload(value), sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _hash_map(items: list[Any], *, id_key: str = "id") -> dict[str, str]:
+    result: dict[str, str] = {}
+    for index, item in enumerate(items or []):
+        payload = _model_payload(item)
+        if not isinstance(payload, dict):
+            continue
+        item_id = str(payload.get(id_key) or payload.get("requirement_id") or f"item-{index + 1}")
+        result[item_id] = _content_hash(payload)
+    return result
+
+
+def _scenario_hash_map(coverage_plan: list[Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for plan in coverage_plan or []:
+        payload = _model_payload(plan)
+        if not isinstance(payload, dict):
+            continue
+        for scenario_index, scenario in enumerate(payload.get("scenarios") or []):
+            if not isinstance(scenario, dict):
+                continue
+            scenario_id = str(scenario.get("id") or f"{payload.get('requirement_id', 'REQ')}-SCN-{scenario_index + 1:02d}")
+            result[scenario_id] = _content_hash(scenario)
+    return result
 
 
 def _use_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, Any]:
@@ -82,10 +113,15 @@ def _append_project_generation_snapshots(
     workflow_run_id: str,
     source_event_id: str,
     base_project_revision: int | None,
+    source_requirements: list[Any] | None = None,
+    source_context: Any = None,
 ) -> None:
     if not project_id:
         return
     try:
+        current_project = get_project(project_id, actor=actor)
+        current_requirements_snapshot = current_project.current_snapshots.get("requirements")
+        current_context_snapshot = current_project.current_snapshots.get("context")
         use_case_snapshot = append_stage_snapshot(
             project_id=project_id,
             stage="use_cases",
@@ -103,6 +139,11 @@ def _append_project_generation_snapshots(
             },
             base_project_revision=base_project_revision,
         )
+        source_snapshot_ids = {
+            "requirements": current_requirements_snapshot.snapshot_id if current_requirements_snapshot else None,
+            "context": current_context_snapshot.snapshot_id if current_context_snapshot else None,
+            "use_cases": use_case_snapshot.snapshot_id,
+        }
         append_stage_snapshot(
             project_id=project_id,
             stage="test_cases",
@@ -115,7 +156,17 @@ def _append_project_generation_snapshots(
             approved=response.approved,
             source_snapshot_id=use_case_snapshot.snapshot_id,
             title="Test cases updated",
-            metadata={"test_case_count": len(response.test_cases), "approved": response.approved},
+            metadata={
+                "test_case_count": len(response.test_cases),
+                "approved": response.approved,
+                "source_snapshot_ids": source_snapshot_ids,
+                "source_requirements_snapshot_id": source_snapshot_ids["requirements"],
+                "source_context_snapshot_id": source_snapshot_ids["context"],
+                "source_use_case_snapshot_id": source_snapshot_ids["use_cases"],
+                "source_requirement_hashes": _hash_map(source_requirements or [], id_key="id"),
+                "source_use_case_hashes": _scenario_hash_map(response.coverage_plan),
+                "source_context_hash": _content_hash(source_context) if source_context is not None else None,
+            },
         )
     except Exception as project_exc:
         raise project_error_to_http(project_exc) from project_exc
@@ -280,6 +331,8 @@ async def generate_test_cases_endpoint(
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
             base_project_revision=payload.base_project_revision,
+            source_requirements=payload.requirements,
+            source_context=payload.context,
         )
         return response
     except Exception as exc:
@@ -373,6 +426,8 @@ async def refine_test_cases_endpoint(
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
             base_project_revision=payload.base_project_revision,
+            source_requirements=payload.requirements,
+            source_context=payload.context,
         )
         return response
     except Exception as exc:

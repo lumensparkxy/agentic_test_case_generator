@@ -23,14 +23,16 @@ PROJECT_STAGES: tuple[ProjectStageName, ...] = (
     "requirements",
     "context",
     "use_cases",
+    "impact_analysis",
     "test_cases",
     "execution",
     "reports",
 )
 DOWNSTREAM_STAGES: dict[ProjectStageName, tuple[ProjectStageName, ...]] = {
-    "requirements": ("context", "use_cases", "test_cases", "execution", "reports"),
-    "context": ("use_cases", "test_cases", "execution", "reports"),
-    "use_cases": ("test_cases", "execution", "reports"),
+    "requirements": ("context", "use_cases", "impact_analysis", "test_cases", "execution", "reports"),
+    "context": ("use_cases", "impact_analysis", "test_cases", "execution", "reports"),
+    "use_cases": ("impact_analysis", "test_cases", "execution", "reports"),
+    "impact_analysis": ("test_cases", "execution", "reports"),
     "test_cases": ("execution", "reports"),
     "execution": ("reports",),
     "reports": (),
@@ -173,6 +175,15 @@ def get_project(project_id: str, *, actor: AuthUser) -> QaProjectDetail:
         timeline=timeline[:100],
         execution_runs=execution_runs[:100],
     )
+
+
+def get_project_stage_snapshot(project_id: str, snapshot_id: str, *, actor: AuthUser) -> QaProjectStageSnapshot:
+    payload = _get_project_payload(project_id)
+    _require_owner(payload, actor)
+    snapshot = _snapshot_for(project_id, snapshot_id)
+    if snapshot is None:
+        raise ProjectNotFoundError(snapshot_id)
+    return snapshot
 
 
 def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[QaProjectSummary]:

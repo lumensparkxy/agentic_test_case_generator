@@ -14,6 +14,8 @@ export interface ApiContractOperations {
 	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
+	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
+	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	requirementsParse: ApiOperation<RequirementsParseRequest, RequirementsParseResponse, "POST", "/requirements/parse">;
 	requirementsEnrich: ApiOperation<RequirementsEnrichRequest, RequirementsEnrichResponse, "POST", "/requirements/enrich">;
@@ -38,6 +40,10 @@ export type ProjectUpdateRequest = QaProjectUpdateInput;
 export type ProjectUpdateResponse = QaProjectDetail;
 export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
+export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
+export type ProjectImpactAnalysisResponse = QaProjectDetail;
+export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
+export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
 export type ProjectUseCasesSaveResponse = QaProjectDetail;
 export type RequirementsParseRequest = Body_parse_requirements_requirements_parse_post;
@@ -355,6 +361,15 @@ export interface GroundedWorkflow {
 	transitions?: Array<string>;
 }
 
+export interface ImpactAnalysisInput {
+	base_project_revision?: number | null;
+}
+
+export interface ImpactUpdateApplyInput {
+	accepted_recommendation_ids?: Array<string> | null;
+	base_project_revision?: number | null;
+}
+
 export interface JiraExportInput {
 	issue_type: string;
 	project_key: string;
@@ -420,7 +435,7 @@ export interface QaProjectStageSnapshot {
 	snapshot_id: string;
 	source_event_id?: string | null;
 	source_snapshot_id?: string | null;
-	stage: "requirements" | "context" | "use_cases" | "test_cases" | "execution" | "reports";
+	stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "execution" | "reports";
 	title?: string | null;
 	version: number;
 	workflow_run_id?: string | null;
@@ -460,7 +475,7 @@ export interface QaProjectTimelineEvent {
 	project_revision: number;
 	run_id?: string | null;
 	snapshot_id?: string | null;
-	stage?: "requirements" | "context" | "use_cases" | "test_cases" | "execution" | "reports" | null;
+	stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "execution" | "reports" | null;
 	summary: string;
 }
 

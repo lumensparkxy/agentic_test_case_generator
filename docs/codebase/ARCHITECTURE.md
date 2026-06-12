@@ -22,7 +22,8 @@ Primary constraints:
   context can be enriched, test cases are generated/reviewed, exports are gated,
   and execution candidates are previewed before running.
 - Durable QA projects can now wrap the staged workflow so requirement, context,
-  use-case, test-case, execution, and report snapshots survive browser reloads.
+  use-case, impact-analysis, test-case, execution, and report snapshots survive
+  browser reloads.
 - Agent output must be resilient: parsers, deterministic fallbacks, retry
   diagnostics, and heuristic quality gates protect the workflow from malformed
   model output.
@@ -43,7 +44,7 @@ flowchart LR
     auth["Auth layer\nFirebase ID token\nlegacy JWT\nGoogle credential login"]
     models["Pydantic contracts\nbackend/app/models.py"]
 
-    agents["Agent workflows\nADK/Gemini\nrequirements, analysis,\ntest generation, automation"]
+    agents["Agent workflows\nADK/Gemini\nrequirements, analysis,\ntest generation, impact update,\nautomation"]
     services["Domain services\naudit, billing, versioning,\nproject lifecycle, grounding,\nexecution, reporting"]
     adapters["Provider adapters\nJIRA Cloud\nAzure DevOps"]
     petf["Plain-English test framework\nspec parser -> IR ->\nPlaywright generator"]
@@ -117,7 +118,7 @@ Typical generate flow:
 Project-scoped workflow flow:
 
 ```text
-QA Project -> requirements snapshot -> context snapshot -> use-case snapshot -> test-case snapshot -> execution runs by environment -> report/export snapshots
+QA Project -> requirements snapshot -> context snapshot -> use-case snapshot -> impact-analysis snapshot -> test-case snapshot -> execution runs by environment -> report/export snapshots
 ```
 
 When a request includes `project_id`, the relevant router appends an immutable
@@ -125,6 +126,20 @@ snapshot through `backend/app/services/workflow_project_service.py`. Upstream
 changes mark downstream stages stale without deleting old versions, execution
 runs, or report/export records. Calls without `project_id` keep the earlier
 one-shot behavior.
+
+Impact update flow:
+
+```text
+Stale upstream requirements/use cases -> /projects/{id}/impact-analysis -> changed-item and recommendation snapshot -> /projects/{id}/impact-update/apply -> versioned test-case snapshot
+```
+
+`backend/app/agents/impact_update_agent.py` compares the current requirement
+and use-case snapshots with the source snapshots that produced the existing
+test-case suite. Direct traceability uses `linked_requirement_ids` and
+`scenario_refs`; semantic-neighbor candidates are suggested without being
+accepted by default. `backend/app/services/impact_update_service.py` applies
+only accepted recommendations, preserves unchanged test-case artifact versions,
+and deprecates obsolete cases instead of hard deleting them.
 
 Next-version execution flow:
 
@@ -145,8 +160,8 @@ The conversion and run path is implemented by
 | FastAPI app | App construction, middleware, CORS, router registration, health, metrics | Feature endpoint logic beyond global middleware | `backend/app/main.py` |
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
-| Agents | Requirement extraction, analysis, test-case generation orchestration, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
-| Services | Billing, audit, versioning, project lifecycle, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
+| Agents | Requirement extraction, analysis, test-case generation orchestration, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
+| Services | Billing, audit, versioning, project lifecycle, impact update apply, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
@@ -163,6 +178,7 @@ The conversion and run path is implemented by
 | Workflow audit lifecycle | `start_workflow_run()`, `complete_workflow_run()`, `record_usage_event()` | Links operations to request IDs, users, billing, reports, and trace metadata |
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
 | Durable project aggregate | `projects.py`, `workflow_project_service.py`, project models in `models.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
+| Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe or unsupported public URLs and returns partial enrichment warnings instead of crashing |
 | Provider adapter plus service | JIRA and Azure DevOps adapter/service pairs plus shared credential crypto helper | Separates remote API mechanics, credential storage/rotation, and import/sync workflow policy |
@@ -211,11 +227,13 @@ The conversion and run path is implemented by
 - `backend/app/routers/projects.py`
 - `backend/app/routers/testcases.py`
 - `backend/app/routers/automation.py`
+- `backend/app/agents/impact_update_agent.py`
 - `backend/app/agents/test_case_agent.py`
 - `backend/app/agents/test_case_coverage.py`
 - `backend/app/agents/test_case_review.py`
 - `backend/app/agents/test_case_fallback.py`
 - `backend/app/agents/test_case_hydration.py`
+- `backend/app/services/impact_update_service.py`
 - `backend/app/services/execution_service.py`
 - `backend/plain_english_test_framework/compiler.py`
 - `backend/plain_english_test_framework/local_runner.py`
