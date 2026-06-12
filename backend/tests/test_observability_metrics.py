@@ -18,6 +18,7 @@ from app.observability.metrics import (
     record_audit_write_failure,
     record_audit_write_retry,
     record_http_request,
+    record_integration_request,
     record_workflow_completed,
     record_workflow_started,
     render_prometheus_metrics,
@@ -42,6 +43,7 @@ class ObservabilityMetricsTests(unittest.TestCase):
         record_audit_write_failure(collection="workflow_runs", operation="workflow_run_start")
         record_audit_write_retry(collection="workflow_runs", operation="workflow_run_start", outcome="scheduled")
         record_audit_dead_letter(collection="workflow_runs", operation="workflow_run_start")
+        record_integration_request(provider="jira", operation="search_issues", status="success", duration_seconds=0.25)
 
         rendered = render_prometheus_metrics()
 
@@ -55,6 +57,9 @@ class ObservabilityMetricsTests(unittest.TestCase):
         self.assertIn('audit_write_failures_total{collection="workflow_runs",operation="workflow_run_start"} 1', rendered)
         self.assertIn('audit_write_retries_total{collection="workflow_runs",operation="workflow_run_start",outcome="scheduled"} 1', rendered)
         self.assertIn('audit_dead_letters_total{collection="workflow_runs",operation="workflow_run_start"} 1', rendered)
+        self.assertIn('integration_requests_total{operation="search_issues",provider="jira",status="success"} 1', rendered)
+        self.assertIn('integration_request_duration_seconds_count{operation="search_issues",provider="jira",status="success"} 1', rendered)
+        self.assertIn('integration_request_duration_seconds_sum{operation="search_issues",provider="jira",status="success"} 0.25', rendered)
 
     def test_metrics_endpoint_exposes_observed_http_request(self) -> None:
         with patch.dict(os.environ, {"METRICS_ENABLED": "true", "METRICS_ACCESS_TOKEN": ""}, clear=False):

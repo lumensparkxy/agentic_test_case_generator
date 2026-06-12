@@ -17,7 +17,7 @@ used by the tracked source.
 | Remote artifact URLs | External HTTP(S) resources | Ground app/prototype/diagram/image links into UI/API/workflow context | Public HTTP(S), no user-supplied auth | Medium | `backend/app/services/artifact_fetcher.py`, `backend/app/services/context_grounding.py`, `backend/app/routers/requirements.py` |
 | Playwright Test execution runtime | Local subprocess/runtime | Convert executable candidates into generated specs, run selected cases, collect reports | Local process, environment config | High for automation feature | `backend/app/services/execution_service.py`, `backend/plain_english_test_framework/local_runner.py`, `backend/execution_runtime/playwright.config.ts` |
 | Cloud Run / Artifact Registry / Secret Manager | Deployment platform | Deploy backend and frontend containers to managed infrastructure | `gcloud` credentials and Secret Manager | Medium | `scripts/deploy_cloud_run.sh`, `backend/Dockerfile`, `frontend/Dockerfile` |
-| Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, and audit failure counters when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `scripts/deploy_cloud_run.sh` |
+| Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, audit failure, and integration request counters/durations when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `backend/app/observability/integrations.py`, `scripts/deploy_cloud_run.sh` |
 | OpenTelemetry | Optional tracing | FastAPI tracing and trace ID propagation | `OTEL_*` environment variables | Medium | `backend/app/observability/tracing.py`, `backend/requirements.txt` |
 
 ## 2) Data Stores
@@ -90,6 +90,10 @@ Rotation/lifecycle notes:
 - Request middleware logs completed and failed HTTP requests with request ID,
   trace ID, method, path, status, and duration.
 - Agent workflow logs carry request/workflow/user/operation context.
+- JIRA and Azure DevOps adapters record provider request success/failure counts
+  and durations with low-cardinality `provider`, `operation`, and `status`
+  labels, and emit safe structured logs without provider URLs, issue keys,
+  work-item IDs, user emails, raw query text, or secrets.
 - `/metrics` exposes Prometheus-compatible counters and durations through
   `backend/app/observability/metrics.py` when `METRICS_ENABLED=true`. Cloud Run
   deployments default it off and require `METRICS_ACCESS_TOKEN` if enabled.
@@ -98,8 +102,6 @@ Rotation/lifecycle notes:
 
 Missing visibility gaps:
 
-- [TODO] Integration adapters do not have a documented per-provider latency and
-  error SLO.
 - [TODO] No durable external dead-letter queue is implemented for audit failures.
 - [TODO] Broader explicit instrumentation for non-agent admin/auth/reporting
   flows is still listed as not fully implemented in the observability feature
@@ -121,6 +123,8 @@ Missing visibility gaps:
 - `backend/app/services/context_grounding.py`
 - `backend/app/services/audit_service.py`
 - `backend/app/services/billing_repository.py`
+- `backend/app/observability/integrations.py`
+- `backend/app/observability/metrics.py`
 - `backend/app/adapters/jira.py`
 - `backend/app/adapters/azure_devops.py`
 - `backend/execution_runtime/playwright.config.ts`

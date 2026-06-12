@@ -77,6 +77,8 @@ git/history checks. It is not a full bug backlog.
 - `backend/app/services/audit_repository.py`
 - `backend/app/services/billing_repository.py`
 - `backend/app/services/reporting_service.py`
+- `backend/app/observability/integrations.py`
+- `backend/app/observability/metrics.py`
 - `frontend/src/App.jsx`
 - `frontend/src/api/generated/api-contracts.d.ts`
 - `frontend/src/api/generated/api-contracts.js`

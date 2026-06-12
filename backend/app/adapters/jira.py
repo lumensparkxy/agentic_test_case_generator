@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency fallback
     certifi = None
 
 from ..models import JiraIssueSummary, JiraIssueTypeSummary, JiraProjectSummary, JiraStoredConnection
+from ..observability.integrations import observe_integration_request
 
 
 DEFAULT_ISSUE_FIELDS = (
@@ -51,7 +52,7 @@ class JiraAdapter:
         )
 
     def validate_connection(self) -> dict[str, Any]:
-        return self._request_json("GET", "/rest/api/3/myself")
+        return self._request_json("GET", "/rest/api/3/myself", operation="validate_connection")
 
     def list_projects(self, *, query: Optional[str] = None, max_results: int = 50) -> list[JiraProjectSummary]:
         normalized_query = str(query or "").strip()
@@ -63,10 +64,11 @@ class JiraAdapter:
                 "query": normalized_query or None,
                 "maxResults": normalized_max_results,
             },
+            operation="list_projects",
         )
         projects = response.get("values") if isinstance(response.get("values"), list) else []
         if not projects:
-            fallback_response = self._request_json("GET", "/rest/api/3/project")
+            fallback_response = self._request_json("GET", "/rest/api/3/project", operation="list_projects")
             projects = fallback_response.get("value") if isinstance(fallback_response.get("value"), list) else []
 
         filtered_projects = self._filter_projects(projects, normalized_query)
@@ -85,6 +87,7 @@ class JiraAdapter:
             "GET",
             f"/rest/api/3/issue/{quote(issue_key, safe='')}",
             query={"fields": self._format_fields(fields)},
+            operation="get_issue",
         )
         return self._parse_issue(response)
 
@@ -92,6 +95,7 @@ class JiraAdapter:
         response = self._request_json(
             "GET",
             f"/rest/api/3/project/{quote(str(project_key or '').strip(), safe='')}",
+            operation="get_project_issue_types",
         )
         issue_types = response.get("issueTypes") if isinstance(response.get("issueTypes"), list) else []
         parsed_issue_types: list[JiraIssueTypeSummary] = []
@@ -118,6 +122,7 @@ class JiraAdapter:
             "PUT",
             f"/rest/api/3/issue/{quote(issue_key, safe='')}",
             body={"fields": fields},
+            operation="update_issue_fields",
         )
 
     def update_issue_description(self, issue_key: str, description_adf: dict[str, Any]) -> None:
@@ -138,7 +143,7 @@ class JiraAdapter:
         }
         if next_page_token:
             body["nextPageToken"] = next_page_token
-        return self._request_json("POST", "/rest/api/3/search/jql", body=body)
+        return self._request_json("POST", "/rest/api/3/search/jql", body=body, operation="search_issues")
 
     def search_issue_summaries(
         self,
@@ -221,6 +226,7 @@ class JiraAdapter:
         *,
         query: Optional[dict[str, Any]] = None,
         body: Optional[dict[str, Any]] = None,
+        operation: str = "request",
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         query_payload = {key: value for key, value in (query or {}).items() if value is not None and value != "" and value != []}
@@ -239,21 +245,22 @@ class JiraAdapter:
             },
         )
 
-        try:
-            payload = self._read_response_with_ssl_fallback(request)
-        except HTTPError as exc:
-            payload_text = exc.read().decode("utf-8", errors="ignore")
-            parsed_payload = self._parse_json(payload_text)
-            message = self._build_http_error_message(exc, parsed_payload, payload_text)
-            raise JiraAdapterError(
-                message,
-                status_code=exc.code,
-                payload=parsed_payload or {},
-            ) from exc
-        except URLError as exc:
-            raise JiraAdapterError(self._build_connection_error_message(exc)) from exc
+        with observe_integration_request(provider="jira", operation=operation):
+            try:
+                payload = self._read_response_with_ssl_fallback(request)
+            except HTTPError as exc:
+                payload_text = exc.read().decode("utf-8", errors="ignore")
+                parsed_payload = self._parse_json(payload_text)
+                message = self._build_http_error_message(exc, parsed_payload, payload_text)
+                raise JiraAdapterError(
+                    message,
+                    status_code=exc.code,
+                    payload=parsed_payload or {},
+                ) from exc
+            except URLError as exc:
+                raise JiraAdapterError(self._build_connection_error_message(exc)) from exc
 
-        parsed_payload = self._parse_json(payload)
+            parsed_payload = self._parse_json(payload)
         return parsed_payload or {}
 
     def _read_response_with_ssl_fallback(self, request: Request) -> str:

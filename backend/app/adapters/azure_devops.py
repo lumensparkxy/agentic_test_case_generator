@@ -22,6 +22,7 @@ from ..models import (
     AzureDevOpsWorkItemSummary,
     AzureDevOpsWorkItemTypeSummary,
 )
+from ..observability.integrations import observe_integration_request
 
 
 DEFAULT_WORK_ITEM_FIELDS = (
@@ -103,6 +104,7 @@ class AzureDevOpsAdapter:
             "GET",
             "/_apis/projects",
             query={"$top": normalized_max_results},
+            operation="list_projects",
         )
         projects = response.get("value") if isinstance(response.get("value"), list) else []
         filtered = self._filter_projects(projects, query or "")
@@ -113,6 +115,7 @@ class AzureDevOpsAdapter:
         response = self._request_json(
             "GET",
             f"/{quote(normalized_project, safe='')}/_apis/wit/workitemtypes",
+            operation="get_project_work_item_types",
         )
         work_item_types = response.get("value") if isinstance(response.get("value"), list) else []
         parsed: list[AzureDevOpsWorkItemTypeSummary] = []
@@ -139,6 +142,7 @@ class AzureDevOpsAdapter:
             f"/{quote(normalized_project, safe='')}/_apis/wit/wiql",
             query={"$top": max(1, int(max_results or 50))},
             body={"query": normalized_wiql},
+            operation="query_work_item_ids",
         )
         references = response.get("workItems") if isinstance(response.get("workItems"), list) else []
         return [int(item.get("id")) for item in references if str(item.get("id") or "").isdigit()]
@@ -181,6 +185,7 @@ class AzureDevOpsAdapter:
             "GET",
             f"/{quote(normalized_project, safe='')}/_apis/wit/workitems/{int(work_item_id)}",
             query=query,
+            operation="get_work_item",
         )
         return self._parse_work_item(response, project=normalized_project)
 
@@ -207,6 +212,7 @@ class AzureDevOpsAdapter:
                 "GET",
                 f"/{quote(normalized_project, safe='')}/_apis/wit/workitems",
                 query=query,
+                operation="get_work_items",
             )
             values = response.get("value") if isinstance(response.get("value"), list) else []
             work_items.extend(self._parse_work_item(item, project=normalized_project) for item in values)
@@ -239,6 +245,7 @@ class AzureDevOpsAdapter:
             f"/{quote(normalized_project, safe='')}/_apis/wit/workitems/{int(work_item_id)}",
             body=operations,
             content_type="application/json-patch+json",
+            operation="update_work_item_description",
         )
 
     def create_work_item(
@@ -273,6 +280,7 @@ class AzureDevOpsAdapter:
             f"/{quote(normalized_project, safe='')}/_apis/wit/workitems/${quote(normalized_type, safe='')}",
             body=operations,
             content_type="application/json-patch+json",
+            operation="create_work_item",
         )
         return self._parse_work_item(response, project=normalized_project)
 
@@ -284,6 +292,7 @@ class AzureDevOpsAdapter:
         query: Optional[dict[str, Any]] = None,
         body: Optional[Any] = None,
         content_type: str = "application/json",
+        operation: str = "request",
     ) -> dict[str, Any]:
         url = f"{self.organization_url}{path}"
         query_payload = {
@@ -304,21 +313,22 @@ class AzureDevOpsAdapter:
             },
         )
 
-        try:
-            payload = self._read_response_with_ssl_fallback(request)
-        except HTTPError as exc:
-            payload_text = exc.read().decode("utf-8", errors="ignore")
-            parsed_payload = self._parse_json(payload_text)
-            message = self._build_http_error_message(exc, parsed_payload, payload_text)
-            raise AzureDevOpsAdapterError(
-                message,
-                status_code=exc.code,
-                payload=parsed_payload or {},
-            ) from exc
-        except URLError as exc:
-            raise AzureDevOpsAdapterError(self._build_connection_error_message(exc)) from exc
+        with observe_integration_request(provider="azure_devops", operation=operation):
+            try:
+                payload = self._read_response_with_ssl_fallback(request)
+            except HTTPError as exc:
+                payload_text = exc.read().decode("utf-8", errors="ignore")
+                parsed_payload = self._parse_json(payload_text)
+                message = self._build_http_error_message(exc, parsed_payload, payload_text)
+                raise AzureDevOpsAdapterError(
+                    message,
+                    status_code=exc.code,
+                    payload=parsed_payload or {},
+                ) from exc
+            except URLError as exc:
+                raise AzureDevOpsAdapterError(self._build_connection_error_message(exc)) from exc
 
-        parsed_payload = self._parse_json(payload)
+            parsed_payload = self._parse_json(payload)
         return parsed_payload or {}
 
     def _read_response_with_ssl_fallback(self, request: Request) -> str:

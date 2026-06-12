@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.adapters.azure_devops import AzureDevOpsAdapter, AzureDevOpsAdapterError, normalize_azure_devops_url
+from app.observability.metrics import render_prometheus_metrics, reset_metrics
 
 
 class _FakeResponse:
@@ -30,6 +31,12 @@ class _FakeResponse:
 
 
 class AzureDevOpsAdapterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_metrics()
+
+    def tearDown(self) -> None:
+        reset_metrics()
+
     def test_normalize_organization_url(self) -> None:
         location = normalize_azure_devops_url("https://dev.azure.com/acme")
 
@@ -77,6 +84,29 @@ class AzureDevOpsAdapterTests(unittest.TestCase):
         self.assertIn("/_apis/projects", captured_requests[0].full_url)
         self.assertIn("api-version=7.1", captured_requests[0].full_url)
         self.assertIn("%24top=10", captured_requests[0].full_url)
+
+    def test_list_projects_records_success_metrics_and_logs(self) -> None:
+        adapter = AzureDevOpsAdapter(
+            organization_url="https://dev.azure.com/acme",
+            personal_access_token="pat-123",
+        )
+
+        with self.assertLogs("app.observability.integrations", level="INFO") as captured:
+            with patch(
+                "app.adapters.azure_devops.urlopen",
+                return_value=_FakeResponse(b'{"value":[{"id":"p1","name":"Payments","state":"wellFormed"}]}'),
+            ):
+                projects = adapter.list_projects(query="pay", max_results=10)
+
+        rendered = render_prometheus_metrics()
+
+        self.assertEqual([project.name for project in projects], ["Payments"])
+        self.assertIn('integration_requests_total{operation="list_projects",provider="azure_devops",status="success"} 1', rendered)
+        self.assertIn('integration_request_duration_seconds_count{operation="list_projects",provider="azure_devops",status="success"} 1', rendered)
+        self.assertEqual(captured.records[0].event, "integration.request.completed")
+        self.assertEqual(captured.records[0].provider, "azure_devops")
+        self.assertEqual(captured.records[0].integration_operation, "list_projects")
+        self.assertEqual(captured.records[0].integration_status, "success")
 
     def test_search_work_items_uses_wiql_and_hydrates_ids(self) -> None:
         adapter = AzureDevOpsAdapter(
@@ -286,11 +316,22 @@ class AzureDevOpsAdapterTests(unittest.TestCase):
         )
 
         with patch("app.adapters.azure_devops.urlopen", side_effect=http_error):
-            with self.assertRaises(AzureDevOpsAdapterError) as raised:
-                adapter.validate_connection()
+            with self.assertLogs("app.observability.integrations", level="WARNING") as captured:
+                with self.assertRaises(AzureDevOpsAdapterError) as raised:
+                    adapter.validate_connection()
+
+        rendered = render_prometheus_metrics()
 
         self.assertIn("does not have enough access", str(raised.exception))
         self.assertIn("Work Items read/write", str(raised.exception))
+        self.assertIn('integration_requests_total{operation="list_projects",provider="azure_devops",status="failure"} 1', rendered)
+        self.assertIn('integration_request_duration_seconds_count{operation="list_projects",provider="azure_devops",status="failure"} 1', rendered)
+        self.assertEqual(captured.records[0].event, "integration.request.failed")
+        self.assertEqual(captured.records[0].provider, "azure_devops")
+        self.assertEqual(captured.records[0].integration_operation, "list_projects")
+        self.assertEqual(captured.records[0].integration_status, "failure")
+        self.assertEqual(captured.records[0].status_code, 403)
+        self.assertEqual(captured.records[0].error_type, "AzureDevOpsAdapterError")
 
 
 if __name__ == "__main__":
