@@ -135,7 +135,7 @@ The conversion and run path is implemented by
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
 | Plain-English framework | Spec parsing, secret detection, environment/data resolution, schema-valid IR generation, Playwright spec generation, local runner | User auth, billing, external integrations | `backend/plain_english_test_framework/*.py` |
-| React app | User workflow state, auth session, component composition, API actions | Backend persistence or agent logic | `frontend/src/App.jsx`, `frontend/src/components/` |
+| React app | Top-level workflow composition, auth session orchestration, domain workflow hooks, component props, API actions | Backend persistence or agent logic | `frontend/src/App.jsx`, `frontend/src/hooks/`, `frontend/src/components/` |
 
 ## 5) Reused Patterns
 
@@ -152,9 +152,11 @@ The conversion and run path is implemented by
 
 ## 6) Known Architectural Risks
 
-- `backend/app/agents/test_case_agent.py`, `frontend/src/App.jsx`, and
-  `frontend/src/App.css` remain large, high-churn files. They mix multiple
-  responsibilities and require focused, well-tested slices for future changes.
+- `backend/app/agents/test_case_agent.py` and `frontend/src/App.css` remain
+  large, high-churn files. `frontend/src/App.jsx` is still the top-level
+  workflow composer, but workflow state is now split into domain hooks under
+  `frontend/src/hooks/`; future changes should continue moving cohesive
+  behavior behind those hook boundaries.
 - `backend/app/models.py` contains many product domains in one file. This keeps
   contracts discoverable but increases merge and review risk as the API grows.
 - Current auth supports Firebase ID tokens and legacy/backend JWT tokens. This

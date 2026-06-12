@@ -22,7 +22,7 @@ should preserve when changing the application.
 | `frontend/` | React/Vite web application, E2E specs, frontend Dockerfile, Nginx config | `frontend/src/main.jsx`, `frontend/package.json`, `frontend/Dockerfile` |
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/services/` | Frontend API helper functions | `frontend/src/services/apiClient.js` |
-| `frontend/src/hooks/` | Reusable React hooks | `frontend/src/hooks/*.js` |
+| `frontend/src/hooks/` | Reusable React hooks, including domain workflow state hooks for requirements, context, generation, integrations, execution, export, and app session state | `frontend/src/hooks/*.js` |
 | `frontend/src/utils/` | Pure frontend helpers | `frontend/src/utils/*.js` |
 | `frontend/e2e/` | Playwright browser workflow tests and screenshot capture script | `frontend/e2e/*.js`, `frontend/e2e/*.mjs` |
 | `schemas/` | JSON schemas for the plain-English spec and IR contracts | `schemas/spec.schema.json`, `schemas/ir.schema.json` |
