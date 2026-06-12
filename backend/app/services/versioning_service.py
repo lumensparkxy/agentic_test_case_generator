@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from ..models import AuthUser, Requirement, TestCase
 from .audit_service import build_actor_snapshot
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection
 
 REQUIREMENT_SETS_COLLECTION = "requirements_sets"
 TEST_CASE_SETS_COLLECTION = "test_case_sets"
@@ -23,13 +23,10 @@ def _hash_payload(payload: Dict[str, Any]) -> str:
 
 
 def _get_collection(collection_name: str):
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        logging.warning("Firestore client unavailable for %s persistence: %s", collection_name, exc)
-        return None
-
-    return client.collection(collection_name)
+    return get_optional_firestore_collection(
+        collection_name,
+        unavailable_message=f"Firestore client unavailable for {collection_name} persistence",
+    )
 
 
 def _safe_set(document_ref, payload: Dict[str, Any], *, operation: str, merge: bool = False) -> bool:

@@ -85,8 +85,9 @@ Evidence: `.github/workflows/ci.yml`.
 
 ## 4) Mocking and Isolation Strategy
 
-- Backend tests patch Firestore clients, provider adapters, auth dependencies,
-  billing services, and agent calls at module boundaries.
+- Backend tests patch the shared Firestore adapter, provider adapters, auth
+  dependencies, billing services, repository hooks, and agent calls at module
+  boundaries.
 - JIRA and Azure DevOps sync tests verify direct source metadata paths avoid
   unnecessary Firestore mapping reads where possible.
 - Frontend focused E2E tests mock API responses and use a local Vite server.

@@ -17,7 +17,7 @@ from ..models import (
     JiraProjectsResponse,
     Requirement,
 )
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection
 from .jira_connection_service import get_jira_adapter_for_user
 
 JIRA_REQUIREMENT_MAPPINGS_COLLECTION = "jira_requirement_mappings"
@@ -32,12 +32,10 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 
 
 def _get_collection() -> Optional[object]:
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        logging.warning("Firestore unavailable for JIRA requirement mapping writes: %s", exc)
-        return None
-    return client.collection(JIRA_REQUIREMENT_MAPPINGS_COLLECTION)
+    return get_optional_firestore_collection(
+        JIRA_REQUIREMENT_MAPPINGS_COLLECTION,
+        unavailable_message="Firestore unavailable for JIRA requirement mapping writes",
+    )
 
 
 def list_jira_projects(

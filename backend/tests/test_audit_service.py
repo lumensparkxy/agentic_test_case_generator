@@ -48,7 +48,7 @@ class AuditServiceTests(unittest.TestCase):
         collection.document.return_value = document
         user = AuthUser(sub="user-1", email="user@example.com", name="User One")
 
-        with patch("app.services.audit_service.get_firestore_client") as get_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_client:
             get_client.return_value.collection.return_value = collection
             run_id = start_workflow_run(
                 operation="requirements.parse",
@@ -70,7 +70,7 @@ class AuditServiceTests(unittest.TestCase):
         document = MagicMock()
         collection.document.return_value = document
 
-        with patch("app.services.audit_service.get_firestore_client") as get_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_client:
             get_client.return_value.collection.return_value = collection
             complete_workflow_run(
                 "run-123",
@@ -89,7 +89,7 @@ class AuditServiceTests(unittest.TestCase):
         collection.document.return_value = document
         user = AuthUser(sub="user-2", email="user2@example.com", name="User Two")
 
-        with patch("app.services.audit_service.get_firestore_client") as get_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_client:
             get_client.return_value.collection.return_value = collection
             event_id = record_usage_event(
                 event_type="requirements.parsed",
@@ -120,7 +120,7 @@ class AuditServiceTests(unittest.TestCase):
         collection.document.return_value = document
         user = AuthUser(sub="user-3", email="user3@example.com", name="User Three")
 
-        with patch("app.services.audit_service.get_firestore_client") as get_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_client:
             get_client.return_value.collection.return_value = collection
             run_id = start_workflow_run(
                 operation="requirements.parse",
@@ -138,7 +138,7 @@ class AuditServiceTests(unittest.TestCase):
         collection.document.return_value = document
         user = AuthUser(sub="user-4", email="user4@example.com", name="User Four")
 
-        with patch("app.services.audit_service.get_firestore_client") as get_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_client:
             get_client.return_value.collection.return_value = collection
             event_id = record_usage_event(
                 event_type="requirements.parsed",
@@ -166,7 +166,7 @@ class AuditServiceTests(unittest.TestCase):
             {"AUDIT_WRITE_RETRY_ATTEMPTS": "1", "AUDIT_WRITE_RETRY_DELAY_SECONDS": "0"},
             clear=False,
         ):
-            with patch("app.services.audit_service.get_firestore_client") as get_client:
+            with patch("app.services.firestore_repository.get_firestore_client") as get_client:
                 get_client.return_value.collection.return_value = collection
                 run_id = start_workflow_run(
                     operation="requirements.parse",
@@ -191,7 +191,7 @@ class AuditServiceTests(unittest.TestCase):
             {"AUDIT_WRITE_RETRY_ATTEMPTS": "1", "AUDIT_WRITE_RETRY_DELAY_SECONDS": "0"},
             clear=False,
         ):
-            with patch("app.services.audit_service.get_firestore_client") as get_client:
+            with patch("app.services.firestore_repository.get_firestore_client") as get_client:
                 get_client.return_value.collection.return_value = collection
                 event_id = record_usage_event(
                     event_type="requirements.parsed",

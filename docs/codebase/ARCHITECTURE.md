@@ -86,7 +86,7 @@ through the plain-English framework plus the isolated Playwright runtime.
 ## 3) System Flow
 
 ```text
-React UI -> FastAPI router -> billing/audit guard -> agent/service/adapters -> Firestore/external API/local artifacts -> Pydantic response -> React UI
+React UI -> FastAPI router -> billing/audit guard -> agent/service/adapters -> persistence repositories/Firestore/external API/local artifacts -> Pydantic response -> React UI
 ```
 
 Typical generate flow:
@@ -105,8 +105,9 @@ Typical generate flow:
    and workflow loops. Focused test-case helper modules own coverage metrics,
    review scoring, deterministic fallback output, and response hydration.
 5. Service modules persist audit/version/billing/integration metadata through
-   Firestore helpers where configured, or return warnings/fallback behavior
-   where the code explicitly supports missing Firestore.
+   repository boundaries and the shared Firestore adapter where configured, or
+   return warnings/fallback behavior where the code explicitly supports missing
+   Firestore.
 6. The router completes audit and billing records, then returns Pydantic
    response models for the frontend to render diagnostics, coverage,
    traceability, exports, or execution results.
@@ -131,7 +132,7 @@ The conversion and run path is implemented by
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
 | Agents | Requirement extraction, analysis, test-case generation orchestration, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
-| Services | Billing, audit, versioning, reporting, Firestore-backed persistence, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
+| Services | Billing, audit, versioning, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
@@ -146,6 +147,7 @@ The conversion and run path is implemented by
 | FastAPI dependency auth | `Depends(get_current_user)` in routers | Keeps protected endpoint identity resolution consistent |
 | Pydantic boundary models | `backend/app/models.py` | Keeps backend API, integration, billing, execution, and export payloads explicit |
 | Workflow audit lifecycle | `start_workflow_run()`, `complete_workflow_run()`, `record_usage_event()` | Links operations to request IDs, users, billing, reports, and trace metadata |
+| Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe URLs and returns partial enrichment instead of crashing |
 | Provider adapter plus service | JIRA and Azure DevOps adapter/service pairs | Separates remote API mechanics from import/sync workflow policy |
@@ -175,7 +177,10 @@ The conversion and run path is implemented by
   integration mappings, and reports. `docs/persistence-target-decision.md`
   accepts a staged approach: keep Firestore as the transitional runtime store
   and target PostgreSQL for compliance-grade audit, billing, reporting, and
-  versioned artifacts after repository boundaries and migration stories exist.
+  versioned artifacts. Repository boundaries now isolate audit writes,
+  reporting usage-event reads, billing repository access, and Firestore
+  collection lookup; PostgreSQL schema, adapter, and migration work remain
+  future implementation stories.
 - The execution runtime shells out to `npx playwright test`. The artifact root,
   runtime cwd, browser channel, and generated paths need careful configuration
   in every deployment environment.
@@ -198,6 +203,9 @@ The conversion and run path is implemented by
 - `backend/app/services/artifact_fetcher.py`
 - `backend/app/services/context_grounding.py`
 - `backend/app/services/audit_service.py`
+- `backend/app/services/audit_repository.py`
+- `backend/app/services/firestore_repository.py`
+- `backend/app/services/usage_event_repository.py`
 - `backend/app/services/billing_service.py`
 - `frontend/src/App.jsx`
 - `frontend/src/components/`

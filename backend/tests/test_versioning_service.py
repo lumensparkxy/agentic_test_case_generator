@@ -58,7 +58,7 @@ class VersioningServiceTests(unittest.TestCase):
         )
         current = [Requirement(id="REQ-1", text="Updated text")]
 
-        with patch("app.services.versioning_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             result = persist_requirement_versions(
                 current_requirements=current,
                 previous_requirements=[previous],
@@ -89,7 +89,7 @@ class VersioningServiceTests(unittest.TestCase):
             )
         ]
 
-        with patch("app.services.versioning_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             result = persist_test_case_versions(
                 current_test_cases=current,
                 actor=actor,
@@ -110,7 +110,7 @@ class VersioningServiceTests(unittest.TestCase):
     def test_persist_requirement_versions_returns_original_models_when_firestore_unavailable(self) -> None:
         current = [Requirement(id="REQ-1", text="The system shall do something")]
 
-        with patch("app.services.versioning_service.get_firestore_client", side_effect=RuntimeError("firestore unavailable")):
+        with patch("app.services.firestore_repository.get_firestore_client", side_effect=RuntimeError("firestore unavailable")):
             result = persist_requirement_versions(
                 current_requirements=current,
                 actor=None,

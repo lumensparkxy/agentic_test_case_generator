@@ -80,7 +80,7 @@ class JiraConnectionServiceTests(unittest.TestCase):
             api_token="jira-token-1234",
         )
 
-        with patch("app.services.jira_connection_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             with patch("app.services.jira_connection_service.get_jira_settings", return_value=self.settings):
                 with patch(
                     "app.services.jira_connection_service.JiraAdapter.validate_connection", return_value={"accountId": "acct-1", "displayName": "QA User"}
@@ -99,7 +99,7 @@ class JiraConnectionServiceTests(unittest.TestCase):
     def test_connection_status_returns_disconnected_when_no_document_exists(self) -> None:
         client = FakeFirestoreClient()
 
-        with patch("app.services.jira_connection_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             response = get_jira_connection_status(current_user=self.user)
 
         self.assertFalse(response.connected)
@@ -113,7 +113,7 @@ class JiraConnectionServiceTests(unittest.TestCase):
             api_token="jira-token-1234",
         )
 
-        with patch("app.services.jira_connection_service.get_firestore_client", return_value=client):
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
             with patch("app.services.jira_connection_service.get_jira_settings", return_value=self.settings):
                 with patch(
                     "app.services.jira_connection_service.JiraAdapter.validate_connection", return_value={"accountId": "acct-1", "displayName": "QA User"}

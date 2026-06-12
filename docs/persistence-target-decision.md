@@ -24,6 +24,16 @@ This means Firestore remains the transitional runtime store, while PostgreSQL is
 the target architecture once repository boundaries, schema, migrations, and
 operational runbooks exist.
 
+## Implementation Status
+
+[#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49)
+introduced the first repository boundary slice after this decision. Runtime
+behavior still uses Firestore, but audit writes, reporting usage-event reads,
+billing repository access, versioning collection lookup, and integration
+metadata collection lookup now route through explicit service-layer repository
+or adapter seams. PostgreSQL schema, adapter, migration, and runbook work remain
+future stories.
+
 ## Why
 
 The product needs reporting, audit, billing, and compliance queries that are
@@ -70,13 +80,13 @@ PostgreSQL transaction isolation behavior.
 
 | Area | Current source | Data involved |
 | --- | --- | --- |
-| Firebase client access | `backend/app/services/firebase_admin.py` | Firebase Admin app and Firestore client |
-| Workflow audit | `backend/app/services/audit_service.py` | `workflow_runs`, `usage_events`, local dead-letter summaries |
-| Billing repository | `backend/app/services/billing_repository.py` | `user_profiles`, `billing_accounts`, `billing_wallet_ledger`, `billing_allocations`, `billing_consumption` |
-| Reporting | `backend/app/services/reporting_service.py` | streamed `usage_events` grouped by user, organization, and event type |
-| Artifact versioning | `backend/app/services/versioning_service.py` | `requirements_sets`, `test_case_sets`, item subcollections, version subcollections |
-| JIRA connections and mappings | `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py` | encrypted connection records and requirement sync mappings |
-| Azure DevOps connections and mappings | `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py` | encrypted connection records and work item sync mappings |
+| Firebase client access | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py` | Firebase Admin app and Firestore collection adapter |
+| Workflow audit | `backend/app/services/audit_service.py`, `backend/app/services/audit_repository.py` | `workflow_runs`, `usage_events`, local dead-letter summaries |
+| Billing repository | `backend/app/services/billing_repository.py`, `backend/app/services/firestore_repository.py` | `user_profiles`, `billing_accounts`, `billing_wallet_ledger`, `billing_allocations`, `billing_consumption` |
+| Reporting | `backend/app/services/reporting_service.py`, `backend/app/services/usage_event_repository.py` | streamed `usage_events` grouped by user, organization, and event type |
+| Artifact versioning | `backend/app/services/versioning_service.py`, `backend/app/services/firestore_repository.py` | `requirements_sets`, `test_case_sets`, item subcollections, version subcollections |
+| JIRA connections and mappings | `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py`, `backend/app/services/firestore_repository.py` | encrypted connection records and requirement sync mappings |
+| Azure DevOps connections and mappings | `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py`, `backend/app/services/firestore_repository.py` | encrypted connection records and work item sync mappings |
 | API contracts and data models | `backend/app/models.py` | `AuthUser`, billing models, usage report models, requirement/test-case artifact metadata |
 
 Routers should continue to call service functions rather than storage adapters
@@ -96,12 +106,11 @@ routers, agents, and frontend contracts can remain stable while storage changes.
 
 ## Follow-Up Implementation Stories
 
-Existing issue state after this decision:
+Existing issue state after this decision and the first implementation slice:
 
 - [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49)
-  should move from blocked to ready. Scope it to repository boundaries for
-  audit and billing with the current Firestore behavior preserved behind an
-  adapter.
+  introduced explicit repository/adapter seams while preserving current
+  Firestore behavior.
 - [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56)
   remains ready and should use the same audit repository boundary for a durable
   dead-letter sink.
@@ -113,8 +122,8 @@ Issue-ready follow-ups to create before implementation:
    consumption records, and monthly rollups.
 2. Add a PostgreSQL repository adapter behind the audit/billing boundary,
    including idempotency and transaction tests.
-3. Move usage reporting to repository queries or rollup tables instead of
-   streaming all usage events into process memory.
+3. Move usage reporting to PostgreSQL repository queries or rollup tables
+   instead of streaming all usage events into process memory.
 4. Extend the persistence boundary to requirement/test-case versioning after
    audit and billing prove the pattern.
 5. Plan Firestore-to-PostgreSQL migration/export tooling and rollback behavior

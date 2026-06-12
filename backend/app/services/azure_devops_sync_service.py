@@ -20,7 +20,7 @@ from ..models import (
     Requirement,
 )
 from .azure_devops_connection_service import get_azure_devops_adapter_for_user
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection
 
 AZURE_DEVOPS_REQUIREMENT_MAPPINGS_COLLECTION = "azure_devops_requirement_mappings"
 MANAGED_BLOCK_START = "<!-- AGENTIC_REQUIREMENTS_START -->"
@@ -325,13 +325,12 @@ def _load_mapping_payloads(requirements: Sequence[Requirement]) -> dict[str, dic
     item_ids = [str(requirement.artifact_item_id or "").strip() for requirement in requirements if _requires_mapping_lookup(requirement)]
     if not item_ids:
         return {}
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        logging.warning("Firestore unavailable for Azure DevOps sync mapping reads: %s", exc)
+    collection = get_optional_firestore_collection(
+        AZURE_DEVOPS_REQUIREMENT_MAPPINGS_COLLECTION,
+        unavailable_message="Firestore unavailable for Azure DevOps sync mapping reads",
+    )
+    if collection is None:
         return {}
-
-    collection = client.collection(AZURE_DEVOPS_REQUIREMENT_MAPPINGS_COLLECTION)
     payloads: dict[str, dict[str, Any]] = {}
     for item_id in dict.fromkeys(item_ids):
         try:

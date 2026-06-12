@@ -47,7 +47,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-12.
 
 - Epic [#37](https://github.com/lumensparkxy/agentic_test_case_generator/issues/37) - Settle production persistence and auth architecture
   - Done: [#48](https://github.com/lumensparkxy/agentic_test_case_generator/issues/48) - Spike: decide Firestore versus Postgres persistence target
-  - Ready: [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49) - Introduce durable persistence boundary for audit and billing
+  - Done: [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49) - Introduce durable persistence boundary for audit and billing
   - Ready: [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50) - Spike: define production auth policy for Firebase and JWT
   - Blocked: [#51](https://github.com/lumensparkxy/agentic_test_case_generator/issues/51) - Enforce accepted production auth mode explicitly
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness

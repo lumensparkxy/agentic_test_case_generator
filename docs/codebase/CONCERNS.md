@@ -8,7 +8,7 @@ git/history checks. It is not a full bug backlog.
 | Severity | Concern | Evidence | Impact | Suggested action |
 |----------|---------|----------|--------|------------------|
 | High | Large, high-churn orchestration and contract files remain central to the app | `frontend/src/App.jsx`, `backend/app/agents/test_case_agent.py`, `backend/app/models.py`, recent git history | Higher regression and merge risk for UI workflow, prompt orchestration, and API contracts | Continue behavior-preserving extraction under issue-scoped frontend, agent, and contract refactor tasks |
-| High | PostgreSQL persistence boundary is accepted but not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firebase_admin.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_service.py` | Audit, billing, and reporting stay coupled to Firestore until repository boundaries and migration stories are implemented | Implement the #49 persistence boundary while preserving current Firestore behavior behind an adapter |
+| High | PostgreSQL persistence adapter, schema, and migration plan are not implemented | `docs/persistence-target-decision.md`, `backend/app/services/firestore_repository.py`, `backend/app/services/billing_repository.py`, `backend/app/services/audit_repository.py` | Audit, billing, and reporting now have repository seams but still use Firestore as the transitional runtime store | Define PostgreSQL schema/migrations and add a PostgreSQL adapter behind the #49 boundaries |
 | Medium | Dual auth support can blur production policy | `backend/app/auth/jwt_auth.py`, `backend/app/auth/firebase_auth.py`, `backend/app/routers/auth.py`, `frontend/src/App.jsx` | Local/E2E JWT compatibility is useful, but production paths need clear accepted-token policy | Document deployment auth mode and eventually remove or isolate legacy JWT if no longer needed |
 | Medium | Metrics endpoint exposure depends on deployment perimeter | `backend/app/main.py`, `backend/app/observability/metrics.py` | `/metrics` may expose operational metadata if public deployments do not protect it | Decide deployment access policy for `/metrics` |
 
@@ -38,7 +38,7 @@ git/history checks. It is not a full bug backlog.
 |---------|----------|-----------------|-------------|-----------------------|
 | Long-running agent workflows | `adk_client.py`, `test_case_agent.py`, `scripts/e2e_playwright_workflow.py` | E2E script sets a 600 second timeout | Request/response flows can tie up workers under load | Consider background jobs or async workflow state once product usage grows |
 | In-process execution subprocesses | `execution_service.py`, `local_runner.py` | Backend shells out to `npx playwright test` | CPU/browser resource contention in multi-user deployments | Add queueing, concurrency limits, and artifact retention policy |
-| Firestore reads for reporting/billing | `reporting_service.py`, `billing_repository.py`, `docs/persistence-target-decision.md` | Tests cover fallback/warning behavior | Large usage-event history may become expensive or slow | Move reporting and billing ledger reads behind the accepted PostgreSQL-ready repository boundary |
+| Firestore reads for reporting/billing | `usage_event_repository.py`, `reporting_service.py`, `billing_repository.py`, `docs/persistence-target-decision.md` | Tests cover repository-boundary fallback/warning behavior | Large usage-event history may become expensive or slow | Add PostgreSQL query/rollup adapters behind the accepted repository boundary |
 | Large frontend state tree | `frontend/src/App.jsx` | Many workflow states in one component | Re-renders and maintenance overhead | Move domain state into hooks/reducers and memoize expensive derived views if needed |
 | Local artifact growth | `.execution_artifacts/`, `client_submission/` | Generated outputs are ignored but not auto-pruned | Disk growth and noisy local scans | Add cleanup command or retention guidance |
 
@@ -71,6 +71,8 @@ git/history checks. It is not a full bug backlog.
 - `backend/app/auth/firebase_auth.py`
 - `backend/app/services/artifact_fetcher.py`
 - `backend/app/services/execution_service.py`
+- `backend/app/services/firestore_repository.py`
+- `backend/app/services/audit_repository.py`
 - `backend/app/services/billing_repository.py`
 - `backend/app/services/reporting_service.py`
 - `frontend/src/App.jsx`

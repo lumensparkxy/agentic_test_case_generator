@@ -17,7 +17,7 @@ from ..models import (
     JiraSyncPreviewResponse,
     Requirement,
 )
-from .firebase_admin import get_firestore_client
+from .firestore_repository import get_optional_firestore_collection
 from .jira_connection_service import get_jira_adapter_for_user
 
 JIRA_REQUIREMENT_MAPPINGS_COLLECTION = "jira_requirement_mappings"
@@ -288,13 +288,12 @@ def _load_mapping_payloads(requirements: Sequence[Requirement]) -> dict[str, dic
     item_ids = [str(requirement.artifact_item_id or "").strip() for requirement in requirements if _requires_mapping_lookup(requirement)]
     if not item_ids:
         return {}
-    try:
-        client = get_firestore_client()
-    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
-        logging.warning("Firestore unavailable for JIRA sync mapping reads: %s", exc)
+    collection = get_optional_firestore_collection(
+        JIRA_REQUIREMENT_MAPPINGS_COLLECTION,
+        unavailable_message="Firestore unavailable for JIRA sync mapping reads",
+    )
+    if collection is None:
         return {}
-
-    collection = client.collection(JIRA_REQUIREMENT_MAPPINGS_COLLECTION)
     payloads: dict[str, dict[str, Any]] = {}
     for item_id in dict.fromkeys(item_ids):
         try:

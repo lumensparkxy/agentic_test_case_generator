@@ -44,7 +44,7 @@ class AzureDevOpsSyncServiceTests(unittest.TestCase):
         fake_adapter.default_project = None
         fake_adapter.get_work_item = lambda project, work_item_id: live_item
 
-        with patch("app.services.azure_devops_sync_service.get_firestore_client") as get_firestore_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_firestore_client:
             with patch("app.services.azure_devops_sync_service.get_azure_devops_adapter_for_user", return_value=fake_adapter):
                 response = preview_azure_devops_requirement_sync(
                     current_user=self.user,
@@ -73,7 +73,7 @@ class AzureDevOpsSyncServiceTests(unittest.TestCase):
         fake_adapter.default_project = None
         fake_adapter.get_work_item = lambda project, work_item_id: live_item
 
-        with patch("app.services.azure_devops_sync_service.get_firestore_client") as get_firestore_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_firestore_client:
             with patch("app.services.azure_devops_sync_service.get_azure_devops_adapter_for_user", return_value=fake_adapter):
                 response = preview_azure_devops_requirement_sync(
                     current_user=self.user,
@@ -112,7 +112,7 @@ class AzureDevOpsSyncServiceTests(unittest.TestCase):
         fake_adapter.get_work_item = lambda project, work_item_id: live_item if "html_description" not in calls else refreshed
         fake_adapter.update_work_item_description = fake_update_work_item_description
 
-        with patch("app.services.azure_devops_sync_service.get_firestore_client") as get_firestore_client:
+        with patch("app.services.firestore_repository.get_firestore_client") as get_firestore_client:
             with patch("app.services.azure_devops_sync_service.get_azure_devops_adapter_for_user", return_value=fake_adapter):
                 response = apply_azure_devops_requirement_sync(
                     current_user=self.user,
