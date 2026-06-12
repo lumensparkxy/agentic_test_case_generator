@@ -141,6 +141,10 @@ Deployment/runtime constraints:
 - Frontend Docker builds static assets with Vite and serves them through Nginx.
 - Local generated execution outputs live under `.execution_artifacts/` and are
   ignored by git.
+- Generated execution/client-submission outputs should be reviewed with
+  `python scripts/cleanup_generated_artifacts.py` before deletion. The cleanup
+  command is dry-run by default and targets `.execution_artifacts/`,
+  `client_submission/`, and `/tmp/pw_workflow_out`.
 
 ## 6) Evidence
 

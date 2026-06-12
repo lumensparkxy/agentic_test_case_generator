@@ -28,7 +28,7 @@ used by the tracked source.
 | PostgreSQL | Accepted target for compliance-grade audit, billing ledger, reporting, and versioned artifacts | Future adapters behind the repository boundaries introduced for #49 | Not implemented yet; requires schema, migrations, idempotency, transaction tests, and migration planning | `docs/persistence-target-decision.md`, `docs/firebase-auth-audit-architecture.md` |
 | In-memory process state | Fallback/dead-letter and local billing repository behavior in selected paths | Service module globals and test fakes | Not durable across processes or restarts | `backend/app/services/audit_service.py`, `backend/app/services/billing_repository.py` |
 | Browser localStorage | Frontend access token and user session persistence | `frontend/src/App.jsx`, `frontend/src/constants/workflow.js` | XSS would expose token; current MVP stores token client-side | `frontend/src/App.jsx`, `README.md` |
-| Local filesystem | Execution artifacts, exported E2E outputs, generated client outputs | `backend/app/services/execution_service.py`, scripts under `scripts/` | Local artifacts can grow and leak data if ignored boundaries are bypassed | `.gitignore`, `scripts/e2e_playwright_workflow.py`, `docs/client-submission-workflow.md` |
+| Local filesystem | Execution artifacts, exported E2E outputs, generated client outputs | `backend/app/services/execution_service.py`, scripts under `scripts/` | Local artifacts can grow and leak data if ignored boundaries are bypassed | `.gitignore`, `scripts/e2e_playwright_workflow.py`, `scripts/cleanup_generated_artifacts.py`, `docs/artifact-retention-policy.md`, `docs/client-submission-workflow.md` |
 
 ## 3) Secrets and Credentials Handling
 
