@@ -46,6 +46,7 @@ import {
 	STORAGE_AUTH_USER,
 } from "./constants/workflow";
 import { API_BASE, createRequestId, downloadResponseBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
+import { API_CONTRACT_ENDPOINTS } from "./api/generated/api-contracts";
 import {
 	buildAzureDevOpsConnectionForm,
 	buildJiraConnectionForm,
@@ -62,6 +63,12 @@ import {
 } from "./utils/usage";
 import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workflow";
 import "./styles/index.css";
+
+const EXPORT_API_PATHS = Object.freeze({
+	csv: API_CONTRACT_ENDPOINTS.exportCsv.path,
+	excel: API_CONTRACT_ENDPOINTS.exportExcel.path,
+	json: API_CONTRACT_ENDPOINTS.exportJson.path,
+});
 
 const getAuthProviderLabel = (providerKeyOrId) => {
 	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (
@@ -833,7 +840,7 @@ export default function App() {
 
 		setIsBillingLoading(true);
 		try {
-			const res = await apiRequest("/entitlements/me", { method: "GET" });
+			const res = await apiRequest(API_CONTRACT_ENDPOINTS.billingEntitlementsMe.path, { method: "GET" });
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to load billing entitlements");
 				throw new Error(errorMessage);
@@ -1884,7 +1891,7 @@ export default function App() {
 				formData.append("feedback", reqFeedback);
 				formData.append("existing_requirements", JSON.stringify(requirements));
 			}
-			const res = await apiRequest("/requirements/parse", {
+			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsParse.path, {
 				method: "POST",
 				headers: { "X-Request-ID": requestId },
 				body: formData
@@ -1951,7 +1958,7 @@ export default function App() {
 			setStatus("Previewing execution readiness...");
 		}
 		try {
-			const res = await apiRequest("/automation/execution/preview", {
+			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(buildExecutionPayload(casesToPreview)),
@@ -1989,7 +1996,7 @@ export default function App() {
 		setIsRunningExecution(true);
 		setStatus(`Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`);
 		try {
-			const res = await apiRequest("/automation/execution/run", {
+			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionRun.path, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -2052,7 +2059,10 @@ export default function App() {
 					feedback: withFeedback && feedback ? feedback.trim() : null
 				};
 
-			const res = await apiRequest(useRefineEndpoint ? "/testcases/refine" : "/testcases/generate", {
+			const testCaseGenerationPath = useRefineEndpoint
+				? API_CONTRACT_ENDPOINTS.testCasesRefine.path
+				: API_CONTRACT_ENDPOINTS.testCasesGenerate.path;
+			const res = await apiRequest(testCaseGenerationPath, {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
 				body: JSON.stringify(payload)
@@ -2114,7 +2124,11 @@ export default function App() {
 				draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
 				draft_override_reason: exportRequiresOverride && draftExportOverrideRequested ? draftExportOverrideReason.trim() : null,
 			};
-			const res = await apiRequest(`/export/${format}`, {
+			const exportPath = EXPORT_API_PATHS[format];
+			if (!exportPath) {
+				throw new Error(`Unsupported export format: ${format}`);
+			}
+			const res = await apiRequest(exportPath, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload)
@@ -2245,7 +2259,7 @@ export default function App() {
 		setIsAnalyzingContext(true);
 		setStatus("Analyzing context artifacts...");
 		try {
-			const res = await apiRequest("/requirements/enrich", {
+			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(buildContextPayload())

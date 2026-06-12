@@ -17,6 +17,7 @@ python -m unittest discover -s backend/tests -p 'test_*.py'
 python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
+python scripts/generate_frontend_api_types.py --check
 
 cd frontend
 npm ci
@@ -34,6 +35,7 @@ CI currently runs:
 - Offline requirement evaluation.
 - Offline generation evaluation.
 - OpenAPI export.
+- Frontend API contract type freshness check.
 - Frontend production build.
 - Focused mocked frontend E2E spec `e2e/export-approval-gate.spec.js`.
 
@@ -58,7 +60,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Backend unit | Yes | Config parsing, auth, model parsing, agents, services, billing, reporting, grounding, execution conversion | Uses `unittest` and `unittest.mock.patch` |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Offline quality benchmarks | Yes | Requirement extraction and test-case generation quality | `--offline --strict` avoids live model dependency |
-| OpenAPI contract | Yes | FastAPI schema export | `scripts/export_openapi.py` |
+| OpenAPI contract | Yes | FastAPI schema export and generated frontend contract types | `scripts/export_openapi.py`, `scripts/generate_frontend_api_types.py --check` |
 | Frontend build | Yes | React/Vite production build | `npm run build` |
 | Frontend E2E | Yes | Mocked browser workflow slices | `frontend/e2e/export-approval-gate.spec.js`, `workflow.spec.js`, `jira-workflow.spec.js` |
 | Backend execution runtime | Partial | Playwright Test availability and generated spec execution | Runtime list check in validation; full run covered by `scripts/e2e_playwright_workflow.py` when backend and credentials are available |

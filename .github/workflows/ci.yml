@@ -45,6 +45,9 @@ jobs:
       - name: Validate OpenAPI contract export
         run: python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
 
+      - name: Check frontend API contract types
+        run: python scripts/generate_frontend_api_types.py --check
+
   frontend:
     name: Frontend build and focused E2E
     runs-on: ubuntu-latest

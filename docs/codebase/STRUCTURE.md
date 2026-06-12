@@ -21,6 +21,7 @@ should preserve when changing the application.
 | `backend/tests/` | Backend unit and integration-style tests using `unittest` and local fakes/patches | `backend/tests/test_*.py` |
 | `frontend/` | React/Vite web application, E2E specs, frontend Dockerfile, Nginx config | `frontend/src/main.jsx`, `frontend/package.json`, `frontend/Dockerfile` |
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
+| `frontend/src/api/` | Generated frontend API contract declarations and endpoint constants | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/api/generated/api-contracts.js` |
 | `frontend/src/services/` | Frontend API helper functions | `frontend/src/services/apiClient.js` |
 | `frontend/src/hooks/` | Reusable React hooks, including domain workflow state hooks for requirements, context, generation, integrations, execution, export, and app session state | `frontend/src/hooks/*.js` |
 | `frontend/src/styles/` | Shared CSS entry point, design tokens, base rules, layout styles, and feature-owned selector modules | `frontend/src/styles/index.css`, `frontend/src/styles/*.css` |
@@ -64,6 +65,7 @@ exposes `/metrics`.
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
 | `frontend/src/components/` | Presentational and workflow UI components receiving props | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |
 | `frontend/src/styles/` | Design tokens, base styles, layout styles, and selectors grouped by feature ownership | React state, API calls, or unrelated visual redesigns |
 | `frontend/src/services/` | API base URL, request ID, API error parsing, download helpers | Large workflow state or JSX markup |
 | `frontend/src/utils/` | Pure formatting, requirement, usage, and workflow helpers | React state or network side effects |
@@ -90,6 +92,8 @@ exposes `/metrics`.
 - Frontend component directories are grouped by feature or layout, for example
   `automation/`, `generation/`, `integrations/`, `requirements/`, and
   `layout/`.
+- Frontend generated API contracts live under `frontend/src/api/generated/` and
+  are refreshed with `python scripts/generate_frontend_api_types.py`.
 - Frontend CSS is imported through `frontend/src/styles/index.css`; shared
   foundations live in `tokens.css` and `base.css`, while feature selectors live
   in the closest named style module.
@@ -123,6 +127,8 @@ Do not document generated files as source conventions and do not commit them.
 - `backend/plain_english_test_framework/`
 - `backend/execution_runtime/package.json`
 - `frontend/src/App.jsx`
+- `frontend/src/api/generated/api-contracts.d.ts`
+- `frontend/src/api/generated/api-contracts.js`
 - `frontend/src/components/`
 - `frontend/src/styles/`
 - `frontend/src/services/apiClient.js`
