@@ -34,6 +34,10 @@ invent rules that are not enforced by configuration.
   and `npm run format:check`.
 - Practical rule: match the surrounding file style, run focused tests, and run
   `git diff --check` before committing if possible.
+- Source-focused codebase scans use `python scripts/scan_codebase.py`, which
+  reads `git ls-files` and explicitly excludes ignored generated output
+  directories plus local agent skill mirrors before writing
+  `docs/codebase/.codebase-scan.txt`.
 
 Current validation commands:
 
@@ -46,6 +50,7 @@ python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
 python scripts/generate_frontend_api_types.py --check
+python scripts/scan_codebase.py
 
 cd frontend
 npm run lint

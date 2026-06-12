@@ -40,8 +40,8 @@ Status markers below reflect the GitHub issue state as of 2026-06-12.
   - Done: [#44](https://github.com/lumensparkxy/agentic_test_case_generator/issues/44) - Add formatter and linter baseline for backend and frontend
   - Done: [#65](https://github.com/lumensparkxy/agentic_test_case_generator/issues/65) - Apply formatter baseline cleanup and enable format checks in CI
   - Done: [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
-  - In progress: [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
-  - Ready: [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
+  - Done: [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
+  - Done: [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
 
 ### Phase 4 - Operational Readiness
 
