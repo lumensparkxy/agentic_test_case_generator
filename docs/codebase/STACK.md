@@ -46,16 +46,19 @@ generated client submission outputs.
 | Tool | Purpose | Evidence |
 |------|---------|----------|
 | `python -m unittest` | Backend regression suite | `backend/tests/`, `.github/workflows/ci.yml` |
+| Ruff | Backend linting and target formatter | `pyproject.toml`, `backend/requirements-dev.txt`, `.github/workflows/ci.yml` |
 | Offline evaluation scripts | Deterministic requirement and generation quality gates | `scripts/evaluate_requirements.py`, `scripts/evaluate_generation.py`, `.github/workflows/ci.yml` |
 | `scripts/export_openapi.py` | FastAPI contract export | `scripts/export_openapi.py`, `.github/workflows/ci.yml` |
 | Vite | Frontend dev server and production build | `frontend/package.json` |
+| ESLint | Frontend JavaScript/JSX linting | `frontend/eslint.config.js`, `frontend/package.json`, `.github/workflows/ci.yml` |
+| Prettier | Frontend target formatter | `frontend/.prettierrc.json`, `frontend/package.json` |
 | Playwright Test | Frontend E2E checks and backend execution runtime | `frontend/package.json`, `frontend/playwright.config.js`, `backend/execution_runtime/package.json` |
 | Docker Compose | Local two-container runtime | `compose.yaml` |
-| GitHub Actions | CI for backend, offline benchmarks, frontend build, and focused mocked E2E | `.github/workflows/ci.yml` |
+| GitHub Actions | CI for backend/frontend lint, backend tests, offline benchmarks, frontend build, and focused mocked E2E | `.github/workflows/ci.yml` |
 
-There is no tracked lint or formatter configuration such as ESLint, Prettier,
-Ruff, Black, or isort. Use local style and existing tests until a future issue
-adds enforced formatting.
+Formatter checks are runnable locally, but the broad repository formatting
+baseline cleanup is tracked separately in issue #65 before those checks become
+CI gates.
 
 ## 4) Key Commands
 
@@ -64,11 +67,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
+python -m pip install -r backend/requirements-dev.txt
 
 uvicorn app.main:app --reload --app-dir backend --reload-dir backend
 
 cd frontend
 npm ci
+npm run lint
+npm run format:check
 npm run dev
 npm run build
 npm run test:e2e -- e2e/export-approval-gate.spec.js
@@ -77,6 +83,8 @@ cd backend/execution_runtime
 npm ci
 npm run test:playwright -- --list
 
+python -m ruff check backend scripts
+python -m ruff format --check backend scripts
 python -m unittest discover -s backend/tests -p 'test_*.py'
 python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
@@ -137,7 +145,10 @@ Deployment/runtime constraints:
 ## 6) Evidence
 
 - `backend/requirements.txt`
+- `backend/requirements-dev.txt`
 - `frontend/package.json`
+- `frontend/eslint.config.js`
+- `frontend/.prettierrc.json`
 - `backend/execution_runtime/package.json`
 - `backend/app/config.py`
 - `backend/app/main.py`

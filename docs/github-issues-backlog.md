@@ -32,6 +32,7 @@ next-version end-to-end Playwright documentation workflow succeeded.
 - Epic [#36](https://github.com/lumensparkxy/agentic_test_case_generator/issues/36) - Strengthen contract safety and engineering hygiene
   - [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43) - Generate frontend API types from FastAPI OpenAPI
   - [#44](https://github.com/lumensparkxy/agentic_test_case_generator/issues/44) - Add formatter and linter baseline for backend and frontend
+  - [#65](https://github.com/lumensparkxy/agentic_test_case_generator/issues/65) - Apply formatter baseline cleanup and enable format checks in CI
   - [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
   - [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
   - [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans

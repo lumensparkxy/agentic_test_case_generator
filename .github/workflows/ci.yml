@@ -28,10 +28,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       - name: Install backend dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r backend/requirements.txt
+        run: python -m pip install --upgrade pip && python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: Lint backend
+        run: python -m ruff check backend scripts
 
       - name: Run backend unittest suite
         run: python -m unittest discover -s backend/tests -p 'test_*.py'
@@ -70,6 +75,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
 
       - name: Build frontend
         working-directory: frontend
