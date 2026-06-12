@@ -108,6 +108,8 @@ Required or important backend variables:
   `firebase-or-backend-jwt` for local/E2E compatibility.
 - `METRICS_ENABLED`
 - `METRICS_ACCESS_TOKEN`
+- `AUDIT_DEAD_LETTER_BACKEND`
+- `AUDIT_DEAD_LETTER_COLLECTION`
 - `CORS_ALLOW_ORIGINS`
 - `FIREBASE_PROJECT_ID`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`

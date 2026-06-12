@@ -2,6 +2,7 @@ import logging
 import hashlib
 import json
 import os
+import time
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Dict, Optional
@@ -10,11 +11,18 @@ from uuid import uuid4
 from ..models import AuthUser
 from ..observability.metrics import (
     record_audit_dead_letter,
+    record_audit_dead_letter_sink_write,
     record_workflow_completed,
     record_workflow_started,
 )
 from ..observability.tracing import get_current_trace_id
-from .audit_repository import AuditRepository, AuditWriteFailure, FirestoreAuditRepository
+from .audit_repository import (
+    AuditDeadLetterSink,
+    AuditRepository,
+    AuditWriteFailure,
+    FirestoreAuditRepository,
+    build_audit_dead_letter_sink_from_env,
+)
 
 WORKFLOW_RUNS_COLLECTION = "workflow_runs"
 USAGE_EVENTS_COLLECTION = "usage_events"
@@ -26,6 +34,7 @@ _AUDIT_REPOSITORY: AuditRepository = FirestoreAuditRepository(
     workflow_runs_collection=WORKFLOW_RUNS_COLLECTION,
     usage_events_collection=USAGE_EVENTS_COLLECTION,
 )
+_AUDIT_DEAD_LETTER_SINK: AuditDeadLetterSink | None = build_audit_dead_letter_sink_from_env()
 
 
 def _utcnow() -> datetime:
@@ -87,6 +96,68 @@ def _dead_letter_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _safe_error_type(error: Exception | str) -> str:
+    if isinstance(error, Exception):
+        return error.__class__.__name__
+
+    value = str(error).strip()
+    if value and all(character.isalnum() or character in "_.:-" for character in value) and len(value) <= 80:
+        return value
+    return "error"
+
+
+def _record_durable_dead_letter(entry: Dict[str, Any]) -> None:
+    sink = get_audit_dead_letter_sink()
+    if sink is None:
+        return
+
+    started_at = time.perf_counter()
+    try:
+        sink.record_dead_letter(entry["dead_letter_id"], entry)
+    except Exception as exc:  # pragma: no cover - defensive around external sinks
+        duration_seconds = time.perf_counter() - started_at
+        record_audit_dead_letter_sink_write(
+            backend=sink.backend,
+            collection=entry["collection_name"],
+            operation=entry["operation"],
+            status="failure",
+            duration_seconds=duration_seconds,
+        )
+        logging.error(
+            "Audit dead-letter durable sink write failed",
+            extra={
+                "event": "audit.dead_letter_sink.write_failed",
+                "sink_backend": sink.backend,
+                "collection_name": entry["collection_name"],
+                "operation": entry["operation"],
+                "payload_hash": entry["payload"]["payload_hash"],
+                "error_type": _safe_error_type(exc),
+                "duration_ms": round(duration_seconds * 1000, 3),
+            },
+        )
+        return
+
+    duration_seconds = time.perf_counter() - started_at
+    record_audit_dead_letter_sink_write(
+        backend=sink.backend,
+        collection=entry["collection_name"],
+        operation=entry["operation"],
+        status="success",
+        duration_seconds=duration_seconds,
+    )
+    logging.info(
+        "Audit dead-letter durable sink write completed",
+        extra={
+            "event": "audit.dead_letter_sink.write_completed",
+            "sink_backend": sink.backend,
+            "collection_name": entry["collection_name"],
+            "operation": entry["operation"],
+            "payload_hash": entry["payload"]["payload_hash"],
+            "duration_ms": round(duration_seconds * 1000, 3),
+        },
+    )
+
+
 def _record_dead_letter(
     *,
     collection_name: str,
@@ -100,11 +171,12 @@ def _record_dead_letter(
         return
 
     entry = {
+        "dead_letter_id": str(uuid4()),
         "collection_name": collection_name,
         "operation": operation,
         "failed_at": _utcnow().isoformat(),
         "attempts": attempts,
-        "error_message": str(error),
+        "error_type": _safe_error_type(error),
         "payload": _dead_letter_summary(payload),
     }
     with _AUDIT_DEAD_LETTER_LOCK:
@@ -113,6 +185,7 @@ def _record_dead_letter(
         if overflow > 0:
             del _AUDIT_DEAD_LETTERS[:overflow]
     record_audit_dead_letter(collection=collection_name, operation=operation)
+    _record_durable_dead_letter(entry)
     logging.error(
         "Audit write moved to local dead-letter buffer",
         extra={
@@ -139,9 +212,18 @@ def get_audit_repository() -> AuditRepository:
     return _AUDIT_REPOSITORY
 
 
+def get_audit_dead_letter_sink() -> AuditDeadLetterSink | None:
+    return _AUDIT_DEAD_LETTER_SINK
+
+
 def set_audit_repository_for_testing(repository: AuditRepository) -> None:
     global _AUDIT_REPOSITORY
     _AUDIT_REPOSITORY = repository
+
+
+def set_audit_dead_letter_sink_for_testing(sink: AuditDeadLetterSink | None) -> None:
+    global _AUDIT_DEAD_LETTER_SINK
+    _AUDIT_DEAD_LETTER_SINK = sink
 
 
 def reset_audit_repository_for_testing() -> None:
@@ -151,6 +233,10 @@ def reset_audit_repository_for_testing() -> None:
             usage_events_collection=USAGE_EVENTS_COLLECTION,
         )
     )
+
+
+def reset_audit_dead_letter_sink_for_testing() -> None:
+    set_audit_dead_letter_sink_for_testing(build_audit_dead_letter_sink_from_env())
 
 
 def build_actor_snapshot(user: Optional[AuthUser]) -> Dict[str, Any]:

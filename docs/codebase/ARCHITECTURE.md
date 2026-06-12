@@ -181,8 +181,9 @@ The conversion and run path is implemented by
   and target PostgreSQL for compliance-grade audit, billing, reporting, and
   versioned artifacts. Repository boundaries now isolate audit writes,
   reporting usage-event reads, billing repository access, and Firestore
-  collection lookup; PostgreSQL schema, adapter, and migration work remain
-  future implementation stories.
+  collection lookup. Audit dead letters can also be mirrored to an optional
+  Firestore sink for compliance deployments. PostgreSQL schema, adapter, and
+  migration work remain future implementation stories.
 - The execution runtime shells out to `npx playwright test`. The artifact root,
   runtime cwd, browser channel, and generated paths need careful configuration
   in every deployment environment.

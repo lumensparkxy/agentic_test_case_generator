@@ -79,6 +79,8 @@ JWT_EXPIRATION_MINUTES="${JWT_EXPIRATION_MINUTES:-60}"
 AUTH_TOKEN_MODE="${AUTH_TOKEN_MODE:-firebase-only}"
 METRICS_ENABLED="${METRICS_ENABLED:-false}"
 METRICS_ACCESS_TOKEN="${METRICS_ACCESS_TOKEN:-}"
+AUDIT_DEAD_LETTER_BACKEND="${AUDIT_DEAD_LETTER_BACKEND:-local}"
+AUDIT_DEAD_LETTER_COLLECTION="${AUDIT_DEAD_LETTER_COLLECTION:-audit_dead_letters}"
 JIRA_CONNECTION_SECRET_KEY="${JIRA_CONNECTION_SECRET_KEY:-}"
 AZURE_DEVOPS_CONNECTION_SECRET_KEY="${AZURE_DEVOPS_CONNECTION_SECRET_KEY:-}"
 TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
@@ -128,6 +130,14 @@ if [[ "$METRICS_ENABLED" == "true" && -z "$METRICS_ACCESS_TOKEN" ]]; then
   echo "Leave METRICS_ENABLED=false to disable the public metrics endpoint." >&2
   exit 1
 fi
+case "$AUDIT_DEAD_LETTER_BACKEND" in
+  ""|local|memory|none|disabled|firestore)
+    ;;
+  *)
+    echo "Invalid AUDIT_DEAD_LETTER_BACKEND=$AUDIT_DEAD_LETTER_BACKEND. Use local, disabled, or firestore." >&2
+    exit 1
+    ;;
+esac
 
 if [[ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" && -n "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
   if [[ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
@@ -191,6 +201,12 @@ build_env_var_arg() {
     "CORS_ALLOW_ORIGINS=$cors_allow_origins"
   )
 
+  if [[ -n "$AUDIT_DEAD_LETTER_BACKEND" && "$AUDIT_DEAD_LETTER_BACKEND" != "local" ]]; then
+    env_entries+=("AUDIT_DEAD_LETTER_BACKEND=$AUDIT_DEAD_LETTER_BACKEND")
+  fi
+  if [[ "$AUDIT_DEAD_LETTER_BACKEND" == "firestore" ]]; then
+    env_entries+=("AUDIT_DEAD_LETTER_COLLECTION=$AUDIT_DEAD_LETTER_COLLECTION")
+  fi
   if [[ -n "$GOOGLE_CLIENT_ID" ]]; then
     env_entries+=("GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID")
   fi
