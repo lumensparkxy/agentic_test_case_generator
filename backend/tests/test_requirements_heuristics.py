@@ -43,17 +43,19 @@ class RequirementHeuristicExtractionTests(unittest.TestCase):
         self.assertFalse(any("node_modules" in text for text in requirement_texts))
 
     def test_convert_to_requirements_preserves_context_metadata(self) -> None:
-        requirements = _convert_to_requirements([
-            {
-                "id": "REQ-LOGIN",
-                "text": "The system shall allow users to sign in using email and password.",
-                "source_path": "Login.docx > Authentication > Happy path",
-                "source_section": "Happy path",
-                "source_excerpt": "Users sign in with email and password.",
-                "source_hierarchy": ["Login.docx", "Authentication"],
-                "quality_flags": ["needs acceptance criteria"],
-            }
-        ])
+        requirements = _convert_to_requirements(
+            [
+                {
+                    "id": "REQ-LOGIN",
+                    "text": "The system shall allow users to sign in using email and password.",
+                    "source_path": "Login.docx > Authentication > Happy path",
+                    "source_section": "Happy path",
+                    "source_excerpt": "Users sign in with email and password.",
+                    "source_hierarchy": ["Login.docx", "Authentication"],
+                    "quality_flags": ["needs acceptance criteria"],
+                }
+            ]
+        )
 
         self.assertEqual(requirements[0].id, "REQ-001")
         self.assertEqual(requirements[0].source_path, "Login.docx > Authentication > Happy path")

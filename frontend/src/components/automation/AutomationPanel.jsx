@@ -23,9 +23,13 @@ const renderCandidateTable = (candidates) => {
 				<tbody>
 					{candidates.map((candidate) => (
 						<tr key={candidate.id}>
-							<td><strong>{candidate.source_test_case_id}</strong></td>
+							<td>
+								<strong>{candidate.source_test_case_id}</strong>
+							</td>
 							<td>{candidate.title}</td>
-							<td>{candidate.spec?.steps?.length || 0} step{(candidate.spec?.steps?.length || 0) === 1 ? "" : "s"}</td>
+							<td>
+								{candidate.spec?.steps?.length || 0} step{(candidate.spec?.steps?.length || 0) === 1 ? "" : "s"}
+							</td>
 							<td>{candidate.traceability_ids?.join(", ") || "None"}</td>
 						</tr>
 					))}
@@ -104,7 +108,9 @@ const renderRunResults = (runResult) => {
 				{renderBucketCount("Skipped", runResult.summary?.skipped)}
 			</div>
 			{runResult.artifacts_root && (
-				<p className="helper-text">Artifacts root: <code>{runResult.artifacts_root}</code></p>
+				<p className="helper-text">
+					Artifacts root: <code>{runResult.artifacts_root}</code>
+				</p>
 			)}
 			{runResult.results?.length > 0 && (
 				<div className="selection-table-wrapper">
@@ -120,7 +126,9 @@ const renderRunResults = (runResult) => {
 						<tbody>
 							{runResult.results.map((result) => (
 								<tr key={result.id}>
-									<td><strong>{result.source_test_case_id}</strong></td>
+									<td>
+										<strong>{result.source_test_case_id}</strong>
+									</td>
 									<td>{result.status}</td>
 									<td>{result.generated_spec_path ? <code>{result.generated_spec_path}</code> : "None"}</td>
 									<td>{result.artifacts_dir ? <code>{result.artifacts_dir}</code> : "None"}</td>
@@ -156,9 +164,7 @@ export default function AutomationPanel({
 	return (
 		<section className="panel">
 			<h2 className="panel-title">Automation</h2>
-			<p className="panel-description">
-				Review executable candidates and run approved browser cases through Playwright.
-			</p>
+			<p className="panel-description">Review executable candidates and run approved browser cases through Playwright.</p>
 			<div className="panel-form two-cols">
 				<div className="form-group">
 					<label>Target base URL</label>
@@ -183,7 +189,9 @@ export default function AutomationPanel({
 					<div className="generate-results-header">
 						<div>
 							<h3>Execution Preview</h3>
-							<p>{testCases.length} generated test case{testCases.length === 1 ? "" : "s"} reviewed for execution.</p>
+							<p>
+								{testCases.length} generated test case{testCases.length === 1 ? "" : "s"} reviewed for execution.
+							</p>
 						</div>
 					</div>
 					<div className="workflow-diagnostics-pills">
@@ -210,7 +218,9 @@ export default function AutomationPanel({
 
 					{executionPreview.warnings?.length > 0 && (
 						<ul className="jira-sync-warning-list">
-							{executionPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+							{executionPreview.warnings.map((warning) => (
+								<li key={warning}>{warning}</li>
+							))}
 						</ul>
 					)}
 				</div>
@@ -224,8 +234,12 @@ export default function AutomationPanel({
 			{renderRunResults(executionRunResult)}
 
 			<div className="panel-nav">
-				<button onClick={goPrev} className="secondary">Back</button>
-				<button onClick={goNext} disabled={testCases.length === 0}>Next</button>
+				<button onClick={goPrev} className="secondary">
+					Back
+				</button>
+				<button onClick={goNext} disabled={testCases.length === 0}>
+					Next
+				</button>
 			</div>
 		</section>
 	);

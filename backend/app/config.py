@@ -240,8 +240,7 @@ def _warn_if_dependency_mismatch() -> None:
 def get_auth_settings() -> AuthSettings:
     google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     google_client_ids = _dedupe_preserving_order(
-        _split_csv_env(os.getenv("GOOGLE_CLIENT_IDS", ""))
-        + [google_client_id, os.getenv("VITE_GOOGLE_CLIENT_ID", "").strip()]
+        _split_csv_env(os.getenv("GOOGLE_CLIENT_IDS", "")) + [google_client_id, os.getenv("VITE_GOOGLE_CLIENT_ID", "").strip()]
     )
     jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
     jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
@@ -273,10 +272,7 @@ def get_firebase_settings() -> FirebaseSettings:
 @lru_cache
 def get_jira_settings() -> JiraSettings:
     auth_settings = get_auth_settings()
-    connection_secret_key = (
-        (os.getenv("JIRA_CONNECTION_SECRET_KEY") or "").strip()
-        or auth_settings.jwt_secret_key
-    )
+    connection_secret_key = (os.getenv("JIRA_CONNECTION_SECRET_KEY") or "").strip() or auth_settings.jwt_secret_key
     return JiraSettings(
         connection_secret_key=connection_secret_key,
         api_timeout_seconds=_parse_positive_int_env(
@@ -300,10 +296,7 @@ def get_jira_settings() -> JiraSettings:
 @lru_cache
 def get_azure_devops_settings() -> AzureDevOpsSettings:
     auth_settings = get_auth_settings()
-    connection_secret_key = (
-        (os.getenv("AZURE_DEVOPS_CONNECTION_SECRET_KEY") or "").strip()
-        or auth_settings.jwt_secret_key
-    )
+    connection_secret_key = (os.getenv("AZURE_DEVOPS_CONNECTION_SECRET_KEY") or "").strip() or auth_settings.jwt_secret_key
     api_version = (os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1").strip() or "7.1"
     return AzureDevOpsSettings(
         connection_secret_key=connection_secret_key,
@@ -366,22 +359,10 @@ def get_billing_settings() -> BillingSettings:
 @lru_cache
 def get_execution_settings() -> ExecutionSettings:
     default_settings = ExecutionSettings()
-    artifact_root = _resolve_repo_path(
-        (os.getenv("EXECUTION_ARTIFACT_ROOT") or "").strip()
-        or default_settings.artifact_root
-    )
-    playwright_config_path = _resolve_repo_path(
-        (os.getenv("EXECUTION_PLAYWRIGHT_CONFIG") or "").strip()
-        or default_settings.playwright_config_path
-    )
-    runtime_cwd = _resolve_repo_path(
-        (os.getenv("EXECUTION_RUNTIME_CWD") or "").strip()
-        or default_settings.runtime_cwd
-    )
-    default_base_url = (
-        (os.getenv("EXECUTION_DEFAULT_BASE_URL") or "").strip()
-        or default_settings.default_base_url
-    )
+    artifact_root = _resolve_repo_path((os.getenv("EXECUTION_ARTIFACT_ROOT") or "").strip() or default_settings.artifact_root)
+    playwright_config_path = _resolve_repo_path((os.getenv("EXECUTION_PLAYWRIGHT_CONFIG") or "").strip() or default_settings.playwright_config_path)
+    runtime_cwd = _resolve_repo_path((os.getenv("EXECUTION_RUNTIME_CWD") or "").strip() or default_settings.runtime_cwd)
+    default_base_url = (os.getenv("EXECUTION_DEFAULT_BASE_URL") or "").strip() or default_settings.default_base_url
 
     return ExecutionSettings(
         enabled=_parse_bool_env(os.getenv("EXECUTION_ENABLED", "true"), default=True),

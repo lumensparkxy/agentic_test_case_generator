@@ -150,9 +150,7 @@ def load_project_config(path: str | Path = DEFAULT_PROJECT_CONFIG_PATH) -> Proje
     if data_dir is not None and not data_dir.is_dir():
         issues.append(ValidationIssue("$.dataDir", f"dataDir does not exist: {data_dir}", "project_config.data_dir_missing"))
     if environment is not None and not environment.file.is_file():
-        issues.append(
-            ValidationIssue("$.environment.file", f"environment file does not exist: {environment.file}", "project_config.environment_file_missing")
-        )
+        issues.append(ValidationIssue("$.environment.file", f"environment file does not exist: {environment.file}", "project_config.environment_file_missing"))
     if playwright is not None and not playwright.config.is_file():
         issues.append(
             ValidationIssue("$.playwright.config", f"Playwright config does not exist: {playwright.config}", "project_config.playwright_config_missing")

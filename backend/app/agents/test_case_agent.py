@@ -80,7 +80,6 @@ STATE_COVERAGE_PLAN = "coverage_plan"
 STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 
 
-
 def _get_model_settings_or_none() -> Any | None:
     try:
         return get_settings()
@@ -88,8 +87,6 @@ def _get_model_settings_or_none() -> Any | None:
         if "GEMINI_API_KEY" not in str(exc):
             raise
         return None
-
-
 
 
 def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
@@ -192,8 +189,6 @@ def _record_event_error(diagnostics: Dict[str, Any], author: str, event: Any) ->
     )
 
 
-
-
 def exit_loop(tool_context: ToolContext) -> dict:
     logging.info("[exit_loop] Test cases approved - exiting validation loop")
     tool_context.actions.escalate = True
@@ -212,7 +207,7 @@ def _build_coverage_planner_agent(
     return Agent(
         name="CoveragePlannerAgent",
         model=model,
-        include_contents='none',
+        include_contents="none",
         generate_content_config=json_generation_config(max_output_tokens=12000),
         output_schema=RequirementCoveragePlanOutput,
         instruction=f"""You are a Senior QA Strategist creating a scenario coverage plan before detailed test cases are written.
@@ -277,7 +272,7 @@ def _build_review_loop(
     validator_agent = Agent(
         name="TestCaseValidatorAgent",
         model=model,
-        include_contents='none',
+        include_contents="none",
         generate_content_config=json_generation_config(max_output_tokens=4096),
         output_schema=ReviewResult,
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
@@ -337,7 +332,7 @@ def _build_review_loop(
     refiner_agent = Agent(
         name="TestCaseRefinerAgent",
         model=model,
-        include_contents='none',
+        include_contents="none",
         generate_content_config=tool_generation_config(max_output_tokens=16000, temperature=0.15),
         instruction=f"""You are a QA Engineer refining test cases.
 
@@ -399,7 +394,7 @@ def _build_generation_pipeline(
     generator_agent = Agent(
         name="TestCaseGeneratorAgent",
         model=model,
-        include_contents='default',
+        include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
         output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
@@ -476,7 +471,7 @@ def _build_refinement_pipeline(
     refinement_agent = Agent(
         name="TestCaseRefinementAgent",
         model=model,
-        include_contents='default',
+        include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
         output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
@@ -557,9 +552,7 @@ async def _run_test_case_workflow_async(
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
     max_iterations = int(resolved_settings["max_iterations"] or DEFAULT_TEST_CASE_MAX_ITERATIONS)
     timeout_seconds = resolved_settings["timeout_seconds"]
-    stall_iteration_limit = int(
-        resolved_settings["stall_iteration_limit"] or DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT
-    )
+    stall_iteration_limit = int(resolved_settings["stall_iteration_limit"] or DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT)
     diagnostics = _new_workflow_diagnostics()
     is_refinement = existing_test_cases is not None
 
@@ -588,7 +581,7 @@ Template:
 {template_text}
 
 Human feedback:
-{human_feedback or 'No human feedback provided.'}
+{human_feedback or "No human feedback provided."}
 """
     else:
         root_agent = _build_generation_pipeline(
@@ -648,7 +641,7 @@ Human feedback:
             session_id=session.id,
             new_message=types.Content(role="user", parts=[types.Part(text=message_text)]),
         ):
-            author = getattr(event, 'author', 'unknown')
+            author = getattr(event, "author", "unknown")
             _log_test_case_workflow("event_received", session_id=session.id, author=author)
             _record_event_error(diagnostics, author, event)
 
@@ -659,7 +652,7 @@ Human feedback:
                 continue
 
             for part in event.content.parts:
-                text = getattr(part, 'text', None)
+                text = getattr(part, "text", None)
                 if not text:
                     continue
 
@@ -712,9 +705,7 @@ Human feedback:
                             context=context,
                         ),
                     )
-                    if current_test_cases and (
-                        not best_candidate or _prefer_review(candidate_review, best_candidate["review"])
-                    ):
+                    if current_test_cases and (not best_candidate or _prefer_review(candidate_review, best_candidate["review"])):
                         best_candidate = {
                             "test_cases": list(current_test_cases),
                             "review": candidate_review,
@@ -802,9 +793,7 @@ Human feedback:
         _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
 
     state_requirement_analysis_raw = session_state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
-    state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(
-        state_requirement_analysis_raw
-    )
+    state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(state_requirement_analysis_raw)
     if state_requirement_analysis:
         current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
     elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
@@ -839,9 +828,7 @@ Human feedback:
     )
     final_review = _merge_review_results(model_review, heuristic_review)
 
-    if best_candidate and (
-        not current_test_cases or _prefer_review(best_candidate["review"], final_review)
-    ):
+    if best_candidate and (not current_test_cases or _prefer_review(best_candidate["review"], final_review)):
         current_test_cases = list(best_candidate["test_cases"])
         final_review = dict(best_candidate["review"])
         diagnostics["best_iteration"] = best_candidate["iteration"]
@@ -890,10 +877,7 @@ Human feedback:
             review=final_review,
             test_cases=current_test_cases,
         )
-        selection_entry["summary"] = (
-            f"Retained best-scoring test cases from iteration {diagnostics['best_iteration']}. "
-            f"{final_review['summary']}"
-        ).strip()
+        selection_entry["summary"] = (f"Retained best-scoring test cases from iteration {diagnostics['best_iteration']}. {final_review['summary']}").strip()
         iteration_history.append(selection_entry)
     else:
         iteration_history.append(
@@ -1068,38 +1052,24 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
             if grounded_context.summary:
                 context_parts.append(f"Grounded context summary: {grounded_context.summary}")
             if grounded_context.artifact_sources:
-                sources = ", ".join(
-                    f"{source.id} ({source.label}, {source.status})"
-                    for source in grounded_context.artifact_sources[:8]
-                )
+                sources = ", ".join(f"{source.id} ({source.label}, {source.status})" for source in grounded_context.artifact_sources[:8])
                 context_parts.append(f"Grounded artifact sources: {sources}")
             if grounded_context.ui_elements:
                 ui_elements = ", ".join(
-                    (
-                        f"{element.element_type}: exact text \"{element.name}\""
-                        + (f" -> {element.href}" if getattr(element, "href", None) else "")
-                    )
+                    (f'{element.element_type}: exact text "{element.name}"' + (f" -> {element.href}" if getattr(element, "href", None) else ""))
                     for element in grounded_context.ui_elements[:12]
                 )
                 context_parts.append(f"Grounded UI elements: {ui_elements}")
             if grounded_context.api_surfaces:
-                api_surfaces = ", ".join(
-                    f"{surface.method or 'API'} {surface.path or surface.name}"
-                    for surface in grounded_context.api_surfaces[:8]
-                )
+                api_surfaces = ", ".join(f"{surface.method or 'API'} {surface.path or surface.name}" for surface in grounded_context.api_surfaces[:8])
                 context_parts.append(f"Grounded API surfaces: {api_surfaces}")
             if grounded_context.workflows:
-                workflows = ", ".join(
-                    f"{workflow.name} [{'; '.join(workflow.transitions[:4])}]"
-                    for workflow in grounded_context.workflows[:4]
-                )
+                workflows = ", ".join(f"{workflow.name} [{'; '.join(workflow.transitions[:4])}]" for workflow in grounded_context.workflows[:4])
                 context_parts.append(f"Grounded workflows: {workflows}")
     context_text = "\n".join(context_parts) if context_parts else "No additional context provided."
 
     template_text = f"Name: {template.name}, Format: {template.format}, Fields: {', '.join(template.fields)}"
     return requirements_text, context_text, template_text
-
-
 
 
 def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement], context: Optional[Any]) -> Dict[str, Any]:
@@ -1140,6 +1110,8 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": public_workflow_diagnostics(dict(workflow.get("workflow_diagnostics") or {})),
     }
+
+
 def generate_test_cases(
     payload: GenerateTestCasesInput,
     actor_user_id: Optional[str] = None,
@@ -1362,9 +1334,7 @@ def refine_test_cases(
         )
         fallback_review["approved"] = False
         fallback_review["summary"] = "Test case refinement returned no updated output. Previous test cases were restored and require further review."
-        fallback_review["blocking_issues"] = _dedupe_preserve(
-            fallback_review["blocking_issues"] + ["Refinement loop did not return an updated test-case set."]
-        )
+        fallback_review["blocking_issues"] = _dedupe_preserve(fallback_review["blocking_issues"] + ["Refinement loop did not return an updated test-case set."])
         workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
         workflow_diagnostics["status"] = "fallback"
         workflow_diagnostics["used_fallback"] = True

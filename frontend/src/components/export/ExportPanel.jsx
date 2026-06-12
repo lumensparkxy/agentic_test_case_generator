@@ -24,13 +24,13 @@ export default function ExportPanel({
 	return (
 		<section className="panel">
 			<h2 className="panel-title">Export Test Cases</h2>
-			<p className="panel-description">
-				Download your generated test cases as CSV, Excel, or JSON.
-			</p>
+			<p className="panel-description">Download your generated test cases as CSV, Excel, or JSON.</p>
 			{testCases.length > 0 && (
 				<div className={`export-readiness-card ${exportRequiresOverride ? "locked" : exportReviewApproved ? "approved" : ""}`}>
 					<div>
-						<strong>{exportRequiresOverride ? "Export locked by review gate" : exportReviewApproved ? "Approved for export" : "Ready to export"}</strong>
+						<strong>
+							{exportRequiresOverride ? "Export locked by review gate" : exportReviewApproved ? "Approved for export" : "Ready to export"}
+						</strong>
 						<p>
 							{exportRequiresOverride
 								? testCaseReview?.summary || "The latest generated test cases need review before export."
@@ -81,7 +81,9 @@ export default function ExportPanel({
 				</div>
 			</div>
 			<div className="panel-nav">
-				<button onClick={goPrev} className="secondary">Back</button>
+				<button onClick={goPrev} className="secondary">
+					Back
+				</button>
 			</div>
 		</section>
 	);

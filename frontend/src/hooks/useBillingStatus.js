@@ -5,24 +5,41 @@ export default function useBillingStatus(billingEntitlements, usageSummary) {
 	const billingContactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 	const billingStatusItems = billingEntitlements
 		? [
-			{ key: "plan", label: "Plan", value: formatPlanLabel(billingEntitlements.account?.plan_tier), variant: "neutral" },
-			...(billingEntitlements.account?.plan_tier === "pilot"
-				? [
-					{ key: "requirementsRemaining", label: "Req left", value: normalizeUsageMetric(billingEntitlements.requirements?.remaining), variant: billingEntitlements.requirements?.exhausted ? "alert" : "default" },
-					{ key: "testCasesRemaining", label: "TC left", value: normalizeUsageMetric(billingEntitlements.test_cases?.remaining), variant: billingEntitlements.test_cases?.exhausted ? "alert" : "default" },
-				]
-				: []),
-			...(billingEntitlements.account?.plan_tier !== "pilot"
-				? [{ key: "walletBalance", label: billingEntitlements.account?.plan_tier === "enterprise" ? "Allocation" : "Credits", value: billingEntitlements.wallet?.balance_token_display || "0", variant: normalizeUsageMetric(billingEntitlements.wallet?.balance_units) > 0 ? "default" : "alert" }]
-				: []),
-		]
+				{ key: "plan", label: "Plan", value: formatPlanLabel(billingEntitlements.account?.plan_tier), variant: "neutral" },
+				...(billingEntitlements.account?.plan_tier === "pilot"
+					? [
+							{
+								key: "requirementsRemaining",
+								label: "Req left",
+								value: normalizeUsageMetric(billingEntitlements.requirements?.remaining),
+								variant: billingEntitlements.requirements?.exhausted ? "alert" : "default",
+							},
+							{
+								key: "testCasesRemaining",
+								label: "TC left",
+								value: normalizeUsageMetric(billingEntitlements.test_cases?.remaining),
+								variant: billingEntitlements.test_cases?.exhausted ? "alert" : "default",
+							},
+						]
+					: []),
+				...(billingEntitlements.account?.plan_tier !== "pilot"
+					? [
+							{
+								key: "walletBalance",
+								label: billingEntitlements.account?.plan_tier === "enterprise" ? "Allocation" : "Credits",
+								value: billingEntitlements.wallet?.balance_token_display || "0",
+								variant: normalizeUsageMetric(billingEntitlements.wallet?.balance_units) > 0 ? "default" : "alert",
+							},
+						]
+					: []),
+			]
 		: [];
 	const statusUsageItems = usageSummary
 		? USAGE_STATUS_ITEMS.map((item) => ({
-			...item,
-			value: normalizeUsageMetric(usageSummary[item.key]),
-			variant: "default",
-		}))
+				...item,
+				value: normalizeUsageMetric(usageSummary[item.key]),
+				variant: "default",
+			}))
 		: [];
 	const pilotAlert = (() => {
 		if (!billingEntitlements || billingEntitlements.account?.plan_tier !== "pilot") {

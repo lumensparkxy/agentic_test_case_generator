@@ -44,16 +44,21 @@ class MainAuditLoggingTests(unittest.TestCase):
             start_run = stack.enter_context(patch("app.routers.requirements.start_workflow_run", return_value="run-parse-1"))
             complete_run = stack.enter_context(patch("app.routers.requirements.complete_workflow_run"))
             record_event = stack.enter_context(patch("app.routers.requirements.record_usage_event", return_value="event-parse-1"))
-            persist_requirements = stack.enter_context(patch("app.routers.requirements.persist_requirement_versions", return_value=[
-                Requirement(
-                    id="REQ-1",
-                    text="The system shall allow login",
-                    artifact_set_id="req-set-1",
-                    artifact_item_id="req-item-1",
-                    artifact_version_id="req-ver-1",
-                    artifact_version_number=1,
+            persist_requirements = stack.enter_context(
+                patch(
+                    "app.routers.requirements.persist_requirement_versions",
+                    return_value=[
+                        Requirement(
+                            id="REQ-1",
+                            text="The system shall allow login",
+                            artifact_set_id="req-set-1",
+                            artifact_item_id="req-item-1",
+                            artifact_version_id="req-ver-1",
+                            artifact_version_number=1,
+                        )
+                    ],
                 )
-            ]))
+            )
             extract = stack.enter_context(patch("app.routers.requirements.extract_requirements", return_value=workflow_result))
             with TestClient(app) as client:
                 response = client.post(
@@ -79,7 +84,17 @@ class MainAuditLoggingTests(unittest.TestCase):
 
     def test_generate_test_cases_logs_workflow_run_and_usage_event(self) -> None:
         workflow_result = {
-            "test_cases": [{"id": "TC-1", "title": "Login test", "steps": [{"step": 1, "action": "Act", "expected": "Observe"}], "priority": "Medium", "type": "Functional", "status": "Draft", "automation_status": "Manual"}],
+            "test_cases": [
+                {
+                    "id": "TC-1",
+                    "title": "Login test",
+                    "steps": [{"step": 1, "action": "Act", "expected": "Observe"}],
+                    "priority": "Medium",
+                    "type": "Functional",
+                    "status": "Draft",
+                    "automation_status": "Manual",
+                }
+            ],
             "approved": True,
             "review": {"approved": True, "score": 100, "threshold": 80, "summary": "ok", "blocking_issues": [], "suggestions": [], "unmet_criteria": []},
             "iteration_history": [],
@@ -104,17 +119,22 @@ class MainAuditLoggingTests(unittest.TestCase):
             start_run = stack.enter_context(patch("app.routers.testcases.start_workflow_run", return_value="run-generate-1"))
             complete_run = stack.enter_context(patch("app.routers.testcases.complete_workflow_run"))
             record_event = stack.enter_context(patch("app.routers.testcases.record_usage_event", return_value="event-generate-1"))
-            persist_test_cases = stack.enter_context(patch("app.routers.testcases.persist_test_case_versions", return_value=[
-                TestCase(
-                    id="TC-1",
-                    title="Login test",
-                    steps=[TestStep(step=1, action="Act", expected="Observe")],
-                    artifact_set_id="tc-set-1",
-                    artifact_item_id="tc-item-1",
-                    artifact_version_id="tc-ver-1",
-                    artifact_version_number=1,
+            persist_test_cases = stack.enter_context(
+                patch(
+                    "app.routers.testcases.persist_test_case_versions",
+                    return_value=[
+                        TestCase(
+                            id="TC-1",
+                            title="Login test",
+                            steps=[TestStep(step=1, action="Act", expected="Observe")],
+                            artifact_set_id="tc-set-1",
+                            artifact_item_id="tc-item-1",
+                            artifact_version_id="tc-ver-1",
+                            artifact_version_number=1,
+                        )
+                    ],
                 )
-            ]))
+            )
             generate = stack.enter_context(patch("app.routers.testcases.generate_test_cases", return_value=workflow_result))
             with TestClient(app) as client:
                 response = client.post("/testcases/generate", json=payload)

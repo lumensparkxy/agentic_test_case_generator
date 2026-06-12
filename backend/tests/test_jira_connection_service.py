@@ -82,7 +82,9 @@ class JiraConnectionServiceTests(unittest.TestCase):
 
         with patch("app.services.jira_connection_service.get_firestore_client", return_value=client):
             with patch("app.services.jira_connection_service.get_jira_settings", return_value=self.settings):
-                with patch("app.services.jira_connection_service.JiraAdapter.validate_connection", return_value={"accountId": "acct-1", "displayName": "QA User"}):
+                with patch(
+                    "app.services.jira_connection_service.JiraAdapter.validate_connection", return_value={"accountId": "acct-1", "displayName": "QA User"}
+                ):
                     response = upsert_jira_connection(current_user=self.user, payload=payload)
                     stored = get_decrypted_jira_connection(current_user=self.user)
 
@@ -113,7 +115,9 @@ class JiraConnectionServiceTests(unittest.TestCase):
 
         with patch("app.services.jira_connection_service.get_firestore_client", return_value=client):
             with patch("app.services.jira_connection_service.get_jira_settings", return_value=self.settings):
-                with patch("app.services.jira_connection_service.JiraAdapter.validate_connection", return_value={"accountId": "acct-1", "displayName": "QA User"}):
+                with patch(
+                    "app.services.jira_connection_service.JiraAdapter.validate_connection", return_value={"accountId": "acct-1", "displayName": "QA User"}
+                ):
                     upsert_jira_connection(current_user=self.user, payload=payload)
                     delete_jira_connection(current_user=self.user)
 

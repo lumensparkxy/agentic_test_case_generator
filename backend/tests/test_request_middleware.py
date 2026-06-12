@@ -33,11 +33,7 @@ class RequestIdMiddlewareTests(unittest.TestCase):
                 response = client.get("/health", headers={"X-Request-ID": "req-log-test"})
 
         self.assertEqual(response.status_code, 200)
-        completion_records = [
-            record
-            for record in captured.records
-            if getattr(record, "event", "") == "http.request.completed"
-        ]
+        completion_records = [record for record in captured.records if getattr(record, "event", "") == "http.request.completed"]
         self.assertTrue(completion_records)
         record = completion_records[-1]
         self.assertEqual(record.request_id, "req-log-test")

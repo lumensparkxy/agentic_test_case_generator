@@ -50,9 +50,7 @@ class JiraSyncServiceTests(unittest.TestCase):
             description_adf={
                 "version": 1,
                 "type": "doc",
-                "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": "Existing description"}]}
-                ],
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Existing description"}]}],
             },
             description_text="Existing description",
         )
@@ -92,9 +90,7 @@ class JiraSyncServiceTests(unittest.TestCase):
             description_adf={
                 "version": 1,
                 "type": "doc",
-                "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": "Existing description"}]}
-                ],
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Existing description"}]}],
             },
             description_text="Existing description",
         )
@@ -108,9 +104,7 @@ class JiraSyncServiceTests(unittest.TestCase):
             description_adf={
                 "version": 1,
                 "type": "doc",
-                "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": "Updated description"}]}
-                ],
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Updated description"}]}],
             },
             description_text="Updated description",
         )

@@ -3,25 +3,23 @@ import AuthProviderIcon from "../auth/AuthProviderIcon";
 function StatusUsagePills({ billingStatusItems, statusUsageItems, isUsageLoading, isBillingLoading }) {
 	return (
 		<div className="status-usage" aria-label="Current user usage summary">
-			{billingStatusItems.length > 0 ? (
-				billingStatusItems.map((item) => (
-					<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
-						<span className="status-usage-pill-label">{item.label}</span>
-						<span className="status-usage-pill-value">{item.value}</span>
-					</span>
-				))
-			) : null}
-			{statusUsageItems.length > 0 ? (
-				statusUsageItems.map((item) => (
-					<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
-						<span className="status-usage-pill-label">{item.label}</span>
-						<span className="status-usage-pill-value">{item.value}</span>
-					</span>
-				))
-			) : null}
-			{isUsageLoading || isBillingLoading ? (
-				<span className="status-usage-loading">Loading usage…</span>
-			) : null}
+			{billingStatusItems.length > 0
+				? billingStatusItems.map((item) => (
+						<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
+							<span className="status-usage-pill-label">{item.label}</span>
+							<span className="status-usage-pill-value">{item.value}</span>
+						</span>
+					))
+				: null}
+			{statusUsageItems.length > 0
+				? statusUsageItems.map((item) => (
+						<span className={`status-usage-pill ${item.variant ? `status-usage-pill-${item.variant}` : ""}`} key={item.key}>
+							<span className="status-usage-pill-label">{item.label}</span>
+							<span className="status-usage-pill-value">{item.value}</span>
+						</span>
+					))
+				: null}
+			{isUsageLoading || isBillingLoading ? <span className="status-usage-loading">Loading usage…</span> : null}
 		</div>
 	);
 }
@@ -44,19 +42,12 @@ function AuthPanel({
 				<span className="auth-message">Checking session...</span>
 			) : isAuthenticated ? (
 				<div className="auth-user">
-					{currentUser?.picture && (
-						<img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />
-					)}
+					{currentUser?.picture && <img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />}
 					<div className="auth-user-meta">
 						<strong>{currentUser?.name}</strong>
 						<span>{currentUser?.email || getAuthProviderLabel(currentUser?.provider) || currentUser?.sub}</span>
 					</div>
-					<button
-						type="button"
-						onClick={handleLogout}
-						className="secondary auth-logout-btn"
-						disabled={isAuthenticating}
-					>
+					<button type="button" onClick={handleLogout} className="secondary auth-logout-btn" disabled={isAuthenticating}>
 						{isAuthenticating ? "Signing out..." : "Sign Out"}
 					</button>
 				</div>
@@ -71,26 +62,15 @@ function AuthPanel({
 					</button>
 				</div>
 			) : hasFirebaseAuthConfig ? (
-				<span className="auth-message auth-config-missing">
-					No Firebase sign-in providers are currently available.
-				</span>
+				<span className="auth-message auth-config-missing">No Firebase sign-in providers are currently available.</span>
 			) : (
-				<span className="auth-message auth-config-missing">
-					Set the VITE_FIREBASE_* variables to enable Firebase sign-in.
-				</span>
+				<span className="auth-message auth-config-missing">Set the VITE_FIREBASE_* variables to enable Firebase sign-in.</span>
 			)}
 		</div>
 	);
 }
 
-export function SignInDialog({
-	isOpen,
-	onOverlayClick,
-	onClose,
-	isAuthenticating,
-	providers,
-	onProviderSignIn,
-}) {
+export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating, providers, onProviderSignIn }) {
 	if (!isOpen) {
 		return null;
 	}
@@ -131,9 +111,7 @@ export function SignInDialog({
 							<span className="auth-provider-option-icon" aria-hidden="true">
 								<AuthProviderIcon providerId={provider.id} />
 							</span>
-							<span className="auth-provider-option-label">
-								{provider.buttonText || `Sign in with ${provider.label}`}
-							</span>
+							<span className="auth-provider-option-label">{provider.buttonText || `Sign in with ${provider.label}`}</span>
 						</button>
 					))}
 				</div>
@@ -165,8 +143,7 @@ export default function AppHeader({
 			<div>
 				<h1 className="title">Agentic Test Case Generator</h1>
 				<p className="subtitle">
-					A guided pipeline to parse requirements, enrich context, generate test cases,
-					and export polished artifacts.
+					A guided pipeline to parse requirements, enrich context, generate test cases, and export polished artifacts.
 				</p>
 			</div>
 			<div className="header-right">

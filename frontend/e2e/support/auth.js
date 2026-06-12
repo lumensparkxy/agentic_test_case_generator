@@ -45,7 +45,7 @@ export function buildTestAccessToken(user = buildTestUser()) {
 			exp,
 		},
 		secret,
-		{ algorithm },
+		{ algorithm }
 	);
 }
 
@@ -63,7 +63,7 @@ export async function seedAuthenticatedSession(page, overrides = {}) {
 			storageUserKey: STORAGE_AUTH_USER,
 			authToken: token,
 			authUser: user,
-		},
+		}
 	);
 
 	return { token, user };

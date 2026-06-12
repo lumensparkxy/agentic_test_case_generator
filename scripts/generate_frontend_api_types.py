@@ -35,7 +35,9 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
     SelectedOperation("exportExcel", "post", "/export/excel", "ExportExcelRequest", "ExportExcelResponse"),
     SelectedOperation("exportJson", "post", "/export/json", "ExportJsonRequest", "ExportJsonResponse"),
     SelectedOperation("exportJira", "post", "/export/jira", "ExportJiraRequest", "ExportJiraResponse"),
-    SelectedOperation("automationExecutionPreview", "post", "/automation/execution/preview", "AutomationExecutionPreviewRequest", "AutomationExecutionPreviewResponse"),
+    SelectedOperation(
+        "automationExecutionPreview", "post", "/automation/execution/preview", "AutomationExecutionPreviewRequest", "AutomationExecutionPreviewResponse"
+    ),
     SelectedOperation("automationExecutionRun", "post", "/automation/execution/run", "AutomationExecutionRunRequest", "AutomationExecutionRunResponse"),
     SelectedOperation("billingEntitlementsMe", "get", "/entitlements/me", "BillingEntitlementsMeRequest", "BillingEntitlementsMeResponse"),
 )
@@ -232,9 +234,7 @@ def build_operation_types(openapi: dict[str, Any]) -> tuple[list[str], list[str]
         response_type = STREAMING_RESPONSE_TYPES.get((selected.method, selected.path)) or operation_type(response_schema(operation), refs)
         method = selected.method.upper()
 
-        operation_lines.append(
-            f"\t{selected.key}: ApiOperation<{selected.request_alias}, {selected.response_alias}, \"{method}\", \"{selected.path}\">;"
-        )
+        operation_lines.append(f'\t{selected.key}: ApiOperation<{selected.request_alias}, {selected.response_alias}, "{method}", "{selected.path}">;')
         alias_lines.append(f"export type {selected.request_alias} = {request_type};")
         alias_lines.append(f"export type {selected.response_alias} = {response_type};")
 
@@ -281,9 +281,7 @@ def render_runtime() -> str:
         "export const API_CONTRACT_ENDPOINTS = Object.freeze({",
     ]
     for selected in SELECTED_OPERATIONS:
-        lines.append(
-            f"\t{selected.key}: Object.freeze({{ method: \"{selected.method.upper()}\", path: \"{selected.path}\" }}),"
-        )
+        lines.append(f'\t{selected.key}: Object.freeze({{ method: "{selected.method.upper()}", path: "{selected.path}" }}),')
     lines.extend(
         [
             "});",

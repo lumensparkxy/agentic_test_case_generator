@@ -176,7 +176,7 @@ Frontend linting and formatting use ESLint and Prettier:
 - `cd frontend && npm run lint`
 - `cd frontend && npm run format:check`
 
-CI enforces the backend Ruff lint check and frontend ESLint check. Formatter checks are documented but not yet CI gates because the current repository baseline needs broad mechanical cleanup tracked in issue #65.
+CI enforces the backend Ruff lint/format checks and frontend ESLint/Prettier checks.
 
 ### 4) Run with containers on fixed local ports
 

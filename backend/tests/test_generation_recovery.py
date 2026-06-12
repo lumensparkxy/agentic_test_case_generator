@@ -79,9 +79,7 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(result["iteration_history"][-1]["actor"], "FallbackCoverageRecovery")
 
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:
-        requirements = [
-            Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password.")
-        ]
+        requirements = [Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password.")]
         payload = GenerateTestCasesInput(
             requirements=requirements,
             template=TestCaseTemplate(name="default", format="table", fields=["id", "title", "steps", "tags"]),

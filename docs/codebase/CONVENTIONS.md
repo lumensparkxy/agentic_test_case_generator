@@ -22,18 +22,16 @@ invent rules that are not enforced by configuration.
 
 - Backend linting: Ruff is configured in `pyproject.toml` and installed from
   `backend/requirements-dev.txt`.
-- Backend formatting: Ruff format is documented as the target formatter, but
-  broad baseline formatting cleanup is tracked separately in issue #65.
+- Backend formatting: Ruff format is the tracked backend formatter.
 - Frontend linting: ESLint flat config is tracked in `frontend/eslint.config.js`
   and runs through `npm run lint`.
-- Frontend formatting: Prettier config is tracked in `frontend/.prettierrc.json`;
-  broad baseline formatting cleanup is tracked separately in issue #65.
+- Frontend formatting: Prettier config is tracked in `frontend/.prettierrc.json`.
 - Type checking: [TODO] no tracked Python type checker or TypeScript config was
   found for application code.
 - Enforced lint commands: CI runs `python -m ruff check backend scripts` and
   `npm run lint`.
-- Documented format checks: `python -m ruff format --check backend scripts` and
-  `npm run format:check`.
+- Enforced format checks: CI runs `python -m ruff format --check backend scripts`
+  and `npm run format:check`.
 - Practical rule: match the surrounding file style, run focused tests, and run
   `git diff --check` before committing if possible.
 

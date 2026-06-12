@@ -22,9 +22,7 @@ from plain_english_test_framework.validation import (
 
 DEFAULT_SCHEMA_PATH = default_schema_path("spec.schema.json")
 
-PLACEHOLDER_PATTERN = re.compile(
-    r"\{(?:env|data)\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}"
-)
+PLACEHOLDER_PATTERN = re.compile(r"\{(?:env|data)\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}")
 BRACED_PATTERN = re.compile(r"\{[^{}\s]*(?:\.[^{}\s]*)*\}")
 MARKDOWN_YAML_BLOCK_PATTERN = re.compile(r"(?ms)^```ya?ml\s*\n(.*?)\n```")
 STEP_KEYWORD_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+")
@@ -99,9 +97,7 @@ def _extract_yaml_payload(text: str, source_path: Path | None) -> str:
     blocks = MARKDOWN_YAML_BLOCK_PATTERN.findall(text)
     if len(blocks) != 1:
         count = "no" if not blocks else "multiple"
-        raise SpecValidationError(
-            (ValidationIssue("$", f"Markdown spec must contain exactly one fenced YAML block; found {count}", "markdown.yaml_block"),)
-        )
+        raise SpecValidationError((ValidationIssue("$", f"Markdown spec must contain exactly one fenced YAML block; found {count}", "markdown.yaml_block"),))
     return blocks[0]
 
 

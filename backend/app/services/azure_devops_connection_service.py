@@ -41,9 +41,7 @@ def _build_fernet() -> Fernet:
     settings = get_azure_devops_settings()
     raw_secret = str(settings.connection_secret_key or "").strip()
     if not raw_secret:
-        raise RuntimeError(
-            "Azure DevOps connection encryption is not configured. Set AZURE_DEVOPS_CONNECTION_SECRET_KEY or JWT_SECRET_KEY."
-        )
+        raise RuntimeError("Azure DevOps connection encryption is not configured. Set AZURE_DEVOPS_CONNECTION_SECRET_KEY or JWT_SECRET_KEY.")
     derived_key = base64.urlsafe_b64encode(hashlib.sha256(raw_secret.encode("utf-8")).digest())
     return Fernet(derived_key)
 

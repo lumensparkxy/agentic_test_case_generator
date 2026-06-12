@@ -39,7 +39,7 @@ def extract_requirements(
     """
     Multi-agent ADK loop for requirement extraction:
     1. ExtractorAgent: Parses document and extracts candidate requirements
-    2. ReviewerAgent: Validates quality and either approves or suggests improvements  
+    2. ReviewerAgent: Validates quality and either approves or suggests improvements
     3. RefinerAgent: Refines based on feedback or exits when approved
     Loop continues until requirements pass review or max iterations reached.
     """
@@ -53,9 +53,9 @@ def extract_requirements(
             document_count=document_count,
         )
         return _build_workflow_response(requirements, fallback_workflow, document_count=document_count)
-    
+
     logging.info("Starting ADK multi-agent requirement extraction loop...")
-    
+
     # Run the ADK agent loop
     workflow = run_requirement_extraction_workflow_sync(
         document_text=text,
@@ -68,13 +68,13 @@ def extract_requirements(
         workflow_run_id=workflow_run_id,
         operation=operation,
     )
-    
+
     extracted = workflow.get("requirements", [])
     if extracted:
         requirements = _convert_to_requirements(extracted)
         logging.info(f"ADK loop extracted {len(requirements)} requirements successfully.")
         return _build_workflow_response(requirements, workflow, document_count=document_count)
-    
+
     # Fallback to heuristic if ADK fails
     logging.warning("ADK extraction returned empty; using enhanced heuristic fallback.")
     record_agent_fallback(workflow=operation or "requirements.parse", reason="heuristic_requirements_fallback")
@@ -113,9 +113,9 @@ def refine_requirements(
             document_count=1,
         )
         return _build_workflow_response(requirements, fallback_workflow, document_count=1)
-    
+
     logging.info(f"Refining {len(existing_requirements)} requirements with feedback: {feedback[:100]}...")
-    
+
     # Run the ADK refinement agent
     workflow = run_requirement_refinement_workflow_sync(
         existing_requirements=existing_requirements,
@@ -128,13 +128,13 @@ def refine_requirements(
         workflow_run_id=workflow_run_id,
         operation=operation,
     )
-    
+
     refined = workflow.get("requirements", [])
     if refined:
         requirements = _convert_to_requirements(refined)
         logging.info(f"ADK refinement produced {len(requirements)} requirements.")
         return _build_workflow_response(requirements, workflow, document_count=1)
-    
+
     # Fallback: return original requirements if refinement fails
     logging.warning("ADK refinement returned empty; returning original requirements.")
     record_agent_fallback(workflow=operation or "requirements.refine", reason="restored_original_requirements")
@@ -176,9 +176,7 @@ def _build_workflow_response(
 
     review_status = "Approved" if bool(workflow.get("approved", False)) else "Needs Review"
     statused_requirements = [
-        requirement.model_copy(update={"review_status": review_status})
-        if requirement.review_status != "Rejected"
-        else requirement
+        requirement.model_copy(update={"review_status": review_status}) if requirement.review_status != "Rejected" else requirement
         for requirement in requirements
     ]
 
@@ -294,49 +292,49 @@ def _convert_to_requirements(extracted: List[Dict[str, Any]]) -> List[Requiremen
     """Convert extracted dicts to Requirement objects."""
     requirements: List[Requirement] = []
     seen = set()
-    
+
     for i, item in enumerate(extracted):
         # Handle both dict format and string format
         if isinstance(item, dict):
-            req_id = item.get("id", f"REQ-{i+1:03d}")
+            req_id = item.get("id", f"REQ-{i + 1:03d}")
             text = item.get("text", "")
             metadata = _extract_requirement_metadata(item)
         else:
-            req_id = f"REQ-{i+1:03d}"
+            req_id = f"REQ-{i + 1:03d}"
             text = str(item)
             metadata = {}
-        
+
         if not text:
             continue
-        
+
         # Clean and deduplicate
         text = normalize_requirement_text(text)
         if not text or len(text) < 20:
             continue
-        
+
         normalized = text.lower()
         if normalized in seen:
             continue
         seen.add(normalized)
-        
+
         # Ensure proper ID format
         if not req_id.startswith("REQ-"):
-            req_id = f"REQ-{len(requirements)+1:03d}"
-        
+            req_id = f"REQ-{len(requirements) + 1:03d}"
+
         try:
             requirements.append(Requirement(id=req_id, text=text, **metadata))
         except ValidationError as exc:
             logging.warning("Requirement metadata was invalid for %s and will be ignored: %s", req_id, exc)
             requirements.append(Requirement(id=req_id, text=text))
-    
+
     # Re-number to ensure sequential IDs
-    id_mapping = {req.id: f"REQ-{i+1:03d}" for i, req in enumerate(requirements)}
+    id_mapping = {req.id: f"REQ-{i + 1:03d}" for i, req in enumerate(requirements)}
     for i, req in enumerate(requirements):
         parent_requirement_id = req.parent_requirement_id
-        req.id = id_mapping.get(req.id, f"REQ-{i+1:03d}")
+        req.id = id_mapping.get(req.id, f"REQ-{i + 1:03d}")
         if parent_requirement_id in id_mapping:
             req.parent_requirement_id = id_mapping[parent_requirement_id]
-    
+
     return requirements
 
 
@@ -380,29 +378,26 @@ def _finalize_requirements(candidates: List[str]) -> List[Requirement]:
     """Clean up and format final requirements list."""
     requirements: List[Requirement] = []
     seen = set()
-    
+
     for line in candidates:
         clean_text = normalize_requirement_text(line)
         if not clean_text:
             continue
-        
+
         # Skip if too short or looks like noise
         if len(clean_text) < 20:
             continue
         if _is_noise(clean_text):
             continue
-        
+
         # Deduplicate
         normalized = clean_text.lower()
         if normalized in seen:
             continue
         seen.add(normalized)
-        
-        requirements.append(Requirement(
-            id=f"REQ-{len(requirements) + 1:03d}",
-            text=clean_text
-        ))
-    
+
+        requirements.append(Requirement(id=f"REQ-{len(requirements) + 1:03d}", text=clean_text))
+
     return requirements
 
 
@@ -414,26 +409,26 @@ def _clean_requirement_text(text: str) -> str:
 def _is_noise(text: str) -> bool:
     """Check if text looks like noise rather than a requirement."""
     lower = text.lower()
-    
+
     noise_patterns = [
-        r'^(created|updated|author|version|date):?\s',
-        r'^\d{4}[-/]\d{2}[-/]\d{2}',  # Dates
-        r'^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d',
-        r'[│├└─]+',  # Tree structure characters
-        r'^#\s',  # Markdown headings
-        r'\.py$|\.js$|\.md$|\.json$',  # File extensions
-        r'^[a-z_]+/$',  # Directory names
-        r'^(purpose|overview|introduction|scope):?\s*$',
-        r'^\*\*[^*]+\*\*:?\s*$',  # Just a bold heading
-        r'^(note|notes|tip|warning):',
-        r'\b(?:api[_-]?key|environment|config)\b',
-        r'^\d+\.\s*\*\*[^:]+\*\*:',  # Numbered heading like "2. **Quality**:"
+        r"^(created|updated|author|version|date):?\s",
+        r"^\d{4}[-/]\d{2}[-/]\d{2}",  # Dates
+        r"^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d",
+        r"[│├└─]+",  # Tree structure characters
+        r"^#\s",  # Markdown headings
+        r"\.py$|\.js$|\.md$|\.json$",  # File extensions
+        r"^[a-z_]+/$",  # Directory names
+        r"^(purpose|overview|introduction|scope):?\s*$",
+        r"^\*\*[^*]+\*\*:?\s*$",  # Just a bold heading
+        r"^(note|notes|tip|warning):",
+        r"\b(?:api[_-]?key|environment|config)\b",
+        r"^\d+\.\s*\*\*[^:]+\*\*:",  # Numbered heading like "2. **Quality**:"
     ]
-    
+
     for pattern in noise_patterns:
         if re.search(pattern, lower):
             return True
-    
+
     return False
 
 
@@ -443,61 +438,61 @@ def _heuristic_extract(text: str) -> List[str]:
     Uses semantic patterns to identify actual requirements.
     """
     raw_lines = [line.strip() for line in text.splitlines() if line.strip()]
-    
+
     # Strong noise indicators - definitely NOT requirements
     noise_patterns = [
-        r'^#+\s',  # Markdown headings
-        r'^\d+\)\s*',  # Numbered steps like "1)"
-        r'^(note|notes|tip|warning|important|caution):',
-        r'`[^`]+`',  # Any inline code
-        r'^(http|https)://',  # URLs
-        r'[│├└─┌┐┘┴┬]+',  # Tree/box drawing characters
-        r'^[A-Z][A-Z0-9_]{2,}',  # CONSTANTS or ENV_VARS
-        r'\.(py|js|ts|md|json|txt|yml|yaml|env|sh)[\s:,)]?',  # File extensions
-        r'^(created|updated|author|version|date|last\s+modified):',
-        r'^\d{4}[-/]\d{2}[-/]\d{2}',  # Dates YYYY-MM-DD
-        r'^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d',
-        r'^\*\*[^*]+\*\*:?\s*$',  # Just bold text (heading)
-        r'^(purpose|overview|introduction|scope|background|context):?\s*$',
-        r'api[_-]?key|secret',
-        r'\(default:',  # Config defaults
-        r'is a stub',  # Implementation notes
-        r'^\s*(#|//|/\*)',  # Code comments
-        r'^(install|setup|configure|run|start|build|deploy)\s+(the|a|your)',
-        r'reports?/|src/|lib/|dist/|node_modules|__pycache__',  # Paths
-        r'uvicorn|npm|pip|python|node',  # Commands
-        r'in-memory|processed|stored',  # Implementation details
+        r"^#+\s",  # Markdown headings
+        r"^\d+\)\s*",  # Numbered steps like "1)"
+        r"^(note|notes|tip|warning|important|caution):",
+        r"`[^`]+`",  # Any inline code
+        r"^(http|https)://",  # URLs
+        r"[│├└─┌┐┘┴┬]+",  # Tree/box drawing characters
+        r"^[A-Z][A-Z0-9_]{2,}",  # CONSTANTS or ENV_VARS
+        r"\.(py|js|ts|md|json|txt|yml|yaml|env|sh)[\s:,)]?",  # File extensions
+        r"^(created|updated|author|version|date|last\s+modified):",
+        r"^\d{4}[-/]\d{2}[-/]\d{2}",  # Dates YYYY-MM-DD
+        r"^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d",
+        r"^\*\*[^*]+\*\*:?\s*$",  # Just bold text (heading)
+        r"^(purpose|overview|introduction|scope|background|context):?\s*$",
+        r"api[_-]?key|secret",
+        r"\(default:",  # Config defaults
+        r"is a stub",  # Implementation notes
+        r"^\s*(#|//|/\*)",  # Code comments
+        r"^(install|setup|configure|run|start|build|deploy)\s+(the|a|your)",
+        r"reports?/|src/|lib/|dist/|node_modules|__pycache__",  # Paths
+        r"uvicorn|npm|pip|python|node",  # Commands
+        r"in-memory|processed|stored",  # Implementation details
     ]
-    noise_re = re.compile('|'.join(noise_patterns), re.IGNORECASE)
-    
+    noise_re = re.compile("|".join(noise_patterns), re.IGNORECASE)
+
     # Strong requirement indicators
     requirement_verbs = [
-        r'\b(shall|should|must|will|can|may)\s+(be\s+able\s+to|allow|enable|support|provide|display|show|generate|create|delete|update|save|load|send|receive|validate|verify|authenticate|authorize)',
-        r'\buser\s+(can|shall|should|must|will)\b',
-        r'\bsystem\s+(shall|should|must|will)\b',
+        r"\b(shall|should|must|will|can|may)\s+(be\s+able\s+to|allow|enable|support|provide|display|show|generate|create|delete|update|save|load|send|receive|validate|verify|authenticate|authorize)",
+        r"\buser\s+(can|shall|should|must|will)\b",
+        r"\bsystem\s+(shall|should|must|will)\b",
     ]
-    requirement_re = re.compile('|'.join(requirement_verbs), re.IGNORECASE)
-    
+    requirement_re = re.compile("|".join(requirement_verbs), re.IGNORECASE)
+
     # Feature-like patterns (action verbs at start)
     feature_start_patterns = [
-        r'^(allow|enable|support|provide|prevent|lock|keep|require|sort|upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate)',
+        r"^(allow|enable|support|provide|prevent|lock|keep|require|sort|upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate)",
     ]
-    feature_start_re = re.compile('|'.join(feature_start_patterns), re.IGNORECASE)
-    
+    feature_start_re = re.compile("|".join(feature_start_patterns), re.IGNORECASE)
+
     candidates: List[str] = []
     in_features_section = False
-    
+
     for i, line in enumerate(raw_lines):
         lower = line.lower()
-        
+
         # Track document sections
-        if re.match(r'^#+\s*(?:functional\s+)?(?:features?|capabilities|functionality)\b', lower):
+        if re.match(r"^#+\s*(?:functional\s+)?(?:features?|capabilities|functionality)\b", lower):
             in_features_section = True
             continue
-        elif re.match(r'^#+\s', line):
+        elif re.match(r"^#+\s", line):
             in_features_section = False
             continue
-        
+
         # Clean the line
         cleaned = _clean_requirement_text(line)
         if not cleaned or len(cleaned) < 15:
@@ -513,40 +508,40 @@ def _heuristic_extract(text: str) -> List[str]:
         # Skip very short or very long lines
         if len(line) < 15 or len(line) > 300:
             continue
-        
+
         # Check if it's valid after cleaning
         if _is_noise(cleaned) and not has_requirement_signal:
             continue
-        
+
         # Score this candidate
         score = 0
-        
+
         # In features section = high score
         if in_features_section:
             score += 3
-        
+
         # Has requirement verb patterns = high score
         if has_requirement_signal:
             score += 4
-        
+
         # Starts with action verb = good feature candidate
         if has_feature_signal:
             score += 3
-        
+
         # Is a bullet point in features section = boost
-        if line.startswith(('-', '*', '•')) and in_features_section:
+        if line.startswith(("-", "*", "•")) and in_features_section:
             score += 2
-        
+
         if score >= 3:
             # Format as proper requirement
             formatted = _format_as_requirement(cleaned)
             if formatted:
                 candidates.append((score, formatted))
-    
+
     # Sort by score descending, take top results
     candidates.sort(key=lambda x: x[0], reverse=True)
     result = [c[1] for c in candidates[:15]]  # Limit to 15 requirements
-    
+
     # Deduplicate
     seen = set()
     unique: List[str] = []
@@ -555,7 +550,7 @@ def _heuristic_extract(text: str) -> List[str]:
         if normalized not in seen:
             seen.add(normalized)
             unique.append(r)
-    
+
     return unique
 
 
@@ -563,22 +558,26 @@ def _format_as_requirement(text: str) -> Optional[str]:
     """Format text as a proper requirement statement."""
     if not text:
         return None
-    
+
     # Already well-formed
-    if re.match(r'^(the\s+system\s+(shall|should|must|will)|user\s+(can|shall|should))', text, re.IGNORECASE):
+    if re.match(r"^(the\s+system\s+(shall|should|must|will)|user\s+(can|shall|should))", text, re.IGNORECASE):
         return text
-    
+
     # Starts with action verb - convert to "The system shall [verb]"
-    action_match = re.match(r'^(upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate|allow|enable|support|provide|prevent|lock|keep|require|sort)\s+(.+)', text, re.IGNORECASE)
+    action_match = re.match(
+        r"^(upload|download|export|import|parse|extract|process|generate|create|add|view|display|show|save|load|send|validate|authenticate|allow|enable|support|provide|prevent|lock|keep|require|sort)\s+(.+)",
+        text,
+        re.IGNORECASE,
+    )
     if action_match:
         verb = action_match.group(1).lower()
         rest = action_match.group(2)
         return f"The system shall {verb} {rest}"
-    
+
     # Starts with noun phrase describing capability
-    if text[0].isupper() and not re.match(r'^(The|A|An)\s', text):
+    if text[0].isupper() and not re.match(r"^(The|A|An)\s", text):
         # Check if it reads like a feature description
-        if re.search(r'\b(support|capability|feature|function|ability)\b', text, re.IGNORECASE):
+        if re.search(r"\b(support|capability|feature|function|ability)\b", text, re.IGNORECASE):
             return f"The system shall provide {text[0].lower()}{text[1:]}"
-    
+
     return None

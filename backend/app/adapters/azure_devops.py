@@ -287,9 +287,7 @@ class AzureDevOpsAdapter:
     ) -> dict[str, Any]:
         url = f"{self.organization_url}{path}"
         query_payload = {
-            key: value
-            for key, value in {"api-version": self.api_version, **(query or {})}.items()
-            if value is not None and value != "" and value != []
+            key: value for key, value in {"api-version": self.api_version, **(query or {})}.items() if value is not None and value != "" and value != []
         }
         if query_payload:
             url = f"{url}?{urlencode(query_payload, doseq=True)}"
@@ -449,8 +447,7 @@ class AzureDevOpsAdapter:
         return [
             project
             for project in projects
-            if normalized_query in str(project.get("name") or "").strip().lower()
-            or normalized_query in str(project.get("id") or "").strip().lower()
+            if normalized_query in str(project.get("name") or "").strip().lower() or normalized_query in str(project.get("id") or "").strip().lower()
         ]
 
     def _parse_json(self, payload_text: str) -> Optional[dict[str, Any]]:
@@ -480,10 +477,7 @@ class AzureDevOpsAdapter:
     ) -> str:
         raw_message = self._extract_error_message(payload) or payload_text or str(exc)
         if exc.code == 401:
-            return (
-                f"Azure DevOps rejected the PAT for {self.organization_url}. "
-                "Verify the token is active and has access to this organization."
-            )
+            return f"Azure DevOps rejected the PAT for {self.organization_url}. Verify the token is active and has access to this organization."
         if exc.code == 403:
             return (
                 f"The Azure DevOps token authenticated but does not have enough access for {self.organization_url}. "

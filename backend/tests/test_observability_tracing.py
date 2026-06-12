@@ -51,11 +51,7 @@ class ObservabilityTracingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("X-Trace-ID"), VALID_TRACE_ID)
-        completion_records = [
-            record
-            for record in captured.records
-            if getattr(record, "event", "") == "http.request.completed"
-        ]
+        completion_records = [record for record in captured.records if getattr(record, "event", "") == "http.request.completed"]
         self.assertTrue(completion_records)
         self.assertEqual(completion_records[-1].trace_id, VALID_TRACE_ID)
 

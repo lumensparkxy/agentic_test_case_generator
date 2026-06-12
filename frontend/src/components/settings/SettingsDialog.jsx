@@ -34,12 +34,7 @@ export default function SettingsDialog({
 						<h2 id="settings-dialog-title">Settings</h2>
 						<p>Manage one-time connections and advanced workflow tuning without crowding the main pipeline.</p>
 					</div>
-					<button
-						type="button"
-						className="auth-dialog-close"
-						onClick={onClose}
-						aria-label="Close settings dialog"
-					>
+					<button type="button" className="auth-dialog-close" onClick={onClose} aria-label="Close settings dialog">
 						×
 					</button>
 				</div>
@@ -86,9 +81,7 @@ export default function SettingsDialog({
 								<p>Set these up once per user. Import/search/sync actions stay in the Upload workflow where they are used.</p>
 							</div>
 							{!isAuthenticated && (
-								<div className="settings-auth-note">
-									🔐 Sign in to create or manage JIRA and Azure DevOps connections.
-								</div>
+								<div className="settings-auth-note">🔐 Sign in to create or manage JIRA and Azure DevOps connections.</div>
 							)}
 							<div className="settings-integration-grid">
 								<JiraConnectionSettings {...jiraSettings} />

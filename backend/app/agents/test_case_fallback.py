@@ -58,11 +58,7 @@ def _grounded_ui_elements(context: Optional[Any]) -> List[Any]:
 
 
 def _tokenize_grounding_text(value: Any) -> set[str]:
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
-        if len(token) > 2 and token not in GROUNDING_STOPWORDS
-    }
+    return {token for token in re.findall(r"[a-z0-9]+", str(value or "").lower()) if len(token) > 2 and token not in GROUNDING_STOPWORDS}
 
 
 def _score_grounded_text(requirement_tokens: set[str], *values: Any) -> int:
@@ -82,8 +78,7 @@ def _select_grounded_source(requirement: Requirement, context: Optional[Any]) ->
     sources = [
         source
         for source in all_sources
-        if _source_url(source)
-        or any(str(getattr(element, "source_id", "") or "") == str(getattr(source, "id", "") or "") for element in elements)
+        if _source_url(source) or any(str(getattr(element, "source_id", "") or "") == str(getattr(source, "id", "") or "") for element in elements)
     ]
     if not sources:
         return None
@@ -110,8 +105,7 @@ def _elements_for_source(context: Optional[Any], source_id: str, element_type: s
     return [
         element
         for element in _grounded_ui_elements(context)
-        if str(getattr(element, "source_id", "") or "") == source_id
-        and str(getattr(element, "element_type", "") or "") == element_type
+        if str(getattr(element, "source_id", "") or "") == source_id and str(getattr(element, "element_type", "") or "") == element_type
     ]
 
 
@@ -264,7 +258,8 @@ def _fallback_raw_test_cases(
                     "type": "Functional",
                     "status": "Draft",
                     "preconditions": context.notes if context else None,
-                    "steps": grounded_steps or [
+                    "steps": grounded_steps
+                    or [
                         {
                             "step": 1,
                             "action": f"Navigate to the feature area that implements {requirement.id}",

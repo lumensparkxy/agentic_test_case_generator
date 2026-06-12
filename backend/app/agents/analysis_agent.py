@@ -625,9 +625,7 @@ def normalize_requirement_analysis(raw_analysis: List[Dict[str, Any]], requireme
         if not item:
             item = fallback_lookup[requirement.id]
         if "Happy Path" not in item["suggested_scenarios"]:
-            item["suggested_scenarios"] = ["Happy Path"] + [
-                scenario for scenario in item["suggested_scenarios"] if scenario != "Happy Path"
-            ]
+            item["suggested_scenarios"] = ["Happy Path"] + [scenario for scenario in item["suggested_scenarios"] if scenario != "Happy Path"]
         normalized.append(item)
 
     logging.info("[RequirementAnalysis] Prepared analysis for %s requirement(s)", len(normalized))
@@ -647,7 +645,7 @@ def build_requirement_analysis_agent(
     return Agent(
         name="RequirementAnalysisAgent",
         model=model,
-        include_contents='none',
+        include_contents="none",
         generate_content_config=json_generation_config(max_output_tokens=12000),
         output_schema=RequirementAnalysisOutput,
         instruction=f"""You are a Senior QA Analyst preparing a structured requirement analysis before scenario planning.

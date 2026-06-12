@@ -40,6 +40,7 @@ STEP_TEXT_PREFIX_PATTERN = re.compile(r"^\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNOR
 STEP_TEXT_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
 STEP_BULLET_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*[-*\u2022]\s+")
 
+
 def _extract_step_text_blocks(text: str, marker_pattern: re.Pattern[str]) -> List[str]:
     matches = list(marker_pattern.finditer(text))
     if not matches:

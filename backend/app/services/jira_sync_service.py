@@ -172,15 +172,10 @@ def apply_jira_requirement_sync(*, current_user: AuthUser, payload: JiraSyncAppl
             )
         )
 
-    final_requirements = [
-        updated_requirements_by_identity.get(_requirement_identity(requirement), requirement)
-        for requirement in payload.requirements
-    ]
+    final_requirements = [updated_requirements_by_identity.get(_requirement_identity(requirement), requirement) for requirement in payload.requirements]
 
     if skipped_requirement_ids:
-        warnings.append(
-            f"Skipped {len(skipped_requirement_ids)} requirement{'s' if len(skipped_requirement_ids) != 1 else ''} without a JIRA sync target."
-        )
+        warnings.append(f"Skipped {len(skipped_requirement_ids)} requirement{'s' if len(skipped_requirement_ids) != 1 else ''} without a JIRA sync target.")
 
     return JiraSyncApplyResponse(
         results=results,
@@ -236,10 +231,7 @@ def _build_sync_plans(
         existing_excerpt = _truncate_text(live_issue.description_text or "", max_length=400) or None
         mapped_issue_updated_at = _resolve_group_baseline_updated_at(contexts)
         has_conflict = bool(
-            mapped_issue_updated_at
-            and live_issue.updated_at
-            and live_issue.updated_at > mapped_issue_updated_at
-            and conflict_strategy == "block"
+            mapped_issue_updated_at and live_issue.updated_at and live_issue.updated_at > mapped_issue_updated_at and conflict_strategy == "block"
         )
         conflict_reason = None
         if has_conflict:
@@ -293,11 +285,7 @@ def _group_requirements_by_issue(
 
 
 def _load_mapping_payloads(requirements: Sequence[Requirement]) -> dict[str, dict[str, Any]]:
-    item_ids = [
-        str(requirement.artifact_item_id or "").strip()
-        for requirement in requirements
-        if _requires_mapping_lookup(requirement)
-    ]
+    item_ids = [str(requirement.artifact_item_id or "").strip() for requirement in requirements if _requires_mapping_lookup(requirement)]
     if not item_ids:
         return {}
     try:
@@ -356,11 +344,7 @@ def _upsert_managed_requirement_block(
     else:
         if start_index is not None or end_index is not None:
             warning = "Existing managed block markers were incomplete, so a fresh managed block was appended."
-            content = [
-                node
-                for node in content
-                if _top_level_text(node) not in {MANAGED_BLOCK_START, MANAGED_BLOCK_END}
-            ]
+            content = [node for node in content if _top_level_text(node) not in {MANAGED_BLOCK_START, MANAGED_BLOCK_END}]
         if content and _top_level_text(content[-1]):
             content.append(_paragraph_node(""))
         content.extend(managed_block)

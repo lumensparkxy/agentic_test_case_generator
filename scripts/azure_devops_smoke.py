@@ -47,9 +47,7 @@ def _parse_args() -> argparse.Namespace:
 def _require_pat() -> str:
     pat = os.getenv("AZURE_DEVOPS_PAT", "").strip()
     if not pat:
-        raise SystemExit(
-            "AZURE_DEVOPS_PAT is not set. Export it in your terminal or enter it silently before running this script."
-        )
+        raise SystemExit("AZURE_DEVOPS_PAT is not set. Export it in your terminal or enter it silently before running this script.")
     return pat
 
 
@@ -96,10 +94,7 @@ def _create_samples(adapter: AzureDevOpsAdapter, *, project: str, work_item_type
         work_item_type=epic_type,
         fields={
             "System.Title": f"{title_prefix}: Sample requirements epic ({timestamp})",
-            "System.Description": (
-                "<p>Sample epic created by Agentic Test Case Generator smoke test. "
-                "Safe to delete after verification.</p>"
-            ),
+            "System.Description": ("<p>Sample epic created by Agentic Test Case Generator smoke test. Safe to delete after verification.</p>"),
         },
     )
     print(f"Created {epic_type} #{epic.work_item_id}: {epic.web_url}")

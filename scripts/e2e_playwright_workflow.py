@@ -53,7 +53,7 @@ except ImportError:
         print(msg)
 
     def _panel(title: str, content: str, style: str = "cyan") -> None:  # type: ignore[misc]
-        print(f"\n{'='*60}\n{title}\n{'='*60}\n{content}\n")
+        print(f"\n{'=' * 60}\n{title}\n{'=' * 60}\n{content}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -143,21 +143,11 @@ def _post_multipart(path: str, fields: dict, files: dict) -> tuple[int, dict]:
     body_parts: list[bytes] = []
 
     for name, value in fields.items():
-        body_parts.append(
-            (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-                f"{value}\r\n"
-            ).encode()
-        )
+        body_parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode())
 
     for field_name, (filename, file_bytes, content_type) in files.items():
         body_parts.append(
-            (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
-                f"Content-Type: {content_type}\r\n\r\n"
-            ).encode()
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n').encode()
             + file_bytes
             + b"\r\n"
         )
@@ -227,6 +217,7 @@ def _check_health() -> None:
 # Step functions
 # ---------------------------------------------------------------------------
 
+
 def step_parse_requirements() -> dict:
     """Step 1 – Parse the markdown requirements file via the pipeline."""
     _print("\n[bold cyan]STEP 1 – Parse Requirements[/bold cyan]")
@@ -244,17 +235,17 @@ def step_parse_requirements() -> dict:
     reqs = result.get("requirements", [])
     _print(f"  Parsed [bold]{len(reqs)}[/bold] requirements")
     _print(f"  Approved: {result.get('approved')}")
-    review = result.get('review', {})
-    if isinstance(review, dict) and review.get('summary'):
+    review = result.get("review", {})
+    if isinstance(review, dict) and review.get("summary"):
         _print(f"  Review summary: {str(review['summary'])[:200]}")
         _print(f"  Score: {review.get('score', '?')}/{review.get('threshold', '?')}")
 
     # Coverage metrics
-    if coverage := result.get('coverage_metrics'):
+    if coverage := result.get("coverage_metrics"):
         _print(f"  Coverage metrics: {json.dumps(coverage)}")
 
     # Iteration history
-    history = result.get('iteration_history', [])
+    history = result.get("iteration_history", [])
     if not isinstance(history, list):
         history = []
     _print(f"  Iterations taken: {len(history)}")
@@ -310,8 +301,8 @@ def step_refine_requirements(parse_result: dict) -> dict:
     reqs = result.get("requirements", [])
     _print(f"  Refined to [bold]{len(reqs)}[/bold] requirements")
     _print(f"  Approved: {result.get('approved')}")
-    review = result.get('review', {})
-    if isinstance(review, dict) and review.get('summary'):
+    review = result.get("review", {})
+    if isinstance(review, dict) and review.get("summary"):
         _print(f"  Review summary: {str(review['summary'])[:200]}")
 
     _save_json("2_refine.json", result)
@@ -332,8 +323,7 @@ def step_enrich_requirements(requirements: list[dict]) -> dict:
         ],
         "image_links": [],
         "notes": (
-            "This is the Playwright for Python official documentation. "
-            "Focus on pytest plugin usage patterns, assertion APIs, and browser lifecycle management."
+            "This is the Playwright for Python official documentation. Focus on pytest plugin usage patterns, assertion APIs, and browser lifecycle management."
         ),
     }
 
@@ -350,8 +340,7 @@ def step_enrich_requirements(requirements: list[dict]) -> dict:
         grounded_summary = grounded.get("summary") or ""
         artifact_count = len(grounded.get("artifact_sources", []))
         ui_count = len(grounded.get("ui_elements", []))
-        _print(f"  Grounded context: summary={'yes' if grounded_summary else 'no'}, "
-               f"artifacts={artifact_count}, ui_elements={ui_count}")
+        _print(f"  Grounded context: summary={'yes' if grounded_summary else 'no'}, artifacts={artifact_count}, ui_elements={ui_count}")
     elif isinstance(grounded, str):
         grounded_summary = grounded
         _print(f"  Grounded context (string) length: {len(grounded_summary)} chars")
@@ -392,10 +381,20 @@ def step_generate_test_cases(enriched: dict) -> dict:
             "name": "default",
             "format": "table",
             "fields": [
-                "id", "title", "description", "priority", "type",
-                "status", "preconditions", "steps", "expected_result",
-                "test_data", "estimated_time", "automation_status",
-                "component", "tags",
+                "id",
+                "title",
+                "description",
+                "priority",
+                "type",
+                "status",
+                "preconditions",
+                "steps",
+                "expected_result",
+                "test_data",
+                "estimated_time",
+                "automation_status",
+                "component",
+                "tags",
             ],
         },
     }
@@ -412,8 +411,8 @@ def step_generate_test_cases(enriched: dict) -> dict:
     tcs = result.get("test_cases", [])
     _print(f"  Generated [bold]{len(tcs)}[/bold] test cases")
     _print(f"  Approved: {result.get('approved')}")
-    review = result.get('review', {})
-    if isinstance(review, dict) and review.get('summary'):
+    review = result.get("review", {})
+    if isinstance(review, dict) and review.get("summary"):
         _print(f"  Review summary: {str(review['summary'])[:300]}")
         _print(f"  Score: {review.get('score', '?')}/{review.get('threshold', '?')}")
 
@@ -433,9 +432,9 @@ def step_generate_test_cases(enriched: dict) -> dict:
         # Show first 3 test cases
         _print("\n  [bold]First 3 test cases:[/bold]")
         for tc in tcs[:3]:
-            _print(f"    [{tc.get('priority','?')}] {tc.get('id','?')} – {tc.get('title','?')}")
+            _print(f"    [{tc.get('priority', '?')}] {tc.get('id', '?')} – {tc.get('title', '?')}")
             steps = tc.get("steps", [])
-            _print(f"      Steps: {len(steps)}, AutoStatus: {tc.get('automation_status','?')}")
+            _print(f"      Steps: {len(steps)}, AutoStatus: {tc.get('automation_status', '?')}")
 
     _save_json("4_generate.json", result)
     return result
@@ -464,7 +463,9 @@ def step_export(generate_result: dict) -> None:
 
     # Excel
     xlsx_path = _post_download(
-        "/export/excel", payload, "5b_test_cases.xlsx",
+        "/export/excel",
+        payload,
+        "5b_test_cases.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     xlsx_size = os.path.getsize(xlsx_path)
@@ -581,29 +582,31 @@ def _print_summary(parse: dict, refined: dict, enriched: dict, generated: dict, 
     _print("\n")
     _panel(
         "WORKFLOW COMPLETE – Summary",
-        "\n".join([
-            f"Requirements parsed   : {len(parse.get('requirements', []))}",
-            f"Requirements refined  : {len(refined.get('requirements', []))}",
-            f"Requirements enriched : {len(enriched.get('requirements', []))}",
-            f"Test cases generated  : {len(generated.get('test_cases', []))}",
-            f"Executable preview    : {preview_summary.get('executable', 0)} executable, "
-            f"{preview_summary.get('unsupported', 0)} unsupported, {preview_summary.get('invalid', 0)} invalid",
-            f"Execution run         : {execution_run.get('status', 'not run') if isinstance(execution_run, dict) else 'not run'} "
-            f"({run_summary.get('passed', 0)} passed, {run_summary.get('failed', 0)} failed)",
-            f"",
-            f"Output directory      : {OUTPUT_DIR}",
-            f"Files produced:",
-            f"  1_parse.json       – raw parse workflow state",
-            f"  2_refine.json      – human feedback refinement",
-            f"  3_enrich.json      – grounded context enrichment",
-            f"  4_generate.json    – full test case generation",
-            f"  5a_test_cases.csv  – CSV export",
-            f"  5b_test_cases.xlsx – Excel export",
-            f"  5c_test_cases.json – JSON export",
-            f"  6_playwright_pom.py– Playwright POM stubs",
-            f"  7a_execution_preview.json – executable case preview",
-            f"  7b_execution_run.json     – execution report when enabled",
-        ]),
+        "\n".join(
+            [
+                f"Requirements parsed   : {len(parse.get('requirements', []))}",
+                f"Requirements refined  : {len(refined.get('requirements', []))}",
+                f"Requirements enriched : {len(enriched.get('requirements', []))}",
+                f"Test cases generated  : {len(generated.get('test_cases', []))}",
+                f"Executable preview    : {preview_summary.get('executable', 0)} executable, "
+                f"{preview_summary.get('unsupported', 0)} unsupported, {preview_summary.get('invalid', 0)} invalid",
+                f"Execution run         : {execution_run.get('status', 'not run') if isinstance(execution_run, dict) else 'not run'} "
+                f"({run_summary.get('passed', 0)} passed, {run_summary.get('failed', 0)} failed)",
+                f"",
+                f"Output directory      : {OUTPUT_DIR}",
+                f"Files produced:",
+                f"  1_parse.json       – raw parse workflow state",
+                f"  2_refine.json      – human feedback refinement",
+                f"  3_enrich.json      – grounded context enrichment",
+                f"  4_generate.json    – full test case generation",
+                f"  5a_test_cases.csv  – CSV export",
+                f"  5b_test_cases.xlsx – Excel export",
+                f"  5c_test_cases.json – JSON export",
+                f"  6_playwright_pom.py– Playwright POM stubs",
+                f"  7a_execution_preview.json – executable case preview",
+                f"  7b_execution_run.json     – execution report when enabled",
+            ]
+        ),
         style="green",
     )
 
@@ -611,15 +614,13 @@ def _print_summary(parse: dict, refined: dict, enriched: dict, generated: dict, 
     if tcs:
         _print("\n[bold]All Generated Test Cases:[/bold]")
         for tc in tcs:
-            _print(
-                f"  {tc.get('id','?'):<12} [{tc.get('priority','?'):<6}] "
-                f"{tc.get('type','?'):<20} {tc.get('title','?')}"
-            )
+            _print(f"  {tc.get('id', '?'):<12} [{tc.get('priority', '?'):<6}] {tc.get('type', '?'):<20} {tc.get('title', '?')}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     global _TOKEN

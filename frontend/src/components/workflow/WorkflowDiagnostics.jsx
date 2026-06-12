@@ -1,9 +1,4 @@
-export default function WorkflowDiagnostics({
-	title,
-	diagnostics,
-	appliedSettings,
-	iterationHistory,
-}) {
+export default function WorkflowDiagnostics({ title, diagnostics, appliedSettings, iterationHistory }) {
 	if (!diagnostics && !appliedSettings) {
 		return null;
 	}
@@ -30,7 +25,9 @@ export default function WorkflowDiagnostics({
 			{pillEntries.length > 0 && (
 				<div className="workflow-diagnostics-pills">
 					{pillEntries.map((entry) => (
-						<span className="workflow-diagnostics-pill" key={entry}>{entry}</span>
+						<span className="workflow-diagnostics-pill" key={entry}>
+							{entry}
+						</span>
 					))}
 				</div>
 			)}
@@ -38,7 +35,9 @@ export default function WorkflowDiagnostics({
 				<div className="workflow-diagnostics-block warning">
 					<strong>Warnings</strong>
 					<ul>
-						{warnings.map((warning) => <li key={warning}>{warning}</li>)}
+						{warnings.map((warning) => (
+							<li key={warning}>{warning}</li>
+						))}
 					</ul>
 				</div>
 			)}
@@ -46,7 +45,9 @@ export default function WorkflowDiagnostics({
 				<div className="workflow-diagnostics-block alert">
 					<strong>Parser issues</strong>
 					<ul>
-						{parserFailures.map((failure) => <li key={failure}>{failure}</li>)}
+						{parserFailures.map((failure) => (
+							<li key={failure}>{failure}</li>
+						))}
 					</ul>
 				</div>
 			)}

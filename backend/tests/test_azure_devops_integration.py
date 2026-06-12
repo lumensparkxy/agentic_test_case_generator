@@ -149,9 +149,15 @@ class AzureDevOpsIntegrationEndpointTests(unittest.TestCase):
                 with patch("app.routers.integrations_azure_devops.complete_workflow_run") as complete_run:
                     with patch("app.routers.integrations_azure_devops.record_usage_event", return_value="event-azure-import-1") as record_event:
                         with patch("app.routers.integrations_azure_devops._record_billing_consumption_safe") as record_billing:
-                            with patch("app.routers.integrations_azure_devops.persist_requirement_versions", return_value=persisted_requirements) as persist_versions:
-                                with patch("app.routers.integrations_azure_devops.persist_azure_devops_requirement_mappings", return_value=persisted_requirements) as persist_mappings:
-                                    with patch("app.routers.integrations_azure_devops.import_requirements_from_azure_devops", return_value=workflow_result) as import_service:
+                            with patch(
+                                "app.routers.integrations_azure_devops.persist_requirement_versions", return_value=persisted_requirements
+                            ) as persist_versions:
+                                with patch(
+                                    "app.routers.integrations_azure_devops.persist_azure_devops_requirement_mappings", return_value=persisted_requirements
+                                ) as persist_mappings:
+                                    with patch(
+                                        "app.routers.integrations_azure_devops.import_requirements_from_azure_devops", return_value=workflow_result
+                                    ) as import_service:
                                         with TestClient(app) as client:
                                             response = client.post(
                                                 "/integrations/azure-devops/import",
@@ -259,18 +265,23 @@ class AzureDevOpsIntegrationEndpointTests(unittest.TestCase):
         with patch("app.routers.integrations_azure_devops.start_workflow_run", return_value="run-azure-sync-1") as start_run:
             with patch("app.routers.integrations_azure_devops.complete_workflow_run") as complete_run:
                 with patch("app.routers.integrations_azure_devops.record_usage_event", return_value="event-azure-sync-1") as record_event:
-                    with patch("app.routers.integrations_azure_devops.persist_azure_devops_requirement_mappings", return_value=[Requirement(
-                        id="REQ-001",
-                        text="The system shall support login",
-                        source_system="azure_devops",
-                        source_issue_key="101",
-                        source_issue_type="User Story",
-                        sync_target_issue_key="101",
-                        artifact_set_id="req-set-1",
-                        artifact_item_id="req-item-1",
-                        artifact_version_id="req-ver-1",
-                        artifact_version_number=1,
-                    )]) as persist_mappings:
+                    with patch(
+                        "app.routers.integrations_azure_devops.persist_azure_devops_requirement_mappings",
+                        return_value=[
+                            Requirement(
+                                id="REQ-001",
+                                text="The system shall support login",
+                                source_system="azure_devops",
+                                source_issue_key="101",
+                                source_issue_type="User Story",
+                                sync_target_issue_key="101",
+                                artifact_set_id="req-set-1",
+                                artifact_item_id="req-item-1",
+                                artifact_version_id="req-ver-1",
+                                artifact_version_number=1,
+                            )
+                        ],
+                    ) as persist_mappings:
                         with patch("app.routers.integrations_azure_devops.apply_azure_devops_requirement_sync", return_value=applied_response) as apply_service:
                             with TestClient(app) as client:
                                 response = client.post(

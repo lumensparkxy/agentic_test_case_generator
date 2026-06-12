@@ -223,11 +223,7 @@ class JiraAdapter:
         body: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
-        query_payload = {
-            key: value
-            for key, value in (query or {}).items()
-            if value is not None and value != "" and value != []
-        }
+        query_payload = {key: value for key, value in (query or {}).items() if value is not None and value != "" and value != []}
         if query_payload:
             url = f"{url}?{urlencode(query_payload, doseq=True)}"
 
@@ -396,10 +392,7 @@ class JiraAdapter:
             )
 
         if exc.code == 403 and (
-            "not permitted to use jira" in normalized
-            or "insufficient permissions" in normalized
-            or "access denied" in normalized
-            or "forbidden" in normalized
+            "not permitted to use jira" in normalized or "insufficient permissions" in normalized or "access denied" in normalized or "forbidden" in normalized
         ):
             return (
                 f"The Atlassian account {self.email} authenticated, but does not have enough Jira access for {self.base_url}. "

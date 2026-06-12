@@ -154,9 +154,7 @@ async def jira_connection_upsert(
         metadata={"base_url": str(payload.base_url), "email": payload.email},
     )
     try:
-        response = JiraConnectionStatusResponse.model_validate(
-            await run_in_threadpool(upsert_jira_connection, current_user=current_user, payload=payload)
-        )
+        response = JiraConnectionStatusResponse.model_validate(await run_in_threadpool(upsert_jira_connection, current_user=current_user, payload=payload))
         complete_workflow_run(
             workflow_run_id,
             status="completed",
@@ -433,9 +431,7 @@ async def jira_sync_preview_endpoint(
         metadata={"requirement_count": len(payload.requirements)},
     )
     try:
-        response = JiraSyncPreviewResponse.model_validate(
-            await run_in_threadpool(preview_jira_requirement_sync, current_user=current_user, payload=payload)
-        )
+        response = JiraSyncPreviewResponse.model_validate(await run_in_threadpool(preview_jira_requirement_sync, current_user=current_user, payload=payload))
         _log_success(
             current_user=current_user,
             request=request,
@@ -508,9 +504,7 @@ async def jira_sync_apply_endpoint(
         },
     )
     try:
-        response = JiraSyncApplyResponse.model_validate(
-            await run_in_threadpool(apply_jira_requirement_sync, current_user=current_user, payload=payload)
-        )
+        response = JiraSyncApplyResponse.model_validate(await run_in_threadpool(apply_jira_requirement_sync, current_user=current_user, payload=payload))
         event_id = _log_success(
             current_user=current_user,
             request=request,

@@ -257,20 +257,22 @@ def start_workflow_run(
 ) -> str:
     run_id = str(uuid4())
     record_workflow_started(run_id, operation, status=status)
-    payload = _attach_trace_id({
-        "run_id": run_id,
-        "operation": operation,
-        "status": status,
-        "request_id": request_id,
-        "workspace_id": workspace_id,
-        "tenant_id": actor.tenant_id if actor else None,
-        "organization_domain": actor.organization_domain if actor else None,
-        "actor": build_actor_snapshot(actor),
-        "actor_user_id": actor.sub if actor else None,
-        "started_at": _utcnow(),
-        "updated_at": _utcnow(),
-        "metadata": _serialize_value(metadata or {}),
-    })
+    payload = _attach_trace_id(
+        {
+            "run_id": run_id,
+            "operation": operation,
+            "status": status,
+            "request_id": request_id,
+            "workspace_id": workspace_id,
+            "tenant_id": actor.tenant_id if actor else None,
+            "organization_domain": actor.organization_domain if actor else None,
+            "actor": build_actor_snapshot(actor),
+            "actor_user_id": actor.sub if actor else None,
+            "started_at": _utcnow(),
+            "updated_at": _utcnow(),
+            "metadata": _serialize_value(metadata or {}),
+        }
+    )
     collection = _get_collection(WORKFLOW_RUNS_COLLECTION)
 
     if collection is not None:
@@ -301,13 +303,15 @@ def complete_workflow_run(
     error_message: Optional[str] = None,
 ) -> None:
     record_workflow_completed(run_id, status)
-    payload = _attach_trace_id({
-        "status": status,
-        "completed_at": _utcnow(),
-        "updated_at": _utcnow(),
-        "error_message": error_message,
-        "result": _serialize_value(metadata or {}),
-    })
+    payload = _attach_trace_id(
+        {
+            "status": status,
+            "completed_at": _utcnow(),
+            "updated_at": _utcnow(),
+            "error_message": error_message,
+            "result": _serialize_value(metadata or {}),
+        }
+    )
     collection = _get_collection(WORKFLOW_RUNS_COLLECTION)
     if collection is None:
         record_audit_write_failure(collection=WORKFLOW_RUNS_COLLECTION, operation="workflow_run_complete")
@@ -341,23 +345,25 @@ def record_usage_event(
     workspace_id: Optional[str] = None,
 ) -> str:
     event_id = str(uuid4())
-    payload = _attach_trace_id({
-        "event_id": event_id,
-        "event_type": event_type,
-        "billing_key": billing_key,
-        "quantity": int(quantity),
-        "unit": unit,
-        "occurred_at": _utcnow(),
-        "tenant_id": actor.tenant_id if actor else None,
-        "organization_domain": actor.organization_domain if actor else None,
-        "actor": build_actor_snapshot(actor),
-        "actor_user_id": actor.sub if actor else None,
-        "workspace_id": workspace_id,
-        "workflow_run_id": workflow_run_id,
-        "request_id": request_id,
-        "status": status,
-        "metadata": _serialize_value(metadata or {}),
-    })
+    payload = _attach_trace_id(
+        {
+            "event_id": event_id,
+            "event_type": event_type,
+            "billing_key": billing_key,
+            "quantity": int(quantity),
+            "unit": unit,
+            "occurred_at": _utcnow(),
+            "tenant_id": actor.tenant_id if actor else None,
+            "organization_domain": actor.organization_domain if actor else None,
+            "actor": build_actor_snapshot(actor),
+            "actor_user_id": actor.sub if actor else None,
+            "workspace_id": workspace_id,
+            "workflow_run_id": workflow_run_id,
+            "request_id": request_id,
+            "status": status,
+            "metadata": _serialize_value(metadata or {}),
+        }
+    )
     collection = _get_collection(USAGE_EVENTS_COLLECTION)
 
     if collection is not None:

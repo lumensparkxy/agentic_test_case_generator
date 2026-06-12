@@ -37,17 +37,16 @@ npm run test:playwright -- --list
 CI currently runs:
 
 - Backend Ruff lint check.
+- Backend Ruff format check.
 - Backend unittest suite.
 - Offline requirement evaluation.
 - Offline generation evaluation.
 - OpenAPI export.
 - Frontend API contract type freshness check.
 - Frontend ESLint check.
+- Frontend Prettier format check.
 - Frontend production build.
 - Focused mocked frontend E2E spec `e2e/export-approval-gate.spec.js`.
-
-Formatter checks are runnable locally but are not CI gates until the broad
-mechanical baseline cleanup tracked in issue #65 is completed.
 
 Evidence: `.github/workflows/ci.yml`.
 
@@ -70,11 +69,11 @@ Evidence: `.github/workflows/ci.yml`.
 | Backend unit | Yes | Config parsing, auth, model parsing, agents, services, billing, reporting, grounding, execution conversion | Uses `unittest` and `unittest.mock.patch` |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |
-| Backend format check | Pending baseline cleanup | Ruff formatter baseline | Runnable locally; current broad reformat is tracked in issue #65 |
+| Backend format check | Yes | Ruff formatter baseline | `python -m ruff format --check backend scripts` |
 | Offline quality benchmarks | Yes | Requirement extraction and test-case generation quality | `--offline --strict` avoids live model dependency |
 | OpenAPI contract | Yes | FastAPI schema export and generated frontend contract types | `scripts/export_openapi.py`, `scripts/generate_frontend_api_types.py --check` |
 | Frontend lint | Yes | JavaScript/JSX baseline linting | `npm run lint` |
-| Frontend format check | Pending baseline cleanup | Prettier formatting baseline | Runnable locally; current broad reformat is tracked in issue #65 |
+| Frontend format check | Yes | Prettier formatting baseline | `npm run format:check` |
 | Frontend build | Yes | React/Vite production build | `npm run build` |
 | Frontend E2E | Yes | Mocked browser workflow slices | `frontend/e2e/export-approval-gate.spec.js`, `workflow.spec.js`, `jira-workflow.spec.js` |
 | Backend execution runtime | Partial | Playwright Test availability and generated spec execution | Runtime list check in validation; full run covered by `scripts/e2e_playwright_workflow.py` when backend and credentials are available |

@@ -18,6 +18,7 @@ DEFAULT_TEST_CASE_MAX_ITERATIONS = 4
 DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT = 2
 DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 1
 
+
 def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, default_summary: str) -> Dict[str, Any]:
     payload = review or {}
     blocking_issues = _dedupe_preserve(list(payload.get("blocking_issues") or []))
@@ -48,6 +49,8 @@ def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, d
         "suggestions": suggestions,
         "unmet_criteria": unmet_criteria,
     }
+
+
 def _heuristic_test_case_review(
     test_cases: List[Dict[str, Any]],
     requirements: List[Requirement],
@@ -79,9 +82,7 @@ def _heuristic_test_case_review(
         score = 0
     else:
         if metrics["requirements_without_tests"]:
-            blocking_issues.append(
-                f"Requirements without traceable test cases: {', '.join(metrics['requirements_without_tests'])}."
-            )
+            blocking_issues.append(f"Requirements without traceable test cases: {', '.join(metrics['requirements_without_tests'])}.")
             unmet_criteria.append("Every requirement must be covered by at least one tagged test case.")
             score -= len(metrics["requirements_without_tests"]) * 8
 
@@ -108,65 +109,46 @@ def _heuristic_test_case_review(
         if scenario_metrics["missing_must_have_scenarios"]:
             preview = ", ".join(scenario_metrics["missing_must_have_scenarios"][:3])
             blocking_issues.append(
-                "Missing must-have planned scenarios: "
-                f"{preview}"
-                + ("." if len(scenario_metrics["missing_must_have_scenarios"]) <= 3 else ", ...")
+                f"Missing must-have planned scenarios: {preview}" + ("." if len(scenario_metrics["missing_must_have_scenarios"]) <= 3 else ", ...")
             )
             unmet_criteria.append("Every must-have scenario in the coverage plan needs at least one corresponding test case.")
             score -= len(scenario_metrics["missing_must_have_scenarios"]) * 7
         elif scenario_metrics["missing_scenarios"]:
             preview = ", ".join(scenario_metrics["missing_scenarios"][:3])
-            suggestions.append(
-                "Add more planned scenario coverage: "
-                f"{preview}"
-                + ("." if len(scenario_metrics["missing_scenarios"]) <= 3 else ", ...")
-            )
+            suggestions.append(f"Add more planned scenario coverage: {preview}" + ("." if len(scenario_metrics["missing_scenarios"]) <= 3 else ", ..."))
             score -= min(12, len(scenario_metrics["missing_scenarios"]) * 2)
 
         if analysis_metrics["high_risk_items_without_tests"]:
             preview = ", ".join(analysis_metrics["high_risk_items_without_tests"][:3])
             blocking_issues.append(
                 "High-risk requirement analysis items without coverage: "
-                f"{preview}"
-                + ("." if len(analysis_metrics["high_risk_items_without_tests"]) <= 3 else ", ...")
+                f"{preview}" + ("." if len(analysis_metrics["high_risk_items_without_tests"]) <= 3 else ", ...")
             )
             unmet_criteria.append("High or critical risks from requirement analysis need corresponding test coverage.")
             score -= len(analysis_metrics["high_risk_items_without_tests"]) * 6
 
         if analysis_metrics["rules_without_tests"]:
             preview = ", ".join(analysis_metrics["rules_without_tests"][:3])
-            suggestions.append(
-                "Add requirement-rule coverage for: "
-                f"{preview}"
-                + ("." if len(analysis_metrics["rules_without_tests"]) <= 3 else ", ...")
-            )
+            suggestions.append(f"Add requirement-rule coverage for: {preview}" + ("." if len(analysis_metrics["rules_without_tests"]) <= 3 else ", ..."))
             score -= min(10, len(analysis_metrics["rules_without_tests"]) * 2)
 
         if analysis_metrics["constraints_without_tests"]:
             preview = ", ".join(analysis_metrics["constraints_without_tests"][:3])
             suggestions.append(
-                "Add validation or boundary coverage for: "
-                f"{preview}"
-                + ("." if len(analysis_metrics["constraints_without_tests"]) <= 3 else ", ...")
+                f"Add validation or boundary coverage for: {preview}" + ("." if len(analysis_metrics["constraints_without_tests"]) <= 3 else ", ...")
             )
             score -= min(10, len(analysis_metrics["constraints_without_tests"]) * 2)
 
         if analysis_metrics["role_permissions_without_tests"]:
             preview = ", ".join(analysis_metrics["role_permissions_without_tests"][:3])
             suggestions.append(
-                "Add authorization coverage for: "
-                f"{preview}"
-                + ("." if len(analysis_metrics["role_permissions_without_tests"]) <= 3 else ", ...")
+                f"Add authorization coverage for: {preview}" + ("." if len(analysis_metrics["role_permissions_without_tests"]) <= 3 else ", ...")
             )
             score -= min(8, len(analysis_metrics["role_permissions_without_tests"]) * 2)
 
         if analysis_metrics["transitions_without_tests"]:
             preview = ", ".join(analysis_metrics["transitions_without_tests"][:3])
-            suggestions.append(
-                "Add state-transition coverage for: "
-                f"{preview}"
-                + ("." if len(analysis_metrics["transitions_without_tests"]) <= 3 else ", ...")
-            )
+            suggestions.append(f"Add state-transition coverage for: {preview}" + ("." if len(analysis_metrics["transitions_without_tests"]) <= 3 else ", ..."))
             score -= min(10, len(analysis_metrics["transitions_without_tests"]) * 2)
 
         if grounded_context_metrics["grounded_artifact_count"] > 0:
@@ -177,18 +159,13 @@ def _heuristic_test_case_review(
                 preview = ", ".join(grounded_context_metrics["unreferenced_artifacts"][:3])
                 suggestions.append(
                     "Add broader grounded-context references for artifacts such as: "
-                    f"{preview}"
-                    + ("." if len(grounded_context_metrics["unreferenced_artifacts"]) <= 3 else ", ...")
+                    f"{preview}" + ("." if len(grounded_context_metrics["unreferenced_artifacts"]) <= 3 else ", ...")
                 )
                 score -= 3
 
     score = max(0, min(100, score))
     approved = score >= threshold and not blocking_issues
-    summary = (
-        "Test cases meet the current quality threshold."
-        if approved
-        else "Test cases still need refinement before export is unlocked."
-    )
+    summary = "Test cases meet the current quality threshold." if approved else "Test cases still need refinement before export is unlocked."
 
     return {
         "approved": approved,
@@ -248,21 +225,13 @@ def _make_history_entry(iteration: int, actor: str, review: Dict[str, Any], test
 def _resolve_test_case_workflow_settings(workflow_settings: Optional[WorkflowSettings]) -> Dict[str, Optional[int]]:
     settings = workflow_settings or WorkflowSettings()
 
-    resolved_threshold = int(
-        settings.approval_threshold if settings.approval_threshold is not None else DEFAULT_TEST_CASE_THRESHOLD
-    )
-    resolved_max_iterations = int(
-        settings.max_iterations if settings.max_iterations is not None else DEFAULT_TEST_CASE_MAX_ITERATIONS
-    )
+    resolved_threshold = int(settings.approval_threshold if settings.approval_threshold is not None else DEFAULT_TEST_CASE_THRESHOLD)
+    resolved_max_iterations = int(settings.max_iterations if settings.max_iterations is not None else DEFAULT_TEST_CASE_MAX_ITERATIONS)
     resolved_timeout_seconds = int(settings.timeout_seconds) if settings.timeout_seconds is not None else None
     resolved_stall_iteration_limit = int(
-        settings.stall_iteration_limit
-        if settings.stall_iteration_limit is not None
-        else DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT
+        settings.stall_iteration_limit if settings.stall_iteration_limit is not None else DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT
     )
-    resolved_retry_attempts = int(
-        settings.retry_attempts if settings.retry_attempts is not None else DEFAULT_TEST_CASE_RETRY_ATTEMPTS
-    )
+    resolved_retry_attempts = int(settings.retry_attempts if settings.retry_attempts is not None else DEFAULT_TEST_CASE_RETRY_ATTEMPTS)
 
     return {
         "approval_threshold": max(0, min(100, resolved_threshold)),
@@ -271,6 +240,8 @@ def _resolve_test_case_workflow_settings(workflow_settings: Optional[WorkflowSet
         "stall_iteration_limit": max(1, resolved_stall_iteration_limit),
         "retry_attempts": max(0, resolved_retry_attempts),
     }
+
+
 def _review_is_stalled(previous_review: Optional[Dict[str, Any]], current_review: Dict[str, Any]) -> bool:
     if not previous_review:
         return False

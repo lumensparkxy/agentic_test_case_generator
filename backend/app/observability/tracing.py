@@ -96,11 +96,7 @@ def configure_tracing(app: Any) -> TracingSetupResult:
         logging.warning("OpenTelemetry tracing requested but dependencies are unavailable: %s", exc)
         return TracingSetupResult(enabled=True, instrumented=False, reason="missing_dependencies")
 
-    service_name = (
-        os.getenv("OTEL_SERVICE_NAME")
-        or os.getenv("SERVICE_NAME")
-        or "agentic-test-case-generator-api"
-    )
+    service_name = os.getenv("OTEL_SERVICE_NAME") or os.getenv("SERVICE_NAME") or "agentic-test-case-generator-api"
     resource_attributes = {
         "service.name": service_name,
         "service.version": os.getenv("SERVICE_VERSION", "dev"),

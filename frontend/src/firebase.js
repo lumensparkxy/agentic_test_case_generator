@@ -21,15 +21,13 @@ const parseBooleanEnvFlag = (value, defaultValue = true) => {
 };
 
 export const hasFirebaseAuthConfig = Boolean(
-	firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId,
+	firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId
 );
 
 export const firebaseAuthDomain = firebaseConfig.authDomain || "";
 export const firebaseAuthHandlerUrl = firebaseAuthDomain ? `https://${firebaseAuthDomain}/__/auth/handler` : "";
 
-export const firebaseApp = hasFirebaseAuthConfig
-	? (getApps().length ? getApp() : initializeApp(firebaseConfig))
-	: null;
+export const firebaseApp = hasFirebaseAuthConfig ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
 
 export const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
 
@@ -87,9 +85,8 @@ export const firebaseAuthProviderConfig = [
 
 export const visibleFirebaseAuthProviders = firebaseAuthProviderConfig.filter((provider) => provider.enabled);
 
-export const getFirebaseAuthProviderConfig = (providerKey) => (
-	visibleFirebaseAuthProviders.find((provider) => provider.id === providerKey) || null
-);
+export const getFirebaseAuthProviderConfig = (providerKey) =>
+	visibleFirebaseAuthProviders.find((provider) => provider.id === providerKey) || null;
 
 export const createFirebaseAuthProvider = (providerKey) => {
 	const providerConfig = getFirebaseAuthProviderConfig(providerKey);

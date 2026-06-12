@@ -54,11 +54,7 @@ generated client submission outputs.
 | Prettier | Frontend target formatter | `frontend/.prettierrc.json`, `frontend/package.json` |
 | Playwright Test | Frontend E2E checks and backend execution runtime | `frontend/package.json`, `frontend/playwright.config.js`, `backend/execution_runtime/package.json` |
 | Docker Compose | Local two-container runtime | `compose.yaml` |
-| GitHub Actions | CI for backend/frontend lint, backend tests, offline benchmarks, frontend build, and focused mocked E2E | `.github/workflows/ci.yml` |
-
-Formatter checks are runnable locally, but the broad repository formatting
-baseline cleanup is tracked separately in issue #65 before those checks become
-CI gates.
+| GitHub Actions | CI for backend/frontend lint and format checks, backend tests, offline benchmarks, frontend build, and focused mocked E2E | `.github/workflows/ci.yml` |
 
 ## 4) Key Commands
 

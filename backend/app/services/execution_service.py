@@ -99,9 +99,7 @@ def preview_execution(
     cases = list(test_cases)
     warnings: list[str] = []
     if len(cases) > settings.max_cases_per_request:
-        warnings.append(
-            f"Only the first {settings.max_cases_per_request} test cases were reviewed for execution."
-        )
+        warnings.append(f"Only the first {settings.max_cases_per_request} test cases were reviewed for execution.")
         cases = cases[: settings.max_cases_per_request]
 
     executable: list[ExecutionCandidate] = []
@@ -164,8 +162,7 @@ def run_execution(
 
     selected_ids = {str(case_id) for case_id in selected_test_case_ids if str(case_id).strip()}
     executable_candidates = [
-        candidate for candidate in preview.executable
-        if not selected_ids or candidate.source_test_case_id in selected_ids or candidate.id in selected_ids
+        candidate for candidate in preview.executable if not selected_ids or candidate.source_test_case_id in selected_ids or candidate.id in selected_ids
     ]
     selected_non_executable = _selected_non_executable(preview, selected_ids)
     run_root = settings.artifact_root / run_id
@@ -334,16 +331,12 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
         source_test_case_id=test_case.id,
         title=test_case.title,
         status="executable",
-            spec=spec,
-            metadata=metadata,
-            unsupported_steps=unsupported_steps,
-            review_reasons=(
-                ["Some source steps were not executable and were omitted from the generated browser spec."]
-                if unsupported_steps
-                else []
-            ),
-            traceability_ids=traceability_ids,
-        )
+        spec=spec,
+        metadata=metadata,
+        unsupported_steps=unsupported_steps,
+        review_reasons=(["Some source steps were not executable and were omitted from the generated browser spec."] if unsupported_steps else []),
+        traceability_ids=traceability_ids,
+    )
 
 
 def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:
@@ -509,10 +502,7 @@ def _selected_non_executable(preview: ExecutionPreviewResponse, selected_ids: se
     if not selected_ids:
         return []
     candidates = [*preview.manual, *preview.unsupported, *preview.invalid]
-    return [
-        candidate for candidate in candidates
-        if candidate.source_test_case_id in selected_ids or candidate.id in selected_ids
-    ]
+    return [candidate for candidate in candidates if candidate.source_test_case_id in selected_ids or candidate.id in selected_ids]
 
 
 def _issues_from_exception(exc: Exception) -> list[ExecutionIssue]:

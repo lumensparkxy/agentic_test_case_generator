@@ -653,11 +653,13 @@ def build_organization_billing_summary(
     if not resolved_domain and not resolved_tenant_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="organization_domain or tenant_id is required to load organization billing summary")
 
-    account = get_billing_account(build_organization_account_id := ensure_organization_billing_account(
-        organization_domain=resolved_domain,
-        tenant_id=resolved_tenant_id,
-        settings=settings,
-    )[0].account_id)
+    account = get_billing_account(
+        build_organization_account_id := ensure_organization_billing_account(
+            organization_domain=resolved_domain,
+            tenant_id=resolved_tenant_id,
+            settings=settings,
+        )[0].account_id
+    )
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization billing account was not found")
 

@@ -67,10 +67,7 @@ class AzureDevOpsAdapterTests(unittest.TestCase):
         def fake_urlopen(request, timeout, context=None):
             captured_requests.append(request)
             return _FakeResponse(
-                b'{"value":['
-                b'{"id":"p1","name":"Payments","state":"wellFormed","visibility":"private"},'
-                b'{"id":"p2","name":"Ops","state":"wellFormed"}'
-                b']}'
+                b'{"value":[{"id":"p1","name":"Payments","state":"wellFormed","visibility":"private"},{"id":"p2","name":"Ops","state":"wellFormed"}]}'
             )
 
         with patch("app.adapters.azure_devops.urlopen", side_effect=fake_urlopen):
@@ -94,7 +91,7 @@ class AzureDevOpsAdapterTests(unittest.TestCase):
                     b'{"value":['
                     b'{"id":101,"rev":7,"fields":{"System.Title":"Login","System.WorkItemType":"User Story","System.State":"Active","System.TeamProject":"Payments","System.ChangedDate":"2026-05-08T10:00:00Z"}},'
                     b'{"id":102,"fields":{"System.Title":"Logout","System.WorkItemType":"Bug","System.TeamProject":"Payments"}}'
-                    b']}'
+                    b"]}"
                 ),
             ]
         )
@@ -172,9 +169,7 @@ class AzureDevOpsAdapterTests(unittest.TestCase):
                     b'{"id":101,"fields":{"System.Title":"Epic","System.WorkItemType":"Epic","System.TeamProject":"Payments"},'
                     b'"relations":[{"rel":"System.LinkTypes.Hierarchy-Forward","url":"https://dev.azure.com/acme/_apis/wit/workItems/102"}]}'
                 ),
-                _FakeResponse(
-                    b'{"value":[{"id":102,"fields":{"System.Title":"Story","System.WorkItemType":"User Story","System.TeamProject":"Payments"}}]}'
-                ),
+                _FakeResponse(b'{"value":[{"id":102,"fields":{"System.Title":"Story","System.WorkItemType":"User Story","System.TeamProject":"Payments"}}]}'),
             ]
         )
 

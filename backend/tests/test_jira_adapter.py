@@ -40,11 +40,7 @@ class JiraAdapterTests(unittest.TestCase):
         def fake_urlopen(request, timeout, context=None):
             captured_requests.append(request)
             return _FakeResponse(
-                b'{'
-                b'"issues":['
-                b'{"id":"10000","key":"THEONE-1","fields":{"summary":"Issue one","issuetype":{"name":"Task"},"status":{"name":"Open"}}}'
-                b']'
-                b'}'
+                b'{"issues":[{"id":"10000","key":"THEONE-1","fields":{"summary":"Issue one","issuetype":{"name":"Task"},"status":{"name":"Open"}}}]}'
             )
 
         with patch("app.adapters.jira.urlopen", side_effect=fake_urlopen):
@@ -69,19 +65,15 @@ class JiraAdapterTests(unittest.TestCase):
         responses = iter(
             [
                 _FakeResponse(
-                    b'{'
+                    b"{"
                     b'"issues":['
                     b'{"id":"10000","key":"THEONE-1","fields":{"summary":"Issue one","issuetype":{"name":"Task"},"status":{"name":"Open"}}}'
-                    b'],'
+                    b"],"
                     b'"nextPageToken":"TOKEN-2"'
-                    b'}'
+                    b"}"
                 ),
                 _FakeResponse(
-                    b'{'
-                    b'"issues":['
-                    b'{"id":"10001","key":"THEONE-2","fields":{"summary":"Issue two","issuetype":{"name":"Bug"},"status":{"name":"Open"}}}'
-                    b']'
-                    b'}'
+                    b'{"issues":[{"id":"10001","key":"THEONE-2","fields":{"summary":"Issue two","issuetype":{"name":"Bug"},"status":{"name":"Open"}}}]}'
                 ),
             ]
         )
@@ -108,12 +100,12 @@ class JiraAdapterTests(unittest.TestCase):
         with patch(
             "app.adapters.jira.urlopen",
             return_value=_FakeResponse(
-                b'{'
+                b"{"
                 b'"issueTypes":['
                 b'{"id":"10000","name":"Epic","description":"Epic work","hierarchyLevel":1,"subtask":false},'
                 b'{"id":"10001","name":"Bug","description":"Bug work","hierarchyLevel":0,"subtask":false}'
-                b']'
-                b'}'
+                b"]"
+                b"}"
             ),
         ):
             issue_types = adapter.get_project_issue_types("THEONE")
@@ -130,12 +122,7 @@ class JiraAdapterTests(unittest.TestCase):
         responses = iter(
             [
                 _FakeResponse(b'{"values":[]}'),
-                _FakeResponse(
-                    b'['
-                    b'{"id":"10001","key":"THEONE","name":"TheONE"},'
-                    b'{"id":"10002","key":"OTHER","name":"Other Project"}'
-                    b']'
-                ),
+                _FakeResponse(b'[{"id":"10001","key":"THEONE","name":"TheONE"},{"id":"10002","key":"OTHER","name":"Other Project"}]'),
             ]
         )
 

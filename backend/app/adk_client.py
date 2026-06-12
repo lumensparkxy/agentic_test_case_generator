@@ -4,6 +4,7 @@ ADK Client - Multi-agent requirement extraction and refinement using Google ADK.
 Implements reviewer/refiner loops with structured review outputs so the UI can
 gate progression on explicit approval thresholds rather than implied success.
 """
+
 import asyncio
 import json
 import logging
@@ -107,13 +108,15 @@ def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, d
 def _compute_requirement_coverage_metrics(requirements: List[Dict[str, Any]], document_count: int) -> Dict[str, Any]:
     total = len(requirements)
     unique_texts = {str(item.get("text", "")).strip().lower() for item in requirements if item.get("text")}
-    shall_format_count = sum(
-        1 for item in requirements if str(item.get("text", "")).strip().lower().startswith("the system shall")
+    shall_format_count = sum(1 for item in requirements if str(item.get("text", "")).strip().lower().startswith("the system shall"))
+    average_word_count = (
+        round(
+            sum(len(str(item.get("text", "")).split()) for item in requirements) / total,
+            2,
+        )
+        if total
+        else 0.0
     )
-    average_word_count = round(
-        sum(len(str(item.get("text", "")).split()) for item in requirements) / total,
-        2,
-    ) if total else 0.0
 
     return {
         "document_count": max(1, document_count),
@@ -145,16 +148,12 @@ def _heuristic_requirement_review(
     else:
         missing_shall = metrics["total_requirements"] - metrics["shall_format_count"]
         if missing_shall > 0:
-            blocking_issues.append(
-                f"{missing_shall} requirement(s) are not in the required 'The system shall...' format."
-            )
+            blocking_issues.append(f"{missing_shall} requirement(s) are not in the required 'The system shall...' format.")
             unmet_criteria.append("Normalize all requirements into a consistent, testable format.")
             score -= missing_shall * 10
 
         if metrics["duplicate_requirements"] > 0:
-            blocking_issues.append(
-                f"{metrics['duplicate_requirements']} duplicate requirement(s) were detected."
-            )
+            blocking_issues.append(f"{metrics['duplicate_requirements']} duplicate requirement(s) were detected.")
             unmet_criteria.append("Remove duplicate or overlapping requirements.")
             score -= metrics["duplicate_requirements"] * 8
 
@@ -168,11 +167,7 @@ def _heuristic_requirement_review(
 
     score = max(0, min(100, score))
     approved = score >= threshold and not blocking_issues
-    summary = (
-        "Requirements meet the current quality threshold."
-        if approved
-        else "Requirements still need refinement before the workflow can move forward."
-    )
+    summary = "Requirements meet the current quality threshold." if approved else "Requirements still need refinement before the workflow can move forward."
 
     return {
         "approved": approved,
@@ -207,11 +202,7 @@ def _select_merged_requirement_score(
     if threshold > 0:
         score_candidates.append(max(0, threshold - 1))
 
-    if (
-        normalized_model["score"] < threshold
-        or normalized_model["blocking_issues"]
-        or normalized_model["unmet_criteria"]
-    ):
+    if normalized_model["score"] < threshold or normalized_model["blocking_issues"] or normalized_model["unmet_criteria"]:
         score_candidates.append(int(normalized_model["score"]))
 
     return max(0, min(score_candidates))
@@ -275,13 +266,9 @@ def _resolve_requirement_workflow_settings(
     resolved_max_iterations = int(settings.max_iterations if settings.max_iterations is not None else max_iterations)
     resolved_timeout_seconds = int(settings.timeout_seconds) if settings.timeout_seconds is not None else None
     resolved_stall_iteration_limit = int(
-        settings.stall_iteration_limit
-        if settings.stall_iteration_limit is not None
-        else DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT
+        settings.stall_iteration_limit if settings.stall_iteration_limit is not None else DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT
     )
-    resolved_retry_attempts = int(
-        settings.retry_attempts if settings.retry_attempts is not None else DEFAULT_REQUIREMENT_RETRY_ATTEMPTS
-    )
+    resolved_retry_attempts = int(settings.retry_attempts if settings.retry_attempts is not None else DEFAULT_REQUIREMENT_RETRY_ATTEMPTS)
 
     return {
         "approval_threshold": max(0, min(100, resolved_threshold)),
@@ -414,7 +401,7 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
     reviewer_agent = Agent(
         name="ReviewerAgent",
         model=model,
-        include_contents='none',
+        include_contents="none",
         generate_content_config=json_generation_config(max_output_tokens=2048),
         output_schema=ReviewResult,
         instruction=f"""You are a Quality Assurance Lead reviewing software requirements for testability.
@@ -456,7 +443,7 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
     refiner_agent = Agent(
         name="RefinerAgent",
         model=model,
-        include_contents='none',
+        include_contents="none",
         generate_content_config=tool_generation_config(max_output_tokens=8192),
         instruction=f"""You are a Business Analyst refining or finalizing requirements.
 
@@ -495,7 +482,7 @@ def _build_requirement_extraction_pipeline(model: str, max_iterations: int, thre
     initial_extractor = Agent(
         name="InitialExtractorAgent",
         model=model,
-        include_contents='default',
+        include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=12000),
         output_schema=RequirementsOutput,
         instruction=f"""You are a Senior Business Analyst specializing in requirements engineering.
@@ -550,7 +537,7 @@ def _build_requirement_refinement_pipeline(
     initial_refiner = Agent(
         name="HumanFeedbackRefinerAgent",
         model=model,
-        include_contents='default',
+        include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=12000),
         output_schema=RequirementsOutput,
         instruction=f"""You are a Senior Business Analyst revising an existing requirement set.
@@ -601,9 +588,7 @@ async def _run_requirement_workflow_async(
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_REQUIREMENT_THRESHOLD)
     safe_iterations = int(resolved_settings["max_iterations"] or DEFAULT_REQUIREMENT_MAX_ITERATIONS)
     timeout_seconds = resolved_settings["timeout_seconds"]
-    stall_iteration_limit = int(
-        resolved_settings["stall_iteration_limit"] or DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT
-    )
+    stall_iteration_limit = int(resolved_settings["stall_iteration_limit"] or DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT)
     diagnostics = _new_workflow_diagnostics()
 
     is_refinement = bool(existing_requirements is not None)
@@ -620,14 +605,14 @@ Existing requirements JSON:
 {json.dumps(existing_requirements or [], indent=2)}
 
 Human feedback:
-{human_feedback or 'No human feedback provided.'}
+{human_feedback or "No human feedback provided."}
 """
     else:
         root_agent = _build_requirement_extraction_pipeline(model, safe_iterations, threshold)
         message_text = f"""Please extract and refine testable requirements from these document contents.
 
 ---DOCUMENT START---
-{document_text or ''}
+{document_text or ""}
 ---DOCUMENT END---
 """
 
@@ -672,7 +657,7 @@ Human feedback:
             session_id=session.id,
             new_message=types.Content(role="user", parts=[types.Part(text=message_text)]),
         ):
-            author = getattr(event, 'author', 'unknown')
+            author = getattr(event, "author", "unknown")
             _log_requirement_workflow("event_received", session_id=session.id, author=author)
             _record_event_error(diagnostics, author, event)
 
@@ -683,7 +668,7 @@ Human feedback:
                 continue
 
             for part in event.content.parts:
-                text = getattr(part, 'text', None)
+                text = getattr(part, "text", None)
                 if not text:
                     continue
 
@@ -721,9 +706,7 @@ Human feedback:
                         model_review,
                         _heuristic_requirement_review(current_requirements, threshold, document_count),
                     )
-                    if current_requirements and (
-                        not best_candidate or _prefer_review(candidate_review, best_candidate["review"])
-                    ):
+                    if current_requirements and (not best_candidate or _prefer_review(candidate_review, best_candidate["review"])):
                         best_candidate = {
                             "requirements": list(current_requirements),
                             "review": candidate_review,
@@ -821,9 +804,7 @@ Human feedback:
     heuristic_review = _heuristic_requirement_review(current_requirements, threshold, document_count)
     final_review = _merge_review_results(model_review, heuristic_review)
 
-    if best_candidate and (
-        not current_requirements or _prefer_review(best_candidate["review"], final_review)
-    ):
+    if best_candidate and (not current_requirements or _prefer_review(best_candidate["review"], final_review)):
         current_requirements = list(best_candidate["requirements"])
         final_review = dict(best_candidate["review"])
         diagnostics["best_iteration"] = best_candidate["iteration"]
@@ -872,10 +853,7 @@ Human feedback:
             review=final_review,
             requirements=current_requirements,
         )
-        selection_entry["summary"] = (
-            f"Retained best-scoring requirements from iteration {diagnostics['best_iteration']}. "
-            f"{final_review['summary']}"
-        ).strip()
+        selection_entry["summary"] = (f"Retained best-scoring requirements from iteration {diagnostics['best_iteration']}. {final_review['summary']}").strip()
         iteration_history.append(selection_entry)
     else:
         iteration_history.append(

@@ -20,9 +20,15 @@ export default function TraceabilityMatrixPanel({
 		<div className="result-section">
 			<h3>Traceability Matrix</h3>
 			<div className="workflow-diagnostics-pills">
-				<span className="workflow-diagnostics-pill">Approved requirements covered {tracedRequirementCount}/{approvedRequirements.length}</span>
-				<span className="workflow-diagnostics-pill">Cases with traceability {coverageMetrics?.cases_with_traceability ?? 0}/{testCases.length}</span>
-				<span className="workflow-diagnostics-pill">Scenario coverage {coverageMetrics?.covered_planned_scenarios ?? 0}/{coverageMetrics?.planned_scenarios_total ?? 0}</span>
+				<span className="workflow-diagnostics-pill">
+					Approved requirements covered {tracedRequirementCount}/{approvedRequirements.length}
+				</span>
+				<span className="workflow-diagnostics-pill">
+					Cases with traceability {coverageMetrics?.cases_with_traceability ?? 0}/{testCases.length}
+				</span>
+				<span className="workflow-diagnostics-pill">
+					Scenario coverage {coverageMetrics?.covered_planned_scenarios ?? 0}/{coverageMetrics?.planned_scenarios_total ?? 0}
+				</span>
 			</div>
 			<div className="traceability-table-wrapper">
 				<table className="traceability-table">
@@ -46,19 +52,29 @@ export default function TraceabilityMatrixPanel({
 									</td>
 									<td>{getRequirementContextPath(requirement)}</td>
 									<td>
-										{linkedTestCases.length ? linkedTestCases.map((testCase) => (
-											<span key={testCase.id} className="tag traceability-case-tag">{testCase.id}</span>
-										)) : <span className="traceability-missing-text">No linked tests</span>}
+										{linkedTestCases.length ? (
+											linkedTestCases.map((testCase) => (
+												<span key={testCase.id} className="tag traceability-case-tag">
+													{testCase.id}
+												</span>
+											))
+										) : (
+											<span className="traceability-missing-text">No linked tests</span>
+										)}
 									</td>
 									<td>
 										{scenarioSummary ? `${scenarioSummary.covered_scenarios}/${scenarioSummary.planned_scenarios}` : "—"}
 										{linkedScenarioTypes.length > 0 && (
 											<div className="traceability-scenario-tags">
-												{linkedScenarioTypes.slice(0, 4).map((scenario) => <span key={`${requirement.id}-${scenario}`}>{scenario}</span>)}
+												{linkedScenarioTypes.slice(0, 4).map((scenario) => (
+													<span key={`${requirement.id}-${scenario}`}>{scenario}</span>
+												))}
 											</div>
 										)}
 									</td>
-									<td><span className={`traceability-status ${isCovered ? "covered" : "missing"}`}>{isCovered ? "Covered" : "Gap"}</span></td>
+									<td>
+										<span className={`traceability-status ${isCovered ? "covered" : "missing"}`}>{isCovered ? "Covered" : "Gap"}</span>
+									</td>
 								</tr>
 							);
 						})}

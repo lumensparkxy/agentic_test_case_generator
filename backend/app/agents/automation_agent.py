@@ -15,12 +15,8 @@ def _build_pom_prompt(payload: AutomationInput) -> str:
 
     tcs_summary = []
     for tc in payload.test_cases[:30]:  # cap to avoid token overflow
-        steps_text = "; ".join(
-            f"Step {s.step}: {s.action}" for s in (tc.steps or [])[:5]
-        )
-        tcs_summary.append(
-            f"  - [{tc.id}] {tc.title} | Component: {tc.component or 'General'} | Steps: {steps_text}"
-        )
+        steps_text = "; ".join(f"Step {s.step}: {s.action}" for s in (tc.steps or [])[:5])
+        tcs_summary.append(f"  - [{tc.id}] {tc.title} | Component: {tc.component or 'General'} | Steps: {steps_text}")
 
     tc_block = "\n".join(tcs_summary) if tcs_summary else "  (no test cases provided)"
 
@@ -126,7 +122,7 @@ def browser_context_args(browser_context_args):
 from playwright.sync_api import Page
 from tests.pages.docs_page import DocsPage
 
-{''.join(smoke_tests)}
+{"".join(smoke_tests)}
 '''
     return (
         [
@@ -165,9 +161,7 @@ def generate_playwright_pom(payload: AutomationInput) -> AutomationResponse:
         # Strip accidental markdown code fences
         if pom_code.startswith("```"):
             lines = pom_code.splitlines()
-            pom_code = "\n".join(
-                line for line in lines if not line.strip().startswith("```")
-            )
+            pom_code = "\n".join(line for line in lines if not line.strip().startswith("```"))
 
         # Extract file names from headers in the generated code
         files: List[str] = []

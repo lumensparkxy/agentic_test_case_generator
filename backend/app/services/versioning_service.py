@@ -50,15 +50,11 @@ def _coerce_test_case(item: TestCase | Dict[str, Any]) -> TestCase:
 
 
 def _requirement_payload(requirement: Requirement) -> Dict[str, Any]:
-    return requirement.model_dump(
-        exclude={"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
-    )
+    return requirement.model_dump(exclude={"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"})
 
 
 def _test_case_payload(test_case: TestCase) -> Dict[str, Any]:
-    return test_case.model_dump(
-        exclude={"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
-    )
+    return test_case.model_dump(exclude={"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"})
 
 
 def persist_requirement_versions(
@@ -126,11 +122,7 @@ def persist_requirement_versions(
         elif requirement.id in previous_by_requirement_id:
             previous_requirement = previous_by_requirement_id[requirement.id]
 
-        item_id = (
-            requirement.artifact_item_id
-            or (previous_requirement.artifact_item_id if previous_requirement else None)
-            or str(uuid4())
-        )
+        item_id = requirement.artifact_item_id or (previous_requirement.artifact_item_id if previous_requirement else None) or str(uuid4())
         previous_version_id = previous_requirement.artifact_version_id if previous_requirement else None
         version_number = int(previous_requirement.artifact_version_number or 0) + 1 if previous_requirement else 1
         version_id = str(uuid4())
@@ -246,11 +238,7 @@ def persist_test_case_versions(
         elif test_case.id in previous_by_case_id:
             previous_test_case = previous_by_case_id[test_case.id]
 
-        item_id = (
-            test_case.artifact_item_id
-            or (previous_test_case.artifact_item_id if previous_test_case else None)
-            or str(uuid4())
-        )
+        item_id = test_case.artifact_item_id or (previous_test_case.artifact_item_id if previous_test_case else None) or str(uuid4())
         previous_version_id = previous_test_case.artifact_version_id if previous_test_case else None
         version_number = int(previous_test_case.artifact_version_number or 0) + 1 if previous_test_case else 1
         version_id = str(uuid4())

@@ -3,19 +3,10 @@ import globals from "globals";
 
 export default [
 	{
-		ignores: [
-			"dist/**",
-			"node_modules/**",
-			"playwright-report/**",
-			"test-results/**",
-		],
+		ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**"],
 	},
 	{
-		files: [
-			"*.js",
-			"e2e/**/*.{js,mjs}",
-			"src/**/*.{js,jsx}",
-		],
+		files: ["*.js", "e2e/**/*.{js,mjs}", "src/**/*.{js,jsx}"],
 		languageOptions: {
 			ecmaVersion: "latest",
 			sourceType: "module",

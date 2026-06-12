@@ -9,7 +9,9 @@ export default function BillingBanner({ isAuthenticated, pilotAlert, billingCont
 				<strong>{pilotAlert.title}</strong>
 				<span>{pilotAlert.message}</span>
 			</div>
-			<a href={`mailto:${billingContactEmail}`} className="billing-banner-link">Contact {billingContactEmail}</a>
+			<a href={`mailto:${billingContactEmail}`} className="billing-banner-link">
+				Contact {billingContactEmail}
+			</a>
 		</div>
 	);
 }

@@ -28,12 +28,18 @@ export default function ScenarioCoveragePanel({
 					</span>
 					<span className="collapsible-panel-meta">
 						<span className="analysis-summary-pill">{coveragePlan.length} requirements</span>
-						<span className="analysis-summary-pill">Scenarios {coveredScenarioTotal}/{plannedScenarioTotal}</span>
-						<span className="analysis-summary-pill">Must-have {mustHaveCoveredScenarioTotal}/{mustHaveScenarioTotal}</span>
+						<span className="analysis-summary-pill">
+							Scenarios {coveredScenarioTotal}/{plannedScenarioTotal}
+						</span>
+						<span className="analysis-summary-pill">
+							Must-have {mustHaveCoveredScenarioTotal}/{mustHaveScenarioTotal}
+						</span>
 						{missingScenarioCount > 0 && (
 							<span className="analysis-summary-pill collapsible-pill-alert">Missing {missingScenarioCount}</span>
 						)}
-						<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+						<span className="collapsible-panel-icon" aria-hidden="true">
+							⏄
+						</span>
 					</span>
 				</summary>
 				<div className="collapsible-panel-body">
