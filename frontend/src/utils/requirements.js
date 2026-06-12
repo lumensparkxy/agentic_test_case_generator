@@ -1,7 +1,4 @@
-import {
-	JIRA_SOURCE_FIELDS,
-	REQUIREMENT_REVIEW_STATUSES,
-} from "../constants/workflow";
+import { JIRA_SOURCE_FIELDS, REQUIREMENT_REVIEW_STATUSES } from "../constants/workflow";
 
 export const buildJiraConnectionForm = (connection, user) => ({
 	baseUrl: connection?.base_url || "",
@@ -15,10 +12,11 @@ export const buildAzureDevOpsConnectionForm = (connection, user) => ({
 	personalAccessToken: "",
 });
 
-export const isJiraLinkedRequirement = (requirement) => Boolean(
-	requirement?.source_system === "jira"
-	|| (!requirement?.source_system && (requirement?.source_issue_key || requirement?.sync_target_issue_key || requirement?.artifact_item_id))
-);
+export const isJiraLinkedRequirement = (requirement) =>
+	Boolean(
+		requirement?.source_system === "jira" ||
+		(!requirement?.source_system && (requirement?.source_issue_key || requirement?.sync_target_issue_key || requirement?.artifact_item_id))
+	);
 
 export const isAzureDevOpsLinkedRequirement = (requirement) => Boolean(requirement?.source_system === "azure_devops");
 
@@ -75,7 +73,10 @@ export const formatSourceIssueKey = (requirement, key) => {
 };
 
 export const getContextTitle = (contextPath = "") => {
-	const segments = `${contextPath || ""}`.split("›").map((segment) => segment.trim()).filter(Boolean);
+	const segments = `${contextPath || ""}`
+		.split("›")
+		.map((segment) => segment.trim())
+		.filter(Boolean);
 	return segments.length ? segments[segments.length - 1] : "";
 };
 
@@ -109,7 +110,10 @@ export const getRequirementEpicCell = (requirement, contextPath = "") => {
 };
 
 export const getRequirementIssueCell = (requirement) => {
-	const issueKey = formatSourceIssueKey(requirement, requirement?.source_issue_key || requirement?.sync_target_issue_key || requirement?.artifact_item_id);
+	const issueKey = formatSourceIssueKey(
+		requirement,
+		requirement?.source_issue_key || requirement?.sync_target_issue_key || requirement?.artifact_item_id
+	);
 	const issueType = `${requirement?.source_issue_type || ""}`.trim();
 	return {
 		primary: issueKey || "—",
@@ -165,14 +169,17 @@ export const mergeRequirementMetadata = (nextRequirements = [], previousRequirem
 	});
 
 	return nextList.map((requirement, index) => {
-		const matchedRequirement = (
-			(requirement?.artifact_item_id && previousByArtifactId.get(requirement.artifact_item_id))
-			|| previousById.get(requirement?.id)
-			|| (nextList.length === previousList.length ? previousList[index] : null)
-		);
+		const matchedRequirement =
+			(requirement?.artifact_item_id && previousByArtifactId.get(requirement.artifact_item_id)) ||
+			previousById.get(requirement?.id) ||
+			(nextList.length === previousList.length ? previousList[index] : null);
 
 		const metadata = JIRA_SOURCE_FIELDS.reduce((acc, field) => {
-			if ((requirement?.[field] == null || requirement?.[field] === "") && matchedRequirement?.[field] != null && matchedRequirement?.[field] !== "") {
+			if (
+				(requirement?.[field] == null || requirement?.[field] === "") &&
+				matchedRequirement?.[field] != null &&
+				matchedRequirement?.[field] !== ""
+			) {
 				acc[field] = matchedRequirement[field];
 			}
 			return acc;

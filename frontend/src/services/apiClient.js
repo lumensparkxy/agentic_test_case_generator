@@ -14,9 +14,7 @@ export const createRequestId = () => {
 };
 
 export const ensureRequestIdHeader = (headers = {}) => {
-	const normalizedHeaders = headers instanceof Headers
-		? Object.fromEntries(headers.entries())
-		: { ...headers };
+	const normalizedHeaders = headers instanceof Headers ? Object.fromEntries(headers.entries()) : { ...headers };
 	const hasRequestId = Object.keys(normalizedHeaders).some((headerName) => headerName.toLowerCase() === "x-request-id");
 	if (!hasRequestId) {
 		normalizedHeaders["X-Request-ID"] = createRequestId();

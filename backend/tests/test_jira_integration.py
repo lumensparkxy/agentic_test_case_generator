@@ -70,7 +70,9 @@ class JiraIntegrationEndpointTests(unittest.TestCase):
                     with patch("app.routers.integrations_jira.record_usage_event", return_value="event-jira-import-1") as record_event:
                         with patch("app.routers.integrations_jira._record_billing_consumption_safe") as record_billing:
                             with patch("app.routers.integrations_jira.persist_requirement_versions", return_value=persisted_requirements) as persist_versions:
-                                with patch("app.routers.integrations_jira.persist_jira_requirement_mappings", return_value=persisted_requirements) as persist_mappings:
+                                with patch(
+                                    "app.routers.integrations_jira.persist_jira_requirement_mappings", return_value=persisted_requirements
+                                ) as persist_mappings:
                                     with patch("app.routers.integrations_jira.import_requirements_from_jira", return_value=workflow_result) as import_service:
                                         with TestClient(app) as client:
                                             response = client.post(
@@ -239,18 +241,23 @@ class JiraIntegrationEndpointTests(unittest.TestCase):
         with patch("app.routers.integrations_jira.start_workflow_run", return_value="run-jira-sync-1") as start_run:
             with patch("app.routers.integrations_jira.complete_workflow_run") as complete_run:
                 with patch("app.routers.integrations_jira.record_usage_event", return_value="event-jira-sync-1") as record_event:
-                    with patch("app.routers.integrations_jira.persist_jira_requirement_mappings", return_value=[Requirement(
-                        id="REQ-001",
-                        text="The system shall support login",
-                        source_system="jira",
-                        source_issue_key="EPIC-1",
-                        source_issue_type="Epic",
-                        sync_target_issue_key="EPIC-1",
-                        artifact_set_id="req-set-1",
-                        artifact_item_id="req-item-1",
-                        artifact_version_id="req-ver-1",
-                        artifact_version_number=1,
-                    )]) as persist_mappings:
+                    with patch(
+                        "app.routers.integrations_jira.persist_jira_requirement_mappings",
+                        return_value=[
+                            Requirement(
+                                id="REQ-001",
+                                text="The system shall support login",
+                                source_system="jira",
+                                source_issue_key="EPIC-1",
+                                source_issue_type="Epic",
+                                sync_target_issue_key="EPIC-1",
+                                artifact_set_id="req-set-1",
+                                artifact_item_id="req-item-1",
+                                artifact_version_id="req-ver-1",
+                                artifact_version_number=1,
+                            )
+                        ],
+                    ) as persist_mappings:
                         with patch("app.routers.integrations_jira.apply_jira_requirement_sync", return_value=applied_response) as apply_service:
                             with TestClient(app) as client:
                                 response = client.post(

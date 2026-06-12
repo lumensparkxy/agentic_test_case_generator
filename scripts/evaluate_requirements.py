@@ -87,9 +87,7 @@ def _offline_refine_requirements(existing_requirements: list[dict[str, Any]], fe
     review["approved"] = False
     review["score"] = min(review["score"], DEFAULT_REQUIREMENT_THRESHOLD - 5)
     review["summary"] = "Offline mode preserved the provided requirements; model-backed refinement was skipped."
-    review["blocking_issues"] = list(review.get("blocking_issues") or []) + [
-        "Offline fallback does not execute the feedback-aware requirement refiner."
-    ]
+    review["blocking_issues"] = list(review.get("blocking_issues") or []) + ["Offline fallback does not execute the feedback-aware requirement refiner."]
     review["suggestions"] = list(review.get("suggestions") or []) + [
         f"Run in model-backed mode to evaluate refinement feedback like: {feedback[:80].strip() or 'No feedback provided.'}"
     ]
@@ -115,11 +113,7 @@ def _compute_structural_metrics(requirements: list[Any]) -> dict[str, Any]:
     expected_ids = [f"REQ-{index:03d}" for index in range(1, total + 1)]
     ids = [item["id"] for item in serialized]
     sequential_id_matches = sum(1 for actual, expected in zip(ids, expected_ids) if actual == expected)
-    short_requirements = [
-        item["id"]
-        for item in serialized
-        if len(item["text"].split()) < 6
-    ]
+    short_requirements = [item["id"] for item in serialized if len(item["text"].split()) < 6]
     empty_requirements = [item["id"] or f"REQ-{index + 1:03d}" for index, item in enumerate(serialized) if not item["text"]]
 
     return {

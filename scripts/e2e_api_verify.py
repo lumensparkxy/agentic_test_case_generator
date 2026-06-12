@@ -126,13 +126,7 @@ def write_out(name: str, status: int, body: bytes, headers: dict) -> None:
     with open(f"{OUT_DIR}/{name}", "wb") as f:
         ctype = headers.get("Content-Type", "")
         if "application/vnd.openxmlformats-officedocument" in ctype:
-            f.write(
-                (
-                    f"BINARY_BYTES:{len(body)}\n"
-                    f"CONTENT_TYPE:{ctype}\n"
-                    f"HTTP_STATUS:{status}\n"
-                ).encode("utf-8")
-            )
+            f.write((f"BINARY_BYTES:{len(body)}\nCONTENT_TYPE:{ctype}\nHTTP_STATUS:{status}\n").encode("utf-8"))
         else:
             f.write(body)
             f.write(f"\nHTTP_STATUS:{status}\n".encode("utf-8"))

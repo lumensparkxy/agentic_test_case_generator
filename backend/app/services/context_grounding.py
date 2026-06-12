@@ -64,13 +64,13 @@ def extract_ui_elements_from_html(
             continue
         elements.append(
             GroundedUIElement(
-                    id=f"{source_id}-UI-H-{index:02d}",
-                    source_id=source_id,
-                    name=label,
-                    element_type="Heading",
-                    description=f"Heading extracted from artifact: {label}",
-                )
+                id=f"{source_id}-UI-H-{index:02d}",
+                source_id=source_id,
+                name=label,
+                element_type="Heading",
+                description=f"Heading extracted from artifact: {label}",
             )
+        )
         if index >= 4:
             break
 
@@ -230,10 +230,12 @@ def build_grounded_context(payload: EnrichInput, fetcher: FetchArtifactFn = fetc
         if not source.url:
             continue
         result = fetcher(str(source.url))
-        artifact_sources[index] = source.model_copy(update={
-            "status": result.get("status") or source.status,
-            "notes": result.get("error") or result.get("content_type") or source.notes,
-        })
+        artifact_sources[index] = source.model_copy(
+            update={
+                "status": result.get("status") or source.status,
+                "notes": result.get("error") or result.get("content_type") or source.notes,
+            }
+        )
         if result.get("status") == "Analyzed":
             analyzed_count += 1
         elif result.get("status") == "Unavailable":

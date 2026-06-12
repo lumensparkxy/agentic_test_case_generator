@@ -42,31 +42,34 @@ async function mockJiraWorkflow(page, user = buildTestUser()) {
 
 	await page.route("**/auth/me", async (route) => jsonResponse(route, user));
 	await page.route("**/reports/usage/me", async (route) => jsonResponse(route, { groups: [] }));
-	await page.route("**/entitlements/me", async (route) => jsonResponse(route, {
-		account: {
-			plan_tier: "premium",
-			support_contact_email: "hello@spica-digital.eu",
-		},
-		requirements: {
-			remaining: 500,
-			exhausted: false,
-		},
-		test_cases: {
-			remaining: 500,
-			exhausted: false,
-		},
-		wallet: {
-			balance_units: 5000,
-			balance_token_display: "5000",
-		},
-		shadow_mode: false,
-	}));
+	await page.route("**/entitlements/me", async (route) =>
+		jsonResponse(route, {
+			account: {
+				plan_tier: "premium",
+				support_contact_email: "hello@spica-digital.eu",
+			},
+			requirements: {
+				remaining: 500,
+				exhausted: false,
+			},
+			test_cases: {
+				remaining: 500,
+				exhausted: false,
+			},
+			wallet: {
+				balance_units: 5000,
+				balance_token_display: "5000",
+			},
+			shadow_mode: false,
+		})
+	);
 
 	await page.route("**/integrations/jira/connection", async (route) => {
 		if (route.request().method() === "GET") {
-			return jsonResponse(route, state.connected
-				? { connected: true, connection: connectionSummary }
-				: { connected: false, connection: null });
+			return jsonResponse(
+				route,
+				state.connected ? { connected: true, connection: connectionSummary } : { connected: false, connection: null }
+			);
 		}
 
 		if (route.request().method() === "POST") {
@@ -82,19 +85,23 @@ async function mockJiraWorkflow(page, user = buildTestUser()) {
 		return jsonResponse(route, { detail: "Unsupported method" }, 405);
 	});
 
-	await page.route("**/integrations/jira/projects**", async (route) => jsonResponse(route, {
-		projects: [
-			{
-				project_id: "20001",
-				key: "PROJ",
-				name: "Platform Finance",
-			},
-		],
-	}));
+	await page.route("**/integrations/jira/projects**", async (route) =>
+		jsonResponse(route, {
+			projects: [
+				{
+					project_id: "20001",
+					key: "PROJ",
+					name: "Platform Finance",
+				},
+			],
+		})
+	);
 
-	await page.route("**/integrations/jira/issues/search**", async (route) => jsonResponse(route, {
-		issues: [sharedIssue],
-	}));
+	await page.route("**/integrations/jira/issues/search**", async (route) =>
+		jsonResponse(route, {
+			issues: [sharedIssue],
+		})
+	);
 
 	await page.route("**/integrations/jira/import", async (route) => {
 		const body = route.request().postDataJSON();
@@ -267,7 +274,9 @@ test.describe("JIRA requirements workflow", () => {
 		await page.getByPlaceholder("Paste your Atlassian API token").fill("jira-api-token");
 		await page.getByRole("button", { name: /connect jira/i }).click();
 
-		await expect(page.locator(".settings-integration-card", { hasText: "JIRA Cloud" }).locator(".jira-status-badge.connected")).toBeVisible();
+		await expect(
+			page.locator(".settings-integration-card", { hasText: "JIRA Cloud" }).locator(".jira-status-badge.connected")
+		).toBeVisible();
 		await page.getByRole("button", { name: /close settings dialog/i }).click();
 		await expect(page.getByRole("dialog", { name: /^settings$/i })).toBeHidden();
 
@@ -304,14 +313,14 @@ test.describe("JIRA requirements workflow", () => {
 		expect(jiraState.previewPayloads).toHaveLength(1);
 		expect(jiraState.previewPayloads[0].managed_section_title).toBe("Agentic Requirements");
 		expect(
-			jiraState.previewPayloads[0].requirements.map((requirement) => requirement.source_issue_key || requirement.sync_target_issue_key),
+			jiraState.previewPayloads[0].requirements.map((requirement) => requirement.source_issue_key || requirement.sync_target_issue_key)
 		).toEqual(["PROJ-101", "PROJ-101"]);
 
 		await page.getByRole("button", { name: /push ready updates/i }).click();
 		await expect(page.getByText(/PROJ-101 — updated: Managed requirements section updated\./i)).toBeVisible();
 		expect(jiraState.syncPayloads).toHaveLength(1);
 		expect(
-			jiraState.syncPayloads[0].requirements.map((requirement) => requirement.source_issue_key || requirement.sync_target_issue_key),
+			jiraState.syncPayloads[0].requirements.map((requirement) => requirement.source_issue_key || requirement.sync_target_issue_key)
 		).toEqual(["PROJ-101", "PROJ-101"]);
 		await expect(page.locator(".jira-sync-preview-card.ready")).toContainText("Rendered update");
 	});

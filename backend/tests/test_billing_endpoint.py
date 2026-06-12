@@ -146,7 +146,10 @@ class BillingEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["granted_units"], 12)
 
     def test_parse_requirements_returns_402_when_billing_access_is_blocked(self) -> None:
-        with patch("app.routers.requirements.enforce_billing_access", side_effect=HTTPException(status_code=402, detail={"code": "pilot_quota_exhausted", "message": "Blocked"})):
+        with patch(
+            "app.routers.requirements.enforce_billing_access",
+            side_effect=HTTPException(status_code=402, detail={"code": "pilot_quota_exhausted", "message": "Blocked"}),
+        ):
             with patch("app.routers.requirements.extract_requirements") as extract_requirements:
                 with TestClient(app) as client:
                     response = client.post(
@@ -166,7 +169,10 @@ class BillingEndpointTests(unittest.TestCase):
             "workflow_settings": None,
         }
 
-        with patch("app.routers.testcases.enforce_billing_access", side_effect=HTTPException(status_code=402, detail={"code": "insufficient_credits", "message": "Blocked"})):
+        with patch(
+            "app.routers.testcases.enforce_billing_access",
+            side_effect=HTTPException(status_code=402, detail={"code": "insufficient_credits", "message": "Blocked"}),
+        ):
             with patch("app.routers.testcases.generate_test_cases") as generate_test_cases:
                 with TestClient(app) as client:
                     response = client.post("/testcases/generate", json=payload)

@@ -129,7 +129,30 @@ SCENARIO_KEYWORD_RULES = [
     (("min", "max", "limit", "length", "range", "threshold", "boundary"), "Boundary"),
     (("login", "auth", "permission", "role", "access", "admin", "user"), "Authorization"),
     (("status", "state", "workflow", "approve", "reject", "submit", "cancel", "transition"), "State Transition"),
-    (("api", "integration", "service", "email", "payment", "upload", "download", "import", "export", "webhook", "install", "installation", "upgrade", "browser", "engine", "dependency", "module", "plugin", "extension"), "Integration"),
+    (
+        (
+            "api",
+            "integration",
+            "service",
+            "email",
+            "payment",
+            "upload",
+            "download",
+            "import",
+            "export",
+            "webhook",
+            "install",
+            "installation",
+            "upgrade",
+            "browser",
+            "engine",
+            "dependency",
+            "module",
+            "plugin",
+            "extension",
+        ),
+        "Integration",
+    ),
     (("error", "failure", "timeout", "unavailable", "retry", "exception"), "Error Handling"),
     (("search", "sort", "filter", "duplicate", "record", "dataset", "data"), "Data Variation"),
 ]
@@ -198,7 +221,6 @@ MATCH_STOP_WORDS = {
 }
 
 
-
 def _dedupe_preserve(items: List[str]) -> List[str]:
     seen: set[str] = set()
     unique: List[str] = []
@@ -209,6 +231,8 @@ def _dedupe_preserve(items: List[str]) -> List[str]:
         seen.add(value)
         unique.append(value)
     return unique
+
+
 def _normalize_test_case_type(raw_type: Any) -> str:
     if not raw_type:
         return "Functional"
@@ -531,11 +555,7 @@ def _extract_scenario_types_from_test_case(test_case: Dict[str, Any]) -> List[st
         return _dedupe_preserve(extracted)
 
     steps = test_case.get("steps") or []
-    step_text = " ".join(
-        f"{step.get('action', '')} {step.get('expected', '')}"
-        for step in steps
-        if isinstance(step, dict)
-    )
+    step_text = " ".join(f"{step.get('action', '')} {step.get('expected', '')}" for step in steps if isinstance(step, dict))
     combined_text = " ".join(
         [
             str(test_case.get("title") or ""),
@@ -632,11 +652,7 @@ def _compute_planned_scenario_metrics(
 
 def _collect_test_case_text(test_case: Dict[str, Any]) -> str:
     steps = test_case.get("steps") or []
-    step_text = " ".join(
-        f"{step.get('action', '')} {step.get('expected', '')} {step.get('test_data', '')}"
-        for step in steps
-        if isinstance(step, dict)
-    )
+    step_text = " ".join(f"{step.get('action', '')} {step.get('expected', '')} {step.get('test_data', '')}" for step in steps if isinstance(step, dict))
     return " ".join(
         [
             str(test_case.get("title") or ""),
@@ -712,11 +728,7 @@ def _compute_requirement_analysis_metrics(
         requirement_id = str(item.get("requirement_id") or "").strip()
         linked_cases = test_cases_by_requirement.get(requirement_id, [])
         linked_case_texts = [_collect_test_case_text(test_case) for test_case in linked_cases]
-        linked_scenarios = {
-            scenario_type
-            for test_case in linked_cases
-            for scenario_type in _extract_scenario_types_from_test_case(test_case)
-        }
+        linked_scenarios = {scenario_type for test_case in linked_cases for scenario_type in _extract_scenario_types_from_test_case(test_case)}
 
         rule_hits = 0
         constraint_hits = 0
@@ -779,9 +791,7 @@ def _compute_requirement_analysis_metrics(
                 covered_permission_ids.append(str(permission.get("id") or ""))
             else:
                 missing_permission_ids.append(str(permission.get("id") or ""))
-                role_permissions_without_tests.append(
-                    f"{requirement_id} - {permission.get('role') or 'Role'} {permission.get('action') or ''}".strip()
-                )
+                role_permissions_without_tests.append(f"{requirement_id} - {permission.get('role') or 'Role'} {permission.get('action') or ''}".strip())
 
         for transition in item.get("state_transitions") or []:
             state_transitions_total += 1
@@ -901,8 +911,12 @@ def _compute_grounded_context_metrics(test_cases: List[Dict[str, Any]], context:
         "artifact_reference_coverage_ratio": round(len(referenced_artifacts) / len(artifact_ids), 2) if artifact_ids else 1.0,
         "unreferenced_artifacts": [artifact_id for artifact_id in artifact_ids if artifact_id not in referenced_artifacts],
     }
+
+
 def _serialize_requirement_ids(requirements: List[Requirement]) -> List[str]:
     return [req.id for req in requirements if req.id]
+
+
 def _compute_test_case_coverage_metrics(test_cases: List[Dict[str, Any]], requirements: List[Requirement]) -> Dict[str, Any]:
     total = len(test_cases)
     requirement_ids = _serialize_requirement_ids(requirements)

@@ -199,9 +199,9 @@ def build_usage_report(
             user_id,
             {
                 "user_id": user_id,
-            "email": scope_details["email"],
-            "name": scope_details["name"],
-            "provider": scope_details["provider"],
+                "email": scope_details["email"],
+                "name": scope_details["name"],
+                "provider": scope_details["provider"],
                 "total_events": 0,
                 "requirements_generated_count": 0,
                 "requirements_modified_count": 0,

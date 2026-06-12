@@ -19,7 +19,11 @@ export default function JiraConnectionSettings({
 					<h3>JIRA Cloud</h3>
 					<p>Store a per-user JIRA Cloud connection so imports and managed requirement sync can use it later.</p>
 				</div>
-				{jiraConnected ? <span className="jira-status-badge connected">Connected</span> : <span className="jira-status-badge">Not connected</span>}
+				{jiraConnected ? (
+					<span className="jira-status-badge connected">Connected</span>
+				) : (
+					<span className="jira-status-badge">Not connected</span>
+				)}
 			</div>
 			{jiraConnected && jiraConnection ? (
 				<div className="jira-connection-summary">
@@ -65,7 +69,11 @@ export default function JiraConnectionSettings({
 				</div>
 			) : (
 				<div className="jira-connected-actions">
-					<button className="secondary" onClick={() => refreshJiraConnectionStatus(currentUser)} disabled={authActionDisabled || isJiraConnectionLoading}>
+					<button
+						className="secondary"
+						onClick={() => refreshJiraConnectionStatus(currentUser)}
+						disabled={authActionDisabled || isJiraConnectionLoading}
+					>
 						{isJiraConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
 					</button>
 					<button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>

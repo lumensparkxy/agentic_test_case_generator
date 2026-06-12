@@ -100,7 +100,9 @@ def build_docx() -> Path:
 
     subtitle = doc.add_paragraph()
     set_run(
-        subtitle.add_run("Synthetic workflow package for reviewing requirements-to-test-case generation, grounded context, traceability, diagnostics, and export readiness."),
+        subtitle.add_run(
+            "Synthetic workflow package for reviewing requirements-to-test-case generation, grounded context, traceability, diagnostics, and export readiness."
+        ),
         12,
         MUTED,
         italic=True,

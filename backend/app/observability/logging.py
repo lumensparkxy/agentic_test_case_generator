@@ -118,10 +118,6 @@ def configure_logging(*, force: bool = False) -> None:
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
-    root_logger.handlers = [
-        existing_handler
-        for existing_handler in root_logger.handlers
-        if not getattr(existing_handler, "_tcg_observability_handler", False)
-    ]
+    root_logger.handlers = [existing_handler for existing_handler in root_logger.handlers if not getattr(existing_handler, "_tcg_observability_handler", False)]
     root_logger.addHandler(handler)
     _CONFIGURED = True

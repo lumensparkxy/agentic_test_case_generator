@@ -1,7 +1,4 @@
-import {
-	REQUIREMENT_QUALITY_FLAG_OPTIONS,
-	REQUIREMENT_REVIEW_STATUSES,
-} from "../../constants/workflow";
+import { REQUIREMENT_QUALITY_FLAG_OPTIONS, REQUIREMENT_REVIEW_STATUSES } from "../../constants/workflow";
 import {
 	formatSourceIssueKey,
 	getRequirementEpicCell,
@@ -31,12 +28,20 @@ export default function RequirementReviewWorkbench({
 				<div className="requirement-review-workbench">
 					<div className="requirement-review-summary">
 						<div>
-							<strong>{approvedRequirementCount}/{requirements.length} approved for test generation</strong>
-							<p>{reviewPendingRequirementCount} pending review • {rejectedRequirementCount} rejected/out of scope</p>
+							<strong>
+								{approvedRequirementCount}/{requirements.length} approved for test generation
+							</strong>
+							<p>
+								{reviewPendingRequirementCount} pending review • {rejectedRequirementCount} rejected/out of scope
+							</p>
 						</div>
 						<div className="requirement-review-bulk-actions">
-							<button type="button" className="secondary small" onClick={onApproveNonRejected}>Approve non-rejected</button>
-							<button type="button" className="secondary small" onClick={onMarkAllNeedsReview}>Mark all needs review</button>
+							<button type="button" className="secondary small" onClick={onApproveNonRejected}>
+								Approve non-rejected
+							</button>
+							<button type="button" className="secondary small" onClick={onMarkAllNeedsReview}>
+								Mark all needs review
+							</button>
 						</div>
 					</div>
 					{groupRequirementsByContext(requirements).map((group) => (
@@ -46,7 +51,9 @@ export default function RequirementReviewWorkbench({
 									<span className="requirement-source-badge subtle">{group.sourceLabel}</span>
 									<h4>{group.label}</h4>
 								</div>
-								<span className="analysis-summary-pill">{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}</span>
+								<span className="analysis-summary-pill">
+									{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}
+								</span>
 							</div>
 							<div className="requirement-table-wrapper">
 								<table className="requirement-review-table">
@@ -71,7 +78,10 @@ export default function RequirementReviewWorkbench({
 											const sourceLabel = getRequirementSourceLabel(req);
 											const hasSyncTarget = req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key;
 											return (
-												<tr key={req.id || req.text || req.__index} className={`requirement-row status-${reviewStatus.toLowerCase().replace(/\s/g, "-")}`}>
+												<tr
+													key={req.id || req.text || req.__index}
+													className={`requirement-row status-${reviewStatus.toLowerCase().replace(/\s/g, "-")}`}
+												>
 													<td className="requirement-epic-cell">
 														<span className="cell-primary">{epicCell.primary}</span>
 														{epicCell.secondary ? <span className="cell-secondary">{epicCell.secondary}</span> : null}
@@ -92,10 +102,16 @@ export default function RequirementReviewWorkbench({
 															<details className="requirement-evidence compact">
 																<summary>Source evidence</summary>
 																<p>{req.source_excerpt}</p>
-																{req.source_issue_url ? <a href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a> : null}
+																{req.source_issue_url ? (
+																	<a href={req.source_issue_url} target="_blank" rel="noreferrer">
+																		Open source ↗
+																	</a>
+																) : null}
 															</details>
 														) : req.source_issue_url ? (
-															<a className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">Open source ↗</a>
+															<a className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">
+																Open source ↗
+															</a>
 														) : req.source_path || req.source_section ? (
 															<span className="cell-secondary">{req.source_path || req.source_section}</span>
 														) : (
@@ -103,7 +119,9 @@ export default function RequirementReviewWorkbench({
 														)}
 														{hasSyncTarget ? (
 															<div className="requirement-source-meta compact">
-																<span className="requirement-source-badge warning">Sync target {formatSourceIssueKey(req, req.sync_target_issue_key)}</span>
+																<span className="requirement-source-badge warning">
+																	Sync target {formatSourceIssueKey(req, req.sync_target_issue_key)}
+																</span>
 															</div>
 														) : null}
 													</td>
@@ -114,13 +132,17 @@ export default function RequirementReviewWorkbench({
 															aria-label={`Review status for ${requirementId}`}
 														>
 															{REQUIREMENT_REVIEW_STATUSES.map((statusOption) => (
-																<option key={`${requirementId}-${statusOption}`} value={statusOption}>{statusOption}</option>
+																<option key={`${requirementId}-${statusOption}`} value={statusOption}>
+																	{statusOption}
+																</option>
 															))}
 														</select>
 													</td>
 													<td className="requirement-flags-cell">
 														<details className="requirement-quality-details">
-															<summary>{qualityFlags.length ? `${qualityFlags.length} flag${qualityFlags.length === 1 ? "" : "s"}` : "Add flags"}</summary>
+															<summary>
+																{qualityFlags.length ? `${qualityFlags.length} flag${qualityFlags.length === 1 ? "" : "s"}` : "Add flags"}
+															</summary>
 															<div className="quality-flag-checklist">
 																{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
 																	<label key={`${requirementId}-${flag}`}>

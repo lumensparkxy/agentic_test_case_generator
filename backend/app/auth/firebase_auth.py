@@ -48,24 +48,16 @@ def verify_firebase_access_token(token: str) -> AuthUser:
     email = decoded_token.get("email") or None
     name = decoded_token.get("name") or email or subject
     tenant_id = (
-        decoded_token.get("tenant_id")
-        or decoded_token.get("tenant")
-        or (firebase_claims.get("tenant") if isinstance(firebase_claims, dict) else None)
-        or None
+        decoded_token.get("tenant_id") or decoded_token.get("tenant") or (firebase_claims.get("tenant") if isinstance(firebase_claims, dict) else None) or None
     )
-    organization_domain = (
-        str(decoded_token.get("organization_domain") or decoded_token.get("org_domain") or "").strip().lower() or None
-    )
+    organization_domain = str(decoded_token.get("organization_domain") or decoded_token.get("org_domain") or "").strip().lower() or None
     if not organization_domain and email:
         email_domain = extract_email_domain(str(email).strip().lower())
         if not is_public_email_domain(email_domain):
             organization_domain = email_domain
     roles = normalize_roles(decoded_token.get("roles"), decoded_token.get("role"), decoded_token.get("tenant_role"))
     is_org_admin = bool(
-        decoded_token.get("is_org_admin")
-        or decoded_token.get("org_admin")
-        or decoded_token.get("tenant_admin")
-        or decoded_token.get("is_tenant_admin")
+        decoded_token.get("is_org_admin") or decoded_token.get("org_admin") or decoded_token.get("tenant_admin") or decoded_token.get("is_tenant_admin")
     )
 
     return AuthUser(

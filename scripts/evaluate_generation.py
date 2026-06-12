@@ -104,18 +104,10 @@ def _compute_structural_metrics(test_cases: list[dict[str, Any]]) -> dict[str, A
     with_expected_results = sum(1 for case in test_cases if str(case.get("expected_result") or "").strip())
     with_preconditions = sum(1 for case in test_cases if str(case.get("preconditions") or "").strip())
     with_two_or_more_steps = sum(1 for case in test_cases if len(case.get("steps") or []) >= 2)
-    with_requirement_tags = sum(
-        1
-        for case in test_cases
-        if any(str(tag).strip().startswith("REQ-") for tag in (case.get("tags") or []))
-    )
+    with_requirement_tags = sum(1 for case in test_cases if any(str(tag).strip().startswith("REQ-") for tag in (case.get("tags") or [])))
     invalid_priorities = [case["id"] for case in test_cases if case.get("priority") not in ALLOWED_PRIORITIES]
     invalid_types = [case["id"] for case in test_cases if case.get("type") not in ALLOWED_TYPES]
-    untitled_cases = [
-        case["id"]
-        for case in test_cases
-        if not str(case.get("title") or "").strip() or "untitled" in str(case.get("title") or "").lower()
-    ]
+    untitled_cases = [case["id"] for case in test_cases if not str(case.get("title") or "").strip() or "untitled" in str(case.get("title") or "").lower()]
 
     def ratio(count: int) -> float:
         return round(count / total, 2) if total else 0.0
@@ -326,15 +318,12 @@ def _print_result(result: dict[str, Any]) -> None:
     if result.get("description"):
         print(f"  {result['description']}")
     if result["scenario_distribution"]:
-        pretty_distribution = ", ".join(
-            f"{scenario}={count}" for scenario, count in result["scenario_distribution"].items()
-        )
+        pretty_distribution = ", ".join(f"{scenario}={count}" for scenario, count in result["scenario_distribution"].items())
         print(f"  scenario tags: {pretty_distribution}")
     unmet_checks = [check for check in expectation_result["checks"] if not check["met"]]
     if unmet_checks:
         for check in unmet_checks:
             print(f"  unmet: {check['name']} expected={check['expected']} actual={check['actual']}")
-
 
 
 def _parse_args() -> argparse.Namespace:
@@ -367,7 +356,6 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-
 def main() -> int:
     args = _parse_args()
     input_dir = Path(args.input_dir).resolve()
@@ -386,10 +374,7 @@ def main() -> int:
     if execution_mode == "offline-fallback" and not args.offline:
         print("No GOOGLE_API_KEY or GEMINI_API_KEY detected; using offline fallback mode.")
 
-    results = [
-        _build_benchmark_result(input_path, expectation_path, payload, execution_mode)
-        for input_path, expectation_path, payload in payloads
-    ]
+    results = [_build_benchmark_result(input_path, expectation_path, payload, execution_mode) for input_path, expectation_path, payload in payloads]
     overall = _build_overall_summary(results, strict=args.strict)
 
     print(f"Evaluated {overall['benchmark_count']} benchmark fixture(s).")

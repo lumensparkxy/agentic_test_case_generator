@@ -40,7 +40,7 @@ class ObservabilityMetricsTests(unittest.TestCase):
 
         rendered = render_prometheus_metrics()
 
-        self.assertIn('# TYPE http_requests_total counter', rendered)
+        self.assertIn("# TYPE http_requests_total counter", rendered)
         self.assertIn('http_requests_total{method="GET",path="/health",status_code="200"} 1', rendered)
         self.assertIn('http_request_duration_seconds_count{method="GET",path="/health",status_code="200"} 1', rendered)
         self.assertIn('workflow_runs_total{operation="requirements.parse",status="started"} 1', rendered)

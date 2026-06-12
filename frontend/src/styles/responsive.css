@@ -1,157 +1,157 @@
 /* Responsive */
 @media (max-width: 768px) {
-    .header {
-        flex-direction: column;
-        gap: 1rem;
-    }
+	.header {
+		flex-direction: column;
+		gap: 1rem;
+	}
 
-    .header-right {
-        width: 100%;
-        min-width: 0;
-        align-items: stretch;
-    }
+	.header-right {
+		width: 100%;
+		min-width: 0;
+		align-items: stretch;
+	}
 
-    .auth-panel,
-    .auth-login {
-        justify-content: flex-start;
-    }
+	.auth-panel,
+	.auth-login {
+		justify-content: flex-start;
+	}
 
-    .settings-open-btn {
-        align-self: flex-start;
-    }
+	.settings-open-btn {
+		align-self: flex-start;
+	}
 
-    .auth-user {
-        justify-content: flex-start;
-        flex-wrap: wrap;
-    }
+	.auth-user {
+		justify-content: flex-start;
+		flex-wrap: wrap;
+	}
 
-    .auth-dialog-overlay {
-        padding: 1rem;
-    }
+	.auth-dialog-overlay {
+		padding: 1rem;
+	}
 
-    .billing-banner {
-        flex-direction: column;
-        align-items: flex-start;
-    }
+	.billing-banner {
+		flex-direction: column;
+		align-items: flex-start;
+	}
 
-    .auth-dialog {
-        width: 100%;
-        padding: 1rem;
-    }
+	.auth-dialog {
+		width: 100%;
+		padding: 1rem;
+	}
 
-    .settings-dialog {
-        width: 100%;
-        max-height: calc(100vh - 2rem);
-    }
+	.settings-dialog {
+		width: 100%;
+		max-height: calc(100vh - 2rem);
+	}
 
-    .settings-dialog-header,
-    .settings-dialog-nav,
-    .settings-dialog-body {
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
+	.settings-dialog-header,
+	.settings-dialog-nav,
+	.settings-dialog-body {
+		padding-left: 1rem;
+		padding-right: 1rem;
+	}
 
-    .settings-dialog-nav {
-        flex-direction: column;
-    }
+	.settings-dialog-nav {
+		flex-direction: column;
+	}
 
-    .settings-nav-btn {
-        width: 100%;
-    }
+	.settings-nav-btn {
+		width: 100%;
+	}
 
-    .status {
-        box-sizing: border-box;
-        max-width: 100%;
-        width: 100%;
-    }
+	.status {
+		box-sizing: border-box;
+		max-width: 100%;
+		width: 100%;
+	}
 
-    .status-usage {
-        margin-left: 0;
-    }
+	.status-usage {
+		margin-left: 0;
+	}
 
-    .auth-user-meta {
-        text-align: left;
-    }
+	.auth-user-meta {
+		text-align: left;
+	}
 
-    .tabs {
-        flex-direction: column;
-    }
+	.tabs {
+		flex-direction: column;
+	}
 
-    .tab {
-        justify-content: flex-start;
-    }
+	.tab {
+		justify-content: flex-start;
+	}
 
-    .panel-form.two-cols {
-        grid-template-columns: 1fr;
-    }
+	.panel-form.two-cols {
+		grid-template-columns: 1fr;
+	}
 
-    .review-banner-header,
-    .requirement-report-header,
-    .coverage-plan-header,
+	.review-banner-header,
+	.requirement-report-header,
+	.coverage-plan-header,
 	.workflow-settings-header,
-    .workflow-diagnostics-header,
-    .jira-card-header,
-    .jira-sync-preview-header,
-    .jira-sync-preview-meta {
-        flex-direction: column;
-        align-items: flex-start;
-    }
+	.workflow-diagnostics-header,
+	.jira-card-header,
+	.jira-sync-preview-header,
+	.jira-sync-preview-meta {
+		flex-direction: column;
+		align-items: flex-start;
+	}
 
-    .requirement-report-flags {
-        justify-content: flex-start;
-    }
+	.requirement-report-flags {
+		justify-content: flex-start;
+	}
 
-    .requirement-report-details summary {
-        flex-direction: column;
-        align-items: flex-start;
-    }
+	.requirement-report-details summary {
+		flex-direction: column;
+		align-items: flex-start;
+	}
 
-    .jira-inline-controls,
-    .jira-connected-actions,
-    .jira-import-actions,
-    .jira-sync-actions {
-        flex-direction: column;
-        align-items: stretch;
-    }
+	.jira-inline-controls,
+	.jira-connected-actions,
+	.jira-import-actions,
+	.jira-sync-actions {
+		flex-direction: column;
+		align-items: stretch;
+	}
 
-    .jira-connection-summary.compact {
-        justify-content: flex-start;
-    }
+	.jira-connection-summary.compact {
+		justify-content: flex-start;
+	}
 
-    .source-toggle,
-    .source-choice-group {
-        grid-template-columns: 1fr;
-    }
+	.source-toggle,
+	.source-choice-group {
+		grid-template-columns: 1fr;
+	}
 
-    .collapsible-panel-summary {
-        flex-direction: column;
-    }
+	.collapsible-panel-summary {
+		flex-direction: column;
+	}
 
-    .collapsible-panel-meta {
-        justify-content: flex-start;
-    }
+	.collapsible-panel-meta {
+		justify-content: flex-start;
+	}
 
-    .test-cases-grid {
-        grid-template-columns: 1fr;
-    }
+	.test-cases-grid {
+		grid-template-columns: 1fr;
+	}
 
-    .panel-nav {
-        flex-direction: column;
-    }
+	.panel-nav {
+		flex-direction: column;
+	}
 
-    .panel-nav button {
-        width: 100%;
-    }
+	.panel-nav button {
+		width: 100%;
+	}
 
-    .feedback-section {
-        padding: 1rem;
-    }
+	.feedback-section {
+		padding: 1rem;
+	}
 
-    .export-buttons {
-        grid-template-columns: 1fr;
-    }
+	.export-buttons {
+		grid-template-columns: 1fr;
+	}
 
-    .integration-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
+	.integration-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
 }

@@ -23,14 +23,7 @@ _NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler, HTTPSHandler(context=_SSL
 
 
 def _address_is_blocked(address: ipaddress._BaseAddress) -> bool:
-    return bool(
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_reserved
-        or address.is_multicast
-        or address.is_unspecified
-    )
+    return bool(address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast or address.is_unspecified)
 
 
 def _resolve_hostname_addresses(hostname: str, resolver: Optional[Any] = None) -> Tuple[list[ipaddress._BaseAddress], Optional[str]]:

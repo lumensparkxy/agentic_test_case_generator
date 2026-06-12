@@ -1,24 +1,23 @@
-
 @media (max-width: 768px) {
-    .requirement-review-summary,
-    .generation-gate-card,
-    .generate-results-header,
-    .requirement-review-card-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
+	.requirement-review-summary,
+	.generation-gate-card,
+	.generate-results-header,
+	.requirement-review-card-header {
+		flex-direction: column;
+		align-items: flex-start;
+	}
 
-    .generate-results-tabs {
-        flex-direction: column;
-        overflow-x: visible;
-    }
+	.generate-results-tabs {
+		flex-direction: column;
+		overflow-x: visible;
+	}
 
-    .generate-result-tab {
-        justify-content: space-between;
-        width: 100%;
-    }
+	.generate-result-tab {
+		justify-content: space-between;
+		width: 100%;
+	}
 
-    .requirement-review-bulk-actions {
-        justify-content: flex-start;
-    }
+	.requirement-review-bulk-actions {
+		justify-content: flex-start;
+	}
 }

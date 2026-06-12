@@ -45,7 +45,7 @@ def generate_playwright_spec_file(path: str | Path) -> GeneratedPlaywrightSpec:
 
 def _render_document(document: Mapping[str, Any]) -> str:
     lines: list[str] = [
-        "import { expect, test } from \"@playwright/test\";",
+        'import { expect, test } from "@playwright/test";',
         "",
         f"test.describe({_js_string(document['spec']['title'])}, () => {{",
     ]
@@ -61,13 +61,11 @@ def _render_document(document: Mapping[str, Any]) -> str:
 def _render_case(document: Mapping[str, Any], case: Mapping[str, Any]) -> list[str]:
     lines = [
         f"  test({_js_string(case['title'])}, async ({{ page }}) => {{",
-        f"    test.info().annotations.push({{ type: \"specId\", description: {_js_string(document['spec']['id'])} }});",
-        f"    test.info().annotations.push({{ type: \"caseId\", description: {_js_string(case['id'])} }});",
+        f'    test.info().annotations.push({{ type: "specId", description: {_js_string(document["spec"]["id"])} }});',
+        f'    test.info().annotations.push({{ type: "caseId", description: {_js_string(case["id"])} }});',
     ]
     if case.get("dataRowId"):
-        lines.append(
-            f"    test.info().annotations.push({{ type: \"dataRowId\", description: {_js_string(case['dataRowId'])} }});"
-        )
+        lines.append(f'    test.info().annotations.push({{ type: "dataRowId", description: {_js_string(case["dataRowId"])} }});')
 
     for step in case["steps"]:
         lines.extend(_render_step(step))

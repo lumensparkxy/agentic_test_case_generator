@@ -7,17 +7,7 @@ import { expect, test } from "@playwright/test";
 import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
 
 const allowedPriorities = new Set(["Critical", "High", "Medium", "Low"]);
-const allowedTypes = new Set([
-	"Functional",
-	"Integration",
-	"E2E",
-	"Regression",
-	"Smoke",
-	"Security",
-	"Performance",
-	"Usability",
-	"UAT",
-]);
+const allowedTypes = new Set(["Functional", "Integration", "E2E", "Regression", "Smoke", "Security", "Performance", "Usability", "UAT"]);
 
 const minimumStructuredCaseRatio = 0.8;
 
@@ -76,14 +66,17 @@ test.describe("Agentic Test Case Generator E2E", () => {
 		await generatedTestCasesTab.click();
 
 		await expect
-			.poll(async () => {
-				const tableRows = await page.locator(".test-cases-table tbody tr").count();
-				const cards = await page.locator(".case-card").count();
-				return tableRows + cards;
-			}, {
-				timeout: 360_000,
-				message: "Expected generated test cases to appear in the UI.",
-			})
+			.poll(
+				async () => {
+					const tableRows = await page.locator(".test-cases-table tbody tr").count();
+					const cards = await page.locator(".case-card").count();
+					return tableRows + cards;
+				},
+				{
+					timeout: 360_000,
+					message: "Expected generated test cases to appear in the UI.",
+				}
+			)
 			.toBeGreaterThan(0);
 
 		await page.getByRole("tab", { name: /requirement analysis/i }).click();
@@ -98,15 +91,14 @@ test.describe("Agentic Test Case Generator E2E", () => {
 		const draftExportToggle = page.getByLabel(/export draft anyway/i);
 		if (await draftExportToggle.isVisible().catch(() => false)) {
 			await draftExportToggle.check();
-			await page.getByLabel(/reason for exporting this draft/i).fill("E2E quality validation export after reviewing generated draft output.");
+			await page
+				.getByLabel(/reason for exporting this draft/i)
+				.fill("E2E quality validation export after reviewing generated draft output.");
 		}
 
 		const jsonButton = page.getByRole("button", { name: /json/i }).first();
 		await expect(jsonButton).toBeEnabled({ timeout: 30_000 });
-		const download = await Promise.all([
-			page.waitForEvent("download"),
-			jsonButton.click(),
-		]).then(([item]) => item);
+		const download = await Promise.all([page.waitForEvent("download"), jsonButton.click()]).then(([item]) => item);
 
 		const downloadPath = path.join(os.tmpdir(), `tcg-e2e-${Date.now()}.json`);
 		await download.saveAs(downloadPath);
@@ -117,38 +109,34 @@ test.describe("Agentic Test Case Generator E2E", () => {
 			total: testCases.length,
 			withDescriptions: testCases.filter((tc) => tc.description?.trim()).length,
 			withExpectedResults: testCases.filter((tc) => tc.expected_result?.trim()).length,
-			withRequirementTags: testCases.filter(
-				(tc) => Array.isArray(tc.tags) && tc.tags.some((tag) => /^REQ-\d+/i.test(tag)),
-			).length,
+			withRequirementTags: testCases.filter((tc) => Array.isArray(tc.tags) && tc.tags.some((tag) => /^REQ-\d+/i.test(tag))).length,
 			withTwoOrMoreSteps: testCases.filter((tc) => Array.isArray(tc.steps) && tc.steps.length >= 2).length,
-			charFragmentCases: testCases.filter((tc) => {
-				if (!Array.isArray(tc.steps) || tc.steps.length <= 10) {
-					return false;
-				}
-				const tinyActions = tc.steps.filter((step) => (step?.action?.trim()?.length || 0) <= 2).length;
-				return tinyActions >= Math.ceil(tc.steps.length * 0.4);
-			}).map((tc) => tc.id),
+			charFragmentCases: testCases
+				.filter((tc) => {
+					if (!Array.isArray(tc.steps) || tc.steps.length <= 10) {
+						return false;
+					}
+					const tinyActions = tc.steps.filter((step) => (step?.action?.trim()?.length || 0) <= 2).length;
+					return tinyActions >= Math.ceil(tc.steps.length * 0.4);
+				})
+				.map((tc) => tc.id),
 			invalidPriorities: testCases.filter((tc) => !allowedPriorities.has(tc.priority)).map((tc) => tc.id),
 			invalidTypes: testCases.filter((tc) => !allowedTypes.has(tc.type)).map((tc) => tc.id),
-			untitledCases: testCases.filter(
-				(tc) => !tc.title?.trim() || /untitled/i.test(tc.title),
-			).map((tc) => tc.id),
+			untitledCases: testCases.filter((tc) => !tc.title?.trim() || /untitled/i.test(tc.title)).map((tc) => tc.id),
 		};
 
 		test.info().annotations.push({
 			type: "quality-summary",
 			description: JSON.stringify(quality),
 		});
-			console.log("Generated test case quality summary:", quality);
+		console.log("Generated test case quality summary:", quality);
 
 		expect(quality.total).toBeGreaterThan(0);
 		expect(quality.withDescriptions).toBe(quality.total);
 		expect(quality.withExpectedResults).toBe(quality.total);
 		expect(quality.withRequirementTags).toBe(quality.total);
-			expect(quality.withTwoOrMoreSteps).toBeGreaterThanOrEqual(
-				Math.ceil(quality.total * minimumStructuredCaseRatio),
-			);
-			expect(quality.charFragmentCases).toEqual([]);
+		expect(quality.withTwoOrMoreSteps).toBeGreaterThanOrEqual(Math.ceil(quality.total * minimumStructuredCaseRatio));
+		expect(quality.charFragmentCases).toEqual([]);
 		expect(quality.invalidPriorities).toEqual([]);
 		expect(quality.invalidTypes).toEqual([]);
 		expect(quality.untitledCases).toEqual([]);

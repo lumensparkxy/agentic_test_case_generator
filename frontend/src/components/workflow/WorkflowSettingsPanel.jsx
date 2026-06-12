@@ -1,11 +1,6 @@
 import { WORKFLOW_SETTING_FIELDS } from "../../constants/workflow";
 
-export default function WorkflowSettingsPanel({
-	title,
-	description,
-	settings,
-	setSettings,
-}) {
+export default function WorkflowSettingsPanel({ title, description, settings, setSettings }) {
 	const updateWorkflowSetting = (key) => (event) => {
 		setSettings((prev) => ({ ...prev, [key]: event.target.value }));
 	};

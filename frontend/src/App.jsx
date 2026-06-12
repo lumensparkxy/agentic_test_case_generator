@@ -57,10 +57,7 @@ import {
 	mergeRequirementMetadata,
 	normalizeStringArray,
 } from "./utils/requirements";
-import {
-	buildEmptyUsageSummary,
-	getCurrentUserUsageSummary,
-} from "./utils/usage";
+import { buildEmptyUsageSummary, getCurrentUserUsageSummary } from "./utils/usage";
 import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workflow";
 import "./styles/index.css";
 
@@ -71,9 +68,7 @@ const EXPORT_API_PATHS = Object.freeze({
 });
 
 const getAuthProviderLabel = (providerKeyOrId) => {
-	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (
-		providerKeyOrId === id || providerKeyOrId === providerId
-	));
+	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => providerKeyOrId === id || providerKeyOrId === providerId);
 	return provider?.label || providerKeyOrId || null;
 };
 
@@ -106,11 +101,7 @@ const buildProviderSignInErrorMessage = (providerConfig, error) => {
 	return `Sign-in with ${providerLabel} failed: ${rawMessage}`;
 };
 
-const hasMetricValue = (metrics, key) => Boolean(
-	metrics
-	&& Object.prototype.hasOwnProperty.call(metrics, key)
-	&& metrics[key] != null
-);
+const hasMetricValue = (metrics, key) => Boolean(metrics && Object.prototype.hasOwnProperty.call(metrics, key) && metrics[key] != null);
 
 const formatWorkflowStatusLabel = (status) => {
 	const normalized = `${status || ""}`.trim();
@@ -158,10 +149,7 @@ const getRequirementSourceMetricMeta = (coverageMetrics) => {
 };
 
 export default function App() {
-	const {
-		activeTab,
-		setActiveTab,
-	} = useWorkflowNavigationState();
+	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const {
 		file,
 		setFile,
@@ -388,14 +376,10 @@ export default function App() {
 	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
 	const billingEnforcementEnabled = Boolean(billingEntitlements && !billingEntitlements.shadow_mode);
 	const requirementWorkflowLocked = Boolean(
-		billingEnforcementEnabled
-		&& billingEntitlements?.account?.plan_tier === "pilot"
-		&& billingEntitlements?.requirements?.exhausted
+		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.requirements?.exhausted
 	);
 	const testCaseWorkflowLocked = Boolean(
-		billingEnforcementEnabled
-		&& billingEntitlements?.account?.plan_tier === "pilot"
-		&& billingEntitlements?.test_cases?.exhausted
+		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.test_cases?.exhausted
 	);
 	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked;
 	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked;
@@ -408,27 +392,32 @@ export default function App() {
 	const jiraIssueTypeOptions = jiraProjectIssueTypes.length
 		? jiraProjectIssueTypes.map((issueType) => issueType.name)
 		: DEFAULT_JIRA_ISSUE_TYPE_OPTIONS;
-	const jiraImportedIssueKeys = [...new Set(
-		requirements
-			.filter((requirement) => isJiraLinkedRequirement(requirement))
-			.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
-			.filter(Boolean)
-	)];
+	const jiraImportedIssueKeys = [
+		...new Set(
+			requirements
+				.filter((requirement) => isJiraLinkedRequirement(requirement))
+				.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
+				.filter(Boolean)
+		),
+	];
 	const azureDevOpsConnection = azureDevOpsConnectionStatus?.connection || null;
 	const azureDevOpsConnected = Boolean(azureDevOpsConnectionStatus?.connected && azureDevOpsConnection);
 	const hasAzureDevOpsRequirements = requirements.some((requirement) => isAzureDevOpsLinkedRequirement(requirement));
 	const azureDevOpsSyncWorkItems = Array.isArray(azureDevOpsSyncPreview?.work_items) ? azureDevOpsSyncPreview.work_items : [];
 	const azureDevOpsPreviewHasReadyWorkItem = azureDevOpsSyncWorkItems.some((workItem) => workItem.status === "ready");
-	const selectedAzureDevOpsWorkItem = azureDevOpsWorkItemResults.find((workItem) => `${workItem.work_item_id}` === `${selectedAzureDevOpsWorkItemId}`) || null;
+	const selectedAzureDevOpsWorkItem =
+		azureDevOpsWorkItemResults.find((workItem) => `${workItem.work_item_id}` === `${selectedAzureDevOpsWorkItemId}`) || null;
 	const azureDevOpsWorkItemTypeOptions = azureDevOpsWorkItemTypes.length
 		? azureDevOpsWorkItemTypes.map((workItemType) => workItemType.name)
 		: DEFAULT_AZURE_DEVOPS_WORK_ITEM_TYPE_OPTIONS;
-	const azureDevOpsImportedWorkItemIds = [...new Set(
-		requirements
-			.filter((requirement) => isAzureDevOpsLinkedRequirement(requirement))
-			.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
-			.filter(Boolean)
-	)];
+	const azureDevOpsImportedWorkItemIds = [
+		...new Set(
+			requirements
+				.filter((requirement) => isAzureDevOpsLinkedRequirement(requirement))
+				.map((requirement) => requirement?.source_issue_key || requirement?.sync_target_issue_key || "")
+				.filter(Boolean)
+		),
+	];
 	const requirementStatusCounts = requirements.reduce((acc, requirement) => {
 		const status = getRequirementReviewStatus(requirement);
 		acc[status] = (acc[status] || 0) + 1;
@@ -443,89 +432,109 @@ export default function App() {
 	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
 	const requirementSourceMetricMeta = getRequirementSourceMetricMeta(requirementCoverageMetrics);
 	const requirementReportStats = [
-		requirementReview ? {
-			label: "Quality score",
-			value: `${requirementReviewMeta.score}/100`,
-			emphasis: true,
-		} : null,
-		requirementReviewMeta.threshold > 0 ? {
-			label: "Approval threshold",
-			value: requirementReviewMeta.threshold,
-		} : null,
-		(requirementCoverageMetrics || requirements.length > 0) ? {
-			label: "Requirements",
-			value: hasMetricValue(requirementCoverageMetrics, "total_requirements")
-				? requirementCoverageMetrics.total_requirements
-				: requirements.length,
-		} : null,
-		requirementSourceMetricMeta.countLabel ? {
-			label: requirementSourceMetricMeta.countLabel,
-			value: requirementSourceMetricMeta.countValue,
-		} : null,
-		hasMetricValue(requirementCoverageMetrics, "requirements_per_document") ? {
-			label: requirementSourceMetricMeta.perLabel,
-			value: requirementCoverageMetrics.requirements_per_document,
-		} : null,
-		hasMetricValue(requirementCoverageMetrics, "unique_requirements") ? {
-			label: "Unique",
-			value: requirementCoverageMetrics.unique_requirements,
-		} : null,
-		hasMetricValue(requirementCoverageMetrics, "duplicate_requirements") ? {
-			label: "Duplicates",
-			value: requirementCoverageMetrics.duplicate_requirements,
-		} : null,
-		hasMetricValue(requirementCoverageMetrics, "shall_format_count") ? {
-			label: "Shall format",
-			value: hasMetricValue(requirementCoverageMetrics, "total_requirements")
-				? `${requirementCoverageMetrics.shall_format_count}/${requirementCoverageMetrics.total_requirements}`
-				: requirementCoverageMetrics.shall_format_count,
-		} : null,
-		requirementWorkflowDiagnostics?.status ? {
-			label: "Workflow status",
-			value: formatWorkflowStatusLabel(requirementWorkflowDiagnostics.status),
-		} : null,
-		requirementIterationHistory.length ? {
-			label: "Iterations",
-			value: requirementIterationHistory.length,
-		} : null,
-		appliedRequirementWorkflowSettings?.max_iterations != null ? {
-			label: "Max iterations",
-			value: appliedRequirementWorkflowSettings.max_iterations,
-		} : null,
+		requirementReview
+			? {
+					label: "Quality score",
+					value: `${requirementReviewMeta.score}/100`,
+					emphasis: true,
+				}
+			: null,
+		requirementReviewMeta.threshold > 0
+			? {
+					label: "Approval threshold",
+					value: requirementReviewMeta.threshold,
+				}
+			: null,
+		requirementCoverageMetrics || requirements.length > 0
+			? {
+					label: "Requirements",
+					value: hasMetricValue(requirementCoverageMetrics, "total_requirements")
+						? requirementCoverageMetrics.total_requirements
+						: requirements.length,
+				}
+			: null,
+		requirementSourceMetricMeta.countLabel
+			? {
+					label: requirementSourceMetricMeta.countLabel,
+					value: requirementSourceMetricMeta.countValue,
+				}
+			: null,
+		hasMetricValue(requirementCoverageMetrics, "requirements_per_document")
+			? {
+					label: requirementSourceMetricMeta.perLabel,
+					value: requirementCoverageMetrics.requirements_per_document,
+				}
+			: null,
+		hasMetricValue(requirementCoverageMetrics, "unique_requirements")
+			? {
+					label: "Unique",
+					value: requirementCoverageMetrics.unique_requirements,
+				}
+			: null,
+		hasMetricValue(requirementCoverageMetrics, "duplicate_requirements")
+			? {
+					label: "Duplicates",
+					value: requirementCoverageMetrics.duplicate_requirements,
+				}
+			: null,
+		hasMetricValue(requirementCoverageMetrics, "shall_format_count")
+			? {
+					label: "Shall format",
+					value: hasMetricValue(requirementCoverageMetrics, "total_requirements")
+						? `${requirementCoverageMetrics.shall_format_count}/${requirementCoverageMetrics.total_requirements}`
+						: requirementCoverageMetrics.shall_format_count,
+				}
+			: null,
+		requirementWorkflowDiagnostics?.status
+			? {
+					label: "Workflow status",
+					value: formatWorkflowStatusLabel(requirementWorkflowDiagnostics.status),
+				}
+			: null,
+		requirementIterationHistory.length
+			? {
+					label: "Iterations",
+					value: requirementIterationHistory.length,
+				}
+			: null,
+		appliedRequirementWorkflowSettings?.max_iterations != null
+			? {
+					label: "Max iterations",
+					value: appliedRequirementWorkflowSettings.max_iterations,
+				}
+			: null,
 	].filter(Boolean);
 	const requirementReportFlags = [
 		requirementWorkflowDiagnostics?.timed_out ? { label: "Timed out", tone: "warning" } : null,
 		requirementWorkflowDiagnostics?.stalled ? { label: "Stalled", tone: "warning" } : null,
 		requirementWorkflowDiagnostics?.used_fallback ? { label: "Fallback used", tone: "warning" } : null,
 		requirementWorkflowDiagnostics?.max_iterations_reached ? { label: "Max iterations reached", tone: "warning" } : null,
-		requirementWorkflowDiagnostics?.failure_reason ? {
-			label: `Reason: ${formatWorkflowStatusLabel(requirementWorkflowDiagnostics.failure_reason)}`,
-			tone: "muted",
-		} : null,
+		requirementWorkflowDiagnostics?.failure_reason
+			? {
+					label: `Reason: ${formatWorkflowStatusLabel(requirementWorkflowDiagnostics.failure_reason)}`,
+					tone: "muted",
+				}
+			: null,
 	].filter(Boolean);
 	const requirementWarnings = requirementWorkflowDiagnostics?.warnings || [];
 	const requirementParserFailures = requirementWorkflowDiagnostics?.parser_failures || [];
-	const requirementBlockingIssues = requirementReview?.approved ? [] : (requirementReview?.blocking_issues || []);
-	const requirementReportDetailCount = (
-		requirementBlockingIssues.length
-		+ requirementWarnings.length
-		+ requirementParserFailures.length
-	);
+	const requirementBlockingIssues = requirementReview?.approved ? [] : requirementReview?.blocking_issues || [];
+	const requirementReportDetailCount = requirementBlockingIssues.length + requirementWarnings.length + requirementParserFailures.length;
 
 	const toggleRowExpansion = (id) => {
-		setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+		setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
 	};
 
 	const chooseGenerateResultTab = (data) => {
 		const diagnostics = data?.workflow_diagnostics || null;
 		const metrics = data?.coverage_metrics || null;
 		const hasDiagnosticAttention = Boolean(
-			diagnostics?.failure_reason
-			|| diagnostics?.timed_out
-			|| diagnostics?.stalled
-			|| (diagnostics?.status && diagnostics.status !== "completed")
-			|| diagnostics?.warnings?.length
-			|| diagnostics?.parser_failures?.length
+			diagnostics?.failure_reason ||
+			diagnostics?.timed_out ||
+			diagnostics?.stalled ||
+			(diagnostics?.status && diagnostics.status !== "completed") ||
+			diagnostics?.warnings?.length ||
+			diagnostics?.parser_failures?.length
 		);
 
 		if (hasDiagnosticAttention) {
@@ -547,38 +556,34 @@ export default function App() {
 	};
 
 	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
-		setRequirements((prev) => prev.map((requirement) => (
-			requirement.id === requirementId
-				? { ...requirement, review_status: reviewStatus }
-				: requirement
-		)));
+		setRequirements((prev) =>
+			prev.map((requirement) => (requirement.id === requirementId ? { ...requirement, review_status: reviewStatus } : requirement))
+		);
 		resetGeneratedArtifacts();
 		setStatus(`${requirementId} marked ${reviewStatus.toLowerCase()}.`);
 	};
 
 	const bulkUpdateRequirementReviewStatus = (reviewStatus, predicate = () => true) => {
 		const targetIds = new Set(requirements.filter(predicate).map((requirement) => requirement.id));
-		setRequirements((prev) => prev.map((requirement) => (
-			targetIds.has(requirement.id)
-				? { ...requirement, review_status: reviewStatus }
-				: requirement
-		)));
+		setRequirements((prev) =>
+			prev.map((requirement) => (targetIds.has(requirement.id) ? { ...requirement, review_status: reviewStatus } : requirement))
+		);
 		resetGeneratedArtifacts();
 		const updatedCount = targetIds.size;
 		setStatus(`${updatedCount} requirement${updatedCount === 1 ? "" : "s"} marked ${reviewStatus.toLowerCase()}.`);
 	};
 
 	const toggleRequirementQualityFlag = (requirementId, flag) => {
-		setRequirements((prev) => prev.map((requirement) => {
-			if (requirement.id !== requirementId) {
-				return requirement;
-			}
-			const currentFlags = normalizeStringArray(requirement.quality_flags);
-			const nextFlags = currentFlags.includes(flag)
-				? currentFlags.filter((item) => item !== flag)
-				: [...currentFlags, flag];
-			return { ...requirement, quality_flags: nextFlags };
-		}));
+		setRequirements((prev) =>
+			prev.map((requirement) => {
+				if (requirement.id !== requirementId) {
+					return requirement;
+				}
+				const currentFlags = normalizeStringArray(requirement.quality_flags);
+				const nextFlags = currentFlags.includes(flag) ? currentFlags.filter((item) => item !== flag) : [...currentFlags, flag];
+				return { ...requirement, quality_flags: nextFlags };
+			})
+		);
 		resetGeneratedArtifacts();
 	};
 
@@ -588,10 +593,16 @@ export default function App() {
 			app_link: appLink || null,
 			prototype_link: prototypeLink || null,
 			diagram_links: diagramLinks
-				? diagramLinks.split(";").map((x) => x.trim()).filter(Boolean)
+				? diagramLinks
+						.split(";")
+						.map((x) => x.trim())
+						.filter(Boolean)
 				: null,
 			image_links: imageLinks
-				? imageLinks.split(";").map((x) => x.trim()).filter(Boolean)
+				? imageLinks
+						.split(";")
+						.map((x) => x.trim())
+						.filter(Boolean)
 				: null,
 			notes: "Generated via UI",
 		};
@@ -613,12 +624,7 @@ export default function App() {
 	};
 
 	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => (
-		<WorkflowDiagnostics
-			title={title}
-			diagnostics={diagnostics}
-			appliedSettings={appliedSettings}
-			iterationHistory={iterationHistory}
-		/>
+		<WorkflowDiagnostics title={title} diagnostics={diagnostics} appliedSettings={appliedSettings} iterationHistory={iterationHistory} />
 	);
 
 	const renderRequirementReviewReport = () => {
@@ -638,7 +644,9 @@ export default function App() {
 								</span>
 							)}
 						</div>
-						<p>{requirementReview?.summary || "A compact view of quality, coverage, and workflow state for the current requirement set."}</p>
+						<p>
+							{requirementReview?.summary || "A compact view of quality, coverage, and workflow state for the current requirement set."}
+						</p>
 					</div>
 					{requirementReportFlags.length > 0 && (
 						<div className="requirement-report-flags">
@@ -657,7 +665,9 @@ export default function App() {
 							<thead>
 								<tr>
 									{requirementReportStats.map((stat) => (
-										<th key={stat.label} scope="col">{stat.label}</th>
+										<th key={stat.label} scope="col">
+											{stat.label}
+										</th>
 									))}
 								</tr>
 							</thead>
@@ -678,14 +688,18 @@ export default function App() {
 					<details className="requirement-report-details">
 						<summary>
 							<span>Workflow notes</span>
-							<span className="requirement-report-details-count">{requirementReportDetailCount} item{requirementReportDetailCount === 1 ? "" : "s"}</span>
+							<span className="requirement-report-details-count">
+								{requirementReportDetailCount} item{requirementReportDetailCount === 1 ? "" : "s"}
+							</span>
 						</summary>
 						<div className="requirement-report-details-body">
 							{requirementBlockingIssues.length > 0 && (
 								<div className="requirement-report-detail-block issue">
 									<strong>Blocking issues</strong>
 									<ul>
-										{requirementBlockingIssues.slice(0, 4).map((issue) => <li key={issue}>{issue}</li>)}
+										{requirementBlockingIssues.slice(0, 4).map((issue) => (
+											<li key={issue}>{issue}</li>
+										))}
 									</ul>
 								</div>
 							)}
@@ -694,7 +708,9 @@ export default function App() {
 								<div className="requirement-report-detail-block warning">
 									<strong>Warnings</strong>
 									<ul>
-										{requirementWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+										{requirementWarnings.map((warning) => (
+											<li key={warning}>{warning}</li>
+										))}
 									</ul>
 								</div>
 							)}
@@ -703,7 +719,9 @@ export default function App() {
 								<div className="requirement-report-detail-block alert">
 									<strong>Parser issues</strong>
 									<ul>
-										{requirementParserFailures.map((failure) => <li key={failure}>{failure}</li>)}
+										{requirementParserFailures.map((failure) => (
+											<li key={failure}>{failure}</li>
+										))}
 									</ul>
 								</div>
 							)}
@@ -993,10 +1011,7 @@ export default function App() {
 			return;
 		}
 
-		void Promise.all([
-			refreshUsageSummary(currentUser),
-			refreshBillingEntitlements(currentUser),
-		]);
+		void Promise.all([refreshUsageSummary(currentUser), refreshBillingEntitlements(currentUser)]);
 	}, [isAuthenticated, currentUser?.sub, currentUser?.email]);
 
 	useEffect(() => {
@@ -1037,7 +1052,7 @@ export default function App() {
 		const res = await fetch(`${API_BASE}${path}`, {
 			...options,
 			cache: "no-store",
-			headers
+			headers,
 		});
 
 		if (authRequired && res.status === 401) {
@@ -1136,7 +1151,9 @@ export default function App() {
 			setIsLoadingJiraIssueTypes(true);
 		}
 		try {
-			const res = await apiRequest(`/integrations/jira/projects/${encodeURIComponent(normalizedProjectKey)}/issue-types`, { method: "GET" });
+			const res = await apiRequest(`/integrations/jira/projects/${encodeURIComponent(normalizedProjectKey)}/issue-types`, {
+				method: "GET",
+			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to load JIRA issue types");
 				throw new Error(errorMessage);
@@ -1174,7 +1191,9 @@ export default function App() {
 			setIsLoadingAzureDevOpsWorkItemTypes(true);
 		}
 		try {
-			const res = await apiRequest(`/integrations/azure-devops/projects/${encodeURIComponent(normalizedProject)}/work-item-types`, { method: "GET" });
+			const res = await apiRequest(`/integrations/azure-devops/projects/${encodeURIComponent(normalizedProject)}/work-item-types`, {
+				method: "GET",
+			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to load Azure DevOps work item types");
 				throw new Error(errorMessage);
@@ -1184,7 +1203,9 @@ export default function App() {
 			setAzureDevOpsWorkItemTypes(workItemTypes);
 			setAzureDevOpsWorkItemType((prev) => (prev && workItemTypes.some((workItemType) => workItemType.name === prev) ? prev : ""));
 			if (!silent && workItemTypes.length) {
-				setStatus(`Loaded ${workItemTypes.length} Azure DevOps work item type${workItemTypes.length === 1 ? "" : "s"} for ${normalizedProject}.`);
+				setStatus(
+					`Loaded ${workItemTypes.length} Azure DevOps work item type${workItemTypes.length === 1 ? "" : "s"} for ${normalizedProject}.`
+				);
 			}
 			return workItemTypes;
 		} catch (error) {
@@ -1242,7 +1263,11 @@ export default function App() {
 				return projects[0]?.key || "";
 			});
 			if (!silent) {
-				setStatus(projects.length ? `Loaded ${projects.length} JIRA project${projects.length === 1 ? "" : "s"}.` : "JIRA returned no browseable projects for this account. If you expected to see a project like TheONE, check that this user has Browse Projects access.");
+				setStatus(
+					projects.length
+						? `Loaded ${projects.length} JIRA project${projects.length === 1 ? "" : "s"}.`
+						: "JIRA returned no browseable projects for this account. If you expected to see a project like TheONE, check that this user has Browse Projects access."
+				);
 			}
 			return projects;
 		} catch (error) {
@@ -1291,7 +1316,11 @@ export default function App() {
 				return projects[0]?.name || prev || "";
 			});
 			if (!silent) {
-				setStatus(projects.length ? `Loaded ${projects.length} Azure DevOps project${projects.length === 1 ? "" : "s"}.` : "Azure DevOps returned no visible projects for this account.");
+				setStatus(
+					projects.length
+						? `Loaded ${projects.length} Azure DevOps project${projects.length === 1 ? "" : "s"}.`
+						: "Azure DevOps returned no visible projects for this account."
+				);
 			}
 			return projects;
 		} catch (error) {
@@ -1441,7 +1470,8 @@ export default function App() {
 			setAzureDevOpsWorkItemResults([]);
 			setSelectedAzureDevOpsWorkItemId("");
 			setSelectedAzureDevOpsProject(data?.connection?.default_project || "");
-			const connectedAs = data?.connection?.display_name || data?.connection?.account_email || data?.connection?.organization || "Azure DevOps";
+			const connectedAs =
+				data?.connection?.display_name || data?.connection?.account_email || data?.connection?.organization || "Azure DevOps";
 			setStatus(`Connected to Azure DevOps as ${connectedAs}. Loading projects...`);
 			const projects = await loadAzureDevOpsProjects("", { silent: true, assumeConnected: true });
 			setStatus(
@@ -1508,8 +1538,12 @@ export default function App() {
 			const data = await res.json();
 			const issues = Array.isArray(data?.issues) ? data.issues : [];
 			setJiraIssueResults(issues);
-			setSelectedJiraIssueKey((prev) => issues.some((issue) => issue.key === prev) ? prev : (issues[0]?.key || ""));
-			setStatus(issues.length ? `Found ${issues.length} JIRA ${issueTypeLabel}${issues.length === 1 || issueTypeLabel.endsWith("s") ? "" : "s"}.` : `No ${issueTypeLabel} matched that search.`);
+			setSelectedJiraIssueKey((prev) => (issues.some((issue) => issue.key === prev) ? prev : issues[0]?.key || ""));
+			setStatus(
+				issues.length
+					? `Found ${issues.length} JIRA ${issueTypeLabel}${issues.length === 1 || issueTypeLabel.endsWith("s") ? "" : "s"}.`
+					: `No ${issueTypeLabel} matched that search.`
+			);
 		} catch (error) {
 			setStatus(`JIRA issue search failed: ${error.message}`);
 		} finally {
@@ -1544,8 +1578,18 @@ export default function App() {
 			const data = await res.json();
 			const workItems = Array.isArray(data?.work_items) ? data.work_items : [];
 			setAzureDevOpsWorkItemResults(workItems);
-			setSelectedAzureDevOpsWorkItemId((prev) => workItems.some((workItem) => `${workItem.work_item_id}` === `${prev}`) ? prev : (workItems[0]?.work_item_id ? `${workItems[0].work_item_id}` : ""));
-			setStatus(workItems.length ? `Found ${workItems.length} Azure DevOps ${workItemTypeLabel}${workItems.length === 1 || workItemTypeLabel.endsWith("s") ? "" : "s"}.` : `No ${workItemTypeLabel} matched that search.`);
+			setSelectedAzureDevOpsWorkItemId((prev) =>
+				workItems.some((workItem) => `${workItem.work_item_id}` === `${prev}`)
+					? prev
+					: workItems[0]?.work_item_id
+						? `${workItems[0].work_item_id}`
+						: ""
+			);
+			setStatus(
+				workItems.length
+					? `Found ${workItems.length} Azure DevOps ${workItemTypeLabel}${workItems.length === 1 || workItemTypeLabel.endsWith("s") ? "" : "s"}.`
+					: `No ${workItemTypeLabel} matched that search.`
+			);
 		} catch (error) {
 			setStatus(`Azure DevOps work item search failed: ${error.message}`);
 		} finally {
@@ -1606,7 +1650,9 @@ export default function App() {
 			setExecutionRunResult(null);
 			setReqFeedback("");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			setStatus(`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || selectedJiraIssueKey}.`);
+			setStatus(
+				`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || selectedJiraIssueKey}.`
+			);
 		} catch (error) {
 			setStatus(`JIRA import failed: ${error.message}`);
 		} finally {
@@ -1672,7 +1718,9 @@ export default function App() {
 			setExecutionRunResult(null);
 			setReqFeedback("");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			setStatus(`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || `#${selectedAzureDevOpsWorkItemId}`}.`);
+			setStatus(
+				`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || `#${selectedAzureDevOpsWorkItemId}`}.`
+			);
 		} catch (error) {
 			setStatus(`Azure DevOps import failed: ${error.message}`);
 		} finally {
@@ -1710,7 +1758,9 @@ export default function App() {
 			setJiraSyncPreview(data || null);
 			const readyCount = data?.ready_issue_count || 0;
 			const conflictCount = data?.conflict_count || 0;
-			setStatus(`JIRA preview ready: ${readyCount} issue${readyCount === 1 ? "" : "s"} ready, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}.`);
+			setStatus(
+				`JIRA preview ready: ${readyCount} issue${readyCount === 1 ? "" : "s"} ready, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}.`
+			);
 		} catch (error) {
 			setStatus(`JIRA preview failed: ${error.message}`);
 		} finally {
@@ -1746,7 +1796,9 @@ export default function App() {
 			setRequirements(syncedRequirements);
 			const updatedCount = data?.updated_issue_count || 0;
 			const conflictCount = data?.conflict_count || 0;
-			setStatus(`JIRA sync complete: ${updatedCount} issue${updatedCount === 1 ? "" : "s"} updated, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} skipped.`);
+			setStatus(
+				`JIRA sync complete: ${updatedCount} issue${updatedCount === 1 ? "" : "s"} updated, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} skipped.`
+			);
 			await previewJiraSync(syncedRequirements, { clearLastSyncResult: false });
 		} catch (error) {
 			setStatus(`JIRA sync failed: ${error.message}`);
@@ -1785,7 +1837,9 @@ export default function App() {
 			setAzureDevOpsSyncPreview(data || null);
 			const readyCount = data?.ready_work_item_count || 0;
 			const conflictCount = data?.conflict_count || 0;
-			setStatus(`Azure DevOps preview ready: ${readyCount} work item${readyCount === 1 ? "" : "s"} ready, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}.`);
+			setStatus(
+				`Azure DevOps preview ready: ${readyCount} work item${readyCount === 1 ? "" : "s"} ready, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}.`
+			);
 		} catch (error) {
 			setStatus(`Azure DevOps preview failed: ${error.message}`);
 		} finally {
@@ -1821,7 +1875,9 @@ export default function App() {
 			setRequirements(syncedRequirements);
 			const updatedCount = data?.updated_work_item_count || 0;
 			const conflictCount = data?.conflict_count || 0;
-			setStatus(`Azure DevOps sync complete: ${updatedCount} work item${updatedCount === 1 ? "" : "s"} updated, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} skipped.`);
+			setStatus(
+				`Azure DevOps sync complete: ${updatedCount} work item${updatedCount === 1 ? "" : "s"} updated, ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} skipped.`
+			);
 			await previewAzureDevOpsSync(syncedRequirements, { clearLastSyncResult: false });
 		} catch (error) {
 			setStatus(`Azure DevOps sync failed: ${error.message}`);
@@ -1894,16 +1950,14 @@ export default function App() {
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsParse.path, {
 				method: "POST",
 				headers: { "X-Request-ID": requestId },
-				body: formData
+				body: formData,
 			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to parse requirements");
 				throw new Error(errorMessage);
 			}
 			const data = await res.json();
-			const nextRequirements = withFeedback
-				? mergeRequirementMetadata(data.requirements || [], requirements)
-				: (data.requirements || []);
+			const nextRequirements = withFeedback ? mergeRequirementMetadata(data.requirements || [], requirements) : data.requirements || [];
 			if (!withFeedback) {
 				setRequirementSourceMode("file");
 			}
@@ -1972,7 +2026,9 @@ export default function App() {
 			setExecutionRunResult(null);
 			if (updateStatus) {
 				const summary = data?.summary || {};
-				setStatus(`Execution preview ready: ${summary.executable || 0} executable, ${summary.manual || 0} manual, ${summary.unsupported || 0} unsupported.`);
+				setStatus(
+					`Execution preview ready: ${summary.executable || 0} executable, ${summary.manual || 0} manual, ${summary.unsupported || 0} unsupported.`
+				);
 			}
 			return data;
 		} catch (error) {
@@ -1986,7 +2042,7 @@ export default function App() {
 	};
 
 	const runApprovedExecution = async () => {
-		const preview = executionPreview || await previewExecution(testCases, { updateStatus: false });
+		const preview = executionPreview || (await previewExecution(testCases, { updateStatus: false }));
 		const executableCandidates = preview?.executable || [];
 		if (!executableCandidates.length) {
 			setStatus("No executable candidates are available to run.");
@@ -2012,7 +2068,9 @@ export default function App() {
 			setExecutionRunResult(data || null);
 			setExecutionPreview(data?.preview || preview);
 			const summary = data?.summary || {};
-			setStatus(`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`);
+			setStatus(
+				`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`
+			);
 		} catch (error) {
 			setStatus(`Execution run failed: ${error.message}`);
 		} finally {
@@ -2032,7 +2090,11 @@ export default function App() {
 		}
 		const requirementsForGeneration = approvedRequirements;
 		setIsGenerating(true);
-		setStatus(withFeedback ? "Refining test cases with approved requirements..." : `Generating test cases from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}...`);
+		setStatus(
+			withFeedback
+				? "Refining test cases with approved requirements..."
+				: `Generating test cases from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}...`
+		);
 		try {
 			const requestId = createRequestId();
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(testCaseWorkflowSettings);
@@ -2041,7 +2103,25 @@ export default function App() {
 				template: {
 					name: templateName,
 					format: templateFormat,
-					fields: ["id", "title", "description", "priority", "type", "status", "preconditions", "steps", "expected_result", "test_data", "estimated_time", "automation_status", "component", "linked_requirement_ids", "scenario_refs", "source_refs", "tags"]
+					fields: [
+						"id",
+						"title",
+						"description",
+						"priority",
+						"type",
+						"status",
+						"preconditions",
+						"steps",
+						"expected_result",
+						"test_data",
+						"estimated_time",
+						"automation_status",
+						"component",
+						"linked_requirement_ids",
+						"scenario_refs",
+						"source_refs",
+						"tags",
+					],
 				},
 				context: buildContextPayload(requirementsForGeneration),
 				workflow_settings: workflowSettingsPayload,
@@ -2050,14 +2130,14 @@ export default function App() {
 			const useRefineEndpoint = withFeedback && testCases.length > 0;
 			const payload = useRefineEndpoint
 				? {
-					...sharedPayload,
-					test_cases: testCases,
-					feedback: feedback.trim()
-				}
+						...sharedPayload,
+						test_cases: testCases,
+						feedback: feedback.trim(),
+					}
 				: {
-					...sharedPayload,
-					feedback: withFeedback && feedback ? feedback.trim() : null
-				};
+						...sharedPayload,
+						feedback: withFeedback && feedback ? feedback.trim() : null,
+					};
 
 			const testCaseGenerationPath = useRefineEndpoint
 				? API_CONTRACT_ENDPOINTS.testCasesRefine.path
@@ -2065,7 +2145,7 @@ export default function App() {
 			const res = await apiRequest(testCaseGenerationPath, {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
-				body: JSON.stringify(payload)
+				body: JSON.stringify(payload),
 			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to generate test cases");
@@ -2087,9 +2167,7 @@ export default function App() {
 			setExecutionPreview(null);
 			setExecutionRunResult(null);
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
-			const reviewStatus = data.review
-				? ` Review ${data.review.approved ? "approved" : "needs refinement"}.`
-				: "";
+			const reviewStatus = data.review ? ` Review ${data.review.approved ? "approved" : "needs refinement"}.` : "";
 			setStatus(
 				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
 			);
@@ -2131,14 +2209,14 @@ export default function App() {
 			const res = await apiRequest(exportPath, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload)
+				body: JSON.stringify(payload),
 			});
-			
+
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Export failed");
 				throw new Error(errorMessage);
 			}
-			
+
 			const extensions = { csv: "csv", excel: "xlsx", json: "json" };
 			await downloadResponseBlob(res, `test_cases.${extensions[format] || format}`);
 			setStatus(`✓ Exported to ${format.toUpperCase()} successfully`);
@@ -2173,18 +2251,26 @@ export default function App() {
 			rules: (analysis.business_rules || []).filter((r) => !coveredRules.has(r.id)).map((r) => r.title),
 			constraints: (analysis.field_constraints || []).filter((c) => !coveredConstraints.has(c.id)).map((c) => c.field_name),
 			permissions: (analysis.role_permissions || []).filter((p) => !coveredPermissions.has(p.id)).map((p) => `${p.role}: ${p.action}`),
-			transitions: (analysis.state_transitions || []).filter((t) => !coveredTransitions.has(t.id)).map((t) => `${t.from_state} → ${t.to_state}`),
+			transitions: (analysis.state_transitions || [])
+				.filter((t) => !coveredTransitions.has(t.id))
+				.map((t) => `${t.from_state} → ${t.to_state}`),
 		};
 	};
 
-	const coveredScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.covered_scenarios || 0), 0);
+	const coveredScenarioTotal = coveragePlan.reduce(
+		(sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.covered_scenarios || 0),
+		0
+	);
 	const plannedScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.length || 0), 0);
 	const mustHaveScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.filter((s) => s.must_have).length || 0), 0);
 	const mustHaveCoveredScenarioTotal = coveragePlan.reduce((sum, plan) => {
 		const missing = new Set(getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types || []);
 		return sum + (plan.scenarios?.filter((s) => s.must_have && !missing.has(s.scenario_type)).length || 0);
 	}, 0);
-	const missingScenarioCount = coveragePlan.reduce((sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types?.length || 0), 0);
+	const missingScenarioCount = coveragePlan.reduce(
+		(sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types?.length || 0),
+		0
+	);
 	const requirementAnalysisGapCount = requirementAnalysis.reduce((sum, analysis) => {
 		const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
 		return sum + Object.values(gaps).reduce((s, arr) => s + arr.length, 0);
@@ -2192,11 +2278,14 @@ export default function App() {
 	const requirementTraceabilityRows = approvedRequirements.map((requirement) => {
 		const linkedTestCases = testCases.filter((testCase) => getTestCaseLinkedRequirementIds(testCase).includes(requirement.id));
 		const scenarioSummary = getRequirementScenarioSummary(requirement.id);
-		const linkedScenarioTypes = [...new Set(
-			linkedTestCases.flatMap((testCase) => normalizeStringArray(testCase.tags))
-				.filter((tag) => tag.startsWith("scenario:"))
-				.map((tag) => tag.replace("scenario:", "").replace(/-/g, " "))
-		)];
+		const linkedScenarioTypes = [
+			...new Set(
+				linkedTestCases
+					.flatMap((testCase) => normalizeStringArray(testCase.tags))
+					.filter((tag) => tag.startsWith("scenario:"))
+					.map((tag) => tag.replace("scenario:", "").replace(/-/g, " "))
+			),
+		];
 		return {
 			requirement,
 			linkedTestCases,
@@ -2206,21 +2295,22 @@ export default function App() {
 	});
 	const tracedRequirementCount = requirementTraceabilityRows.filter((row) => row.linkedTestCases.length > 0).length;
 	const traceabilityGapCount = Math.max(0, approvedRequirements.length - tracedRequirementCount);
-	const diagnosticsWarningCount = (testCaseWorkflowDiagnostics?.warnings?.length || 0) + (testCaseWorkflowDiagnostics?.parser_failures?.length || 0);
+	const diagnosticsWarningCount =
+		(testCaseWorkflowDiagnostics?.warnings?.length || 0) + (testCaseWorkflowDiagnostics?.parser_failures?.length || 0);
 	const diagnosticsNeedsAttention = Boolean(
-		testCaseWorkflowDiagnostics?.failure_reason
-		|| testCaseWorkflowDiagnostics?.timed_out
-		|| testCaseWorkflowDiagnostics?.stalled
-		|| (testCaseWorkflowDiagnostics?.status && testCaseWorkflowDiagnostics.status !== "completed")
-		|| diagnosticsWarningCount > 0
+		testCaseWorkflowDiagnostics?.failure_reason ||
+		testCaseWorkflowDiagnostics?.timed_out ||
+		testCaseWorkflowDiagnostics?.stalled ||
+		(testCaseWorkflowDiagnostics?.status && testCaseWorkflowDiagnostics.status !== "completed") ||
+		diagnosticsWarningCount > 0
 	);
 	const hasGenerateResults = Boolean(
-		testCases.length
-		|| coveragePlan.length
-		|| requirementAnalysis.length
-		|| testCaseWorkflowDiagnostics
-		|| appliedTestCaseWorkflowSettings
-		|| testCaseReview
+		testCases.length ||
+		coveragePlan.length ||
+		requirementAnalysis.length ||
+		testCaseWorkflowDiagnostics ||
+		appliedTestCaseWorkflowSettings ||
+		testCaseReview
 	);
 	const generateResultTabs = [
 		{
@@ -2262,7 +2352,7 @@ export default function App() {
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildContextPayload())
+				body: JSON.stringify(buildContextPayload()),
 			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to analyze context");
@@ -2286,17 +2376,12 @@ export default function App() {
 		{ id: 2, label: "Template", title: "Template Setup" },
 		{ id: 3, label: "Generate", title: "Generate Test Cases" },
 		{ id: 4, label: "Automation", title: "Automation" },
-		{ id: 5, label: "Export", title: "Export Test Cases" }
+		{ id: 5, label: "Export", title: "Export Test Cases" },
 	];
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
-	const {
-		billingContactEmail,
-		billingStatusItems,
-		statusUsageItems,
-		pilotAlert,
-	} = useBillingStatus(billingEntitlements, usageSummary);
+	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
 	const jiraSettings = {
 		jiraConnected,
@@ -2349,17 +2434,10 @@ export default function App() {
 			/>
 
 			{!isAuthenticated && !isVerifyingSession && (
-				<div className="auth-warning-banner">
-					🔐 Sign in to parse requirements, generate test cases, and export artifacts.
-				</div>
+				<div className="auth-warning-banner">🔐 Sign in to parse requirements, generate test cases, and export artifacts.</div>
 			)}
 
-
-			<BillingBanner
-				isAuthenticated={isAuthenticated}
-				pilotAlert={pilotAlert}
-				billingContactEmail={billingContactEmail}
-			/>
+			<BillingBanner isAuthenticated={isAuthenticated} pilotAlert={pilotAlert} billingContactEmail={billingContactEmail} />
 
 			<SignInDialog
 				isOpen={isSignInDialogOpen}
@@ -2392,7 +2470,8 @@ export default function App() {
 					<section className="panel">
 						<h2 className="panel-title">Upload Requirements</h2>
 						<p className="panel-description">
-							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA or Azure DevOps.
+							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA or
+							Azure DevOps.
 						</p>
 						<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
 							{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
@@ -2415,11 +2494,7 @@ export default function App() {
 							<div className="panel-form">
 								<div className="form-group">
 									<label>Requirements file</label>
-									<input
-										type="file"
-										accept=".md,.docx,.xlsx"
-										onChange={(e) => setFile(e.target.files?.[0] || null)}
-									/>
+									<input type="file" accept=".md,.docx,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
 								</div>
 								<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
 									{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
@@ -2447,23 +2522,39 @@ export default function App() {
 										<div className="form-group jira-inline-action">
 											<label>Project</label>
 											<div className="jira-inline-controls">
-												<select value={selectedJiraProjectKey} onChange={(event) => setSelectedJiraProjectKey(event.target.value)} disabled={!jiraConnected || !jiraProjects.length}>
+												<select
+													value={selectedJiraProjectKey}
+													onChange={(event) => setSelectedJiraProjectKey(event.target.value)}
+													disabled={!jiraConnected || !jiraProjects.length}
+												>
 													<option value="">Select a JIRA project</option>
 													{jiraProjects.map((project) => (
-														<option key={project.project_id || project.key} value={project.key}>{project.key} — {project.name}</option>
+														<option key={project.project_id || project.key} value={project.key}>
+															{project.key} — {project.name}
+														</option>
 													))}
 												</select>
-												<button className="secondary" onClick={() => loadJiraProjects(jiraProjectQuery)} disabled={!jiraConnected || isLoadingJiraProjects}>
+												<button
+													className="secondary"
+													onClick={() => loadJiraProjects(jiraProjectQuery)}
+													disabled={!jiraConnected || isLoadingJiraProjects}
+												>
 													{isLoadingJiraProjects ? "⏳" : "Load"}
 												</button>
 											</div>
 										</div>
 										<div className="form-group">
 											<label>Issue type</label>
-											<select value={jiraIssueType} onChange={(event) => setJiraIssueType(event.target.value)} disabled={!jiraConnected || isLoadingJiraIssueTypes}>
+											<select
+												value={jiraIssueType}
+												onChange={(event) => setJiraIssueType(event.target.value)}
+												disabled={!jiraConnected || isLoadingJiraIssueTypes}
+											>
 												<option value="">Any issue type</option>
 												{jiraIssueTypeOptions.map((issueTypeName) => (
-													<option key={issueTypeName} value={issueTypeName}>{issueTypeName}</option>
+													<option key={issueTypeName} value={issueTypeName}>
+														{issueTypeName}
+													</option>
 												))}
 											</select>
 										</div>
@@ -2476,7 +2567,11 @@ export default function App() {
 													onChange={(event) => setJiraIssueQuery(event.target.value)}
 													disabled={!jiraConnected}
 												/>
-												<button className="secondary" onClick={searchJiraIssues} disabled={!jiraConnected || !selectedJiraProjectKey || isSearchingJiraIssues}>
+												<button
+													className="secondary"
+													onClick={searchJiraIssues}
+													disabled={!jiraConnected || !selectedJiraProjectKey || isSearchingJiraIssues}
+												>
 													{isSearchingJiraIssues ? "⏳" : "Search"}
 												</button>
 											</div>
@@ -2514,7 +2609,9 @@ export default function App() {
 																		aria-label={`Select JIRA issue ${issue.key}`}
 																	/>
 																</td>
-																<td><strong>{issue.key}</strong></td>
+																<td>
+																	<strong>{issue.key}</strong>
+																</td>
 																<td>{issue.summary}</td>
 																<td>{issue.issue_type || "—"}</td>
 																<td>{issue.status || "—"}</td>
@@ -2530,10 +2627,17 @@ export default function App() {
 									)}
 
 									<div className="panel-form button-row jira-import-actions">
-										<button onClick={importRequirementsFromJira} disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}>
+										<button
+											onClick={importRequirementsFromJira}
+											disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}
+										>
 											{isImportingFromJira ? "⏳ Importing..." : `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
 										</button>
-										{selectedJiraIssue ? <span className="helper-text">Selected source: {selectedJiraIssue.key} — {selectedJiraIssue.summary}</span> : null}
+										{selectedJiraIssue ? (
+											<span className="helper-text">
+												Selected source: {selectedJiraIssue.key} — {selectedJiraIssue.summary}
+											</span>
+										) : null}
 									</div>
 								</div>
 							</div>
@@ -2559,23 +2663,39 @@ export default function App() {
 										<div className="form-group jira-inline-action">
 											<label>Project</label>
 											<div className="jira-inline-controls">
-												<select value={selectedAzureDevOpsProject} onChange={(event) => setSelectedAzureDevOpsProject(event.target.value)} disabled={!azureDevOpsConnected || !azureDevOpsProjects.length}>
+												<select
+													value={selectedAzureDevOpsProject}
+													onChange={(event) => setSelectedAzureDevOpsProject(event.target.value)}
+													disabled={!azureDevOpsConnected || !azureDevOpsProjects.length}
+												>
 													<option value="">Select an Azure DevOps project</option>
 													{azureDevOpsProjects.map((project) => (
-														<option key={project.project_id || project.name} value={project.name}>{project.name}</option>
+														<option key={project.project_id || project.name} value={project.name}>
+															{project.name}
+														</option>
 													))}
 												</select>
-												<button className="secondary" onClick={() => loadAzureDevOpsProjects(azureDevOpsProjectQuery)} disabled={!azureDevOpsConnected || isLoadingAzureDevOpsProjects}>
+												<button
+													className="secondary"
+													onClick={() => loadAzureDevOpsProjects(azureDevOpsProjectQuery)}
+													disabled={!azureDevOpsConnected || isLoadingAzureDevOpsProjects}
+												>
 													{isLoadingAzureDevOpsProjects ? "⏳" : "Load"}
 												</button>
 											</div>
 										</div>
 										<div className="form-group">
 											<label>Work item type</label>
-											<select value={azureDevOpsWorkItemType} onChange={(event) => setAzureDevOpsWorkItemType(event.target.value)} disabled={!azureDevOpsConnected || isLoadingAzureDevOpsWorkItemTypes}>
+											<select
+												value={azureDevOpsWorkItemType}
+												onChange={(event) => setAzureDevOpsWorkItemType(event.target.value)}
+												disabled={!azureDevOpsConnected || isLoadingAzureDevOpsWorkItemTypes}
+											>
 												<option value="">Any work item type</option>
 												{azureDevOpsWorkItemTypeOptions.map((workItemTypeName) => (
-													<option key={workItemTypeName} value={workItemTypeName}>{workItemTypeName}</option>
+													<option key={workItemTypeName} value={workItemTypeName}>
+														{workItemTypeName}
+													</option>
 												))}
 											</select>
 										</div>
@@ -2588,7 +2708,11 @@ export default function App() {
 													onChange={(event) => setAzureDevOpsWorkItemQuery(event.target.value)}
 													disabled={!azureDevOpsConnected}
 												/>
-												<button className="secondary" onClick={searchAzureDevOpsWorkItems} disabled={!azureDevOpsConnected || !selectedAzureDevOpsProject || isSearchingAzureDevOpsWorkItems}>
+												<button
+													className="secondary"
+													onClick={searchAzureDevOpsWorkItems}
+													disabled={!azureDevOpsConnected || !selectedAzureDevOpsProject || isSearchingAzureDevOpsWorkItems}
+												>
 													{isSearchingAzureDevOpsWorkItems ? "⏳" : "Search"}
 												</button>
 											</div>
@@ -2626,7 +2750,9 @@ export default function App() {
 																		aria-label={`Select Azure DevOps work item ${workItem.work_item_id}`}
 																	/>
 																</td>
-																<td><strong>#{workItem.work_item_id}</strong></td>
+																<td>
+																	<strong>#{workItem.work_item_id}</strong>
+																</td>
 																<td>{workItem.title}</td>
 																<td>{workItem.work_item_type || "—"}</td>
 																<td>{workItem.state || "—"}</td>
@@ -2642,15 +2768,23 @@ export default function App() {
 									)}
 
 									<div className="panel-form button-row jira-import-actions">
-										<button onClick={importRequirementsFromAzureDevOps} disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}>
-											{isImportingFromAzureDevOps ? "⏳ Importing..." : `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
+										<button
+											onClick={importRequirementsFromAzureDevOps}
+											disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}
+										>
+											{isImportingFromAzureDevOps
+												? "⏳ Importing..."
+												: `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
 										</button>
-										{selectedAzureDevOpsWorkItem ? <span className="helper-text">Selected source: #{selectedAzureDevOpsWorkItem.work_item_id} — {selectedAzureDevOpsWorkItem.title}</span> : null}
+										{selectedAzureDevOpsWorkItem ? (
+											<span className="helper-text">
+												Selected source: #{selectedAzureDevOpsWorkItem.work_item_id} — {selectedAzureDevOpsWorkItem.title}
+											</span>
+										) : null}
 									</div>
 								</div>
 							</div>
 						)}
-
 
 						{rawText && (
 							<div className="result-section compact-result-section">
@@ -2662,7 +2796,9 @@ export default function App() {
 										</span>
 										<span className="collapsible-panel-meta">
 											<span className="analysis-summary-pill">{rawText.length.toLocaleString()} chars</span>
-											<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+											<span className="collapsible-panel-icon" aria-hidden="true">
+												⏄
+											</span>
 										</span>
 									</summary>
 									<div className="collapsible-panel-body">
@@ -2677,7 +2813,9 @@ export default function App() {
 							approvedRequirementCount={approvedRequirementCount}
 							reviewPendingRequirementCount={reviewPendingRequirementCount}
 							rejectedRequirementCount={rejectedRequirementCount}
-							onApproveNonRejected={() => bulkUpdateRequirementReviewStatus("Approved", (requirement) => getRequirementReviewStatus(requirement) !== "Rejected")}
+							onApproveNonRejected={() =>
+								bulkUpdateRequirementReviewStatus("Approved", (requirement) => getRequirementReviewStatus(requirement) !== "Rejected")
+							}
 							onMarkAllNeedsReview={() => bulkUpdateRequirementReviewStatus("Needs Review")}
 							onReviewStatusChange={updateRequirementReviewStatus}
 							onQualityFlagToggle={toggleRequirementQualityFlag}
@@ -2692,7 +2830,9 @@ export default function App() {
 									</div>
 									<div className="jira-connection-summary compact">
 										{jiraImportedIssueKeys.map((issueKey) => (
-											<span key={issueKey} className="jira-summary-pill">{issueKey}</span>
+											<span key={issueKey} className="jira-summary-pill">
+												{issueKey}
+											</span>
 										))}
 									</div>
 								</div>
@@ -2706,10 +2846,17 @@ export default function App() {
 										/>
 									</div>
 									<div className="feedback-actions jira-sync-actions">
-										<button className="secondary" onClick={() => previewJiraSync()} disabled={authActionDisabled || isPreviewingJiraSync || isApplyingJiraSync}>
+										<button
+											className="secondary"
+											onClick={() => previewJiraSync()}
+											disabled={authActionDisabled || isPreviewingJiraSync || isApplyingJiraSync}
+										>
 											{isPreviewingJiraSync ? "⏳ Previewing..." : "Preview JIRA Update"}
 										</button>
-										<button onClick={applyJiraSync} disabled={authActionDisabled || isApplyingJiraSync || !jiraSyncPreview || !jiraPreviewHasReadyIssue}>
+										<button
+											onClick={applyJiraSync}
+											disabled={authActionDisabled || isApplyingJiraSync || !jiraSyncPreview || !jiraPreviewHasReadyIssue}
+										>
 											{isApplyingJiraSync ? "⏳ Syncing..." : "Push Ready Updates"}
 										</button>
 									</div>
@@ -2734,7 +2881,11 @@ export default function App() {
 													</div>
 													<div className="jira-sync-preview-meta">
 														<span>Requirements: {(issue.requirement_ids || []).join(", ") || "—"}</span>
-														{issue.issue_url ? <a href={issue.issue_url} target="_blank" rel="noreferrer">Open in JIRA ↗</a> : null}
+														{issue.issue_url ? (
+															<a href={issue.issue_url} target="_blank" rel="noreferrer">
+																Open in JIRA ↗
+															</a>
+														) : null}
 													</div>
 													{issue.conflict_reason ? <p className="jira-sync-preview-warning">{issue.conflict_reason}</p> : null}
 													{issue.warning ? <p className="jira-sync-preview-warning">{issue.warning}</p> : null}
@@ -2753,7 +2904,9 @@ export default function App() {
 										</div>
 										{jiraSyncPreview.warnings?.length > 0 && (
 											<ul className="jira-sync-warning-list">
-												{jiraSyncPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+												{jiraSyncPreview.warnings.map((warning) => (
+													<li key={warning}>{warning}</li>
+												))}
 											</ul>
 										)}
 									</div>
@@ -2765,7 +2918,8 @@ export default function App() {
 										<ul className="jira-sync-apply-list">
 											{jiraSyncResults.results?.map((result) => (
 												<li key={`${result.issue_key}-${result.status}`}>
-													<strong>{result.issue_key}</strong> — {result.status}{result.message ? `: ${result.message}` : ""}
+													<strong>{result.issue_key}</strong> — {result.status}
+													{result.message ? `: ${result.message}` : ""}
 												</li>
 											))}
 										</ul>
@@ -2783,7 +2937,9 @@ export default function App() {
 									</div>
 									<div className="jira-connection-summary compact">
 										{azureDevOpsImportedWorkItemIds.map((workItemId) => (
-											<span key={workItemId} className="jira-summary-pill">#{workItemId}</span>
+											<span key={workItemId} className="jira-summary-pill">
+												#{workItemId}
+											</span>
 										))}
 									</div>
 								</div>
@@ -2797,10 +2953,19 @@ export default function App() {
 										/>
 									</div>
 									<div className="feedback-actions jira-sync-actions">
-										<button className="secondary" onClick={() => previewAzureDevOpsSync()} disabled={authActionDisabled || isPreviewingAzureDevOpsSync || isApplyingAzureDevOpsSync}>
+										<button
+											className="secondary"
+											onClick={() => previewAzureDevOpsSync()}
+											disabled={authActionDisabled || isPreviewingAzureDevOpsSync || isApplyingAzureDevOpsSync}
+										>
 											{isPreviewingAzureDevOpsSync ? "⏳ Previewing..." : "Preview Azure DevOps Update"}
 										</button>
-										<button onClick={applyAzureDevOpsSync} disabled={authActionDisabled || isApplyingAzureDevOpsSync || !azureDevOpsSyncPreview || !azureDevOpsPreviewHasReadyWorkItem}>
+										<button
+											onClick={applyAzureDevOpsSync}
+											disabled={
+												authActionDisabled || isApplyingAzureDevOpsSync || !azureDevOpsSyncPreview || !azureDevOpsPreviewHasReadyWorkItem
+											}
+										>
 											{isApplyingAzureDevOpsSync ? "⏳ Syncing..." : "Push Ready Updates"}
 										</button>
 									</div>
@@ -2811,7 +2976,9 @@ export default function App() {
 										<div className="workflow-diagnostics-pills">
 											<span className="workflow-diagnostics-pill">Ready {azureDevOpsSyncPreview.ready_work_item_count || 0}</span>
 											<span className="workflow-diagnostics-pill">Conflicts {azureDevOpsSyncPreview.conflict_count || 0}</span>
-											<span className="workflow-diagnostics-pill">Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}</span>
+											<span className="workflow-diagnostics-pill">
+												Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}
+											</span>
 										</div>
 										<div className="jira-sync-preview-list">
 											{azureDevOpsSyncPreview.work_items?.map((workItem) => (
@@ -2825,7 +2992,11 @@ export default function App() {
 													</div>
 													<div className="jira-sync-preview-meta">
 														<span>Requirements: {(workItem.requirement_ids || []).join(", ") || "—"}</span>
-														{workItem.work_item_url ? <a href={workItem.work_item_url} target="_blank" rel="noreferrer">Open in Azure DevOps ↗</a> : null}
+														{workItem.work_item_url ? (
+															<a href={workItem.work_item_url} target="_blank" rel="noreferrer">
+																Open in Azure DevOps ↗
+															</a>
+														) : null}
 													</div>
 													{workItem.conflict_reason ? <p className="jira-sync-preview-warning">{workItem.conflict_reason}</p> : null}
 													{workItem.warning ? <p className="jira-sync-preview-warning">{workItem.warning}</p> : null}
@@ -2844,7 +3015,9 @@ export default function App() {
 										</div>
 										{azureDevOpsSyncPreview.warnings?.length > 0 && (
 											<ul className="jira-sync-warning-list">
-												{azureDevOpsSyncPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+												{azureDevOpsSyncPreview.warnings.map((warning) => (
+													<li key={warning}>{warning}</li>
+												))}
 											</ul>
 										)}
 									</div>
@@ -2856,7 +3029,8 @@ export default function App() {
 										<ul className="jira-sync-apply-list">
 											{azureDevOpsSyncResults.results?.map((result) => (
 												<li key={`${result.work_item_id}-${result.status}`}>
-													<strong>#{result.work_item_id}</strong> — {result.status}{result.message ? `: ${result.message}` : ""}
+													<strong>#{result.work_item_id}</strong> — {result.status}
+													{result.message ? `: ${result.message}` : ""}
 												</li>
 											))}
 										</ul>
@@ -2881,8 +3055,8 @@ export default function App() {
 									rows={4}
 								/>
 								<div className="feedback-actions">
-									<button 
-										onClick={() => parseRequirements(true)} 
+									<button
+										onClick={() => parseRequirements(true)}
 										disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
 										className="feedback-button"
 									>
@@ -2937,22 +3111,32 @@ export default function App() {
 				{activeTab === 3 && (
 					<section className="panel">
 						<h2 className="panel-title">Generate Test Cases</h2>
-						<p className="panel-description">
-							Generate structured test cases from approved requirements and context.
-						</p>
+						<p className="panel-description">Generate structured test cases from approved requirements and context.</p>
 						{requirements.length > 0 && (
 							<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
 								<div>
-									<strong>{canGenerateFromApprovedRequirements ? "Ready for approved-requirement generation" : "Approval required before generation"}</strong>
-									<p>{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review • {rejectedRequirementCount} rejected. Only approved requirements are sent to the test-case agents.</p>
+									<strong>
+										{canGenerateFromApprovedRequirements
+											? "Ready for approved-requirement generation"
+											: "Approval required before generation"}
+									</strong>
+									<p>
+										{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review • {rejectedRequirementCount}{" "}
+										rejected. Only approved requirements are sent to the test-case agents.
+									</p>
 								</div>
 								{!canGenerateFromApprovedRequirements && (
-									<button type="button" className="secondary small" onClick={() => setActiveTab(0)}>Review requirements</button>
+									<button type="button" className="secondary small" onClick={() => setActiveTab(0)}>
+										Review requirements
+									</button>
 								)}
 							</div>
 						)}
 						<div className="panel-form button-row">
-							<button onClick={() => generateTestCases(false)} disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}>
+							<button
+								onClick={() => generateTestCases(false)}
+								disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
+							>
 								{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
 							</button>
 						</div>
@@ -2963,9 +3147,7 @@ export default function App() {
 									<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
 									<div className="review-banner-metrics">
 										<span className="review-metric-pill review-metric-pill-strong">{testCaseReviewMeta.scoreLabel}</span>
-										{testCaseReviewMeta.thresholdLabel && (
-											<span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>
-										)}
+										{testCaseReviewMeta.thresholdLabel && <span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>}
 									</div>
 								</div>
 								<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
@@ -2984,9 +3166,14 @@ export default function App() {
 								<div className="generate-results-header">
 									<div>
 										<h3>Generation Results</h3>
-										<p>Review the generated cases, traceability, coverage, analysis, and workflow diagnostics without scrolling through a wall of artifacts.</p>
+										<p>
+											Review the generated cases, traceability, coverage, analysis, and workflow diagnostics without scrolling through a
+											wall of artifacts.
+										</p>
 									</div>
-									<span className="generate-results-summary-pill">{testCases.length} test case{testCases.length === 1 ? "" : "s"}</span>
+									<span className="generate-results-summary-pill">
+										{testCases.length} test case{testCases.length === 1 ? "" : "s"}
+									</span>
 								</div>
 								<div className="generate-results-tabs" role="tablist" aria-label="Generation result sections">
 									{generateResultTabs.map((tab) => (
@@ -3000,7 +3187,9 @@ export default function App() {
 											aria-controls="generate-result-panel"
 										>
 											<span>{tab.label}</span>
-											<span className={`generate-result-tab-badge ${tab.variant ? `generate-result-tab-badge-${tab.variant}` : ""}`}>{tab.badge}</span>
+											<span className={`generate-result-tab-badge ${tab.variant ? `generate-result-tab-badge-${tab.variant}` : ""}`}>
+												{tab.badge}
+											</span>
 										</button>
 									))}
 								</div>
@@ -3010,19 +3199,18 @@ export default function App() {
 									role="tabpanel"
 									aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
 								>
-									{activeGenerateResultTab === "diagnostics" && (
-										renderWorkflowDiagnostics(
+									{activeGenerateResultTab === "diagnostics" &&
+										(renderWorkflowDiagnostics(
 											"Test-case workflow diagnostics",
 											testCaseWorkflowDiagnostics,
 											appliedTestCaseWorkflowSettings,
-											testCaseIterationHistory,
+											testCaseIterationHistory
 										) || (
 											<div className="generate-result-empty">
 												<h3>Diagnostics</h3>
 												<p>No workflow diagnostics are available for this run.</p>
 											</div>
-										)
-									)}
+										))}
 
 									{activeGenerateResultTab === "coverage" && (
 										<ScenarioCoveragePanel
@@ -3074,13 +3262,20 @@ export default function App() {
 						) : (
 							<div className="result-section">
 								<h3>Generated Test Cases</h3>
-								<span className="helper-text">No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis, and diagnostics.</span>
+								<span className="helper-text">
+									No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis, and
+									diagnostics.
+								</span>
 							</div>
 						)}
 
 						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">Back</button>
-							<button onClick={goNext} disabled={testCases.length === 0}>Next</button>
+							<button onClick={goPrev} className="secondary">
+								Back
+							</button>
+							<button onClick={goNext} disabled={testCases.length === 0}>
+								Next
+							</button>
 						</div>
 					</section>
 				)}

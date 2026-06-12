@@ -12,7 +12,6 @@ git/history checks. It is not a full bug backlog.
 | Medium | Dual auth support can blur production policy | `backend/app/auth/jwt_auth.py`, `backend/app/auth/firebase_auth.py`, `backend/app/routers/auth.py`, `frontend/src/App.jsx` | Local/E2E JWT compatibility is useful, but production paths need clear accepted-token policy | Document deployment auth mode and eventually remove or isolate legacy JWT if no longer needed |
 | Medium | `.env.example` duplicates execution settings | `.env.example` lines 34-50 | Increases setup confusion and risk of stale values | Deduplicate the repeated execution block in a focused docs/config cleanup issue |
 | Medium | Generated artifacts can dominate local scans | `.gitignore`, `.execution_artifacts/`, `client_submission/` ignore rules | Repository analysis can report generated traces/reports instead of source complexity | Keep ignored artifact cleanup in local workflow and tune future scan scripts to exclude ignored directories |
-| Medium | Formatter baseline cleanup is not yet enforced in CI | `pyproject.toml`, `frontend/.prettierrc.json`, issue #65 | Broad mechanical reformatting remains a separate review concern until baseline cleanup lands | Complete issue #65, then promote format checks to CI gates |
 | Medium | Metrics endpoint exposure depends on deployment perimeter | `backend/app/main.py`, `backend/app/observability/metrics.py` | `/metrics` may expose operational metadata if public deployments do not protect it | Decide deployment access policy for `/metrics` |
 
 ## 2) Technical Debt
@@ -25,7 +24,6 @@ git/history checks. It is not a full bug backlog.
 | Broad model module | Many product domains share one Pydantic file | `backend/app/models.py` | Contract merge conflicts and long review cycles | Split model modules only after router/service ownership boundaries are stable |
 | Older roadmap/doc drift | Some docs describe work as future that is partly implemented now | `docs/implementation-plan.md`, `docs/frontend-refactor-github-issues.md` | Contributors may follow stale sequencing | Add "current state" notes or close superseded plan sections during planning updates |
 | Partial generated frontend API types | High-traffic workflow contracts are generated from OpenAPI, but broader integrations still consume some response shapes manually | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/App.jsx`, `scripts/generate_frontend_api_types.py` | Untyped lower-traffic calls can still drift until runtime/E2E | Extend generated contract coverage as additional API areas change |
-| Formatter cleanup baseline | Ruff and Prettier configs exist, but full formatting is intentionally deferred to avoid broad churn in the lint baseline task | `pyproject.toml`, `frontend/.prettierrc.json`, issue #65 | Format checks can report known existing violations until the baseline cleanup issue lands | Run lint gates now; finish mechanical format cleanup in one focused follow-up |
 
 ## 3) Security Concerns
 

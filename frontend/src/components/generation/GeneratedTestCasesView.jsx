@@ -92,12 +92,16 @@ export default function GeneratedTestCasesView({
 										<td className="tc-component">{tc.component || "-"}</td>
 										<td className="tc-tags">
 											{getTestCaseLinkedRequirementIds(tc).map((requirementId) => (
-												<span key={`${tc.id}-${requirementId}`} className="tag traceability-case-tag">{requirementId}</span>
+												<span key={`${tc.id}-${requirementId}`} className="tag traceability-case-tag">
+													{requirementId}
+												</span>
 											))}
 										</td>
 										<td className="tc-tags">
 											{tc.tags?.map((tag) => (
-												<span key={tag} className="tag">{tag}</span>
+												<span key={tag} className="tag">
+													{tag}
+												</span>
 											))}
 										</td>
 									</tr>
@@ -118,26 +122,32 @@ export default function GeneratedTestCasesView({
 									</div>
 									{tc.description && <div className="case-description">{tc.description}</div>}
 									<div className="case-meta">
-										<span className="meta-item"><strong>Type:</strong> {tc.type}</span>
+										<span className="meta-item">
+											<strong>Type:</strong> {tc.type}
+										</span>
 										<span className={`status-badge ${getStatusClass(tc.status)}`}>{tc.status}</span>
-										<span className="meta-item"><strong>Est:</strong> {tc.estimated_time}</span>
+										<span className="meta-item">
+											<strong>Est:</strong> {tc.estimated_time}
+										</span>
 									</div>
 									{linkedRequirementIds.length > 0 && (
 										<div className="case-tags traceability-links">
 											{linkedRequirementIds.map((requirementId) => (
-												<span key={`${tc.id}-linked-${requirementId}`} className="tag traceability-case-tag">{requirementId}</span>
+												<span key={`${tc.id}-linked-${requirementId}`} className="tag traceability-case-tag">
+													{requirementId}
+												</span>
 											))}
 										</div>
 									)}
-									{tc.preconditions && (
-										<div className="case-preconditions">{tc.preconditions}</div>
-									)}
+									{tc.preconditions && <div className="case-preconditions">{tc.preconditions}</div>}
 									<div className="case-steps">
 										<strong>Steps</strong>
 										<ol>
 											{tc.steps?.map((step, index) => (
 												<li key={`${tc.id}-card-step-${step.step || index + 1}`}>
-													<span className="step-action">{step.step || index + 1}. {step.action}</span>
+													<span className="step-action">
+														{step.step || index + 1}. {step.action}
+													</span>
 													<span className="step-expected">→ {step.expected}</span>
 													{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
 												</li>
@@ -145,12 +155,16 @@ export default function GeneratedTestCasesView({
 										</ol>
 									</div>
 									{tc.expected_result && (
-										<div className="case-expected"><strong>Expected Result:</strong> {tc.expected_result}</div>
+										<div className="case-expected">
+											<strong>Expected Result:</strong> {tc.expected_result}
+										</div>
 									)}
 									{tc.tags && tc.tags.length > 0 && (
 										<div className="case-tags">
 											{tc.tags.map((tag) => (
-												<span key={tag} className="tag">{tag}</span>
+												<span key={tag} className="tag">
+													{tag}
+												</span>
 											))}
 										</div>
 									)}
@@ -164,9 +178,7 @@ export default function GeneratedTestCasesView({
 			{testCases.length > 0 && (
 				<div className="feedback-section">
 					<h3>Human Feedback</h3>
-					<p className="feedback-description">
-						Provide feedback on the generated test cases. The AI will refine them based on your input.
-					</p>
+					<p className="feedback-description">Provide feedback on the generated test cases. The AI will refine them based on your input.</p>
 					<textarea
 						className="feedback-textarea"
 						placeholder="Enter your feedback here... e.g., 'Add more negative test cases for upload feature', 'TC-003 needs more detailed steps', 'Include security test cases', etc."

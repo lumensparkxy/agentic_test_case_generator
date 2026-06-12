@@ -70,10 +70,8 @@ Baseline values should be captured in Phase 0 before any scoring target is enfor
 - Requirement import/sync is implemented for JIRA/Azure DevOps, but test-case lifecycle sync/export is not productized.
 - Artifact fetching needs stronger SSRF hardening before broad production use.
 - CI runs backend lint, backend unittest, offline benchmark scripts, API
-  contract checks, frontend lint, frontend build, and mocked Playwright checks
-  on every PR.
-- Formatter configs are tracked, but broad mechanical formatting cleanup and
-  CI format gates are intentionally split into issue #65.
+  contract checks, backend/frontend format checks, frontend lint, frontend
+  build, and mocked Playwright checks on every PR.
 
 ## Delivery phases
 

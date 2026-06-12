@@ -28,24 +28,40 @@ export default function RequirementAnalysisPanel({
 						<span className="analysis-summary-pill">{requirementAnalysis.length} requirements</span>
 						{coverageMetrics && (
 							<>
-								<span className="analysis-summary-pill">Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}</span>
-								<span className="analysis-summary-pill">Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}</span>
+								<span className="analysis-summary-pill">
+									Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}
+								</span>
+								<span className="analysis-summary-pill">
+									Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}
+								</span>
 							</>
 						)}
 						{requirementAnalysisGapCount > 0 && (
 							<span className="analysis-summary-pill collapsible-pill-alert">Gaps {requirementAnalysisGapCount}</span>
 						)}
-						<span className="collapsible-panel-icon" aria-hidden="true">⏄</span>
+						<span className="collapsible-panel-icon" aria-hidden="true">
+							⏄
+						</span>
 					</span>
 				</summary>
 				<div className="collapsible-panel-body">
 					{coverageMetrics && (
 						<div className="analysis-overview-row">
-							<span className="analysis-summary-pill">Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}</span>
-							<span className="analysis-summary-pill">Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}</span>
-							<span className="analysis-summary-pill">Permissions {coverageMetrics.role_permissions_covered || 0}/{coverageMetrics.role_permissions_total || 0}</span>
-							<span className="analysis-summary-pill">Transitions {coverageMetrics.state_transitions_covered || 0}/{coverageMetrics.state_transitions_total || 0}</span>
-							<span className="analysis-summary-pill">Risks {coverageMetrics.risk_signals_covered || 0}/{coverageMetrics.risk_signals_total || 0}</span>
+							<span className="analysis-summary-pill">
+								Rules {coverageMetrics.business_rules_covered || 0}/{coverageMetrics.business_rules_total || 0}
+							</span>
+							<span className="analysis-summary-pill">
+								Constraints {coverageMetrics.field_constraints_covered || 0}/{coverageMetrics.field_constraints_total || 0}
+							</span>
+							<span className="analysis-summary-pill">
+								Permissions {coverageMetrics.role_permissions_covered || 0}/{coverageMetrics.role_permissions_total || 0}
+							</span>
+							<span className="analysis-summary-pill">
+								Transitions {coverageMetrics.state_transitions_covered || 0}/{coverageMetrics.state_transitions_total || 0}
+							</span>
+							<span className="analysis-summary-pill">
+								Risks {coverageMetrics.risk_signals_covered || 0}/{coverageMetrics.risk_signals_total || 0}
+							</span>
 						</div>
 					)}
 					<div className="analysis-card-list">
@@ -62,7 +78,8 @@ export default function RequirementAnalysisPanel({
 										</div>
 										{summary && (
 											<span className="coverage-plan-summary">
-												{summary.business_rules_covered}/{summary.business_rules_total} rules • {summary.field_constraints_covered}/{summary.field_constraints_total} constraints
+												{summary.business_rules_covered}/{summary.business_rules_total} rules • {summary.field_constraints_covered}/
+												{summary.field_constraints_total} constraints
 											</span>
 										)}
 									</div>
@@ -95,7 +112,9 @@ export default function RequirementAnalysisPanel({
 											<h4>Constraints</h4>
 											<ul className="analysis-detail-list">
 												{(analysis.field_constraints || []).slice(0, 2).map((constraint) => (
-													<li key={constraint.id}>{constraint.field_name}: {constraint.description}</li>
+													<li key={constraint.id}>
+														{constraint.field_name}: {constraint.description}
+													</li>
 												))}
 											</ul>
 										</div>
@@ -103,7 +122,9 @@ export default function RequirementAnalysisPanel({
 											<h4>Permissions</h4>
 											<ul className="analysis-detail-list">
 												{(analysis.role_permissions || []).slice(0, 2).map((permission) => (
-													<li key={permission.id}>{permission.role}: {permission.action}</li>
+													<li key={permission.id}>
+														{permission.role}: {permission.action}
+													</li>
 												))}
 											</ul>
 										</div>
@@ -111,7 +132,9 @@ export default function RequirementAnalysisPanel({
 											<h4>Transitions</h4>
 											<ul className="analysis-detail-list">
 												{(analysis.state_transitions || []).slice(0, 2).map((transition) => (
-													<li key={transition.id}>{transition.from_state} → {transition.to_state}</li>
+													<li key={transition.id}>
+														{transition.from_state} → {transition.to_state}
+													</li>
 												))}
 											</ul>
 										</div>
@@ -119,7 +142,9 @@ export default function RequirementAnalysisPanel({
 											<h4>Risks</h4>
 											<ul className="analysis-detail-list">
 												{(analysis.risk_signals || []).slice(0, 2).map((risk) => (
-													<li key={risk.id}>{risk.severity}: {risk.title}</li>
+													<li key={risk.id}>
+														{risk.severity}: {risk.title}
+													</li>
 												))}
 											</ul>
 										</div>
@@ -128,11 +153,21 @@ export default function RequirementAnalysisPanel({
 										<div className="analysis-gap-block">
 											<strong>Coverage gaps</strong>
 											<ul className="analysis-gap-list">
-												{gaps.highRisks.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
-												{gaps.rules.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
-												{gaps.constraints.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
-												{gaps.permissions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
-												{gaps.transitions.slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+												{gaps.highRisks.slice(0, 2).map((item) => (
+													<li key={item}>{item}</li>
+												))}
+												{gaps.rules.slice(0, 2).map((item) => (
+													<li key={item}>{item}</li>
+												))}
+												{gaps.constraints.slice(0, 2).map((item) => (
+													<li key={item}>{item}</li>
+												))}
+												{gaps.permissions.slice(0, 2).map((item) => (
+													<li key={item}>{item}</li>
+												))}
+												{gaps.transitions.slice(0, 2).map((item) => (
+													<li key={item}>{item}</li>
+												))}
 											</ul>
 										</div>
 									)}

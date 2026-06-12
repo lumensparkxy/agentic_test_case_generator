@@ -191,10 +191,7 @@ def apply_azure_devops_requirement_sync(
             )
         )
 
-    final_requirements = [
-        updated_requirements_by_identity.get(_requirement_identity(requirement), requirement)
-        for requirement in payload.requirements
-    ]
+    final_requirements = [updated_requirements_by_identity.get(_requirement_identity(requirement), requirement) for requirement in payload.requirements]
 
     if skipped_requirement_ids:
         warnings.append(
@@ -261,12 +258,7 @@ def _build_sync_plans(
         rendered_excerpt = _truncate_text(_html_to_text(rendered_html), max_length=600)
         existing_excerpt = _truncate_text(live_item.description_text or _html_to_text(existing_html), max_length=400) or None
         mapped_changed_at = _resolve_group_baseline_changed_at(contexts)
-        has_conflict = bool(
-            mapped_changed_at
-            and live_item.changed_at
-            and live_item.changed_at > mapped_changed_at
-            and conflict_strategy == "block"
-        )
+        has_conflict = bool(mapped_changed_at and live_item.changed_at and live_item.changed_at > mapped_changed_at and conflict_strategy == "block")
         conflict_reason = None
         if has_conflict:
             conflict_reason = (
@@ -330,11 +322,7 @@ def _group_requirements_by_work_item(
 
 
 def _load_mapping_payloads(requirements: Sequence[Requirement]) -> dict[str, dict[str, Any]]:
-    item_ids = [
-        str(requirement.artifact_item_id or "").strip()
-        for requirement in requirements
-        if _requires_mapping_lookup(requirement)
-    ]
+    item_ids = [str(requirement.artifact_item_id or "").strip() for requirement in requirements if _requires_mapping_lookup(requirement)]
     if not item_ids:
         return {}
     try:
@@ -431,13 +419,10 @@ def _upsert_managed_requirement_block(
 
 def _build_managed_block_html(requirements: Sequence[Requirement], managed_section_title: str) -> str:
     sorted_requirements = sorted(requirements, key=lambda requirement: requirement.id)
-    items = "".join(
-        f"<li><strong>{escape(requirement.id)}:</strong> {escape(requirement.text)}</li>"
-        for requirement in sorted_requirements
-    )
+    items = "".join(f"<li><strong>{escape(requirement.id)}:</strong> {escape(requirement.text)}</li>" for requirement in sorted_requirements)
     return (
         f"{MANAGED_BLOCK_START}\n"
-        f"<section data-agentic-managed=\"requirements\">"
+        f'<section data-agentic-managed="requirements">'
         f"<h3>{escape(managed_section_title)} (managed by Agentic Test Case Generator)</h3>"
         f"<ul>{items}</ul>"
         f"</section>\n"

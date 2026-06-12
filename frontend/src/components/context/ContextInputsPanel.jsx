@@ -21,56 +21,32 @@ export default function ContextInputsPanel({
 	return (
 		<section className="panel">
 			<h2 className="panel-title">Context Inputs</h2>
-			<p className="panel-description">
-				Add links and references to enrich the test case generation context.
-			</p>
+			<p className="panel-description">Add links and references to enrich the test case generation context.</p>
 			<div className="panel-form two-cols">
 				<div className="form-group">
 					<label>Application link</label>
-					<input
-						placeholder="https://your-app"
-						value={appLink}
-						onChange={(e) => setAppLink(e.target.value)}
-					/>
+					<input placeholder="https://your-app" value={appLink} onChange={(e) => setAppLink(e.target.value)} />
 				</div>
 				<div className="form-group">
 					<label>Prototype link</label>
-					<input
-						placeholder="https://prototype"
-						value={prototypeLink}
-						onChange={(e) => setPrototypeLink(e.target.value)}
-					/>
+					<input placeholder="https://prototype" value={prototypeLink} onChange={(e) => setPrototypeLink(e.target.value)} />
 				</div>
 				<div className="form-group">
 					<label>Diagram links</label>
-					<input
-						placeholder="Link1; Link2"
-						value={diagramLinks}
-						onChange={(e) => setDiagramLinks(e.target.value)}
-					/>
+					<input placeholder="Link1; Link2" value={diagramLinks} onChange={(e) => setDiagramLinks(e.target.value)} />
 				</div>
 				<div className="form-group">
 					<label>Image links</label>
-					<input
-						placeholder="Link1; Link2"
-						value={imageLinks}
-						onChange={(e) => setImageLinks(e.target.value)}
-					/>
+					<input placeholder="Link1; Link2" value={imageLinks} onChange={(e) => setImageLinks(e.target.value)} />
 				</div>
 			</div>
 			{hasContextInputs && (
 				<div className="panel-form button-row">
-					<button
-						onClick={analyzeContext}
-						disabled={isAnalyzingContext || authActionDisabled}
-					>
+					<button onClick={analyzeContext} disabled={isAnalyzingContext || authActionDisabled}>
 						{isAnalyzingContext ? "⏳ Analyzing..." : "Analyze Context"}
 					</button>
 					{enrichedContext && (
-						<button
-							className="secondary"
-							onClick={resetContextAnalysis}
-						>
+						<button className="secondary" onClick={resetContextAnalysis}>
 							Clear Analysis
 						</button>
 					)}
@@ -91,9 +67,7 @@ export default function ContextInputsPanel({
 												checked={selectedArtifactSourceIds.includes(source.id)}
 												onChange={(e) => {
 													setSelectedArtifactSourceIds((prev) =>
-														e.target.checked
-															? [...prev, source.id]
-															: prev.filter((id) => id !== source.id)
+														e.target.checked ? [...prev, source.id] : prev.filter((id) => id !== source.id)
 													);
 												}}
 											/>
@@ -111,7 +85,9 @@ export default function ContextInputsPanel({
 								<h4>UI Elements</h4>
 								<ul className="analysis-detail-list">
 									{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
-										<li key={el.id}>{el.element_type}: {el.label || el.id}</li>
+										<li key={el.id}>
+											{el.element_type}: {el.label || el.id}
+										</li>
 									))}
 								</ul>
 							</div>
@@ -121,7 +97,9 @@ export default function ContextInputsPanel({
 								<h4>Workflows</h4>
 								<ul className="analysis-detail-list">
 									{enrichedContext.grounded_context.workflows.slice(0, 4).map((workflow) => (
-										<li key={workflow.id}>{workflow.name}: {(workflow.transitions || []).join(", ") || workflow.description}</li>
+										<li key={workflow.id}>
+											{workflow.name}: {(workflow.transitions || []).join(", ") || workflow.description}
+										</li>
 									))}
 								</ul>
 							</div>
@@ -130,7 +108,9 @@ export default function ContextInputsPanel({
 				</div>
 			)}
 			<div className="panel-nav">
-				<button onClick={goPrev} className="secondary">Back</button>
+				<button onClick={goPrev} className="secondary">
+					Back
+				</button>
 				<button onClick={goNext}>Next</button>
 			</div>
 		</section>
