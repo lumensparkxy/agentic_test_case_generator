@@ -64,10 +64,16 @@ Baseline values should be captured in Phase 0 before any scoring target is enfor
   `backend/app/main.py`, and `backend/app/agents/test_case_agent.py`);
   frontend styles are now split under `frontend/src/styles/` behind a shared
   cascade entry point.
-- Frontend/backend contracts still need generated/shared types to prevent response-shape drift.
+- Frontend/backend contracts now have generated high-traffic API constants and
+  freshness checks; broader low-traffic API surfaces still need incremental
+  coverage.
 - Requirement import/sync is implemented for JIRA/Azure DevOps, but test-case lifecycle sync/export is not productized.
 - Artifact fetching needs stronger SSRF hardening before broad production use.
-- CI should run backend unittest, offline benchmark scripts, frontend build, and mocked Playwright checks on every PR.
+- CI runs backend lint, backend unittest, offline benchmark scripts, API
+  contract checks, frontend lint, frontend build, and mocked Playwright checks
+  on every PR.
+- Formatter configs are tracked, but broad mechanical formatting cleanup and
+  CI format gates are intentionally split into issue #65.
 
 ## Delivery phases
 

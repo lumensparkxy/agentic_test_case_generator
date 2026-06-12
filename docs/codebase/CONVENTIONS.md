@@ -20,17 +20,29 @@ invent rules that are not enforced by configuration.
 
 ## 2) Formatting and Linting
 
-- Formatter: [TODO] no tracked formatter config was found.
-- Linter: [TODO] no tracked linter config was found.
+- Backend linting: Ruff is configured in `pyproject.toml` and installed from
+  `backend/requirements-dev.txt`.
+- Backend formatting: Ruff format is documented as the target formatter, but
+  broad baseline formatting cleanup is tracked separately in issue #65.
+- Frontend linting: ESLint flat config is tracked in `frontend/eslint.config.js`
+  and runs through `npm run lint`.
+- Frontend formatting: Prettier config is tracked in `frontend/.prettierrc.json`;
+  broad baseline formatting cleanup is tracked separately in issue #65.
 - Type checking: [TODO] no tracked Python type checker or TypeScript config was
   found for application code.
-- Enforced formatting command: [TODO] none in package manifests or CI.
+- Enforced lint commands: CI runs `python -m ruff check backend scripts` and
+  `npm run lint`.
+- Documented format checks: `python -m ruff format --check backend scripts` and
+  `npm run format:check`.
 - Practical rule: match the surrounding file style, run focused tests, and run
   `git diff --check` before committing if possible.
 
 Current validation commands:
 
 ```bash
+python -m pip install -r backend/requirements-dev.txt
+python -m ruff check backend scripts
+python -m ruff format --check backend scripts
 python -m unittest discover -s backend/tests -p 'test_*.py'
 python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
@@ -38,6 +50,8 @@ python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent
 python scripts/generate_frontend_api_types.py --check
 
 cd frontend
+npm run lint
+npm run format:check
 npm run build
 npm run test:e2e -- e2e/export-approval-gate.spec.js
 
@@ -147,3 +161,8 @@ work.
 - `frontend/src/services/apiClient.js`
 - `frontend/src/components/`
 - `.github/workflows/ci.yml`
+- `pyproject.toml`
+- `backend/requirements-dev.txt`
+- `frontend/eslint.config.js`
+- `frontend/.prettierrc.json`
+- `frontend/package.json`

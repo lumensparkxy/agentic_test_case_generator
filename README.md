@@ -92,6 +92,7 @@ The backend encrypts stored PATs using `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when
 
 Create a Python virtual environment (3.10+ recommended) and install deps:
 - `python -m pip install -r backend/requirements.txt`
+- `python -m pip install -r backend/requirements-dev.txt` for lint and format tooling
 
 Run the API:
 - `uvicorn app.main:app --reload --app-dir backend --reload-dir backend`
@@ -99,7 +100,7 @@ Run the API:
 ### 3) Frontend
 
 Install deps:
-- `npm install` in frontend
+- `npm ci` in frontend
 
 Run UI:
 - `npm run dev` in frontend
@@ -162,6 +163,20 @@ To generate the current FastAPI OpenAPI schema for contract checks or frontend t
 - `python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json`
 
 Use this as the source for generated TypeScript clients/types instead of hand-copying response shapes into the frontend.
+
+### 3.4) Run lint and format checks
+
+Backend linting uses Ruff:
+
+- `python -m ruff check backend scripts`
+- `python -m ruff format --check backend scripts`
+
+Frontend linting and formatting use ESLint and Prettier:
+
+- `cd frontend && npm run lint`
+- `cd frontend && npm run format:check`
+
+CI enforces the backend Ruff lint check and frontend ESLint check. Formatter checks are documented but not yet CI gates because the current repository baseline needs broad mechanical cleanup tracked in issue #65.
 
 ### 4) Run with containers on fixed local ports
 
