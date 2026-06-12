@@ -53,7 +53,9 @@ Copy .env.example to .env and set values:
 - VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_MEASUREMENT_ID (recommended to mirror your Firebase web app config)
 - VITE_FIREBASE_ENABLE_GOOGLE_AUTH, VITE_FIREBASE_ENABLE_MICROSOFT_AUTH, VITE_FIREBASE_ENABLE_APPLE_AUTH (optional provider toggles; default true)
 - JIRA_CONNECTION_SECRET_KEY (optional dedicated encryption key for stored JIRA API tokens; falls back to JWT_SECRET_KEY)
+- JIRA_CONNECTION_PREVIOUS_SECRET_KEYS (optional comma-separated previous JIRA encryption keys for read-only rotation support)
 - AZURE_DEVOPS_CONNECTION_SECRET_KEY (optional dedicated encryption key for stored Azure DevOps PATs; falls back to JWT_SECRET_KEY)
+- AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS (optional comma-separated previous Azure DevOps encryption keys for read-only rotation support)
 - AZURE_DEVOPS_API_VERSION (optional; defaults to 7.1)
 - AZURE_DEVOPS_API_TIMEOUT_SECONDS, AZURE_DEVOPS_PROJECT_PAGE_SIZE, AZURE_DEVOPS_WORK_ITEM_PAGE_SIZE (optional Azure DevOps client tuning)
 - EXECUTION_ENABLED (optional; defaults to true)
@@ -111,7 +113,7 @@ For each user connection:
 	- `https://dev.azure.com/{organization}/{project}`
 4. If a project URL is supplied, the backend normalizes it to the organization URL and remembers the project as the default project for that connection.
 
-The backend encrypts stored PATs using `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when set, otherwise `JWT_SECRET_KEY`. Do not commit PATs to `.env.example`, tests, logs, or documentation.
+The backend encrypts stored PATs using `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when set, otherwise `JWT_SECRET_KEY`. Planned encryption-key rotation can stage previous read-only keys through `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` and re-encrypt records with `python scripts/reencrypt_integration_credentials.py --apply`. Do not commit PATs to `.env.example`, tests, logs, or documentation.
 See [docs/credential-rotation-runbook.md](docs/credential-rotation-runbook.md)
 for per-user PAT rotation and encryption-key rotation behavior.
 
@@ -274,6 +276,7 @@ Prerequisites:
 	- `AUTH_TOKEN_MODE=firebase-only`
 	- `METRICS_ENABLED=false` or `METRICS_ENABLED=true` with `METRICS_ACCESS_TOKEN`
 	- `JIRA_CONNECTION_SECRET_KEY` and `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when production should use dedicated integration encryption keys
+	- `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` and `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` only during planned integration encryption-key rotation windows
 
 Set your target project and optionally the region/repository/service names:
 
@@ -296,6 +299,7 @@ What the script does:
 - deploys `METRICS_ENABLED=false` by default, or stores `METRICS_ACCESS_TOKEN` in Secret Manager when metrics are explicitly enabled
 - optionally stores `FIREBASE_SERVICE_ACCOUNT_JSON` in Secret Manager when provided
 - optionally stores `JIRA_CONNECTION_SECRET_KEY` and `AZURE_DEVOPS_CONNECTION_SECRET_KEY` in Secret Manager when provided
+- optionally stores `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` and `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` in Secret Manager when provided for staged re-encryption
 - if `GOOGLE_APPLICATION_CREDENTIALS` points to a local Firebase Admin SDK JSON file, the deploy script reads that file and uploads it as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret automatically
 - builds and pushes the backend container
 - deploys the backend to Cloud Run

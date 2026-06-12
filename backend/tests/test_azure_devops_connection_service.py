@@ -10,16 +10,19 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import AzureDevOpsSettings
 from app.models import AuthUser, AzureDevOpsConnectionInput
 from app.services.azure_devops_connection_service import (
+    AZURE_DEVOPS_TOKEN_KEY_ID_FIELD,
     delete_azure_devops_connection,
     get_azure_devops_connection_status,
     get_decrypted_azure_devops_connection,
+    reencrypt_azure_devops_connection_credentials,
     upsert_azure_devops_connection,
 )
 
 
 class FakeSnapshot:
-    def __init__(self, payload):
+    def __init__(self, payload, doc_id=None):
         self._payload = payload
+        self.id = doc_id
 
     @property
     def exists(self):
@@ -40,7 +43,7 @@ class FakeDocument:
         self.store[self.doc_id] = existing
 
     def get(self):
-        return FakeSnapshot(self.store.get(self.doc_id))
+        return FakeSnapshot(self.store.get(self.doc_id), doc_id=self.doc_id)
 
     def delete(self):
         self.store.pop(self.doc_id, None)
@@ -52,6 +55,9 @@ class FakeCollection:
 
     def document(self, doc_id):
         return FakeDocument(self.store, doc_id)
+
+    def stream(self):
+        return [FakeSnapshot(payload, doc_id=doc_id) for doc_id, payload in self.store.items()]
 
 
 class FakeFirestoreClient:
@@ -94,7 +100,76 @@ class AzureDevOpsConnectionServiceTests(unittest.TestCase):
         self.assertEqual(response.connection.default_project, "Payments")
         self.assertEqual(response.connection.token_hint, "••••1234")
         self.assertNotEqual(persisted["encrypted_personal_access_token"], "azure-pat-1234")
+        self.assertIn(AZURE_DEVOPS_TOKEN_KEY_ID_FIELD, persisted)
         self.assertEqual(stored.personal_access_token, "azure-pat-1234")
+
+    def test_decrypts_previous_key_record_and_reencrypts_with_primary_key(self) -> None:
+        client = FakeFirestoreClient()
+        payload = AzureDevOpsConnectionInput(
+            organization_url="https://dev.azure.com/acme/Payments",
+            personal_access_token="azure-pat-1234",
+            account_email="qa@acme.com",
+        )
+        old_settings = self.settings.model_copy(update={"connection_secret_key": "old-azure-secret"})
+        new_settings = self.settings.model_copy(
+            update={
+                "connection_secret_key": "new-azure-secret",
+                "previous_connection_secret_keys": ["old-azure-secret"],
+            }
+        )
+
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
+            with patch("app.services.azure_devops_connection_service.get_azure_devops_settings", return_value=old_settings):
+                with patch(
+                    "app.services.azure_devops_connection_service.AzureDevOpsAdapter.validate_connection",
+                    return_value={"organization": "acme"},
+                ):
+                    upsert_azure_devops_connection(current_user=self.user, payload=payload)
+
+            persisted = client.collections["azure_devops_user_connections"][self.user.sub]
+            old_ciphertext = persisted["encrypted_personal_access_token"]
+            old_key_id = persisted[AZURE_DEVOPS_TOKEN_KEY_ID_FIELD]
+
+            with patch("app.services.azure_devops_connection_service.get_azure_devops_settings", return_value=new_settings):
+                status = get_azure_devops_connection_status(current_user=self.user)
+                stored = get_decrypted_azure_devops_connection(current_user=self.user)
+                dry_run = reencrypt_azure_devops_connection_credentials(dry_run=True)
+                after_dry_run_ciphertext = persisted["encrypted_personal_access_token"]
+                result = reencrypt_azure_devops_connection_credentials()
+                rotated = get_decrypted_azure_devops_connection(current_user=self.user)
+
+        updated = client.collections["azure_devops_user_connections"][self.user.sub]
+        self.assertTrue(status.connected)
+        self.assertEqual(status.connection.token_hint, "••••1234")
+        self.assertEqual(stored.personal_access_token, "azure-pat-1234")
+        self.assertEqual(dry_run["dry_run"], True)
+        self.assertEqual(dry_run["reencrypted"], 1)
+        self.assertEqual(after_dry_run_ciphertext, old_ciphertext)
+        self.assertEqual(result["checked"], 1)
+        self.assertEqual(result["reencrypted"], 1)
+        self.assertNotEqual(updated["encrypted_personal_access_token"], old_ciphertext)
+        self.assertNotEqual(updated[AZURE_DEVOPS_TOKEN_KEY_ID_FIELD], old_key_id)
+        self.assertNotIn("azure-pat-1234", str(updated))
+        self.assertEqual(rotated.personal_access_token, "azure-pat-1234")
+
+    def test_invalid_ciphertext_reencrypt_failure_does_not_log_token_material(self) -> None:
+        client = FakeFirestoreClient()
+        client.collections["azure_devops_user_connections"] = {
+            self.user.sub: {
+                "encrypted_personal_access_token": "not-a-valid-fernet-token",
+                "token_hint": "••••1234",
+            }
+        }
+
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
+            with patch("app.services.azure_devops_connection_service.get_azure_devops_settings", return_value=self.settings):
+                with self.assertLogs(level="WARNING") as logs:
+                    result = reencrypt_azure_devops_connection_credentials()
+
+        self.assertEqual(result["failed"], 1)
+        serialized_logs = "\n".join(logs.output)
+        self.assertIn("could not be decrypted", serialized_logs)
+        self.assertNotIn("azure-pat", serialized_logs)
 
     def test_connection_status_returns_disconnected_when_no_document_exists(self) -> None:
         client = FakeFirestoreClient()

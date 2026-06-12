@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 258
+- Files scanned: 261
 - Files excluded after `git ls-files`: 70
-- Total bytes: 2030390
-- Text lines counted: 52997
+- Total bytes: 2063281
+- Text lines counted: 53651
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -32,9 +32,9 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Directory | Files |
 | --- | ---: |
-| `backend` | 127 |
+| `backend` | 129 |
 | `frontend` | 71 |
-| `scripts` | 26 |
+| `scripts` | 27 |
 | `docs` | 21 |
 | `.github` | 2 |
 | `schemas` | 2 |
@@ -52,7 +52,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Extension | Files |
 | --- | ---: |
-| `.py` | 131 |
+| `.py` | 134 |
 | `.md` | 25 |
 | `.js` | 25 |
 | `.json` | 21 |
@@ -79,7 +79,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/agents/test_case_agent.py` | 60416 | 1371 |
 | `backend/app/adk_client.py` | 44434 | 1106 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
-| `docs/requirements_traceability.md` | 35294 | 33 |
+| `docs/requirements_traceability.md` | 37015 | 34 |
 | `backend/app/models.py` | 33206 | 1048 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
@@ -92,5 +92,5 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/services/azure_devops_sync_service.py` | 20434 | 496 |
 | `backend/app/services/billing_repository.py` | 20291 | 540 |
 | `backend/plain_english_test_framework/compiler.py` | 20061 | 510 |
+| `README.md` | 19694 | 355 |
 | `scripts/evaluate_requirements.py` | 19614 | 483 |
-| `backend/tests/test_analysis_coverage_metrics.py` | 19012 | 446 |

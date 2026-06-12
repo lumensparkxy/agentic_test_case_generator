@@ -28,7 +28,7 @@ should preserve when changing the application.
 | `frontend/src/utils/` | Pure frontend helpers | `frontend/src/utils/*.js` |
 | `frontend/e2e/` | Playwright browser workflow tests and screenshot capture script | `frontend/e2e/*.js`, `frontend/e2e/*.mjs` |
 | `schemas/` | JSON schemas for the plain-English spec and IR contracts | `schemas/spec.schema.json`, `schemas/ir.schema.json` |
-| `scripts/` | Evaluation scripts, smoke/E2E scripts, deployment helper, payload fixtures, benchmark fixtures | `scripts/*.py`, `scripts/*.sh`, `scripts/api_payloads/` |
+| `scripts/` | Evaluation scripts, smoke/E2E scripts, deployment helper, integration credential re-encryption helper, payload fixtures, benchmark fixtures | `scripts/*.py`, `scripts/*.sh`, `scripts/api_payloads/` |
 | `docs/` | Planning, architecture, traceability, observability, client workflow, and codebase docs | `docs/*.md` |
 | `.github/workflows/` | CI pipeline definitions | `.github/workflows/ci.yml` |
 | `compose.yaml` | Local two-container app orchestration | `compose.yaml` |
@@ -48,6 +48,7 @@ should preserve when changing the application.
 - Reproducible next-version E2E workflow: `scripts/e2e_playwright_workflow.py`.
 - API smoke workflow: `scripts/run_api_smoke.sh` and `scripts/e2e_api_verify.py`.
 - OpenAPI export: `scripts/export_openapi.py`.
+- Integration credential re-encryption: `scripts/reencrypt_integration_credentials.py`.
 
 `backend/app/main.py` creates the FastAPI app, installs CORS and request
 middleware, registers routers, configures tracing, exposes `/health`, and

@@ -109,7 +109,8 @@ Logging strategy:
 Sensitive-data rules visible in code:
 
 - Connection secrets are excluded from Pydantic reprs with `Field(repr=False)`.
-- JIRA tokens and Azure DevOps PATs are encrypted before Firestore storage.
+- JIRA tokens and Azure DevOps PATs are encrypted before Firestore storage with
+  non-secret key metadata and planned previous-key rotation support.
 - Token hints are displayed instead of full credentials.
 - The plain-English framework scans generated specs for secret-like values.
 - README and `.env.example` warn not to commit PATs, API keys, credentials, or
@@ -159,6 +160,7 @@ work.
 - `backend/app/auth/firebase_auth.py`
 - `backend/app/services/jira_connection_service.py`
 - `backend/app/services/azure_devops_connection_service.py`
+- `backend/app/services/credential_crypto.py`
 - `backend/app/observability/logging.py`
 - `backend/plain_english_test_framework/validation.py`
 - `backend/tests/`

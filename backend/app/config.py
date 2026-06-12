@@ -96,6 +96,7 @@ class MetricsSettings(BaseModel):
 
 class JiraSettings(BaseModel):
     connection_secret_key: str = ""
+    previous_connection_secret_keys: list[str] = Field(default_factory=list)
     api_timeout_seconds: int = 15
     project_page_size: int = 50
     issue_page_size: int = 50
@@ -103,6 +104,7 @@ class JiraSettings(BaseModel):
 
 class AzureDevOpsSettings(BaseModel):
     connection_secret_key: str = ""
+    previous_connection_secret_keys: list[str] = Field(default_factory=list)
     api_timeout_seconds: int = 15
     api_version: str = "7.1"
     project_page_size: int = 50
@@ -314,8 +316,10 @@ def get_metrics_settings() -> MetricsSettings:
 def get_jira_settings() -> JiraSettings:
     auth_settings = get_auth_settings()
     connection_secret_key = (os.getenv("JIRA_CONNECTION_SECRET_KEY") or "").strip() or auth_settings.jwt_secret_key
+    previous_connection_secret_keys = _dedupe_preserving_order(_split_csv_env(os.getenv("JIRA_CONNECTION_PREVIOUS_SECRET_KEYS", "")))
     return JiraSettings(
         connection_secret_key=connection_secret_key,
+        previous_connection_secret_keys=previous_connection_secret_keys,
         api_timeout_seconds=_parse_positive_int_env(
             os.getenv("JIRA_API_TIMEOUT_SECONDS", "15"),
             default=15,
@@ -338,9 +342,11 @@ def get_jira_settings() -> JiraSettings:
 def get_azure_devops_settings() -> AzureDevOpsSettings:
     auth_settings = get_auth_settings()
     connection_secret_key = (os.getenv("AZURE_DEVOPS_CONNECTION_SECRET_KEY") or "").strip() or auth_settings.jwt_secret_key
+    previous_connection_secret_keys = _dedupe_preserving_order(_split_csv_env(os.getenv("AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS", "")))
     api_version = (os.getenv("AZURE_DEVOPS_API_VERSION") or "7.1").strip() or "7.1"
     return AzureDevOpsSettings(
         connection_secret_key=connection_secret_key,
+        previous_connection_secret_keys=previous_connection_secret_keys,
         api_timeout_seconds=_parse_positive_int_env(
             os.getenv("AZURE_DEVOPS_API_TIMEOUT_SECONDS", "15"),
             default=15,
