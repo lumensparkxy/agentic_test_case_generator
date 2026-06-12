@@ -172,9 +172,10 @@ The conversion and run path is implemented by
   helps local/E2E workflows, but it can confuse production auth policy unless
   the intended long-term mode remains documented.
 - Firestore is the current durable service path for audit, versioning, billing,
-  integration mappings, and reports, while older architecture docs recommend
-  Postgres as a target. The target persistence architecture needs explicit
-  product/operational confirmation.
+  integration mappings, and reports. `docs/persistence-target-decision.md`
+  accepts a staged approach: keep Firestore as the transitional runtime store
+  and target PostgreSQL for compliance-grade audit, billing, reporting, and
+  versioned artifacts after repository boundaries and migration stories exist.
 - The execution runtime shells out to `npx playwright test`. The artifact root,
   runtime cwd, browser channel, and generated paths need careful configuration
   in every deployment environment.
