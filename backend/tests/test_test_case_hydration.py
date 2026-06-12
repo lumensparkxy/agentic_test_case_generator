@@ -6,7 +6,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import _compute_test_case_coverage_metrics, _hydrate_test_cases, _normalize_test_case_type
+from app.agents.test_case_coverage import _compute_test_case_coverage_metrics, _normalize_test_case_type
+from app.agents.test_case_hydration import _hydrate_test_cases
 from app.models import Requirement
 
 

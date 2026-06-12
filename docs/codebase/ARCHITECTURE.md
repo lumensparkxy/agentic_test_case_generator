@@ -102,7 +102,8 @@ Typical generate flow:
 4. Agent modules such as `backend/app/adk_client.py`,
    `backend/app/agents/analysis_agent.py`, and
    `backend/app/agents/test_case_agent.py` orchestrate model calls, parsing,
-   review loops, metrics, and deterministic fallback output.
+   and workflow loops. Focused test-case helper modules own coverage metrics,
+   review scoring, deterministic fallback output, and response hydration.
 5. Service modules persist audit/version/billing/integration metadata through
    Firestore helpers where configured, or return warnings/fallback behavior
    where the code explicitly supports missing Firestore.
@@ -129,7 +130,7 @@ The conversion and run path is implemented by
 | FastAPI app | App construction, middleware, CORS, router registration, health, metrics | Feature endpoint logic beyond global middleware | `backend/app/main.py` |
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
-| Agents | Requirement extraction, analysis, test-case generation, review/refinement loops, deterministic fallback generation, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
+| Agents | Requirement extraction, analysis, test-case generation orchestration, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
 | Services | Billing, audit, versioning, reporting, Firestore-backed persistence, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
@@ -153,12 +154,18 @@ The conversion and run path is implemented by
 
 ## 6) Known Architectural Risks
 
-- `backend/app/agents/test_case_agent.py` remains a large, high-churn file.
-  `frontend/src/App.jsx` is still the top-level workflow composer, but
-  workflow state is now split into domain hooks under `frontend/src/hooks/`,
-  and feature styles are split under `frontend/src/styles/` behind
-  `frontend/src/styles/index.css`. Future changes should continue moving
-  cohesive behavior and selectors behind those ownership boundaries.
+- Test-case generation is now split across focused backend helper modules:
+  orchestration and prompt builders remain in
+  `backend/app/agents/test_case_agent.py`, coverage helpers live in
+  `backend/app/agents/test_case_coverage.py`, review helpers live in
+  `backend/app/agents/test_case_review.py`, deterministic fallback helpers live
+  in `backend/app/agents/test_case_fallback.py`, and response hydration helpers
+  live in `backend/app/agents/test_case_hydration.py`. `frontend/src/App.jsx`
+  is still the top-level workflow composer, but workflow state is now split into
+  domain hooks under `frontend/src/hooks/`, and feature styles are split under
+  `frontend/src/styles/` behind `frontend/src/styles/index.css`. Future changes
+  should continue moving cohesive behavior and selectors behind those ownership
+  boundaries.
 - `backend/app/models.py` contains many product domains in one file. This keeps
   contracts discoverable but increases merge and review risk as the API grows.
 - Current auth supports Firebase ID tokens and legacy/backend JWT tokens. This
@@ -179,6 +186,11 @@ The conversion and run path is implemented by
 - `backend/app/routers/requirements.py`
 - `backend/app/routers/testcases.py`
 - `backend/app/routers/automation.py`
+- `backend/app/agents/test_case_agent.py`
+- `backend/app/agents/test_case_coverage.py`
+- `backend/app/agents/test_case_review.py`
+- `backend/app/agents/test_case_fallback.py`
+- `backend/app/agents/test_case_hydration.py`
 - `backend/app/services/execution_service.py`
 - `backend/plain_english_test_framework/compiler.py`
 - `backend/plain_english_test_framework/local_runner.py`
