@@ -15,6 +15,7 @@ invent rules that are not enforced by configuration.
 | Frontend components | PascalCase file and function names | `AutomationPanel.jsx`, `GeneratedTestCasesView.jsx` | `frontend/src/components/` |
 | Frontend hooks | `use*` camelCase | `useBillingStatus.js`, `useEscapeToClose.js` | `frontend/src/hooks/` |
 | Frontend helpers | camelCase exports in domain helper files | `createRequestId`, `downloadResponseBlob` | `frontend/src/services/apiClient.js` |
+| Generated frontend API contracts | committed generated files under `frontend/src/api/generated/` | `api-contracts.d.ts`, `api-contracts.js` | `scripts/generate_frontend_api_types.py` |
 | Frontend style modules | lower-case domain names imported through `styles/index.css` | `requirements-source.css`, `generation-results.css` | `frontend/src/styles/` |
 
 ## 2) Formatting and Linting
@@ -34,6 +35,7 @@ python -m unittest discover -s backend/tests -p 'test_*.py'
 python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
+python scripts/generate_frontend_api_types.py --check
 
 cd frontend
 npm run build
@@ -50,13 +52,18 @@ npm run test:playwright -- --list
 - Backend tests import application modules through `app.*` when run with
   `backend` on the Python import path.
 - Frontend modules use relative imports. No path alias is configured.
+- Generated API contract files live in `frontend/src/api/generated/`. Do not
+  edit them by hand; update them with `python scripts/generate_frontend_api_types.py`
+  after backend API contract changes and verify with
+  `python scripts/generate_frontend_api_types.py --check`.
 - Frontend CSS enters the app through `frontend/src/styles/index.css`.
   Shared foundations live in `tokens.css` and `base.css`; feature-specific
   selectors stay in the nearest owned style module.
 - Router modules expose a module-level `router = APIRouter()`.
 - Service modules mostly expose functions rather than classes; provider-specific
   remote behavior lives in adapter modules.
-- There are no barrel exports or generated frontend API clients today.
+- The generated frontend API contract module exports type declarations and
+  high-traffic endpoint constants, not a full generated API client.
 
 ## 4) Error and Logging Conventions
 

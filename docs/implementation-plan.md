@@ -342,6 +342,7 @@ Use behavior-preserving slices so each refactor can be validated by the same CI 
 	- Completed first slice: coverage metrics, review helpers, deterministic fallback generation, and response hydration now live in `backend/app/agents/test_case_coverage.py`, `backend/app/agents/test_case_review.py`, `backend/app/agents/test_case_fallback.py`, and `backend/app/agents/test_case_hydration.py`; `test_case_agent.py` retains orchestration and prompt builders.
 3. **Frontend workflow modules** — extract API calls into `frontend/src/api/`, shared workflow state into hooks, and large tab bodies into focused components.
 4. **Shared contract generation** — use `scripts/export_openapi.py` in CI and generate frontend TypeScript types from that schema before larger UI refactors.
+	- Completed first slice: `scripts/generate_frontend_api_types.py` emits committed declarations and endpoint constants for high-traffic workflow contracts, and CI checks they stay fresh.
 5. **Integration provider abstraction** — introduce a common provider interface after router extraction so Jira/Azure DevOps sync stays behavior-compatible.
 
 Do not combine these steps in one pull request. Each slice should pass backend unittest, offline benchmarks, frontend build, and the relevant mocked Playwright tests.

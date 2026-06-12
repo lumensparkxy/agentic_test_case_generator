@@ -24,7 +24,7 @@ git/history checks. It is not a full bug backlog.
 | Test-case agent orchestration | Coverage metrics, review scoring, fallback generation, and hydration are split, but prompt builders and workflow orchestration still share one module | `backend/app/agents/test_case_agent.py`, `backend/app/agents/test_case_coverage.py`, `backend/app/agents/test_case_review.py`, `backend/app/agents/test_case_fallback.py`, `backend/app/agents/test_case_hydration.py` | Prompt or workflow changes still require careful regression checks across generation behavior | Keep future prompt/orchestration changes focused and rely on helper-level tests plus offline benchmarks |
 | Broad model module | Many product domains share one Pydantic file | `backend/app/models.py` | Contract merge conflicts and long review cycles | Split model modules only after router/service ownership boundaries are stable |
 | Older roadmap/doc drift | Some docs describe work as future that is partly implemented now | `docs/implementation-plan.md`, `docs/frontend-refactor-github-issues.md` | Contributors may follow stale sequencing | Add "current state" notes or close superseded plan sections during planning updates |
-| No generated frontend API types | Frontend manually consumes backend response shapes | `frontend/src/App.jsx`, `scripts/export_openapi.py` | Response-shape drift can escape until runtime/E2E | Generate frontend types from OpenAPI in a dedicated contract issue |
+| Partial generated frontend API types | High-traffic workflow contracts are generated from OpenAPI, but broader integrations still consume some response shapes manually | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/App.jsx`, `scripts/generate_frontend_api_types.py` | Untyped lower-traffic calls can still drift until runtime/E2E | Extend generated contract coverage as additional API areas change |
 
 ## 3) Security Concerns
 
@@ -78,6 +78,8 @@ git/history checks. It is not a full bug backlog.
 - `backend/app/services/billing_repository.py`
 - `backend/app/services/reporting_service.py`
 - `frontend/src/App.jsx`
+- `frontend/src/api/generated/api-contracts.d.ts`
+- `frontend/src/api/generated/api-contracts.js`
 - `frontend/src/styles/`
 - `backend/app/agents/test_case_agent.py`
 - `backend/app/agents/test_case_coverage.py`

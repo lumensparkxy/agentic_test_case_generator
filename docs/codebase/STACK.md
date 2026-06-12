@@ -81,6 +81,7 @@ python -m unittest discover -s backend/tests -p 'test_*.py'
 python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
+python scripts/generate_frontend_api_types.py --check
 ```
 
 ## 5) Environment and Config
