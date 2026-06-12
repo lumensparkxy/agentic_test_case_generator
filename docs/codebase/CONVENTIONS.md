@@ -1,0 +1,138 @@
+# Coding Conventions
+
+This reference describes conventions visible in the tracked source. It does not
+invent rules that are not enforced by configuration.
+
+## 1) Naming Rules
+
+| Item | Rule | Example | Evidence |
+|------|------|---------|----------|
+| Backend Python files | snake_case, usually by feature or service role | `test_case_agent.py`, `artifact_fetcher.py`, `azure_devops_sync_service.py` | `backend/app/agents/`, `backend/app/services/` |
+| Backend test files | `test_*.py` in `backend/tests/` | `test_execution_service.py` | `backend/tests/` |
+| Python functions | snake_case; internal helpers commonly start with `_` | `_normalize_base_url`, `preview_execution` | `backend/app/services/execution_service.py` |
+| Python classes/models | PascalCase | `GenerateTestCasesResponse`, `BillingAccount` | `backend/app/models.py` |
+| Constants/env vars | uppercase snake_case | `DEFAULT_MODEL_NAME`, `EXECUTION_MAX_CASES_PER_REQUEST` | `backend/app/config.py`, `.env.example` |
+| Frontend components | PascalCase file and function names | `AutomationPanel.jsx`, `GeneratedTestCasesView.jsx` | `frontend/src/components/` |
+| Frontend hooks | `use*` camelCase | `useBillingStatus.js`, `useEscapeToClose.js` | `frontend/src/hooks/` |
+| Frontend helpers | camelCase exports in domain helper files | `createRequestId`, `downloadResponseBlob` | `frontend/src/services/apiClient.js` |
+
+## 2) Formatting and Linting
+
+- Formatter: [TODO] no tracked formatter config was found.
+- Linter: [TODO] no tracked linter config was found.
+- Type checking: [TODO] no tracked Python type checker or TypeScript config was
+  found for application code.
+- Enforced formatting command: [TODO] none in package manifests or CI.
+- Practical rule: match the surrounding file style, run focused tests, and run
+  `git diff --check` before committing if possible.
+
+Current validation commands:
+
+```bash
+python -m unittest discover -s backend/tests -p 'test_*.py'
+python scripts/evaluate_requirements.py --offline --strict
+python scripts/evaluate_generation.py --offline --strict
+python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
+
+cd frontend
+npm run build
+npm run test:e2e -- e2e/export-approval-gate.spec.js
+
+cd backend/execution_runtime
+npm run test:playwright -- --list
+```
+
+## 3) Import and Module Conventions
+
+- Backend application imports use relative imports inside `backend/app`, for
+  example `from ..models import AuthUser` in routers.
+- Backend tests import application modules through `app.*` when run with
+  `backend` on the Python import path.
+- Frontend modules use relative imports. No path alias is configured.
+- Router modules expose a module-level `router = APIRouter()`.
+- Service modules mostly expose functions rather than classes; provider-specific
+  remote behavior lives in adapter modules.
+- There are no barrel exports or generated frontend API clients today.
+
+## 4) Error and Logging Conventions
+
+Backend error strategy:
+
+- Auth helpers raise `HTTPException` for missing, expired, revoked, or invalid
+  bearer tokens.
+- Routers raise `HTTPException` for endpoint-level validation and provider
+  workflow failures.
+- Service functions return typed response models or raise domain/runtime errors
+  that routers translate to HTTP responses.
+- Agent workflows prefer diagnostics, warnings, parser failure metadata, and
+  deterministic fallback output when model output is malformed or incomplete.
+
+Logging strategy:
+
+- `backend/app/main.py` configures structured request logging through
+  `backend/app/observability/logging.py`.
+- Request middleware binds `request_id`, optional `trace_id`, method, and path
+  into log context.
+- Workflow agents add `request_id`, `workflow_run_id`, `actor_user_id`, and
+  operation context to workflow logs.
+- Audit writes are retried and dead-letter summaries are sanitized before
+  storage in memory.
+
+Sensitive-data rules visible in code:
+
+- Connection secrets are excluded from Pydantic reprs with `Field(repr=False)`.
+- JIRA tokens and Azure DevOps PATs are encrypted before Firestore storage.
+- Token hints are displayed instead of full credentials.
+- The plain-English framework scans generated specs for secret-like values.
+- README and `.env.example` warn not to commit PATs, API keys, credentials, or
+  generated client data.
+
+## 5) Testing Conventions
+
+- Backend tests live in `backend/tests/` and are discovered with
+  `python -m unittest discover -s backend/tests -p 'test_*.py'`.
+- Tests use `unittest`, `fastapi.testclient.TestClient`, `unittest.mock.patch`,
+  and local fake clients instead of real remote services.
+- Integration tests for JIRA/Azure DevOps patch service and adapter boundaries.
+- Firestore-dependent tests patch `get_firestore_client` or use fake clients to
+  isolate behavior.
+- Frontend E2E specs live in `frontend/e2e/`.
+- Execution runtime smoke checks use `npm run test:playwright -- --list` under
+  `backend/execution_runtime`.
+
+## 6) Branching, Issue, and Change Scope
+
+The repository-level `AGENTS.md` makes GitHub issues or issue-ready proposals
+the unit of work. Use `codex/issue-<number>-<short-slug>` when working from a
+GitHub issue. If no issue exists, create one or add an issue-ready proposal
+before changing code or docs.
+
+The GitHub `main` branch is protected. Changes must merge through a pull
+request linked to the issue. The solo-maintainer setup requires 0 approving
+reviews, but still requires the branch to be up to date, all conversations to be
+resolved, and these checks to pass:
+
+- `Backend tests and offline benchmarks`
+- `Frontend build and focused E2E`
+
+Direct pushes, force pushes, and deletion of `main` are blocked. Admin
+enforcement is enabled.
+
+Keep implementations scoped to acceptance criteria, update traceability docs
+when validation evidence changes, and avoid unrelated cleanup in issue-scoped
+work.
+
+## 7) Evidence
+
+- `AGENTS.md`
+- `backend/app/main.py`
+- `backend/app/auth/jwt_auth.py`
+- `backend/app/auth/firebase_auth.py`
+- `backend/app/services/jira_connection_service.py`
+- `backend/app/services/azure_devops_connection_service.py`
+- `backend/app/observability/logging.py`
+- `backend/plain_english_test_framework/validation.py`
+- `backend/tests/`
+- `frontend/src/services/apiClient.js`
+- `frontend/src/components/`
+- `.github/workflows/ci.yml`

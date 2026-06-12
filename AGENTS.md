@@ -74,6 +74,26 @@ use the `type:epic` label and link child stories/tasks from the epic body.
 10. Comment on the issue with the implementation summary, validation results,
     and any follow-up work.
 
+## Branch Protection
+
+The GitHub `main` branch is protected. Do not push directly to `main`.
+
+Required merge path:
+
+- Work on an issue-scoped branch, normally
+  `codex/issue-<number>-<short-slug>`.
+- Open a pull request linked to the issue.
+- Keep the branch up to date with `main` before merge.
+- Resolve all pull request conversations before merge.
+- Required approvals: 0. This repository is currently solo-maintained, so a PR
+  is still required for traceability and CI, but approving reviews are not.
+- Required status checks:
+  - `Backend tests and offline benchmarks`
+  - `Frontend build and focused E2E`
+
+Force pushes and deletion of `main` are blocked. Admin enforcement is enabled,
+so the protected-branch workflow applies to maintainers too.
+
 ## Local Environment
 
 Use the repo-local Python virtual environment for backend work. Do not rely on
@@ -172,4 +192,3 @@ A change is complete only when:
 - Documentation is updated for changed workflow, API, configuration, or behavior.
 - The pull request is linked to the issue and clearly summarizes what changed.
 - Follow-up work is captured as linked issues instead of hidden TODOs.
-

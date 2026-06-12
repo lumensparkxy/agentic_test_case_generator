@@ -13,6 +13,16 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - Preview generated test cases for browser automation readiness and run approved executable candidates with Playwright
 - No document retention (in-memory processing only)
 
+## Documentation Map
+
+- `docs/codebase/STACK.md` describes runtimes, dependencies, commands, and environment configuration.
+- `docs/codebase/STRUCTURE.md` maps source directories, entry points, and module boundaries.
+- `docs/codebase/ARCHITECTURE.md` explains the backend, frontend, agent, integration, and execution-runtime flow.
+- `docs/codebase/CONVENTIONS.md` captures naming, routing, error handling, logging, and testing conventions.
+- `docs/codebase/INTEGRATIONS.md` inventories Firebase, Gemini/ADK, Firestore, JIRA, Azure DevOps, Playwright, and observability integrations.
+- `docs/codebase/TESTING.md` lists validation gates and folds in the reproducible Playwright documentation E2E workflow for the next version.
+- `docs/codebase/CONCERNS.md` records high-churn areas, technical debt, security/scaling concerns, and open architecture questions.
+
 ## Setup
 
 ### 1) Configure environment
