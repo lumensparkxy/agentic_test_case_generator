@@ -1,6 +1,19 @@
-# Frontend Architecture Refactor — GitHub Issue Plan
+# Frontend Architecture Refactor — Historical GitHub Issue Plan
 
-> Live GitHub issue creation is blocked in this environment because no GitHub issue API tool is available, `gh` is not installed, and no `GITHUB_TOKEN`/`GH_TOKEN` is configured. This file contains issue-ready epics and implementation issues for creation in GitHub once authentication is available.
+> Historical note as of 2026-06-12: GitHub issue and PR automation is now
+> available for this repository. This file is retained as the original frontend
+> refactor issue plan, not the active source of truth. Current issue-backed
+> roadmap status lives in `docs/github-issues-backlog.md` and implementation
+> evidence lives in `docs/requirements_traceability.md`.
+
+## Current status
+
+- Workflow state extraction completed under [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39), with domain hooks in `frontend/src/hooks/`.
+- CSS modularization completed under [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40), with feature-owned styles under `frontend/src/styles/`.
+- High-traffic frontend API contract generation completed under [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43), with generated contracts under `frontend/src/api/generated/`.
+- API base URL, request ID, API error, JSON, and blob helpers live in `frontend/src/services/apiClient.js`.
+- Reusable layout, workflow, integration, requirement, generation, automation, and export components live in `frontend/src/components/`.
+- `frontend/src/App.jsx` remains the top-level workflow/layout orchestrator; new frontend architecture work should be captured as fresh issue-scoped follow-up under [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35).
 
 ## Suggested labels
 
@@ -46,6 +59,10 @@ Current implementation note: frontend styles enter through
 
 **Labels:** `type:refactor`, `area:frontend`, `area:architecture`, `phase:frontend-refactor`
 
+**Status:** Completed in the current source tree. Constants and pure helpers live
+in `frontend/src/constants/workflow.js`, `frontend/src/utils/workflow.js`,
+`frontend/src/utils/requirements.js`, and `frontend/src/utils/usage.js`.
+
 ### Summary
 
 Move static constants and pure helper functions out of `App.jsx` into dedicated modules.
@@ -70,6 +87,11 @@ Move static constants and pure helper functions out of `App.jsx` into dedicated 
 
 **Labels:** `type:refactor`, `area:frontend`, `area:architecture`, `phase:frontend-refactor`
 
+**Status:** Completed for shared client helpers. `frontend/src/services/apiClient.js`
+owns base URL resolution, request ID headers, API error parsing, and blob
+downloads. Generated endpoint constants for high-traffic workflows live in
+`frontend/src/api/generated/`.
+
 ### Summary
 
 Centralize API base URL resolution, request ID generation, API error parsing, and download helpers.
@@ -92,6 +114,11 @@ Centralize API base URL resolution, request ID generation, API error parsing, an
 ## Issue 3 — Phase 3: extract reusable UI components
 
 **Labels:** `type:refactor`, `area:frontend`, `area:architecture`, `phase:frontend-refactor`
+
+**Status:** Completed for high-traffic sections in the current source tree.
+Reusable components live under `frontend/src/components/`, including auth,
+layout, settings, workflow, requirements, integrations, generation, automation,
+and export areas.
 
 ### Summary
 
@@ -116,6 +143,9 @@ Move repeated or self-contained JSX sections into focused components.
 ## Issue 4 — Phase 4: group workflow state into custom hooks
 
 **Labels:** `type:refactor`, `area:frontend`, `area:architecture`, `phase:frontend-refactor`
+
+**Status:** Completed under [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39).
+Workflow state hooks live in `frontend/src/hooks/`.
 
 ### Summary
 
@@ -143,6 +173,10 @@ Move related state and side-effect orchestration into custom hooks to reduce `Ap
 
 **Labels:** `type:refactor`, `area:frontend`, `area:architecture`, `area:qa`, `phase:frontend-refactor`
 
+**Status:** Completed under [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40).
+Feature-owned style modules live under `frontend/src/styles/` and are imported
+through `frontend/src/styles/index.css`.
+
 ### Summary
 
 Split the large global stylesheet into shared foundations and feature/component styles, then remove styles no longer referenced by the UI.
@@ -166,6 +200,10 @@ Split the large global stylesheet into shared foundations and feature/component 
 ## Issue 6 — Phase 6: add regression validation for the refactor
 
 **Labels:** `type:refactor`, `area:frontend`, `area:qa`, `phase:frontend-refactor`
+
+**Status:** Completed through CI and issue-specific validation evidence. The
+current CI workflow runs frontend lint, formatting checks, production build, and
+focused mocked Playwright E2E on PRs.
 
 ### Summary
 
