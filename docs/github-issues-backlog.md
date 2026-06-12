@@ -4,6 +4,10 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 
 ## Created GitHub issues
 
+The original Phase 0 through Phase 2 issues in this section are historical
+planning records for implemented coverage-intelligence and grounded-context
+work. Active roadmap work is tracked in the Phase 3 and Phase 4 sections below.
+
 - Tracker: [#12](https://github.com/lumensparkxy/agentic_test_case_generator/issues/12) — Improve the test case engine with coverage intelligence and grounded context
 - [#3](https://github.com/lumensparkxy/agentic_test_case_generator/issues/3) — Phase 0: add generation evaluation harness and benchmark fixtures
 - [#4](https://github.com/lumensparkxy/agentic_test_case_generator/issues/4) — Phase 1: add requirement analysis models and JSON parsers
@@ -24,33 +28,35 @@ next-version end-to-end Playwright documentation workflow succeeded.
 
 ### Phase 3 - Architecture Hardening
 
+Status markers below reflect the GitHub issue state as of 2026-06-12.
+
 - Epic [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35) - Reduce high-churn architecture hotspots
-  - [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
-  - [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40) - Modularize frontend CSS by feature ownership
-  - [#41](https://github.com/lumensparkxy/agentic_test_case_generator/issues/41) - Split test_case_agent.py into focused backend modules
-  - [#42](https://github.com/lumensparkxy/agentic_test_case_generator/issues/42) - Split backend Pydantic contracts by domain
+  - Done: [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
+  - Done: [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40) - Modularize frontend CSS by feature ownership
+  - Done: [#41](https://github.com/lumensparkxy/agentic_test_case_generator/issues/41) - Split test_case_agent.py into focused backend modules
+  - Blocked: [#42](https://github.com/lumensparkxy/agentic_test_case_generator/issues/42) - Split backend Pydantic contracts by domain
 - Epic [#36](https://github.com/lumensparkxy/agentic_test_case_generator/issues/36) - Strengthen contract safety and engineering hygiene
-  - [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43) - Generate frontend API types from FastAPI OpenAPI
-  - [#44](https://github.com/lumensparkxy/agentic_test_case_generator/issues/44) - Add formatter and linter baseline for backend and frontend
-  - [#65](https://github.com/lumensparkxy/agentic_test_case_generator/issues/65) - Apply formatter baseline cleanup and enable format checks in CI
-  - [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
-  - [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
-  - [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
+  - Done: [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43) - Generate frontend API types from FastAPI OpenAPI
+  - Done: [#44](https://github.com/lumensparkxy/agentic_test_case_generator/issues/44) - Add formatter and linter baseline for backend and frontend
+  - Done: [#65](https://github.com/lumensparkxy/agentic_test_case_generator/issues/65) - Apply formatter baseline cleanup and enable format checks in CI
+  - Done: [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
+  - In progress: [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
+  - Ready: [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
 
 ### Phase 4 - Operational Readiness
 
 - Epic [#37](https://github.com/lumensparkxy/agentic_test_case_generator/issues/37) - Settle production persistence and auth architecture
-  - [#48](https://github.com/lumensparkxy/agentic_test_case_generator/issues/48) - Spike: decide Firestore versus Postgres persistence target
-  - [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49) - Introduce durable persistence boundary for audit and billing
-  - [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50) - Spike: define production auth policy for Firebase and JWT
-  - [#51](https://github.com/lumensparkxy/agentic_test_case_generator/issues/51) - Enforce accepted production auth mode explicitly
+  - Ready: [#48](https://github.com/lumensparkxy/agentic_test_case_generator/issues/48) - Spike: decide Firestore versus Postgres persistence target
+  - Blocked: [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49) - Introduce durable persistence boundary for audit and billing
+  - Ready: [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50) - Spike: define production auth policy for Firebase and JWT
+  - Blocked: [#51](https://github.com/lumensparkxy/agentic_test_case_generator/issues/51) - Enforce accepted production auth mode explicitly
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
-  - [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
-  - [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command
-  - [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
-  - [#55](https://github.com/lumensparkxy/agentic_test_case_generator/issues/55) - Add integration latency and error metrics for JIRA and Azure DevOps
-  - [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56) - Add durable audit dead-letter sink for compliance deployments
-  - [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57) - Harden artifact fetching threat model and validation
+  - Ready: [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
+  - Ready: [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command
+  - Ready: [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
+  - Ready: [#55](https://github.com/lumensparkxy/agentic_test_case_generator/issues/55) - Add integration latency and error metrics for JIRA and Azure DevOps
+  - Ready: [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56) - Add durable audit dead-letter sink for compliance deployments
+  - Ready: [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57) - Harden artifact fetching threat model and validation
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
