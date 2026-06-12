@@ -12,6 +12,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.adapters.jira import JiraAdapter, JiraAdapterError
+from app.observability.metrics import render_prometheus_metrics, reset_metrics
 
 
 class _FakeResponse:
@@ -29,6 +30,12 @@ class _FakeResponse:
 
 
 class JiraAdapterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_metrics()
+
+    def tearDown(self) -> None:
+        reset_metrics()
+
     def test_search_issue_summaries_uses_enhanced_jql_search_endpoint(self) -> None:
         adapter = JiraAdapter(
             base_url="https://acme.atlassian.net",
@@ -159,6 +166,27 @@ class JiraAdapterTests(unittest.TestCase):
         self.assertEqual(call_contexts, [None, cert_context])
         create_context.assert_called_once_with(cafile="/tmp/certifi.pem")
 
+    def test_validate_connection_records_success_metrics_and_logs(self) -> None:
+        adapter = JiraAdapter(
+            base_url="https://acme.atlassian.net",
+            email="qa@example.com",
+            api_token="token-123",
+        )
+
+        with self.assertLogs("app.observability.integrations", level="INFO") as captured:
+            with patch("app.adapters.jira.urlopen", return_value=_FakeResponse(b'{"accountId":"acct-1"}')):
+                payload = adapter.validate_connection()
+
+        rendered = render_prometheus_metrics()
+
+        self.assertEqual(payload["accountId"], "acct-1")
+        self.assertIn('integration_requests_total{operation="validate_connection",provider="jira",status="success"} 1', rendered)
+        self.assertIn('integration_request_duration_seconds_count{operation="validate_connection",provider="jira",status="success"} 1', rendered)
+        self.assertEqual(captured.records[0].event, "integration.request.completed")
+        self.assertEqual(captured.records[0].provider, "jira")
+        self.assertEqual(captured.records[0].integration_operation, "validate_connection")
+        self.assertEqual(captured.records[0].integration_status, "success")
+
     def test_validate_connection_surfaces_helpful_ssl_message_when_no_bundle_available(self) -> None:
         adapter = JiraAdapter(
             base_url="https://acme.atlassian.net",
@@ -190,11 +218,22 @@ class JiraAdapterTests(unittest.TestCase):
         )
 
         with patch("app.adapters.jira.urlopen", side_effect=http_error):
-            with self.assertRaises(JiraAdapterError) as raised:
-                adapter.validate_connection()
+            with self.assertLogs("app.observability.integrations", level="WARNING") as captured:
+                with self.assertRaises(JiraAdapterError) as raised:
+                    adapter.validate_connection()
+
+        rendered = render_prometheus_metrics()
 
         self.assertIn("does not have enough Jira access", str(raised.exception))
         self.assertIn("grant this user Jira product access", str(raised.exception))
+        self.assertIn('integration_requests_total{operation="validate_connection",provider="jira",status="failure"} 1', rendered)
+        self.assertIn('integration_request_duration_seconds_count{operation="validate_connection",provider="jira",status="failure"} 1', rendered)
+        self.assertEqual(captured.records[0].event, "integration.request.failed")
+        self.assertEqual(captured.records[0].provider, "jira")
+        self.assertEqual(captured.records[0].integration_operation, "validate_connection")
+        self.assertEqual(captured.records[0].integration_status, "failure")
+        self.assertEqual(captured.records[0].status_code, 403)
+        self.assertEqual(captured.records[0].error_type, "JiraAdapterError")
 
 
 if __name__ == "__main__":

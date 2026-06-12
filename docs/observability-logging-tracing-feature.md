@@ -9,7 +9,7 @@ Area: Backend, Frontend, Platform, AI Workflow Operations
 
 - Phase 1 implemented: structured JSON backend logging, request completion/failure logs, request-context binding, and automatic frontend `X-Request-ID` injection through the shared API helper.
 - Phase 2 core workflow propagation implemented: `request_id`, `workflow_run_id`, `actor_user_id`, and `operation` now flow into requirement/test-case ADK workflow logging for direct uploads, refinements, JIRA imports, and Azure DevOps imports.
-- Phase 3 implemented: Prometheus-compatible `/metrics` endpoint now exposes HTTP request counts/durations, workflow run counts/durations, agent fallback counts, and audit write failure counts. Exposure is controlled by `METRICS_ENABLED`; optional `METRICS_ACCESS_TOKEN` requires a bearer token, and Cloud Run deployments default metrics off unless explicitly token-protected.
+- Phase 3 implemented: Prometheus-compatible `/metrics` endpoint now exposes HTTP request counts/durations, workflow run counts/durations, agent fallback counts, audit write failure counts, and JIRA/Azure DevOps integration request counts/durations. Exposure is controlled by `METRICS_ENABLED`; optional `METRICS_ACCESS_TOKEN` requires a bearer token, and Cloud Run deployments default metrics off unless explicitly token-protected.
 - Phase 4 implemented: optional OpenTelemetry FastAPI tracing can be enabled with `OTEL_ENABLED=true`; incoming W3C `traceparent` IDs are surfaced as `trace_id` in request logs, `X-Trace-ID` response headers, and audit payloads.
 - Phase 5 implemented: audit writes now use bounded retry settings and record exhausted failures into a sanitized local dead-letter buffer with retry/dead-letter metrics.
 - Not yet implemented: broader explicit instrumentation for non-agent admin/auth/reporting flows and a durable external dead-letter queue for compliance deployments.
@@ -39,7 +39,7 @@ Key gaps:
 3. Backend request logs do not consistently include method, path, status, duration, actor, and request ID.
 4. Agent workflow logs include session/user context but not consistently `request_id` or `workflow_run_id`.
 5. There is no distributed tracing framework such as OpenTelemetry.
-6. Metrics such as workflow latency, failure rate, fallback usage, and external integration errors are not exposed.
+6. Metrics expose workflow latency, failure rate, fallback usage, audit write failures, and JIRA/Azure DevOps integration request outcomes/durations.
 7. Audit persistence is best-effort; failed audit writes are only warned about, with no retry/dead-letter path.
 
 ## Goals
@@ -74,7 +74,7 @@ Already implemented:
 Current limitations:
 
 - Some routes, especially auth/reporting/admin reads, have thinner explicit instrumentation
-  than the core generation workflows.
+  than the core generation and integration workflows.
 - Compliance deployments still need a durable external dead-letter queue instead of
   only the sanitized local dead-letter buffer.
 - Production metrics scraping remains deployment-specific; Cloud Run disables
@@ -210,6 +210,7 @@ Recommended metrics:
 - `agent_fallbacks_total{workflow,reason}`
 - `audit_write_failures_total{collection,operation}`
 - `integration_requests_total{provider,operation,status}`
+- `integration_request_duration_seconds{provider,operation,status}`
 - `billing_consumption_total{billing_key,status}`
 
 ### 7. Audit reliability improvements
@@ -452,6 +453,6 @@ Audit events:
 - A developer can take a failing `request_id` and find the request log, workflow run, usage event, billing record, and agent workflow logs.
 - Every core workflow has correlated request, workflow, actor, and operation metadata.
 - Logs are structured and safe for centralized aggregation.
-- Metrics show request volume, workflow success/failure rates, latency, fallback counts, and audit write failures.
+- Metrics show request volume, workflow success/failure rates, latency, fallback counts, audit write failures, and JIRA/Azure DevOps integration request outcomes and durations.
 - Tracing can be enabled without code changes using environment variables.
 - Existing backend tests pass, and new observability tests cover the implemented behavior.

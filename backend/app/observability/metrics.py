@@ -19,6 +19,8 @@ _METRIC_META = {
     "audit_write_failures_total": ("counter", "Audit persistence write failures by collection and operation."),
     "audit_write_retries_total": ("counter", "Audit persistence retry attempts by collection, operation, and outcome."),
     "audit_dead_letters_total": ("counter", "Audit persistence failures recorded to the local dead-letter buffer."),
+    "integration_requests_total": ("counter", "External integration requests by provider, operation, and status."),
+    "integration_request_duration_seconds": ("summary", "External integration request duration in seconds."),
 }
 
 
@@ -92,6 +94,12 @@ def record_audit_write_retry(*, collection: str, operation: str, outcome: str) -
 
 def record_audit_dead_letter(*, collection: str, operation: str) -> None:
     increment_counter("audit_dead_letters_total", {"collection": collection, "operation": operation})
+
+
+def record_integration_request(*, provider: str, operation: str, status: str, duration_seconds: float) -> None:
+    labels = {"provider": provider, "operation": operation, "status": status}
+    increment_counter("integration_requests_total", labels)
+    observe_summary("integration_request_duration_seconds", duration_seconds, labels)
 
 
 def _iter_metric_names() -> Iterable[str]:
