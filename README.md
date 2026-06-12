@@ -51,7 +51,7 @@ Copy .env.example to .env and set values:
 - EXECUTION_ENABLED (optional; defaults to true)
 - EXECUTION_ARTIFACT_ROOT (optional; defaults to `.execution_artifacts`)
 - EXECUTION_DEFAULT_BASE_URL (optional browser execution target)
-- EXECUTION_PLAYWRIGHT_CONFIG, EXECUTION_RUNTIME_CWD, EXECUTION_MAX_CASES_PER_REQUEST (optional execution runtime tuning)
+- EXECUTION_PLAYWRIGHT_CONFIG, EXECUTION_RUNTIME_CWD, EXECUTION_MAX_CASES_PER_REQUEST, EXECUTION_BROWSER_CHANNEL (optional execution runtime tuning)
 - BILLING_SHADOW_MODE (optional; defaults to true), BILLING_CONTACT_EMAIL, BILLING_ADMIN_EMAILS, BILLING_PILOT_REQUIREMENTS_LIMIT, BILLING_PILOT_TEST_CASE_LIMIT, and related billing tuning values
 
 Note: ADK expects GOOGLE_API_KEY. Configure GEMINI_API_KEY in this project; the backend normalizes it to GOOGLE_API_KEY at runtime. If both are set, GEMINI_API_KEY is preferred so the project `.env` does not get shadowed by an older shell-level GOOGLE_API_KEY.
