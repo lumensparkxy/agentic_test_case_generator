@@ -6,12 +6,14 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import (
+from app.agents.test_case_coverage import (
     _compute_requirement_analysis_metrics,
     _extract_scenario_types_from_test_case,
+    _normalize_coverage_plan,
+)
+from app.agents.test_case_review import (
     _heuristic_test_case_review,
     _merge_review_results,
-    _normalize_coverage_plan,
     _prefer_review,
     _resolve_test_case_workflow_settings,
 )

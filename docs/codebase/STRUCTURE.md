@@ -10,7 +10,7 @@ should preserve when changing the application.
 | `backend/` | FastAPI API, agents, services, auth, tests, execution framework, backend Dockerfile | `backend/app/main.py`, `backend/tests/`, `backend/Dockerfile` |
 | `backend/app/` | Runtime application package | `backend/app/main.py` |
 | `backend/app/routers/` | HTTP endpoint groups registered by `main.py` | `backend/app/main.py`, `backend/app/routers/*.py` |
-| `backend/app/agents/` | ADK/Gemini-facing workflow agents and prompt helpers | `backend/app/adk_client.py`, `backend/app/agents/test_case_agent.py` |
+| `backend/app/agents/` | ADK/Gemini-facing workflow agents, prompt helpers, test-case coverage/review/fallback helpers, and response hydration helpers | `backend/app/adk_client.py`, `backend/app/agents/test_case_agent.py`, `backend/app/agents/test_case_coverage.py` |
 | `backend/app/services/` | Business services, persistence adapters, execution services, billing, reporting, grounding | `backend/app/services/*.py` |
 | `backend/app/adapters/` | External API clients for JIRA and Azure DevOps | `backend/app/adapters/jira.py`, `backend/app/adapters/azure_devops.py` |
 | `backend/app/auth/` | Firebase, Google credential, backend JWT, role, and authorization helpers | `backend/app/auth/*.py` |
@@ -57,7 +57,7 @@ exposes `/metrics`.
 | Boundary | What belongs here | What must not be here |
 |----------|-------------------|------------------------|
 | `backend/app/routers/` | HTTP request parsing, FastAPI dependencies, workflow audit start/complete calls, response assembly | Low-level external API request code, raw SDK setup, large agent prompts |
-| `backend/app/agents/` | ADK/Gemini workflow orchestration, prompt construction, deterministic fallbacks, test-design review logic | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
+| `backend/app/agents/` | ADK/Gemini workflow orchestration, prompt construction, deterministic fallbacks, test-design review logic, coverage metrics, and agent response hydration | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
 | `backend/app/services/` | Domain services for billing, audit, versioning, execution, grounding, reporting, integration connection storage | FastAPI route decorators, JSX/UI behavior |
 | `backend/app/adapters/` | Provider-specific JIRA and Azure DevOps HTTP semantics | App-wide workflow decisions or billing policy |
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
@@ -73,7 +73,8 @@ exposes `/metrics`.
 ## 4) Naming and Organization Rules
 
 - Python files use snake_case, for example `test_case_agent.py`,
-  `artifact_fetcher.py`, and `azure_devops_sync_service.py`.
+  `test_case_coverage.py`, `artifact_fetcher.py`, and
+  `azure_devops_sync_service.py`.
 - Python classes and Pydantic models use PascalCase, for example
   `RequirementAnalysis`, `ExecutionPreviewResponse`, and `BillingAccount`.
 - Python functions and helpers use snake_case. Private/internal helpers are
@@ -115,6 +116,10 @@ Do not document generated files as source conventions and do not commit them.
 - `backend/app/routers/`
 - `backend/app/services/`
 - `backend/app/agents/`
+- `backend/app/agents/test_case_coverage.py`
+- `backend/app/agents/test_case_review.py`
+- `backend/app/agents/test_case_fallback.py`
+- `backend/app/agents/test_case_hydration.py`
 - `backend/plain_english_test_framework/`
 - `backend/execution_runtime/package.json`
 - `frontend/src/App.jsx`

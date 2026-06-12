@@ -8,7 +8,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents.analysis_agent import fallback_requirement_analysis
-from app.agents.test_case_agent import _fallback_coverage_plan, generate_test_cases
+from app.agents.test_case_agent import generate_test_cases
+from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import GenerateTestCasesInput, Requirement, TestCaseTemplate
 
 

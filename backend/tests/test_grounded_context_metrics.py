@@ -6,7 +6,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.agents.test_case_agent import _compute_grounded_context_metrics, _fallback_raw_test_cases, _prepare_workflow_inputs
+from app.agents.test_case_agent import _prepare_workflow_inputs
+from app.agents.test_case_coverage import _compute_grounded_context_metrics
+from app.agents.test_case_fallback import _fallback_raw_test_cases
 from app.models import ArtifactSource, EnrichInput, GroundedContext, Requirement, TestCaseTemplate
 
 
