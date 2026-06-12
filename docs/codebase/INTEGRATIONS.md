@@ -9,8 +9,8 @@ used by the tracked source.
 |--------|------|---------|------------|-------------|----------|
 | Gemini API through Google ADK / GenAI SDK | External AI API | Requirement extraction, requirement analysis, test-case generation, review/refinement, automation POM generation | `GEMINI_API_KEY` normalized to `GOOGLE_API_KEY` | High | `backend/app/config.py`, `backend/app/adk_client.py`, `backend/app/agents/test_case_agent.py`, `backend/app/agents/automation_agent.py` |
 | Firebase Authentication | External identity provider | Frontend sign-in and backend Firebase ID token verification | Firebase ID token bearer token | High | `frontend/src/firebase.js`, `backend/app/auth/firebase_auth.py`, `backend/app/services/firebase_admin.py` |
-| Backend-issued JWT | Local auth compatibility path | Legacy/local API token support and E2E helper token minting | `JWT_SECRET_KEY`, `JWT_ALGORITHM` | Medium | `backend/app/auth/jwt_auth.py`, `scripts/e2e_playwright_workflow.py` |
-| Google Identity credential verification | External identity provider path | `/auth/google/login` exchanges Google credential for backend JWT | Google ID token verified against allowed audiences | Medium | `backend/app/auth/google_auth.py`, `backend/app/routers/auth.py` |
+| Backend-issued JWT | Local/test auth compatibility path | Legacy/local API token support and E2E helper token minting; accepted only behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt` after #51 | `JWT_SECRET_KEY`, `JWT_ALGORITHM` | Medium | `backend/app/auth/jwt_auth.py`, `scripts/e2e_playwright_workflow.py`, `docs/production-auth-policy-decision.md` |
+| Google Identity credential verification | Local/test compatibility identity path | `/auth/google/login` exchanges Google credential for backend JWT only in compatibility mode after #51 | Google ID token verified against allowed audiences | Medium | `backend/app/auth/google_auth.py`, `backend/app/routers/auth.py`, `docs/production-auth-policy-decision.md` |
 | Firestore | External data store | Audit events, workflow runs, version records, connection records, billing repository, reporting data | Firebase Admin SDK credentials | High | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, `backend/app/services/audit_repository.py`, `backend/app/services/versioning_service.py`, `backend/app/services/billing_repository.py`, `backend/app/services/usage_event_repository.py` |
 | JIRA Cloud | External API | Store user JIRA connection, import requirements, sync managed requirement blocks, export tests placeholder | User email plus API token, token encrypted before storage | High | `backend/app/adapters/jira.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py`, `backend/app/routers/integrations_jira.py` |
 | Azure DevOps Services | External API | Store user Azure DevOps connection, import work items, sync managed requirement blocks | Personal Access Token, encrypted before storage | High | `backend/app/adapters/azure_devops.py`, `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py`, `backend/app/routers/integrations_azure_devops.py` |
@@ -54,8 +54,9 @@ Rotation/lifecycle notes:
 - [TODO] No credential rotation workflow is documented for JIRA/Azure DevOps
   connection secrets.
 - [TODO] No Secret Manager rotation automation is tracked.
-- [TODO] No formal token lifetime policy is documented beyond JWT expiration
-  settings and Firebase token verification behavior.
+- `docs/production-auth-policy-decision.md` defines Firebase ID tokens as the
+  production protected-endpoint token type and backend JWTs as local/test
+  compatibility tokens.
 
 ## 4) Reliability and Failure Behavior
 

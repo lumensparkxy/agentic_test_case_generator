@@ -170,9 +170,10 @@ The conversion and run path is implemented by
   boundaries.
 - `backend/app/models.py` contains many product domains in one file. This keeps
   contracts discoverable but increases merge and review risk as the API grows.
-- Current auth supports Firebase ID tokens and legacy/backend JWT tokens. This
-  helps local/E2E workflows, but it can confuse production auth policy unless
-  the intended long-term mode remains documented.
+- `docs/production-auth-policy-decision.md` accepts Firebase ID tokens as the
+  production protected-endpoint token type. Backend-issued JWTs and
+  `/auth/google/login` remain local/test compatibility paths until #51 isolates
+  them behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt`.
 - Firestore is the current durable service path for audit, versioning, billing,
   integration mappings, and reports. `docs/persistence-target-decision.md`
   accepts a staged approach: keep Firestore as the transitional runtime store

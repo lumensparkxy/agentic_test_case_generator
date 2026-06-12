@@ -22,6 +22,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - `docs/codebase/INTEGRATIONS.md` inventories Firebase, Gemini/ADK, Firestore, JIRA, Azure DevOps, Playwright, and observability integrations.
 - `docs/codebase/TESTING.md` lists validation gates and folds in the reproducible Playwright documentation E2E workflow for the next version.
 - `docs/codebase/CONCERNS.md` records high-churn areas, technical debt, security/scaling concerns, and open architecture questions.
+- `docs/production-auth-policy-decision.md` records the accepted production auth policy: Firebase ID tokens in production, backend JWTs only for explicit local/E2E compatibility after #51.
 
 ## Setup
 
@@ -248,6 +249,10 @@ After deployment, add the frontend Cloud Run URL as an Authorized JavaScript ori
 If you use Firebase Authentication with popup or redirect flows, also add the deployed frontend hostname (without `https://`) to Firebase Console -> Authentication -> Settings -> Authorized domains. For Cloud Run, this is typically both the canonical `*.a.run.app` hostname and the region-scoped `*.run.app` hostname shown by the deploy script.
 
 ## API Authentication
+Accepted production policy is documented in `docs/production-auth-policy-decision.md`.
+Current code still accepts Firebase ID tokens and backend-issued JWTs until #51
+adds explicit `AUTH_TOKEN_MODE` enforcement.
+
 - Public endpoints:
 	- `GET /health`
 	- `POST /auth/google/login`

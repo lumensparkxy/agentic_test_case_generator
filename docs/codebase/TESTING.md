@@ -88,6 +88,9 @@ Evidence: `.github/workflows/ci.yml`.
 - Backend tests patch the shared Firestore adapter, provider adapters, auth
   dependencies, billing services, repository hooks, and agent calls at module
   boundaries.
+- Local JWT based browser/API tests are compatibility workflows. After #51 they
+  must run the backend with `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production
+  validation should exercise Firebase ID token verification.
 - JIRA and Azure DevOps sync tests verify direct source metadata paths avoid
   unnecessary Firestore mapping reads where possible.
 - Frontend focused E2E tests mock API responses and use a local Vite server.
@@ -112,7 +115,7 @@ Common failure modes:
 The first successful next-version workflow is captured by
 `scripts/e2e_playwright_workflow.py`. It exercises:
 
-1. Local JWT minting.
+1. Local JWT minting in the documented compatibility mode.
 2. Markdown requirement parsing from `scripts/playwright_docs_requirements.md`.
 3. Human feedback requirement refinement.
 4. Grounded context enrichment against Playwright for Python documentation URLs.
