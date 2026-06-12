@@ -17,21 +17,99 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 - [#11](https://github.com/lumensparkxy/agentic_test_case_generator/issues/11) — Phase 2: expand backend and E2E regression coverage
 - [#17](https://github.com/lumensparkxy/agentic_test_case_generator/issues/17) — Update project dependencies to latest compatible versions
 
+## Created concern hardening issues
+
+These issues were created from `docs/codebase/CONCERNS.md` after the first
+next-version end-to-end Playwright documentation workflow succeeded.
+
+### Phase 3 - Architecture Hardening
+
+- Epic [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35) - Reduce high-churn architecture hotspots
+  - [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
+  - [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40) - Modularize frontend CSS by feature ownership
+  - [#41](https://github.com/lumensparkxy/agentic_test_case_generator/issues/41) - Split test_case_agent.py into focused backend modules
+  - [#42](https://github.com/lumensparkxy/agentic_test_case_generator/issues/42) - Split backend Pydantic contracts by domain
+- Epic [#36](https://github.com/lumensparkxy/agentic_test_case_generator/issues/36) - Strengthen contract safety and engineering hygiene
+  - [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43) - Generate frontend API types from FastAPI OpenAPI
+  - [#44](https://github.com/lumensparkxy/agentic_test_case_generator/issues/44) - Add formatter and linter baseline for backend and frontend
+  - [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
+  - [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
+  - [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
+
+### Phase 4 - Operational Readiness
+
+- Epic [#37](https://github.com/lumensparkxy/agentic_test_case_generator/issues/37) - Settle production persistence and auth architecture
+  - [#48](https://github.com/lumensparkxy/agentic_test_case_generator/issues/48) - Spike: decide Firestore versus Postgres persistence target
+  - [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49) - Introduce durable persistence boundary for audit and billing
+  - [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50) - Spike: define production auth policy for Firebase and JWT
+  - [#51](https://github.com/lumensparkxy/agentic_test_case_generator/issues/51) - Enforce accepted production auth mode explicitly
+- Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
+  - [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
+  - [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command
+  - [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
+  - [#55](https://github.com/lumensparkxy/agentic_test_case_generator/issues/55) - Add integration latency and error metrics for JIRA and Azure DevOps
+  - [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56) - Add durable audit dead-letter sink for compliance deployments
+  - [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57) - Harden artifact fetching threat model and validation
+
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
+
+## Pending issue-ready drafts
+
+### Draft - Document current codebase after first next-version E2E success
+
+**Suggested labels:** `type:task`, `area:docs`, `priority:p2`, `status:ready`
+
+**Suggested milestone:** `Phase 2 - Grounded Context`
+
+#### Summary
+
+Add repository-level codebase documentation after the first successful
+next-version end-to-end Playwright documentation workflow so maintainers and
+automation agents can understand the current architecture, validation gates,
+integration boundaries, and remaining risks.
+
+#### Acceptance criteria
+
+- [ ] Scan the tracked codebase and existing planning docs.
+- [ ] Add `docs/codebase/STACK.md`, `STRUCTURE.md`, `ARCHITECTURE.md`,
+      `CONVENTIONS.md`, `INTEGRATIONS.md`, `TESTING.md`, and `CONCERNS.md`.
+- [ ] Each codebase document includes evidence paths for non-trivial claims.
+- [ ] Fold the first next-version E2E workflow into `docs/codebase/TESTING.md`.
+- [ ] Update `README.md` with links to the new codebase documentation.
+- [ ] Capture unresolved intent-dependent questions as `[ASK USER]` items.
+
+#### Test plan
+
+- [ ] Review the Markdown files for internal links, evidence paths, and
+      unsupported claims.
+- [ ] Run a lightweight file-presence check for the expected docs.
+- [ ] Run `git diff --check`.
 
 ## Suggested milestones
 
 - `Phase 0 - Evaluation`
 - `Phase 1 - Coverage Intelligence`
 - `Phase 2 - Grounded Context`
+- `Phase 3 - Architecture Hardening`
+- `Phase 4 - Operational Readiness`
 
 ## Suggested labels
 
 - `type:enhancement`
 - `type:epic`
+- `type:story`
+- `type:task`
+- `type:spike`
 - `area:backend`
 - `area:frontend`
 - `area:qa`
+- `area:docs`
+- `area:devops`
+- `priority:p1`
+- `priority:p2`
+- `priority:p3`
+- `status:ready`
+- `status:blocked`
 - `phase:0`
 - `phase:1`
 - `phase:2`
