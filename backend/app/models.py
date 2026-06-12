@@ -661,6 +661,99 @@ class QaProjectListResponse(BaseModel):
     projects: List[QaProjectSummary] = Field(default_factory=list)
 
 
+OrchestratorStageName = Literal[
+    "requirements",
+    "context",
+    "use_cases",
+    "impact_analysis",
+    "test_cases",
+    "automation",
+    "execution",
+    "review",
+    "reports",
+]
+OrchestratorStageStatus = Literal[
+    "not_started",
+    "ready",
+    "blocked",
+    "completed",
+    "stale",
+    "failed",
+    "attention_required",
+]
+OrchestratorActionId = Literal[
+    "refine",
+    "approve",
+    "generate",
+    "analyze_impact",
+    "apply_update",
+    "full_regenerate",
+    "automate",
+    "execute",
+    "review",
+    "report",
+]
+OrchestratorBlockerCode = Literal[
+    "missing_project",
+    "missing_requirements",
+    "missing_use_cases",
+    "missing_test_cases",
+    "missing_approval",
+    "stale_downstream_stage",
+    "missing_baseline",
+    "failed_execution",
+    "unresolved_review",
+    "missing_execution",
+]
+
+
+class OrchestratorBlocker(BaseModel):
+    code: OrchestratorBlockerCode
+    message: str
+    stage: Optional[OrchestratorStageName] = None
+    action: Optional[OrchestratorActionId] = None
+    source_stage: Optional[OrchestratorStageName] = None
+    severity: Literal["info", "warning", "blocking"] = "blocking"
+
+
+class OrchestratorActionRecommendation(BaseModel):
+    action: OrchestratorActionId
+    label: str
+    stage: OrchestratorStageName
+    enabled: bool = True
+    primary: bool = False
+    secondary: bool = False
+    reason: str
+    blockers: List[OrchestratorBlocker] = Field(default_factory=list)
+
+
+class OrchestratorStageState(BaseModel):
+    stage: OrchestratorStageName
+    status: OrchestratorStageStatus = "not_started"
+    current_snapshot_id: Optional[str] = None
+    version: int = 0
+    approved: bool = False
+    stale: bool = False
+    stale_reason: Optional[str] = None
+    operation: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    blockers: List[OrchestratorBlocker] = Field(default_factory=list)
+
+
+class OrchestratorStatusResponse(BaseModel):
+    project_id: Optional[str] = None
+    project_revision: int = 0
+    current_stage: OrchestratorStageName = "requirements"
+    stages: Dict[OrchestratorStageName, OrchestratorStageState] = Field(default_factory=dict)
+    next_actions: List[OrchestratorActionRecommendation] = Field(default_factory=list)
+    blockers: List[OrchestratorBlocker] = Field(default_factory=list)
+    has_baseline_test_suite: bool = False
+    upstream_changed: bool = False
+    changed_upstream_stages: List[OrchestratorStageName] = Field(default_factory=list)
+    generated_at: datetime
+
+
 class QaProjectCreateInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     description: Optional[str] = Field(default=None, max_length=1000)
