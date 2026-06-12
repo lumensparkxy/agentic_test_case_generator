@@ -61,7 +61,7 @@ import {
 	getCurrentUserUsageSummary,
 } from "./utils/usage";
 import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workflow";
-import "./App.css";
+import "./styles/index.css";
 
 const getAuthProviderLabel = (providerKeyOrId) => {
 	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => (

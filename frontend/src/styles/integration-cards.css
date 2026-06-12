@@ -1,0 +1,41 @@
+/* Integration Grid */
+.integration-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.integration-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.25rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: #f8fafc;
+}
+
+.integration-card.disabled {
+    opacity: 0.6;
+}
+
+.integration-icon {
+    font-size: 1.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.integration-name {
+    font-weight: 600;
+    color: var(--text-main);
+    font-size: 0.9rem;
+}
+
+.integration-status {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: #e2e8f0;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    margin-top: 0.5rem;
+}

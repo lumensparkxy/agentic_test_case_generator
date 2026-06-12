@@ -21,7 +21,13 @@
 
 ### Summary
 
-Break down the monolithic `frontend/src/App.jsx` and `frontend/src/App.css` into services, utilities, hooks, focused components, and modular styles while preserving the current user workflow.
+Break down the monolithic `frontend/src/App.jsx` and former
+`frontend/src/App.css` into services, utilities, hooks, focused components, and
+modular styles while preserving the current user workflow.
+
+Current implementation note: frontend styles enter through
+`frontend/src/styles/index.css`, with shared foundations in `tokens.css` and
+`base.css` and feature-owned selectors in named style modules.
 
 ### Acceptance criteria
 

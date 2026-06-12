@@ -136,6 +136,7 @@ The conversion and run path is implemented by
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
 | Plain-English framework | Spec parsing, secret detection, environment/data resolution, schema-valid IR generation, Playwright spec generation, local runner | User auth, billing, external integrations | `backend/plain_english_test_framework/*.py` |
 | React app | Top-level workflow composition, auth session orchestration, domain workflow hooks, component props, API actions | Backend persistence or agent logic | `frontend/src/App.jsx`, `frontend/src/hooks/`, `frontend/src/components/` |
+| Frontend styles | Shared design tokens, base rules, layout styles, and feature-owned selectors imported through one cascade entry point | React state, backend contracts, or visual redesign outside the owning feature | `frontend/src/styles/index.css`, `frontend/src/styles/*.css` |
 
 ## 5) Reused Patterns
 
@@ -152,11 +153,12 @@ The conversion and run path is implemented by
 
 ## 6) Known Architectural Risks
 
-- `backend/app/agents/test_case_agent.py` and `frontend/src/App.css` remain
-  large, high-churn files. `frontend/src/App.jsx` is still the top-level
-  workflow composer, but workflow state is now split into domain hooks under
-  `frontend/src/hooks/`; future changes should continue moving cohesive
-  behavior behind those hook boundaries.
+- `backend/app/agents/test_case_agent.py` remains a large, high-churn file.
+  `frontend/src/App.jsx` is still the top-level workflow composer, but
+  workflow state is now split into domain hooks under `frontend/src/hooks/`,
+  and feature styles are split under `frontend/src/styles/` behind
+  `frontend/src/styles/index.css`. Future changes should continue moving
+  cohesive behavior and selectors behind those ownership boundaries.
 - `backend/app/models.py` contains many product domains in one file. This keeps
   contracts discoverable but increases merge and review risk as the API grows.
 - Current auth supports Firebase ID tokens and legacy/backend JWT tokens. This
@@ -186,5 +188,6 @@ The conversion and run path is implemented by
 - `backend/app/services/billing_service.py`
 - `frontend/src/App.jsx`
 - `frontend/src/components/`
+- `frontend/src/styles/`
 - `frontend/src/services/apiClient.js`
 - `backend/execution_runtime/playwright.config.ts`
