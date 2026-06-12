@@ -14,6 +14,7 @@ export interface ApiContractOperations {
 	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
+	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
@@ -40,6 +41,8 @@ export type ProjectUpdateRequest = QaProjectUpdateInput;
 export type ProjectUpdateResponse = QaProjectDetail;
 export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
+export type ProjectOrchestratorStatusRequest = undefined;
+export type ProjectOrchestratorStatusResponse = OrchestratorStatusResponse;
 export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
 export type ProjectImpactAnalysisResponse = QaProjectDetail;
 export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
@@ -379,6 +382,53 @@ export interface JiraExportInput {
 export interface JiraExportResponse {
 	message: string;
 	status: string;
+}
+
+export interface OrchestratorActionRecommendation {
+	action: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report";
+	blockers?: Array<OrchestratorBlocker>;
+	enabled?: boolean;
+	label: string;
+	primary?: boolean;
+	reason: string;
+	secondary?: boolean;
+	stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+}
+
+export interface OrchestratorBlocker {
+	action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
+	code: "missing_project" | "missing_requirements" | "missing_use_cases" | "missing_test_cases" | "missing_approval" | "stale_downstream_stage" | "missing_baseline" | "failed_execution" | "unresolved_review" | "missing_execution";
+	message: string;
+	severity?: "info" | "warning" | "blocking";
+	source_stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
+	stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
+}
+
+export interface OrchestratorStageState {
+	approved?: boolean;
+	blockers?: Array<OrchestratorBlocker>;
+	current_snapshot_id?: string | null;
+	operation?: string | null;
+	stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+	stale?: boolean;
+	stale_reason?: string | null;
+	status?: "not_started" | "ready" | "blocked" | "completed" | "stale" | "failed" | "attention_required";
+	summary?: Record<string, unknown>;
+	updated_at?: string | null;
+	version?: number;
+}
+
+export interface OrchestratorStatusResponse {
+	blockers?: Array<OrchestratorBlocker>;
+	changed_upstream_stages?: Array<"requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports">;
+	current_stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+	generated_at: string;
+	has_baseline_test_suite?: boolean;
+	next_actions?: Array<OrchestratorActionRecommendation>;
+	project_id?: string | null;
+	project_revision?: number;
+	stages?: Record<string, OrchestratorStageState>;
+	upstream_changed?: boolean;
 }
 
 export interface QaProjectCreateInput {

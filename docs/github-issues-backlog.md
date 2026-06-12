@@ -28,7 +28,7 @@ next-version end-to-end Playwright documentation workflow succeeded.
 
 ### Phase 3 - Architecture Hardening
 
-Status markers below reflect the GitHub issue state as of 2026-06-12.
+Status markers below reflect the GitHub issue state as of 2026-06-13.
 
 - Epic [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35) - Reduce high-churn architecture hotspots
   - Done: [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
@@ -50,8 +50,17 @@ Status markers below reflect the GitHub issue state as of 2026-06-12.
   - Done: [#49](https://github.com/lumensparkxy/agentic_test_case_generator/issues/49) - Introduce durable persistence boundary for audit and billing
   - Done: [#50](https://github.com/lumensparkxy/agentic_test_case_generator/issues/50) - Spike: define production auth policy for Firebase and JWT
   - Done: [#51](https://github.com/lumensparkxy/agentic_test_case_generator/issues/51) - Enforce accepted production auth mode explicitly
-  - In Progress: [#83](https://github.com/lumensparkxy/agentic_test_case_generator/issues/83) - Add durable QA project lifecycle for resumable workflows
-  - In Progress: [#85](https://github.com/lumensparkxy/agentic_test_case_generator/issues/85) - Add agentic impact update flow for changed requirements
+  - Done: [#83](https://github.com/lumensparkxy/agentic_test_case_generator/issues/83) - Add durable QA project lifecycle for resumable workflows
+  - Done: [#85](https://github.com/lumensparkxy/agentic_test_case_generator/issues/85) - Add agentic impact update flow for changed requirements
+- Epic [#86](https://github.com/lumensparkxy/agentic_test_case_generator/issues/86) - Implement Orchestrator Flow for durable QA lifecycle
+  - Done: [#87](https://github.com/lumensparkxy/agentic_test_case_generator/issues/87) - Define orchestrator domain model and workflow decisions
+  - Ready: [#88](https://github.com/lumensparkxy/agentic_test_case_generator/issues/88) - Add ADK-compatible specialist agent task contracts
+  - Ready: [#89](https://github.com/lumensparkxy/agentic_test_case_generator/issues/89) - Persist orchestrator runs, events, and resumable checkpoints
+  - Ready: [#90](https://github.com/lumensparkxy/agentic_test_case_generator/issues/90) - Build orchestrator cockpit in the frontend
+  - Ready: [#91](https://github.com/lumensparkxy/agentic_test_case_generator/issues/91) - Integrate impact update path into orchestrator decisions
+  - Ready: [#92](https://github.com/lumensparkxy/agentic_test_case_generator/issues/92) - Orchestrate automation and multi-environment execution
+  - Ready: [#93](https://github.com/lumensparkxy/agentic_test_case_generator/issues/93) - Orchestrate review and evidence-backed reporting
+  - Ready: [#94](https://github.com/lumensparkxy/agentic_test_case_generator/issues/94) - Add orchestrator evaluation and end-to-end validation suite
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
   - Done: [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
   - Done: [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command
