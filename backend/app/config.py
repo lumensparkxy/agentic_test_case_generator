@@ -20,6 +20,12 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
+AUTH_TOKEN_MODE_FIREBASE_ONLY = "firebase-only"
+AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT = "firebase-or-backend-jwt"
+SUPPORTED_AUTH_TOKEN_MODES = {
+    AUTH_TOKEN_MODE_FIREBASE_ONLY,
+    AUTH_TOKEN_MODE_FIREBASE_OR_BACKEND_JWT,
+}
 
 
 class _SuppressNonTextPartsWarning(logging.Filter):
@@ -75,6 +81,7 @@ class AuthSettings(BaseModel):
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60
+    auth_token_mode: str = AUTH_TOKEN_MODE_FIREBASE_ONLY
 
 
 class FirebaseSettings(BaseModel):
@@ -208,6 +215,25 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
     return ordered
 
 
+def _parse_auth_token_mode(raw_value: str) -> str:
+    normalized = str(raw_value or "").strip().lower()
+    if not normalized:
+        logging.warning(
+            "AUTH_TOKEN_MODE is not configured. Falling back to %s.",
+            AUTH_TOKEN_MODE_FIREBASE_ONLY,
+        )
+        return AUTH_TOKEN_MODE_FIREBASE_ONLY
+    if normalized in SUPPORTED_AUTH_TOKEN_MODES:
+        return normalized
+    logging.warning(
+        "Invalid AUTH_TOKEN_MODE=%s. Expected one of: %s. Falling back to %s.",
+        raw_value,
+        ", ".join(sorted(SUPPORTED_AUTH_TOKEN_MODES)),
+        AUTH_TOKEN_MODE_FIREBASE_ONLY,
+    )
+    return AUTH_TOKEN_MODE_FIREBASE_ONLY
+
+
 def _resolve_repo_path(raw_value: str | Path) -> Path:
     path = Path(raw_value)
     return path if path.is_absolute() else REPO_ROOT / path
@@ -245,6 +271,7 @@ def get_auth_settings() -> AuthSettings:
     jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
     jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expiration_raw = os.getenv("JWT_EXPIRATION_MINUTES", "60")
+    auth_token_mode = _parse_auth_token_mode(os.getenv("AUTH_TOKEN_MODE", ""))
 
     try:
         jwt_expiration_minutes = int(jwt_expiration_raw)
@@ -258,6 +285,7 @@ def get_auth_settings() -> AuthSettings:
         jwt_secret_key=jwt_secret_key,
         jwt_algorithm=jwt_algorithm,
         jwt_expiration_minutes=jwt_expiration_minutes,
+        auth_token_mode=auth_token_mode,
     )
 
 

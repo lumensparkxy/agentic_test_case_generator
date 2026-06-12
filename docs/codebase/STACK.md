@@ -103,7 +103,7 @@ Required or important backend variables:
 - `JWT_SECRET_KEY`
 - `JWT_ALGORITHM`
 - `JWT_EXPIRATION_MINUTES`
-- `AUTH_TOKEN_MODE` planned by #51: `firebase-only` for production,
+- `AUTH_TOKEN_MODE`: `firebase-only` for production,
   `firebase-or-backend-jwt` for local/E2E compatibility.
 - `CORS_ALLOW_ORIGINS`
 - `FIREBASE_PROJECT_ID`
@@ -124,12 +124,12 @@ Required or important backend variables:
 Required or important frontend variables:
 
 - `VITE_API_BASE`
-- `VITE_GOOGLE_CLIENT_ID`
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
 - `VITE_FIREBASE_PROJECT_ID`
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_*` optional metadata and provider toggles.
+- `VITE_GOOGLE_CLIENT_ID` only for compatibility-mode Google OAuth hints.
 
 Deployment/runtime constraints:
 
