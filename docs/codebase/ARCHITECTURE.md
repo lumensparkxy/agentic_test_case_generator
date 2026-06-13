@@ -200,6 +200,22 @@ impact-analysis priority over full regeneration when upstream artifacts changed.
 The cockpit also renders blockers from the status payload and links timeline
 events to checkpoint output snapshot IDs.
 
+Review and evidence-backed reporting flow:
+
+```text
+Approved test-case or execution evidence -> review action -> export/report snapshot with source snapshot IDs and execution run IDs -> stale report regeneration when upstream evidence changes
+```
+
+Report generation reuses the export endpoints in `backend/app/routers/export.py`
+for CSV, Excel, and JSON outputs. When export requests include `project_id`, the
+router loads the current QA project and writes a `reports` snapshot that records
+`evidence.source_snapshot_ids`, `evidence.execution_run_ids`, and evidence refs
+for each source project snapshot or execution run. The orchestrator exposes
+review/report actions after approved test-case evidence and after execution; if
+a downstream project change marks the `reports` stage stale, report regeneration
+becomes the primary recommended action. The project workspace renders the latest
+report status and evidence IDs so the audit trail is visible after reload.
+
 Next-version execution flow:
 
 ```text

@@ -58,6 +58,45 @@ function ExecutionHistory({ runs }) {
 	);
 }
 
+function ReportEvidence({ reportState, reportSnapshot }) {
+	if (!reportSnapshot) {
+		return null;
+	}
+	const payload = reportSnapshot.payload || {};
+	const evidence = payload.evidence || {};
+	const sourceSnapshotIds = evidence.source_snapshot_ids || {};
+	const executionRunIds = evidence.execution_run_ids || [];
+	const sourceEntries = Object.entries(sourceSnapshotIds).filter(([, value]) => value);
+	const status = reportState?.stale ? "Stale" : reportState?.approved ? "Approved" : "Draft";
+
+	return (
+		<div className="project-history-block">
+			<h3>Latest Report</h3>
+			<div className="project-run-list">
+				<div className="project-run-row">
+					<span>{payload.format || reportState?.operation || "report"}</span>
+					<strong>{status}</strong>
+					<span>{reportSnapshot.snapshot_id}</span>
+				</div>
+				{sourceEntries.slice(0, 3).map(([stage, snapshotId]) => (
+					<div className="project-run-row" key={`${stage}-${snapshotId}`}>
+						<span>{stage.replaceAll("_", " ")}</span>
+						<strong>Evidence</strong>
+						<span>{snapshotId}</span>
+					</div>
+				))}
+				{executionRunIds.slice(0, 2).map((runId) => (
+					<div className="project-run-row" key={runId}>
+						<span>execution run</span>
+						<strong>Evidence</strong>
+						<span>{runId}</span>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
 function TimelinePreview({ events }) {
 	if (!events?.length) {
 		return null;
@@ -99,6 +138,7 @@ export default function ProjectWorkspacePanel({
 }) {
 	const selectedProjectId = currentProject?.project_id || "";
 	const stageState = currentProject?.stage_state || {};
+	const reportSnapshot = currentProject?.current_snapshots?.reports || null;
 	return (
 		<section className="project-workspace">
 			<div className="project-workspace-header">
@@ -158,6 +198,7 @@ export default function ProjectWorkspacePanel({
 						onAction={onOrchestratorAction}
 					/>
 					<div className="project-history-grid">
+						<ReportEvidence reportState={stageState.reports} reportSnapshot={reportSnapshot} />
 						<ExecutionHistory runs={currentProject.execution_runs || []} />
 						<TimelinePreview events={currentProject.timeline || []} />
 					</div>

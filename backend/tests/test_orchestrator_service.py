@@ -330,9 +330,15 @@ class OrchestratorServiceTests(unittest.TestCase):
         status = get_project_orchestrator_status(project.project_id, actor=self.actor)
 
         automate = self._action(status, "automate")
+        report = self._action(status, "report")
+        review = self._action(status, "review")
         self.assertTrue(automate.primary)
         self.assertTrue(automate.enabled)
         self.assertEqual(automate.stage, "automation")
+        self.assertTrue(report.secondary)
+        self.assertTrue(report.enabled)
+        self.assertTrue(review.secondary)
+        self.assertTrue(review.enabled)
         self.assertEqual(status.stages["automation"].status, "ready")
         self.assertEqual(status.stages["automation"].summary["source"], "test_cases")
         self.assertEqual(status.stages["automation"].summary["test_case_count"], 1)
@@ -378,8 +384,54 @@ class OrchestratorServiceTests(unittest.TestCase):
         status = get_project_orchestrator_status(project.project_id, actor=self.actor)
 
         report = self._action(status, "report")
+        review = self._action(status, "review")
         self.assertTrue(report.primary)
         self.assertTrue(report.enabled)
+        self.assertTrue(review.secondary)
+        self.assertTrue(review.enabled)
+        self.assertEqual(status.current_stage, "reports")
+
+    def test_stale_report_recommends_report_regeneration(self) -> None:
+        project = self._seed_baseline_suite()
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "run-1", "status": "passed"},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="req-run",
+            approved=True,
+            title="Execution run",
+            metadata={"status": "passed", "run_id": "run-1"},
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="reports",
+            payload={"format": "json", "evidence": {"source_snapshot_ids": {"test_cases": "snap-old"}}},
+            operation="export.json",
+            actor=self.actor,
+            request_id="req-report",
+            approved=True,
+            title="Evidence report",
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload={"test_cases": [{"id": "TC-002", "title": "Checkout v2"}]},
+            operation="testcases.generate",
+            actor=self.actor,
+            request_id="req-test-cases-v2",
+            approved=True,
+            title="Updated test cases",
+        )
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+
+        report = self._action(status, "report")
+        self.assertTrue(report.primary)
+        self.assertTrue(report.enabled)
+        self.assertEqual(report.label, "Regenerate Evidence Report")
+        self.assertEqual(status.stages["reports"].status, "stale")
         self.assertEqual(status.current_stage, "reports")
 
     def test_failed_execution_recommends_review(self) -> None:
