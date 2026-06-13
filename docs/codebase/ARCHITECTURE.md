@@ -28,6 +28,9 @@ Primary constraints:
   requirements, use cases, impact, test cases, automation, execution, review,
   and reporting, with local adapters registered behind an ADK-compatible
   dispatcher boundary.
+- Orchestrator run records, timeline events, and checkpoints are persisted
+  under QA projects so action progress, blockers, retries, produced snapshots,
+  and execution links can resume after reloads or backend restarts.
 - Agent output must be resilient: parsers, deterministic fallbacks, retry
   diagnostics, and heuristic quality gates protect the workflow from malformed
   model output.
@@ -159,6 +162,20 @@ metadata from `backend/app/agents/specialist_registry.py`. The status service
 does not call agents or decide human approvals; those remain explicit gates
 represented as blockers.
 
+Orchestrator run persistence flow:
+
+```text
+Action request + request ID -> orchestrator run record -> events + checkpoints -> /projects/{id}/orchestrator/runs
+```
+
+`backend/app/services/orchestrator_run_service.py` stores run records,
+idempotent event records, and resumable checkpoints in project subcollections.
+Run records track current action/stage, status, actor, request ID, project
+revision, blockers, produced snapshot IDs, and execution run IDs. Checkpoints
+link source/output snapshots, agent output references, and execution records.
+The `GET /projects/{id}/orchestrator/runs` endpoint returns timeline-friendly
+runs, events, and checkpoints for the frontend cockpit tracked by issue #90.
+
 Next-version execution flow:
 
 ```text
@@ -179,7 +196,7 @@ The conversion and run path is implemented by
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
 | Agents | Requirement extraction, analysis, test-case generation orchestration, specialist task contracts/registry, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
-| Services | Billing, audit, versioning, project lifecycle, orchestrator decisions, impact update apply, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
+| Services | Billing, audit, versioning, project lifecycle, orchestrator decisions, orchestrator run persistence, impact update apply, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
@@ -197,6 +214,7 @@ The conversion and run path is implemented by
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
 | Durable project aggregate | `projects.py`, `workflow_project_service.py`, project models in `models.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
 | Orchestrator decision model | `orchestrator_service.py`, orchestrator models in `models.py` | Derives deterministic next actions and blockers from durable project snapshots |
+| Orchestrator run persistence | `orchestrator_run_service.py`, orchestrator run/checkpoint/event models in `models.py` | Keeps action progress, retries, blockers, produced snapshots, and execution links resumable across reloads and backend restarts |
 | Specialist agent task registry | `specialist_contracts.py`, `specialist_registry.py` | Gives orchestrator actions stable typed task envelopes/results and lets local or future ADK adapters plug in behind the same contract |
 | Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
@@ -227,7 +245,8 @@ The conversion and run path is implemented by
   `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production uses
   `AUTH_TOKEN_MODE=firebase-only`.
 - Firestore is the current durable service path for audit, versioning, billing,
-  integration mappings, QA project snapshots, and reports. `docs/persistence-target-decision.md`
+  integration mappings, QA project snapshots, orchestrator run/event/checkpoint
+  records, and reports. `docs/persistence-target-decision.md`
   accepts a staged approach: keep Firestore as the transitional runtime store
   and target PostgreSQL for compliance-grade audit, billing, reporting, and
   versioned artifacts. Repository boundaries now isolate audit writes,

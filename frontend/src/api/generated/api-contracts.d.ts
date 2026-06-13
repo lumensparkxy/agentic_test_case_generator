@@ -15,6 +15,7 @@ export interface ApiContractOperations {
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
 	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
+	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
@@ -43,6 +44,8 @@ export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
 export type ProjectOrchestratorStatusRequest = undefined;
 export type ProjectOrchestratorStatusResponse = OrchestratorStatusResponse;
+export type ProjectOrchestratorRunsRequest = undefined;
+export type ProjectOrchestratorRunsResponse = OrchestratorRunListResponse;
 export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
 export type ProjectImpactAnalysisResponse = QaProjectDetail;
 export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
@@ -405,6 +408,69 @@ export interface OrchestratorBlocker {
 	severity?: "info" | "warning" | "blocking";
 	source_stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
 	stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
+}
+
+export interface OrchestratorCheckpointRecord {
+	action: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report";
+	actor_user_id?: string | null;
+	agent_output_refs?: Array<Record<string, unknown>>;
+	blockers?: Array<OrchestratorBlocker>;
+	checkpoint_id: string;
+	execution_run_ids?: Array<string>;
+	metadata?: Record<string, unknown>;
+	next_action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
+	output_snapshot_ids?: Record<string, string | null>;
+	project_id: string;
+	project_revision?: number;
+	request_id?: string | null;
+	run_id: string;
+	source_snapshot_ids?: Record<string, string | null>;
+	stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+	updated_at: string;
+}
+
+export interface OrchestratorRunEvent {
+	action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
+	actor_user_id?: string | null;
+	checkpoint_id?: string | null;
+	event_id: string;
+	event_type: "run_started" | "decision_recorded" | "agent_invoked" | "approval_recorded" | "blocked" | "retry_recorded" | "checkpoint_saved" | "action_completed" | "run_failed";
+	metadata?: Record<string, unknown>;
+	occurred_at: string;
+	project_id: string;
+	project_revision?: number;
+	request_id?: string | null;
+	run_id: string;
+	stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
+	summary: string;
+}
+
+export interface OrchestratorRunListResponse {
+	checkpoints?: Array<OrchestratorCheckpointRecord>;
+	events?: Array<OrchestratorRunEvent>;
+	runs?: Array<OrchestratorRunRecord>;
+}
+
+export interface OrchestratorRunRecord {
+	action: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report";
+	actor_user_id: string;
+	blockers?: Array<OrchestratorBlocker>;
+	completed_at?: string | null;
+	current_action: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report";
+	current_checkpoint_id?: string | null;
+	current_stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+	execution_run_ids?: Array<string>;
+	idempotency_key: string;
+	metadata?: Record<string, unknown>;
+	next_unblock_action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
+	produced_snapshot_ids?: Record<string, string | null>;
+	project_id: string;
+	project_revision?: number;
+	request_id: string;
+	run_id: string;
+	started_at: string;
+	status?: "running" | "blocked" | "completed" | "failed" | "cancelled";
+	updated_at: string;
 }
 
 export interface OrchestratorStageState {

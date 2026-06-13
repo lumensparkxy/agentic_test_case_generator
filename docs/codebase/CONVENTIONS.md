@@ -83,6 +83,10 @@ npm run test:playwright -- --list
   contract registry in `backend/app/agents/specialist_registry.py`; add new
   task payload/result models in `backend/app/agents/specialist_contracts.py`
   before wiring new local or ADK-backed implementations.
+- Orchestrated action progress should use
+  `backend/app/services/orchestrator_run_service.py` for run records, event
+  records, and checkpoints. Pass stable request IDs or idempotency keys when a
+  client or worker may retry an action.
 - The generated frontend API contract module exports type declarations and
   high-traffic endpoint constants, not a full generated API client.
 

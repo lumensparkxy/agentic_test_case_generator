@@ -170,6 +170,88 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         self.assertEqual(loaded.execution_runs[0].target_environment, "staging")
         self.assertEqual(loaded.execution_runs[0].summary["failed"], 1)
 
+    def test_stage_snapshot_idempotency_key_returns_existing_snapshot(self) -> None:
+        project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
+
+        first = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="requirements",
+            payload={"requirements": [{"id": "REQ-1", "text": "Login"}]},
+            operation="requirements.parse",
+            actor=self.actor,
+            request_id="req-2",
+            idempotency_key="requirements:req-2",
+        )
+        second = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="requirements",
+            payload={"requirements": [{"id": "REQ-1", "text": "Login retry"}]},
+            operation="requirements.parse",
+            actor=self.actor,
+            request_id="req-2",
+            base_project_revision=0,
+            idempotency_key="requirements:req-2",
+        )
+
+        loaded = get_project(project.project_id, actor=self.actor)
+        snapshot_paths = [path for path in self.store if "/snapshots/" in path]
+        self.assertEqual(first.snapshot_id, second.snapshot_id)
+        self.assertEqual(second.payload["requirements"][0]["text"], "Login")
+        self.assertEqual(len(snapshot_paths), 1)
+        self.assertEqual(loaded.stage_state["requirements"].version, 1)
+
+    def test_execution_run_idempotency_key_returns_existing_record(self) -> None:
+        project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
+        execution_snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "run-1", "status": "passed"},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="req-2",
+            approved=True,
+            title="Staging execution run",
+        )
+
+        first = record_execution_run(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="req-2",
+            run_id="run-1",
+            target_environment="staging",
+            status_value="passed",
+            summary={"passed": 1, "failed": 0},
+            test_case_count=1,
+            snapshot_id=execution_snapshot.snapshot_id,
+            workflow_run_id="workflow-1",
+            source_event_id="event-1",
+            project_revision=execution_snapshot.project_revision,
+            idempotency_key="execution:req-2",
+        )
+        second = record_execution_run(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="req-2",
+            run_id="run-retry",
+            target_environment="staging",
+            status_value="failed",
+            summary={"passed": 0, "failed": 1},
+            test_case_count=1,
+            snapshot_id=execution_snapshot.snapshot_id,
+            workflow_run_id="workflow-retry",
+            source_event_id="event-retry",
+            project_revision=execution_snapshot.project_revision,
+            idempotency_key="execution:req-2",
+        )
+
+        loaded = get_project(project.project_id, actor=self.actor)
+        execution_paths = [path for path in self.store if "/execution_runs/" in path]
+        self.assertEqual(first.run_record_id, second.run_record_id)
+        self.assertEqual(second.run_id, "run-1")
+        self.assertEqual(len(execution_paths), 1)
+        self.assertEqual(len(loaded.execution_runs), 1)
+        self.assertEqual(loaded.execution_runs[0].status, "passed")
+
     def test_base_revision_conflict_raises(self) -> None:
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
 

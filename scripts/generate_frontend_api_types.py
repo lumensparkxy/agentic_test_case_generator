@@ -40,6 +40,13 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "ProjectOrchestratorStatusResponse",
     ),
     SelectedOperation(
+        "projectOrchestratorRuns",
+        "get",
+        "/projects/{project_id}/orchestrator/runs",
+        "ProjectOrchestratorRunsRequest",
+        "ProjectOrchestratorRunsResponse",
+    ),
+    SelectedOperation(
         "projectImpactAnalysis", "post", "/projects/{project_id}/impact-analysis", "ProjectImpactAnalysisRequest", "ProjectImpactAnalysisResponse"
     ),
     SelectedOperation(
