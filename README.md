@@ -15,6 +15,17 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 
 ## Documentation Map
 
+The GitHub Wiki is the reader-facing documentation hub for long-form
+architecture, testing, integration, concern, and project-tracking material:
+[Home](https://github.com/lumensparkxy/agentic_test_case_generator/wiki),
+[Architecture](https://github.com/lumensparkxy/agentic_test_case_generator/wiki/Architecture),
+[Testing and Validation](https://github.com/lumensparkxy/agentic_test_case_generator/wiki/Testing-and-Validation),
+[Integrations](https://github.com/lumensparkxy/agentic_test_case_generator/wiki/Integrations),
+[Concerns and Risks](https://github.com/lumensparkxy/agentic_test_case_generator/wiki/Concerns-and-Risks),
+and [Project Tracking](https://github.com/lumensparkxy/agentic_test_case_generator/wiki/Project-Tracking).
+The source-controlled docs below remain checked in for code-coupled review and
+PR history.
+
 - `docs/codebase/STACK.md` describes runtimes, dependencies, commands, and environment configuration.
 - `docs/codebase/STRUCTURE.md` maps source directories, entry points, and module boundaries.
 - `docs/codebase/ARCHITECTURE.md` explains the backend, frontend, agent, integration, and execution-runtime flow.
