@@ -179,7 +179,26 @@ class OrchestratorServiceTests(unittest.TestCase):
                         "test_case_id": "TC-001",
                     }
                 ],
-                "summary": {"changed_item_count": 1},
+                "impacted_test_cases": [
+                    {
+                        "test_case_id": "TC-001",
+                        "title": "Checkout happy path",
+                        "impact_source": "direct",
+                        "linked_requirement_ids": ["REQ-001"],
+                        "scenario_refs": ["REQ-001-SCN-01"],
+                        "reason": "Direct traceability match.",
+                    }
+                ],
+                "summary": {
+                    "changed_item_count": 1,
+                    "added_count": 0,
+                    "modified_count": 1,
+                    "removed_count": 0,
+                    "unchanged_requirement_count": 0,
+                    "directly_impacted_test_case_count": 1,
+                    "semantic_neighbor_count": 0,
+                    "recommendation_counts": {"update": 1},
+                },
             },
             operation="impact.analysis",
             actor=self.actor,
@@ -240,6 +259,21 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertTrue(full_regenerate.secondary)
         self.assertTrue(full_regenerate.enabled)
 
+    def test_unapproved_changed_upstream_can_still_run_impact_analysis(self) -> None:
+        project = self._seed_baseline_suite()
+        self._append_requirements(project.project_id, approved=False, title="Requirements v2")
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+
+        analyze = self._action(status, "analyze_impact")
+        full_regenerate = self._action(status, "full_regenerate")
+        self.assertTrue(status.has_baseline_test_suite)
+        self.assertTrue(status.upstream_changed)
+        self.assertEqual(status.current_stage, "impact_analysis")
+        self.assertTrue(analyze.primary)
+        self.assertTrue(analyze.enabled)
+        self.assertTrue(full_regenerate.secondary)
+
     def test_current_impact_analysis_recommends_apply_update(self) -> None:
         project = self._seed_baseline_suite()
         self._append_requirements(project.project_id, title="Requirements v2")
@@ -250,6 +284,9 @@ class OrchestratorServiceTests(unittest.TestCase):
         apply_update = self._action(status, "apply_update")
         self.assertTrue(apply_update.primary)
         self.assertTrue(apply_update.enabled)
+        self.assertEqual(apply_update.label, "Apply Accepted Updates")
+        self.assertEqual(status.stages["impact_analysis"].summary["modified_count"], 1)
+        self.assertEqual(status.stages["impact_analysis"].summary["directly_impacted_test_case_count"], 1)
 
     def test_apply_update_is_blocked_until_changed_items_are_approved(self) -> None:
         project = self._seed_baseline_suite()
@@ -262,6 +299,19 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertFalse(apply_update.enabled)
         self.assertEqual(apply_update.blockers[0].code, "missing_approval")
         self.assertEqual(apply_update.blockers[0].action, "apply_update")
+
+    def test_apply_update_is_blocked_until_changed_upstream_stage_is_approved(self) -> None:
+        project = self._seed_baseline_suite()
+        self._append_requirements(project.project_id, approved=False, title="Requirements v2")
+        self._append_impact_analysis(project.project_id, changed_item_approved=True)
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+
+        apply_update = self._action(status, "apply_update")
+        self.assertTrue(apply_update.primary)
+        self.assertFalse(apply_update.enabled)
+        self.assertEqual(apply_update.blockers[0].code, "missing_approval")
+        self.assertEqual(apply_update.blockers[0].source_stage, "requirements")
 
     def test_unapproved_test_cases_block_report_action(self) -> None:
         project = self._seed_baseline_suite(test_cases_approved=False)

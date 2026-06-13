@@ -140,6 +140,28 @@ def _impact_apply_blockers(project: QaProjectDetail) -> list[OrchestratorBlocker
     blockers: list[OrchestratorBlocker] = []
     impact_payload = _snapshot_payload(project, "impact_analysis")
     changed_items = impact_payload.get("changed_items") if isinstance(impact_payload, dict) else []
+    changed_stages: set[OrchestratorStageName] = set()
+    for item in changed_items or []:
+        if not isinstance(item, dict) or item.get("change_type") not in {"added", "modified"}:
+            continue
+        if item.get("kind") == "requirement" or item.get("requirement_id"):
+            changed_stages.add("requirements")
+        if item.get("kind") == "use_case" or item.get("use_case_id") or item.get("scenario_ids"):
+            changed_stages.add("use_cases")
+
+    for stage in ("requirements", "use_cases"):
+        if stage not in changed_stages:
+            continue
+        state = _project_state(project, stage)
+        if not state or not state.approved or state.stale:
+            blockers.append(
+                _approval_blocker(
+                    stage,
+                    action="apply_update",
+                    message=f"Approve changed {stage.replace('_', ' ')} before applying impact updates.",
+                )
+            )
+
     unapproved = [
         str(item.get("item_id") or item.get("requirement_id") or item.get("use_case_id"))
         for item in changed_items or []
@@ -180,12 +202,16 @@ def _execution_operation(project: QaProjectDetail) -> Optional[str]:
 
 def _changed_upstream_stages(project: QaProjectDetail) -> list[OrchestratorStageName]:
     test_case_state = _project_state(project, "test_cases")
+    if not test_case_state or not test_case_state.current_snapshot_id or not test_case_state.stale:
+        return []
     stale_reason = str(test_case_state.stale_reason or "") if test_case_state and test_case_state.stale else ""
     changed: list[OrchestratorStageName] = []
     for stage in ("requirements", "context", "use_cases"):
         if f"{stage} changed" in stale_reason:
             changed.append(stage)
     if changed:
+        return changed
+    if "impact_analysis changed" not in stale_reason:
         return changed
     impact_state = _project_state(project, "impact_analysis")
     if not impact_state or not impact_state.current_snapshot_id or impact_state.stale:
@@ -234,6 +260,11 @@ def _real_stage(project: QaProjectDetail, stage: ProjectStageName) -> Orchestrat
         )
     elif status == "attention_required" and stage in {"requirements", "use_cases", "test_cases", "reports"}:
         blockers.append(_approval_blocker(stage))
+    summary = dict(state.metadata or {}) if state else {}
+    if state and stage == "impact_analysis":
+        payload_summary = _snapshot_payload(project, "impact_analysis").get("summary")
+        if isinstance(payload_summary, dict):
+            summary = {**payload_summary, **summary}
     return OrchestratorStageState(
         stage=stage,
         status=status,
@@ -244,7 +275,7 @@ def _real_stage(project: QaProjectDetail, stage: ProjectStageName) -> Orchestrat
         stale_reason=state.stale_reason if state else None,
         operation=state.operation if state else None,
         updated_at=state.updated_at if state else None,
-        summary=dict(state.metadata or {}) if state else {},
+        summary=summary,
         blockers=blockers,
     )
 
@@ -408,6 +439,32 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
             )
         ]
 
+    if has_baseline_test_suite and upstream_changed:
+        if impact_state and impact_state.current_snapshot_id and not impact_state.stale:
+            apply_blockers = _impact_apply_blockers(project)
+            actions.append(
+                _action(
+                    "apply_update",
+                    "Apply Accepted Updates",
+                    "test_cases",
+                    reason="Impact analysis is current; apply accepted update/add/deprecate recommendations to produce the next test-case snapshot.",
+                    primary=True,
+                    blockers=apply_blockers,
+                )
+            )
+        else:
+            actions.append(
+                _action(
+                    "analyze_impact",
+                    "Analyze Impact",
+                    "impact_analysis",
+                    reason="Upstream requirements/use cases changed after the baseline suite was generated.",
+                    primary=True,
+                )
+            )
+        actions.append(_full_regenerate_action(full_regenerate_blockers))
+        return actions
+
     if not requirements_state.approved or requirements_state.stale:
         actions.append(
             _action(
@@ -440,32 +497,6 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 blockers=generation_blockers,
             )
         )
-        return actions
-
-    if has_baseline_test_suite and upstream_changed:
-        if impact_state and impact_state.current_snapshot_id and not impact_state.stale:
-            apply_blockers = _impact_apply_blockers(project)
-            actions.append(
-                _action(
-                    "apply_update",
-                    "Apply Impact Update",
-                    "test_cases",
-                    reason="Impact analysis is current; apply accepted recommendations to produce the next test-case snapshot.",
-                    primary=True,
-                    blockers=apply_blockers,
-                )
-            )
-        else:
-            actions.append(
-                _action(
-                    "analyze_impact",
-                    "Analyze Impact",
-                    "impact_analysis",
-                    reason="Upstream requirements/use cases changed after the baseline suite was generated.",
-                    primary=True,
-                )
-            )
-        actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
     if not use_cases_state.approved or use_cases_state.stale:

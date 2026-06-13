@@ -10,6 +10,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.models import AuthUser, TestCase, TestStep
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
+from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 
 
@@ -236,6 +237,22 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(result["preserved_count"], 8)
         self.assertEqual(result["updated_count"], 2)
         self.assertEqual(result["added_count"], 0)
+
+    def test_apply_clears_incremental_update_recommendation_after_versioned_snapshot(self) -> None:
+        project = self._seed_project(modified={"REQ-003", "REQ-010"})
+        analyzed_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
+        before_status = get_project_orchestrator_status(analyzed_project.project_id, actor=self.actor)
+
+        updated_project = apply_project_impact_update(project_id=analyzed_project.project_id, actor=self.actor, request_id="req-apply")
+        after_status = get_project_orchestrator_status(updated_project.project_id, actor=self.actor)
+
+        before_actions = {action.action for action in before_status.next_actions}
+        after_actions = {action.action for action in after_status.next_actions}
+        self.assertIn("apply_update", before_actions)
+        self.assertFalse(after_status.upstream_changed)
+        self.assertNotIn("apply_update", after_actions)
+        self.assertEqual(after_status.stages["test_cases"].summary["preserved_count"], 8)
+        self.assertEqual(after_status.stages["test_cases"].summary["updated_count"], 2)
 
     def test_removed_requirement_deprecates_linked_test_case(self) -> None:
         project = self._seed_project(omit={"REQ-005"})

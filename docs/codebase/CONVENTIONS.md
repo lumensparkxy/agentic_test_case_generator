@@ -87,6 +87,11 @@ npm run test:playwright -- --list
   `backend/app/services/orchestrator_run_service.py` for run records, event
   records, and checkpoints. Pass stable request IDs or idempotency keys when a
   client or worker may retry an action.
+- Incremental impact updates should remain the primary orchestrator path only
+  while the current test-case snapshot is stale. After `impact.update.apply`
+  creates a new test-case snapshot sourced from the impact-analysis snapshot,
+  subsequent status calls should move on to automation, execution, review, or
+  reporting rather than offering another apply.
 - The frontend project workspace may persist the selected project ID in local
   storage for resume-on-reload, but project state, recommended orchestrator
   actions, blockers, and timeline entries must be reloaded from backend project,
