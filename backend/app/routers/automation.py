@@ -18,7 +18,7 @@ from ..models import (
 )
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.execution_service import preview_execution, run_execution
-from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http, record_execution_run
+from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http, record_execution_run
 
 router = APIRouter()
 
@@ -112,6 +112,18 @@ def _target_environment(payload: ExecutionPreviewInput) -> str:
     if payload.target_base_url:
         return str(payload.target_base_url.host or "default")
     return "default"
+
+
+def _project_test_case_snapshot_id(project_id: Optional[str], *, actor: AuthUser) -> Optional[str]:
+    if not project_id:
+        return None
+    project = get_project(project_id, actor=actor)
+    snapshot = project.current_snapshots.get("test_cases")
+    return snapshot.snapshot_id if snapshot else None
+
+
+def _action_idempotency_key(action: str, *, request_id: str, target_environment: str) -> str:
+    return f"{action}:{request_id}:{target_environment}"
 
 
 def _preview_project_payload(response: ExecutionPreviewResponse, *, target_environment: str, target_base_url: Optional[str]) -> dict[str, Any]:
@@ -249,6 +261,7 @@ async def automation_execution_preview(
         )
         if payload.project_id:
             try:
+                source_snapshot_id = _project_test_case_snapshot_id(payload.project_id, actor=current_user)
                 append_stage_snapshot(
                     project_id=payload.project_id,
                     stage="execution",
@@ -259,15 +272,23 @@ async def automation_execution_preview(
                     workflow_run_id=workflow_run_id,
                     source_event_id=event_id,
                     approved=True,
+                    source_snapshot_id=source_snapshot_id,
                     title=f"{target_environment} execution preview",
                     metadata={
                         "target_environment": target_environment,
+                        "target_base_url": target_base_url,
+                        "source_snapshot_id": source_snapshot_id,
                         "executable_count": response.summary.executable,
                         "manual_count": response.summary.manual,
                         "unsupported_count": response.summary.unsupported,
                         "invalid_count": response.summary.invalid,
                     },
                     base_project_revision=payload.base_project_revision,
+                    idempotency_key=_action_idempotency_key(
+                        "automation.execution.preview",
+                        request_id=request_id,
+                        target_environment=target_environment,
+                    ),
                 )
             except Exception as project_exc:
                 raise project_error_to_http(project_exc) from project_exc
@@ -331,6 +352,7 @@ async def automation_execution_run(
         )
         if payload.project_id:
             try:
+                source_snapshot_id = _project_test_case_snapshot_id(payload.project_id, actor=current_user)
                 execution_snapshot = append_stage_snapshot(
                     project_id=payload.project_id,
                     stage="execution",
@@ -341,9 +363,13 @@ async def automation_execution_run(
                     workflow_run_id=workflow_run_id,
                     source_event_id=event_id,
                     approved=response.status == "passed",
+                    source_snapshot_id=source_snapshot_id,
                     title=f"{target_environment} execution run",
                     metadata={
                         "target_environment": target_environment,
+                        "target_base_url": target_base_url,
+                        "source_snapshot_id": source_snapshot_id,
+                        "selected_test_case_ids": list(payload.selected_test_case_ids),
                         "run_id": response.run_id,
                         "status": response.status,
                         "passed_count": response.summary.passed,
@@ -351,6 +377,11 @@ async def automation_execution_run(
                         "invalid_count": response.summary.invalid,
                     },
                     base_project_revision=payload.base_project_revision,
+                    idempotency_key=_action_idempotency_key(
+                        "automation.execution.run",
+                        request_id=request_id,
+                        target_environment=target_environment,
+                    ),
                 )
                 record_execution_run(
                     project_id=payload.project_id,
@@ -358,13 +389,21 @@ async def automation_execution_run(
                     request_id=request_id,
                     run_id=response.run_id,
                     target_environment=target_environment,
+                    target_base_url=target_base_url,
                     status_value=response.status,
                     summary=_model_payload(response.summary),
                     test_case_count=len(payload.test_cases),
                     snapshot_id=execution_snapshot.snapshot_id,
+                    source_snapshot_id=source_snapshot_id,
+                    selected_test_case_ids=list(payload.selected_test_case_ids),
                     workflow_run_id=workflow_run_id,
                     source_event_id=event_id,
                     project_revision=execution_snapshot.project_revision,
+                    idempotency_key=_action_idempotency_key(
+                        "automation.execution.run_record",
+                        request_id=request_id,
+                        target_environment=target_environment,
+                    ),
                 )
                 append_stage_snapshot(
                     project_id=payload.project_id,
@@ -385,6 +424,11 @@ async def automation_execution_run(
                     source_snapshot_id=execution_snapshot.snapshot_id,
                     title=f"{target_environment} execution report",
                     metadata={"run_id": response.run_id, "target_environment": target_environment, "status": response.status},
+                    idempotency_key=_action_idempotency_key(
+                        "reports.execution_summary",
+                        request_id=request_id,
+                        target_environment=target_environment,
+                    ),
                 )
             except Exception as project_exc:
                 raise project_error_to_http(project_exc) from project_exc

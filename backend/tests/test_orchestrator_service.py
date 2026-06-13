@@ -324,6 +324,23 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertFalse(report.enabled)
         self.assertEqual(report.blockers[0].code, "missing_approval")
 
+    def test_approved_test_cases_recommend_automation_from_current_snapshot(self) -> None:
+        project = self._seed_baseline_suite()
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+
+        automate = self._action(status, "automate")
+        self.assertTrue(automate.primary)
+        self.assertTrue(automate.enabled)
+        self.assertEqual(automate.stage, "automation")
+        self.assertEqual(status.stages["automation"].status, "ready")
+        self.assertEqual(status.stages["automation"].summary["source"], "test_cases")
+        self.assertEqual(status.stages["automation"].summary["test_case_count"], 1)
+        self.assertEqual(
+            status.stages["automation"].summary["source_snapshot_id"],
+            status.stages["test_cases"].current_snapshot_id,
+        )
+
     def test_execution_preview_recommends_execute(self) -> None:
         project = self._seed_baseline_suite()
         append_stage_snapshot(

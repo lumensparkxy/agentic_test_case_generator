@@ -528,10 +528,13 @@ export interface QaProjectExecutionRun {
 	request_id?: string | null;
 	run_id: string;
 	run_record_id: string;
+	selected_test_case_ids?: Array<string>;
 	snapshot_id?: string | null;
 	source_event_id?: string | null;
+	source_snapshot_id?: string | null;
 	status: string;
 	summary?: Record<string, unknown>;
+	target_base_url?: string | null;
 	target_environment: string;
 	test_case_count?: number;
 	workflow_run_id?: string | null;

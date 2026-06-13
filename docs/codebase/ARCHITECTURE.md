@@ -203,14 +203,22 @@ events to checkpoint output snapshot IDs.
 Next-version execution flow:
 
 ```text
-Generated TestCase -> /automation/execution/preview -> executable candidates
-selected candidates -> YAML spec -> IR JSON -> Playwright TS spec -> npx playwright test -> report artifacts
+Approved test-case snapshot -> /automation/execution/preview for target environment -> executable candidates
+selected candidates -> /automation/execution/run -> YAML spec -> IR JSON -> Playwright TS spec -> npx playwright test -> environment run history and report artifacts
 ```
 
 The conversion and run path is implemented by
 `backend/app/services/execution_service.py` and
 `backend/plain_english_test_framework/`, with Node runtime configuration in
 `backend/execution_runtime/playwright.config.ts`.
+When execution requests include `project_id`, `backend/app/routers/automation.py`
+records the target environment, optional target base URL, selected test-case
+IDs, and source test-case snapshot ID. `workflow_project_service.py` stores
+environment-specific execution records in the project `execution_runs`
+subcollection, so staging, production-like, and other named runs remain visible
+without overwriting each other. Failed execution records update execution/review
+signals through orchestrator status but do not mutate requirement, use-case, or
+test-case snapshots automatically.
 
 ## 4) Layer/Module Responsibilities
 

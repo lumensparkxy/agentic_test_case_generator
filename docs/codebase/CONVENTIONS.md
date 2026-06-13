@@ -87,6 +87,13 @@ npm run test:playwright -- --list
   `backend/app/services/orchestrator_run_service.py` for run records, event
   records, and checkpoints. Pass stable request IDs or idempotency keys when a
   client or worker may retry an action.
+- Project-scoped execution preview/run requests should carry a named
+  `target_environment`, optional `target_base_url`, the current test-case
+  `source_snapshot_id`, and selected test-case IDs. Repeated requests with the
+  same request/environment idempotency key should return existing snapshots and
+  execution records; runs for different environments must remain separate
+  history entries. Failed execution is a review signal and must not directly
+  rewrite requirements, use cases, or test cases.
 - Incremental impact updates should remain the primary orchestrator path only
   while the current test-case snapshot is stale. After `impact.update.apply`
   creates a new test-case snapshot sourced from the impact-analysis snapshot,

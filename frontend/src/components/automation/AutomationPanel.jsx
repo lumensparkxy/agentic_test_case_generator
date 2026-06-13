@@ -146,6 +146,8 @@ export default function AutomationPanel({
 	testCases,
 	executionTargetBaseUrl,
 	setExecutionTargetBaseUrl,
+	executionTargetEnvironment,
+	setExecutionTargetEnvironment,
 	executionPreview,
 	executionRunResult,
 	isPreviewingExecution,
@@ -166,6 +168,14 @@ export default function AutomationPanel({
 			<h2 className="panel-title">Automation</h2>
 			<p className="panel-description">Review executable candidates and run approved browser cases through Playwright.</p>
 			<div className="panel-form two-cols">
+				<div className="form-group">
+					<label>Target environment</label>
+					<input
+						value={executionTargetEnvironment}
+						onChange={(event) => setExecutionTargetEnvironment(event.target.value)}
+						placeholder="staging, dev, customer-a"
+					/>
+				</div>
 				<div className="form-group">
 					<label>Target base URL</label>
 					<input

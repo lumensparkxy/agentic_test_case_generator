@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.main import app, get_current_user
-from app.models import AuthUser, AutomationResponse, ExecutionPreviewResponse, ExecutionRunResponse
+from app.models import AuthUser, AutomationResponse, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
 
 
 class AutomationEndpointTests(unittest.TestCase):
@@ -144,6 +145,65 @@ class AutomationEndpointTests(unittest.TestCase):
         record_event.assert_called_once()
         self.assertEqual(record_event.call_args.kwargs["event_type"], "automation.execution.ran")
         self.assertEqual(response.json()["run_id"], "exec_test")
+
+    def test_project_execution_run_records_environment_source_snapshot_and_idempotency(self) -> None:
+        payload = {
+            "test_cases": [
+                {
+                    "id": "TC-001",
+                    "title": "Verify checkout",
+                    "steps": [{"step": 1, "action": "Open checkout", "expected": "Checkout is displayed"}],
+                    "automation_status": "Automated",
+                }
+            ],
+            "selected_test_case_ids": ["TC-001"],
+            "target_base_url": "https://staging.example.test/app",
+            "target_environment": "staging",
+            "project_id": "project-1",
+            "base_project_revision": 7,
+        }
+        service_response = ExecutionRunResponse(
+            status="failed",
+            run_id="exec_staging",
+            preview=ExecutionPreviewResponse(),
+            summary=ExecutionRunSummary(passed=0, failed=1),
+        )
+        project = SimpleNamespace(current_snapshots={"test_cases": SimpleNamespace(snapshot_id="snap-test-v1")})
+        execution_snapshot = SimpleNamespace(snapshot_id="snap-exec-v1", project_revision=8)
+        report_snapshot = SimpleNamespace(snapshot_id="snap-report-v1", project_revision=9)
+
+        with patch("app.main.start_workflow_run", return_value="run-execution-run-1"):
+            with patch("app.main.complete_workflow_run"):
+                with patch("app.main.record_usage_event", return_value="event-execution-run-1"):
+                    with patch("app.main.run_execution", return_value=service_response):
+                        with patch("app.routers.automation.get_project", return_value=project):
+                            with patch(
+                                "app.routers.automation.append_stage_snapshot",
+                                side_effect=[execution_snapshot, report_snapshot],
+                            ) as append_snapshot:
+                                with patch("app.routers.automation.record_execution_run") as record_run:
+                                    with TestClient(app) as client:
+                                        response = client.post(
+                                            "/automation/execution/run",
+                                            json=payload,
+                                            headers={"X-Request-ID": "req-exec-staging"},
+                                        )
+
+        self.assertEqual(response.status_code, 200)
+        execution_call = append_snapshot.call_args_list[0].kwargs
+        report_call = append_snapshot.call_args_list[1].kwargs
+        record_call = record_run.call_args.kwargs
+        self.assertEqual(execution_call["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(execution_call["metadata"]["target_environment"], "staging")
+        self.assertEqual(execution_call["metadata"]["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(execution_call["idempotency_key"], "automation.execution.run:req-exec-staging:staging")
+        self.assertEqual(report_call["source_snapshot_id"], "snap-exec-v1")
+        self.assertEqual(report_call["idempotency_key"], "reports.execution_summary:req-exec-staging:staging")
+        self.assertEqual(record_call["target_environment"], "staging")
+        self.assertEqual(record_call["target_base_url"], "https://staging.example.test/app")
+        self.assertEqual(record_call["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(record_call["selected_test_case_ids"], ["TC-001"])
+        self.assertEqual(record_call["idempotency_key"], "automation.execution.run_record:req-exec-staging:staging")
 
 
 if __name__ == "__main__":

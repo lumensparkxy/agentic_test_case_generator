@@ -140,6 +140,16 @@ class WorkflowProjectServiceTests(unittest.TestCase):
 
     def test_record_execution_run_is_returned_with_project_detail(self) -> None:
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
+        test_case_snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload={"test_cases": [{"id": "TC-001", "title": "Checkout"}]},
+            operation="testcases.generate",
+            actor=self.actor,
+            request_id="req-test",
+            approved=True,
+            title="Test cases",
+        )
         execution_snapshot = append_stage_snapshot(
             project_id=project.project_id,
             stage="execution",
@@ -148,6 +158,7 @@ class WorkflowProjectServiceTests(unittest.TestCase):
             actor=self.actor,
             request_id="req-2",
             approved=False,
+            source_snapshot_id=test_case_snapshot.snapshot_id,
             title="Staging execution run",
         )
         record_execution_run(
@@ -156,10 +167,13 @@ class WorkflowProjectServiceTests(unittest.TestCase):
             request_id="req-2",
             run_id="run-1",
             target_environment="staging",
+            target_base_url="https://staging.example.test",
             status_value="failed",
             summary={"passed": 2, "failed": 1},
             test_case_count=3,
             snapshot_id=execution_snapshot.snapshot_id,
+            source_snapshot_id=test_case_snapshot.snapshot_id,
+            selected_test_case_ids=["TC-001"],
             workflow_run_id="workflow-1",
             source_event_id="event-1",
             project_revision=execution_snapshot.project_revision,
@@ -168,7 +182,130 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         loaded = get_project(project.project_id, actor=self.actor)
         self.assertEqual(len(loaded.execution_runs), 1)
         self.assertEqual(loaded.execution_runs[0].target_environment, "staging")
+        self.assertEqual(loaded.execution_runs[0].target_base_url, "https://staging.example.test")
+        self.assertEqual(loaded.execution_runs[0].source_snapshot_id, test_case_snapshot.snapshot_id)
+        self.assertEqual(loaded.execution_runs[0].selected_test_case_ids, ["TC-001"])
         self.assertEqual(loaded.execution_runs[0].summary["failed"], 1)
+
+    def test_multiple_environment_execution_runs_preserve_separate_history(self) -> None:
+        project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
+        test_case_snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload={"test_cases": [{"id": "TC-001", "title": "Checkout"}]},
+            operation="testcases.generate",
+            actor=self.actor,
+            request_id="req-test",
+            approved=True,
+            title="Test cases",
+        )
+
+        for environment, status_value, summary in (
+            ("staging", "failed", {"passed": 0, "failed": 1}),
+            ("production-like", "passed", {"passed": 1, "failed": 0}),
+        ):
+            execution_snapshot = append_stage_snapshot(
+                project_id=project.project_id,
+                stage="execution",
+                payload={"run_id": f"run-{environment}", "status": status_value},
+                operation="automation.execution.run",
+                actor=self.actor,
+                request_id=f"req-{environment}",
+                approved=status_value == "passed",
+                source_snapshot_id=test_case_snapshot.snapshot_id,
+                title=f"{environment} execution run",
+            )
+            record_execution_run(
+                project_id=project.project_id,
+                actor=self.actor,
+                request_id=f"req-{environment}",
+                run_id=f"run-{environment}",
+                target_environment=environment,
+                status_value=status_value,
+                summary=summary,
+                test_case_count=1,
+                snapshot_id=execution_snapshot.snapshot_id,
+                source_snapshot_id=test_case_snapshot.snapshot_id,
+                selected_test_case_ids=["TC-001"],
+                workflow_run_id=f"workflow-{environment}",
+                source_event_id=f"event-{environment}",
+                project_revision=execution_snapshot.project_revision,
+            )
+
+        loaded = get_project(project.project_id, actor=self.actor)
+        by_environment = {run.target_environment: run for run in loaded.execution_runs}
+        self.assertEqual(set(by_environment), {"staging", "production-like"})
+        self.assertEqual(by_environment["staging"].status, "failed")
+        self.assertEqual(by_environment["production-like"].status, "passed")
+        self.assertEqual(by_environment["staging"].source_snapshot_id, test_case_snapshot.snapshot_id)
+        self.assertEqual(by_environment["production-like"].source_snapshot_id, test_case_snapshot.snapshot_id)
+
+    def test_record_execution_run_idempotency_preserves_source_snapshot(self) -> None:
+        project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
+        test_case_snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload={"test_cases": [{"id": "TC-001", "title": "Checkout"}]},
+            operation="testcases.generate",
+            actor=self.actor,
+            request_id="req-test",
+            approved=True,
+            title="Test cases",
+        )
+        execution_snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "run-staging", "status": "failed"},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="req-staging",
+            approved=False,
+            source_snapshot_id=test_case_snapshot.snapshot_id,
+            title="Staging execution run",
+            idempotency_key="automation.execution.run:req-staging:staging",
+        )
+
+        first = record_execution_run(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="req-staging",
+            run_id="run-staging",
+            target_environment="staging",
+            status_value="failed",
+            summary={"passed": 0, "failed": 1},
+            test_case_count=1,
+            snapshot_id=execution_snapshot.snapshot_id,
+            source_snapshot_id=test_case_snapshot.snapshot_id,
+            selected_test_case_ids=["TC-001"],
+            workflow_run_id="workflow-staging",
+            source_event_id="event-staging",
+            project_revision=execution_snapshot.project_revision,
+            idempotency_key="automation.execution.run_record:req-staging:staging",
+        )
+        second = record_execution_run(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="req-staging",
+            run_id="run-staging-retry",
+            target_environment="staging",
+            status_value="passed",
+            summary={"passed": 1, "failed": 0},
+            test_case_count=1,
+            snapshot_id=execution_snapshot.snapshot_id,
+            source_snapshot_id=test_case_snapshot.snapshot_id,
+            selected_test_case_ids=["TC-001"],
+            workflow_run_id="workflow-staging",
+            source_event_id="event-staging",
+            project_revision=execution_snapshot.project_revision,
+            idempotency_key="automation.execution.run_record:req-staging:staging",
+        )
+
+        loaded = get_project(project.project_id, actor=self.actor)
+        self.assertEqual(first.run_record_id, second.run_record_id)
+        self.assertEqual(len(loaded.execution_runs), 1)
+        self.assertEqual(loaded.execution_runs[0].status, "failed")
+        self.assertEqual(loaded.execution_runs[0].source_snapshot_id, test_case_snapshot.snapshot_id)
+        self.assertEqual(loaded.execution_runs[0].selected_test_case_ids, ["TC-001"])
 
     def test_stage_snapshot_idempotency_key_returns_existing_snapshot(self) -> None:
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")

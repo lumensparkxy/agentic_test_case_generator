@@ -74,6 +74,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Orchestrator decisions | Yes | Stage health, approval blockers, stale downstream state, impact-analysis priority, apply-update blockers, execution/review/report actions | `backend/tests/test_orchestrator_service.py` uses fake Firestore project snapshots and `TestClient` |
 | Orchestrator run persistence | Yes | Run creation/resume, idempotent events, checkpoint history, blockers, completion links, timeline endpoint payloads | `backend/tests/test_orchestrator_run_service.py` uses fake Firestore subcollections and `TestClient` |
 | Frontend orchestrator cockpit | Yes | First-time project actions, resumed stale-impact action priority, blocker display, run/checkpoint timeline output, and reload restore | `frontend/e2e/orchestrator-cockpit.spec.js` uses mocked project, status, run, event, and checkpoint payloads |
+| Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Integration observability | Yes | JIRA/Azure DevOps provider metrics, duration summaries, and safe structured logs | `backend/tests/test_integration_observability.py`, adapter tests, and `backend/tests/test_observability_metrics.py` |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |
@@ -96,6 +97,9 @@ Evidence: `.github/workflows/ci.yml`.
 - Orchestrator run persistence tests use project-scoped fake Firestore
   subcollections and request IDs/idempotency keys to prove retries do not create
   duplicate runs, events, snapshots, execution records, or checkpoints.
+- Multi-environment execution tests use named synthetic environments and
+  source snapshot IDs to prove reruns preserve environment-specific history and
+  failed executions become review signals without mutating upstream snapshots.
 - Local JWT based browser/API tests are compatibility workflows. Real-backend
   runs must use `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production validation
   should exercise Firebase ID token verification.
@@ -205,6 +209,9 @@ Use the smallest gate that proves the change:
   covered.
 - Execution conversion/runtime change: backend execution tests and
   `backend/execution_runtime` Playwright list check.
+- Project execution history or orchestrator execution change: workflow project,
+  automation endpoint, orchestrator service, and focused multi-environment
+  E2E tests.
 - End-to-end workflow or release confidence change: run
   `scripts/e2e_playwright_workflow.py`.
 

@@ -58,7 +58,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#89](https://github.com/lumensparkxy/agentic_test_case_generator/issues/89) - Persist orchestrator runs, events, and resumable checkpoints
   - Done: [#90](https://github.com/lumensparkxy/agentic_test_case_generator/issues/90) - Build orchestrator cockpit in the frontend
   - Done: [#91](https://github.com/lumensparkxy/agentic_test_case_generator/issues/91) - Integrate impact update path into orchestrator decisions
-  - Ready: [#92](https://github.com/lumensparkxy/agentic_test_case_generator/issues/92) - Orchestrate automation and multi-environment execution
+  - Done: [#92](https://github.com/lumensparkxy/agentic_test_case_generator/issues/92) - Orchestrate automation and multi-environment execution
   - Ready: [#93](https://github.com/lumensparkxy/agentic_test_case_generator/issues/93) - Orchestrate review and evidence-backed reporting
   - Ready: [#94](https://github.com/lumensparkxy/agentic_test_case_generator/issues/94) - Add orchestrator evaluation and end-to-end validation suite
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
