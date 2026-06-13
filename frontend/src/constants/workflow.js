@@ -1,5 +1,6 @@
 export const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 export const STORAGE_AUTH_USER = "tcg.auth.user";
+export const STORAGE_CURRENT_PROJECT_ID = "tcg.current.project_id";
 export const AUTH_REQUIRED_MESSAGE = "Sign in to continue.";
 
 export const EMPTY_WORKFLOW_SETTINGS = {

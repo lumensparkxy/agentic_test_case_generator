@@ -46,6 +46,7 @@ import {
 	REQUIREMENT_SOURCE_OPTIONS,
 	STORAGE_AUTH_TOKEN,
 	STORAGE_AUTH_USER,
+	STORAGE_CURRENT_PROJECT_ID,
 } from "./constants/workflow";
 import { API_BASE, createRequestId, downloadResponseBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
 import { API_CONTRACT_ENDPOINTS } from "./api/generated/api-contracts";
@@ -72,6 +73,10 @@ const EXPORT_API_PATHS = Object.freeze({
 const PROJECT_API_PATHS = Object.freeze({
 	projects: "/projects",
 	project: (projectId) => `/projects/${projectId}`,
+	orchestratorStatus: (projectId) =>
+		API_CONTRACT_ENDPOINTS.projectOrchestratorStatus.path.replace("{project_id}", encodeURIComponent(projectId)),
+	orchestratorRuns: (projectId) =>
+		API_CONTRACT_ENDPOINTS.projectOrchestratorRuns.path.replace("{project_id}", encodeURIComponent(projectId)),
 	impactAnalysis: (projectId) => `/projects/${projectId}/impact-analysis`,
 	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
@@ -307,6 +312,14 @@ export default function App() {
 		setIsCreatingProject,
 		isOpeningProject,
 		setIsOpeningProject,
+		orchestratorStatus,
+		setOrchestratorStatus,
+		orchestratorRuns,
+		setOrchestratorRuns,
+		isLoadingOrchestrator,
+		setIsLoadingOrchestrator,
+		orchestratorError,
+		setOrchestratorError,
 	} = useProjectWorkspaceState();
 	const {
 		status,
@@ -834,6 +847,12 @@ export default function App() {
 		setIsUsageLoading(false);
 		setBillingEntitlements(null);
 		setIsBillingLoading(false);
+		setProjects([]);
+		setCurrentProject(null);
+		setOrchestratorStatus(null);
+		setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
+		setOrchestratorError("");
+		setIsLoadingOrchestrator(false);
 		setRequirementSourceMode("file");
 		setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
 		setJiraConnectionForm(EMPTY_JIRA_CONNECTION_FORM);
@@ -859,6 +878,7 @@ export default function App() {
 		setAzureDevOpsSyncResults(null);
 		localStorage.removeItem(STORAGE_AUTH_TOKEN);
 		localStorage.removeItem(STORAGE_AUTH_USER);
+		localStorage.removeItem(STORAGE_CURRENT_PROJECT_ID);
 		if (nextStatus) {
 			setStatus(nextStatus);
 		}
@@ -1237,10 +1257,56 @@ export default function App() {
 		}
 	};
 
+	const loadProjectOrchestrator = async (projectId, { silent = false } = {}) => {
+		if (!projectId || !isAuthenticated) {
+			setOrchestratorStatus(null);
+			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
+			setOrchestratorError("");
+			return null;
+		}
+		if (!silent) {
+			setIsLoadingOrchestrator(true);
+		}
+		try {
+			const [statusRes, runsRes] = await Promise.all([
+				apiRequest(PROJECT_API_PATHS.orchestratorStatus(projectId), { method: "GET" }),
+				apiRequest(PROJECT_API_PATHS.orchestratorRuns(projectId), { method: "GET" }),
+			]);
+			if (!statusRes.ok) {
+				const errorMessage = await parseApiError(statusRes, "Failed to load orchestrator status");
+				throw new Error(errorMessage);
+			}
+			if (!runsRes.ok) {
+				const errorMessage = await parseApiError(runsRes, "Failed to load orchestrator runs");
+				throw new Error(errorMessage);
+			}
+			const [statusPayload, runsPayload] = await Promise.all([statusRes.json(), runsRes.json()]);
+			setOrchestratorStatus(statusPayload || null);
+			setOrchestratorRuns(runsPayload || { runs: [], events: [], checkpoints: [] });
+			setOrchestratorError("");
+			return { status: statusPayload || null, runs: runsPayload || null };
+		} catch (error) {
+			setOrchestratorStatus(null);
+			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
+			setOrchestratorError(error.message);
+			if (!silent) {
+				setStatus(`Orchestrator load failed: ${error.message}`);
+			}
+			return null;
+		} finally {
+			if (!silent) {
+				setIsLoadingOrchestrator(false);
+			}
+		}
+	};
+
 	const loadProjects = async ({ silent = false } = {}) => {
 		if (!isAuthenticated) {
 			setProjects([]);
 			setCurrentProject(null);
+			setOrchestratorStatus(null);
+			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
+			setOrchestratorError("");
 			return [];
 		}
 		if (!silent) {
@@ -1271,6 +1337,10 @@ export default function App() {
 	const openProject = async (projectId, { hydrate = true, silent = false } = {}) => {
 		if (!projectId) {
 			setCurrentProject(null);
+			setOrchestratorStatus(null);
+			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
+			setOrchestratorError("");
+			localStorage.removeItem(STORAGE_CURRENT_PROJECT_ID);
 			return null;
 		}
 		if (!silent) {
@@ -1286,6 +1356,10 @@ export default function App() {
 			setCurrentProject(data || null);
 			if (hydrate && data) {
 				hydrateProjectWorkflow(data);
+			}
+			if (data?.project_id) {
+				localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, data.project_id);
+				await loadProjectOrchestrator(data.project_id, { silent: true });
 			}
 			if (!silent) {
 				setStatus(data ? `Opened ${data.name}.` : "Project opened.");
@@ -1328,6 +1402,10 @@ export default function App() {
 			const data = await res.json();
 			setCurrentProject(data || null);
 			hydrateProjectWorkflow(data);
+			if (data?.project_id) {
+				localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, data.project_id);
+				await loadProjectOrchestrator(data.project_id, { silent: true });
+			}
 			setNewProjectName("");
 			await loadProjects({ silent: true });
 			setStatus(`Created ${data.name}.`);
@@ -1342,9 +1420,17 @@ export default function App() {
 		if (!isAuthenticated) {
 			setProjects([]);
 			setCurrentProject(null);
+			setOrchestratorStatus(null);
+			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
+			setOrchestratorError("");
 			return;
 		}
-		loadProjects({ silent: true });
+		loadProjects({ silent: true }).then((nextProjects) => {
+			const storedProjectId = localStorage.getItem(STORAGE_CURRENT_PROJECT_ID);
+			if (storedProjectId && nextProjects.some((project) => project.project_id === storedProjectId)) {
+				openProject(storedProjectId, { hydrate: true, silent: true });
+			}
+		});
 	}, [isAuthenticated, currentUser?.sub]);
 
 	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
@@ -2508,6 +2594,7 @@ export default function App() {
 			setCurrentProject(data || null);
 			if (data) {
 				hydrateProjectWorkflow(data);
+				await loadProjectOrchestrator(data.project_id, { silent: true });
 			}
 			const analysis = data?.current_snapshots?.impact_analysis?.payload || null;
 			const changedCount = analysis?.summary?.changed_item_count || 0;
@@ -2550,6 +2637,7 @@ export default function App() {
 			setCurrentProject(data || null);
 			if (data) {
 				hydrateProjectWorkflow(data);
+				await loadProjectOrchestrator(data.project_id, { silent: true });
 			}
 			const nextTestCases = data?.current_snapshots?.test_cases?.payload?.test_cases || [];
 			const result = data?.current_snapshots?.test_cases?.payload?.impact_update_result || {};
@@ -2564,6 +2652,67 @@ export default function App() {
 		} finally {
 			setIsApplyingImpactUpdate(false);
 		}
+	};
+
+	const handleOrchestratorAction = async (recommendation) => {
+		const action = recommendation?.action;
+		if (!recommendation?.enabled) {
+			const blockerMessage = recommendation?.blockers?.[0]?.message || "This orchestrator action is blocked.";
+			setStatus(blockerMessage);
+			return;
+		}
+
+		if (action === "analyze_impact") {
+			setActiveTab(3);
+			await analyzeImpact();
+			return;
+		}
+		if (action === "apply_update") {
+			setActiveTab(3);
+			await applyImpactUpdate();
+			return;
+		}
+		if (action === "generate" || action === "full_regenerate") {
+			setActiveTab(3);
+			await generateTestCases(false);
+			return;
+		}
+		if (action === "automate") {
+			setActiveTab(4);
+			await previewExecution();
+			return;
+		}
+		if (action === "execute") {
+			setActiveTab(4);
+			await runApprovedExecution();
+			return;
+		}
+		if (action === "report") {
+			setActiveTab(5);
+			setStatus("Review report and export options.");
+			return;
+		}
+		if (action === "refine" || action === "approve") {
+			setActiveTab(recommendation.stage === "test_cases" ? 3 : 0);
+			setStatus(recommendation.reason || "Review and approve the required stage before continuing.");
+			return;
+		}
+		if (action === "review") {
+			setActiveTab(3);
+			setStatus(recommendation.reason || "Review the current test-case evidence.");
+			return;
+		}
+
+		setStatus(recommendation?.reason || "Open the relevant workflow tab to continue.");
+	};
+
+	const orchestratorActionBusy = {
+		analyze_impact: isAnalyzingImpact,
+		apply_update: isApplyingImpactUpdate,
+		generate: isGenerating,
+		full_regenerate: isGenerating,
+		automate: isPreviewingExecution,
+		execute: isRunningExecution,
 	};
 	const exportReviewApproved = Boolean(testCaseReview?.approved);
 	const exportRequiresOverride = Boolean(testCases.length > 0 && testCaseReview && !testCaseReview.approved);
@@ -2974,10 +3123,17 @@ export default function App() {
 				isLoadingProjects={isLoadingProjects}
 				isCreatingProject={isCreatingProject}
 				isOpeningProject={isOpeningProject}
+				orchestratorStatus={orchestratorStatus}
+				orchestratorRuns={orchestratorRuns}
+				isLoadingOrchestrator={isLoadingOrchestrator}
+				orchestratorError={orchestratorError}
 				authActionDisabled={authActionDisabled}
 				onCreateProject={createProject}
 				onOpenProject={(projectId) => openProject(projectId)}
 				onRefreshProjects={() => loadProjects()}
+				onRefreshOrchestrator={() => loadProjectOrchestrator(currentProjectId)}
+				onOrchestratorAction={handleOrchestratorAction}
+				orchestratorActionBusy={orchestratorActionBusy}
 			/>
 
 			<WorkflowTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />

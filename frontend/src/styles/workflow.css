@@ -154,6 +154,324 @@
 	overflow-wrap: anywhere;
 }
 
+.orchestrator-cockpit {
+	display: grid;
+	gap: 0.9rem;
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--border-color);
+}
+
+.orchestrator-cockpit-header,
+.orchestrator-cockpit-actions,
+.orchestrator-timeline-header,
+.orchestrator-event-row,
+.orchestrator-action {
+	display: flex;
+	gap: 0.75rem;
+}
+
+.orchestrator-cockpit-header,
+.orchestrator-timeline-header {
+	align-items: flex-start;
+	justify-content: space-between;
+}
+
+.orchestrator-cockpit h2,
+.orchestrator-cockpit h3,
+.orchestrator-timeline h3,
+.orchestrator-blockers h3 {
+	margin: 0;
+	color: var(--text-main);
+}
+
+.orchestrator-cockpit h2 {
+	font-size: 1rem;
+	font-weight: 750;
+}
+
+.orchestrator-cockpit h3,
+.orchestrator-timeline h3,
+.orchestrator-blockers h3 {
+	font-size: 0.86rem;
+	font-weight: 750;
+}
+
+.orchestrator-cockpit p,
+.orchestrator-empty-text,
+.orchestrator-timeline p,
+.orchestrator-action p {
+	margin: 0.25rem 0 0;
+	color: var(--text-muted);
+	font-size: 0.8rem;
+}
+
+.orchestrator-cockpit-actions {
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+}
+
+.orchestrator-status-pill,
+.orchestrator-agent-contract,
+.orchestrator-action-blocker {
+	display: inline-flex;
+	align-items: center;
+	width: fit-content;
+	max-width: 100%;
+	padding: 0.28rem 0.58rem;
+	border-radius: 9999px;
+	border: 1px solid var(--border-color);
+	background: #f8fafc;
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 800;
+	white-space: nowrap;
+}
+
+.orchestrator-status-pill.completed,
+.orchestrator-status-pill.complete {
+	border-color: #86efac;
+	background: #f0fdf4;
+	color: #166534;
+}
+
+.orchestrator-status-pill.ready,
+.orchestrator-status-pill.running {
+	border-color: #bfdbfe;
+	background: #eff6ff;
+	color: #1d4ed8;
+}
+
+.orchestrator-status-pill.stale,
+.orchestrator-status-pill.attention-required,
+.orchestrator-status-pill.blocked {
+	border-color: #fcd34d;
+	background: #fffbeb;
+	color: #92400e;
+}
+
+.orchestrator-status-pill.failed {
+	border-color: #fecaca;
+	background: #fef2f2;
+	color: #b91c1c;
+}
+
+.orchestrator-error {
+	padding: 0.7rem 0.85rem;
+	border-radius: var(--radius-md);
+	border: 1px solid #fecaca;
+	background: #fef2f2;
+	color: #b91c1c;
+	font-size: 0.82rem;
+}
+
+.orchestrator-summary-grid,
+.orchestrator-action-grid {
+	display: grid;
+	gap: 0.75rem;
+}
+
+.orchestrator-summary-grid {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.orchestrator-summary-grid > div {
+	min-width: 0;
+	padding: 0.7rem 0.8rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-sm);
+	background: #f8fafc;
+}
+
+.orchestrator-summary-grid span {
+	display: block;
+	font-size: 0.72rem;
+	font-weight: 800;
+	color: var(--text-muted);
+	text-transform: uppercase;
+}
+
+.orchestrator-summary-grid strong {
+	display: block;
+	margin-top: 0.25rem;
+	color: var(--text-main);
+	font-size: 0.92rem;
+	overflow-wrap: anywhere;
+}
+
+.orchestrator-stage-rail {
+	display: grid;
+	grid-template-columns: repeat(9, minmax(82px, 1fr));
+	gap: 0.4rem;
+	overflow-x: auto;
+	padding-bottom: 0.1rem;
+}
+
+.orchestrator-stage-step {
+	min-width: 82px;
+	min-height: 54px;
+	padding: 0.55rem 0.6rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid #dbe4ee;
+	background: #ffffff;
+}
+
+.orchestrator-stage-step span,
+.orchestrator-stage-step strong {
+	display: block;
+	overflow-wrap: anywhere;
+}
+
+.orchestrator-stage-step span {
+	color: var(--text-main);
+	font-size: 0.7rem;
+	font-weight: 800;
+}
+
+.orchestrator-stage-step strong {
+	margin-top: 0.18rem;
+	color: var(--text-muted);
+	font-size: 0.7rem;
+}
+
+.orchestrator-stage-step.completed {
+	border-color: #86efac;
+	background: #f0fdf4;
+}
+
+.orchestrator-stage-step.ready {
+	border-color: #bfdbfe;
+	background: #eff6ff;
+}
+
+.orchestrator-stage-step.stale,
+.orchestrator-stage-step.attention_required,
+.orchestrator-stage-step.blocked {
+	border-color: #fcd34d;
+	background: #fffbeb;
+}
+
+.orchestrator-stage-step.failed {
+	border-color: #fecaca;
+	background: #fef2f2;
+}
+
+.orchestrator-action-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.orchestrator-action-column {
+	min-width: 0;
+	display: grid;
+	align-content: start;
+	gap: 0.55rem;
+	padding: 0.8rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	background: #ffffff;
+}
+
+.orchestrator-action {
+	flex-direction: column;
+	align-items: flex-start;
+	min-width: 0;
+	padding: 0.72rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-sm);
+	background: #f8fafc;
+}
+
+.orchestrator-action.primary {
+	border-color: #93c5fd;
+	background: #eff6ff;
+}
+
+.orchestrator-action.secondary-action {
+	background: #ffffff;
+}
+
+.orchestrator-action button {
+	max-width: 100%;
+	white-space: normal;
+	text-align: left;
+}
+
+.orchestrator-action-blocker {
+	border-color: #fcd34d;
+	background: #fffbeb;
+	color: #92400e;
+	white-space: normal;
+}
+
+.orchestrator-agent-contract {
+	border-color: rgba(59, 130, 246, 0.22);
+	background: rgba(239, 246, 255, 0.86);
+	color: #1d4ed8;
+}
+
+.orchestrator-blockers,
+.orchestrator-timeline {
+	display: grid;
+	gap: 0.6rem;
+	padding-top: 0.8rem;
+	border-top: 1px solid var(--border-color);
+}
+
+.orchestrator-blockers ul {
+	display: grid;
+	gap: 0.45rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.orchestrator-blockers li {
+	display: grid;
+	gap: 0.2rem;
+	padding: 0.65rem 0.75rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid #fcd34d;
+	background: #fffbeb;
+	color: #92400e;
+	font-size: 0.8rem;
+}
+
+.orchestrator-blockers li strong {
+	color: #78350f;
+	font-size: 0.75rem;
+}
+
+.orchestrator-event-list {
+	display: grid;
+	gap: 0.45rem;
+}
+
+.orchestrator-event-row {
+	align-items: flex-start;
+	padding: 0.65rem 0.75rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid #dbe4ee;
+	background: #f8fafc;
+}
+
+.orchestrator-event-row > span {
+	flex: 0 0 112px;
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 700;
+}
+
+.orchestrator-event-row div {
+	min-width: 0;
+}
+
+.orchestrator-event-row strong {
+	color: var(--text-main);
+	font-size: 0.82rem;
+	overflow-wrap: anywhere;
+}
+
 .workflow-settings-panel,
 .workflow-metrics-panel,
 .workflow-diagnostics-panel {

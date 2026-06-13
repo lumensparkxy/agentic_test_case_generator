@@ -1,3 +1,5 @@
+import OrchestratorCockpitPanel from "./OrchestratorCockpitPanel";
+
 const STAGES = [
 	{ key: "requirements", label: "Requirements" },
 	{ key: "context", label: "Context" },
@@ -83,10 +85,17 @@ export default function ProjectWorkspacePanel({
 	isLoadingProjects,
 	isCreatingProject,
 	isOpeningProject,
+	orchestratorStatus,
+	orchestratorRuns,
+	isLoadingOrchestrator,
+	orchestratorError,
 	authActionDisabled,
 	onCreateProject,
 	onOpenProject,
 	onRefreshProjects,
+	onRefreshOrchestrator,
+	onOrchestratorAction,
+	orchestratorActionBusy,
 }) {
 	const selectedProjectId = currentProject?.project_id || "";
 	const stageState = currentProject?.stage_state || {};
@@ -137,6 +146,17 @@ export default function ProjectWorkspacePanel({
 							<StagePill key={stage.key} stage={stage} state={stageState[stage.key]} />
 						))}
 					</div>
+					<OrchestratorCockpitPanel
+						currentProject={currentProject}
+						status={orchestratorStatus}
+						runsPayload={orchestratorRuns}
+						isLoading={isLoadingOrchestrator}
+						error={orchestratorError}
+						authActionDisabled={authActionDisabled}
+						actionBusy={orchestratorActionBusy}
+						onRefresh={onRefreshOrchestrator}
+						onAction={onOrchestratorAction}
+					/>
 					<div className="project-history-grid">
 						<ExecutionHistory runs={currentProject.execution_runs || []} />
 						<TimelinePreview events={currentProject.timeline || []} />

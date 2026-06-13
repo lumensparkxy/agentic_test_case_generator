@@ -39,6 +39,8 @@ should preserve when changing the application.
 - Main backend runtime entry: `backend/app/main.py`.
 - Frontend runtime entry: `frontend/src/main.jsx`.
 - Frontend orchestration component: `frontend/src/App.jsx`.
+- Frontend project cockpit component:
+  `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`.
 - Frontend style entry point: `frontend/src/styles/index.css`.
 - Backend execution runtime config: `backend/execution_runtime/playwright.config.ts`.
 - Frontend E2E config: `frontend/playwright.config.js`.
@@ -65,7 +67,7 @@ exposes `/metrics`.
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
-| `frontend/src/components/` | Presentational and workflow UI components receiving props | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace and orchestrator cockpit | Backend API transport details beyond passed callbacks/data |
 | `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |
 | `frontend/src/styles/` | Design tokens, base styles, layout styles, and selectors grouped by feature ownership | React state, API calls, or unrelated visual redesigns |
 | `frontend/src/services/` | API base URL, request ID, API error parsing, download helpers | Large workflow state or JSX markup |

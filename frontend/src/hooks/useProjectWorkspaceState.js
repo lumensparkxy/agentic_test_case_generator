@@ -7,6 +7,10 @@ export default function useProjectWorkspaceState() {
 	const [isLoadingProjects, setIsLoadingProjects] = useState(false);
 	const [isCreatingProject, setIsCreatingProject] = useState(false);
 	const [isOpeningProject, setIsOpeningProject] = useState(false);
+	const [orchestratorStatus, setOrchestratorStatus] = useState(null);
+	const [orchestratorRuns, setOrchestratorRuns] = useState({ runs: [], events: [], checkpoints: [] });
+	const [isLoadingOrchestrator, setIsLoadingOrchestrator] = useState(false);
+	const [orchestratorError, setOrchestratorError] = useState("");
 
 	return {
 		projects,
@@ -21,5 +25,13 @@ export default function useProjectWorkspaceState() {
 		setIsCreatingProject,
 		isOpeningProject,
 		setIsOpeningProject,
+		orchestratorStatus,
+		setOrchestratorStatus,
+		orchestratorRuns,
+		setOrchestratorRuns,
+		isLoadingOrchestrator,
+		setIsLoadingOrchestrator,
+		orchestratorError,
+		setOrchestratorError,
 	};
 }
