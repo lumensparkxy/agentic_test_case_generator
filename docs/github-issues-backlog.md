@@ -69,6 +69,9 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56) - Add durable audit dead-letter sink for compliance deployments
   - Done: [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57) - Harden artifact fetching threat model and validation
   - Done: [#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77) - Add seamless integration credential key rotation and re-encryption support
+- Operational documentation and tracking
+  - Done: [#59](https://github.com/lumensparkxy/agentic_test_case_generator/issues/59) - Set up GitHub Wiki and Project tracking workspace
+  - Ready: [#60](https://github.com/lumensparkxy/agentic_test_case_generator/issues/60) - Create, update, and move detailed documentation to GitHub Wiki
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
