@@ -24,6 +24,10 @@ Primary constraints:
 - Durable QA projects can now wrap the staged workflow so requirement, context,
   use-case, impact-analysis, test-case, execution, and report snapshots survive
   browser reloads.
+- Orchestrator next actions are backed by stable specialist task contracts for
+  requirements, use cases, impact, test cases, automation, execution, review,
+  and reporting, with local adapters registered behind an ADK-compatible
+  dispatcher boundary.
 - Agent output must be resilient: parsers, deterministic fallbacks, retry
   diagnostics, and heuristic quality gates protect the workflow from malformed
   model output.
@@ -149,8 +153,11 @@ QA Project snapshots -> /projects/{id}/orchestrator/status -> deterministic stag
 
 `backend/app/services/orchestrator_service.py` derives workflow stage health and
 recommended actions from persisted project snapshots, stage staleness, approval
-flags, impact-analysis payloads, and execution history. It does not call agents
-or decide human approvals; those remain explicit gates represented as blockers.
+flags, impact-analysis payloads, and execution history. Each recommended action
+includes the registered specialist contract kind, version, and implementation
+metadata from `backend/app/agents/specialist_registry.py`. The status service
+does not call agents or decide human approvals; those remain explicit gates
+represented as blockers.
 
 Next-version execution flow:
 
@@ -171,7 +178,7 @@ The conversion and run path is implemented by
 | FastAPI app | App construction, middleware, CORS, router registration, health, metrics | Feature endpoint logic beyond global middleware | `backend/app/main.py` |
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
-| Agents | Requirement extraction, analysis, test-case generation orchestration, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
+| Agents | Requirement extraction, analysis, test-case generation orchestration, specialist task contracts/registry, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
 | Services | Billing, audit, versioning, project lifecycle, orchestrator decisions, impact update apply, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
@@ -190,6 +197,7 @@ The conversion and run path is implemented by
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
 | Durable project aggregate | `projects.py`, `workflow_project_service.py`, project models in `models.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
 | Orchestrator decision model | `orchestrator_service.py`, orchestrator models in `models.py` | Derives deterministic next actions and blockers from durable project snapshots |
+| Specialist agent task registry | `specialist_contracts.py`, `specialist_registry.py` | Gives orchestrator actions stable typed task envelopes/results and lets local or future ADK adapters plug in behind the same contract |
 | Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe or unsupported public URLs and returns partial enrichment warnings instead of crashing |
@@ -240,6 +248,8 @@ The conversion and run path is implemented by
 - `backend/app/routers/testcases.py`
 - `backend/app/routers/automation.py`
 - `backend/app/agents/impact_update_agent.py`
+- `backend/app/agents/specialist_contracts.py`
+- `backend/app/agents/specialist_registry.py`
 - `backend/app/agents/test_case_agent.py`
 - `backend/app/agents/test_case_coverage.py`
 - `backend/app/agents/test_case_review.py`

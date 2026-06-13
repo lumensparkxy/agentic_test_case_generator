@@ -79,6 +79,10 @@ npm run test:playwright -- --list
 - Router modules expose a module-level `router = APIRouter()`.
 - Service modules mostly expose functions rather than classes; provider-specific
   remote behavior lives in adapter modules.
+- Orchestrator-delegated agent work should go through the specialist task
+  contract registry in `backend/app/agents/specialist_registry.py`; add new
+  task payload/result models in `backend/app/agents/specialist_contracts.py`
+  before wiring new local or ADK-backed implementations.
 - The generated frontend API contract module exports type declarations and
   high-traffic endpoint constants, not a full generated API client.
 
@@ -94,6 +98,9 @@ Backend error strategy:
   that routers translate to HTTP responses.
 - Agent workflows prefer diagnostics, warnings, parser failure metadata, and
   deterministic fallback output when model output is malformed or incomplete.
+- Specialist task dispatch returns structured diagnostics for input validation,
+  output validation, timeout, and execution failures instead of partial untyped
+  payloads.
 
 Logging strategy:
 

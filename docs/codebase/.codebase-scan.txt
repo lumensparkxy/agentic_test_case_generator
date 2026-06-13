@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 270
+- Files scanned: 275
 - Files excluded after `git ls-files`: 70
-- Total bytes: 2243937
-- Text lines counted: 58285
+- Total bytes: 2324607
+- Text lines counted: 60286
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -32,7 +32,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Directory | Files |
 | --- | ---: |
-| `backend` | 135 |
+| `backend` | 140 |
 | `frontend` | 74 |
 | `scripts` | 27 |
 | `docs` | 21 |
@@ -52,7 +52,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Extension | Files |
 | --- | ---: |
-| `.py` | 140 |
+| `.py` | 145 |
 | `.js` | 27 |
 | `.md` | 25 |
 | `.json` | 21 |
@@ -78,19 +78,19 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `frontend/package-lock.json` | 110508 | 3101 |
 | `backend/app/agents/test_case_agent.py` | 60416 | 1371 |
 | `backend/app/adk_client.py` | 44434 | 1106 |
-| `backend/app/models.py` | 42944 | 1342 |
-| `docs/requirements_traceability.md` | 41162 | 37 |
+| `backend/app/models.py` | 43077 | 1345 |
+| `docs/requirements_traceability.md` | 42549 | 38 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
 | `scripts/e2e_playwright_workflow.py` | 26113 | 682 |
 | `backend/app/adapters/azure_devops.py` | 25549 | 561 |
+| `backend/app/services/orchestrator_service.py` | 24511 | 660 |
+| `frontend/src/api/generated/api-contracts.d.ts` | 24067 | 737 |
 | `backend/app/routers/requirements.py` | 23961 | 596 |
-| `frontend/src/api/generated/api-contracts.d.ts` | 23958 | 734 |
 | `backend/app/agents/requirements_agent.py` | 23657 | 583 |
 | `backend/app/services/execution_service.py` | 23645 | 635 |
 | `backend/app/routers/integrations_azure_devops.py` | 23560 | 582 |
 | `backend/app/agents/impact_update_agent.py` | 23043 | 556 |
 | `backend/app/routers/integrations_jira.py` | 21792 | 570 |
 | `backend/app/services/azure_devops_sync_service.py` | 20434 | 496 |
-| `backend/app/services/billing_repository.py` | 20291 | 540 |
