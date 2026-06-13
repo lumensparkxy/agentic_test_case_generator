@@ -1,0 +1,7 @@
+{
+  "name": "v1_generation",
+  "description": "Approved v1 requirements with no baseline suite should resume to first-suite generation.",
+  "requirement_count": 10,
+  "include_baseline_suite": false,
+  "modified_requirement_ids": []
+}

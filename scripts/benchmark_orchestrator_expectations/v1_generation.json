@@ -1,0 +1,10 @@
+{
+  "name": "v1_generation",
+  "description": "Approved v1 requirements route to first-suite generation and survive project reload.",
+  "expected_primary_action": "generate",
+  "expected_current_stage": "test_cases",
+  "require_enabled_primary": true,
+  "expected_has_baseline_test_suite": false,
+  "expected_upstream_changed": false,
+  "expected_resume_action_match": true
+}
