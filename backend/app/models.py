@@ -725,6 +725,9 @@ class OrchestratorActionRecommendation(BaseModel):
     secondary: bool = False
     reason: str
     blockers: List[OrchestratorBlocker] = Field(default_factory=list)
+    agent_kind: Optional[str] = None
+    agent_contract_version: Optional[str] = None
+    agent_implementation: Optional[str] = None
 
 
 class OrchestratorStageState(BaseModel):

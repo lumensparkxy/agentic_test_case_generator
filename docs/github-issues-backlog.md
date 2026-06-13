@@ -54,7 +54,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#85](https://github.com/lumensparkxy/agentic_test_case_generator/issues/85) - Add agentic impact update flow for changed requirements
 - Epic [#86](https://github.com/lumensparkxy/agentic_test_case_generator/issues/86) - Implement Orchestrator Flow for durable QA lifecycle
   - Done: [#87](https://github.com/lumensparkxy/agentic_test_case_generator/issues/87) - Define orchestrator domain model and workflow decisions
-  - Ready: [#88](https://github.com/lumensparkxy/agentic_test_case_generator/issues/88) - Add ADK-compatible specialist agent task contracts
+  - Done: [#88](https://github.com/lumensparkxy/agentic_test_case_generator/issues/88) - Add ADK-compatible specialist agent task contracts
   - Ready: [#89](https://github.com/lumensparkxy/agentic_test_case_generator/issues/89) - Persist orchestrator runs, events, and resumable checkpoints
   - Ready: [#90](https://github.com/lumensparkxy/agentic_test_case_generator/issues/90) - Build orchestrator cockpit in the frontend
   - Ready: [#91](https://github.com/lumensparkxy/agentic_test_case_generator/issues/91) - Integrate impact update path into orchestrator decisions

@@ -386,6 +386,9 @@ export interface JiraExportResponse {
 
 export interface OrchestratorActionRecommendation {
 	action: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report";
+	agent_contract_version?: string | null;
+	agent_implementation?: string | null;
+	agent_kind?: string | null;
 	blockers?: Array<OrchestratorBlocker>;
 	enabled?: boolean;
 	label: string;

@@ -16,6 +16,7 @@ from ..models import (
     QaProjectDetail,
     QaProjectStageState,
 )
+from ..agents.specialist_registry import agent_contract_metadata_for_action
 from .workflow_project_service import get_project
 
 ORCHESTRATOR_STAGES: tuple[OrchestratorStageName, ...] = (
@@ -94,6 +95,7 @@ def _action(
     blockers: Optional[list[OrchestratorBlocker]] = None,
 ) -> OrchestratorActionRecommendation:
     action_blockers = list(blockers or [])
+    agent_metadata = agent_contract_metadata_for_action(action)
     return OrchestratorActionRecommendation(
         action=action,
         label=label,
@@ -103,6 +105,7 @@ def _action(
         secondary=secondary,
         reason=reason,
         blockers=action_blockers,
+        **agent_metadata,
     )
 
 
