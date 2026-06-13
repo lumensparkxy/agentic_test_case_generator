@@ -10,7 +10,8 @@ Why this classification:
 - `backend/app/main.py` creates one FastAPI application and registers feature
   routers from `backend/app/routers/`.
 - Routers delegate domain behavior to service modules, agent modules, adapters,
-  and Pydantic contracts in `backend/app/models.py`.
+  and domain-owned Pydantic contracts in `backend/app/contracts/`.
+  `backend/app/models.py` remains a compatibility facade for existing imports.
 - The frontend is one Vite React app with `App.jsx` as top-level workflow
   orchestration and focused components under `frontend/src/components/`.
 - Browser execution is split into a backend Python conversion/service path and
@@ -49,7 +50,7 @@ flowchart LR
     middleware["Request middleware\nrequest_id, trace_id,\nlogging, metrics"]
     routers["Feature routers\nprojects, requirements,\ntestcases, automation, export,\nintegrations, billing, reports"]
     auth["Auth layer\nFirebase ID token\nlegacy JWT\nGoogle credential login"]
-    models["Pydantic contracts\nbackend/app/models.py"]
+    models["Pydantic contracts\nbackend/app/contracts\nbackend/app/models.py facade"]
 
     agents["Agent workflows\nADK/Gemini\nrequirements, analysis,\ntest generation, impact update,\nautomation"]
     services["Domain services\naudit, billing, versioning,\nproject lifecycle, orchestrator,\ngrounding, execution, reporting"]
@@ -242,7 +243,7 @@ test-case snapshots automatically.
 |-----------------|------|--------------|----------|
 | FastAPI app | App construction, middleware, CORS, router registration, health, metrics | Feature endpoint logic beyond global middleware | `backend/app/main.py` |
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
-| Models | Pydantic request/response/data contracts | Runtime business behavior | `backend/app/models.py` |
+| Models | Pydantic request/response/data contracts grouped by domain with a compatibility facade | Runtime business behavior | `backend/app/contracts/*.py`, `backend/app/models.py` |
 | Agents | Requirement extraction, analysis, test-case generation orchestration, specialist task contracts/registry, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
 | Services | Billing, audit, versioning, project lifecycle, orchestrator decisions, orchestrator run persistence, impact update apply, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
@@ -257,12 +258,12 @@ test-case snapshots automatically.
 | Pattern | Where found | Why it exists |
 |---------|-------------|---------------|
 | FastAPI dependency auth | `Depends(get_current_user)` in routers | Keeps protected endpoint identity resolution consistent |
-| Pydantic boundary models | `backend/app/models.py` | Keeps backend API, integration, billing, execution, and export payloads explicit |
+| Pydantic boundary models | `backend/app/contracts/*.py`, `backend/app/models.py` facade | Keeps backend API, integration, billing, execution, and export payloads explicit while reducing cross-domain contract churn |
 | Workflow audit lifecycle | `start_workflow_run()`, `complete_workflow_run()`, `record_usage_event()` | Links operations to request IDs, users, billing, reports, and trace metadata |
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
-| Durable project aggregate | `projects.py`, `workflow_project_service.py`, project models in `models.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
-| Orchestrator decision model | `orchestrator_service.py`, orchestrator models in `models.py` | Derives deterministic next actions and blockers from durable project snapshots |
-| Orchestrator run persistence | `orchestrator_run_service.py`, orchestrator run/checkpoint/event models in `models.py` | Keeps action progress, retries, blockers, produced snapshots, and execution links resumable across reloads and backend restarts |
+| Durable project aggregate | `projects.py`, `workflow_project_service.py`, project contracts in `contracts/projects.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
+| Orchestrator decision model | `orchestrator_service.py`, orchestrator contracts in `contracts/orchestrator.py` | Derives deterministic next actions and blockers from durable project snapshots |
+| Orchestrator run persistence | `orchestrator_run_service.py`, orchestrator run/checkpoint/event contracts in `contracts/orchestrator.py` | Keeps action progress, retries, blockers, produced snapshots, and execution links resumable across reloads and backend restarts |
 | Specialist agent task registry | `specialist_contracts.py`, `specialist_registry.py` | Gives orchestrator actions stable typed task envelopes/results and lets local or future ADK adapters plug in behind the same contract |
 | Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
@@ -285,8 +286,10 @@ test-case snapshots automatically.
   `frontend/src/styles/` behind `frontend/src/styles/index.css`. Future changes
   should continue moving cohesive behavior and selectors behind those ownership
   boundaries.
-- `backend/app/models.py` contains many product domains in one file. This keeps
-  contracts discoverable but increases merge and review risk as the API grows.
+- Pydantic contracts now live in domain modules under `backend/app/contracts/`,
+  with `backend/app/models.py` kept as a compatibility facade. New contract
+  changes should use the closest domain module and continue to run OpenAPI
+  export plus generated frontend API contract checks.
 - `docs/production-auth-policy-decision.md` accepts Firebase ID tokens as the
   production protected-endpoint token type. Backend-issued JWTs and
   `/auth/google/login` are isolated to local/test compatibility mode through
@@ -309,6 +312,7 @@ test-case snapshots automatically.
 ## 7) Evidence
 
 - `backend/app/main.py`
+- `backend/app/contracts/`
 - `backend/app/models.py`
 - `backend/app/routers/requirements.py`
 - `backend/app/routers/projects.py`
