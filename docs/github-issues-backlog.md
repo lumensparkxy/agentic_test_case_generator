@@ -34,7 +34,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
   - Done: [#40](https://github.com/lumensparkxy/agentic_test_case_generator/issues/40) - Modularize frontend CSS by feature ownership
   - Done: [#41](https://github.com/lumensparkxy/agentic_test_case_generator/issues/41) - Split test_case_agent.py into focused backend modules
-  - Blocked: [#42](https://github.com/lumensparkxy/agentic_test_case_generator/issues/42) - Split backend Pydantic contracts by domain
+  - Ready: [#42](https://github.com/lumensparkxy/agentic_test_case_generator/issues/42) - Split backend Pydantic contracts by domain
 - Epic [#36](https://github.com/lumensparkxy/agentic_test_case_generator/issues/36) - Strengthen contract safety and engineering hygiene
   - Done: [#43](https://github.com/lumensparkxy/agentic_test_case_generator/issues/43) - Generate frontend API types from FastAPI OpenAPI
   - Done: [#44](https://github.com/lumensparkxy/agentic_test_case_generator/issues/44) - Add formatter and linter baseline for backend and frontend
