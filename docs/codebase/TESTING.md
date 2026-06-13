@@ -19,6 +19,7 @@ python -m ruff format --check backend scripts
 python -m unittest discover -s backend/tests -p 'test_*.py'
 python scripts/evaluate_requirements.py --offline --strict
 python scripts/evaluate_generation.py --offline --strict
+python scripts/evaluate_orchestrator.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
 python scripts/generate_frontend_api_types.py --check
 python scripts/scan_codebase.py
@@ -42,6 +43,7 @@ CI currently runs:
 - Backend unittest suite.
 - Offline requirement evaluation.
 - Offline generation evaluation.
+- Offline orchestrator lifecycle evaluation.
 - OpenAPI export.
 - Frontend API contract type freshness check.
 - Frontend ESLint check.
@@ -61,6 +63,9 @@ Evidence: `.github/workflows/ci.yml`.
 - Plain-English schema contracts: `schemas/spec.schema.json` and
   `schemas/ir.schema.json`.
 - Benchmark inputs and expectations: `scripts/benchmark_*`.
+- Orchestrator benchmark inputs and expectations:
+  `scripts/benchmark_orchestrator_inputs/` and
+  `scripts/benchmark_orchestrator_expectations/`.
 - API payload fixtures: `scripts/api_payloads/`.
 - Source-focused codebase scan: `scripts/scan_codebase.py`, with output in
   `docs/codebase/.codebase-scan.txt`.
@@ -73,7 +78,9 @@ Evidence: `.github/workflows/ci.yml`.
 | Specialist task contracts | Yes | Orchestrator agent registry manifest, typed input/output dispatch, trace propagation, malformed output diagnostics | `backend/tests/test_specialist_agent_registry.py` uses synthetic fixtures and patched local agents |
 | Orchestrator decisions | Yes | Stage health, approval blockers, stale downstream state, impact-analysis priority, apply-update blockers, execution/review/report actions | `backend/tests/test_orchestrator_service.py` uses fake Firestore project snapshots and `TestClient` |
 | Orchestrator run persistence | Yes | Run creation/resume, idempotent events, checkpoint history, blockers, completion links, timeline endpoint payloads | `backend/tests/test_orchestrator_run_service.py` uses fake Firestore subcollections and `TestClient` |
+| Offline orchestrator lifecycle benchmarks | Yes | v1 first-generation routing, v2 two-requirement impact precision, unchanged-test preservation versus full regeneration, resumability, and governance gates | `scripts/evaluate_orchestrator.py`, `backend/tests/test_orchestrator_evaluation.py`, `scripts/benchmark_orchestrator_*` |
 | Frontend orchestrator cockpit | Yes | First-time project actions, resumed stale-impact action priority, blocker display, run/checkpoint timeline output, and reload restore | `frontend/e2e/orchestrator-cockpit.spec.js` uses mocked project, status, run, event, and checkpoint payloads |
+| Frontend orchestrator lifecycle | Yes | Create project, generate v1, reload, change requirements, impact update, execute, review, and report | `frontend/e2e/orchestrator-lifecycle.spec.js` uses synthetic project and orchestrator fixtures |
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
@@ -104,6 +111,9 @@ Evidence: `.github/workflows/ci.yml`.
 - Report evidence tests mock current project snapshots and execution runs so
   exported report snapshots cite exact source IDs and stale reports are visible
   as regeneration actions in the frontend.
+- Orchestrator lifecycle evaluation uses deterministic project fixtures to
+  compare full regeneration with targeted impact update behavior without live
+  model calls or real operational data.
 - Local JWT based browser/API tests are compatibility workflows. Real-backend
   runs must use `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production validation
   should exercise Firebase ID token verification.
@@ -208,6 +218,10 @@ Use the smallest gate that proves the change:
 - Backend service/router/model change: backend unittest plus focused tests.
 - Agent, fallback, coverage, or parsing change: backend unittest plus both
   offline evaluation scripts.
+- Orchestrator decision, impact-routing, project lifecycle, or governance
+  change: backend unittest plus `scripts/evaluate_orchestrator.py --offline
+  --strict`; run `frontend/e2e/orchestrator-lifecycle.spec.js` for stitched
+  browser workflow changes.
 - API contract change: OpenAPI export.
 - Frontend UI or API call change: frontend build and focused E2E if the flow is
   covered.
@@ -239,6 +253,7 @@ the issue, PR, or handoff note.
 - `backend/execution_runtime/playwright.config.ts`
 - `scripts/evaluate_requirements.py`
 - `scripts/evaluate_generation.py`
+- `scripts/evaluate_orchestrator.py`
 - `scripts/export_openapi.py`
 - `scripts/e2e_playwright_workflow.py`
 - `docs/requirements_traceability.md`

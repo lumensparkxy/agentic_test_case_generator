@@ -1,0 +1,17 @@
+{
+  "name": "v2_two_requirement_change",
+  "description": "Two changed requirements are detected with no false update recommendations while full regeneration would rewrite unchanged coverage.",
+  "expected_primary_action": "analyze_impact",
+  "expected_current_stage": "impact_analysis",
+  "require_enabled_primary": true,
+  "expected_has_baseline_test_suite": true,
+  "expected_upstream_changed": true,
+  "expected_changed_item_count": 2,
+  "expected_resume_action_match": true,
+  "minimum_impact_precision": 1.0,
+  "minimum_impact_recall": 1.0,
+  "minimum_unchanged_preservation_ratio": 1.0,
+  "minimum_false_update_recommendations_avoided": 8,
+  "expected_full_regenerate_false_update_recommendations": 8,
+  "expected_impact_false_update_recommendations": 0
+}

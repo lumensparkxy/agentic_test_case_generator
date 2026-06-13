@@ -1,0 +1,18 @@
+{
+  "name": "v2_approval_gate",
+  "description": "Governance keeps analysis available while the apply mutation is blocked by changed-item approval.",
+  "expected_primary_action": "apply_update",
+  "expected_current_stage": "test_cases",
+  "require_enabled_primary": false,
+  "expected_has_baseline_test_suite": true,
+  "expected_changed_item_count": 2,
+  "expected_blocker_codes": ["missing_approval"],
+  "expected_analysis_available_while_mutation_blocked": true,
+  "expected_resume_action_match": true,
+  "minimum_impact_precision": 1.0,
+  "minimum_impact_recall": 1.0,
+  "minimum_unchanged_preservation_ratio": 1.0,
+  "minimum_false_update_recommendations_avoided": 8,
+  "expected_full_regenerate_false_update_recommendations": 8,
+  "expected_impact_false_update_recommendations": 0
+}

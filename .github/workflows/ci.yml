@@ -50,6 +50,9 @@ jobs:
       - name: Evaluate generation offline
         run: python scripts/evaluate_generation.py --offline --strict
 
+      - name: Evaluate orchestrator offline
+        run: python scripts/evaluate_orchestrator.py --offline --strict
+
       - name: Validate OpenAPI contract export
         run: python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
 

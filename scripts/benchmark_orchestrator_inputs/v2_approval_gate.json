@@ -1,0 +1,10 @@
+{
+  "name": "v2_approval_gate",
+  "description": "A current impact analysis with unapproved changed items must leave analysis available while blocking mutation.",
+  "requirement_count": 10,
+  "include_baseline_suite": true,
+  "include_impact_analysis": true,
+  "current_requirements_approved": true,
+  "changed_items_approved": false,
+  "modified_requirement_ids": ["REQ-003", "REQ-010"]
+}

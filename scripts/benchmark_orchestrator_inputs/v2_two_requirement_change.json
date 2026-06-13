@@ -1,0 +1,7 @@
+{
+  "name": "v2_two_requirement_change",
+  "description": "A v2 change to two of ten requirements should prefer impact analysis over full regeneration and preserve unchanged tests.",
+  "requirement_count": 10,
+  "include_baseline_suite": true,
+  "modified_requirement_ids": ["REQ-003", "REQ-010"]
+}
