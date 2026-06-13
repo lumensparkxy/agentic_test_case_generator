@@ -11,7 +11,7 @@ should preserve when changing the application.
 | `backend/app/` | Runtime application package | `backend/app/main.py` |
 | `backend/app/routers/` | HTTP endpoint groups registered by `main.py` | `backend/app/main.py`, `backend/app/routers/*.py` |
 | `backend/app/agents/` | ADK/Gemini-facing workflow agents, specialist task contracts/registry, prompt helpers, impact recommendation logic, test-case coverage/review/fallback helpers, and response hydration helpers | `backend/app/adk_client.py`, `backend/app/agents/specialist_contracts.py`, `backend/app/agents/specialist_registry.py`, `backend/app/agents/test_case_agent.py`, `backend/app/agents/impact_update_agent.py` |
-| `backend/app/services/` | Business services, persistence repository boundaries/adapters, orchestrator decisions, impact update application, execution services, billing, reporting, grounding | `backend/app/services/*.py` |
+| `backend/app/services/` | Business services, persistence repository boundaries/adapters, orchestrator decisions and run persistence, impact update application, execution services, billing, reporting, grounding | `backend/app/services/*.py` |
 | `backend/app/adapters/` | External API clients for JIRA and Azure DevOps | `backend/app/adapters/jira.py`, `backend/app/adapters/azure_devops.py` |
 | `backend/app/auth/` | Firebase, Google credential, backend JWT, role, and authorization helpers | `backend/app/auth/*.py` |
 | `backend/app/observability/` | Structured logging, Prometheus-style metrics, optional tracing | `backend/app/observability/*.py` |
@@ -60,7 +60,7 @@ exposes `/metrics`.
 |----------|-------------------|------------------------|
 | `backend/app/routers/` | HTTP request parsing, FastAPI dependencies, workflow audit start/complete calls, response assembly | Low-level external API request code, raw SDK setup, large agent prompts |
 | `backend/app/agents/` | ADK/Gemini workflow orchestration, specialist task contracts/registry, prompt construction, deterministic fallbacks, impact recommendation logic, test-design review logic, coverage metrics, and agent response hydration | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
-| `backend/app/services/` | Domain services for billing, audit, versioning, QA project lifecycle, orchestrator decisions, impact update application, execution, grounding, reporting, integration connection storage, and storage adapter boundaries | FastAPI route decorators, JSX/UI behavior |
+| `backend/app/services/` | Domain services for billing, audit, versioning, QA project lifecycle, orchestrator decisions, orchestrator run persistence, impact update application, execution, grounding, reporting, integration connection storage, and storage adapter boundaries | FastAPI route decorators, JSX/UI behavior |
 | `backend/app/adapters/` | Provider-specific JIRA and Azure DevOps HTTP semantics | App-wide workflow decisions or billing policy |
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |

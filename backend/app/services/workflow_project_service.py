@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -55,6 +56,12 @@ class ProjectPermissionError(RuntimeError):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _stable_document_id(prefix: str, *parts: Any) -> str:
+    raw = "::".join(str(part or "") for part in parts)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}_{digest}"
 
 
 def _collection():
@@ -296,9 +303,15 @@ def append_stage_snapshot(
     title: Optional[str] = None,
     metadata: Optional[dict[str, Any]] = None,
     base_project_revision: Optional[int] = None,
+    idempotency_key: Optional[str] = None,
 ) -> QaProjectStageSnapshot:
     project_payload = _get_project_payload(project_id)
     _require_owner(project_payload, actor)
+    snapshot_id = _stable_document_id("snapshot", project_id, stage, operation, idempotency_key) if idempotency_key else str(uuid4())
+    if idempotency_key:
+        existing_snapshot = _snapshot_for(project_id, snapshot_id)
+        if existing_snapshot is not None:
+            return existing_snapshot
     _check_revision(project_payload, base_project_revision)
 
     now = _utcnow()
@@ -308,7 +321,6 @@ def append_stage_snapshot(
     stage_state = _stage_state_from_payload(project_payload)
     previous_state = stage_state.get(stage) or {}
     version = int(previous_state.get("version") or 0) + 1
-    snapshot_id = str(uuid4())
     snapshot_payload = {
         "snapshot_id": snapshot_id,
         "project_id": project_id,
@@ -325,6 +337,7 @@ def append_stage_snapshot(
         "title": title,
         "metadata": _serialize_value(metadata or {}),
         "payload": _serialize_value(payload),
+        "idempotency_key": idempotency_key,
         "created_at": now,
     }
     project_doc.collection("snapshots").document(snapshot_id).set(snapshot_payload)
@@ -388,9 +401,14 @@ def record_execution_run(
     workflow_run_id: Optional[str],
     source_event_id: Optional[str],
     project_revision: int,
+    idempotency_key: Optional[str] = None,
 ) -> QaProjectExecutionRun:
     now = _utcnow()
-    run_record_id = str(uuid4())
+    run_record_id = _stable_document_id("execution", project_id, idempotency_key) if idempotency_key else str(uuid4())
+    if idempotency_key:
+        existing = _document_to_dict(_get_project_doc(project_id).collection("execution_runs").document(run_record_id).get())
+        if existing is not None:
+            return QaProjectExecutionRun.model_validate(existing)
     payload = {
         "run_record_id": run_record_id,
         "project_id": project_id,
@@ -405,6 +423,7 @@ def record_execution_run(
         "source_event_id": source_event_id,
         "request_id": request_id,
         "actor_user_id": actor.sub,
+        "idempotency_key": idempotency_key,
         "created_at": now,
     }
     project_doc = _get_project_doc(project_id)

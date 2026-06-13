@@ -71,6 +71,7 @@ Evidence: `.github/workflows/ci.yml`.
 |-------|----------|----------------|-------|
 | Backend unit | Yes | Config parsing, auth, model parsing, agents, services, billing, reporting, grounding, execution conversion | Uses `unittest` and `unittest.mock.patch` |
 | Specialist task contracts | Yes | Orchestrator agent registry manifest, typed input/output dispatch, trace propagation, malformed output diagnostics | `backend/tests/test_specialist_agent_registry.py` uses synthetic fixtures and patched local agents |
+| Orchestrator run persistence | Yes | Run creation/resume, idempotent events, checkpoint history, blockers, completion links, timeline endpoint payloads | `backend/tests/test_orchestrator_run_service.py` uses fake Firestore subcollections and `TestClient` |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Integration observability | Yes | JIRA/Azure DevOps provider metrics, duration summaries, and safe structured logs | `backend/tests/test_integration_observability.py`, adapter tests, and `backend/tests/test_observability_metrics.py` |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |
@@ -90,6 +91,9 @@ Evidence: `.github/workflows/ci.yml`.
 - Backend tests patch the shared Firestore adapter, provider adapters, auth
   dependencies, billing services, repository hooks, and agent calls at module
   boundaries.
+- Orchestrator run persistence tests use project-scoped fake Firestore
+  subcollections and request IDs/idempotency keys to prove retries do not create
+  duplicate runs, events, snapshots, execution records, or checkpoints.
 - Local JWT based browser/API tests are compatibility workflows. Real-backend
   runs must use `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production validation
   should exercise Firebase ID token verification.

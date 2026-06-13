@@ -8,6 +8,7 @@ from ..models import (
     AuthUser,
     ImpactAnalysisInput,
     ImpactUpdateApplyInput,
+    OrchestratorRunListResponse,
     OrchestratorStatusResponse,
     QaProjectCreateInput,
     QaProjectDetail,
@@ -17,6 +18,7 @@ from ..models import (
     QaProjectUseCaseSnapshotInput,
 )
 from ..services.impact_update_service import analyze_project_impact, apply_project_impact_update, impact_error_to_http
+from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
 from ..services.workflow_project_service import (
     append_stage_snapshot,
@@ -116,6 +118,17 @@ async def get_qa_project_orchestrator_status(
 ) -> OrchestratorStatusResponse:
     try:
         return await run_in_threadpool(get_project_orchestrator_status, project_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/orchestrator/runs", response_model=OrchestratorRunListResponse)
+async def list_qa_project_orchestrator_runs(
+    project_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> OrchestratorRunListResponse:
+    try:
+        return await run_in_threadpool(list_orchestrator_runs, project_id=project_id, actor=current_user)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 
