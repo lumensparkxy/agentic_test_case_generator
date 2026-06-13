@@ -176,6 +176,20 @@ link source/output snapshots, agent output references, and execution records.
 The `GET /projects/{id}/orchestrator/runs` endpoint returns timeline-friendly
 runs, events, and checkpoints for the frontend cockpit tracked by issue #90.
 
+Frontend orchestrator cockpit flow:
+
+```text
+Stored current project ID -> project reopen -> status/runs fetch -> cockpit recommended action, blockers, and timeline
+```
+
+`frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
+the project workspace and consumes the deterministic status plus durable run
+payloads. It keeps the existing tab workflows available while making the
+backend-recommended primary action visible for resumed projects, including
+impact-analysis priority over full regeneration when upstream artifacts changed.
+The cockpit also renders blockers from the status payload and links timeline
+events to checkpoint output snapshot IDs.
+
 Next-version execution flow:
 
 ```text

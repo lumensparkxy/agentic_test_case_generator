@@ -87,6 +87,10 @@ npm run test:playwright -- --list
   `backend/app/services/orchestrator_run_service.py` for run records, event
   records, and checkpoints. Pass stable request IDs or idempotency keys when a
   client or worker may retry an action.
+- The frontend project workspace may persist the selected project ID in local
+  storage for resume-on-reload, but project state, recommended orchestrator
+  actions, blockers, and timeline entries must be reloaded from backend project,
+  status, and run endpoints.
 - The generated frontend API contract module exports type declarations and
   high-traffic endpoint constants, not a full generated API client.
 

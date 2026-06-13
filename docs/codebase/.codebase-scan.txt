@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 277
+- Files scanned: 279
 - Files excluded after `git ls-files`: 70
-- Total bytes: 2368951
-- Text lines counted: 61352
+- Total bytes: 2411273
+- Text lines counted: 62729
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -33,7 +33,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | Directory | Files |
 | --- | ---: |
 | `backend` | 142 |
-| `frontend` | 74 |
+| `frontend` | 76 |
 | `scripts` | 27 |
 | `docs` | 21 |
 | `.github` | 2 |
@@ -53,10 +53,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | Extension | Files |
 | --- | ---: |
 | `.py` | 147 |
-| `.js` | 27 |
+| `.js` | 28 |
 | `.md` | 25 |
+| `.jsx` | 22 |
 | `.json` | 21 |
-| `.jsx` | 21 |
 | `.css` | 17 |
 | `[no extension]` | 5 |
 | `.txt` | 3 |
@@ -74,12 +74,12 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Path | Bytes | Lines |
 | --- | ---: | ---: |
-| `frontend/src/App.jsx` | 143934 | 3865 |
+| `frontend/src/App.jsx` | 149443 | 4021 |
 | `frontend/package-lock.json` | 110508 | 3101 |
 | `backend/app/agents/test_case_agent.py` | 60416 | 1371 |
 | `backend/app/models.py` | 45755 | 1422 |
+| `docs/requirements_traceability.md` | 45383 | 40 |
 | `backend/app/adk_client.py` | 44434 | 1106 |
-| `docs/requirements_traceability.md` | 43904 | 39 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |

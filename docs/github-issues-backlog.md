@@ -56,7 +56,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#87](https://github.com/lumensparkxy/agentic_test_case_generator/issues/87) - Define orchestrator domain model and workflow decisions
   - Done: [#88](https://github.com/lumensparkxy/agentic_test_case_generator/issues/88) - Add ADK-compatible specialist agent task contracts
   - Done: [#89](https://github.com/lumensparkxy/agentic_test_case_generator/issues/89) - Persist orchestrator runs, events, and resumable checkpoints
-  - Ready: [#90](https://github.com/lumensparkxy/agentic_test_case_generator/issues/90) - Build orchestrator cockpit in the frontend
+  - Done: [#90](https://github.com/lumensparkxy/agentic_test_case_generator/issues/90) - Build orchestrator cockpit in the frontend
   - Ready: [#91](https://github.com/lumensparkxy/agentic_test_case_generator/issues/91) - Integrate impact update path into orchestrator decisions
   - Ready: [#92](https://github.com/lumensparkxy/agentic_test_case_generator/issues/92) - Orchestrate automation and multi-environment execution
   - Ready: [#93](https://github.com/lumensparkxy/agentic_test_case_generator/issues/93) - Orchestrate review and evidence-backed reporting

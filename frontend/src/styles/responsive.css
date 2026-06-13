@@ -90,6 +90,8 @@
 	.coverage-plan-header,
 	.workflow-settings-header,
 	.workflow-diagnostics-header,
+	.orchestrator-cockpit-header,
+	.orchestrator-timeline-header,
 	.jira-card-header,
 	.jira-sync-preview-header,
 	.jira-sync-preview-meta {
@@ -141,6 +143,30 @@
 
 	.panel-nav button {
 		width: 100%;
+	}
+
+	.orchestrator-cockpit-actions,
+	.orchestrator-action-grid,
+	.orchestrator-summary-grid {
+		grid-template-columns: 1fr;
+		width: 100%;
+	}
+
+	.orchestrator-cockpit-actions {
+		justify-content: flex-start;
+	}
+
+	.orchestrator-stage-rail {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		overflow-x: visible;
+	}
+
+	.orchestrator-event-row {
+		display: grid;
+	}
+
+	.orchestrator-event-row > span {
+		flex-basis: auto;
 	}
 
 	.feedback-section {
