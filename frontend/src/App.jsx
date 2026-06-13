@@ -521,8 +521,18 @@ export default function App() {
 	const acceptedImpactRecommendationIds = impactRecommendations
 		.filter((recommendation) => recommendation.accepted)
 		.map((recommendation) => recommendation.recommendation_id);
+	const impactChangedItems = impactAnalysis?.changed_items || [];
+	const impactApplyBlockedByStageApproval = impactChangedItems.some((item) => {
+		if (!["added", "modified"].includes(item.change_type)) return false;
+		const requirementChanged = item.kind === "requirement" || item.requirement_id;
+		const useCaseChanged = item.kind === "use_case" || item.use_case_id || (item.scenario_ids || []).length > 0;
+		const requirementsBlocked = requirementChanged && (!projectStageState.requirements?.approved || projectStageState.requirements?.stale);
+		const useCasesBlocked = useCaseChanged && (!projectStageState.use_cases?.approved || projectStageState.use_cases?.stale);
+		return requirementsBlocked || useCasesBlocked;
+	});
 	const impactApplyBlockedByApproval = Boolean(
-		(impactAnalysis?.changed_items || []).some((item) => ["added", "modified"].includes(item.change_type) && !item.approved)
+		impactApplyBlockedByStageApproval ||
+		impactChangedItems.some((item) => ["added", "modified"].includes(item.change_type) && !item.approved)
 	);
 	const canAnalyzeImpact = Boolean(currentProjectId && hasExistingTestCaseBaseline && upstreamChangedForImpact);
 	const canApplyImpactUpdate = Boolean(

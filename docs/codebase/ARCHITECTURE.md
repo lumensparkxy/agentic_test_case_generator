@@ -162,6 +162,16 @@ metadata from `backend/app/agents/specialist_registry.py`. The status service
 does not call agents or decide human approvals; those remain explicit gates
 represented as blockers.
 
+Incremental impact updates are first-class orchestrator decisions. When a
+baseline suite exists and downstream test cases are stale because requirements
+or use cases changed, the orchestrator recommends impact analysis as the primary
+path and keeps full regeneration secondary. Impact analysis can run before the
+changed upstream artifact is approved, but apply is blocked until the changed
+requirement/use-case stage and changed items are approved. Once
+`impact.update.apply` writes the new test-case snapshot sourced from the current
+impact snapshot, the suite is no longer treated as needing another incremental
+update.
+
 Orchestrator run persistence flow:
 
 ```text

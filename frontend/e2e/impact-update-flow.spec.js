@@ -362,6 +362,10 @@ test.describe("Impact update flow", () => {
 		});
 		await expect(page.getByText(/Impact QA · revision 5/)).toBeVisible();
 
+		await page.reload();
+		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByText(/Impact QA · revision 5/)).toBeVisible();
+
 		await page.locator(".tab", { hasText: "Generate" }).click();
 		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toBeVisible();
 		await expect(page.getByRole("button", { name: /Full Regenerate from 10 Approved/i })).toBeVisible();
@@ -375,5 +379,6 @@ test.describe("Impact update flow", () => {
 		await page.getByRole("button", { name: /Apply 3 Accepted Recommendations/i }).click();
 		await expect(page.getByText(/Impact update applied: 1 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
 		await expect(page.getByText(/3 test cases/i)).toBeVisible();
+		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toHaveCount(0);
 	});
 });

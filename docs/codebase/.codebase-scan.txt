@@ -8,8 +8,8 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 - Files scanned: 279
 - Files excluded after `git ls-files`: 70
-- Total bytes: 2411273
-- Text lines counted: 62729
+- Total bytes: 2420444
+- Text lines counted: 62859
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -74,19 +74,19 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Path | Bytes | Lines |
 | --- | ---: | ---: |
-| `frontend/src/App.jsx` | 149443 | 4021 |
+| `frontend/src/App.jsx` | 150186 | 4031 |
 | `frontend/package-lock.json` | 110508 | 3101 |
 | `backend/app/agents/test_case_agent.py` | 60416 | 1371 |
+| `docs/requirements_traceability.md` | 47039 | 41 |
 | `backend/app/models.py` | 45755 | 1422 |
-| `docs/requirements_traceability.md` | 45383 | 40 |
 | `backend/app/adk_client.py` | 44434 | 1106 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
 | `frontend/src/api/generated/api-contracts.d.ts` | 27400 | 803 |
 | `scripts/e2e_playwright_workflow.py` | 26113 | 682 |
+| `backend/app/services/orchestrator_service.py` | 25945 | 691 |
 | `backend/app/adapters/azure_devops.py` | 25549 | 561 |
-| `backend/app/services/orchestrator_service.py` | 24511 | 660 |
 | `backend/app/routers/requirements.py` | 23961 | 596 |
 | `backend/app/agents/requirements_agent.py` | 23657 | 583 |
 | `backend/app/services/execution_service.py` | 23645 | 635 |
