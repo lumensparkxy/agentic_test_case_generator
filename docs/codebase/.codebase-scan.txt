@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 279
+- Files scanned: 280
 - Files excluded after `git ls-files`: 70
-- Total bytes: 2439918
-- Text lines counted: 63186
+- Total bytes: 2462154
+- Text lines counted: 63726
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -33,7 +33,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | Directory | Files |
 | --- | ---: |
 | `backend` | 142 |
-| `frontend` | 76 |
+| `frontend` | 77 |
 | `scripts` | 27 |
 | `docs` | 21 |
 | `.github` | 2 |
@@ -53,7 +53,7 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | Extension | Files |
 | --- | ---: |
 | `.py` | 147 |
-| `.js` | 28 |
+| `.js` | 29 |
 | `.md` | 25 |
 | `.jsx` | 22 |
 | `.json` | 21 |
@@ -77,14 +77,14 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `frontend/src/App.jsx` | 150603 | 4041 |
 | `frontend/package-lock.json` | 110508 | 3101 |
 | `backend/app/agents/test_case_agent.py` | 60416 | 1371 |
-| `docs/requirements_traceability.md` | 48831 | 42 |
+| `docs/requirements_traceability.md` | 50371 | 43 |
 | `backend/app/models.py` | 45910 | 1425 |
 | `backend/app/adk_client.py` | 44434 | 1106 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
+| `backend/app/services/orchestrator_service.py` | 28587 | 764 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
 | `frontend/src/api/generated/api-contracts.d.ts` | 27512 | 806 |
-| `backend/app/services/orchestrator_service.py` | 26310 | 696 |
 | `scripts/e2e_playwright_workflow.py` | 26113 | 682 |
 | `backend/app/adapters/azure_devops.py` | 25549 | 561 |
 | `backend/app/routers/requirements.py` | 23961 | 596 |
@@ -93,4 +93,4 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/routers/integrations_azure_devops.py` | 23560 | 582 |
 | `backend/app/agents/impact_update_agent.py` | 23043 | 556 |
 | `backend/app/routers/integrations_jira.py` | 21792 | 570 |
-| `backend/app/services/azure_devops_sync_service.py` | 20434 | 496 |
+| `docs/codebase/ARCHITECTURE.md` | 20530 | 343 |

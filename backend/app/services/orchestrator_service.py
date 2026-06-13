@@ -565,6 +565,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
 
     execution_status = _latest_execution_status(project)
     execution_operation = _execution_operation(project)
+    report_stale = bool(reports_state and reports_state.current_snapshot_id and reports_state.stale)
     if execution_status == "failed":
         actions.append(
             _action(
@@ -587,6 +588,28 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
+    if report_stale:
+        actions.append(
+            _action(
+                "report",
+                "Regenerate Evidence Report",
+                "reports",
+                reason="The latest report is stale because upstream project evidence changed.",
+                primary=True,
+            )
+        )
+        actions.append(
+            _action(
+                "review",
+                "Review Evidence",
+                "review",
+                reason="Review current requirements, coverage, automation readiness, and execution evidence before regenerating the report.",
+                secondary=True,
+            )
+        )
+        actions.append(_full_regenerate_action(full_regenerate_blockers))
+        return actions
+
     if execution_operation == "automation.execution.preview":
         actions.append(
             _action(
@@ -595,6 +618,15 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 "execution",
                 reason="Automation preview is ready; execute the selected cases in the target environment.",
                 primary=True,
+            )
+        )
+        actions.append(
+            _action(
+                "review",
+                "Review Evidence",
+                "review",
+                reason="Review automation readiness and current coverage before execution.",
+                secondary=True,
             )
         )
         actions.append(_full_regenerate_action(full_regenerate_blockers))
@@ -610,6 +642,15 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 primary=True,
             )
         )
+        actions.append(
+            _action(
+                "review",
+                "Review Evidence",
+                "review",
+                reason="Review requirements, coverage, automation readiness, and execution outcomes before reporting.",
+                secondary=True,
+            )
+        )
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
@@ -623,9 +664,36 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 primary=True,
             )
         )
+        actions.append(
+            _action(
+                "report",
+                "Create Test Case Report",
+                "reports",
+                reason="Approved test-case evidence can be reported before environment execution.",
+                secondary=True,
+            )
+        )
+        actions.append(
+            _action(
+                "review",
+                "Review Evidence",
+                "review",
+                reason="Review generated coverage and traceability before automation or reporting.",
+                secondary=True,
+            )
+        )
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
+    actions.append(
+        _action(
+            "review",
+            "Review Evidence",
+            "review",
+            reason="Review current requirements, coverage, execution outcomes, and report evidence.",
+            secondary=True,
+        )
+    )
     actions.append(
         _action(
             "report",

@@ -94,6 +94,11 @@ npm run test:playwright -- --list
   execution records; runs for different environments must remain separate
   history entries. Failed execution is a review signal and must not directly
   rewrite requirements, use cases, or test cases.
+- Project-scoped report/export snapshots should include
+  `evidence.source_snapshot_ids`, `evidence.execution_run_ids`, and evidence
+  refs for the exact project snapshots and execution runs summarized. Report
+  actions should be recommended when approved evidence exists and should become
+  primary regeneration actions when the `reports` stage is stale.
 - Incremental impact updates should remain the primary orchestrator path only
   while the current test-case snapshot is stale. After `impact.update.apply`
   creates a new test-case snapshot sourced from the impact-analysis snapshot,
