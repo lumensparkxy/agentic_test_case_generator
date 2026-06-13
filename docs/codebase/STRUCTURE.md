@@ -10,6 +10,7 @@ should preserve when changing the application.
 | `backend/` | FastAPI API, agents, services, auth, tests, execution framework, backend Dockerfile | `backend/app/main.py`, `backend/tests/`, `backend/Dockerfile` |
 | `backend/app/` | Runtime application package | `backend/app/main.py` |
 | `backend/app/routers/` | HTTP endpoint groups registered by `main.py` | `backend/app/main.py`, `backend/app/routers/*.py` |
+| `backend/app/contracts/` | Domain-owned Pydantic request, response, and data contracts re-exported through the legacy `models.py` facade | `backend/app/contracts/*.py`, `backend/app/models.py` |
 | `backend/app/agents/` | ADK/Gemini-facing workflow agents, specialist task contracts/registry, prompt helpers, impact recommendation logic, test-case coverage/review/fallback helpers, and response hydration helpers | `backend/app/adk_client.py`, `backend/app/agents/specialist_contracts.py`, `backend/app/agents/specialist_registry.py`, `backend/app/agents/test_case_agent.py`, `backend/app/agents/impact_update_agent.py` |
 | `backend/app/services/` | Business services, persistence repository boundaries/adapters, orchestrator decisions and run persistence, impact update application, execution services, billing, reporting, grounding | `backend/app/services/*.py` |
 | `backend/app/adapters/` | External API clients for JIRA and Azure DevOps | `backend/app/adapters/jira.py`, `backend/app/adapters/azure_devops.py` |
@@ -63,6 +64,7 @@ exposes `/metrics`.
 | Boundary | What belongs here | What must not be here |
 |----------|-------------------|------------------------|
 | `backend/app/routers/` | HTTP request parsing, FastAPI dependencies, workflow audit start/complete calls, response assembly | Low-level external API request code, raw SDK setup, large agent prompts |
+| `backend/app/contracts/` | Domain-owned Pydantic models for requirements, grounding, auth, test cases, execution, impact updates, projects, orchestration, integrations, export, automation, reporting, and billing | Runtime business behavior or route handlers |
 | `backend/app/agents/` | ADK/Gemini workflow orchestration, specialist task contracts/registry, prompt construction, deterministic fallbacks, impact recommendation logic, test-design review logic, coverage metrics, and agent response hydration | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
 | `backend/app/services/` | Domain services for billing, audit, versioning, QA project lifecycle, orchestrator decisions, orchestrator run persistence, impact update application, execution, grounding, reporting, integration connection storage, and storage adapter boundaries | FastAPI route decorators, JSX/UI behavior |
 | `backend/app/adapters/` | Provider-specific JIRA and Azure DevOps HTTP semantics | App-wide workflow decisions or billing policy |
@@ -84,6 +86,9 @@ exposes `/metrics`.
   `azure_devops_sync_service.py`.
 - Python classes and Pydantic models use PascalCase, for example
   `RequirementAnalysis`, `ExecutionPreviewResponse`, and `BillingAccount`.
+- Backend Pydantic contract modules live under `backend/app/contracts/` by
+  domain; keep `backend/app/models.py` as a compatibility facade for existing
+  imports.
 - Python functions and helpers use snake_case. Private/internal helpers are
   commonly prefixed with `_`, for example `_get_request_id()` and
   `_normalize_base_url()`.
@@ -127,6 +132,7 @@ Do not document generated files as source conventions and do not commit them.
 - `git ls-files`
 - `backend/app/main.py`
 - `backend/app/routers/`
+- `backend/app/contracts/`
 - `backend/app/services/`
 - `backend/app/agents/`
 - `backend/app/agents/impact_update_agent.py`

@@ -6,10 +6,10 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 ## Summary
 
-- Files scanned: 282
+- Files scanned: 291
 - Files excluded after `git ls-files`: 70
-- Total bytes: 2478025
-- Text lines counted: 64116
+- Total bytes: 2505433
+- Text lines counted: 64445
 
 ## Excluded Ignored Generated/Local Prefixes
 
@@ -32,9 +32,9 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Directory | Files |
 | --- | ---: |
-| `backend` | 143 |
-| `frontend` | 78 |
-| `scripts` | 27 |
+| `backend` | 144 |
+| `frontend` | 79 |
+| `scripts` | 34 |
 | `docs` | 21 |
 | `.github` | 2 |
 | `schemas` | 2 |
@@ -52,11 +52,11 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 
 | Extension | Files |
 | --- | ---: |
-| `.py` | 148 |
-| `.js` | 30 |
+| `.py` | 150 |
+| `.js` | 31 |
+| `.json` | 27 |
 | `.md` | 25 |
 | `.jsx` | 22 |
-| `.json` | 21 |
 | `.css` | 17 |
 | `[no extension]` | 5 |
 | `.txt` | 3 |
@@ -77,14 +77,15 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `frontend/src/App.jsx` | 150603 | 4041 |
 | `frontend/package-lock.json` | 110508 | 3101 |
 | `backend/app/agents/test_case_agent.py` | 60416 | 1371 |
-| `docs/requirements_traceability.md` | 51996 | 44 |
-| `backend/app/models.py` | 45910 | 1425 |
+| `docs/requirements_traceability.md` | 53057 | 45 |
 | `backend/app/adk_client.py` | 44434 | 1106 |
 | `backend/app/agents/test_case_coverage.py` | 38515 | 967 |
+| `scripts/evaluate_orchestrator.py` | 37138 | 805 |
 | `backend/app/services/orchestrator_service.py` | 28587 | 764 |
 | `backend/app/agents/analysis_agent.py` | 28139 | 741 |
 | `backend/app/services/billing_service.py` | 28086 | 672 |
 | `frontend/src/api/generated/api-contracts.d.ts` | 27512 | 806 |
+| `frontend/e2e/orchestrator-lifecycle.spec.js` | 26700 | 785 |
 | `scripts/e2e_playwright_workflow.py` | 26113 | 682 |
 | `backend/app/adapters/azure_devops.py` | 25549 | 561 |
 | `backend/app/routers/requirements.py` | 23961 | 596 |
@@ -93,4 +94,3 @@ Scope: tracked repository files after explicit generated/local-output exclusions
 | `backend/app/routers/integrations_azure_devops.py` | 23560 | 582 |
 | `backend/app/agents/impact_update_agent.py` | 23043 | 556 |
 | `backend/app/routers/integrations_jira.py` | 21792 | 570 |
-| `docs/codebase/ARCHITECTURE.md` | 20530 | 343 |
