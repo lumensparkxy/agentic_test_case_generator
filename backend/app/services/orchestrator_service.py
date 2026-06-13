@@ -284,6 +284,7 @@ def _automation_stage(project: QaProjectDetail) -> OrchestratorStageState:
     test_case_state = _project_state(project, "test_cases")
     operation = _execution_operation(project)
     blockers: list[OrchestratorBlocker] = []
+    test_case_metadata = dict(test_case_state.metadata or {}) if test_case_state else {}
     if operation in {"automation.execution.preview", "automation.execution.run"}:
         status: OrchestratorStageStatus = "completed"
         approved = True
@@ -317,7 +318,11 @@ def _automation_stage(project: QaProjectDetail) -> OrchestratorStageState:
             if operation == "automation.execution.preview"
             else "execution_run"
             if operation == "automation.execution.run"
-            else None
+            else "test_cases"
+            if test_case_state and test_case_state.current_snapshot_id
+            else None,
+            "source_snapshot_id": test_case_state.current_snapshot_id if test_case_state else None,
+            "test_case_count": test_case_metadata.get("test_case_count"),
         },
     )
 

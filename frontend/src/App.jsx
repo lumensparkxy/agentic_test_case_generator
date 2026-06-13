@@ -280,6 +280,8 @@ export default function App() {
 	const {
 		executionTargetBaseUrl,
 		setExecutionTargetBaseUrl,
+		executionTargetEnvironment,
+		setExecutionTargetEnvironment,
 		executionPreview,
 		setExecutionPreview,
 		executionRunResult,
@@ -1242,6 +1244,7 @@ export default function App() {
 		resetExportWorkflowState();
 
 		setExecutionTargetBaseUrl(executionPayload?.target_base_url || "");
+		setExecutionTargetEnvironment(executionPayload?.target_environment || "");
 		if (executionPayload?.run_id) {
 			setExecutionRunResult({
 				status: executionPayload.status,
@@ -2378,13 +2381,18 @@ export default function App() {
 		}
 	};
 
-	const buildExecutionPayload = (casesOverride = testCases, { includeProject = true } = {}) => ({
-		test_cases: casesOverride,
-		target_base_url: executionTargetBaseUrl.trim() || appLink || null,
-		target_environment: executionTargetBaseUrl.trim() ? "custom" : appLink ? "application" : "default",
-		project_id: includeProject && currentProjectId ? currentProjectId : null,
-		base_project_revision: includeProject ? currentProjectRevision : null,
-	});
+	const buildExecutionPayload = (casesOverride = testCases, { includeProject = true } = {}) => {
+		const targetBaseUrl = executionTargetBaseUrl.trim() || appLink || null;
+		const targetEnvironment =
+			executionTargetEnvironment.trim() || (executionTargetBaseUrl.trim() ? "custom" : appLink ? "application" : "default");
+		return {
+			test_cases: casesOverride,
+			target_base_url: targetBaseUrl,
+			target_environment: targetEnvironment,
+			project_id: includeProject && currentProjectId ? currentProjectId : null,
+			base_project_revision: includeProject ? currentProjectRevision : null,
+		};
+	};
 
 	const previewExecution = async (casesOverride = testCases, options = {}) => {
 		const { updateStatus = true, persistProject = true } = options;
@@ -3996,6 +4004,8 @@ export default function App() {
 						testCases={testCases}
 						executionTargetBaseUrl={executionTargetBaseUrl}
 						setExecutionTargetBaseUrl={setExecutionTargetBaseUrl}
+						executionTargetEnvironment={executionTargetEnvironment}
+						setExecutionTargetEnvironment={setExecutionTargetEnvironment}
 						executionPreview={executionPreview}
 						executionRunResult={executionRunResult}
 						isPreviewingExecution={isPreviewingExecution}

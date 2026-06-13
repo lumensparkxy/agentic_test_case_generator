@@ -639,11 +639,14 @@ class QaProjectExecutionRun(BaseModel):
     project_id: str
     run_id: str
     target_environment: str
+    target_base_url: Optional[str] = None
     project_revision: int
     test_case_count: int = 0
     status: str
     summary: Dict[str, Any] = Field(default_factory=dict)
     snapshot_id: Optional[str] = None
+    source_snapshot_id: Optional[str] = None
+    selected_test_case_ids: List[str] = Field(default_factory=list)
     workflow_run_id: Optional[str] = None
     source_event_id: Optional[str] = None
     request_id: Optional[str] = None
