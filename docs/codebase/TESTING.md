@@ -56,6 +56,8 @@ Evidence: `.github/workflows/ci.yml`.
 ## 2) Test Layout
 
 - Backend tests: `backend/tests/test_*.py`.
+- Backend real-service E2E tests: `backend/e2e/test_*.py`; skipped unless
+  `RUN_REAL_ADK_E2E=1` is set.
 - Frontend browser specs: `frontend/e2e/*.spec.js`.
 - Frontend E2E support: `frontend/e2e/support/`.
 - Execution runtime smoke/list command: `backend/execution_runtime/package.json`.
@@ -84,6 +86,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
+| Backend real ADK E2E | Opt-in | Requirements parsing, enrichment, test-case generation, automation POM output, execution preview, exports, and summary artifacts against a running backend | `RUN_REAL_ADK_E2E=1 python -m unittest discover -s backend/e2e -p 'test_*.py'`; not part of required CI |
 | Integration observability | Yes | JIRA/Azure DevOps provider metrics, duration summaries, and safe structured logs | `backend/tests/test_integration_observability.py`, adapter tests, and `backend/tests/test_observability_metrics.py` |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |
 | Backend format check | Yes | Ruff formatter baseline | `python -m ruff format --check backend scripts` |
@@ -210,6 +213,36 @@ Use this script for release confidence when changes affect requirement parsing,
 grounded context, generation, exports, automation, execution preview, or the
 plain-English framework. It is slower and more environment-sensitive than the
 offline CI gates, so do not replace unit and offline benchmark checks with it.
+
+Optional real-service unittest E2E:
+
+```bash
+source .venv/bin/activate
+RUN_REAL_ADK_E2E=1 python -m unittest discover -s backend/e2e -p 'test_*.py'
+```
+
+This suite is skipped by default during discovery and is not wired into required
+CI. It expects a backend running at `REAL_ADK_E2E_BASE_URL`, default
+`http://127.0.0.1:8000`, real model credentials via `GEMINI_API_KEY` or
+`GOOGLE_API_KEY`, local JWT compatibility via
+`AUTH_TOKEN_MODE=firebase-or-backend-jwt` and `JWT_SECRET_KEY` unless
+`AUTH_TOKEN` is provided, and installed execution runtime dependencies under
+`backend/execution_runtime/node_modules`.
+
+Optional configuration:
+
+- `REAL_ADK_E2E_OUTPUT_DIR`, default
+  `/tmp/agentic-tcg-real-adk-e2e`.
+- `REAL_ADK_E2E_REQUIREMENTS_FILE`, default
+  `scripts/playwright_docs_requirements.md`.
+- `REAL_ADK_E2E_TARGET_URL`, default `https://playwright.dev/python/`.
+- `REAL_ADK_E2E_TIMEOUT_SECONDS`, default `600`.
+
+Each run writes timestamped artifacts under the output directory, including
+`01_parse.json`, `02_enrich.json`, `03_generate.json`,
+`04_playwright_pom.json`, `05_execution_preview.json`, export files, and
+`summary_report.json`. The suite is preview-only by default; it does not execute
+generated browser cases.
 
 ## 6) Validation Gate Selection
 
