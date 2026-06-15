@@ -11,6 +11,8 @@
     "format:check": "prettier --check \"src/**/*.{js,jsx,css}\" \"e2e/**/*.{js,mjs}\" \"*.js\"",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:edge-login": "node e2e/bootstrap-edge-login.mjs",
+    "test:e2e:edge-real-auth": "playwright test e2e/real-auth-workflow.spec.js",
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
