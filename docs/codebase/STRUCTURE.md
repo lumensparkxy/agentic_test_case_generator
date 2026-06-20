@@ -42,8 +42,10 @@ should preserve when changing the application.
 - Frontend orchestration component: `frontend/src/App.jsx`.
 - Frontend workflow navigation shell:
   `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`.
-- Frontend project cockpit component:
+- Frontend project cockpit action surface:
   `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`.
+- Frontend project information rail:
+  `frontend/src/components/projects/ProjectInformationRail.jsx`.
 - Frontend style entry point: `frontend/src/styles/index.css`.
 - Backend execution runtime config: `backend/execution_runtime/playwright.config.ts`.
 - Frontend E2E config: `frontend/playwright.config.js`.

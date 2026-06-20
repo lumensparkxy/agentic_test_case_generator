@@ -4,6 +4,12 @@
 		grid-template-columns: minmax(84px, 96px) minmax(0, 1fr);
 	}
 
+	.project-information-rail {
+		position: static;
+		grid-column: 2;
+		max-height: none;
+	}
+
 	.workflow-navigation-drawer {
 		padding: 0.7rem;
 	}
@@ -30,6 +36,10 @@
 @media (max-width: 768px) {
 	.workflow-shell {
 		grid-template-columns: 1fr;
+	}
+
+	.project-information-rail {
+		grid-column: auto;
 	}
 
 	.workflow-navigation-drawer {
@@ -202,6 +212,8 @@
 	.workflow-settings-header,
 	.workflow-diagnostics-header,
 	.orchestrator-cockpit-header,
+	.project-rail-header,
+	.project-rail-section-header,
 	.next-action-panel,
 	.orchestrator-timeline-header,
 	.jira-card-header,
@@ -309,6 +321,10 @@
 
 @media (max-width: 520px) {
 	.workflow-navigation-list {
+		grid-template-columns: 1fr;
+	}
+
+	.project-information-rail .orchestrator-stage-rail {
 		grid-template-columns: 1fr;
 	}
 }

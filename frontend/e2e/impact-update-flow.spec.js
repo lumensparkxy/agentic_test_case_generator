@@ -360,11 +360,11 @@ test.describe("Impact update flow", () => {
 			select.value = "project-1";
 			select.dispatchEvent(new Event("change", { bubbles: true }));
 		});
-		await expect(page.getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(page.getByLabel("Workflow workspace").getByText(/Impact QA · revision 5/)).toBeVisible();
 
 		await page.reload();
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(page.getByLabel("Workflow workspace").getByText(/Impact QA · revision 5/)).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Workflow navigation" })

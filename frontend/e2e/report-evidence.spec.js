@@ -255,7 +255,7 @@ test.describe("Report evidence", () => {
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
 		await expect(cockpit.getByRole("button", { name: /^Regenerate Evidence Report$/ })).toBeVisible();
 
-		const reportBlock = page.locator(".project-history-block", { hasText: "Latest Report" });
+		const reportBlock = page.getByLabel("Project information rail").locator(".project-history-block", { hasText: "Latest Report" });
 		await expect(reportBlock).toBeVisible();
 		await expect(reportBlock).toContainText("Stale");
 		await expect(reportBlock).toContainText("snap-report-v1");

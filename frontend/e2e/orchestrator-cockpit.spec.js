@@ -491,8 +491,9 @@ test.describe("Orchestrator cockpit", () => {
 		await page.goto("/");
 
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
-		await expect(cockpit.getByRole("heading", { name: /^Orchestrator Cockpit$/ })).toBeVisible({ timeout: 30_000 });
-		await expect(cockpit.getByText(/Baseline suite/i)).toBeVisible();
+		const rail = page.getByLabel("Project information rail");
+		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(rail.getByText(/Baseline suite/i)).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Generate Test Cases$/i })).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /Analyze Impact/i })).toHaveCount(0);
 	});
@@ -518,22 +519,23 @@ test.describe("Orchestrator cockpit", () => {
 		await page.goto("/");
 
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
-		await expect(cockpit.getByRole("heading", { name: /^Orchestrator Cockpit$/ })).toBeVisible({ timeout: 30_000 });
-		await expect(cockpit.getByText(/Impact Analysis · revision 5/i)).toBeVisible();
+		const rail = page.getByLabel("Project information rail");
+		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(rail.getByText(/Impact QA · revision 5/i)).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Analyze Impact$/i })).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
-		await expect(cockpit.getByText("Test cases are stale because requirements changed.")).toBeVisible();
-		await expect(cockpit.getByText("Test case agent produced baseline suite.")).toBeVisible();
-		await expect(cockpit.getByText(/Test Cases snap-test-v1/i)).toBeVisible();
+		await expect(rail.getByText("Test cases are stale because requirements changed.")).toBeVisible();
+		await expect(rail.getByText("Test case agent produced baseline suite.")).toBeVisible();
+		await expect(rail.getByText(/Test Cases snap-test-v1/i)).toBeVisible();
 
 		await page.reload();
-		await expect(cockpit.getByRole("heading", { name: /^Orchestrator Cockpit$/ })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(rail.getByText(/Impact QA · revision 5/)).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Analyze Impact$/i })).toBeVisible();
 
 		await cockpit.getByRole("button", { name: /^Analyze Impact$/i }).click();
 		await expect(cockpit.getByRole("button", { name: /^Apply Accepted Updates$/i })).toBeVisible();
-		await expect(cockpit.getByText("Impact agent identified 2 changed items.")).toBeVisible();
-		await expect(cockpit.getByText(/Impact Analysis snap-impact-v1/i)).toBeVisible();
+		await expect(rail.getByText("Impact agent identified 2 changed items.")).toBeVisible();
+		await expect(rail.getByText(/Impact Analysis snap-impact-v1/i)).toBeVisible();
 	});
 });

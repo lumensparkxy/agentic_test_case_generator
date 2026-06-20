@@ -185,12 +185,145 @@
 	overflow-wrap: anywhere;
 }
 
+.project-information-rail {
+	position: sticky;
+	top: 1rem;
+	display: grid;
+	gap: 0.85rem;
+	max-height: calc(100vh - 2rem);
+	overflow: auto;
+	padding: 0.95rem;
+	border: 1px solid rgba(191, 219, 254, 0.78);
+	border-radius: var(--radius-lg);
+	background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+	box-shadow: var(--shadow-sm);
+}
+
+.project-information-rail.empty {
+	position: static;
+}
+
+.project-rail-header,
+.project-rail-section-header,
+.project-last-run {
+	display: flex;
+	gap: 0.65rem;
+}
+
+.project-rail-header,
+.project-rail-section-header {
+	align-items: flex-start;
+	justify-content: space-between;
+}
+
+.project-rail-header {
+	padding-bottom: 0.75rem;
+	border-bottom: 1px solid #dbe4ee;
+}
+
+.project-rail-kicker {
+	display: block;
+	color: #2563eb;
+	font-size: 0.7rem;
+	font-weight: 850;
+	text-transform: uppercase;
+}
+
+.project-rail-header strong {
+	display: block;
+	margin-top: 0.2rem;
+	color: var(--text-main);
+	font-size: 1rem;
+	line-height: 1.2;
+}
+
+.project-rail-header p,
+.project-rail-empty,
+.project-last-run span {
+	margin: 0.2rem 0 0;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+}
+
+.project-rail-refresh {
+	width: 100%;
+}
+
+.project-rail-section {
+	display: grid;
+	gap: 0.6rem;
+	padding: 0.8rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-md);
+	background: rgba(255, 255, 255, 0.76);
+}
+
+.project-rail-section-header h3 {
+	margin: 0;
+	color: var(--text-main);
+	font-size: 0.86rem;
+	font-weight: 780;
+}
+
+.project-rail-section-header span {
+	flex: 0 0 auto;
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 800;
+}
+
+.project-history-grid.rail {
+	grid-template-columns: 1fr;
+	margin-top: 0;
+}
+
+.project-history-grid.rail .project-history-block:first-child {
+	padding-top: 0;
+	border-top: none;
+}
+
+.project-information-rail .orchestrator-stage-rail {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	overflow-x: visible;
+}
+
+.project-information-rail .project-run-row,
+.project-information-rail .project-timeline-row {
+	grid-template-columns: 1fr;
+	gap: 0.16rem;
+	padding: 0.58rem 0;
+	border-bottom: 1px solid #e2e8f0;
+}
+
+.project-information-rail .project-run-row:last-child,
+.project-information-rail .project-timeline-row:last-child {
+	border-bottom: none;
+}
+
+.project-information-rail .orchestrator-event-row {
+	display: grid;
+	gap: 0.3rem;
+}
+
+.project-information-rail .orchestrator-event-row > span {
+	flex-basis: auto;
+}
+
+.project-last-run {
+	flex-direction: column;
+	align-items: flex-start;
+}
+
+.project-last-run strong {
+	color: var(--text-main);
+	font-size: 0.9rem;
+	overflow-wrap: anywhere;
+}
+
 .orchestrator-cockpit {
 	display: grid;
 	gap: 0.9rem;
-	margin-top: 1rem;
-	padding-top: 1rem;
-	border-top: 1px solid var(--border-color);
+	margin-top: 0.9rem;
 }
 
 .orchestrator-cockpit-header,
