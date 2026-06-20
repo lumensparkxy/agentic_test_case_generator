@@ -40,9 +40,7 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
             threshold=90,
             max_iterations=1,
         )
-        generation_agent = next(
-            agent for agent in generation_pipeline.sub_agents if agent.name == "TestCaseGeneratorAgent"
-        )
+        generation_agent = next(agent for agent in generation_pipeline.sub_agents if agent.name == "TestCaseGeneratorAgent")
 
         refinement_pipeline = _build_refinement_pipeline(
             "test-model",
@@ -53,9 +51,7 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
             max_iterations=1,
             human_feedback="Tighten assertions.",
         )
-        refinement_agent = next(
-            agent for agent in refinement_pipeline.sub_agents if agent.name == "TestCaseRefinementAgent"
-        )
+        refinement_agent = next(agent for agent in refinement_pipeline.sub_agents if agent.name == "TestCaseRefinementAgent")
 
         self.assertIsNone(getattr(generation_agent, "output_schema", None))
         self.assertEqual(generation_agent.output_key, "current_test_cases")
