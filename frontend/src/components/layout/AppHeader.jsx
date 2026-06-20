@@ -120,8 +120,7 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 	);
 }
 
-export default function AppHeader({
-	status,
+export default function CommandDeckHeader({
 	isAuthenticated,
 	billingStatusItems,
 	statusUsageItems,
@@ -137,28 +136,61 @@ export default function AppHeader({
 	hasVisibleAuthProviders,
 	openSignInDialog,
 	currentAuthProviderLabel,
+	projects,
+	currentProject,
+	isLoadingProjects,
+	isOpeningProject,
+	authActionDisabled,
+	onOpenProject,
 }) {
+	const selectedProjectId = currentProject?.project_id || "";
+	const healthLabel = isAuthenticated ? "System healthy" : "Sign in required";
+
 	return (
-		<header className="header">
-			<div>
+		<header className="command-header">
+			<div className="command-brand">
 				<h1 className="title">Agentic Test Case Generator</h1>
-				<p className="subtitle">
-					A guided pipeline to parse requirements, enrich context, generate test cases, and export polished artifacts.
-				</p>
+				<p className="subtitle">QA command deck for requirements, generation, automation, and export.</p>
 			</div>
-			<div className="header-right">
-				<div className={`status ${isAuthenticated ? "status-authenticated" : ""}`}>
-					<strong>Status:</strong>
-					<span className="status-message">{status || "Idle"}</span>
-					{isAuthenticated && (
-						<StatusUsagePills
-							billingStatusItems={billingStatusItems}
-							statusUsageItems={statusUsageItems}
-							isUsageLoading={isUsageLoading}
-							isBillingLoading={isBillingLoading}
-						/>
-					)}
-				</div>
+
+			<div className="command-project-control">
+				<label htmlFor="command-project-select">Project</label>
+				<select
+					id="command-project-select"
+					value={selectedProjectId}
+					onChange={(event) => onOpenProject(event.target.value)}
+					disabled={authActionDisabled || isLoadingProjects || isOpeningProject}
+					aria-label="Open QA project"
+				>
+					<option value="">Select project</option>
+					{projects.map((project) => (
+						<option key={project.project_id} value={project.project_id}>
+							{project.name}
+						</option>
+					))}
+				</select>
+			</div>
+
+			<div className="command-actions">
+				<details className={`command-health ${isAuthenticated ? "status-authenticated" : ""}`}>
+					<summary>
+						<span className="command-health-dot" aria-hidden="true" />
+						<span className="status-message">{healthLabel}</span>
+					</summary>
+					<div className="command-health-details">
+						<p>
+							{isAuthenticated ? "Session active. Workflow messages stay in the active workspace." : "Sign in to enable workflow actions."}
+						</p>
+						{isAuthenticated && (
+							<StatusUsagePills
+								billingStatusItems={billingStatusItems}
+								statusUsageItems={statusUsageItems}
+								isUsageLoading={isUsageLoading}
+								isBillingLoading={isBillingLoading}
+							/>
+						)}
+					</div>
+				</details>
 				<button
 					type="button"
 					className="settings-open-btn"
@@ -166,7 +198,6 @@ export default function AppHeader({
 					onClick={onOpenSettings}
 					aria-label="Open settings"
 				>
-					<span aria-hidden="true">⚙</span>
 					Settings
 				</button>
 				<AuthPanel

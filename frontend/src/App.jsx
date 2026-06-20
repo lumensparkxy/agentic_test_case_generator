@@ -7,7 +7,7 @@ import {
 	hasFirebaseAuthConfig,
 	visibleFirebaseAuthProviders,
 } from "./firebase";
-import AppHeader, { SignInDialog } from "./components/layout/AppHeader";
+import CommandDeckHeader, { SignInDialog } from "./components/layout/AppHeader";
 import AutomationPanel from "./components/automation/AutomationPanel";
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import ExportPanel from "./components/export/ExportPanel";
@@ -20,7 +20,7 @@ import ProjectWorkspacePanel from "./components/projects/ProjectWorkspacePanel";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
-import WorkflowTabs from "./components/layout/WorkflowTabs";
+import WorkflowStepper from "./components/layout/WorkflowStepper";
 import WorkflowDiagnostics from "./components/workflow/WorkflowDiagnostics";
 import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
@@ -277,6 +277,8 @@ export default function App() {
 	const [impactAnalysis, setImpactAnalysis] = useState(null);
 	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
 	const [isApplyingImpactUpdate, setIsApplyingImpactUpdate] = useState(false);
+	const [impactUpdateMessage, setImpactUpdateMessage] = useState("");
+	const [exportMessage, setExportMessage] = useState("");
 	const {
 		executionTargetBaseUrl,
 		setExecutionTargetBaseUrl,
@@ -2597,6 +2599,7 @@ export default function App() {
 			return;
 		}
 		setIsAnalyzingImpact(true);
+		setImpactUpdateMessage("");
 		setStatus("Analyzing impact against the current test-case baseline...");
 		try {
 			const res = await apiRequest(PROJECT_API_PATHS.impactAnalysis(currentProjectId), {
@@ -2659,9 +2662,9 @@ export default function App() {
 			}
 			const nextTestCases = data?.current_snapshots?.test_cases?.payload?.test_cases || [];
 			const result = data?.current_snapshots?.test_cases?.payload?.impact_update_result || {};
-			setStatus(
-				`Impact update applied: ${result.preserved_count || 0} preserved, ${result.updated_count || 0} updated, ${result.added_count || 0} added, ${result.deprecated_count || 0} deprecated.`
-			);
+			const message = `Impact update applied: ${result.preserved_count || 0} preserved, ${result.updated_count || 0} updated, ${result.added_count || 0} added, ${result.deprecated_count || 0} deprecated.`;
+			setImpactUpdateMessage(message);
+			setStatus(message);
 			if (nextTestCases.length > 0) {
 				await previewExecution(nextTestCases, { updateStatus: false, persistProject: false });
 			}
@@ -2743,6 +2746,7 @@ export default function App() {
 			return;
 		}
 		setIsExporting(true);
+		setExportMessage("");
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
 			const payload = {
@@ -2772,7 +2776,9 @@ export default function App() {
 			const extensions = { csv: "csv", excel: "xlsx", json: "json" };
 			await downloadResponseBlob(res, `test_cases.${extensions[format] || format}`);
 			await refreshCurrentProject({ hydrate: false });
-			setStatus(`✓ Exported to ${format.toUpperCase()} successfully`);
+			const message = `Exported to ${format.toUpperCase()} successfully`;
+			setExportMessage(message);
+			setStatus(message);
 		} catch (error) {
 			setStatus(`Export failed: ${error.message}`);
 		} finally {
@@ -3010,6 +3016,11 @@ export default function App() {
 							: `Apply ${acceptedImpactRecommendationIds.length} Accepted Recommendation${acceptedImpactRecommendationIds.length === 1 ? "" : "s"}`}
 					</button>
 				</div>
+				{impactUpdateMessage && (
+					<div className="impact-update-result" role="status">
+						<p>{impactUpdateMessage}</p>
+					</div>
+				)}
 			</div>
 		);
 	};
@@ -3084,7 +3095,7 @@ export default function App() {
 
 	return (
 		<div className="page">
-			<AppHeader
+			<CommandDeckHeader
 				status={status}
 				isAuthenticated={isAuthenticated}
 				billingStatusItems={billingStatusItems}
@@ -3101,6 +3112,12 @@ export default function App() {
 				hasVisibleAuthProviders={hasVisibleAuthProviders}
 				openSignInDialog={openSignInDialog}
 				currentAuthProviderLabel={currentAuthProviderLabel}
+				projects={projects}
+				currentProject={currentProject}
+				isLoadingProjects={isLoadingProjects}
+				isOpeningProject={isOpeningProject}
+				authActionDisabled={authActionDisabled}
+				onOpenProject={(projectId) => openProject(projectId)}
 			/>
 
 			{!isAuthenticated && !isVerifyingSession && (
@@ -3133,28 +3150,25 @@ export default function App() {
 				azureDevOpsSettings={azureDevOpsSettings}
 			/>
 
+			<WorkflowStepper tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+
 			<ProjectWorkspacePanel
-				projects={projects}
 				currentProject={currentProject}
 				newProjectName={newProjectName}
 				setNewProjectName={setNewProjectName}
 				isLoadingProjects={isLoadingProjects}
 				isCreatingProject={isCreatingProject}
-				isOpeningProject={isOpeningProject}
 				orchestratorStatus={orchestratorStatus}
 				orchestratorRuns={orchestratorRuns}
 				isLoadingOrchestrator={isLoadingOrchestrator}
 				orchestratorError={orchestratorError}
 				authActionDisabled={authActionDisabled}
 				onCreateProject={createProject}
-				onOpenProject={(projectId) => openProject(projectId)}
 				onRefreshProjects={() => loadProjects()}
 				onRefreshOrchestrator={() => loadProjectOrchestrator(currentProjectId)}
 				onOrchestratorAction={handleOrchestratorAction}
 				orchestratorActionBusy={orchestratorActionBusy}
 			/>
-
-			<WorkflowTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
 
 			<div className="tab-content">
 				{activeTab === 0 && (
@@ -4032,6 +4046,7 @@ export default function App() {
 						isExporting={isExporting}
 						authActionDisabled={authActionDisabled}
 						exportToFormat={exportToFormat}
+						exportMessage={exportMessage}
 						goPrev={goPrev}
 					/>
 				)}

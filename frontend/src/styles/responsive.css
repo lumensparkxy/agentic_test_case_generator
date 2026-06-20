@@ -1,5 +1,21 @@
 /* Responsive */
 @media (max-width: 768px) {
+	.command-header {
+		grid-template-columns: 1fr;
+		gap: 0.85rem;
+		margin-left: 0;
+		margin-right: 0;
+	}
+
+	.command-actions {
+		justify-content: flex-start;
+		flex-wrap: wrap;
+	}
+
+	.command-health {
+		min-width: min(100%, 220px);
+	}
+
 	.header {
 		flex-direction: column;
 		gap: 1rem;
@@ -74,11 +90,18 @@
 	}
 
 	.tabs {
-		flex-direction: column;
+		flex-direction: row;
+		overflow-x: auto;
+		padding-bottom: 0.25rem;
 	}
 
 	.tab {
-		justify-content: flex-start;
+		justify-content: center;
+		flex-basis: 132px;
+	}
+
+	.tab:not(:last-child)::after {
+		display: none;
 	}
 
 	.panel-form.two-cols {
@@ -91,6 +114,7 @@
 	.workflow-settings-header,
 	.workflow-diagnostics-header,
 	.orchestrator-cockpit-header,
+	.next-action-panel,
 	.orchestrator-timeline-header,
 	.jira-card-header,
 	.jira-sync-preview-header,
@@ -123,6 +147,19 @@
 	.source-toggle,
 	.source-choice-group {
 		grid-template-columns: 1fr;
+	}
+
+	.orchestrator-command-grid,
+	.orchestrator-summary-grid,
+	.project-stage-grid,
+	.project-history-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.run-details-summary-copy {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: 0.15rem;
 	}
 
 	.collapsible-panel-summary {

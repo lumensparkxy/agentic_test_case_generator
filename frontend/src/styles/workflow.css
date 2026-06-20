@@ -14,7 +14,7 @@
 
 .project-workspace {
 	margin-bottom: 1.25rem;
-	padding: 1rem 1.1rem;
+	padding: 1.05rem 1.15rem;
 	border: 1px solid var(--border-color);
 	border-radius: var(--radius-md);
 	background: #ffffff;
@@ -67,14 +67,45 @@
 	align-items: center;
 }
 
+.project-progress-disclosure {
+	margin-top: 0.85rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-md);
+	background: #f8fafc;
+}
+
+.project-progress-disclosure summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.7rem 0.85rem;
+	cursor: pointer;
+	color: var(--text-main);
+	font-size: 0.84rem;
+	font-weight: 750;
+	list-style: none;
+}
+
+.project-progress-disclosure summary::-webkit-details-marker {
+	display: none;
+}
+
+.project-progress-disclosure summary span:last-child {
+	color: var(--text-muted);
+	font-size: 0.76rem;
+	font-weight: 650;
+}
+
 .project-create-row input {
 	max-width: 360px;
 }
 
 .project-stage-grid {
-	margin-top: 0.9rem;
 	display: grid;
 	grid-template-columns: repeat(6, minmax(120px, 1fr));
+	gap: 0.75rem;
+	padding: 0 0.85rem 0.85rem;
 }
 
 .project-stage-pill {
@@ -212,6 +243,60 @@
 	flex-wrap: wrap;
 }
 
+.orchestrator-command-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1.8fr) minmax(240px, 0.8fr);
+	gap: 1rem;
+	align-items: stretch;
+}
+
+.next-action-panel {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 1rem;
+	align-items: center;
+	min-width: 0;
+	padding: 1.2rem;
+	border: 1px solid #bfdbfe;
+	border-radius: var(--radius-md);
+	background: linear-gradient(135deg, rgba(239, 246, 255, 0.92), #ffffff 58%);
+}
+
+.next-action-copy {
+	min-width: 0;
+}
+
+.next-action-kicker {
+	display: block;
+	color: #2563eb;
+	font-size: 0.72rem;
+	font-weight: 850;
+	text-transform: uppercase;
+}
+
+.next-action-panel h3 {
+	margin-top: 0.25rem;
+	font-size: 1.15rem;
+	line-height: 1.25;
+}
+
+.next-action-panel p {
+	max-width: 58ch;
+}
+
+.next-action-buttons {
+	display: grid;
+	gap: 0.65rem;
+	justify-items: start;
+	min-width: min(280px, 100%);
+}
+
+.next-action-secondary-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
 .orchestrator-status-pill,
 .orchestrator-agent-contract,
 .orchestrator-action-blocker {
@@ -273,7 +358,11 @@
 }
 
 .orchestrator-summary-grid {
-	grid-template-columns: repeat(4, minmax(0, 1fr));
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.project-summary-panel {
+	grid-template-columns: 1fr;
 }
 
 .orchestrator-summary-grid > div {
@@ -376,19 +465,10 @@
 	flex-direction: column;
 	align-items: flex-start;
 	min-width: 0;
-	padding: 0.72rem;
-	border: 1px solid #dbe4ee;
-	border-radius: var(--radius-sm);
-	background: #f8fafc;
-}
-
-.orchestrator-action.primary {
-	border-color: #93c5fd;
-	background: #eff6ff;
-}
-
-.orchestrator-action.secondary-action {
-	background: #ffffff;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	background: transparent;
 }
 
 .orchestrator-action button {
@@ -414,8 +494,62 @@
 .orchestrator-timeline {
 	display: grid;
 	gap: 0.6rem;
-	padding-top: 0.8rem;
-	border-top: 1px solid var(--border-color);
+	padding-top: 0;
+	border-top: none;
+}
+
+.run-details-drawer {
+	margin-top: 0.2rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-md);
+	background: #ffffff;
+}
+
+.run-details-drawer summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.78rem 0.9rem;
+	cursor: pointer;
+	list-style: none;
+}
+
+.run-details-drawer summary::-webkit-details-marker {
+	display: none;
+}
+
+.run-details-summary-copy {
+	display: flex;
+	align-items: baseline;
+	gap: 0.6rem;
+	min-width: 0;
+}
+
+.run-details-summary-copy strong {
+	color: var(--text-main);
+	font-size: 0.92rem;
+}
+
+.run-details-summary-copy span {
+	color: var(--text-muted);
+	font-size: 0.8rem;
+}
+
+.run-details-toggle {
+	flex: 0 0 auto;
+	padding: 0.28rem 0.55rem;
+	border: 1px solid var(--border-color);
+	border-radius: 9999px;
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 800;
+}
+
+.run-details-body {
+	display: grid;
+	gap: 0.85rem;
+	padding: 0 0.9rem 0.9rem;
 }
 
 .orchestrator-blockers ul {

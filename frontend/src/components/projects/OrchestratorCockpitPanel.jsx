@@ -1,3 +1,7 @@
+import NextActionPanel from "./NextActionPanel";
+import ProjectSummaryPanel from "./ProjectSummaryPanel";
+import RunDetailsDrawer from "./RunDetailsDrawer";
+
 const STAGE_ORDER = [
 	"requirements",
 	"context",
@@ -9,19 +13,6 @@ const STAGE_ORDER = [
 	"review",
 	"reports",
 ];
-
-const ACTION_KIND_LABELS = {
-	refine: "Refine",
-	approve: "Review approvals",
-	generate: "Generate",
-	analyze_impact: "Analyze Impact",
-	apply_update: "Apply Accepted Updates",
-	full_regenerate: "Full Regenerate",
-	automate: "Preview Automation",
-	execute: "Run Execution",
-	review: "Review",
-	report: "Open Reports",
-};
 
 const STATUS_LABELS = {
 	not_started: "Not started",
@@ -57,30 +48,6 @@ const normalizeList = (value) => (Array.isArray(value) ? value : []);
 function StatusPill({ status }) {
 	const normalized = `${status || "not_started"}`.replaceAll("_", "-");
 	return <span className={`orchestrator-status-pill ${normalized}`}>{STATUS_LABELS[status] || formatLabel(status)}</span>;
-}
-
-function ActionButton({ action, disabled, busy, onAction }) {
-	const label = action.label || ACTION_KIND_LABELS[action.action] || formatLabel(action.action);
-	const blockedMessage = normalizeList(action.blockers)[0]?.message || "";
-	return (
-		<div className={`orchestrator-action ${action.primary ? "primary" : action.secondary ? "secondary-action" : ""}`}>
-			<button
-				type="button"
-				className={action.primary ? "" : "secondary"}
-				onClick={() => onAction(action)}
-				disabled={disabled || busy || !action.enabled}
-			>
-				{busy ? "Working..." : label}
-			</button>
-			<p>{action.reason || blockedMessage || (action.enabled ? "Ready to run." : "Blocked.")}</p>
-			{blockedMessage && <span className="orchestrator-action-blocker">{blockedMessage}</span>}
-			{action.agent_kind && (
-				<span className="orchestrator-agent-contract">
-					{formatLabel(action.agent_kind)} contract {action.agent_contract_version || "v1"}
-				</span>
-			)}
-		</div>
-	);
 }
 
 function StageRail({ stages }) {
@@ -192,7 +159,6 @@ export default function OrchestratorCockpitPanel({
 	const primaryActions = nextActions.filter((action) => action.primary);
 	const secondaryActions = nextActions.filter((action) => action.secondary || !action.primary);
 	const currentStage = status?.current_stage || currentProject.latest_stage || "requirements";
-	const stageSummary = status?.stages?.[currentStage]?.summary || {};
 	const busyMap = actionBusy || {};
 
 	return (
@@ -214,70 +180,26 @@ export default function OrchestratorCockpitPanel({
 
 			{error && <div className="orchestrator-error">{error}</div>}
 
-			<div className="orchestrator-summary-grid">
-				<div>
-					<span>Baseline suite</span>
-					<strong>{status?.has_baseline_test_suite ? "Present" : "Not generated"}</strong>
-				</div>
-				<div>
-					<span>Upstream change</span>
-					<strong>
-						{status?.upstream_changed ? normalizeList(status.changed_upstream_stages).map(formatLabel).join(", ") || "Detected" : "None"}
-					</strong>
-				</div>
-				<div>
-					<span>Changed items</span>
-					<strong>
-						{stageSummary.changed_item_count ?? currentProject.stage_state?.impact_analysis?.metadata?.changed_item_count ?? 0}
-					</strong>
-				</div>
-				<div>
-					<span>Runs</span>
-					<strong>{normalizeList(runsPayload?.runs).length}</strong>
-				</div>
+			<div className="orchestrator-command-grid">
+				<NextActionPanel
+					primaryActions={primaryActions}
+					secondaryActions={secondaryActions}
+					busyMap={busyMap}
+					disabled={authActionDisabled}
+					onAction={onAction}
+				/>
+				<ProjectSummaryPanel currentProject={currentProject} status={status} runsPayload={runsPayload} />
 			</div>
 
-			<StageRail stages={status?.stages} />
-
-			<div className="orchestrator-action-grid">
-				<div className="orchestrator-action-column">
-					<h3>Primary Action</h3>
-					{primaryActions.length ? (
-						primaryActions.map((action) => (
-							<ActionButton
-								action={action}
-								busy={Boolean(busyMap[action.action])}
-								disabled={authActionDisabled}
-								key={`${action.action}-${action.stage}`}
-								onAction={onAction}
-							/>
-						))
-					) : (
-						<p className="orchestrator-empty-text">No primary action is currently available.</p>
-					)}
-				</div>
-				<div className="orchestrator-action-column">
-					<h3>Secondary Actions</h3>
-					{secondaryActions.length ? (
-						secondaryActions
-							.slice(0, 3)
-							.map((action) => (
-								<ActionButton
-									action={action}
-									busy={Boolean(busyMap[action.action])}
-									disabled={authActionDisabled}
-									key={`${action.action}-${action.stage}`}
-									onAction={onAction}
-								/>
-							))
-					) : (
-						<p className="orchestrator-empty-text">No secondary actions are currently available.</p>
-					)}
-				</div>
-			</div>
-
-			<BlockerList blockers={status?.blockers} />
-			<RunTimeline runsPayload={runsPayload} />
+			<RunDetailsDrawer
+				title="Run details"
+				summary="Stage progress, blockers, and durable agent timeline"
+				defaultOpen={Boolean(status || normalizeList(runsPayload?.events).length)}
+			>
+				<StageRail stages={status?.stages} />
+				<BlockerList blockers={status?.blockers} />
+				<RunTimeline runsPayload={runsPayload} />
+			</RunDetailsDrawer>
 		</section>
 	);
 }
