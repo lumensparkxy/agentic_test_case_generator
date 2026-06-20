@@ -725,7 +725,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 
 		await page.getByPlaceholder("New QA project name").fill(PROJECT_NAME);
 		await page.getByRole("button", { name: /^New Project$/ }).click();
-		await expect(page.getByText(/Lifecycle QA · revision 0/)).toBeVisible();
+		await expect(page.getByLabel("Workflow workspace").getByText(/Lifecycle QA · revision 0/)).toBeVisible();
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /^Parse Requirements$/ }).click();
@@ -744,9 +744,9 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByText(/Generated v1 baseline suite/i)).toBeVisible();
 
 		await page.reload();
-		await expect(page.getByText(/Lifecycle QA · revision 4/)).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByLabel("Workflow workspace").getByText(/Lifecycle QA · revision 4/)).toBeVisible({ timeout: 30_000 });
 		await expect(
-			page.getByLabel("Orchestrator Cockpit").locator(".orchestrator-summary-grid div", { hasText: "Baseline suite" })
+			page.getByLabel("Project information rail").locator(".orchestrator-summary-grid div", { hasText: "Baseline suite" })
 		).toContainText("Present");
 
 		await page
@@ -782,7 +782,10 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
 
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
-		await cockpit.getByRole("button", { name: /^Refresh$/ }).click();
+		await page
+			.getByLabel("Project information rail")
+			.getByRole("button", { name: /^Refresh status$/ })
+			.click();
 		await expect(cockpit.getByRole("button", { name: /^Review Evidence$/ })).toBeVisible();
 		await cockpit.getByRole("button", { name: /^Review Evidence$/ }).click();
 		await expect(page.getByText(/Approved for export/i)).toBeVisible();

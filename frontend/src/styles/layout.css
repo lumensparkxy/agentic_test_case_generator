@@ -611,7 +611,7 @@
 /* Workflow Navigation */
 .workflow-shell {
 	display: grid;
-	grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+	grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(300px, 360px);
 	gap: 1.15rem;
 	align-items: start;
 }

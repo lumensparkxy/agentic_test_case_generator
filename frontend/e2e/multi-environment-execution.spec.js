@@ -256,7 +256,7 @@ test.describe("Multi-environment execution", () => {
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await page.getByLabel("Open QA project").selectOption("project-1");
-		await expect(page.getByText(/Environment QA · revision 4/)).toBeVisible();
+		await expect(page.getByLabel("Workflow workspace").getByText(/Environment QA · revision 4/)).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Workflow navigation" })

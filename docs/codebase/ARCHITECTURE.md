@@ -196,7 +196,7 @@ Stored current project ID -> project reopen -> status/runs fetch -> cockpit reco
 Frontend workflow shell flow:
 
 ```text
-Top command bar -> left workflow navigation -> active tab workspace -> project/orchestrator cockpit context
+Top command bar -> left workflow navigation -> active tab workspace -> right project information rail
 ```
 
 `frontend/src/components/layout/WorkflowNavigationDrawer.jsx` renders the
@@ -207,12 +207,14 @@ workflow actions, and `Next`/`Back` behavior remain unchanged while the
 horizontal stepper is no longer the primary navigation surface.
 
 `frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
-the project workspace and consumes the deterministic status plus durable run
-payloads. It keeps the existing tab workflows available while making the
-backend-recommended primary action visible for resumed projects, including
-impact-analysis priority over full regeneration when upstream artifacts changed.
-The cockpit also renders blockers from the status payload and links timeline
-events to checkpoint output snapshot IDs.
+the project workspace as the action surface. It preserves
+`aria-label="Orchestrator Cockpit"` and existing action handlers while removing
+the repeated visible cockpit/run-details headers from the center workspace.
+`frontend/src/components/projects/ProjectInformationRail.jsx` owns the durable
+status presentation in the right rail: status overview, stage progress,
+blockers, agent timeline, project evidence, latest report evidence, and last
+run details. Both components consume the same deterministic status and run
+payloads, so backend status/runs contracts remain unchanged.
 
 Review and evidence-backed reporting flow:
 

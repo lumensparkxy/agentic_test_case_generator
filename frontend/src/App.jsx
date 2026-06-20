@@ -16,6 +16,7 @@ import RequirementAnalysisPanel from "./components/generation/RequirementAnalysi
 import ScenarioCoveragePanel from "./components/generation/ScenarioCoveragePanel";
 import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
+import ProjectInformationRail from "./components/projects/ProjectInformationRail";
 import ProjectWorkspacePanel from "./components/projects/ProjectWorkspacePanel";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
@@ -3169,13 +3170,11 @@ export default function App() {
 						isLoadingProjects={isLoadingProjects}
 						isCreatingProject={isCreatingProject}
 						orchestratorStatus={orchestratorStatus}
-						orchestratorRuns={orchestratorRuns}
 						isLoadingOrchestrator={isLoadingOrchestrator}
 						orchestratorError={orchestratorError}
 						authActionDisabled={authActionDisabled}
 						onCreateProject={createProject}
 						onRefreshProjects={() => loadProjects()}
-						onRefreshOrchestrator={() => loadProjectOrchestrator(currentProjectId)}
 						onOrchestratorAction={handleOrchestratorAction}
 						orchestratorActionBusy={orchestratorActionBusy}
 					/>
@@ -4071,6 +4070,15 @@ export default function App() {
 						)}
 					</div>
 				</main>
+				<ProjectInformationRail
+					currentProject={currentProject}
+					status={orchestratorStatus}
+					runsPayload={orchestratorRuns}
+					isLoading={isLoadingOrchestrator}
+					error={orchestratorError}
+					authActionDisabled={authActionDisabled}
+					onRefresh={() => loadProjectOrchestrator(currentProjectId)}
+				/>
 			</div>
 		</div>
 	);
