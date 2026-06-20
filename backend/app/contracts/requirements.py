@@ -166,6 +166,8 @@ class WorkflowDiagnostics(BaseModel):
     stalled: bool = False
     max_iterations_reached: bool = False
     parser_failures: List[str] = Field(default_factory=list)
+    parser_recoveries: List[str] = Field(default_factory=list)
+    recovery_reason: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
     best_iteration: Optional[int] = None
     attempt_count: int = 1

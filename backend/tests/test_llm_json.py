@@ -211,6 +211,46 @@ class DetailedPayloadParserTests(unittest.TestCase):
         self.assertIsNotNone(error)
         self.assertIn("invalid JSON payload", error)
 
+    def test_requirement_analysis_parser_recovers_complete_entries_from_truncated_output(self) -> None:
+        payload = """
+        {
+          "requirement_analysis": [
+            {
+              "requirement_id": "REQ-001",
+              "requirement_text": "Users can sign in.",
+              "business_rules": [{"id": "BR-001", "title": "Sign in"}],
+              "suggested_scenarios": ["Happy Path", "Negative"]
+            },
+            {
+              "requirement_id": "REQ-002",
+              "requirement_text": "Accounts lock after failed attempts.",
+              "risk_signals": [{"id": "RS-001", "severity": "High"}],
+              "dependencies": ["Audit log"]
+            },
+            {
+              "requirement_id": "REQ-003",
+              "requirement_text": "Audit events are stored.",
+              "risk_signals": [{"id": "RS-002", "severity": "High
+        """
+
+        analysis, error = parse_requirement_analysis_json_detailed(payload)
+
+        self.assertEqual([item["requirement_id"] for item in analysis], ["REQ-001", "REQ-002"])
+        self.assertEqual(analysis[0]["suggested_scenarios"], ["Happy Path", "Negative"])
+        self.assertEqual(analysis[1]["dependencies"], ["Audit log"])
+        self.assertIsNotNone(error)
+        self.assertIn("invalid JSON payload", error)
+        self.assertIn("recovered 2 complete requirement_analysis entries", error)
+
+    def test_requirement_analysis_parser_rejects_truncated_output_without_complete_entries(self) -> None:
+        payload = '{"requirement_analysis": [{"requirement_id": "REQ-001", "risk_signals": [{"id"'
+
+        analysis, error = parse_requirement_analysis_json_detailed(payload)
+
+        self.assertEqual(analysis, [])
+        self.assertIsNotNone(error)
+        self.assertIn("invalid JSON payload", error)
+
     def test_parsers_accept_structured_adk_output_schema_state(self) -> None:
         test_cases, test_case_error = parse_test_cases_json_detailed(
             {

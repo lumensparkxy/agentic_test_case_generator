@@ -96,6 +96,8 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
         "stalled": False,
         "max_iterations_reached": False,
         "parser_failures": [],
+        "parser_recoveries": [],
+        "recovery_reason": None,
         "warnings": [],
         "best_iteration": None,
         "attempt_count": attempt_count,
@@ -144,6 +146,7 @@ def _record_parser_failure(
 ) -> None:
     if not error:
         return
+    diagnostics.setdefault("parser_failures", [])
     message = f"{author}: {error}"
     sample = _diagnostic_sample(raw_text)
     if sample:
@@ -174,11 +177,13 @@ def _record_parser_recovery(
 ) -> None:
     if not error:
         return
+    diagnostics.setdefault("parser_recoveries", [])
+    diagnostics.setdefault("warnings", [])
     message = f"{author}: {error}"
     sample = _diagnostic_sample(raw_text)
     if sample:
         message = f"{message} | sample: {sample}"
-    _append_unique_message(diagnostics["parser_failures"], message)
+    _append_unique_message(diagnostics["parser_recoveries"], message)
     if diagnostics["status"] == "completed":
         diagnostics["status"] = "partial"
     _append_unique_message(diagnostics["warnings"], f"{author}: recovered usable {artifact_label} JSON from malformed output.")
@@ -188,9 +193,20 @@ def _record_parser_recovery(
         artifact_label=artifact_label,
         error=error,
         sample=sample or None,
-        parser_failure_count=len(diagnostics["parser_failures"]),
+        parser_recovery_count=len(diagnostics["parser_recoveries"]),
         status=diagnostics["status"],
     )
+
+
+def _combined_event_text(event: Any) -> str:
+    if not event.content or not event.content.parts:
+        return ""
+    text_parts = []
+    for part in event.content.parts:
+        text = getattr(part, "text", None)
+        if text:
+            text_parts.append(str(text))
+    return "\n".join(text_parts).strip()
 
 
 def _record_event_error(diagnostics: Dict[str, Any], author: str, event: Any) -> None:
@@ -672,110 +688,107 @@ Human feedback:
             if getattr(event, "partial", False):
                 continue
 
-            if not event.content or not event.content.parts:
+            text = _combined_event_text(event)
+            if not text:
                 continue
 
-            for part in event.content.parts:
-                text = getattr(part, "text", None)
-                if not text:
+            if author in {"TestCaseGeneratorAgent", "TestCaseRefinementAgent", "TestCaseRefinerAgent"}:
+                parsed_test_cases, parse_error = parse_test_cases_json_detailed(text)
+                if parsed_test_cases:
+                    current_test_cases = parsed_test_cases
+                    _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="test-case")
+                else:
+                    _record_parser_failure(diagnostics, author, parse_error, text)
+
+            if author == "CoveragePlannerAgent":
+                parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
+                if parsed_coverage_plan:
+                    current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
+                    _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="coverage-plan")
+                else:
+                    _record_parser_failure(diagnostics, author, parse_error, text)
+
+            if author == "RequirementAnalysisAgent":
+                parsed_requirement_analysis, parse_error = parse_requirement_analysis_json_detailed(text)
+                if parsed_requirement_analysis:
+                    current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
+                    _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="requirement-analysis")
+                else:
+                    _record_parser_failure(diagnostics, author, parse_error, text)
+
+            if author == "TestCaseValidatorAgent":
+                parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
+                if not parsed_review:
+                    _record_parser_failure(diagnostics, author, parse_error, text, retryable=True)
                     continue
 
-                if author in {"TestCaseGeneratorAgent", "TestCaseRefinementAgent", "TestCaseRefinerAgent"}:
-                    parsed_test_cases, parse_error = parse_test_cases_json_detailed(text)
-                    if parsed_test_cases:
-                        current_test_cases = parsed_test_cases
-                        _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="test-case")
-                    else:
-                        _record_parser_failure(diagnostics, author, parse_error, text)
-
-                if author == "CoveragePlannerAgent":
-                    parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
-                    if parsed_coverage_plan:
-                        current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
-                        _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="coverage-plan")
-                    else:
-                        _record_parser_failure(diagnostics, author, parse_error, text)
-
-                if author == "RequirementAnalysisAgent":
-                    parsed_requirement_analysis, parse_error = parse_requirement_analysis_json_detailed(text)
-                    if parsed_requirement_analysis:
-                        current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, requirements)
-                    else:
-                        _record_parser_failure(diagnostics, author, parse_error, text)
-
-                if author == "TestCaseValidatorAgent":
-                    parsed_review, parse_error = parse_review_json_detailed(text, default_threshold=threshold)
-                    if not parsed_review:
-                        _record_parser_failure(diagnostics, author, parse_error, text, retryable=True)
-                        continue
-
-                    model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
-                    iteration_number = len(iteration_history) + 1
-                    iteration_history.append(
-                        _make_history_entry(
-                            iteration=iteration_number,
-                            actor=author,
-                            review=model_review,
-                            test_cases=current_test_cases,
-                        )
-                    )
-
-                    candidate_review = _merge_review_results(
-                        model_review,
-                        _heuristic_test_case_review(
-                            current_test_cases,
-                            requirements,
-                            threshold,
-                            coverage_plan=current_coverage_plan or _fallback_coverage_plan(requirements),
-                            requirement_analysis=current_requirement_analysis or fallback_requirement_analysis(requirements),
-                            context=context,
-                        ),
-                    )
-                    if current_test_cases and (not best_candidate or _prefer_review(candidate_review, best_candidate["review"])):
-                        best_candidate = {
-                            "test_cases": list(current_test_cases),
-                            "review": candidate_review,
-                            "iteration": iteration_number,
-                        }
-                        diagnostics["best_iteration"] = iteration_number
-
-                    score_delta = model_review["score"] - (previous_review["score"] if previous_review else 0)
-                    _log_test_case_workflow(
-                        "review_iteration",
-                        session_id=session.id,
+                model_review = _normalize_review_result(parsed_review, threshold, "Test case validation completed.")
+                iteration_number = len(iteration_history) + 1
+                iteration_history.append(
+                    _make_history_entry(
                         iteration=iteration_number,
-                        author=author,
-                        score=model_review["score"],
-                        threshold=model_review["threshold"],
-                        approved=model_review["approved"],
-                        score_delta=score_delta,
-                        blocking_issue_count=len(model_review["blocking_issues"]),
-                        suggestion_count=len(model_review["suggestions"]),
-                        test_case_count=len(current_test_cases),
+                        actor=author,
+                        review=model_review,
+                        test_cases=current_test_cases,
                     )
+                )
 
-                    if _review_is_stalled(previous_review, model_review):
-                        repeated_review_count += 1
-                    else:
-                        repeated_review_count = 1
-                    previous_review = model_review
+                candidate_review = _merge_review_results(
+                    model_review,
+                    _heuristic_test_case_review(
+                        current_test_cases,
+                        requirements,
+                        threshold,
+                        coverage_plan=current_coverage_plan or _fallback_coverage_plan(requirements),
+                        requirement_analysis=current_requirement_analysis or fallback_requirement_analysis(requirements),
+                        context=context,
+                    ),
+                )
+                if current_test_cases and (not best_candidate or _prefer_review(candidate_review, best_candidate["review"])):
+                    best_candidate = {
+                        "test_cases": list(current_test_cases),
+                        "review": candidate_review,
+                        "iteration": iteration_number,
+                    }
+                    diagnostics["best_iteration"] = iteration_number
 
-                    if repeated_review_count >= stall_iteration_limit:
-                        diagnostics["status"] = "partial"
-                        diagnostics["stalled"] = True
-                        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "stalled"
-                        _append_unique_message(
-                            diagnostics["warnings"],
-                            f"Test-case validation stalled after {repeated_review_count} repeated review cycles.",
-                        )
-                        _log_test_case_workflow(
-                            "review_stalled",
-                            session_id=session.id,
-                            repeated_review_count=repeated_review_count,
-                            stall_iteration_limit=stall_iteration_limit,
-                            last_score=model_review["score"],
-                        )
-                        return
+                score_delta = model_review["score"] - (previous_review["score"] if previous_review else 0)
+                _log_test_case_workflow(
+                    "review_iteration",
+                    session_id=session.id,
+                    iteration=iteration_number,
+                    author=author,
+                    score=model_review["score"],
+                    threshold=model_review["threshold"],
+                    approved=model_review["approved"],
+                    score_delta=score_delta,
+                    blocking_issue_count=len(model_review["blocking_issues"]),
+                    suggestion_count=len(model_review["suggestions"]),
+                    test_case_count=len(current_test_cases),
+                )
+
+                if _review_is_stalled(previous_review, model_review):
+                    repeated_review_count += 1
+                else:
+                    repeated_review_count = 1
+                previous_review = model_review
+
+                if repeated_review_count >= stall_iteration_limit:
+                    diagnostics["status"] = "partial"
+                    diagnostics["stalled"] = True
+                    diagnostics["failure_reason"] = diagnostics["failure_reason"] or "stalled"
+                    _append_unique_message(
+                        diagnostics["warnings"],
+                        f"Test-case validation stalled after {repeated_review_count} repeated review cycles.",
+                    )
+                    _log_test_case_workflow(
+                        "review_stalled",
+                        session_id=session.id,
+                        repeated_review_count=repeated_review_count,
+                        stall_iteration_limit=stall_iteration_limit,
+                        last_score=model_review["score"],
+                    )
+                    return
 
     try:
         if timeout_seconds is not None:
@@ -838,8 +851,17 @@ Human feedback:
 
     state_requirement_analysis_raw = session_state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
     state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(state_requirement_analysis_raw)
+    had_event_requirement_analysis = bool(current_requirement_analysis)
     if state_requirement_analysis:
         current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
+        if not had_event_requirement_analysis:
+            _record_parser_recovery(
+                diagnostics,
+                "SessionStateRequirementAnalysis",
+                state_requirement_analysis_error,
+                state_requirement_analysis_raw,
+                artifact_label="requirement-analysis",
+            )
     elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
         _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error, state_requirement_analysis_raw)
 
@@ -1274,15 +1296,16 @@ def generate_test_cases(
             )
             current_review = dict(workflow.get("review") or {})
             if _prefer_review(recovery_review, current_review):
-                record_agent_fallback(workflow=operation or "testcases.generate", reason="quality_recovery")
                 raw_test_cases = recovery_test_cases
                 workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
-                workflow_diagnostics["status"] = "fallback"
-                workflow_diagnostics["used_fallback"] = True
-                workflow_diagnostics["failure_reason"] = "quality_recovery"
+                workflow_diagnostics["status"] = "partial"
+                workflow_diagnostics["used_fallback"] = False
+                workflow_diagnostics["recovery_reason"] = "coverage_augmentation"
+                if workflow_diagnostics.get("failure_reason") in {None, "quality_rejection"}:
+                    workflow_diagnostics["failure_reason"] = None
                 _append_unique_message(
                     workflow_diagnostics["warnings"],
-                    "Rejected model output was augmented with deterministic fallback cases to restore requirement and scenario coverage.",
+                    "Recovered model output was augmented with deterministic coverage cases to restore requirement and scenario coverage.",
                 )
                 iteration_history = list(workflow.get("iteration_history") or [])
                 iteration_history.append(

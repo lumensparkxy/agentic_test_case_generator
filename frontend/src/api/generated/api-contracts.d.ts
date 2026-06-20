@@ -782,6 +782,8 @@ export interface WorkflowDiagnostics {
 	failure_reason?: string | null;
 	max_iterations_reached?: boolean;
 	parser_failures?: Array<string>;
+	parser_recoveries?: Array<string>;
+	recovery_reason?: string | null;
 	stalled?: boolean;
 	status?: "completed" | "partial" | "fallback" | "failed";
 	timed_out?: boolean;

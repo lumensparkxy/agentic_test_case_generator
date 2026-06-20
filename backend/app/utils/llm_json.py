@@ -2,6 +2,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+REQUIREMENT_ANALYSIS_KEYS = ("requirement_analysis", "requirement_analyses", "analysis", "analyses")
+
 
 def _clean_string_list(values: Any) -> List[str]:
     if not isinstance(values, list):
@@ -251,6 +253,46 @@ def _valid_coverage_plan_entries(data: Any) -> List[Dict[str, Any]]:
     return valid
 
 
+def _requirement_analysis_candidates(data: Any) -> Any:
+    if isinstance(data, dict):
+        for key in REQUIREMENT_ANALYSIS_KEYS:
+            if isinstance(data.get(key), list):
+                return data[key]
+    return data
+
+
+def _valid_requirement_analysis_entries(data: Any) -> List[Dict[str, Any]]:
+    analysis_candidates = _requirement_analysis_candidates(data)
+    if not isinstance(analysis_candidates, list):
+        return []
+
+    valid: List[Dict[str, Any]] = []
+    for item in analysis_candidates:
+        if not isinstance(item, dict):
+            continue
+
+        requirement_id = str(item.get("requirement_id") or "").strip()
+        requirement_text = str(item.get("requirement_text") or item.get("text") or "").strip()
+        if not requirement_id:
+            continue
+
+        valid.append(
+            {
+                "requirement_id": requirement_id,
+                "requirement_text": requirement_text,
+                "business_rules": _clean_object_list(item.get("business_rules")),
+                "field_constraints": _clean_object_list(item.get("field_constraints")),
+                "role_permissions": _clean_object_list(item.get("role_permissions")),
+                "state_transitions": _clean_object_list(item.get("state_transitions")),
+                "risk_signals": _clean_object_list(item.get("risk_signals")),
+                "suggested_scenarios": _clean_string_list(item.get("suggested_scenarios")),
+                "dependencies": _clean_string_list(item.get("dependencies")),
+            }
+        )
+
+    return valid
+
+
 def parse_coverage_plan_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse requirement coverage plan payload from model output and return an error when invalid."""
     if _is_blank_output(text):
@@ -302,44 +344,24 @@ def parse_requirement_analysis_json_detailed(text: Any) -> tuple[List[Dict[str, 
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as exc:
+        recovered_analysis: List[Any] = []
+        for key in REQUIREMENT_ANALYSIS_KEYS:
+            recovered_analysis = _recover_complete_array_items(json_text, key=key)
+            if recovered_analysis:
+                break
+        recovered_valid = _valid_requirement_analysis_entries(recovered_analysis)
+        if recovered_valid:
+            return recovered_valid, f"invalid JSON payload: {exc.msg}; recovered {len(recovered_valid)} complete requirement_analysis entries"
         return [], f"invalid JSON payload: {exc.msg}"
 
-    analysis_candidates: Any = data
-    if isinstance(data, dict):
-        for key in ("requirement_analysis", "requirement_analyses", "analysis", "analyses"):
-            if isinstance(data.get(key), list):
-                analysis_candidates = data[key]
-                break
+    valid = _valid_requirement_analysis_entries(data)
+    if valid:
+        return valid, None
 
+    analysis_candidates = _requirement_analysis_candidates(data)
     if not isinstance(analysis_candidates, list):
         return [], "requirement-analysis payload must be a JSON array or an object with a requirement_analysis array"
 
-    valid: List[Dict[str, Any]] = []
-    for item in analysis_candidates:
-        if not isinstance(item, dict):
-            continue
-
-        requirement_id = str(item.get("requirement_id") or "").strip()
-        requirement_text = str(item.get("requirement_text") or item.get("text") or "").strip()
-        if not requirement_id:
-            continue
-
-        valid.append(
-            {
-                "requirement_id": requirement_id,
-                "requirement_text": requirement_text,
-                "business_rules": _clean_object_list(item.get("business_rules")),
-                "field_constraints": _clean_object_list(item.get("field_constraints")),
-                "role_permissions": _clean_object_list(item.get("role_permissions")),
-                "state_transitions": _clean_object_list(item.get("state_transitions")),
-                "risk_signals": _clean_object_list(item.get("risk_signals")),
-                "suggested_scenarios": _clean_string_list(item.get("suggested_scenarios")),
-                "dependencies": _clean_string_list(item.get("dependencies")),
-            }
-        )
-
-    if valid:
-        return valid, None
     if not analysis_candidates:
         return [], "requirement_analysis list was empty"
     return [], "requirement-analysis payload did not contain valid requirement_id entries"
