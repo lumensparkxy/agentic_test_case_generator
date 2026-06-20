@@ -90,6 +90,11 @@ npm run test:playwright -- --list
   contract registry in `backend/app/agents/specialist_registry.py`; add new
   task payload/result models in `backend/app/agents/specialist_contracts.py`
   before wiring new local or ADK-backed implementations.
+- Use-case-only orchestration belongs in `backend/app/agents/use_case_agent.py`.
+  Shard workers may produce draft requirement analysis and coverage-plan
+  fragments, but project snapshots, artifact versions, usage events, billing
+  consumption, and files must be written only by the existing router/service
+  layer after the merged response is validated.
 - Orchestrated action progress should use
   `backend/app/services/orchestrator_run_service.py` for run records, event
   records, and checkpoints. Pass stable request IDs or idempotency keys when a

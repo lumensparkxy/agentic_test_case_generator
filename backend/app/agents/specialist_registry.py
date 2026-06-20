@@ -241,10 +241,10 @@ def _run_requirement_task(task_input: BaseModel, trace: SpecialistTaskTrace) -> 
 
 
 def _run_use_case_task(task_input: BaseModel, trace: SpecialistTaskTrace) -> UseCaseTaskOutput:
-    from . import test_case_agent
+    from . import use_case_agent
 
     payload = UseCaseTaskInput.model_validate(task_input)
-    workflow = test_case_agent.generate_test_cases(
+    workflow = use_case_agent.generate_use_cases(
         GenerateTestCasesInput(
             requirements=payload.requirements,
             template=payload.template,
@@ -257,15 +257,14 @@ def _run_use_case_task(task_input: BaseModel, trace: SpecialistTaskTrace) -> Use
         workflow_run_id=trace.workflow_run_id,
         operation="orchestrator.use_cases.generate",
     )
-    response = GenerateTestCasesResponse.model_validate(workflow)
     return UseCaseTaskOutput(
-        requirement_analysis=response.requirement_analysis,
-        coverage_plan=response.coverage_plan,
-        approved=response.approved,
-        review=response.review,
-        coverage_metrics=response.coverage_metrics,
-        workflow_settings=response.workflow_settings,
-        workflow_diagnostics=response.workflow_diagnostics,
+        requirement_analysis=workflow.get("requirement_analysis") or [],
+        coverage_plan=workflow.get("coverage_plan") or [],
+        approved=bool(workflow.get("approved", False)),
+        review=workflow.get("review") or {},
+        coverage_metrics=workflow.get("coverage_metrics") or {},
+        workflow_settings=workflow.get("workflow_settings") or {},
+        workflow_diagnostics=workflow.get("workflow_diagnostics") or {},
     )
 
 

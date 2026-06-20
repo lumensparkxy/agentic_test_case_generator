@@ -101,6 +101,22 @@ class SpecialistAgentRegistryTests(unittest.TestCase):
             "workflow_settings": {},
             "workflow_diagnostics": {},
         }
+        self.use_case_response = {
+            "approved": True,
+            "review": self.review,
+            "coverage_plan": self.generation_response["coverage_plan"],
+            "requirement_analysis": [],
+            "coverage_metrics": {"requirements_with_coverage_plan": 1},
+            "workflow_settings": {},
+            "workflow_diagnostics": {
+                "status": "completed",
+                "shard_count": 1,
+                "worker_count": 1,
+                "failed_shard_count": 0,
+                "fallback_shard_count": 0,
+                "merge_warnings": [],
+            },
+        }
 
     def _snapshot(self, stage: str, payload: dict, snapshot_id: str) -> QaProjectStageSnapshot:
         return QaProjectStageSnapshot(
@@ -185,6 +201,7 @@ class SpecialistAgentRegistryTests(unittest.TestCase):
 
         with (
             patch("app.agents.requirements_agent.extract_requirements", return_value=requirements_output) as extract_mock,
+            patch("app.agents.use_case_agent.generate_use_cases", return_value=self.use_case_response) as use_case_mock,
             patch("app.agents.test_case_agent.generate_test_cases", return_value=self.generation_response) as generate_mock,
             patch(
                 "app.agents.automation_agent.generate_playwright_pom",
@@ -195,7 +212,9 @@ class SpecialistAgentRegistryTests(unittest.TestCase):
 
         self.assertEqual(extract_mock.call_args.kwargs["request_id"], "req-123")
         self.assertEqual(extract_mock.call_args.kwargs["workflow_run_id"], "wf-123")
-        self.assertGreaterEqual(generate_mock.call_count, 2)
+        self.assertEqual(use_case_mock.call_count, 1)
+        self.assertEqual(generate_mock.call_count, 1)
+        self.assertEqual(use_case_mock.call_args.kwargs["operation"], "orchestrator.use_cases.generate")
         self.assertEqual(automation_mock.call_count, 1)
         for kind, result in results.items():
             with self.subTest(kind=kind):

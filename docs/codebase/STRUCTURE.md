@@ -11,7 +11,7 @@ should preserve when changing the application.
 | `backend/app/` | Runtime application package | `backend/app/main.py` |
 | `backend/app/routers/` | HTTP endpoint groups registered by `main.py` | `backend/app/main.py`, `backend/app/routers/*.py` |
 | `backend/app/contracts/` | Domain-owned Pydantic request, response, and data contracts re-exported through the legacy `models.py` facade | `backend/app/contracts/*.py`, `backend/app/models.py` |
-| `backend/app/agents/` | ADK/Gemini-facing workflow agents, specialist task contracts/registry, prompt helpers, impact recommendation logic, test-case coverage/review/fallback helpers, and response hydration helpers | `backend/app/adk_client.py`, `backend/app/agents/specialist_contracts.py`, `backend/app/agents/specialist_registry.py`, `backend/app/agents/test_case_agent.py`, `backend/app/agents/impact_update_agent.py` |
+| `backend/app/agents/` | ADK/Gemini-facing workflow agents, specialist task contracts/registry, prompt helpers, bounded use-case planning, impact recommendation logic, test-case coverage/review/fallback helpers, and response hydration helpers | `backend/app/adk_client.py`, `backend/app/agents/specialist_contracts.py`, `backend/app/agents/specialist_registry.py`, `backend/app/agents/use_case_agent.py`, `backend/app/agents/test_case_agent.py`, `backend/app/agents/impact_update_agent.py` |
 | `backend/app/services/` | Business services, persistence repository boundaries/adapters, orchestrator decisions and run persistence, impact update application, execution services, billing, reporting, grounding | `backend/app/services/*.py` |
 | `backend/app/adapters/` | External API clients for JIRA and Azure DevOps | `backend/app/adapters/jira.py`, `backend/app/adapters/azure_devops.py` |
 | `backend/app/auth/` | Firebase, Google credential, backend JWT, role, and authorization helpers | `backend/app/auth/*.py` |
@@ -48,6 +48,8 @@ should preserve when changing the application.
   `frontend/src/components/projects/ProjectInformationRail.jsx`.
 - Frontend style entry point: `frontend/src/styles/index.css`.
 - Backend execution runtime config: `backend/execution_runtime/playwright.config.ts`.
+- Backend use-case planning coordinator:
+  `backend/app/agents/use_case_agent.py`.
 - Frontend E2E config: `frontend/playwright.config.js`.
 - Backend container entry: `backend/Dockerfile`.
 - Frontend container entry: `frontend/Dockerfile`.
@@ -69,7 +71,7 @@ exposes `/metrics`.
 |----------|-------------------|------------------------|
 | `backend/app/routers/` | HTTP request parsing, FastAPI dependencies, workflow audit start/complete calls, response assembly | Low-level external API request code, raw SDK setup, large agent prompts |
 | `backend/app/contracts/` | Domain-owned Pydantic models for requirements, grounding, auth, test cases, execution, impact updates, projects, orchestration, integrations, export, automation, reporting, and billing | Runtime business behavior or route handlers |
-| `backend/app/agents/` | ADK/Gemini workflow orchestration, specialist task contracts/registry, prompt construction, deterministic fallbacks, impact recommendation logic, test-design review logic, coverage metrics, and agent response hydration | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
+| `backend/app/agents/` | ADK/Gemini workflow orchestration, specialist task contracts/registry, prompt construction, bounded use-case shard coordination, deterministic fallbacks, impact recommendation logic, test-design review logic, coverage metrics, and agent response hydration | HTTP endpoint definitions, Firestore collection setup, frontend-specific shaping |
 | `backend/app/services/` | Domain services for billing, audit, versioning, QA project lifecycle, orchestrator decisions, orchestrator run persistence, impact update application, execution, grounding, reporting, integration connection storage, and storage adapter boundaries | FastAPI route decorators, JSX/UI behavior |
 | `backend/app/adapters/` | Provider-specific JIRA and Azure DevOps HTTP semantics | App-wide workflow decisions or billing policy |
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
@@ -85,8 +87,8 @@ exposes `/metrics`.
 
 ## 4) Naming and Organization Rules
 
-- Python files use snake_case, for example `test_case_agent.py`,
-  `test_case_coverage.py`, `artifact_fetcher.py`, and
+- Python files use snake_case, for example `use_case_agent.py`,
+  `test_case_agent.py`, `test_case_coverage.py`, `artifact_fetcher.py`, and
   `azure_devops_sync_service.py`.
 - Python classes and Pydantic models use PascalCase, for example
   `RequirementAnalysis`, `ExecutionPreviewResponse`, and `BillingAccount`.

@@ -779,16 +779,21 @@ export interface TestStep {
 export interface WorkflowDiagnostics {
 	attempt_count?: number;
 	best_iteration?: number | null;
+	failed_shard_count?: number;
 	failure_reason?: string | null;
+	fallback_shard_count?: number;
 	max_iterations_reached?: boolean;
+	merge_warnings?: Array<string>;
 	parser_failures?: Array<string>;
 	parser_recoveries?: Array<string>;
 	recovery_reason?: string | null;
+	shard_count?: number;
 	stalled?: boolean;
 	status?: "completed" | "partial" | "fallback" | "failed";
 	timed_out?: boolean;
 	used_fallback?: boolean;
 	warnings?: Array<string>;
+	worker_count?: number;
 }
 
 export interface WorkflowIteration {
