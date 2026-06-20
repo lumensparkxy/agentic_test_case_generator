@@ -215,6 +215,8 @@ status presentation in the right rail: status overview, stage progress,
 blockers, agent timeline, project evidence, latest report evidence, and last
 run details. Both components consume the same deterministic status and run
 payloads, so backend status/runs contracts remain unchanged.
+The selected Brighter Executive Cockpit visual target and QA mapping are
+recorded in `docs/brighter-executive-cockpit-design-qa.md`.
 
 Review and evidence-backed reporting flow:
 

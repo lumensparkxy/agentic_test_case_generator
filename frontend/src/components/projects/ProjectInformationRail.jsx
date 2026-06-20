@@ -272,7 +272,7 @@ export default function ProjectInformationRail({ currentProject, status, runsPay
 
 	return (
 		<aside className="project-information-rail" aria-label="Project information rail">
-			<div className="project-rail-header">
+			<section className="project-rail-header" aria-label="Status overview">
 				<div>
 					<span className="project-rail-kicker">Operational status</span>
 					<strong>{formatLabel(currentStage)}</strong>
@@ -281,7 +281,7 @@ export default function ProjectInformationRail({ currentProject, status, runsPay
 					</p>
 				</div>
 				<StatusPill status={statusValue} />
-			</div>
+			</section>
 
 			<button type="button" className="secondary project-rail-refresh" onClick={onRefresh} disabled={authActionDisabled || isLoading}>
 				{isLoading ? "Refreshing" : "Refresh status"}
