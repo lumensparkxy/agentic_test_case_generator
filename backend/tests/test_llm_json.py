@@ -225,6 +225,67 @@ class DetailedPayloadParserTests(unittest.TestCase):
         self.assertEqual(review_error, None)
         self.assertEqual(review["score"], 95)
 
+    def test_coverage_plan_parser_recovers_complete_entries_from_truncated_output(self) -> None:
+        payload = """
+        {
+          "coverage_plan": [
+            {
+              "requirement_id": "REQ-001",
+              "requirement_text": "Users can sign in.",
+              "scenarios": [
+                {
+                  "id": "REQ-001-SCN-01",
+                  "scenario_type": "Happy Path",
+                  "title": "Successful sign in",
+                  "objective": "Validate successful sign in.",
+                  "priority": "High",
+                  "must_have": true
+                }
+              ]
+            },
+            {
+              "requirement_id": "REQ-002",
+              "requirement_text": "Accounts lock after repeated failures.",
+              "scenarios": [
+                {
+                  "id": "REQ-002-SCN-01",
+                  "scenario_type": "Negative",
+                  "title": "Account lockout",
+                  "objective": "Validate lockout after failed attempts.",
+                  "priority": "High",
+                  "must_have": true
+                }
+              ]
+            },
+            {
+              "requirement_id": "REQ-003",
+              "requirement_text": "Audit events are retained.",
+              "scenarios": [
+                {
+                  "id": "REQ-003-SCN-01",
+                  "scenario_type": "Happy Path",
+                  "title": "Audit retention",
+                  "objective": "Validate audit retention.",
+                  "priority": "High",
+                  "must
+        """
+
+        coverage_plan, coverage_error = parse_coverage_plan_json_detailed(payload)
+
+        self.assertEqual([item["requirement_id"] for item in coverage_plan], ["REQ-001", "REQ-002"])
+        self.assertIsNotNone(coverage_error)
+        self.assertIn("invalid JSON payload", coverage_error)
+        self.assertIn("recovered 2 complete coverage_plan entries", coverage_error)
+
+    def test_coverage_plan_parser_rejects_truncated_output_without_complete_entries(self) -> None:
+        payload = '{"coverage_plan": [{"requirement_id": "REQ-001", "scenarios": [{"id": "REQ-001-SCN-01", "must'
+
+        coverage_plan, coverage_error = parse_coverage_plan_json_detailed(payload)
+
+        self.assertEqual(coverage_plan, [])
+        self.assertIsNotNone(coverage_error)
+        self.assertIn("invalid JSON payload", coverage_error)
+
 
 if __name__ == "__main__":
     unittest.main()

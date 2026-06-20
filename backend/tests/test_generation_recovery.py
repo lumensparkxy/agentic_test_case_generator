@@ -8,12 +8,24 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents.analysis_agent import fallback_requirement_analysis
-from app.agents.test_case_agent import generate_test_cases
+from app.agents.test_case_agent import _build_coverage_planner_agent, generate_test_cases
 from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import GenerateTestCasesInput, Requirement, TestCaseTemplate
 
 
 class TestCaseGenerationRecoveryTests(unittest.TestCase):
+    def test_coverage_planner_uses_raw_json_output_for_parser_recovery(self) -> None:
+        agent = _build_coverage_planner_agent(
+            "test-model",
+            "REQ-001: The system shall allow users to sign in.",
+            "No additional context provided.",
+        )
+
+        self.assertIsNone(getattr(agent, "output_schema", None))
+        self.assertEqual(getattr(agent, "output_key", None), "coverage_plan")
+        self.assertGreaterEqual(agent.generate_content_config.max_output_tokens, 24000)
+        self.assertEqual(agent.generate_content_config.response_mime_type, "application/json")
+
     def test_rejected_model_suite_is_recovered_with_fallback_coverage(self) -> None:
         requirements = [
             Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password."),
