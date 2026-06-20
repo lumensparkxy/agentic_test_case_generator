@@ -27,7 +27,6 @@ from ..models import (
     Requirement,
     ReviewResult,
     TestCase,
-    TestCasesOutput,
     WorkflowSettings,
 )
 from ..observability.logging import bind_log_context, get_log_context, reset_log_context
@@ -170,6 +169,8 @@ def _record_parser_recovery(
     author: str,
     error: Optional[str],
     raw_text: Optional[str] = None,
+    *,
+    artifact_label: str = "JSON",
 ) -> None:
     if not error:
         return
@@ -180,10 +181,11 @@ def _record_parser_recovery(
     _append_unique_message(diagnostics["parser_failures"], message)
     if diagnostics["status"] == "completed":
         diagnostics["status"] = "partial"
-    _append_unique_message(diagnostics["warnings"], f"{author}: recovered usable coverage-plan JSON from malformed output.")
+    _append_unique_message(diagnostics["warnings"], f"{author}: recovered usable {artifact_label} JSON from malformed output.")
     _log_test_case_workflow(
         "parser_recovery",
         author=author,
+        artifact_label=artifact_label,
         error=error,
         sample=sample or None,
         parser_failure_count=len(diagnostics["parser_failures"]),
@@ -420,7 +422,6 @@ def _build_generation_pipeline(
         model=model,
         include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
-        output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
@@ -497,7 +498,6 @@ def _build_refinement_pipeline(
         model=model,
         include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
-        output_schema=TestCasesOutput,
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
@@ -684,6 +684,7 @@ Human feedback:
                     parsed_test_cases, parse_error = parse_test_cases_json_detailed(text)
                     if parsed_test_cases:
                         current_test_cases = parsed_test_cases
+                        _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="test-case")
                     else:
                         _record_parser_failure(diagnostics, author, parse_error, text)
 
@@ -691,7 +692,7 @@ Human feedback:
                     parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
                     if parsed_coverage_plan:
                         current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
-                        _record_parser_recovery(diagnostics, author, parse_error, text)
+                        _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="coverage-plan")
                     else:
                         _record_parser_failure(diagnostics, author, parse_error, text)
 
@@ -805,8 +806,17 @@ Human feedback:
 
     state_test_cases_raw = session_state.get(STATE_TEST_CASES, "[]")
     state_test_cases, state_test_cases_error = parse_test_cases_json_detailed(state_test_cases_raw)
+    had_event_test_cases = bool(current_test_cases)
     if state_test_cases:
         current_test_cases = state_test_cases
+        if not had_event_test_cases:
+            _record_parser_recovery(
+                diagnostics,
+                "SessionStateTestCases",
+                state_test_cases_error,
+                state_test_cases_raw,
+                artifact_label="test-case",
+            )
     elif str(state_test_cases_raw).strip() not in {"", "[]"}:
         _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error, state_test_cases_raw)
 
@@ -816,7 +826,13 @@ Human feedback:
     if state_coverage_plan:
         current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
         if not had_event_coverage_plan:
-            _record_parser_recovery(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
+            _record_parser_recovery(
+                diagnostics,
+                "SessionStateCoveragePlan",
+                state_coverage_plan_error,
+                state_coverage_plan_raw,
+                artifact_label="coverage-plan",
+            )
     elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
         _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
 

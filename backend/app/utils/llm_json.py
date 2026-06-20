@@ -185,20 +185,22 @@ def parse_test_cases_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Opt
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as exc:
+        recovered_cases = _recover_complete_array_items(json_text, key="test_cases")
+        recovered_valid = _valid_test_case_entries(recovered_cases)
+        if recovered_valid:
+            return recovered_valid, f"invalid JSON payload: {exc.msg}; recovered {len(recovered_valid)} complete test_cases entries"
         return [], f"invalid JSON payload: {exc.msg}"
 
+    valid = _valid_test_case_entries(data)
+    if valid:
+        return valid, None
+
     if isinstance(data, list):
-        valid = [item for item in data if _valid_test_case_shape(item)]
-        if valid:
-            return valid, None
         if data:
             return [], "test_cases payload did not contain valid id/title/steps objects"
         return [], "test_cases list was empty"
 
     if isinstance(data, dict) and "test_cases" in data and isinstance(data["test_cases"], list):
-        valid = [item for item in data["test_cases"] if _valid_test_case_shape(item)]
-        if valid:
-            return valid, None
         if data["test_cases"]:
             return [], "test_cases payload did not contain valid id/title/steps objects"
         return [], "test_cases list was empty"
@@ -210,6 +212,16 @@ def parse_test_cases_json(text: Any) -> List[Dict[str, Any]]:
     """Parse test-case payload from model output."""
     parsed, _ = parse_test_cases_json_detailed(text)
     return parsed
+
+
+def _valid_test_case_entries(data: Any) -> List[Dict[str, Any]]:
+    if isinstance(data, list):
+        candidates = data
+    elif isinstance(data, dict) and "test_cases" in data and isinstance(data["test_cases"], list):
+        candidates = data["test_cases"]
+    else:
+        return []
+    return [item for item in candidates if _valid_test_case_shape(item)]
 
 
 def _valid_coverage_plan_entries(data: Any) -> List[Dict[str, Any]]:
