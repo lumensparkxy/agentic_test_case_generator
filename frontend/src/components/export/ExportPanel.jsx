@@ -4,9 +4,98 @@ const EXPORT_FORMATS = [
 	{ format: "json", className: "json", icon: "🧾", label: "JSON", description: "API/Import ready" },
 ];
 
+const REPORT_PATH_LIMIT = 8;
+
+function latestExecutionReport(executionRunResult, currentProject) {
+	if (executionRunResult?.run_id) {
+		return executionRunResult;
+	}
+	const executionSnapshotPayload = currentProject?.current_snapshots?.execution?.payload;
+	if (executionSnapshotPayload?.run_id) {
+		return executionSnapshotPayload;
+	}
+	const projectRun = currentProject?.execution_runs?.[0];
+	if (projectRun?.run_id) {
+		return projectRun;
+	}
+	const reportSnapshotPayload = currentProject?.current_snapshots?.reports?.payload;
+	return reportSnapshotPayload?.run_id ? reportSnapshotPayload : null;
+}
+
+function normalizeReportPaths(report) {
+	const directPaths = Array.isArray(report?.playwright_report_paths) ? report.playwright_report_paths : [];
+	const resultPaths = Array.isArray(report?.results) ? report.results.map((result) => result?.playwright_report_path).filter(Boolean) : [];
+	return [...new Set([...directPaths, ...resultPaths])];
+}
+
+function renderSummaryPill(label, value, tone = "") {
+	return (
+		<span className={`workflow-diagnostics-pill ${tone}`.trim()}>
+			{label} {value || 0}
+		</span>
+	);
+}
+
+function PlaywrightExecutionReport({ report }) {
+	const summary = report?.summary || {};
+	const reportPaths = normalizeReportPaths(report);
+	const visibleReportPaths = reportPaths.slice(0, REPORT_PATH_LIMIT);
+	const hiddenReportPathCount = Math.max(0, reportPaths.length - visibleReportPaths.length);
+
+	return (
+		<div className="export-section playwright-report-section">
+			<h3 className="section-subtitle">Playwright Execution Report</h3>
+			{report ? (
+				<div className="playwright-report-card">
+					<div className="playwright-report-header">
+						<div>
+							<strong>Run {report.run_id}</strong>
+							<p>
+								{report.target_environment || "default"} {report.target_base_url ? `• ${report.target_base_url}` : ""}
+							</p>
+						</div>
+						<span className={`review-banner ${report.status === "passed" ? "review-approved" : "review-needs-work"}`}>
+							{report.status || "recorded"}
+						</span>
+					</div>
+					<div className="workflow-diagnostics-pills">
+						{renderSummaryPill("Passed", summary.passed, "success")}
+						{renderSummaryPill("Failed", summary.failed, "warning")}
+						{renderSummaryPill("Invalid", summary.invalid, "warning")}
+						{renderSummaryPill("Skipped", summary.skipped)}
+					</div>
+					{report.artifacts_root && (
+						<p className="helper-text">
+							Artifacts root: <code>{report.artifacts_root}</code>
+						</p>
+					)}
+					{visibleReportPaths.length ? (
+						<ul className="playwright-report-paths">
+							{visibleReportPaths.map((path) => (
+								<li key={path}>
+									<code>{path}</code>
+								</li>
+							))}
+						</ul>
+					) : (
+						<p className="helper-text">No Playwright report path was returned for this execution run.</p>
+					)}
+					{hiddenReportPathCount > 0 && <p className="helper-text">+ {hiddenReportPathCount} more report paths</p>}
+				</div>
+			) : (
+				<div className="playwright-report-card empty">
+					<p>No Playwright execution report has been recorded yet.</p>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export default function ExportPanel({
 	testCases,
 	testCaseReview,
+	executionRunResult,
+	currentProject,
 	exportReviewApproved,
 	exportRequiresOverride,
 	exportGateLocked,
@@ -21,6 +110,7 @@ export default function ExportPanel({
 	goPrev,
 }) {
 	const exportDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportGateLocked;
+	const executionReport = latestExecutionReport(executionRunResult, currentProject);
 
 	return (
 		<section className="panel">
@@ -63,6 +153,7 @@ export default function ExportPanel({
 					)}
 				</div>
 			)}
+			<PlaywrightExecutionReport report={executionReport} />
 			<div className="export-section">
 				<h3 className="section-subtitle">📥 Quick Export</h3>
 				<p className="helper-text">Download test cases directly to your computer.</p>

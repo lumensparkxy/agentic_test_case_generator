@@ -16,8 +16,9 @@ from app.config import ExecutionSettings
 from app.models import TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
 from plain_english_test_framework.compiler import compile_spec_file
-from plain_english_test_framework.local_runner import _node_resolution_env
+from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
 from plain_english_test_framework.playwright_generator import generate_playwright_spec
+from plain_english_test_framework.validation import ValidationIssue
 
 
 def _browser_case(case_id: str = "TC-001") -> TestCase:
@@ -125,6 +126,16 @@ class ExecutionServiceTests(unittest.TestCase):
             env["NODE_PATH"].split(os.pathsep),
             [str(runtime / "node_modules"), "/existing/node_modules"],
         )
+
+    def test_default_preview_limit_allows_large_generated_suites(self) -> None:
+        settings = ExecutionSettings()
+        cases = [_browser_case(f"TC-{index:03d}") for index in range(1, 26)]
+
+        response = preview_execution(cases, settings=settings)
+
+        self.assertEqual(settings.max_cases_per_request, 9999)
+        self.assertEqual(response.summary.executable, 25)
+        self.assertEqual(response.warnings, [])
 
     def test_preview_converts_safe_browser_steps_to_candidate_spec(self) -> None:
         response = preview_execution([_browser_case()], target_base_url="https://example.test")
@@ -274,7 +285,10 @@ class ExecutionServiceTests(unittest.TestCase):
                 stdout="passed",
                 stderr="",
                 generated_spec_path=root / "generated" / "tc_001.spec.ts",
-                paths=SimpleNamespace(artifacts_dir=root / "artifacts" / "run"),
+                paths=SimpleNamespace(
+                    artifacts_dir=root / "artifacts" / "run",
+                    html_report_dir=root / "artifacts" / "run" / "html-report",
+                ),
             )
 
             with patch("app.services.execution_service.run_local_playwright", return_value=fake_run) as runner:
@@ -284,6 +298,9 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.passed, 1)
         self.assertEqual(response.results[0].status, "passed")
         self.assertTrue(response.results[0].ir_path.endswith("tc_001.ir.json"))
+        self.assertEqual(response.playwright_report_paths, [str(root / "artifacts" / "run" / "html-report")])
+        self.assertEqual(response.results[0].report_json_path, str(root / "artifacts" / "run" / "results.json"))
+        self.assertEqual(response.results[0].playwright_report_path, str(root / "artifacts" / "run" / "html-report"))
         runner.assert_called_once()
 
     def test_run_compiles_documentation_url_assertion_before_invoking_runner(self) -> None:
@@ -295,7 +312,10 @@ class ExecutionServiceTests(unittest.TestCase):
                 stdout="passed",
                 stderr="",
                 generated_spec_path=root / "generated" / "tc_doc.spec.ts",
-                paths=SimpleNamespace(artifacts_dir=root / "artifacts" / "run"),
+                paths=SimpleNamespace(
+                    artifacts_dir=root / "artifacts" / "run",
+                    html_report_dir=root / "artifacts" / "run" / "html-report",
+                ),
             )
 
             with patch("app.services.execution_service.run_local_playwright", return_value=fake_run) as runner:
@@ -319,7 +339,10 @@ class ExecutionServiceTests(unittest.TestCase):
                 stdout="",
                 stderr="expect failed",
                 generated_spec_path=root / "generated" / "tc_001.spec.ts",
-                paths=SimpleNamespace(artifacts_dir=root / "artifacts" / "run"),
+                paths=SimpleNamespace(
+                    artifacts_dir=root / "artifacts" / "run",
+                    html_report_dir=root / "artifacts" / "run" / "html-report",
+                ),
             )
 
             with patch("app.services.execution_service.run_local_playwright", return_value=fake_run):
@@ -329,6 +352,22 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.failed, 1)
         self.assertEqual(response.results[0].status, "failed")
         self.assertEqual(response.results[0].returncode, 1)
+
+    def test_run_does_not_publish_report_paths_when_runner_fails_before_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = _settings(root)
+            runner_error = LocalPlaywrightRunnerError((ValidationIssue("$", "npx was not found", "runner.npx_missing"),))
+
+            with patch("app.services.execution_service.run_local_playwright", side_effect=runner_error):
+                response = run_execution([_browser_case()], settings=settings)
+
+        self.assertEqual(response.status, "failed")
+        self.assertEqual(response.summary.invalid, 1)
+        self.assertEqual(response.results[0].status, "invalid")
+        self.assertIsNone(response.results[0].report_json_path)
+        self.assertIsNone(response.results[0].playwright_report_path)
+        self.assertEqual(response.playwright_report_paths, [])
 
 
 if __name__ == "__main__":

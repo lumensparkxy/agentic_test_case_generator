@@ -165,6 +165,8 @@ def _run_project_payload(response: ExecutionRunResponse, *, target_environment: 
         "target_base_url": target_base_url,
         "run_id": response.run_id,
         "status": response.status,
+        "artifacts_root": response.artifacts_root,
+        "playwright_report_paths": list(response.playwright_report_paths or []),
         "summary": _model_payload(response.summary),
         "warnings": list(response.warnings or []),
         "results": [
@@ -174,6 +176,10 @@ def _run_project_payload(response: ExecutionRunResponse, *, target_environment: 
                 "title": item.title,
                 "status": item.status,
                 "returncode": item.returncode,
+                "generated_spec_path": item.generated_spec_path,
+                "artifacts_dir": item.artifacts_dir,
+                "report_json_path": item.report_json_path,
+                "playwright_report_path": item.playwright_report_path,
                 "issues": _model_payload(item.issues),
             }
             for item in response.results
@@ -396,6 +402,8 @@ async def automation_execution_run(
                     snapshot_id=execution_snapshot.snapshot_id,
                     source_snapshot_id=source_snapshot_id,
                     selected_test_case_ids=list(payload.selected_test_case_ids),
+                    artifacts_root=response.artifacts_root,
+                    playwright_report_paths=list(response.playwright_report_paths or []),
                     workflow_run_id=workflow_run_id,
                     source_event_id=event_id,
                     project_revision=execution_snapshot.project_revision,
@@ -413,6 +421,8 @@ async def automation_execution_run(
                         "run_id": response.run_id,
                         "target_environment": target_environment,
                         "status": response.status,
+                        "artifacts_root": response.artifacts_root,
+                        "playwright_report_paths": list(response.playwright_report_paths or []),
                         "summary": _model_payload(response.summary),
                     },
                     operation="reports.execution_summary",
@@ -423,7 +433,13 @@ async def automation_execution_run(
                     approved=response.status == "passed",
                     source_snapshot_id=execution_snapshot.snapshot_id,
                     title=f"{target_environment} execution report",
-                    metadata={"run_id": response.run_id, "target_environment": target_environment, "status": response.status},
+                    metadata={
+                        "run_id": response.run_id,
+                        "target_environment": target_environment,
+                        "status": response.status,
+                        "artifacts_root": response.artifacts_root,
+                        "playwright_report_paths": list(response.playwright_report_paths or []),
+                    },
                     idempotency_key=_action_idempotency_key(
                         "reports.execution_summary",
                         request_id=request_id,

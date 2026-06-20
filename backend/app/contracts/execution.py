@@ -69,6 +69,8 @@ class ExecutionRunItem(BaseModel):
     ir_path: Optional[str] = None
     generated_spec_path: Optional[str] = None
     artifacts_dir: Optional[str] = None
+    report_json_path: Optional[str] = None
+    playwright_report_path: Optional[str] = None
     returncode: Optional[int] = None
     stdout: str = ""
     stderr: str = ""
@@ -88,6 +90,7 @@ class ExecutionRunResponse(BaseModel):
     status: Literal["passed", "failed", "disabled"]
     run_id: str
     artifacts_root: Optional[str] = None
+    playwright_report_paths: List[str] = Field(default_factory=list)
     results: List[ExecutionRunItem] = Field(default_factory=list)
     preview: ExecutionPreviewResponse
     warnings: List[str] = Field(default_factory=list)

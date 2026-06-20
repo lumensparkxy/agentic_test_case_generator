@@ -78,6 +78,8 @@ class QaProjectExecutionRun(BaseModel):
     run_id: str
     target_environment: str
     target_base_url: Optional[str] = None
+    artifacts_root: Optional[str] = None
+    playwright_report_paths: List[str] = Field(default_factory=list)
     project_revision: int
     test_case_count: int = 0
     status: str

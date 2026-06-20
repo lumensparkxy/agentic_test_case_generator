@@ -129,7 +129,7 @@ class ExecutionSettings(BaseModel):
     default_base_url: str = "http://127.0.0.1:5173"
     playwright_config_path: Path = REPO_ROOT / "backend" / "execution_runtime" / "playwright.config.ts"
     runtime_cwd: Path = REPO_ROOT / "backend" / "execution_runtime"
-    max_cases_per_request: int = 20
+    max_cases_per_request: int = 9999
 
 
 def get_cors_allow_origins() -> list[str]:
