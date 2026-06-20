@@ -95,6 +95,43 @@ def extract_json(text: Any) -> Optional[str]:
     return normalized[start : end + 1]
 
 
+def _recover_complete_array_items(json_text: str, *, key: str) -> List[Any]:
+    """Return complete items from a JSON array prefix after a decode failure."""
+    normalized = str(json_text or "")
+    stripped = normalized.lstrip()
+    offset = len(normalized) - len(stripped)
+
+    if stripped.startswith("["):
+        array_start = offset
+    else:
+        key_match = re.search(rf'"{re.escape(key)}"\s*:', normalized)
+        if not key_match:
+            return []
+        array_start = normalized.find("[", key_match.end())
+        if array_start == -1:
+            return []
+
+    decoder = json.JSONDecoder()
+    items: List[Any] = []
+    index = array_start + 1
+    length = len(normalized)
+
+    while index < length:
+        while index < length and normalized[index] in " \r\n\t,":
+            index += 1
+
+        if index >= length or normalized[index] == "]":
+            break
+
+        try:
+            item, index = decoder.raw_decode(normalized, index)
+        except json.JSONDecodeError:
+            break
+        items.append(item)
+
+    return items
+
+
 def parse_requirements_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse requirements payload from model output and return an error when invalid."""
     if _is_blank_output(text):
@@ -175,26 +212,13 @@ def parse_test_cases_json(text: Any) -> List[Dict[str, Any]]:
     return parsed
 
 
-def parse_coverage_plan_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
-    """Parse requirement coverage plan payload from model output and return an error when invalid."""
-    if _is_blank_output(text):
-        return [], "empty output"
-
-    json_text = extract_json(text)
-    if not json_text:
-        return [], "no JSON payload found"
-
-    try:
-        data = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        return [], f"invalid JSON payload: {exc.msg}"
-
+def _valid_coverage_plan_entries(data: Any) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         plan = data
     elif isinstance(data, dict) and "coverage_plan" in data and isinstance(data["coverage_plan"], list):
         plan = data["coverage_plan"]
     else:
-        return [], "coverage-plan payload must be a JSON array or an object with a coverage_plan array"
+        return []
 
     valid: List[Dict[str, Any]] = []
     for item in plan:
@@ -212,7 +236,35 @@ def parse_coverage_plan_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], 
                 "scenarios": [scenario for scenario in scenarios if isinstance(scenario, dict)],
             }
         )
+    return valid
 
+
+def parse_coverage_plan_json_detailed(text: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Parse requirement coverage plan payload from model output and return an error when invalid."""
+    if _is_blank_output(text):
+        return [], "empty output"
+
+    json_text = extract_json(text)
+    if not json_text:
+        return [], "no JSON payload found"
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        recovered_plan = _recover_complete_array_items(json_text, key="coverage_plan")
+        recovered_valid = _valid_coverage_plan_entries(recovered_plan)
+        if recovered_valid:
+            return recovered_valid, f"invalid JSON payload: {exc.msg}; recovered {len(recovered_valid)} complete coverage_plan entries"
+        return [], f"invalid JSON payload: {exc.msg}"
+
+    if isinstance(data, list):
+        plan = data
+    elif isinstance(data, dict) and "coverage_plan" in data and isinstance(data["coverage_plan"], list):
+        plan = data["coverage_plan"]
+    else:
+        return [], "coverage-plan payload must be a JSON array or an object with a coverage_plan array"
+
+    valid = _valid_coverage_plan_entries(plan)
     if valid:
         return valid, None
     if not plan:
