@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -12,10 +13,14 @@ from app.agents.test_case_agent import (
     _build_coverage_planner_agent,
     _build_generation_pipeline,
     _build_refinement_pipeline,
+    _combined_event_text,
+    _new_workflow_diagnostics,
+    _record_parser_recovery,
     generate_test_cases,
 )
 from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import GenerateTestCasesInput, Requirement, TestCaseTemplate
+from app.utils.llm_json import parse_test_cases_json_detailed
 
 
 class TestCaseGenerationRecoveryTests(unittest.TestCase):
@@ -59,6 +64,40 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertIsNone(getattr(refinement_agent, "output_schema", None))
         self.assertEqual(refinement_agent.output_key, "current_test_cases")
         self.assertEqual(refinement_agent.generate_content_config.response_mime_type, "application/json")
+
+    def test_parser_recovery_diagnostics_do_not_populate_failures(self) -> None:
+        diagnostics = _new_workflow_diagnostics()
+
+        _record_parser_recovery(
+            diagnostics,
+            "TestCaseGeneratorAgent",
+            "invalid JSON payload: EOF while parsing a string; recovered 2 complete test_cases entries",
+            '{"test_cases": [{"id": "TC-001"}',
+            artifact_label="test-case",
+        )
+
+        self.assertEqual(diagnostics["status"], "partial")
+        self.assertIsNone(diagnostics["failure_reason"])
+        self.assertEqual(diagnostics["parser_failures"], [])
+        self.assertEqual(len(diagnostics["parser_recoveries"]), 1)
+        self.assertIn("TestCaseGeneratorAgent: invalid JSON payload", diagnostics["parser_recoveries"][0])
+        self.assertIn("recovered usable test-case JSON", diagnostics["warnings"][0])
+
+    def test_combined_event_text_allows_parser_to_receive_full_payload(self) -> None:
+        event = SimpleNamespace(
+            content=SimpleNamespace(
+                parts=[
+                    SimpleNamespace(text='{"test_cases": ['),
+                    SimpleNamespace(text='{"id": "TC-001", "title": "Invite user", "steps": [{"step": 1, "action": "Invite", "expected": "Sent"}]}'),
+                    SimpleNamespace(text="]}"),
+                ]
+            )
+        )
+
+        parsed, error = parse_test_cases_json_detailed(_combined_event_text(event))
+
+        self.assertIsNone(error)
+        self.assertEqual([item["id"] for item in parsed], ["TC-001"])
 
     def test_rejected_model_suite_is_recovered_with_fallback_coverage(self) -> None:
         requirements = [
@@ -120,8 +159,10 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertGreaterEqual(result["review"]["score"], result["review"]["threshold"])
         self.assertGreater(len(result["test_cases"]), len(partial_model_cases))
         self.assertEqual(result["coverage_metrics"]["requirements_without_tests"], [])
-        self.assertTrue(result["workflow_diagnostics"]["used_fallback"])
-        self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "quality_recovery")
+        self.assertEqual(result["workflow_diagnostics"]["status"], "partial")
+        self.assertFalse(result["workflow_diagnostics"]["used_fallback"])
+        self.assertIsNone(result["workflow_diagnostics"]["failure_reason"])
+        self.assertEqual(result["workflow_diagnostics"]["recovery_reason"], "coverage_augmentation")
         self.assertEqual(result["iteration_history"][-1]["actor"], "FallbackCoverageRecovery")
 
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:
