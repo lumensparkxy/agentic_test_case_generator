@@ -59,6 +59,26 @@ test.describe("Workflow navigation", () => {
 		await expect(navigation.getByRole("button", { name: /^Generate, Active$/i })).toBeVisible();
 		await expect(page.getByRole("heading", { name: /^Generate Test Cases$/i })).toBeVisible();
 
+		await navigation.getByRole("button", { name: /^Collapse workflow navigation$/i }).click();
+		await expect(navigation.getByRole("button", { name: /^Expand workflow navigation$/i })).toBeVisible();
+		await navigation.getByRole("button", { name: /^Template,/i }).click();
+		await expect(navigation.getByRole("button", { name: /^Template, Active$/i })).toBeVisible();
+		await expect(page.getByRole("heading", { name: /^Template Setup$/i })).toBeVisible();
+
+		await page.reload();
+		await expect(
+			page.getByRole("navigation", { name: "Workflow navigation" }).getByRole("button", { name: /^Expand workflow navigation$/i })
+		).toBeVisible({
+			timeout: 30_000,
+		});
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Expand workflow navigation$/i })
+			.click();
+		await expect(
+			page.getByRole("navigation", { name: "Workflow navigation" }).getByRole("button", { name: /^Collapse workflow navigation$/i })
+		).toBeVisible();
+
 		await navigation.getByRole("button", { name: /^Export,/i }).click();
 		await expect(navigation.getByRole("button", { name: /^Export, Active$/i })).toBeVisible();
 		await expect(page.getByRole("heading", { name: /^Export Test Cases$/i })).toBeVisible();

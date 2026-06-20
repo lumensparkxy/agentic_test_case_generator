@@ -534,8 +534,17 @@ test.describe("Orchestrator cockpit", () => {
 		await expect(rail.getByLabel("Project evidence")).toContainText("Pending");
 		await expect(rail.getByText(/Test Cases snap-test-v1/i)).toBeVisible();
 
+		await rail.getByRole("button", { name: /^Collapse project information$/i }).click();
+		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
+		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
+		await expect(rail.getByLabel("Stage progress")).toHaveCount(0);
+
 		await page.reload();
 		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
+		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
+		await rail.getByRole("button", { name: /^Expand project information$/i }).click();
+		await expect(rail.getByRole("button", { name: /^Collapse project information$/i })).toBeVisible();
 		await expect(rail.getByText(/Impact QA · revision 5/)).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Analyze Impact$/i })).toBeVisible();
 

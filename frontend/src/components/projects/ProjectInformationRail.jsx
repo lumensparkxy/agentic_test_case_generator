@@ -250,17 +250,34 @@ function LastRunSummary({ currentProject, runsPayload }) {
 	);
 }
 
-export default function ProjectInformationRail({ currentProject, status, runsPayload, isLoading, error, authActionDisabled, onRefresh }) {
+export default function ProjectInformationRail({
+	currentProject,
+	status,
+	runsPayload,
+	isLoading,
+	error,
+	authActionDisabled,
+	onRefresh,
+	isCollapsed = false,
+	onToggleCollapsed,
+}) {
+	const toggleLabel = isCollapsed ? "Expand project information" : "Collapse project information";
+
 	if (!currentProject) {
 		return (
-			<aside className="project-information-rail empty" aria-label="Project information rail">
-				<section className="project-rail-section">
-					<div className="project-rail-section-header">
-						<h3>Status</h3>
-						<span>Idle</span>
+			<aside className={`project-information-rail empty ${isCollapsed ? "collapsed" : ""}`} aria-label="Project information rail">
+				<section className="project-rail-header" aria-label="Status overview">
+					<div>
+						<span className="project-rail-kicker">Operational status</span>
+						<strong>Idle</strong>
 					</div>
-					<p className="project-rail-empty">Select or create a QA project to see status, blockers, timeline, and evidence.</p>
+					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel}>
+						{isCollapsed ? "Expand" : "Collapse"}
+					</button>
 				</section>
+				{!isCollapsed && (
+					<p className="project-rail-empty">Select or create a QA project to see status, blockers, timeline, and evidence.</p>
+				)}
 			</aside>
 		);
 	}
@@ -271,7 +288,7 @@ export default function ProjectInformationRail({ currentProject, status, runsPay
 	const statusValue = status?.upstream_changed ? "stale" : status?.stages?.[currentStage]?.status || "ready";
 
 	return (
-		<aside className="project-information-rail" aria-label="Project information rail">
+		<aside className={`project-information-rail ${isCollapsed ? "collapsed" : ""}`} aria-label="Project information rail">
 			<section className="project-rail-header" aria-label="Status overview">
 				<div>
 					<span className="project-rail-kicker">Operational status</span>
@@ -280,40 +297,49 @@ export default function ProjectInformationRail({ currentProject, status, runsPay
 						{currentProject.name} · revision {status?.project_revision ?? currentProject.current_revision}
 					</p>
 				</div>
-				<StatusPill status={statusValue} />
-			</section>
-
-			<button type="button" className="secondary project-rail-refresh" onClick={onRefresh} disabled={authActionDisabled || isLoading}>
-				{isLoading ? "Refreshing" : "Refresh status"}
-			</button>
-
-			{error && <div className="orchestrator-error">{error}</div>}
-
-			<ProjectSummaryPanel currentProject={currentProject} status={status} runsPayload={runsPayload} />
-
-			<section className="project-rail-section" aria-label="Stage progress">
-				<div className="project-rail-section-header">
-					<h3>Stage progress</h3>
-					<span>{STAGE_ORDER.filter((stage) => status?.stages?.[stage]?.version || stageState[stage]?.version).length} started</span>
-				</div>
-				<StageRail stages={status?.stages || stageState} />
-			</section>
-
-			<BlockerList blockers={status?.blockers} />
-			<RunTimeline runsPayload={runsPayload} />
-			<LastRunSummary currentProject={currentProject} runsPayload={runsPayload} />
-
-			<section className="project-rail-section" aria-label="Project evidence">
-				<div className="project-rail-section-header">
-					<h3>Project evidence</h3>
-					<span>{reportSnapshot ? "Ready" : "Pending"}</span>
-				</div>
-				<div className="project-history-grid rail">
-					<ReportEvidence reportState={stageState.reports} reportSnapshot={reportSnapshot} />
-					<ExecutionHistory runs={currentProject.execution_runs || []} />
-					<TimelinePreview events={currentProject.timeline || []} />
+				<div className="project-rail-header-actions">
+					<StatusPill status={statusValue} />
+					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel}>
+						{isCollapsed ? "Expand" : "Collapse"}
+					</button>
 				</div>
 			</section>
+
+			{!isCollapsed && (
+				<>
+					<button type="button" className="secondary project-rail-refresh" onClick={onRefresh} disabled={authActionDisabled || isLoading}>
+						{isLoading ? "Refreshing" : "Refresh status"}
+					</button>
+
+					{error && <div className="orchestrator-error">{error}</div>}
+
+					<ProjectSummaryPanel currentProject={currentProject} status={status} runsPayload={runsPayload} />
+
+					<section className="project-rail-section" aria-label="Stage progress">
+						<div className="project-rail-section-header">
+							<h3>Stage progress</h3>
+							<span>{STAGE_ORDER.filter((stage) => status?.stages?.[stage]?.version || stageState[stage]?.version).length} started</span>
+						</div>
+						<StageRail stages={status?.stages || stageState} />
+					</section>
+
+					<BlockerList blockers={status?.blockers} />
+					<RunTimeline runsPayload={runsPayload} />
+					<LastRunSummary currentProject={currentProject} runsPayload={runsPayload} />
+
+					<section className="project-rail-section" aria-label="Project evidence">
+						<div className="project-rail-section-header">
+							<h3>Project evidence</h3>
+							<span>{reportSnapshot ? "Ready" : "Pending"}</span>
+						</div>
+						<div className="project-history-grid rail">
+							<ReportEvidence reportState={stageState.reports} reportSnapshot={reportSnapshot} />
+							<ExecutionHistory runs={currentProject.execution_runs || []} />
+							<TimelinePreview events={currentProject.timeline || []} />
+						</div>
+					</section>
+				</>
+			)}
 		</aside>
 	);
 }

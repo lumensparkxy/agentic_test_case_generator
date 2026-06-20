@@ -206,6 +206,22 @@ test.describe("Frontend CSS smoke", () => {
 			await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 			await expectNoHorizontalOverflow(page, `${label} requirements`);
 
+			await page
+				.getByRole("navigation", { name: "Workflow navigation" })
+				.getByRole("button", { name: /^Collapse workflow navigation$/i })
+				.click();
+			await page
+				.getByLabel("Project information rail")
+				.getByRole("button", { name: /^Collapse project information$/i })
+				.click();
+			await expect(
+				page.getByRole("navigation", { name: "Workflow navigation" }).getByRole("button", { name: /^Expand workflow navigation$/i })
+			).toBeVisible();
+			await expect(
+				page.getByLabel("Project information rail").getByRole("button", { name: /^Expand project information$/i })
+			).toBeVisible();
+			await expectNoHorizontalOverflow(page, `${label} collapsed shell`);
+
 			await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 			await page.getByRole("button", { name: /parse requirements/i }).click();
 			await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(2);

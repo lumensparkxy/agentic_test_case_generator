@@ -34,6 +34,7 @@ import useProjectWorkspaceState from "./hooks/useProjectWorkspaceState";
 import useRequirementWorkflowState from "./hooks/useRequirementWorkflowState";
 import useTestCaseWorkflowState from "./hooks/useTestCaseWorkflowState";
 import useWorkflowNavigationState from "./hooks/useWorkflowNavigationState";
+import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
 import {
 	AUTH_REQUIRED_MESSAGE,
 	DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE,
@@ -199,6 +200,8 @@ const estimateChangedRequirementCount = (snapshots) => {
 
 export default function App() {
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
+	const { isWorkflowNavCollapsed, isProjectRailCollapsed, toggleWorkflowNavCollapsed, toggleProjectRailCollapsed } =
+		useWorkflowShellLayoutState();
 	const {
 		file,
 		setFile,
@@ -3072,6 +3075,13 @@ export default function App() {
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
 	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
+	const workflowShellClassName = [
+		"workflow-shell",
+		isWorkflowNavCollapsed ? "nav-collapsed" : "",
+		isProjectRailCollapsed ? "rail-collapsed" : "",
+	]
+		.filter(Boolean)
+		.join(" ");
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
 	const jiraSettings = {
 		jiraConnected,
@@ -3159,8 +3169,15 @@ export default function App() {
 				azureDevOpsSettings={azureDevOpsSettings}
 			/>
 
-			<div className="workflow-shell">
-				<WorkflowNavigationDrawer tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} statusByTabId={workflowNavStatusByTabId} />
+			<div className={workflowShellClassName}>
+				<WorkflowNavigationDrawer
+					tabs={tabs}
+					activeTab={activeTab}
+					onTabChange={setActiveTab}
+					statusByTabId={workflowNavStatusByTabId}
+					isCollapsed={isWorkflowNavCollapsed}
+					onToggleCollapsed={toggleWorkflowNavCollapsed}
+				/>
 
 				<main className="workflow-main" aria-label="Workflow workspace">
 					<ProjectWorkspacePanel
@@ -4078,6 +4095,8 @@ export default function App() {
 					error={orchestratorError}
 					authActionDisabled={authActionDisabled}
 					onRefresh={() => loadProjectOrchestrator(currentProjectId)}
+					isCollapsed={isProjectRailCollapsed}
+					onToggleCollapsed={toggleProjectRailCollapsed}
 				/>
 			</div>
 		</div>
