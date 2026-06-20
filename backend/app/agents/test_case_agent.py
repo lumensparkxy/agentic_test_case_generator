@@ -9,6 +9,8 @@ import asyncio
 import json
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
@@ -20,7 +22,7 @@ from google.genai import types
 from .adk_runtime import json_generation_config, tool_generation_config
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
-from ..config import get_settings
+from ..config import GenerationSettings, get_generation_settings, get_settings
 from ..models import (
     GenerateTestCasesInput,
     RefineTestCasesInput,
@@ -49,8 +51,11 @@ from .test_case_coverage import (
     _compute_requirement_analysis_metrics,
     _compute_test_case_coverage_metrics,
     _dedupe_preserve,
+    _extract_linked_requirement_ids_from_test_case,
+    _extract_scenario_refs_from_test_case,
     _fallback_coverage_plan,
     _normalize_coverage_plan,
+    _scenario_tag,
 )
 from .test_case_fallback import _augment_with_fallback_coverage, _fallback_raw_test_cases
 from .test_case_hydration import (
@@ -422,18 +427,16 @@ Either call exit_loop OR output the refined JSON object. Never do both. Never ad
     )
 
 
-def _build_generation_pipeline(
+def _build_test_case_generator_agent(
     model: str,
     requirements_text: str,
     context_text: str,
     template_text: str,
-    threshold: int,
-    max_iterations: int,
     human_feedback: Optional[str] = None,
 ) -> Agent:
     feedback_section = human_feedback_section("Human Feedback to Address", human_feedback)
 
-    generator_agent = Agent(
+    return Agent(
         name="TestCaseGeneratorAgent",
         model=model,
         include_contents="default",
@@ -480,6 +483,24 @@ def _build_generation_pipeline(
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
+    )
+
+
+def _build_generation_pipeline(
+    model: str,
+    requirements_text: str,
+    context_text: str,
+    template_text: str,
+    threshold: int,
+    max_iterations: int,
+    human_feedback: Optional[str] = None,
+) -> Agent:
+    generator_agent = _build_test_case_generator_agent(
+        model,
+        requirements_text,
+        context_text,
+        template_text,
+        human_feedback=human_feedback,
     )
 
     return SequentialAgent(
@@ -1080,6 +1101,548 @@ def _run_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class _ParallelTestCaseShard:
+    index: int
+    requirements: List[Requirement]
+    requirement_analysis: List[Dict[str, Any]]
+    coverage_plan: List[Dict[str, Any]]
+
+    @property
+    def shard_id(self) -> str:
+        return f"test-case-shard-{self.index:02d}"
+
+
+@dataclass(frozen=True)
+class _ParallelTestCaseShardResult:
+    shard: _ParallelTestCaseShard
+    test_cases: List[Dict[str, Any]]
+    diagnostics: Dict[str, Any]
+    used_fallback: bool = False
+    failed: bool = False
+
+
+def _serialize_contract_items(items: List[Any]) -> List[Dict[str, Any]]:
+    serialized: List[Dict[str, Any]] = []
+    for item in items or []:
+        if hasattr(item, "model_dump"):
+            serialized.append(item.model_dump(mode="json"))
+        elif isinstance(item, dict):
+            serialized.append(dict(item))
+    return serialized
+
+
+def _scenario_count(coverage_plan: List[Dict[str, Any]]) -> int:
+    return sum(len(item.get("scenarios") or []) for item in coverage_plan or [])
+
+
+def _should_use_parallel_test_case_generation(
+    requirement_analysis: List[Dict[str, Any]],
+    coverage_plan: List[Dict[str, Any]],
+    generation_settings: GenerationSettings,
+) -> bool:
+    if not generation_settings.parallel_test_case_generation_enabled:
+        return False
+    if not requirement_analysis or not coverage_plan:
+        return False
+    if len(coverage_plan) <= 1:
+        return False
+    return _scenario_count(coverage_plan) >= generation_settings.parallel_test_case_min_scenarios
+
+
+def _plan_parallel_test_case_shards(
+    requirements: List[Requirement],
+    requirement_analysis: List[Dict[str, Any]],
+    coverage_plan: List[Dict[str, Any]],
+    *,
+    max_workers: int,
+) -> List[_ParallelTestCaseShard]:
+    requirement_by_id = {requirement.id: requirement for requirement in requirements}
+    analysis_by_id = {str(item.get("requirement_id") or "").strip(): item for item in requirement_analysis or []}
+    plan_items = [item for item in coverage_plan or [] if str(item.get("requirement_id") or "").strip() in requirement_by_id]
+    if not plan_items:
+        return []
+
+    worker_count = max(1, min(max_workers, len(plan_items)))
+    shard_size = (len(plan_items) + worker_count - 1) // worker_count
+    shards: List[_ParallelTestCaseShard] = []
+    for index, start in enumerate(range(0, len(plan_items), shard_size), start=1):
+        shard_plan = plan_items[start : start + shard_size]
+        shard_requirements = [requirement_by_id[str(item.get("requirement_id") or "").strip()] for item in shard_plan]
+        shards.append(
+            _ParallelTestCaseShard(
+                index=index,
+                requirements=shard_requirements,
+                requirement_analysis=[
+                    analysis_by_id.get(requirement.id) or fallback_requirement_analysis([requirement])[0] for requirement in shard_requirements
+                ],
+                coverage_plan=shard_plan,
+            )
+        )
+    return shards
+
+
+async def _run_parallel_test_case_shard_workflow_async(
+    *,
+    shard: _ParallelTestCaseShard,
+    context: Optional[Any],
+    requirements_text: str,
+    context_text: str,
+    template_text: str,
+    model: str,
+    human_feedback: Optional[str],
+    workflow_settings: Optional[WorkflowSettings],
+    actor_user_id: Optional[str],
+) -> Dict[str, Any]:
+    resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
+    timeout_seconds = resolved_settings["timeout_seconds"]
+    diagnostics = _new_workflow_diagnostics()
+    diagnostics.update(
+        {
+            "shard_count": 1,
+            "worker_count": 1,
+            "failed_shard_count": 0,
+            "fallback_shard_count": 0,
+            "merge_warnings": [],
+        }
+    )
+
+    root_agent = _build_test_case_generator_agent(
+        model,
+        requirements_text,
+        context_text,
+        template_text,
+        human_feedback=human_feedback,
+    )
+    session_service = InMemorySessionService()
+    runner = Runner(
+        agent=root_agent,
+        app_name="parallel_test_case_generator",
+        session_service=session_service,
+    )
+    user_id = str(actor_user_id or f"user_{uuid.uuid4().hex[:8]}")
+    session = await session_service.create_session(
+        app_name="parallel_test_case_generator",
+        user_id=user_id,
+        state={
+            STATE_TEST_CASES: "[]",
+            STATE_REQUIREMENT_ANALYSIS: json.dumps(shard.requirement_analysis),
+            STATE_COVERAGE_PLAN: json.dumps(shard.coverage_plan),
+        },
+    )
+    current_test_cases: List[Dict[str, Any]] = []
+
+    async def _consume_events() -> None:
+        nonlocal current_test_cases
+
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=types.Content(
+                role="user",
+                parts=[types.Part(text="Generate draft test cases for this shard only. Do not review, persist, bill, or write files.")],
+            ),
+        ):
+            author = getattr(event, "author", "unknown")
+            _record_event_error(diagnostics, author, event)
+            if getattr(event, "partial", False):
+                continue
+            text = _combined_event_text(event)
+            if not text:
+                continue
+            if author == "TestCaseGeneratorAgent":
+                parsed_test_cases, parse_error = parse_test_cases_json_detailed(text)
+                if parsed_test_cases:
+                    current_test_cases = parsed_test_cases
+                    _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="test-case")
+                else:
+                    _record_parser_failure(diagnostics, author, parse_error, text)
+
+    try:
+        if timeout_seconds is not None:
+            await asyncio.wait_for(_consume_events(), timeout=timeout_seconds)
+        else:
+            await _consume_events()
+    except asyncio.TimeoutError:
+        diagnostics["status"] = "partial"
+        diagnostics["timed_out"] = True
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "timeout"
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Parallel test-case shard {shard.shard_id} timed out after {timeout_seconds} second(s).",
+        )
+
+    updated_session = await session_service.get_session(
+        app_name="parallel_test_case_generator",
+        user_id=user_id,
+        session_id=session.id,
+    )
+    session_state = updated_session.state if updated_session else session.state
+    state_test_cases_raw = session_state.get(STATE_TEST_CASES, "[]")
+    state_test_cases, state_test_cases_error = parse_test_cases_json_detailed(state_test_cases_raw)
+    had_event_test_cases = bool(current_test_cases)
+    if state_test_cases:
+        current_test_cases = state_test_cases
+        if not had_event_test_cases:
+            _record_parser_recovery(
+                diagnostics,
+                "SessionStateTestCases",
+                state_test_cases_error,
+                state_test_cases_raw,
+                artifact_label="test-case",
+            )
+    elif str(state_test_cases_raw).strip() not in {"", "[]"}:
+        _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error, state_test_cases_raw)
+
+    if not current_test_cases:
+        diagnostics["status"] = "partial"
+        diagnostics["used_fallback"] = True
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "fallback_generated_artifacts"
+        current_test_cases = _fallback_raw_test_cases(shard.requirements, context, coverage_plan=shard.coverage_plan)
+        _append_unique_message(
+            diagnostics["warnings"],
+            f"Parallel test-case shard {shard.shard_id} used deterministic fallback test cases.",
+        )
+
+    return {
+        "test_cases": current_test_cases,
+        "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
+    }
+
+
+def _run_parallel_test_case_shard_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
+    try:
+        asyncio.get_running_loop()
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        return asyncio.run(_run_parallel_test_case_shard_workflow_async(**kwargs))
+    except RuntimeError:
+        return asyncio.run(_run_parallel_test_case_shard_workflow_async(**kwargs))
+
+
+def _fallback_parallel_test_case_shard(
+    shard: _ParallelTestCaseShard,
+    context: Optional[Any],
+    *,
+    reason: str,
+    warning: str,
+    failed: bool = False,
+) -> _ParallelTestCaseShardResult:
+    diagnostics = _new_workflow_diagnostics()
+    diagnostics.update(
+        {
+            "status": "fallback",
+            "used_fallback": True,
+            "failure_reason": reason,
+            "shard_count": 1,
+            "worker_count": 1,
+            "failed_shard_count": 1 if failed else 0,
+            "fallback_shard_count": 1,
+            "merge_warnings": [],
+        }
+    )
+    _append_unique_message(diagnostics["warnings"], warning)
+    return _ParallelTestCaseShardResult(
+        shard=shard,
+        test_cases=_fallback_raw_test_cases(shard.requirements, context, coverage_plan=shard.coverage_plan),
+        diagnostics=diagnostics,
+        used_fallback=True,
+        failed=failed,
+    )
+
+
+def _run_parallel_test_case_shard_with_fallback(
+    *,
+    shard: _ParallelTestCaseShard,
+    context: Optional[Any],
+    template: Any,
+    model: str,
+    human_feedback: Optional[str],
+    workflow_settings: Optional[WorkflowSettings],
+    actor_user_id: Optional[str],
+) -> _ParallelTestCaseShardResult:
+    requirements_text, context_text, template_text = _prepare_workflow_inputs(shard.requirements, context, template)
+    try:
+        workflow = _run_parallel_test_case_shard_workflow_sync(
+            shard=shard,
+            context=context,
+            requirements_text=requirements_text,
+            context_text=context_text,
+            template_text=template_text,
+            model=model,
+            human_feedback=human_feedback,
+            workflow_settings=workflow_settings,
+            actor_user_id=actor_user_id,
+        )
+    except Exception as exc:
+        return _fallback_parallel_test_case_shard(
+            shard,
+            context,
+            reason="shard_execution_error",
+            warning=f"Parallel test-case shard {shard.shard_id} failed and was replaced with deterministic fallback cases: {exc}",
+            failed=True,
+        )
+
+    diagnostics = dict(workflow.get("workflow_diagnostics") or {})
+    return _ParallelTestCaseShardResult(
+        shard=shard,
+        test_cases=list(workflow.get("test_cases") or []),
+        diagnostics=diagnostics,
+        used_fallback=bool(diagnostics.get("used_fallback")),
+        failed=False,
+    )
+
+
+def _scenario_lookup(coverage_plan: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    lookup: Dict[str, Dict[str, Any]] = {}
+    order = 0
+    for plan_item in coverage_plan or []:
+        requirement_id = str(plan_item.get("requirement_id") or "").strip()
+        for scenario in plan_item.get("scenarios") or []:
+            scenario_id = str(scenario.get("id") or "").strip()
+            if not scenario_id:
+                continue
+            lookup[scenario_id] = {
+                "order": order,
+                "requirement_id": requirement_id,
+                "scenario_type": scenario.get("scenario_type") or "Happy Path",
+            }
+            order += 1
+    return lookup
+
+
+def _merge_parallel_test_cases(
+    shard_results: List[_ParallelTestCaseShardResult],
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[str]]:
+    requirement_id_set = {requirement.id for requirement in requirements}
+    scenario_by_id = _scenario_lookup(coverage_plan)
+    ordered_scenario_ids = [scenario_id for scenario_id, details in sorted(scenario_by_id.items(), key=lambda item: item[1]["order"])]
+    assigned_scenarios: set[str] = set()
+    raw_cases: List[Dict[str, Any]] = []
+
+    for result in sorted(shard_results, key=lambda item: item.shard.index):
+        raw_cases.extend(dict(test_case) for test_case in result.test_cases)
+
+    def sort_key(item: tuple[int, Dict[str, Any]]) -> tuple[int, int]:
+        index, test_case = item
+        scenario_refs = [reference for reference in _extract_scenario_refs_from_test_case(test_case) if reference in scenario_by_id]
+        if scenario_refs:
+            return min(scenario_by_id[reference]["order"] for reference in scenario_refs), index
+        return len(ordered_scenario_ids) + index, index
+
+    merge_warnings: List[str] = []
+    id_remapped = False
+    traceability_repaired = False
+    merged: List[Dict[str, Any]] = []
+
+    for _, raw_case in sorted(enumerate(raw_cases), key=sort_key):
+        test_case = dict(raw_case)
+        original_id = str(test_case.get("id") or "").strip()
+        stable_id = f"TC-{len(merged) + 1:03d}"
+        if original_id != stable_id:
+            id_remapped = True
+        test_case["id"] = stable_id
+
+        scenario_refs = _dedupe_preserve([reference for reference in _extract_scenario_refs_from_test_case(test_case) if reference in scenario_by_id])
+        linked_requirement_ids = _dedupe_preserve(
+            [
+                requirement_id
+                for requirement_id in _extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set)
+                if requirement_id in requirement_id_set
+            ]
+        )
+        if not scenario_refs:
+            candidate_ids = linked_requirement_ids or [requirement.id for requirement in requirements]
+            for scenario_id in ordered_scenario_ids:
+                details = scenario_by_id[scenario_id]
+                if scenario_id in assigned_scenarios or details["requirement_id"] not in candidate_ids:
+                    continue
+                scenario_refs = [scenario_id]
+                break
+        if scenario_refs and not linked_requirement_ids:
+            linked_requirement_ids = _dedupe_preserve([scenario_by_id[scenario_id]["requirement_id"] for scenario_id in scenario_refs])
+            traceability_repaired = True
+        if not linked_requirement_ids:
+            linked_requirement_ids = [requirements[0].id] if requirements else []
+            traceability_repaired = True
+
+        assigned_scenarios.update(scenario_refs)
+        scenario_tags = [_scenario_tag(str(scenario_by_id[scenario_id]["scenario_type"])) for scenario_id in scenario_refs if scenario_id in scenario_by_id]
+        tags = _dedupe_preserve([str(tag) for tag in (test_case.get("tags") or []) if str(tag).strip()] + linked_requirement_ids + scenario_tags)
+        test_case["linked_requirement_ids"] = linked_requirement_ids
+        test_case["scenario_refs"] = scenario_refs
+        test_case["tags"] = tags
+        merged.append(test_case)
+
+    if id_remapped:
+        merge_warnings.append("Remapped worker-generated test-case IDs to stable global TC-* IDs.")
+    if traceability_repaired:
+        merge_warnings.append("Repaired missing worker traceability from coverage-plan scenario references.")
+    return merged, merge_warnings
+
+
+def _merge_parallel_diagnostics(
+    diagnostics: Dict[str, Any],
+    shard_results: List[_ParallelTestCaseShardResult],
+    merge_warnings: List[str],
+) -> None:
+    failed_shards = sum(1 for result in shard_results if result.failed)
+    fallback_shards = sum(1 for result in shard_results if result.used_fallback)
+    diagnostics["failed_shard_count"] = failed_shards
+    diagnostics["fallback_shard_count"] = fallback_shards
+    diagnostics["used_fallback"] = fallback_shards > 0
+    diagnostics["merge_warnings"] = _dedupe_preserve(list(diagnostics.get("merge_warnings") or []) + merge_warnings)
+    for warning in merge_warnings:
+        _append_unique_message(diagnostics["warnings"], warning)
+
+    for result in shard_results:
+        shard_diagnostics = result.diagnostics or {}
+        for key in ("parser_failures", "parser_recoveries", "warnings"):
+            for message in shard_diagnostics.get(key) or []:
+                _append_unique_message(diagnostics[key], str(message))
+        if shard_diagnostics.get("timed_out"):
+            diagnostics["timed_out"] = True
+
+    if failed_shards:
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "shard_fallback"
+    elif fallback_shards:
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "fallback_generated_artifacts"
+    elif diagnostics["parser_failures"] or diagnostics["parser_recoveries"]:
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or ("parser_failure" if diagnostics["parser_failures"] else None)
+
+
+def _run_parallel_test_case_generation_sync(
+    *,
+    requirements: List[Requirement],
+    context: Optional[Any],
+    template: Any,
+    model: str,
+    requirement_analysis: List[Dict[str, Any]],
+    coverage_plan: List[Dict[str, Any]],
+    human_feedback: Optional[str],
+    workflow_settings: Optional[WorkflowSettings],
+    generation_settings: GenerationSettings,
+    actor_user_id: Optional[str],
+    request_id: Optional[str],
+    workflow_run_id: Optional[str],
+    operation: Optional[str],
+) -> Dict[str, Any]:
+    context_token = bind_log_context(
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        actor_user_id=actor_user_id,
+        operation=operation or "testcases.generate",
+    )
+    try:
+        resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
+        threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
+        shards = _plan_parallel_test_case_shards(
+            requirements,
+            requirement_analysis,
+            coverage_plan,
+            max_workers=generation_settings.parallel_test_case_max_workers,
+        )
+        worker_count = min(generation_settings.parallel_test_case_max_workers, len(shards)) if shards else 0
+        diagnostics = _new_workflow_diagnostics()
+        diagnostics.update(
+            {
+                "shard_count": len(shards),
+                "worker_count": worker_count,
+                "failed_shard_count": 0,
+                "fallback_shard_count": 0,
+                "merge_warnings": [],
+            }
+        )
+        _log_test_case_workflow(
+            "parallel_generation_started",
+            requirement_count=len(requirements),
+            planned_scenario_count=_scenario_count(coverage_plan),
+            shard_count=len(shards),
+            worker_count=worker_count,
+        )
+
+        result_by_index: Dict[int, _ParallelTestCaseShardResult] = {}
+        with ThreadPoolExecutor(max_workers=max(1, worker_count)) as executor:
+            future_by_shard = {
+                executor.submit(
+                    _run_parallel_test_case_shard_with_fallback,
+                    shard=shard,
+                    context=context,
+                    template=template,
+                    model=model,
+                    human_feedback=human_feedback,
+                    workflow_settings=WorkflowSettings(**resolved_settings),
+                    actor_user_id=actor_user_id,
+                ): shard
+                for shard in shards
+            }
+            for future in as_completed(future_by_shard):
+                shard = future_by_shard[future]
+                try:
+                    result_by_index[shard.index] = future.result()
+                except Exception as exc:
+                    result_by_index[shard.index] = _fallback_parallel_test_case_shard(
+                        shard,
+                        context,
+                        reason="shard_execution_error",
+                        warning=f"Parallel test-case shard {shard.shard_id} failed and was replaced with deterministic fallback cases: {exc}",
+                        failed=True,
+                    )
+
+        shard_results = [result_by_index[shard.index] for shard in shards]
+        merged_test_cases, merge_warnings = _merge_parallel_test_cases(shard_results, requirements, coverage_plan)
+        _merge_parallel_diagnostics(diagnostics, shard_results, merge_warnings)
+        review = _heuristic_test_case_review(
+            merged_test_cases,
+            requirements,
+            threshold,
+            coverage_plan=coverage_plan,
+            requirement_analysis=requirement_analysis,
+            context=context,
+        )
+        iteration_history = [
+            _make_history_entry(
+                iteration=1,
+                actor="ParallelGenerationMerge",
+                review=review,
+                test_cases=merged_test_cases,
+            )
+        ]
+        coverage_metrics = _compute_test_case_coverage_metrics(merged_test_cases, requirements)
+        coverage_metrics.update(_compute_planned_scenario_metrics(coverage_plan, merged_test_cases, requirements))
+        coverage_metrics.update(_compute_requirement_analysis_metrics(requirement_analysis, merged_test_cases, requirements))
+        coverage_metrics.update(_compute_grounded_context_metrics(merged_test_cases, context))
+        _log_test_case_workflow(
+            "parallel_generation_completed",
+            approved=review["approved"],
+            score=review["score"],
+            threshold=threshold,
+            test_case_count=len(merged_test_cases),
+            shard_count=diagnostics["shard_count"],
+            fallback_shard_count=diagnostics["fallback_shard_count"],
+            failed_shard_count=diagnostics["failed_shard_count"],
+        )
+        return {
+            "test_cases": merged_test_cases,
+            "requirement_analysis": requirement_analysis,
+            "coverage_plan": coverage_plan,
+            "approved": review["approved"],
+            "review": review,
+            "iteration_history": iteration_history,
+            "coverage_metrics": coverage_metrics,
+            "workflow_settings": resolved_settings,
+            "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
+        }
+    finally:
+        reset_log_context(context_token)
+
+
 def _format_requirement_for_prompt(requirement: Requirement) -> str:
     parts = [f"- {requirement.id}: {requirement.text}"]
     context_bits: List[str] = []
@@ -1187,12 +1750,19 @@ def generate_test_cases(
 ) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
+    precomputed_requirement_analysis = (
+        normalize_requirement_analysis(_serialize_contract_items(payload.requirement_analysis), payload.requirements) if payload.requirement_analysis else []
+    )
+    precomputed_coverage_plan = (
+        _normalize_coverage_plan(_serialize_contract_items(payload.coverage_plan), payload.requirements) if payload.coverage_plan else []
+    )
+    generation_settings = get_generation_settings()
 
     if settings is None:
         workflow = {
             "test_cases": [],
-            "requirement_analysis": fallback_requirement_analysis(payload.requirements),
-            "coverage_plan": _fallback_coverage_plan(payload.requirements),
+            "requirement_analysis": precomputed_requirement_analysis or fallback_requirement_analysis(payload.requirements),
+            "coverage_plan": precomputed_coverage_plan or _fallback_coverage_plan(payload.requirements),
             "approved": False,
             "review": None,
             "iteration_history": [],
@@ -1206,6 +1776,26 @@ def generate_test_cases(
                 "warnings": ["Model credentials are unavailable; deterministic fallback was used."],
             },
         }
+    elif _should_use_parallel_test_case_generation(
+        precomputed_requirement_analysis,
+        precomputed_coverage_plan,
+        generation_settings,
+    ):
+        workflow = _run_parallel_test_case_generation_sync(
+            requirements=payload.requirements,
+            context=payload.context,
+            template=payload.template,
+            model=settings.model_name,
+            requirement_analysis=precomputed_requirement_analysis,
+            coverage_plan=precomputed_coverage_plan,
+            human_feedback=payload.feedback if payload.feedback else None,
+            workflow_settings=payload.workflow_settings,
+            generation_settings=generation_settings,
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation=operation,
+        )
     else:
         workflow = _run_workflow_sync(
             requirements=payload.requirements,

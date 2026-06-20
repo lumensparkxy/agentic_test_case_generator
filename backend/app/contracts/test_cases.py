@@ -67,6 +67,8 @@ class GenerateTestCasesInput(BaseModel):
     workflow_settings: Optional[WorkflowSettings] = None
     project_id: Optional[str] = None
     base_project_revision: Optional[int] = Field(default=None, ge=0)
+    requirement_analysis: List[RequirementAnalysis] = Field(default_factory=list)
+    coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)
 
 
 class RefineTestCasesInput(BaseModel):
