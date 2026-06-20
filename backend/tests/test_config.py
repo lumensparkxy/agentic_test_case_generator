@@ -177,6 +177,23 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertEqual(settings.parallel_test_case_min_scenarios, 12)
         self.assertEqual(settings.parallel_test_case_max_workers, 4)
 
+    def test_get_generation_settings_parses_parallel_automation_controls(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PARALLEL_AUTOMATION_GENERATION_ENABLED": "false",
+                "PARALLEL_AUTOMATION_MIN_CASES": "24",
+                "PARALLEL_AUTOMATION_MAX_WORKERS": "5",
+            },
+            clear=True,
+        ):
+            get_generation_settings.cache_clear()
+            settings = get_generation_settings()
+
+        self.assertFalse(settings.parallel_automation_generation_enabled)
+        self.assertEqual(settings.parallel_automation_min_cases, 24)
+        self.assertEqual(settings.parallel_automation_max_workers, 5)
+
     def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
         with patch.dict(
             os.environ,
