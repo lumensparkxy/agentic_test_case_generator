@@ -237,20 +237,28 @@
 
 .project-rail-toggle {
 	flex: 0 0 auto;
-	padding: 0.32rem 0.48rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.05rem;
+	height: 2.05rem;
+	padding: 0;
 	border: 1px solid #bfd4f5;
 	border-radius: 9999px;
 	background: #ffffff;
 	color: var(--primary-hover);
 	box-shadow: var(--shadow-sm);
-	font-size: 0.72rem;
-	font-weight: 800;
 	line-height: 1;
 }
 
 .project-rail-toggle:hover:not(:disabled) {
 	background: var(--primary-tonal);
 	transform: none;
+}
+
+.project-rail-toggle svg {
+	display: block;
+	flex: 0 0 auto;
 }
 
 .project-rail-kicker {
@@ -296,6 +304,15 @@
 .project-information-rail.collapsed .project-rail-header-actions {
 	display: grid;
 	justify-items: start;
+}
+
+.project-information-rail.collapsed .project-rail-kicker {
+	display: none;
+}
+
+.project-information-rail.collapsed .project-rail-header strong {
+	font-size: 0.82rem;
+	overflow-wrap: anywhere;
 }
 
 .project-rail-section {

@@ -1,3 +1,5 @@
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+
 import ProjectSummaryPanel from "./ProjectSummaryPanel";
 
 const STAGE_ORDER = [
@@ -262,6 +264,7 @@ export default function ProjectInformationRail({
 	onToggleCollapsed,
 }) {
 	const toggleLabel = isCollapsed ? "Expand project information" : "Collapse project information";
+	const ToggleIcon = isCollapsed ? PanelRightOpen : PanelRightClose;
 
 	if (!currentProject) {
 		return (
@@ -271,8 +274,8 @@ export default function ProjectInformationRail({
 						<span className="project-rail-kicker">Operational status</span>
 						<strong>Idle</strong>
 					</div>
-					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel}>
-						{isCollapsed ? "Expand" : "Collapse"}
+					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel} title={toggleLabel}>
+						<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
 					</button>
 				</section>
 				{!isCollapsed && (
@@ -299,8 +302,8 @@ export default function ProjectInformationRail({
 				</div>
 				<div className="project-rail-header-actions">
 					<StatusPill status={statusValue} />
-					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel}>
-						{isCollapsed ? "Expand" : "Collapse"}
+					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel} title={toggleLabel}>
+						<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
 					</button>
 				</div>
 			</section>

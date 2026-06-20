@@ -204,7 +204,9 @@ Material 3-inspired workflow navigation introduced for issue #120. It consumes
 the same tab IDs owned by `frontend/src/App.jsx` (`Upload`, `Context`,
 `Template`, `Generate`, `Automation`, and `Export`) so existing tab state,
 workflow actions, and `Next`/`Back` behavior remain unchanged while the
-horizontal stepper is no longer the primary navigation surface.
+horizontal stepper is no longer the primary navigation surface. The rail uses
+`lucide-react` line icons for the six workflow destinations and keeps the
+button `aria-label` values as the stable navigation contract.
 
 `frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
 the project workspace as the action surface. It preserves
@@ -218,8 +220,10 @@ payloads, so backend status/runs contracts remain unchanged.
 The selected Brighter Executive Cockpit visual target and QA mapping are
 recorded in `docs/brighter-executive-cockpit-design-qa.md`.
 The shell also supports independent local-only collapse preferences for the
-left workflow navigation and right information rail, preserving the same tab and
-orchestrator data contracts while changing only presentation density.
+left workflow navigation and right information rail. Directional icon controls
+collapse the left navigation toward the left edge and the right rail toward the
+right edge, preserving the same tab and orchestrator data contracts while
+changing only presentation density.
 
 Review and evidence-backed reporting flow:
 

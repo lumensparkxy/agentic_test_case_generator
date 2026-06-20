@@ -533,9 +533,11 @@ test.describe("Orchestrator cockpit", () => {
 		await expect(rail.getByLabel("Last run")).toContainText("Generate");
 		await expect(rail.getByLabel("Project evidence")).toContainText("Pending");
 		await expect(rail.getByText(/Test Cases snap-test-v1/i)).toBeVisible();
+		await expect(rail.getByRole("button", { name: /^Collapse project information$/i }).locator("svg")).toBeVisible();
 
 		await rail.getByRole("button", { name: /^Collapse project information$/i }).click();
 		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
+		await expect(rail.getByRole("button", { name: /^Expand project information$/i }).locator("svg")).toBeVisible();
 		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
 		await expect(rail.getByLabel("Stage progress")).toHaveCount(0);
 

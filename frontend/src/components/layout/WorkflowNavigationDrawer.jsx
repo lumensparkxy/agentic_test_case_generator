@@ -1,8 +1,19 @@
+import { BookOpen, Bot, CloudUpload, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, WandSparkles } from "lucide-react";
+
 const STATE_LABELS = {
 	active: "Active",
 	complete: "Complete",
 	blocked: "Blocked",
 	pending: "Pending",
+};
+
+const WORKFLOW_ICONS = {
+	0: CloudUpload,
+	1: BookOpen,
+	2: LayoutGrid,
+	3: WandSparkles,
+	4: Bot,
+	5: Download,
 };
 
 export default function WorkflowNavigationDrawer({
@@ -14,6 +25,7 @@ export default function WorkflowNavigationDrawer({
 	onToggleCollapsed,
 }) {
 	const toggleLabel = isCollapsed ? "Expand workflow navigation" : "Collapse workflow navigation";
+	const ToggleIcon = isCollapsed ? PanelLeftOpen : PanelLeftClose;
 
 	return (
 		<nav className={`workflow-navigation-drawer ${isCollapsed ? "collapsed" : ""}`} aria-label="Workflow navigation">
@@ -22,8 +34,14 @@ export default function WorkflowNavigationDrawer({
 					<span>Workflow</span>
 					<strong>{tabs.find((tab) => tab.id === activeTab)?.label || "Workspace"}</strong>
 				</div>
-				<button type="button" className="workflow-navigation-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel}>
-					{isCollapsed ? "Expand" : "Collapse"}
+				<button
+					type="button"
+					className="workflow-navigation-toggle"
+					onClick={onToggleCollapsed}
+					aria-label={toggleLabel}
+					title={toggleLabel}
+				>
+					<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
 				</button>
 			</div>
 			<div className="workflow-navigation-list">
@@ -31,6 +49,7 @@ export default function WorkflowNavigationDrawer({
 					const isActive = activeTab === tab.id;
 					const state = statusByTabId[tab.id] || "pending";
 					const stateLabel = isActive ? STATE_LABELS.active : STATE_LABELS[state] || STATE_LABELS.pending;
+					const WorkflowIcon = WORKFLOW_ICONS[tab.id] || LayoutGrid;
 					return (
 						<button
 							type="button"
@@ -41,7 +60,7 @@ export default function WorkflowNavigationDrawer({
 							aria-label={`${tab.label}, ${stateLabel}`}
 						>
 							<span className="workflow-navigation-marker" aria-hidden="true">
-								{tab.id + 1}
+								<WorkflowIcon size={18} strokeWidth={2.15} />
 							</span>
 							<span className="workflow-navigation-copy">
 								<strong>{tab.label}</strong>

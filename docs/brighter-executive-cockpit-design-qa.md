@@ -16,12 +16,13 @@ Final result: passed.
 
 - Top app bar remains the global product and project control surface.
 - Left workflow navigation owns Upload, Context, Template, Generate,
-  Automation, and Export, and can collapse to a compact marker rail.
+  Automation, and Export, uses line icons for destination recognition, and can
+  collapse to a compact icon rail.
 - Center workspace owns the active workflow and keeps the vivid command banner
   for recommended Generate/orchestrator actions.
 - Right information rail owns operational status, stage progress, blockers,
   agent timeline, last run, project evidence, and report evidence; it can
-  collapse to a compact status handle.
+  collapse to a compact status handle with a directional icon control.
 - The visual system uses brighter Material 3-inspired tokens without adding a
   Material UI dependency.
 
@@ -32,6 +33,8 @@ Final result: passed.
   stack.
 - The center workspace keeps existing accessible action names so workflow E2E
   coverage and keyboard/user expectations remain stable.
+- Navigation and rail collapse controls are icon-only visually, but keep
+  explicit accessible labels for collapse/expand state.
 - Project evidence and latest report evidence stay in compact rail sections
   rather than modal-only surfaces so audit context remains visible after reload.
 - The selected mock's bright command treatment is applied to the orchestrator
@@ -41,6 +44,7 @@ Final result: passed.
 ## Checked Surfaces
 
 - Left workflow navigation destinations and active state.
+- Workflow destination icons and left/right directional collapse affordances.
 - Generate command banner, primary/secondary orchestrator actions, and blocker
   messaging.
 - Right rail status overview, stage progress, blockers, agent timeline, last

@@ -80,6 +80,9 @@ npm run test:playwright -- --list
   brighter Material 3-inspired primary, success, warning, danger, info, surface,
   elevation, and tonal-container values. Do not add a Material UI dependency for
   shell styling without a separate dependency decision issue.
+- Workflow shell iconography uses `lucide-react` line icons. Keep icon-only
+  controls paired with stable `aria-label` text and avoid custom SVGs where a
+  matching lucide icon exists.
 - Router modules expose a module-level `router = APIRouter()`.
 - Service modules mostly expose functions rather than classes; provider-specific
   remote behavior lives in adapter modules.
