@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { seedAuthenticatedSession } from "./support/auth.js";
+import { openQaProjectByName } from "./support/projects.js";
 
 function jsonResponse(route, payload, status = 200) {
 	return route.fulfill({
@@ -250,7 +251,7 @@ test.describe("Report evidence", () => {
 		await seedAuthenticatedSession(page);
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-		await page.getByLabel("Open QA project").selectOption("project-1");
+		await openQaProjectByName(page, "Report Evidence QA");
 
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
 		await expect(cockpit.getByRole("button", { name: /^Regenerate Evidence Report$/ })).toBeVisible();

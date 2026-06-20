@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { seedAuthenticatedSession } from "./support/auth.js";
+import { openQaProjectByName } from "./support/projects.js";
 
 function jsonResponse(route, payload, status = 200) {
 	return route.fulfill({
@@ -355,16 +356,12 @@ test.describe("Impact update flow", () => {
 		await seedAuthenticatedSession(page);
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-		const projectSelector = page.getByLabel("Open QA project");
-		await projectSelector.evaluate((select) => {
-			select.value = "project-1";
-			select.dispatchEvent(new Event("change", { bubbles: true }));
-		});
-		await expect(page.getByLabel("Workflow workspace").getByText(/Impact QA · revision 5/)).toBeVisible();
+		await openQaProjectByName(page, "Impact QA");
+		await expect(page.getByLabel("Project information rail").getByText(/Impact QA · revision 5/)).toBeVisible();
 
 		await page.reload();
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByLabel("Workflow workspace").getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(page.getByLabel("Project information rail").getByText(/Impact QA · revision 5/)).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Workflow navigation" })

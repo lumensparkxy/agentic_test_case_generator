@@ -96,6 +96,31 @@
 		flex-wrap: wrap;
 	}
 
+	.command-project-control {
+		width: 100%;
+	}
+
+	.command-project-menu {
+		position: static;
+		box-sizing: border-box;
+		width: 100%;
+		margin-top: 0.4rem;
+	}
+
+	.command-project-menu-header,
+	.command-project-create-row {
+		grid-template-columns: 1fr;
+	}
+
+	.command-project-menu-header {
+		display: grid;
+	}
+
+	.command-project-menu-action,
+	.command-project-create-row button {
+		width: 100%;
+	}
+
 	.command-health {
 		min-width: min(100%, 220px);
 		width: 100%;
@@ -257,7 +282,6 @@
 
 	.orchestrator-command-grid,
 	.orchestrator-summary-grid,
-	.project-stage-grid,
 	.project-history-grid {
 		grid-template-columns: 1fr;
 	}

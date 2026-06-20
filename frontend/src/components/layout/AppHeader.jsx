@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, FolderOpen, Plus, RefreshCw } from "lucide-react";
+
 import AuthProviderIcon from "../auth/AuthProviderIcon";
 
 function StatusUsagePills({ billingStatusItems, statusUsageItems, isUsageLoading, isBillingLoading }) {
@@ -65,6 +68,162 @@ function AuthPanel({
 				<span className="auth-message auth-config-missing">No Firebase sign-in providers are currently available.</span>
 			) : (
 				<span className="auth-message auth-config-missing">Set the VITE_FIREBASE_* variables to enable Firebase sign-in.</span>
+			)}
+		</div>
+	);
+}
+
+function ProjectMenu({
+	projects,
+	currentProject,
+	isLoadingProjects,
+	isOpeningProject,
+	authActionDisabled,
+	newProjectName,
+	setNewProjectName,
+	isCreatingProject,
+	onOpenProject,
+	onCreateProject,
+	onRefreshProjects,
+}) {
+	const [isOpen, setIsOpen] = useState(false);
+	const menuRef = useRef(null);
+	const selectedProjectId = currentProject?.project_id || "";
+	const isDisabled = authActionDisabled || isLoadingProjects || isOpeningProject;
+	const triggerText = currentProject?.name || "Select project";
+	const triggerMeta = currentProject ? `revision ${currentProject.current_revision}` : "Projects";
+
+	useEffect(() => {
+		if (!isOpen) {
+			return undefined;
+		}
+
+		const handlePointerDown = (event) => {
+			if (menuRef.current && !menuRef.current.contains(event.target)) {
+				setIsOpen(false);
+			}
+		};
+		const handleKeyDown = (event) => {
+			if (event.key === "Escape") {
+				setIsOpen(false);
+			}
+		};
+
+		document.addEventListener("mousedown", handlePointerDown);
+		document.addEventListener("keydown", handleKeyDown);
+		return () => {
+			document.removeEventListener("mousedown", handlePointerDown);
+			document.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [isOpen]);
+
+	const handleOpenProject = async (projectId) => {
+		await onOpenProject(projectId);
+		setIsOpen(false);
+	};
+
+	const handleCreateProject = async (event) => {
+		event.preventDefault();
+		const createdProject = await onCreateProject();
+		if (createdProject) {
+			setIsOpen(false);
+		}
+	};
+
+	return (
+		<div className="command-project-control" ref={menuRef}>
+			<span className="command-project-label">Projects</span>
+			<button
+				type="button"
+				className="command-project-trigger"
+				onClick={() => setIsOpen((current) => !current)}
+				disabled={isDisabled}
+				aria-label="Open QA project menu"
+				aria-haspopup="dialog"
+				aria-expanded={isOpen}
+			>
+				<span className="command-project-trigger-copy">
+					<strong>{isOpeningProject ? "Opening project" : triggerText}</strong>
+					<span>{isLoadingProjects ? "Loading projects" : triggerMeta}</span>
+				</span>
+				<ChevronDown aria-hidden="true" size={18} strokeWidth={2.1} />
+			</button>
+
+			{isOpen && (
+				<div className="command-project-menu" role="dialog" aria-label="Projects">
+					<div className="command-project-menu-header">
+						<div>
+							<strong>Projects</strong>
+							<span>{projects.length ? `${projects.length} available` : "No projects yet"}</span>
+						</div>
+						<button
+							type="button"
+							className="command-project-menu-action"
+							onClick={onRefreshProjects}
+							disabled={authActionDisabled || isLoadingProjects}
+						>
+							<RefreshCw aria-hidden="true" size={16} strokeWidth={2.1} />
+							{isLoadingProjects ? "Refreshing" : "Refresh projects"}
+						</button>
+					</div>
+
+					<div className="command-project-list" aria-label="Available QA projects">
+						{projects.length ? (
+							projects.map((project) => {
+								const isSelected = selectedProjectId === project.project_id;
+								return (
+									<button
+										type="button"
+										key={project.project_id}
+										className={`command-project-option ${isSelected ? "selected" : ""}`}
+										onClick={() => handleOpenProject(project.project_id)}
+										disabled={authActionDisabled || isOpeningProject}
+										aria-label={`Open QA project ${project.name}`}
+										aria-current={isSelected ? "true" : undefined}
+									>
+										<FolderOpen aria-hidden="true" size={18} strokeWidth={2.1} />
+										<span>
+											<strong>{project.name}</strong>
+											<span>revision {project.current_revision}</span>
+										</span>
+										{isSelected && <Check aria-hidden="true" size={17} strokeWidth={2.4} />}
+									</button>
+								);
+							})
+						) : (
+							<p className="command-project-empty">Create a QA project to persist workflow progress.</p>
+						)}
+					</div>
+
+					{currentProject && (
+						<button
+							type="button"
+							className="command-project-clear"
+							onClick={() => handleOpenProject("")}
+							disabled={authActionDisabled || isOpeningProject}
+						>
+							Clear selection
+						</button>
+					)}
+
+					<form className="command-project-create" onSubmit={handleCreateProject}>
+						<label htmlFor="command-project-create-name">New project</label>
+						<div className="command-project-create-row">
+							<input
+								id="command-project-create-name"
+								type="text"
+								value={newProjectName}
+								onChange={(event) => setNewProjectName(event.target.value)}
+								placeholder="New QA project name"
+								disabled={authActionDisabled || isCreatingProject}
+							/>
+							<button type="submit" disabled={authActionDisabled || isCreatingProject || !newProjectName.trim()}>
+								<Plus aria-hidden="true" size={16} strokeWidth={2.2} />
+								{isCreatingProject ? "Creating" : "New Project"}
+							</button>
+						</div>
+					</form>
+				</div>
 			)}
 		</div>
 	);
@@ -141,9 +300,13 @@ export default function CommandDeckHeader({
 	isLoadingProjects,
 	isOpeningProject,
 	authActionDisabled,
+	newProjectName,
+	setNewProjectName,
+	isCreatingProject,
 	onOpenProject,
+	onCreateProject,
+	onRefreshProjects,
 }) {
-	const selectedProjectId = currentProject?.project_id || "";
 	const healthLabel = isAuthenticated ? "System healthy" : "Sign in required";
 
 	return (
@@ -153,23 +316,19 @@ export default function CommandDeckHeader({
 				<p className="subtitle">QA command deck for requirements, generation, automation, and export.</p>
 			</div>
 
-			<div className="command-project-control">
-				<label htmlFor="command-project-select">Project</label>
-				<select
-					id="command-project-select"
-					value={selectedProjectId}
-					onChange={(event) => onOpenProject(event.target.value)}
-					disabled={authActionDisabled || isLoadingProjects || isOpeningProject}
-					aria-label="Open QA project"
-				>
-					<option value="">Select project</option>
-					{projects.map((project) => (
-						<option key={project.project_id} value={project.project_id}>
-							{project.name}
-						</option>
-					))}
-				</select>
-			</div>
+			<ProjectMenu
+				projects={projects}
+				currentProject={currentProject}
+				isLoadingProjects={isLoadingProjects}
+				isOpeningProject={isOpeningProject}
+				authActionDisabled={authActionDisabled}
+				newProjectName={newProjectName}
+				setNewProjectName={setNewProjectName}
+				isCreatingProject={isCreatingProject}
+				onOpenProject={onOpenProject}
+				onCreateProject={onCreateProject}
+				onRefreshProjects={onRefreshProjects}
+			/>
 
 			<div className="command-actions">
 				<details className={`command-health ${isAuthenticated ? "status-authenticated" : ""}`}>

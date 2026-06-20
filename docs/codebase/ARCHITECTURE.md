@@ -196,7 +196,7 @@ Stored current project ID -> project reopen -> status/runs fetch -> cockpit reco
 Frontend workflow shell flow:
 
 ```text
-Top command bar -> left workflow navigation -> active tab workspace -> right project information rail
+Top command bar with Projects menu -> left workflow navigation -> active tab workspace -> right project information rail
 ```
 
 `frontend/src/components/layout/WorkflowNavigationDrawer.jsx` renders the
@@ -209,9 +209,11 @@ horizontal stepper is no longer the primary navigation surface. The rail uses
 button `aria-label` values as the stable navigation contract.
 
 `frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
-the project workspace as the action surface. It preserves
+the center workspace as the action surface. It preserves
 `aria-label="Orchestrator Cockpit"` and existing action handlers while removing
 the repeated visible cockpit/run-details headers from the center workspace.
+Project selection, refresh, and creation live in the top command bar Projects
+menu so the center workspace stays focused on workflow actions.
 `frontend/src/components/projects/ProjectInformationRail.jsx` owns the durable
 status presentation in the right rail: status overview, stage progress,
 blockers, agent timeline, project evidence, latest report evidence, and last

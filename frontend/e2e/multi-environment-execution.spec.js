@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { seedAuthenticatedSession } from "./support/auth.js";
+import { openQaProjectByName } from "./support/projects.js";
 
 function jsonResponse(route, payload, status = 200) {
 	return route.fulfill({
@@ -255,8 +256,8 @@ test.describe("Multi-environment execution", () => {
 		await seedAuthenticatedSession(page);
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-		await page.getByLabel("Open QA project").selectOption("project-1");
-		await expect(page.getByLabel("Workflow workspace").getByText(/Environment QA · revision 4/)).toBeVisible();
+		await openQaProjectByName(page, "Environment QA");
+		await expect(page.getByLabel("Project information rail").getByText(/Environment QA · revision 4/)).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Workflow navigation" })

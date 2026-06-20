@@ -17,7 +17,7 @@ import ScenarioCoveragePanel from "./components/generation/ScenarioCoveragePanel
 import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
 import ProjectInformationRail from "./components/projects/ProjectInformationRail";
-import ProjectWorkspacePanel from "./components/projects/ProjectWorkspacePanel";
+import OrchestratorCockpitPanel from "./components/projects/OrchestratorCockpitPanel";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
@@ -1405,7 +1405,7 @@ export default function App() {
 
 	const createProject = async () => {
 		const name = newProjectName.trim();
-		if (!name) return;
+		if (!name) return null;
 		setIsCreatingProject(true);
 		setStatus("Creating QA project...");
 		try {
@@ -1428,8 +1428,10 @@ export default function App() {
 			setNewProjectName("");
 			await loadProjects({ silent: true });
 			setStatus(`Created ${data.name}.`);
+			return data || null;
 		} catch (error) {
 			setStatus(`Project create failed: ${error.message}`);
+			return null;
 		} finally {
 			setIsCreatingProject(false);
 		}
@@ -3136,7 +3138,12 @@ export default function App() {
 				isLoadingProjects={isLoadingProjects}
 				isOpeningProject={isOpeningProject}
 				authActionDisabled={authActionDisabled}
+				newProjectName={newProjectName}
+				setNewProjectName={setNewProjectName}
+				isCreatingProject={isCreatingProject}
 				onOpenProject={(projectId) => openProject(projectId)}
+				onCreateProject={createProject}
+				onRefreshProjects={() => loadProjects()}
 			/>
 
 			{!isAuthenticated && !isVerifyingSession && (
@@ -3180,20 +3187,14 @@ export default function App() {
 				/>
 
 				<main className="workflow-main" aria-label="Workflow workspace">
-					<ProjectWorkspacePanel
+					<OrchestratorCockpitPanel
 						currentProject={currentProject}
-						newProjectName={newProjectName}
-						setNewProjectName={setNewProjectName}
-						isLoadingProjects={isLoadingProjects}
-						isCreatingProject={isCreatingProject}
-						orchestratorStatus={orchestratorStatus}
-						isLoadingOrchestrator={isLoadingOrchestrator}
-						orchestratorError={orchestratorError}
+						status={orchestratorStatus}
+						isLoading={isLoadingOrchestrator}
+						error={orchestratorError}
 						authActionDisabled={authActionDisabled}
-						onCreateProject={createProject}
-						onRefreshProjects={() => loadProjects()}
-						onOrchestratorAction={handleOrchestratorAction}
-						orchestratorActionBusy={orchestratorActionBusy}
+						actionBusy={orchestratorActionBusy}
+						onAction={handleOrchestratorAction}
 					/>
 
 					<div className="tab-content">

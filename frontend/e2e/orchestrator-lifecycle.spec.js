@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
+import { openQaProjectMenu } from "./support/projects.js";
 
 const PROJECT_ID = "project-lifecycle";
 const PROJECT_NAME = "Lifecycle QA";
@@ -723,9 +724,14 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 
-		await page.getByPlaceholder("New QA project name").fill(PROJECT_NAME);
-		await page.getByRole("button", { name: /^New Project$/ }).click();
-		await expect(page.getByLabel("Workflow workspace").getByText(/Lifecycle QA · revision 0/)).toBeVisible();
+		const projectMenu = await openQaProjectMenu(page);
+		await projectMenu.getByRole("button", { name: /^Refresh projects$/i }).click();
+		await projectMenu.getByPlaceholder("New QA project name").fill(PROJECT_NAME);
+		await projectMenu.getByRole("button", { name: /^New Project$/i }).click();
+		await expect(page.getByRole("button", { name: /^Open QA project menu$/i })).toContainText("Lifecycle QA");
+		await expect(page.getByLabel("Project information rail").getByText(/Lifecycle QA · revision 0/)).toBeVisible();
+		await expect(page.getByRole("heading", { name: /^QA Project$/i })).toHaveCount(0);
+		await expect(page.getByText(/^No project selected$/i)).toHaveCount(0);
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /^Parse Requirements$/ }).click();
@@ -744,7 +750,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByText(/Generated v1 baseline suite/i)).toBeVisible();
 
 		await page.reload();
-		await expect(page.getByLabel("Workflow workspace").getByText(/Lifecycle QA · revision 4/)).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByLabel("Project information rail").getByText(/Lifecycle QA · revision 4/)).toBeVisible({ timeout: 30_000 });
 		await expect(
 			page.getByLabel("Project information rail").locator(".orchestrator-summary-grid div", { hasText: "Baseline suite" })
 		).toContainText("Present");

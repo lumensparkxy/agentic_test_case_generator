@@ -50,22 +50,231 @@
 }
 
 .command-project-control {
+	position: relative;
 	display: grid;
 	gap: 0.3rem;
+	min-width: 0;
 }
 
-.command-project-control label {
+.command-project-label {
 	color: var(--text-muted);
 	font-size: 0.72rem;
 	font-weight: 800;
 	text-transform: uppercase;
 }
 
-.command-project-control select {
+.command-project-trigger {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	width: 100%;
 	min-height: 42px;
+	padding: 0.55rem 0.7rem;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-md);
 	border-color: #dbe4ee;
 	background: #ffffff;
 	box-shadow: var(--shadow-sm);
+	color: var(--text-main);
+	text-align: left;
+	transform: none;
+}
+
+.command-project-trigger:hover:not(:disabled) {
+	border-color: #bfd4f5;
+	background: #f8fbff;
+	transform: none;
+}
+
+.command-project-trigger-copy {
+	display: grid;
+	gap: 0.12rem;
+	min-width: 0;
+}
+
+.command-project-trigger-copy strong,
+.command-project-trigger-copy span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.command-project-trigger-copy strong {
+	color: var(--text-main);
+	font-size: 0.84rem;
+	font-weight: 800;
+}
+
+.command-project-trigger-copy span {
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 650;
+}
+
+.command-project-trigger svg,
+.command-project-menu-action svg,
+.command-project-option svg,
+.command-project-create-row button svg {
+	flex: 0 0 auto;
+}
+
+.command-project-menu {
+	position: absolute;
+	z-index: 30;
+	top: calc(100% + 0.45rem);
+	left: 0;
+	display: grid;
+	gap: 0.75rem;
+	width: min(430px, calc(100vw - 4rem));
+	padding: 0.85rem;
+	border: 1px solid #cfe0f7;
+	border-radius: var(--radius-lg);
+	background: #ffffff;
+	box-shadow: var(--shadow-lg);
+}
+
+.command-project-menu-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.75rem;
+}
+
+.command-project-menu-header > div {
+	display: grid;
+	gap: 0.12rem;
+	min-width: 0;
+}
+
+.command-project-menu-header strong {
+	color: var(--text-main);
+	font-size: 0.9rem;
+	font-weight: 820;
+}
+
+.command-project-menu-header span,
+.command-project-create label,
+.command-project-option span span {
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 650;
+}
+
+.command-project-menu-action,
+.command-project-clear {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	padding: 0.42rem 0.6rem;
+	border: 1px solid #bfd4f5;
+	border-radius: 9999px;
+	background: #ffffff;
+	color: var(--primary-hover);
+	box-shadow: none;
+	font-size: 0.74rem;
+	font-weight: 800;
+	line-height: 1;
+	transform: none;
+}
+
+.command-project-menu-action:hover:not(:disabled),
+.command-project-clear:hover:not(:disabled) {
+	background: var(--primary-tonal);
+	transform: none;
+}
+
+.command-project-list {
+	display: grid;
+	gap: 0.35rem;
+	max-height: min(320px, 45vh);
+	overflow: auto;
+}
+
+.command-project-option {
+	display: grid;
+	grid-template-columns: 1.4rem minmax(0, 1fr) 1rem;
+	align-items: center;
+	gap: 0.6rem;
+	width: 100%;
+	padding: 0.65rem;
+	border: 1px solid transparent;
+	border-radius: var(--radius-md);
+	background: #f8fafc;
+	color: var(--text-main);
+	box-shadow: none;
+	text-align: left;
+	transform: none;
+}
+
+.command-project-option:hover:not(:disabled) {
+	border-color: #bfd4f5;
+	background: var(--primary-tonal);
+	transform: none;
+}
+
+.command-project-option.selected {
+	border-color: #88b8ff;
+	background: #eff6ff;
+	color: var(--primary-hover);
+}
+
+.command-project-option > span {
+	display: grid;
+	gap: 0.08rem;
+	min-width: 0;
+}
+
+.command-project-option strong,
+.command-project-option span span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.command-project-option strong {
+	font-size: 0.84rem;
+	font-weight: 800;
+}
+
+.command-project-empty {
+	margin: 0;
+	padding: 0.75rem;
+	border: 1px dashed #bfd4f5;
+	border-radius: var(--radius-md);
+	background: #f8fbff;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+}
+
+.command-project-clear {
+	justify-self: start;
+}
+
+.command-project-create {
+	display: grid;
+	gap: 0.4rem;
+	padding-top: 0.7rem;
+	border-top: 1px solid #e6eef9;
+}
+
+.command-project-create-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 0.5rem;
+}
+
+.command-project-create-row input {
+	min-width: 0;
+}
+
+.command-project-create-row button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.35rem;
+	white-space: nowrap;
 }
 
 .command-actions {
