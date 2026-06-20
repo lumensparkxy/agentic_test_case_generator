@@ -193,6 +193,19 @@ Frontend orchestrator cockpit flow:
 Stored current project ID -> project reopen -> status/runs fetch -> cockpit recommended action, blockers, and timeline
 ```
 
+Frontend workflow shell flow:
+
+```text
+Top command bar -> left workflow navigation -> active tab workspace -> project/orchestrator cockpit context
+```
+
+`frontend/src/components/layout/WorkflowNavigationDrawer.jsx` renders the
+Material 3-inspired workflow navigation introduced for issue #120. It consumes
+the same tab IDs owned by `frontend/src/App.jsx` (`Upload`, `Context`,
+`Template`, `Generate`, `Automation`, and `Export`) so existing tab state,
+workflow actions, and `Next`/`Back` behavior remain unchanged while the
+horizontal stepper is no longer the primary navigation surface.
+
 `frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
 the project workspace and consumes the deterministic status plus durable run
 payloads. It keeps the existing tab workflows available while making the

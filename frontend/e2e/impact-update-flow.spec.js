@@ -366,7 +366,10 @@ test.describe("Impact update flow", () => {
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByText(/Impact QA · revision 5/)).toBeVisible();
 
-		await page.locator(".tab", { hasText: "Generate" }).click();
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Generate,/i })
+			.click();
 		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toBeVisible();
 		await expect(page.getByRole("button", { name: /Full Regenerate from 10 Approved/i })).toBeVisible();
 
