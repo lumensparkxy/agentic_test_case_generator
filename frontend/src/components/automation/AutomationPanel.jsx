@@ -89,6 +89,8 @@ const renderRunResults = (runResult) => {
 	if (!runResult) {
 		return null;
 	}
+	const summary = runResult.summary || {};
+	const resultMessage = `Execution ${runResult.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`;
 
 	return (
 		<div className="result-section">
@@ -101,11 +103,14 @@ const renderRunResults = (runResult) => {
 					{runResult.status}
 				</span>
 			</div>
+			<div className={`workflow-result-notice ${runResult.status === "passed" ? "success" : "warning"}`} role="status">
+				<p>{resultMessage}</p>
+			</div>
 			<div className="workflow-diagnostics-pills">
-				{renderBucketCount("Passed", runResult.summary?.passed, "success")}
-				{renderBucketCount("Failed", runResult.summary?.failed, "warning")}
-				{renderBucketCount("Invalid", runResult.summary?.invalid, "warning")}
-				{renderBucketCount("Skipped", runResult.summary?.skipped)}
+				{renderBucketCount("Passed", summary.passed, "success")}
+				{renderBucketCount("Failed", summary.failed, "warning")}
+				{renderBucketCount("Invalid", summary.invalid, "warning")}
+				{renderBucketCount("Skipped", summary.skipped)}
 			</div>
 			{runResult.artifacts_root && (
 				<p className="helper-text">

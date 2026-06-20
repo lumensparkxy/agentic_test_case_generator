@@ -7,6 +7,16 @@
 }
 
 /* Header */
+.command-header {
+	display: grid;
+	grid-template-columns: minmax(240px, 1.1fr) minmax(280px, 0.8fr) auto;
+	align-items: center;
+	gap: 1.25rem;
+	margin: -0.25rem -0.5rem 1.25rem;
+	padding: 0.9rem 0.5rem 1.1rem;
+	border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+}
+
 .header {
 	display: flex;
 	justify-content: space-between;
@@ -25,21 +35,96 @@
 }
 
 .title {
-	font-size: 2rem;
+	font-size: 1.45rem;
 	font-weight: 800;
-	letter-spacing: -0.025em;
+	letter-spacing: 0;
 	margin: 0;
-	background: linear-gradient(to right, #1e293b, #3b82f6);
-	-webkit-background-clip: text;
-	background-clip: text;
-	-webkit-text-fill-color: transparent;
+	color: #0f172a;
 }
 
 .subtitle {
 	color: var(--text-muted);
-	font-size: 1rem;
-	margin-top: 0.5rem;
-	max-width: 600px;
+	font-size: 0.86rem;
+	margin: 0.25rem 0 0;
+	max-width: 520px;
+}
+
+.command-project-control {
+	display: grid;
+	gap: 0.3rem;
+}
+
+.command-project-control label {
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 800;
+	text-transform: uppercase;
+}
+
+.command-project-control select {
+	min-height: 42px;
+	border-color: #dbe4ee;
+	background: #ffffff;
+	box-shadow: var(--shadow-sm);
+}
+
+.command-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.command-health {
+	position: relative;
+	min-width: 170px;
+	border: 1px solid #dbe4ee;
+	border-radius: var(--radius-md);
+	background: #ffffff;
+	box-shadow: var(--shadow-sm);
+	color: var(--text-muted);
+	font-size: 0.82rem;
+}
+
+.command-health summary {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.62rem 0.75rem;
+	cursor: pointer;
+	list-style: none;
+}
+
+.command-health summary::-webkit-details-marker {
+	display: none;
+}
+
+.command-health-dot {
+	width: 0.52rem;
+	height: 0.52rem;
+	border-radius: 9999px;
+	background: #22c55e;
+	box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+}
+
+.command-health-details {
+	position: absolute;
+	z-index: 5;
+	top: calc(100% + 0.4rem);
+	right: 0;
+	width: min(360px, 88vw);
+	padding: 0.85rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	background: #ffffff;
+	box-shadow: var(--shadow-lg);
+}
+
+.command-health-details p {
+	margin: 0 0 0.6rem;
+	color: var(--text-main);
+	font-size: 0.85rem;
 }
 
 .status {
@@ -179,11 +264,10 @@
 }
 
 .settings-open-btn {
-	align-self: flex-end;
 	display: inline-flex;
 	align-items: center;
 	gap: 0.45rem;
-	padding: 0.55rem 0.85rem;
+	padding: 0.62rem 0.85rem;
 	border: 1px solid var(--border-color);
 	background: var(--card-bg);
 	color: var(--text-main);
@@ -527,22 +611,25 @@
 /* Tab Navigation */
 .tabs {
 	display: flex;
-	gap: 0.5rem;
-	margin-bottom: 1.5rem;
-	background: var(--card-bg);
-	padding: 0.5rem;
-	border-radius: var(--radius-lg);
-	border: 1px solid var(--border-color);
-	box-shadow: var(--shadow-sm);
+	align-items: center;
+	gap: 0;
+	margin-bottom: 1.15rem;
+	background: transparent;
+	padding: 0;
+	border-radius: 0;
+	border: none;
+	box-shadow: none;
+	overflow-x: auto;
 }
 
 .tab {
-	flex: 1;
+	position: relative;
+	flex: 1 0 140px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	gap: 0.5rem;
-	padding: 1rem 1.5rem;
+	padding: 0.75rem 0.8rem;
 	border: none;
 	background: transparent;
 	border-radius: var(--radius-md);
@@ -552,15 +639,30 @@
 	color: var(--text-muted);
 }
 
+.tab:not(:last-child)::after {
+	content: "";
+	position: absolute;
+	right: -18%;
+	top: 50%;
+	width: 36%;
+	height: 1px;
+	background: #cbd5e1;
+	transform: translateY(-50%);
+	pointer-events: none;
+}
+
 .tab:hover {
-	background: #f1f5f9;
+	background: #f8fafc;
 	color: var(--text-main);
+	transform: none;
 }
 
 .tab.active {
-	background: var(--primary);
-	color: white;
-	box-shadow: var(--shadow-md);
+	background: #ffffff;
+	color: #0f172a;
+	box-shadow:
+		inset 0 0 0 1px #bfdbfe,
+		var(--shadow-sm);
 }
 
 .tab-number {
@@ -570,13 +672,20 @@
 	width: 1.5rem;
 	height: 1.5rem;
 	border-radius: 50%;
-	background: rgba(0, 0, 0, 0.1);
+	background: #f1f5f9;
+	color: #64748b;
 	font-size: 0.75rem;
 	font-weight: 700;
 }
 
 .tab.active .tab-number {
-	background: rgba(255, 255, 255, 0.2);
+	background: #2563eb;
+	color: #ffffff;
+}
+
+.tab.complete .tab-number {
+	background: #ecfdf5;
+	color: #047857;
 }
 
 .tab-label {

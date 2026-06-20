@@ -17,6 +17,7 @@ export default function ExportPanel({
 	isExporting,
 	authActionDisabled,
 	exportToFormat,
+	exportMessage,
 	goPrev,
 }) {
 	const exportDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportGateLocked;
@@ -65,6 +66,11 @@ export default function ExportPanel({
 			<div className="export-section">
 				<h3 className="section-subtitle">📥 Quick Export</h3>
 				<p className="helper-text">Download test cases directly to your computer.</p>
+				{exportMessage && (
+					<div className="workflow-result-notice success" role="status">
+						<p>{exportMessage}</p>
+					</div>
+				)}
 				<div className="export-buttons">
 					{EXPORT_FORMATS.map((item) => (
 						<button

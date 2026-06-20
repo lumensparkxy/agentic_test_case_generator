@@ -1,4 +1,5 @@
 import OrchestratorCockpitPanel from "./OrchestratorCockpitPanel";
+import RunDetailsDrawer from "./RunDetailsDrawer";
 
 const STAGES = [
 	{ key: "requirements", label: "Requirements" },
@@ -117,28 +118,25 @@ function TimelinePreview({ events }) {
 }
 
 export default function ProjectWorkspacePanel({
-	projects,
 	currentProject,
 	newProjectName,
 	setNewProjectName,
 	isLoadingProjects,
 	isCreatingProject,
-	isOpeningProject,
 	orchestratorStatus,
 	orchestratorRuns,
 	isLoadingOrchestrator,
 	orchestratorError,
 	authActionDisabled,
 	onCreateProject,
-	onOpenProject,
 	onRefreshProjects,
 	onRefreshOrchestrator,
 	onOrchestratorAction,
 	orchestratorActionBusy,
 }) {
-	const selectedProjectId = currentProject?.project_id || "";
 	const stageState = currentProject?.stage_state || {};
 	const reportSnapshot = currentProject?.current_snapshots?.reports || null;
+	const hasProjectHistory = Boolean(reportSnapshot || currentProject?.execution_runs?.length || currentProject?.timeline?.length);
 	return (
 		<section className="project-workspace">
 			<div className="project-workspace-header">
@@ -147,19 +145,6 @@ export default function ProjectWorkspacePanel({
 					<p>{currentProject ? `${currentProject.name} · revision ${currentProject.current_revision}` : "No project selected"}</p>
 				</div>
 				<div className="project-workspace-actions">
-					<select
-						value={selectedProjectId}
-						onChange={(event) => onOpenProject(event.target.value)}
-						disabled={authActionDisabled || isLoadingProjects || isOpeningProject}
-						aria-label="Open QA project"
-					>
-						<option value="">Select project</option>
-						{projects.map((project) => (
-							<option key={project.project_id} value={project.project_id}>
-								{project.name}
-							</option>
-						))}
-					</select>
 					<button type="button" className="secondary" onClick={onRefreshProjects} disabled={authActionDisabled || isLoadingProjects}>
 						{isLoadingProjects ? "Loading" : "Refresh"}
 					</button>
@@ -181,11 +166,17 @@ export default function ProjectWorkspacePanel({
 
 			{currentProject && (
 				<>
-					<div className="project-stage-grid">
-						{STAGES.map((stage) => (
-							<StagePill key={stage.key} stage={stage} state={stageState[stage.key]} />
-						))}
-					</div>
+					<details className="project-progress-disclosure">
+						<summary>
+							<span>Project progress</span>
+							<span>{STAGES.filter((stage) => stageState[stage.key]?.version).length} stages started</span>
+						</summary>
+						<div className="project-stage-grid">
+							{STAGES.map((stage) => (
+								<StagePill key={stage.key} stage={stage} state={stageState[stage.key]} />
+							))}
+						</div>
+					</details>
 					<OrchestratorCockpitPanel
 						currentProject={currentProject}
 						status={orchestratorStatus}
@@ -197,11 +188,13 @@ export default function ProjectWorkspacePanel({
 						onRefresh={onRefreshOrchestrator}
 						onAction={onOrchestratorAction}
 					/>
-					<div className="project-history-grid">
-						<ReportEvidence reportState={stageState.reports} reportSnapshot={reportSnapshot} />
-						<ExecutionHistory runs={currentProject.execution_runs || []} />
-						<TimelinePreview events={currentProject.timeline || []} />
-					</div>
+					<RunDetailsDrawer title="Project evidence" summary="Latest report, execution runs, and timeline" defaultOpen={hasProjectHistory}>
+						<div className="project-history-grid">
+							<ReportEvidence reportState={stageState.reports} reportSnapshot={reportSnapshot} />
+							<ExecutionHistory runs={currentProject.execution_runs || []} />
+							<TimelinePreview events={currentProject.timeline || []} />
+						</div>
+					</RunDetailsDrawer>
 				</>
 			)}
 		</section>
