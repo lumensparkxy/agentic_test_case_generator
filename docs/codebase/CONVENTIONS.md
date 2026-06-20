@@ -76,6 +76,10 @@ npm run test:playwright -- --list
 - Frontend CSS enters the app through `frontend/src/styles/index.css`.
   Shared foundations live in `tokens.css` and `base.css`; feature-specific
   selectors stay in the nearest owned style module.
+- The workflow shell visual system is token-driven in `tokens.css`, with
+  brighter Material 3-inspired primary, success, warning, danger, info, surface,
+  elevation, and tonal-container values. Do not add a Material UI dependency for
+  shell styling without a separate dependency decision issue.
 - Router modules expose a module-level `router = APIRouter()`.
 - Service modules mostly expose functions rather than classes; provider-specific
   remote behavior lives in adapter modules.

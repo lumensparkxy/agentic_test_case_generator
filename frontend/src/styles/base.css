@@ -2,7 +2,7 @@ body {
 	margin: 0;
 	padding: 0;
 	font-family: var(--font-sans);
-	background-color: var(--bg-color);
+	background: linear-gradient(180deg, #f8fbff 0%, var(--bg-color) 44%, #ffffff 100%);
 	color: var(--text-main);
 	-webkit-font-smoothing: antialiased;
 	line-height: 1.5;
