@@ -250,6 +250,8 @@ export interface ExecutionRunItem {
 	id: string;
 	ir_path?: string | null;
 	issues?: Array<ExecutionIssue>;
+	playwright_report_path?: string | null;
+	report_json_path?: string | null;
 	returncode?: number | null;
 	source_test_case_id: string;
 	spec_id?: string | null;
@@ -261,6 +263,7 @@ export interface ExecutionRunItem {
 
 export interface ExecutionRunResponse {
 	artifacts_root?: string | null;
+	playwright_report_paths?: Array<string>;
 	preview: ExecutionPreviewResponse;
 	results?: Array<ExecutionRunItem>;
 	run_id: string;
@@ -522,7 +525,9 @@ export interface QaProjectDetail {
 
 export interface QaProjectExecutionRun {
 	actor_user_id?: string | null;
+	artifacts_root?: string | null;
 	created_at: string;
+	playwright_report_paths?: Array<string>;
 	project_id: string;
 	project_revision: number;
 	request_id?: string | null;

@@ -212,10 +212,12 @@ def run_execution(
 
     summary = _summarize_run(results, preview)
     status = "passed" if summary.failed == 0 and summary.invalid == 0 else "failed"
+    playwright_report_paths = [item.playwright_report_path for item in results if item.playwright_report_path]
     return ExecutionRunResponse(
         status=status,
         run_id=run_id,
         artifacts_root=str(run_root),
+        playwright_report_paths=playwright_report_paths,
         results=results,
         preview=preview,
         warnings=preview.warnings,
@@ -481,6 +483,8 @@ def _run_candidate(
         ir_path=str(ir_path),
         generated_spec_path=str(run.generated_spec_path),
         artifacts_dir=str(run.paths.artifacts_dir),
+        report_json_path=str(run.paths.artifacts_dir / "results.json"),
+        playwright_report_path=str(run.paths.html_report_dir),
         returncode=run.returncode,
         stdout=run.stdout,
         stderr=run.stderr,

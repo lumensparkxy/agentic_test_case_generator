@@ -4072,6 +4072,8 @@ export default function App() {
 							<ExportPanel
 								testCases={testCases}
 								testCaseReview={testCaseReview}
+								executionRunResult={executionRunResult}
+								currentProject={currentProject}
 								exportReviewApproved={exportReviewApproved}
 								exportRequiresOverride={exportRequiresOverride}
 								exportGateLocked={exportGateLocked}

@@ -404,6 +404,8 @@ def record_execution_run(
     target_base_url: Optional[str] = None,
     source_snapshot_id: Optional[str] = None,
     selected_test_case_ids: Optional[list[str]] = None,
+    artifacts_root: Optional[str] = None,
+    playwright_report_paths: Optional[list[str]] = None,
     idempotency_key: Optional[str] = None,
 ) -> QaProjectExecutionRun:
     now = _utcnow()
@@ -418,6 +420,8 @@ def record_execution_run(
         "run_id": run_id,
         "target_environment": target_environment,
         "target_base_url": target_base_url,
+        "artifacts_root": artifacts_root,
+        "playwright_report_paths": _serialize_value(playwright_report_paths or []),
         "project_revision": project_revision,
         "test_case_count": test_case_count,
         "status": status_value,
@@ -450,6 +454,8 @@ def record_execution_run(
                 "summary": _serialize_value(summary),
                 "target_environment": target_environment,
                 "target_base_url": target_base_url,
+                "artifacts_root": artifacts_root,
+                "playwright_report_paths": _serialize_value(playwright_report_paths or []),
                 "source_snapshot_id": source_snapshot_id,
                 "selected_test_case_ids": _serialize_value(selected_test_case_ids or []),
             },
