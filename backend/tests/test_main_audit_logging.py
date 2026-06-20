@@ -111,6 +111,38 @@ class MainAuditLoggingTests(unittest.TestCase):
             "context": None,
             "feedback": None,
             "workflow_settings": None,
+            "requirement_analysis": [
+                {
+                    "requirement_id": "REQ-1",
+                    "requirement_text": "The system shall allow login",
+                    "business_rules": [
+                        {
+                            "id": "REQ-1-BR-01",
+                            "requirement_id": "REQ-1",
+                            "title": "Login allowed",
+                            "description": "The system shall allow login",
+                            "rule_type": "Business",
+                        }
+                    ],
+                }
+            ],
+            "coverage_plan": [
+                {
+                    "requirement_id": "REQ-1",
+                    "requirement_text": "The system shall allow login",
+                    "scenarios": [
+                        {
+                            "id": "REQ-1-SCN-01",
+                            "requirement_id": "REQ-1",
+                            "scenario_type": "Happy Path",
+                            "title": "Login succeeds",
+                            "objective": "Verify successful login.",
+                            "priority": "High",
+                            "must_have": True,
+                        }
+                    ],
+                }
+            ],
         }
 
         with ExitStack() as stack:
@@ -149,6 +181,7 @@ class MainAuditLoggingTests(unittest.TestCase):
         self.assertTrue(generate.call_args.kwargs["request_id"])
         self.assertEqual(generate.call_args.kwargs["workflow_run_id"], "run-generate-1")
         self.assertEqual(generate.call_args.kwargs["operation"], "testcases.generate")
+        self.assertEqual(len(generate.call_args.args[0].coverage_plan), 1)
         start_run.assert_called_once()
         complete_run.assert_called_once()
         record_event.assert_called_once()

@@ -132,6 +132,12 @@ class ExecutionSettings(BaseModel):
     max_cases_per_request: int = 9999
 
 
+class GenerationSettings(BaseModel):
+    parallel_test_case_generation_enabled: bool = True
+    parallel_test_case_min_scenarios: int = 8
+    parallel_test_case_max_workers: int = 3
+
+
 def get_cors_allow_origins() -> list[str]:
     raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
     if not raw_origins.strip():
@@ -421,6 +427,27 @@ def get_execution_settings() -> ExecutionSettings:
             os.getenv("EXECUTION_MAX_CASES_PER_REQUEST", str(default_settings.max_cases_per_request)),
             default=default_settings.max_cases_per_request,
             env_name="EXECUTION_MAX_CASES_PER_REQUEST",
+        ),
+    )
+
+
+@lru_cache
+def get_generation_settings() -> GenerationSettings:
+    default_settings = GenerationSettings()
+    return GenerationSettings(
+        parallel_test_case_generation_enabled=_parse_bool_env(
+            os.getenv("PARALLEL_TEST_CASE_GENERATION_ENABLED", "true"),
+            default=default_settings.parallel_test_case_generation_enabled,
+        ),
+        parallel_test_case_min_scenarios=_parse_positive_int_env(
+            os.getenv("PARALLEL_TEST_CASE_MIN_SCENARIOS", str(default_settings.parallel_test_case_min_scenarios)),
+            default=default_settings.parallel_test_case_min_scenarios,
+            env_name="PARALLEL_TEST_CASE_MIN_SCENARIOS",
+        ),
+        parallel_test_case_max_workers=_parse_positive_int_env(
+            os.getenv("PARALLEL_TEST_CASE_MAX_WORKERS", str(default_settings.parallel_test_case_max_workers)),
+            default=default_settings.parallel_test_case_max_workers,
+            env_name="PARALLEL_TEST_CASE_MAX_WORKERS",
         ),
     )
 

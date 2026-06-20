@@ -314,8 +314,10 @@ export interface FieldConstraint {
 export interface GenerateTestCasesInput {
 	base_project_revision?: number | null;
 	context?: EnrichInput | null;
+	coverage_plan?: Array<RequirementCoveragePlan>;
 	feedback?: string | null;
 	project_id?: string | null;
+	requirement_analysis?: Array<RequirementAnalysis>;
 	requirements: Array<Requirement>;
 	template: TestCaseTemplate;
 	workflow_settings?: WorkflowSettings | null;

@@ -95,6 +95,12 @@ npm run test:playwright -- --list
   fragments, but project snapshots, artifact versions, usage events, billing
   consumption, and files must be written only by the existing router/service
   layer after the merged response is validated.
+- Parallel test-case generation belongs in `backend/app/agents/test_case_agent.py`.
+  It may reuse approved `requirement_analysis` and `coverage_plan` payloads and
+  draft cases in bounded workers, but workers must not review the whole suite,
+  bill, persist snapshots, version artifacts, record usage events, or write
+  files. The coordinator owns duplicate ID remapping, traceability repair,
+  scenario ordering, and one final merged-suite approval gate.
 - Orchestrated action progress should use
   `backend/app/services/orchestrator_run_service.py` for run records, event
   records, and checkpoints. Pass stable request IDs or idempotency keys when a

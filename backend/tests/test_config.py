@@ -21,6 +21,7 @@ from app.config import (
     get_azure_devops_settings,
     get_billing_settings,
     get_jira_settings,
+    get_generation_settings,
     get_metrics_settings,
     get_settings,
 )
@@ -34,6 +35,7 @@ class ConfigSettingsTests(unittest.TestCase):
         get_jira_settings.cache_clear()
         get_azure_devops_settings.cache_clear()
         get_metrics_settings.cache_clear()
+        get_generation_settings.cache_clear()
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -157,6 +159,23 @@ class ConfigSettingsTests(unittest.TestCase):
 
         self.assertFalse(settings.enabled)
         self.assertEqual(settings.access_token, "metrics-secret")
+
+    def test_get_generation_settings_parses_parallel_test_case_controls(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PARALLEL_TEST_CASE_GENERATION_ENABLED": "false",
+                "PARALLEL_TEST_CASE_MIN_SCENARIOS": "12",
+                "PARALLEL_TEST_CASE_MAX_WORKERS": "4",
+            },
+            clear=True,
+        ):
+            get_generation_settings.cache_clear()
+            settings = get_generation_settings()
+
+        self.assertFalse(settings.parallel_test_case_generation_enabled)
+        self.assertEqual(settings.parallel_test_case_min_scenarios, 12)
+        self.assertEqual(settings.parallel_test_case_max_workers, 4)
 
     def test_get_billing_settings_parses_limits_launch_date_and_shadow_mode(self) -> None:
         with patch.dict(

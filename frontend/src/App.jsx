@@ -2539,6 +2539,13 @@ export default function App() {
 			};
 
 			const useRefineEndpoint = withFeedback && testCases.length > 0;
+			const reusableUseCaseArtifacts =
+				!useRefineEndpoint && requirementAnalysis.length && coveragePlan.length
+					? {
+							requirement_analysis: requirementAnalysis,
+							coverage_plan: coveragePlan,
+						}
+					: {};
 			const payload = useRefineEndpoint
 				? {
 						...sharedPayload,
@@ -2547,6 +2554,7 @@ export default function App() {
 					}
 				: {
 						...sharedPayload,
+						...reusableUseCaseArtifacts,
 						feedback: withFeedback && feedback ? feedback.trim() : null,
 					};
 
