@@ -139,6 +139,7 @@ __all__ = [
     "JiraExportResponse",
     "ExportTestCasesInput",
     "AutomationInput",
+    "AutomationCaseDiagnostic",
     "AutomationResponse",
     "UsageReportUserSummary",
     "UsageReportGroup",

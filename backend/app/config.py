@@ -136,6 +136,9 @@ class GenerationSettings(BaseModel):
     parallel_test_case_generation_enabled: bool = True
     parallel_test_case_min_scenarios: int = 8
     parallel_test_case_max_workers: int = 3
+    parallel_automation_generation_enabled: bool = True
+    parallel_automation_min_cases: int = 12
+    parallel_automation_max_workers: int = 3
 
 
 def get_cors_allow_origins() -> list[str]:
@@ -448,6 +451,20 @@ def get_generation_settings() -> GenerationSettings:
             os.getenv("PARALLEL_TEST_CASE_MAX_WORKERS", str(default_settings.parallel_test_case_max_workers)),
             default=default_settings.parallel_test_case_max_workers,
             env_name="PARALLEL_TEST_CASE_MAX_WORKERS",
+        ),
+        parallel_automation_generation_enabled=_parse_bool_env(
+            os.getenv("PARALLEL_AUTOMATION_GENERATION_ENABLED", "true"),
+            default=default_settings.parallel_automation_generation_enabled,
+        ),
+        parallel_automation_min_cases=_parse_positive_int_env(
+            os.getenv("PARALLEL_AUTOMATION_MIN_CASES", str(default_settings.parallel_automation_min_cases)),
+            default=default_settings.parallel_automation_min_cases,
+            env_name="PARALLEL_AUTOMATION_MIN_CASES",
+        ),
+        parallel_automation_max_workers=_parse_positive_int_env(
+            os.getenv("PARALLEL_AUTOMATION_MAX_WORKERS", str(default_settings.parallel_automation_max_workers)),
+            default=default_settings.parallel_automation_max_workers,
+            env_name="PARALLEL_AUTOMATION_MAX_WORKERS",
         ),
     )
 

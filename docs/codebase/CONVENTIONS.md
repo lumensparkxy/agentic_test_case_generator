@@ -101,6 +101,13 @@ npm run test:playwright -- --list
   bill, persist snapshots, version artifacts, record usage events, or write
   files. The coordinator owns duplicate ID remapping, traceability repair,
   scenario ordering, and one final merged-suite approval gate.
+- Parallel automation generation belongs in
+  `backend/app/agents/automation_agent.py`. Workers may produce generated test
+  file fragments for their component/page group only. The coordinator owns
+  shared files such as `base_page.py` and `conftest.py`, final file paths,
+  duplicate file/class/function/method handling, fallback fragments, and
+  case-level generated/manual/unsupported diagnostics. The `/automation/playwright`
+  endpoint remains the only owner of automation usage events and billing.
 - Orchestrated action progress should use
   `backend/app/services/orchestrator_run_service.py` for run records, event
   records, and checkpoints. Pass stable request IDs or idempotency keys when a
