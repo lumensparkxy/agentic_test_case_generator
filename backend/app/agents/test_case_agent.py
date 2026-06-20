@@ -25,7 +25,6 @@ from ..models import (
     GenerateTestCasesInput,
     RefineTestCasesInput,
     Requirement,
-    RequirementCoveragePlanOutput,
     ReviewResult,
     TestCase,
     TestCasesOutput,
@@ -166,6 +165,32 @@ def _record_parser_failure(
     )
 
 
+def _record_parser_recovery(
+    diagnostics: Dict[str, Any],
+    author: str,
+    error: Optional[str],
+    raw_text: Optional[str] = None,
+) -> None:
+    if not error:
+        return
+    message = f"{author}: {error}"
+    sample = _diagnostic_sample(raw_text)
+    if sample:
+        message = f"{message} | sample: {sample}"
+    _append_unique_message(diagnostics["parser_failures"], message)
+    if diagnostics["status"] == "completed":
+        diagnostics["status"] = "partial"
+    _append_unique_message(diagnostics["warnings"], f"{author}: recovered usable coverage-plan JSON from malformed output.")
+    _log_test_case_workflow(
+        "parser_recovery",
+        author=author,
+        error=error,
+        sample=sample or None,
+        parser_failure_count=len(diagnostics["parser_failures"]),
+        status=diagnostics["status"],
+    )
+
+
 def _record_event_error(diagnostics: Dict[str, Any], author: str, event: Any) -> None:
     error_code = getattr(event, "error_code", None)
     error_message = getattr(event, "error_message", None)
@@ -208,8 +233,7 @@ def _build_coverage_planner_agent(
         name="CoveragePlannerAgent",
         model=model,
         include_contents="none",
-        generate_content_config=json_generation_config(max_output_tokens=12000),
-        output_schema=RequirementCoveragePlanOutput,
+        generate_content_config=json_generation_config(max_output_tokens=24000),
         instruction=f"""You are a Senior QA Strategist creating a scenario coverage plan before detailed test cases are written.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
@@ -667,6 +691,7 @@ Human feedback:
                     parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
                     if parsed_coverage_plan:
                         current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, requirements)
+                        _record_parser_recovery(diagnostics, author, parse_error, text)
                     else:
                         _record_parser_failure(diagnostics, author, parse_error, text)
 
@@ -787,8 +812,11 @@ Human feedback:
 
     state_coverage_plan_raw = session_state.get(STATE_COVERAGE_PLAN, "[]")
     state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
+    had_event_coverage_plan = bool(current_coverage_plan)
     if state_coverage_plan:
         current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
+        if not had_event_coverage_plan:
+            _record_parser_recovery(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
     elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
         _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
 
