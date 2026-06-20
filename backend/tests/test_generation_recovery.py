@@ -8,7 +8,12 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents.analysis_agent import fallback_requirement_analysis
-from app.agents.test_case_agent import _build_coverage_planner_agent, generate_test_cases
+from app.agents.test_case_agent import (
+    _build_coverage_planner_agent,
+    _build_generation_pipeline,
+    _build_refinement_pipeline,
+    generate_test_cases,
+)
 from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import GenerateTestCasesInput, Requirement, TestCaseTemplate
 
@@ -25,6 +30,39 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(getattr(agent, "output_key", None), "coverage_plan")
         self.assertGreaterEqual(agent.generate_content_config.max_output_tokens, 24000)
         self.assertEqual(agent.generate_content_config.response_mime_type, "application/json")
+
+    def test_test_case_agents_use_raw_json_output_for_parser_recovery(self) -> None:
+        generation_pipeline = _build_generation_pipeline(
+            "test-model",
+            "REQ-001: The system shall allow users to sign in.",
+            "No additional context provided.",
+            "Name: default, Format: table, Fields: id, title, steps, tags",
+            threshold=90,
+            max_iterations=1,
+        )
+        generation_agent = next(
+            agent for agent in generation_pipeline.sub_agents if agent.name == "TestCaseGeneratorAgent"
+        )
+
+        refinement_pipeline = _build_refinement_pipeline(
+            "test-model",
+            "REQ-001: The system shall allow users to sign in.",
+            "No additional context provided.",
+            "Name: default, Format: table, Fields: id, title, steps, tags",
+            threshold=90,
+            max_iterations=1,
+            human_feedback="Tighten assertions.",
+        )
+        refinement_agent = next(
+            agent for agent in refinement_pipeline.sub_agents if agent.name == "TestCaseRefinementAgent"
+        )
+
+        self.assertIsNone(getattr(generation_agent, "output_schema", None))
+        self.assertEqual(generation_agent.output_key, "current_test_cases")
+        self.assertEqual(generation_agent.generate_content_config.response_mime_type, "application/json")
+        self.assertIsNone(getattr(refinement_agent, "output_schema", None))
+        self.assertEqual(refinement_agent.output_key, "current_test_cases")
+        self.assertEqual(refinement_agent.generate_content_config.response_mime_type, "application/json")
 
     def test_rejected_model_suite_is_recovered_with_fallback_coverage(self) -> None:
         requirements = [
