@@ -79,7 +79,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Orchestrator decisions | Yes | Stage health, approval blockers, stale downstream state, impact-analysis priority, apply-update blockers, execution/review/report actions | `backend/tests/test_orchestrator_service.py` uses fake Firestore project snapshots and `TestClient` |
 | Orchestrator run persistence | Yes | Run creation/resume, idempotent events, checkpoint history, blockers, completion links, timeline endpoint payloads | `backend/tests/test_orchestrator_run_service.py` uses fake Firestore subcollections and `TestClient` |
 | Offline orchestrator lifecycle benchmarks | Yes | v1 first-generation routing, v2 two-requirement impact precision, unchanged-test preservation versus full regeneration, resumability, and governance gates | `scripts/evaluate_orchestrator.py`, `backend/tests/test_orchestrator_evaluation.py`, `scripts/benchmark_orchestrator_*` |
-| Frontend orchestrator cockpit | Yes | First-time project actions, resumed stale-impact action priority, right rail status overview, blockers, run/checkpoint timeline output, project evidence, last run, and reload restore | `frontend/e2e/orchestrator-cockpit.spec.js` uses mocked project, status, run, event, and checkpoint payloads |
+| Frontend orchestrator cockpit | Yes | First-time project actions, resumed stale-impact action priority, collapsible right rail status overview, blockers, run/checkpoint timeline output, project evidence, last run, and reload restore | `frontend/e2e/orchestrator-cockpit.spec.js` uses mocked project, status, run, event, and checkpoint payloads |
 | Frontend orchestrator lifecycle | Yes | Create project, generate v1, reload, change requirements, impact update, execute, review, and report | `frontend/e2e/orchestrator-lifecycle.spec.js` uses synthetic project and orchestrator fixtures |
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
@@ -120,6 +120,9 @@ Evidence: `.github/workflows/ci.yml`.
 - JIRA and Azure DevOps sync tests verify direct source metadata paths avoid
   unnecessary Firestore mapping reads where possible.
 - Frontend focused E2E tests mock API responses and use a local Vite server.
+- Workflow shell collapse tests keep localStorage-backed layout preferences
+  browser-local and verify that collapsed left/right rails do not change
+  workflow behavior.
 - Brighter Executive Cockpit design QA maps the selected visual target to
   tested surfaces in `docs/brighter-executive-cockpit-design-qa.md`.
 - Offline evaluation scripts use deterministic fallback behavior instead of

@@ -217,6 +217,9 @@ run details. Both components consume the same deterministic status and run
 payloads, so backend status/runs contracts remain unchanged.
 The selected Brighter Executive Cockpit visual target and QA mapping are
 recorded in `docs/brighter-executive-cockpit-design-qa.md`.
+The shell also supports independent local-only collapse preferences for the
+left workflow navigation and right information rail, preserving the same tab and
+orchestrator data contracts while changing only presentation density.
 
 Review and evidence-backed reporting flow:
 

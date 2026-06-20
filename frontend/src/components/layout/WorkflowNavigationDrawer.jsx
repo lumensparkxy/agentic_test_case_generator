@@ -5,12 +5,26 @@ const STATE_LABELS = {
 	pending: "Pending",
 };
 
-export default function WorkflowNavigationDrawer({ tabs, activeTab, onTabChange, statusByTabId = {} }) {
+export default function WorkflowNavigationDrawer({
+	tabs,
+	activeTab,
+	onTabChange,
+	statusByTabId = {},
+	isCollapsed = false,
+	onToggleCollapsed,
+}) {
+	const toggleLabel = isCollapsed ? "Expand workflow navigation" : "Collapse workflow navigation";
+
 	return (
-		<nav className="workflow-navigation-drawer" aria-label="Workflow navigation">
+		<nav className={`workflow-navigation-drawer ${isCollapsed ? "collapsed" : ""}`} aria-label="Workflow navigation">
 			<div className="workflow-navigation-header">
-				<span>Workflow</span>
-				<strong>{tabs.find((tab) => tab.id === activeTab)?.label || "Workspace"}</strong>
+				<div>
+					<span>Workflow</span>
+					<strong>{tabs.find((tab) => tab.id === activeTab)?.label || "Workspace"}</strong>
+				</div>
+				<button type="button" className="workflow-navigation-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel}>
+					{isCollapsed ? "Expand" : "Collapse"}
+				</button>
 			</div>
 			<div className="workflow-navigation-list">
 				{tabs.map((tab) => {

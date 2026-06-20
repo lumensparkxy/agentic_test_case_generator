@@ -16,11 +16,12 @@ Final result: passed.
 
 - Top app bar remains the global product and project control surface.
 - Left workflow navigation owns Upload, Context, Template, Generate,
-  Automation, and Export.
+  Automation, and Export, and can collapse to a compact marker rail.
 - Center workspace owns the active workflow and keeps the vivid command banner
   for recommended Generate/orchestrator actions.
 - Right information rail owns operational status, stage progress, blockers,
-  agent timeline, last run, project evidence, and report evidence.
+  agent timeline, last run, project evidence, and report evidence; it can
+  collapse to a compact status handle.
 - The visual system uses brighter Material 3-inspired tokens without adding a
   Material UI dependency.
 
@@ -44,6 +45,8 @@ Final result: passed.
   messaging.
 - Right rail status overview, stage progress, blockers, agent timeline, last
   run, project evidence, and latest report evidence.
+- Independent collapse/expand controls for the left workflow navigation and
+  right project information rail, including persisted browser preferences.
 - Core upload, context, generation, automation, export, orchestrator lifecycle,
   and report-evidence workflows.
 - Desktop and mobile CSS smoke surfaces for clipped text and overflow.

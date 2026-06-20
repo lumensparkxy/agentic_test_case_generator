@@ -1,6 +1,8 @@
 export const STORAGE_AUTH_TOKEN = "tcg.auth.token";
 export const STORAGE_AUTH_USER = "tcg.auth.user";
 export const STORAGE_CURRENT_PROJECT_ID = "tcg.current.project_id";
+export const STORAGE_PROJECT_RAIL_COLLAPSED = "tcg.shell.projectRailCollapsed";
+export const STORAGE_WORKFLOW_NAV_COLLAPSED = "tcg.shell.workflowNavCollapsed";
 export const AUTH_REQUIRED_MESSAGE = "Sign in to continue.";
 
 export const EMPTY_WORKFLOW_SETTINGS = {

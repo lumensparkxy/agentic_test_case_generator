@@ -610,10 +610,21 @@
 
 /* Workflow Navigation */
 .workflow-shell {
+	--workflow-nav-column: minmax(210px, 240px);
+	--project-rail-column: minmax(300px, 360px);
+
 	display: grid;
-	grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(300px, 360px);
+	grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr) var(--project-rail-column);
 	gap: 1.15rem;
 	align-items: start;
+}
+
+.workflow-shell.nav-collapsed {
+	--workflow-nav-column: 88px;
+}
+
+.workflow-shell.rail-collapsed {
+	--project-rail-column: 128px;
 }
 
 .workflow-main {
@@ -633,9 +644,17 @@
 }
 
 .workflow-navigation-header {
-	display: grid;
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
 	gap: 0.2rem;
 	padding: 0.15rem 0.25rem 0.35rem;
+}
+
+.workflow-navigation-header > div {
+	display: grid;
+	gap: 0.2rem;
+	min-width: 0;
 }
 
 .workflow-navigation-header span {
@@ -649,6 +668,24 @@
 	color: var(--text-main);
 	font-size: 1rem;
 	line-height: 1.2;
+}
+
+.workflow-navigation-toggle {
+	flex: 0 0 auto;
+	padding: 0.32rem 0.48rem;
+	border: 1px solid #bfd4f5;
+	border-radius: 9999px;
+	background: #ffffff;
+	color: var(--primary-hover);
+	box-shadow: var(--shadow-sm);
+	font-size: 0.72rem;
+	font-weight: 800;
+	line-height: 1;
+}
+
+.workflow-navigation-toggle:hover:not(:disabled) {
+	background: var(--primary-tonal);
+	transform: none;
 }
 
 .workflow-navigation-list {
@@ -762,6 +799,34 @@
 
 .workflow-navigation-item.blocked .workflow-navigation-state {
 	color: #b45309;
+}
+
+.workflow-navigation-drawer.collapsed {
+	padding: 0.7rem;
+}
+
+.workflow-navigation-drawer.collapsed .workflow-navigation-header {
+	display: grid;
+	justify-items: center;
+	text-align: center;
+}
+
+.workflow-navigation-drawer.collapsed .workflow-navigation-header strong,
+.workflow-navigation-drawer.collapsed .workflow-navigation-copy span,
+.workflow-navigation-drawer.collapsed .workflow-navigation-state {
+	display: none;
+}
+
+.workflow-navigation-drawer.collapsed .workflow-navigation-item {
+	grid-template-columns: 1fr;
+	justify-items: center;
+	gap: 0.35rem;
+	padding: 0.62rem 0.45rem;
+	text-align: center;
+}
+
+.workflow-navigation-drawer.collapsed .workflow-navigation-copy strong {
+	font-size: 0.72rem;
 }
 
 /* Tab Navigation */

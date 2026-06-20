@@ -1,7 +1,13 @@
 /* Responsive */
 @media (max-width: 1100px) {
 	.workflow-shell {
-		grid-template-columns: minmax(84px, 96px) minmax(0, 1fr);
+		--workflow-nav-column: minmax(84px, 96px);
+
+		grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr);
+	}
+
+	.workflow-shell.nav-collapsed {
+		--workflow-nav-column: 72px;
 	}
 
 	.project-information-rail {
@@ -47,7 +53,6 @@
 	}
 
 	.workflow-navigation-header {
-		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
 	}
