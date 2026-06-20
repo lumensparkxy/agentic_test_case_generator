@@ -122,7 +122,8 @@ Evidence: `.github/workflows/ci.yml`.
 - Frontend focused E2E tests mock API responses and use a local Vite server.
 - Workflow shell collapse tests keep localStorage-backed layout preferences
   browser-local and verify that collapsed left/right rails do not change
-  workflow behavior.
+  workflow behavior. Icon-specific assertions check that destination markers
+  and collapse controls render as SVG icons while retaining accessible names.
 - Brighter Executive Cockpit design QA maps the selected visual target to
   tested surfaces in `docs/brighter-executive-cockpit-design-qa.md`.
 - Offline evaluation scripts use deterministic fallback behavior instead of

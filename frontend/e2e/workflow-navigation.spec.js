@@ -51,6 +51,8 @@ test.describe("Workflow navigation", () => {
 		for (const label of ["Upload", "Context", "Template", "Generate", "Automation", "Export"]) {
 			await expect(navigation.getByRole("button", { name: new RegExp(`^${label},`, "i") })).toBeVisible();
 		}
+		await expect(navigation.locator(".workflow-navigation-marker svg")).toHaveCount(6);
+		await expect(navigation.getByRole("button", { name: /^Collapse workflow navigation$/i }).locator("svg")).toBeVisible();
 
 		await expect(navigation.getByRole("button", { name: /^Upload, Active$/i })).toBeVisible();
 		await expect(page.getByRole("heading", { name: /^Upload Requirements$/i })).toBeVisible();
@@ -61,6 +63,7 @@ test.describe("Workflow navigation", () => {
 
 		await navigation.getByRole("button", { name: /^Collapse workflow navigation$/i }).click();
 		await expect(navigation.getByRole("button", { name: /^Expand workflow navigation$/i })).toBeVisible();
+		await expect(navigation.getByRole("button", { name: /^Expand workflow navigation$/i }).locator("svg")).toBeVisible();
 		await navigation.getByRole("button", { name: /^Template,/i }).click();
 		await expect(navigation.getByRole("button", { name: /^Template, Active$/i })).toBeVisible();
 		await expect(page.getByRole("heading", { name: /^Template Setup$/i })).toBeVisible();

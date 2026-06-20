@@ -40,6 +40,7 @@ generated client submission outputs.
 | `react` / `react-dom` | `^19.2.7` | Frontend UI runtime | `frontend/package.json`, `frontend/src/main.jsx` |
 | `firebase` | `^12.14.0` | Frontend Firebase Authentication provider setup | `frontend/package.json`, `frontend/src/firebase.js` |
 | `@react-oauth/google` | `^0.13.5` | Google OAuth dependency still present in frontend package manifest | `frontend/package.json` |
+| `lucide-react` | `^1.21.0` | Frontend workflow-shell line icons and directional collapse controls | `frontend/package.json`, `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`, `frontend/src/components/projects/ProjectInformationRail.jsx` |
 
 ## 3) Development Toolchain
 

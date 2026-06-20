@@ -7,7 +7,7 @@
 	}
 
 	.workflow-shell.nav-collapsed {
-		--workflow-nav-column: 72px;
+		--workflow-nav-column: 64px;
 	}
 
 	.project-information-rail {
@@ -21,6 +21,7 @@
 	}
 
 	.workflow-navigation-header strong,
+	.workflow-navigation-copy,
 	.workflow-navigation-copy span,
 	.workflow-navigation-state {
 		display: none;
@@ -32,10 +33,6 @@
 		gap: 0.35rem;
 		padding: 0.62rem 0.45rem;
 		text-align: center;
-	}
-
-	.workflow-navigation-copy strong {
-		font-size: 0.72rem;
 	}
 }
 
@@ -61,6 +58,10 @@
 	.workflow-navigation-copy span,
 	.workflow-navigation-state {
 		display: initial;
+	}
+
+	.workflow-navigation-copy {
+		display: grid;
 	}
 
 	.workflow-navigation-list {
