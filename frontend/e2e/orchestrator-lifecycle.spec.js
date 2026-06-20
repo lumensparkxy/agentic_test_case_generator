@@ -735,7 +735,10 @@ test.describe("Orchestrator lifecycle validation", () => {
 			await approveButton.click();
 		}
 
-		await page.locator(".tab", { hasText: "Generate" }).click();
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Generate,/i })
+			.click();
 		await page.getByRole("button", { name: /^Generate from 10 Approved$/ }).click();
 		await expect(page.locator(".generate-results-summary-pill", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByText(/Generated v1 baseline suite/i)).toBeVisible();
@@ -746,13 +749,19 @@ test.describe("Orchestrator lifecycle validation", () => {
 			page.getByLabel("Orchestrator Cockpit").locator(".orchestrator-summary-grid div", { hasText: "Baseline suite" })
 		).toContainText("Present");
 
-		await page.locator(".tab", { hasText: "Upload" }).click();
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Upload,/i })
+			.click();
 		await page
 			.getByPlaceholder(/Enter your feedback here/i)
 			.fill("Change REQ-003 and REQ-010 to include payment retry and approval behavior.");
 		await page.getByRole("button", { name: /Implement Changes/i }).click();
 
-		await page.locator(".tab", { hasText: "Generate" }).click();
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Generate,/i })
+			.click();
 		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toBeVisible();
 		await page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i }).click();
 		await expect(page.getByRole("heading", { name: /^Impact Analysis$/i })).toBeVisible();
@@ -761,7 +770,10 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await page.getByRole("button", { name: /Apply 10 Accepted Recommendations/i }).click();
 		await expect(page.getByText(/Impact update applied: 8 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
 
-		await page.locator(".tab", { hasText: "Automation" }).click();
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Automation,/i })
+			.click();
 		await page.getByPlaceholder("staging, dev, customer-a").fill("staging");
 		await page.getByPlaceholder("Use backend default").fill("https://staging.example.test/app");
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();

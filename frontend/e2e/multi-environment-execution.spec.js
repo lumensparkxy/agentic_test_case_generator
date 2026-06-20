@@ -258,7 +258,10 @@ test.describe("Multi-environment execution", () => {
 		await page.getByLabel("Open QA project").selectOption("project-1");
 		await expect(page.getByText(/Environment QA · revision 4/)).toBeVisible();
 
-		await page.locator(".tab", { hasText: "Automation" }).click();
+		await page
+			.getByRole("navigation", { name: "Workflow navigation" })
+			.getByRole("button", { name: /^Automation,/i })
+			.click();
 		await page.getByPlaceholder("staging, dev, customer-a").fill("staging");
 		await page.getByPlaceholder("Use backend default").fill("https://staging.example.test/app");
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();

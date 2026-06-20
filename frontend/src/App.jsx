@@ -20,7 +20,7 @@ import ProjectWorkspacePanel from "./components/projects/ProjectWorkspacePanel";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
-import WorkflowStepper from "./components/layout/WorkflowStepper";
+import WorkflowNavigationDrawer from "./components/layout/WorkflowNavigationDrawer";
 import WorkflowDiagnostics from "./components/workflow/WorkflowDiagnostics";
 import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
@@ -3059,6 +3059,14 @@ export default function App() {
 		{ id: 4, label: "Automation", title: "Automation" },
 		{ id: 5, label: "Export", title: "Export Test Cases" },
 	];
+	const workflowNavStatusByTabId = {
+		0: requirements.length ? "complete" : "pending",
+		1: enrichedContext?.grounded_context ? "complete" : hasContextInputs ? "pending" : "pending",
+		2: templateName && templateFormat ? "complete" : "pending",
+		3: testCases.length ? "complete" : canGenerateFromApprovedRequirements ? "pending" : "blocked",
+		4: executionPreview || executionRunResult ? "complete" : testCases.length ? "pending" : "blocked",
+		5: exportMessage ? "complete" : testCases.length && !exportGateLocked ? "pending" : "blocked",
+	};
 
 	const goNext = () => setActiveTab((prev) => Math.min(prev + 1, tabs.length - 1));
 	const goPrev = () => setActiveTab((prev) => Math.max(prev - 1, 0));
@@ -3150,906 +3158,919 @@ export default function App() {
 				azureDevOpsSettings={azureDevOpsSettings}
 			/>
 
-			<WorkflowStepper tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+			<div className="workflow-shell">
+				<WorkflowNavigationDrawer tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} statusByTabId={workflowNavStatusByTabId} />
 
-			<ProjectWorkspacePanel
-				currentProject={currentProject}
-				newProjectName={newProjectName}
-				setNewProjectName={setNewProjectName}
-				isLoadingProjects={isLoadingProjects}
-				isCreatingProject={isCreatingProject}
-				orchestratorStatus={orchestratorStatus}
-				orchestratorRuns={orchestratorRuns}
-				isLoadingOrchestrator={isLoadingOrchestrator}
-				orchestratorError={orchestratorError}
-				authActionDisabled={authActionDisabled}
-				onCreateProject={createProject}
-				onRefreshProjects={() => loadProjects()}
-				onRefreshOrchestrator={() => loadProjectOrchestrator(currentProjectId)}
-				onOrchestratorAction={handleOrchestratorAction}
-				orchestratorActionBusy={orchestratorActionBusy}
-			/>
-
-			<div className="tab-content">
-				{activeTab === 0 && (
-					<section className="panel">
-						<h2 className="panel-title">Upload Requirements</h2>
-						<p className="panel-description">
-							Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA or
-							Azure DevOps.
-						</p>
-						<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
-							{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
-								<label key={option.value} className={`choice-card ${requirementSourceMode === option.value ? "selected" : ""}`}>
-									<input
-										type="radio"
-										name="requirement-source"
-										value={option.value}
-										checked={requirementSourceMode === option.value}
-										onChange={() => setRequirementSourceMode(option.value)}
-									/>
-									<span className="choice-card-copy">
-										<span className="choice-card-title">{option.label}</span>
-									</span>
-								</label>
-							))}
-						</div>
-
-						{requirementSourceMode === "file" ? (
-							<div className="panel-form">
-								<div className="form-group">
-									<label>Requirements file</label>
-									<input type="file" accept=".md,.docx,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-								</div>
-								<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
-									{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
-								</button>
-							</div>
-						) : requirementSourceMode === "jira" ? (
-							<div className="jira-workflow-panel">
-								<div className="jira-card">
-									<div className="jira-card-header">
-										<div>
-											<h3>Import from JIRA</h3>
-											<p>Pick a project, search for an epic, and import the epic plus child issues into the requirement parser.</p>
-										</div>
-									</div>
-									<div className="panel-form two-cols jira-search-grid">
-										<div className="form-group">
-											<label>Project search</label>
-											<input
-												placeholder="Search JIRA projects"
-												value={jiraProjectQuery}
-												onChange={(event) => setJiraProjectQuery(event.target.value)}
-												disabled={!jiraConnected}
-											/>
-										</div>
-										<div className="form-group jira-inline-action">
-											<label>Project</label>
-											<div className="jira-inline-controls">
-												<select
-													value={selectedJiraProjectKey}
-													onChange={(event) => setSelectedJiraProjectKey(event.target.value)}
-													disabled={!jiraConnected || !jiraProjects.length}
-												>
-													<option value="">Select a JIRA project</option>
-													{jiraProjects.map((project) => (
-														<option key={project.project_id || project.key} value={project.key}>
-															{project.key} — {project.name}
-														</option>
-													))}
-												</select>
-												<button
-													className="secondary"
-													onClick={() => loadJiraProjects(jiraProjectQuery)}
-													disabled={!jiraConnected || isLoadingJiraProjects}
-												>
-													{isLoadingJiraProjects ? "⏳" : "Load"}
-												</button>
-											</div>
-										</div>
-										<div className="form-group">
-											<label>Issue type</label>
-											<select
-												value={jiraIssueType}
-												onChange={(event) => setJiraIssueType(event.target.value)}
-												disabled={!jiraConnected || isLoadingJiraIssueTypes}
-											>
-												<option value="">Any issue type</option>
-												{jiraIssueTypeOptions.map((issueTypeName) => (
-													<option key={issueTypeName} value={issueTypeName}>
-														{issueTypeName}
-													</option>
-												))}
-											</select>
-										</div>
-										<div className="form-group jira-inline-action">
-											<label>Issue search</label>
-											<div className="jira-inline-controls">
-												<input
-													placeholder={`Search ${(jiraIssueType || "issue").toLowerCase()} summaries`}
-													value={jiraIssueQuery}
-													onChange={(event) => setJiraIssueQuery(event.target.value)}
-													disabled={!jiraConnected}
-												/>
-												<button
-													className="secondary"
-													onClick={searchJiraIssues}
-													disabled={!jiraConnected || !selectedJiraProjectKey || isSearchingJiraIssues}
-												>
-													{isSearchingJiraIssues ? "⏳" : "Search"}
-												</button>
-											</div>
-										</div>
-									</div>
-
-									{jiraIssueResults.length > 0 ? (
-										<div className="selection-table-wrapper">
-											<table className="selection-table">
-												<thead>
-													<tr>
-														<th>Select</th>
-														<th>Issue</th>
-														<th>Summary</th>
-														<th>Type</th>
-														<th>Status</th>
-														<th>Parent</th>
-													</tr>
-												</thead>
-												<tbody>
-													{jiraIssueResults.map((issue) => {
-														const selected = selectedJiraIssueKey === issue.key;
-														return (
-															<tr
-																key={issue.issue_id || issue.key}
-																className={selected ? "selected" : ""}
-																onClick={() => setSelectedJiraIssueKey(issue.key)}
-															>
-																<td>
-																	<input
-																		type="radio"
-																		name="jira-issue-selection"
-																		checked={selected}
-																		onChange={() => setSelectedJiraIssueKey(issue.key)}
-																		aria-label={`Select JIRA issue ${issue.key}`}
-																	/>
-																</td>
-																<td>
-																	<strong>{issue.key}</strong>
-																</td>
-																<td>{issue.summary}</td>
-																<td>{issue.issue_type || "—"}</td>
-																<td>{issue.status || "—"}</td>
-																<td>{issue.parent_key || "—"}</td>
-															</tr>
-														);
-													})}
-												</tbody>
-											</table>
-										</div>
-									) : (
-										<span className="helper-text">Search visible issues in the selected project to choose an import source.</span>
-									)}
-
-									<div className="panel-form button-row jira-import-actions">
-										<button
-											onClick={importRequirementsFromJira}
-											disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}
-										>
-											{isImportingFromJira ? "⏳ Importing..." : `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
-										</button>
-										{selectedJiraIssue ? (
-											<span className="helper-text">
-												Selected source: {selectedJiraIssue.key} — {selectedJiraIssue.summary}
-											</span>
-										) : null}
-									</div>
-								</div>
-							</div>
-						) : (
-							<div className="jira-workflow-panel">
-								<div className="jira-card">
-									<div className="jira-card-header">
-										<div>
-											<h3>Import from Azure DevOps</h3>
-											<p>Pick a project, search work items, and import the selected item plus children into the requirement parser.</p>
-										</div>
-									</div>
-									<div className="panel-form two-cols jira-search-grid">
-										<div className="form-group">
-											<label>Project search</label>
-											<input
-												placeholder="Search Azure DevOps projects"
-												value={azureDevOpsProjectQuery}
-												onChange={(event) => setAzureDevOpsProjectQuery(event.target.value)}
-												disabled={!azureDevOpsConnected}
-											/>
-										</div>
-										<div className="form-group jira-inline-action">
-											<label>Project</label>
-											<div className="jira-inline-controls">
-												<select
-													value={selectedAzureDevOpsProject}
-													onChange={(event) => setSelectedAzureDevOpsProject(event.target.value)}
-													disabled={!azureDevOpsConnected || !azureDevOpsProjects.length}
-												>
-													<option value="">Select an Azure DevOps project</option>
-													{azureDevOpsProjects.map((project) => (
-														<option key={project.project_id || project.name} value={project.name}>
-															{project.name}
-														</option>
-													))}
-												</select>
-												<button
-													className="secondary"
-													onClick={() => loadAzureDevOpsProjects(azureDevOpsProjectQuery)}
-													disabled={!azureDevOpsConnected || isLoadingAzureDevOpsProjects}
-												>
-													{isLoadingAzureDevOpsProjects ? "⏳" : "Load"}
-												</button>
-											</div>
-										</div>
-										<div className="form-group">
-											<label>Work item type</label>
-											<select
-												value={azureDevOpsWorkItemType}
-												onChange={(event) => setAzureDevOpsWorkItemType(event.target.value)}
-												disabled={!azureDevOpsConnected || isLoadingAzureDevOpsWorkItemTypes}
-											>
-												<option value="">Any work item type</option>
-												{azureDevOpsWorkItemTypeOptions.map((workItemTypeName) => (
-													<option key={workItemTypeName} value={workItemTypeName}>
-														{workItemTypeName}
-													</option>
-												))}
-											</select>
-										</div>
-										<div className="form-group jira-inline-action">
-											<label>Work item search</label>
-											<div className="jira-inline-controls">
-												<input
-													placeholder={`Search ${(azureDevOpsWorkItemType || "work item").toLowerCase()} titles/descriptions`}
-													value={azureDevOpsWorkItemQuery}
-													onChange={(event) => setAzureDevOpsWorkItemQuery(event.target.value)}
-													disabled={!azureDevOpsConnected}
-												/>
-												<button
-													className="secondary"
-													onClick={searchAzureDevOpsWorkItems}
-													disabled={!azureDevOpsConnected || !selectedAzureDevOpsProject || isSearchingAzureDevOpsWorkItems}
-												>
-													{isSearchingAzureDevOpsWorkItems ? "⏳" : "Search"}
-												</button>
-											</div>
-										</div>
-									</div>
-
-									{azureDevOpsWorkItemResults.length > 0 ? (
-										<div className="selection-table-wrapper">
-											<table className="selection-table">
-												<thead>
-													<tr>
-														<th>Select</th>
-														<th>Work item</th>
-														<th>Title</th>
-														<th>Type</th>
-														<th>State</th>
-														<th>Parent</th>
-													</tr>
-												</thead>
-												<tbody>
-													{azureDevOpsWorkItemResults.map((workItem) => {
-														const selected = `${selectedAzureDevOpsWorkItemId}` === `${workItem.work_item_id}`;
-														return (
-															<tr
-																key={workItem.work_item_id}
-																className={selected ? "selected" : ""}
-																onClick={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
-															>
-																<td>
-																	<input
-																		type="radio"
-																		name="azure-devops-work-item-selection"
-																		checked={selected}
-																		onChange={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
-																		aria-label={`Select Azure DevOps work item ${workItem.work_item_id}`}
-																	/>
-																</td>
-																<td>
-																	<strong>#{workItem.work_item_id}</strong>
-																</td>
-																<td>{workItem.title}</td>
-																<td>{workItem.work_item_type || "—"}</td>
-																<td>{workItem.state || "—"}</td>
-																<td>{workItem.parent_id ? `#${workItem.parent_id}` : "—"}</td>
-															</tr>
-														);
-													})}
-												</tbody>
-											</table>
-										</div>
-									) : (
-										<span className="helper-text">Search visible work items in the selected project to choose an import source.</span>
-									)}
-
-									<div className="panel-form button-row jira-import-actions">
-										<button
-											onClick={importRequirementsFromAzureDevOps}
-											disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}
-										>
-											{isImportingFromAzureDevOps
-												? "⏳ Importing..."
-												: `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
-										</button>
-										{selectedAzureDevOpsWorkItem ? (
-											<span className="helper-text">
-												Selected source: #{selectedAzureDevOpsWorkItem.work_item_id} — {selectedAzureDevOpsWorkItem.title}
-											</span>
-										) : null}
-									</div>
-								</div>
-							</div>
-						)}
-
-						{rawText && (
-							<div className="result-section compact-result-section">
-								<details className="collapsible-panel raw-text-panel">
-									<summary className="collapsible-panel-summary">
-										<span className="collapsible-panel-copy">
-											<span className="collapsible-panel-title">Raw extracted text</span>
-											<span className="collapsible-panel-description">Open only when you need to inspect parser input.</span>
-										</span>
-										<span className="collapsible-panel-meta">
-											<span className="analysis-summary-pill">{rawText.length.toLocaleString()} chars</span>
-											<span className="collapsible-panel-icon" aria-hidden="true">
-												⏄
-											</span>
-										</span>
-									</summary>
-									<div className="collapsible-panel-body">
-										<pre className="raw-text-pre">{rawText}</pre>
-									</div>
-								</details>
-							</div>
-						)}
-
-						<RequirementReviewWorkbench
-							requirements={requirements}
-							approvedRequirementCount={approvedRequirementCount}
-							reviewPendingRequirementCount={reviewPendingRequirementCount}
-							rejectedRequirementCount={rejectedRequirementCount}
-							onApproveNonRejected={() =>
-								bulkUpdateRequirementReviewStatus("Approved", (requirement) => getRequirementReviewStatus(requirement) !== "Rejected")
-							}
-							onMarkAllNeedsReview={() => bulkUpdateRequirementReviewStatus("Needs Review")}
-							onReviewStatusChange={updateRequirementReviewStatus}
-							onQualityFlagToggle={toggleRequirementQualityFlag}
-						/>
-
-						{hasJiraRequirements && (
-							<div className="jira-sync-panel">
-								<div className="jira-card-header">
-									<div>
-										<h3>JIRA Sync Preview</h3>
-										<p>Preview the managed requirement block that will be written back to JIRA and then push ready updates explicitly.</p>
-									</div>
-									<div className="jira-connection-summary compact">
-										{jiraImportedIssueKeys.map((issueKey) => (
-											<span key={issueKey} className="jira-summary-pill">
-												{issueKey}
-											</span>
-										))}
-									</div>
-								</div>
-								<div className="panel-form two-cols jira-sync-controls">
-									<div className="form-group">
-										<label>Managed section title</label>
-										<input
-											value={jiraManagedSectionTitle}
-											onChange={(event) => setJiraManagedSectionTitle(event.target.value)}
-											placeholder={DEFAULT_JIRA_SYNC_SECTION_TITLE}
-										/>
-									</div>
-									<div className="feedback-actions jira-sync-actions">
-										<button
-											className="secondary"
-											onClick={() => previewJiraSync()}
-											disabled={authActionDisabled || isPreviewingJiraSync || isApplyingJiraSync}
-										>
-											{isPreviewingJiraSync ? "⏳ Previewing..." : "Preview JIRA Update"}
-										</button>
-										<button
-											onClick={applyJiraSync}
-											disabled={authActionDisabled || isApplyingJiraSync || !jiraSyncPreview || !jiraPreviewHasReadyIssue}
-										>
-											{isApplyingJiraSync ? "⏳ Syncing..." : "Push Ready Updates"}
-										</button>
-									</div>
-								</div>
-
-								{jiraSyncPreview && (
-									<div className="jira-sync-results">
-										<div className="workflow-diagnostics-pills">
-											<span className="workflow-diagnostics-pill">Ready {jiraSyncPreview.ready_issue_count || 0}</span>
-											<span className="workflow-diagnostics-pill">Conflicts {jiraSyncPreview.conflict_count || 0}</span>
-											<span className="workflow-diagnostics-pill">Skipped {(jiraSyncPreview.skipped_requirement_ids || []).length}</span>
-										</div>
-										<div className="jira-sync-preview-list">
-											{jiraSyncPreview.issues?.map((issue) => (
-												<div key={issue.issue_key} className={`jira-sync-preview-card ${issue.status}`}>
-													<div className="jira-sync-preview-header">
-														<div>
-															<strong>{issue.issue_key}</strong>
-															<span>{issue.issue_type || "Issue"}</span>
-														</div>
-														<span className={`jira-status-badge ${issue.status}`}>{issue.status}</span>
-													</div>
-													<div className="jira-sync-preview-meta">
-														<span>Requirements: {(issue.requirement_ids || []).join(", ") || "—"}</span>
-														{issue.issue_url ? (
-															<a href={issue.issue_url} target="_blank" rel="noreferrer">
-																Open in JIRA ↗
-															</a>
-														) : null}
-													</div>
-													{issue.conflict_reason ? <p className="jira-sync-preview-warning">{issue.conflict_reason}</p> : null}
-													{issue.warning ? <p className="jira-sync-preview-warning">{issue.warning}</p> : null}
-													<div className="jira-sync-preview-excerpts">
-														<div>
-															<h4>Current description</h4>
-															<p>{issue.existing_description_excerpt || "No description yet."}</p>
-														</div>
-														<div>
-															<h4>Rendered update</h4>
-															<p>{issue.rendered_description_excerpt || "No rendered update available."}</p>
-														</div>
-													</div>
-												</div>
-											))}
-										</div>
-										{jiraSyncPreview.warnings?.length > 0 && (
-											<ul className="jira-sync-warning-list">
-												{jiraSyncPreview.warnings.map((warning) => (
-													<li key={warning}>{warning}</li>
-												))}
-											</ul>
-										)}
-									</div>
-								)}
-
-								{jiraSyncResults && (
-									<div className="jira-sync-results-summary">
-										<h4>Last sync result</h4>
-										<ul className="jira-sync-apply-list">
-											{jiraSyncResults.results?.map((result) => (
-												<li key={`${result.issue_key}-${result.status}`}>
-													<strong>{result.issue_key}</strong> — {result.status}
-													{result.message ? `: ${result.message}` : ""}
-												</li>
-											))}
-										</ul>
-									</div>
-								)}
-							</div>
-						)}
-
-						{hasAzureDevOpsRequirements && (
-							<div className="jira-sync-panel">
-								<div className="jira-card-header">
-									<div>
-										<h3>Azure DevOps Sync Preview</h3>
-										<p>Preview the managed requirements block that will be written back to Azure DevOps work item descriptions.</p>
-									</div>
-									<div className="jira-connection-summary compact">
-										{azureDevOpsImportedWorkItemIds.map((workItemId) => (
-											<span key={workItemId} className="jira-summary-pill">
-												#{workItemId}
-											</span>
-										))}
-									</div>
-								</div>
-								<div className="panel-form two-cols jira-sync-controls">
-									<div className="form-group">
-										<label>Managed section title</label>
-										<input
-											value={azureDevOpsManagedSectionTitle}
-											onChange={(event) => setAzureDevOpsManagedSectionTitle(event.target.value)}
-											placeholder={DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE}
-										/>
-									</div>
-									<div className="feedback-actions jira-sync-actions">
-										<button
-											className="secondary"
-											onClick={() => previewAzureDevOpsSync()}
-											disabled={authActionDisabled || isPreviewingAzureDevOpsSync || isApplyingAzureDevOpsSync}
-										>
-											{isPreviewingAzureDevOpsSync ? "⏳ Previewing..." : "Preview Azure DevOps Update"}
-										</button>
-										<button
-											onClick={applyAzureDevOpsSync}
-											disabled={
-												authActionDisabled || isApplyingAzureDevOpsSync || !azureDevOpsSyncPreview || !azureDevOpsPreviewHasReadyWorkItem
-											}
-										>
-											{isApplyingAzureDevOpsSync ? "⏳ Syncing..." : "Push Ready Updates"}
-										</button>
-									</div>
-								</div>
-
-								{azureDevOpsSyncPreview && (
-									<div className="jira-sync-results">
-										<div className="workflow-diagnostics-pills">
-											<span className="workflow-diagnostics-pill">Ready {azureDevOpsSyncPreview.ready_work_item_count || 0}</span>
-											<span className="workflow-diagnostics-pill">Conflicts {azureDevOpsSyncPreview.conflict_count || 0}</span>
-											<span className="workflow-diagnostics-pill">
-												Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}
-											</span>
-										</div>
-										<div className="jira-sync-preview-list">
-											{azureDevOpsSyncPreview.work_items?.map((workItem) => (
-												<div key={workItem.work_item_id} className={`jira-sync-preview-card ${workItem.status}`}>
-													<div className="jira-sync-preview-header">
-														<div>
-															<strong>#{workItem.work_item_id}</strong>
-															<span>{workItem.work_item_type || "Work Item"}</span>
-														</div>
-														<span className={`jira-status-badge ${workItem.status}`}>{workItem.status}</span>
-													</div>
-													<div className="jira-sync-preview-meta">
-														<span>Requirements: {(workItem.requirement_ids || []).join(", ") || "—"}</span>
-														{workItem.work_item_url ? (
-															<a href={workItem.work_item_url} target="_blank" rel="noreferrer">
-																Open in Azure DevOps ↗
-															</a>
-														) : null}
-													</div>
-													{workItem.conflict_reason ? <p className="jira-sync-preview-warning">{workItem.conflict_reason}</p> : null}
-													{workItem.warning ? <p className="jira-sync-preview-warning">{workItem.warning}</p> : null}
-													<div className="jira-sync-preview-excerpts">
-														<div>
-															<h4>Current description</h4>
-															<p>{workItem.existing_description_excerpt || "No description yet."}</p>
-														</div>
-														<div>
-															<h4>Rendered update</h4>
-															<p>{workItem.rendered_description_excerpt || "No rendered update available."}</p>
-														</div>
-													</div>
-												</div>
-											))}
-										</div>
-										{azureDevOpsSyncPreview.warnings?.length > 0 && (
-											<ul className="jira-sync-warning-list">
-												{azureDevOpsSyncPreview.warnings.map((warning) => (
-													<li key={warning}>{warning}</li>
-												))}
-											</ul>
-										)}
-									</div>
-								)}
-
-								{azureDevOpsSyncResults && (
-									<div className="jira-sync-results-summary">
-										<h4>Last sync result</h4>
-										<ul className="jira-sync-apply-list">
-											{azureDevOpsSyncResults.results?.map((result) => (
-												<li key={`${result.work_item_id}-${result.status}`}>
-													<strong>#{result.work_item_id}</strong> — {result.status}
-													{result.message ? `: ${result.message}` : ""}
-												</li>
-											))}
-										</ul>
-									</div>
-								)}
-							</div>
-						)}
-
-						{renderRequirementReviewReport()}
-
-						{requirements.length > 0 && (
-							<div className="feedback-section">
-								<h3>Human Feedback</h3>
-								<p className="feedback-description">
-									Provide feedback on the extracted requirements. The AI will refine them based on your input.
-								</p>
-								<textarea
-									className="feedback-textarea"
-									placeholder="Enter your feedback here... e.g., 'Merge REQ-003 and REQ-004 into one', 'Split REQ-001 into multiple requirements', 'REQ-005 is too vague, make it more specific', 'Add a requirement for error handling', etc."
-									value={reqFeedback}
-									onChange={(e) => setReqFeedback(e.target.value)}
-									rows={4}
-								/>
-								<div className="feedback-actions">
-									<button
-										onClick={() => parseRequirements(true)}
-										disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
-										className="feedback-button"
-									>
-										{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
-									</button>
-								</div>
-							</div>
-						)}
-
-						<div className="panel-nav">
-							<button onClick={goNext} className="secondary">
-								Next
-							</button>
-						</div>
-					</section>
-				)}
-
-				{activeTab === 1 && (
-					<ContextInputsPanel
-						appLink={appLink}
-						setAppLink={setAppLink}
-						prototypeLink={prototypeLink}
-						setPrototypeLink={setPrototypeLink}
-						diagramLinks={diagramLinks}
-						setDiagramLinks={setDiagramLinks}
-						imageLinks={imageLinks}
-						setImageLinks={setImageLinks}
-						hasContextInputs={hasContextInputs}
-						analyzeContext={analyzeContext}
-						isAnalyzingContext={isAnalyzingContext}
+				<main className="workflow-main" aria-label="Workflow workspace">
+					<ProjectWorkspacePanel
+						currentProject={currentProject}
+						newProjectName={newProjectName}
+						setNewProjectName={setNewProjectName}
+						isLoadingProjects={isLoadingProjects}
+						isCreatingProject={isCreatingProject}
+						orchestratorStatus={orchestratorStatus}
+						orchestratorRuns={orchestratorRuns}
+						isLoadingOrchestrator={isLoadingOrchestrator}
+						orchestratorError={orchestratorError}
 						authActionDisabled={authActionDisabled}
-						enrichedContext={enrichedContext}
-						resetContextAnalysis={resetContextAnalysis}
-						selectedArtifactSourceIds={selectedArtifactSourceIds}
-						setSelectedArtifactSourceIds={setSelectedArtifactSourceIds}
-						goPrev={goPrev}
-						goNext={goNext}
+						onCreateProject={createProject}
+						onRefreshProjects={() => loadProjects()}
+						onRefreshOrchestrator={() => loadProjectOrchestrator(currentProjectId)}
+						onOrchestratorAction={handleOrchestratorAction}
+						orchestratorActionBusy={orchestratorActionBusy}
 					/>
-				)}
 
-				{activeTab === 2 && (
-					<TemplateSetupPanel
-						templateName={templateName}
-						setTemplateName={setTemplateName}
-						templateFormat={templateFormat}
-						setTemplateFormat={setTemplateFormat}
-						goPrev={goPrev}
-						goNext={goNext}
-					/>
-				)}
-
-				{activeTab === 3 && (
-					<section className="panel">
-						<h2 className="panel-title">Generate Test Cases</h2>
-						<p className="panel-description">
-							Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
-						</p>
-						{requirements.length > 0 && (
-							<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
-								<div>
-									<strong>
-										{upstreamChangedForImpact
-											? "Existing suite needs impact analysis"
-											: canGenerateFromApprovedRequirements
-												? "Ready for approved-requirement generation"
-												: "Approval required before generation"}
-									</strong>
-									<p>
-										{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review • {rejectedRequirementCount}{" "}
-										rejected
-										{upstreamChangedForImpact
-											? ". The current suite is preserved while impact analysis reviews changed inputs."
-											: ". Only approved requirements are sent to the test-case agents."}
-									</p>
-								</div>
-								{!canGenerateFromApprovedRequirements && (
-									<button type="button" className="secondary small" onClick={() => setActiveTab(0)}>
-										Review requirements
-									</button>
-								)}
-							</div>
-						)}
-						<div className="panel-form button-row">
-							{upstreamChangedForImpact ? (
-								<>
-									<button onClick={analyzeImpact} disabled={!canAnalyzeImpact || isAnalyzingImpact || testCaseActionDisabled}>
-										{isAnalyzingImpact
-											? "⏳ Analyzing impact..."
-											: impactChangedItemCount
-												? `Analyze Impact for ${impactChangedItemCount} Changed Item${impactChangedItemCount === 1 ? "" : "s"}`
-												: "Analyze Impact for Changed Items"}
-									</button>
-									<button
-										className="secondary"
-										onClick={() => generateTestCases(false)}
-										disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
-									>
-										{isGenerating ? "⏳ Regenerating..." : `Full Regenerate from ${approvedRequirementCount || 0} Approved`}
-									</button>
-								</>
-							) : (
-								<button
-									onClick={() => generateTestCases(false)}
-									disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
-								>
-									{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
-								</button>
-							)}
-						</div>
-
-						{renderImpactAnalysisPanel()}
-
-						{testCaseReview && (
-							<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
-								<div className="review-banner-header">
-									<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
-									<div className="review-banner-metrics">
-										<span className="review-metric-pill review-metric-pill-strong">{testCaseReviewMeta.scoreLabel}</span>
-										{testCaseReviewMeta.thresholdLabel && <span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>}
-									</div>
-								</div>
-								<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
-								{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
-									<ul className="review-issues">
-										{testCaseReview.blocking_issues.slice(0, 3).map((issue) => (
-											<li key={issue}>{issue}</li>
-										))}
-									</ul>
-								)}
-							</div>
-						)}
-
-						{hasGenerateResults ? (
-							<div className="generate-results-workspace">
-								<div className="generate-results-header">
-									<div>
-										<h3>Generation Results</h3>
-										<p>
-											Review the generated cases, traceability, coverage, analysis, and workflow diagnostics without scrolling through a
-											wall of artifacts.
-										</p>
-									</div>
-									<span className="generate-results-summary-pill">
-										{testCases.length} test case{testCases.length === 1 ? "" : "s"}
-									</span>
-								</div>
-								<div className="generate-results-tabs" role="tablist" aria-label="Generation result sections">
-									{generateResultTabs.map((tab) => (
-										<button
-											type="button"
-											key={tab.id}
-											className={`generate-result-tab ${activeGenerateResultTab === tab.id ? "active" : ""} ${tab.variant ? `generate-result-tab-${tab.variant}` : ""}`}
-											onClick={() => setActiveGenerateResultTab(tab.id)}
-											role="tab"
-											aria-selected={activeGenerateResultTab === tab.id}
-											aria-controls="generate-result-panel"
-										>
-											<span>{tab.label}</span>
-											<span className={`generate-result-tab-badge ${tab.variant ? `generate-result-tab-badge-${tab.variant}` : ""}`}>
-												{tab.badge}
+					<div className="tab-content">
+						{activeTab === 0 && (
+							<section className="panel">
+								<h2 className="panel-title">Upload Requirements</h2>
+								<p className="panel-description">
+									Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to JIRA or
+									Azure DevOps.
+								</p>
+								<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
+									{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
+										<label key={option.value} className={`choice-card ${requirementSourceMode === option.value ? "selected" : ""}`}>
+											<input
+												type="radio"
+												name="requirement-source"
+												value={option.value}
+												checked={requirementSourceMode === option.value}
+												onChange={() => setRequirementSourceMode(option.value)}
+											/>
+											<span className="choice-card-copy">
+												<span className="choice-card-title">{option.label}</span>
 											</span>
-										</button>
+										</label>
 									))}
 								</div>
-								<div
-									id="generate-result-panel"
-									className="generate-result-panel"
-									role="tabpanel"
-									aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
-								>
-									{activeGenerateResultTab === "diagnostics" &&
-										(renderWorkflowDiagnostics(
-											"Test-case workflow diagnostics",
-											testCaseWorkflowDiagnostics,
-											appliedTestCaseWorkflowSettings,
-											testCaseIterationHistory
-										) || (
-											<div className="generate-result-empty">
-												<h3>Diagnostics</h3>
-												<p>No workflow diagnostics are available for this run.</p>
+
+								{requirementSourceMode === "file" ? (
+									<div className="panel-form">
+										<div className="form-group">
+											<label>Requirements file</label>
+											<input type="file" accept=".md,.docx,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+										</div>
+										<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
+											{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
+										</button>
+									</div>
+								) : requirementSourceMode === "jira" ? (
+									<div className="jira-workflow-panel">
+										<div className="jira-card">
+											<div className="jira-card-header">
+												<div>
+													<h3>Import from JIRA</h3>
+													<p>Pick a project, search for an epic, and import the epic plus child issues into the requirement parser.</p>
+												</div>
 											</div>
-										))}
+											<div className="panel-form two-cols jira-search-grid">
+												<div className="form-group">
+													<label>Project search</label>
+													<input
+														placeholder="Search JIRA projects"
+														value={jiraProjectQuery}
+														onChange={(event) => setJiraProjectQuery(event.target.value)}
+														disabled={!jiraConnected}
+													/>
+												</div>
+												<div className="form-group jira-inline-action">
+													<label>Project</label>
+													<div className="jira-inline-controls">
+														<select
+															value={selectedJiraProjectKey}
+															onChange={(event) => setSelectedJiraProjectKey(event.target.value)}
+															disabled={!jiraConnected || !jiraProjects.length}
+														>
+															<option value="">Select a JIRA project</option>
+															{jiraProjects.map((project) => (
+																<option key={project.project_id || project.key} value={project.key}>
+																	{project.key} — {project.name}
+																</option>
+															))}
+														</select>
+														<button
+															className="secondary"
+															onClick={() => loadJiraProjects(jiraProjectQuery)}
+															disabled={!jiraConnected || isLoadingJiraProjects}
+														>
+															{isLoadingJiraProjects ? "⏳" : "Load"}
+														</button>
+													</div>
+												</div>
+												<div className="form-group">
+													<label>Issue type</label>
+													<select
+														value={jiraIssueType}
+														onChange={(event) => setJiraIssueType(event.target.value)}
+														disabled={!jiraConnected || isLoadingJiraIssueTypes}
+													>
+														<option value="">Any issue type</option>
+														{jiraIssueTypeOptions.map((issueTypeName) => (
+															<option key={issueTypeName} value={issueTypeName}>
+																{issueTypeName}
+															</option>
+														))}
+													</select>
+												</div>
+												<div className="form-group jira-inline-action">
+													<label>Issue search</label>
+													<div className="jira-inline-controls">
+														<input
+															placeholder={`Search ${(jiraIssueType || "issue").toLowerCase()} summaries`}
+															value={jiraIssueQuery}
+															onChange={(event) => setJiraIssueQuery(event.target.value)}
+															disabled={!jiraConnected}
+														/>
+														<button
+															className="secondary"
+															onClick={searchJiraIssues}
+															disabled={!jiraConnected || !selectedJiraProjectKey || isSearchingJiraIssues}
+														>
+															{isSearchingJiraIssues ? "⏳" : "Search"}
+														</button>
+													</div>
+												</div>
+											</div>
 
-									{activeGenerateResultTab === "coverage" && (
-										<ScenarioCoveragePanel
-											coveragePlan={coveragePlan}
-											coveredScenarioTotal={coveredScenarioTotal}
-											plannedScenarioTotal={plannedScenarioTotal}
-											mustHaveCoveredScenarioTotal={mustHaveCoveredScenarioTotal}
-											mustHaveScenarioTotal={mustHaveScenarioTotal}
-											missingScenarioCount={missingScenarioCount}
-											getRequirementScenarioSummary={getRequirementScenarioSummary}
-										/>
-									)}
+											{jiraIssueResults.length > 0 ? (
+												<div className="selection-table-wrapper">
+													<table className="selection-table">
+														<thead>
+															<tr>
+																<th>Select</th>
+																<th>Issue</th>
+																<th>Summary</th>
+																<th>Type</th>
+																<th>Status</th>
+																<th>Parent</th>
+															</tr>
+														</thead>
+														<tbody>
+															{jiraIssueResults.map((issue) => {
+																const selected = selectedJiraIssueKey === issue.key;
+																return (
+																	<tr
+																		key={issue.issue_id || issue.key}
+																		className={selected ? "selected" : ""}
+																		onClick={() => setSelectedJiraIssueKey(issue.key)}
+																	>
+																		<td>
+																			<input
+																				type="radio"
+																				name="jira-issue-selection"
+																				checked={selected}
+																				onChange={() => setSelectedJiraIssueKey(issue.key)}
+																				aria-label={`Select JIRA issue ${issue.key}`}
+																			/>
+																		</td>
+																		<td>
+																			<strong>{issue.key}</strong>
+																		</td>
+																		<td>{issue.summary}</td>
+																		<td>{issue.issue_type || "—"}</td>
+																		<td>{issue.status || "—"}</td>
+																		<td>{issue.parent_key || "—"}</td>
+																	</tr>
+																);
+															})}
+														</tbody>
+													</table>
+												</div>
+											) : (
+												<span className="helper-text">Search visible issues in the selected project to choose an import source.</span>
+											)}
 
-									{activeGenerateResultTab === "analysis" && (
-										<RequirementAnalysisPanel
-											requirementAnalysis={requirementAnalysis}
-											coverageMetrics={coverageMetrics}
-											requirementAnalysisGapCount={requirementAnalysisGapCount}
-											getRequirementAnalysisSummary={getRequirementAnalysisSummary}
-											getRequirementAnalysisGaps={getRequirementAnalysisGaps}
-										/>
-									)}
+											<div className="panel-form button-row jira-import-actions">
+												<button
+													onClick={importRequirementsFromJira}
+													disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}
+												>
+													{isImportingFromJira ? "⏳ Importing..." : `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
+												</button>
+												{selectedJiraIssue ? (
+													<span className="helper-text">
+														Selected source: {selectedJiraIssue.key} — {selectedJiraIssue.summary}
+													</span>
+												) : null}
+											</div>
+										</div>
+									</div>
+								) : (
+									<div className="jira-workflow-panel">
+										<div className="jira-card">
+											<div className="jira-card-header">
+												<div>
+													<h3>Import from Azure DevOps</h3>
+													<p>Pick a project, search work items, and import the selected item plus children into the requirement parser.</p>
+												</div>
+											</div>
+											<div className="panel-form two-cols jira-search-grid">
+												<div className="form-group">
+													<label>Project search</label>
+													<input
+														placeholder="Search Azure DevOps projects"
+														value={azureDevOpsProjectQuery}
+														onChange={(event) => setAzureDevOpsProjectQuery(event.target.value)}
+														disabled={!azureDevOpsConnected}
+													/>
+												</div>
+												<div className="form-group jira-inline-action">
+													<label>Project</label>
+													<div className="jira-inline-controls">
+														<select
+															value={selectedAzureDevOpsProject}
+															onChange={(event) => setSelectedAzureDevOpsProject(event.target.value)}
+															disabled={!azureDevOpsConnected || !azureDevOpsProjects.length}
+														>
+															<option value="">Select an Azure DevOps project</option>
+															{azureDevOpsProjects.map((project) => (
+																<option key={project.project_id || project.name} value={project.name}>
+																	{project.name}
+																</option>
+															))}
+														</select>
+														<button
+															className="secondary"
+															onClick={() => loadAzureDevOpsProjects(azureDevOpsProjectQuery)}
+															disabled={!azureDevOpsConnected || isLoadingAzureDevOpsProjects}
+														>
+															{isLoadingAzureDevOpsProjects ? "⏳" : "Load"}
+														</button>
+													</div>
+												</div>
+												<div className="form-group">
+													<label>Work item type</label>
+													<select
+														value={azureDevOpsWorkItemType}
+														onChange={(event) => setAzureDevOpsWorkItemType(event.target.value)}
+														disabled={!azureDevOpsConnected || isLoadingAzureDevOpsWorkItemTypes}
+													>
+														<option value="">Any work item type</option>
+														{azureDevOpsWorkItemTypeOptions.map((workItemTypeName) => (
+															<option key={workItemTypeName} value={workItemTypeName}>
+																{workItemTypeName}
+															</option>
+														))}
+													</select>
+												</div>
+												<div className="form-group jira-inline-action">
+													<label>Work item search</label>
+													<div className="jira-inline-controls">
+														<input
+															placeholder={`Search ${(azureDevOpsWorkItemType || "work item").toLowerCase()} titles/descriptions`}
+															value={azureDevOpsWorkItemQuery}
+															onChange={(event) => setAzureDevOpsWorkItemQuery(event.target.value)}
+															disabled={!azureDevOpsConnected}
+														/>
+														<button
+															className="secondary"
+															onClick={searchAzureDevOpsWorkItems}
+															disabled={!azureDevOpsConnected || !selectedAzureDevOpsProject || isSearchingAzureDevOpsWorkItems}
+														>
+															{isSearchingAzureDevOpsWorkItems ? "⏳" : "Search"}
+														</button>
+													</div>
+												</div>
+											</div>
 
-									{activeGenerateResultTab === "traceability" && (
-										<TraceabilityMatrixPanel
-											approvedRequirements={approvedRequirements}
-											requirementTraceabilityRows={requirementTraceabilityRows}
-											tracedRequirementCount={tracedRequirementCount}
-											coverageMetrics={coverageMetrics}
-											testCases={testCases}
-										/>
-									)}
+											{azureDevOpsWorkItemResults.length > 0 ? (
+												<div className="selection-table-wrapper">
+													<table className="selection-table">
+														<thead>
+															<tr>
+																<th>Select</th>
+																<th>Work item</th>
+																<th>Title</th>
+																<th>Type</th>
+																<th>State</th>
+																<th>Parent</th>
+															</tr>
+														</thead>
+														<tbody>
+															{azureDevOpsWorkItemResults.map((workItem) => {
+																const selected = `${selectedAzureDevOpsWorkItemId}` === `${workItem.work_item_id}`;
+																return (
+																	<tr
+																		key={workItem.work_item_id}
+																		className={selected ? "selected" : ""}
+																		onClick={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
+																	>
+																		<td>
+																			<input
+																				type="radio"
+																				name="azure-devops-work-item-selection"
+																				checked={selected}
+																				onChange={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
+																				aria-label={`Select Azure DevOps work item ${workItem.work_item_id}`}
+																			/>
+																		</td>
+																		<td>
+																			<strong>#{workItem.work_item_id}</strong>
+																		</td>
+																		<td>{workItem.title}</td>
+																		<td>{workItem.work_item_type || "—"}</td>
+																		<td>{workItem.state || "—"}</td>
+																		<td>{workItem.parent_id ? `#${workItem.parent_id}` : "—"}</td>
+																	</tr>
+																);
+															})}
+														</tbody>
+													</table>
+												</div>
+											) : (
+												<span className="helper-text">Search visible work items in the selected project to choose an import source.</span>
+											)}
 
-									{activeGenerateResultTab === "test-cases" && (
-										<GeneratedTestCasesView
-											testCases={testCases}
-											templateFormat={templateFormat}
-											expandedRows={expandedRows}
-											onToggleRowExpansion={toggleRowExpansion}
-											feedback={feedback}
-											onFeedbackChange={setFeedback}
-											onRefineTestCases={() => generateTestCases(true)}
-											isGenerating={isGenerating}
-											testCaseActionDisabled={testCaseActionDisabled}
+											<div className="panel-form button-row jira-import-actions">
+												<button
+													onClick={importRequirementsFromAzureDevOps}
+													disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}
+												>
+													{isImportingFromAzureDevOps
+														? "⏳ Importing..."
+														: `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
+												</button>
+												{selectedAzureDevOpsWorkItem ? (
+													<span className="helper-text">
+														Selected source: #{selectedAzureDevOpsWorkItem.work_item_id} — {selectedAzureDevOpsWorkItem.title}
+													</span>
+												) : null}
+											</div>
+										</div>
+									</div>
+								)}
+
+								{rawText && (
+									<div className="result-section compact-result-section">
+										<details className="collapsible-panel raw-text-panel">
+											<summary className="collapsible-panel-summary">
+												<span className="collapsible-panel-copy">
+													<span className="collapsible-panel-title">Raw extracted text</span>
+													<span className="collapsible-panel-description">Open only when you need to inspect parser input.</span>
+												</span>
+												<span className="collapsible-panel-meta">
+													<span className="analysis-summary-pill">{rawText.length.toLocaleString()} chars</span>
+													<span className="collapsible-panel-icon" aria-hidden="true">
+														⏄
+													</span>
+												</span>
+											</summary>
+											<div className="collapsible-panel-body">
+												<pre className="raw-text-pre">{rawText}</pre>
+											</div>
+										</details>
+									</div>
+								)}
+
+								<RequirementReviewWorkbench
+									requirements={requirements}
+									approvedRequirementCount={approvedRequirementCount}
+									reviewPendingRequirementCount={reviewPendingRequirementCount}
+									rejectedRequirementCount={rejectedRequirementCount}
+									onApproveNonRejected={() =>
+										bulkUpdateRequirementReviewStatus("Approved", (requirement) => getRequirementReviewStatus(requirement) !== "Rejected")
+									}
+									onMarkAllNeedsReview={() => bulkUpdateRequirementReviewStatus("Needs Review")}
+									onReviewStatusChange={updateRequirementReviewStatus}
+									onQualityFlagToggle={toggleRequirementQualityFlag}
+								/>
+
+								{hasJiraRequirements && (
+									<div className="jira-sync-panel">
+										<div className="jira-card-header">
+											<div>
+												<h3>JIRA Sync Preview</h3>
+												<p>
+													Preview the managed requirement block that will be written back to JIRA and then push ready updates explicitly.
+												</p>
+											</div>
+											<div className="jira-connection-summary compact">
+												{jiraImportedIssueKeys.map((issueKey) => (
+													<span key={issueKey} className="jira-summary-pill">
+														{issueKey}
+													</span>
+												))}
+											</div>
+										</div>
+										<div className="panel-form two-cols jira-sync-controls">
+											<div className="form-group">
+												<label>Managed section title</label>
+												<input
+													value={jiraManagedSectionTitle}
+													onChange={(event) => setJiraManagedSectionTitle(event.target.value)}
+													placeholder={DEFAULT_JIRA_SYNC_SECTION_TITLE}
+												/>
+											</div>
+											<div className="feedback-actions jira-sync-actions">
+												<button
+													className="secondary"
+													onClick={() => previewJiraSync()}
+													disabled={authActionDisabled || isPreviewingJiraSync || isApplyingJiraSync}
+												>
+													{isPreviewingJiraSync ? "⏳ Previewing..." : "Preview JIRA Update"}
+												</button>
+												<button
+													onClick={applyJiraSync}
+													disabled={authActionDisabled || isApplyingJiraSync || !jiraSyncPreview || !jiraPreviewHasReadyIssue}
+												>
+													{isApplyingJiraSync ? "⏳ Syncing..." : "Push Ready Updates"}
+												</button>
+											</div>
+										</div>
+
+										{jiraSyncPreview && (
+											<div className="jira-sync-results">
+												<div className="workflow-diagnostics-pills">
+													<span className="workflow-diagnostics-pill">Ready {jiraSyncPreview.ready_issue_count || 0}</span>
+													<span className="workflow-diagnostics-pill">Conflicts {jiraSyncPreview.conflict_count || 0}</span>
+													<span className="workflow-diagnostics-pill">
+														Skipped {(jiraSyncPreview.skipped_requirement_ids || []).length}
+													</span>
+												</div>
+												<div className="jira-sync-preview-list">
+													{jiraSyncPreview.issues?.map((issue) => (
+														<div key={issue.issue_key} className={`jira-sync-preview-card ${issue.status}`}>
+															<div className="jira-sync-preview-header">
+																<div>
+																	<strong>{issue.issue_key}</strong>
+																	<span>{issue.issue_type || "Issue"}</span>
+																</div>
+																<span className={`jira-status-badge ${issue.status}`}>{issue.status}</span>
+															</div>
+															<div className="jira-sync-preview-meta">
+																<span>Requirements: {(issue.requirement_ids || []).join(", ") || "—"}</span>
+																{issue.issue_url ? (
+																	<a href={issue.issue_url} target="_blank" rel="noreferrer">
+																		Open in JIRA ↗
+																	</a>
+																) : null}
+															</div>
+															{issue.conflict_reason ? <p className="jira-sync-preview-warning">{issue.conflict_reason}</p> : null}
+															{issue.warning ? <p className="jira-sync-preview-warning">{issue.warning}</p> : null}
+															<div className="jira-sync-preview-excerpts">
+																<div>
+																	<h4>Current description</h4>
+																	<p>{issue.existing_description_excerpt || "No description yet."}</p>
+																</div>
+																<div>
+																	<h4>Rendered update</h4>
+																	<p>{issue.rendered_description_excerpt || "No rendered update available."}</p>
+																</div>
+															</div>
+														</div>
+													))}
+												</div>
+												{jiraSyncPreview.warnings?.length > 0 && (
+													<ul className="jira-sync-warning-list">
+														{jiraSyncPreview.warnings.map((warning) => (
+															<li key={warning}>{warning}</li>
+														))}
+													</ul>
+												)}
+											</div>
+										)}
+
+										{jiraSyncResults && (
+											<div className="jira-sync-results-summary">
+												<h4>Last sync result</h4>
+												<ul className="jira-sync-apply-list">
+													{jiraSyncResults.results?.map((result) => (
+														<li key={`${result.issue_key}-${result.status}`}>
+															<strong>{result.issue_key}</strong> — {result.status}
+															{result.message ? `: ${result.message}` : ""}
+														</li>
+													))}
+												</ul>
+											</div>
+										)}
+									</div>
+								)}
+
+								{hasAzureDevOpsRequirements && (
+									<div className="jira-sync-panel">
+										<div className="jira-card-header">
+											<div>
+												<h3>Azure DevOps Sync Preview</h3>
+												<p>Preview the managed requirements block that will be written back to Azure DevOps work item descriptions.</p>
+											</div>
+											<div className="jira-connection-summary compact">
+												{azureDevOpsImportedWorkItemIds.map((workItemId) => (
+													<span key={workItemId} className="jira-summary-pill">
+														#{workItemId}
+													</span>
+												))}
+											</div>
+										</div>
+										<div className="panel-form two-cols jira-sync-controls">
+											<div className="form-group">
+												<label>Managed section title</label>
+												<input
+													value={azureDevOpsManagedSectionTitle}
+													onChange={(event) => setAzureDevOpsManagedSectionTitle(event.target.value)}
+													placeholder={DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE}
+												/>
+											</div>
+											<div className="feedback-actions jira-sync-actions">
+												<button
+													className="secondary"
+													onClick={() => previewAzureDevOpsSync()}
+													disabled={authActionDisabled || isPreviewingAzureDevOpsSync || isApplyingAzureDevOpsSync}
+												>
+													{isPreviewingAzureDevOpsSync ? "⏳ Previewing..." : "Preview Azure DevOps Update"}
+												</button>
+												<button
+													onClick={applyAzureDevOpsSync}
+													disabled={
+														authActionDisabled ||
+														isApplyingAzureDevOpsSync ||
+														!azureDevOpsSyncPreview ||
+														!azureDevOpsPreviewHasReadyWorkItem
+													}
+												>
+													{isApplyingAzureDevOpsSync ? "⏳ Syncing..." : "Push Ready Updates"}
+												</button>
+											</div>
+										</div>
+
+										{azureDevOpsSyncPreview && (
+											<div className="jira-sync-results">
+												<div className="workflow-diagnostics-pills">
+													<span className="workflow-diagnostics-pill">Ready {azureDevOpsSyncPreview.ready_work_item_count || 0}</span>
+													<span className="workflow-diagnostics-pill">Conflicts {azureDevOpsSyncPreview.conflict_count || 0}</span>
+													<span className="workflow-diagnostics-pill">
+														Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}
+													</span>
+												</div>
+												<div className="jira-sync-preview-list">
+													{azureDevOpsSyncPreview.work_items?.map((workItem) => (
+														<div key={workItem.work_item_id} className={`jira-sync-preview-card ${workItem.status}`}>
+															<div className="jira-sync-preview-header">
+																<div>
+																	<strong>#{workItem.work_item_id}</strong>
+																	<span>{workItem.work_item_type || "Work Item"}</span>
+																</div>
+																<span className={`jira-status-badge ${workItem.status}`}>{workItem.status}</span>
+															</div>
+															<div className="jira-sync-preview-meta">
+																<span>Requirements: {(workItem.requirement_ids || []).join(", ") || "—"}</span>
+																{workItem.work_item_url ? (
+																	<a href={workItem.work_item_url} target="_blank" rel="noreferrer">
+																		Open in Azure DevOps ↗
+																	</a>
+																) : null}
+															</div>
+															{workItem.conflict_reason ? <p className="jira-sync-preview-warning">{workItem.conflict_reason}</p> : null}
+															{workItem.warning ? <p className="jira-sync-preview-warning">{workItem.warning}</p> : null}
+															<div className="jira-sync-preview-excerpts">
+																<div>
+																	<h4>Current description</h4>
+																	<p>{workItem.existing_description_excerpt || "No description yet."}</p>
+																</div>
+																<div>
+																	<h4>Rendered update</h4>
+																	<p>{workItem.rendered_description_excerpt || "No rendered update available."}</p>
+																</div>
+															</div>
+														</div>
+													))}
+												</div>
+												{azureDevOpsSyncPreview.warnings?.length > 0 && (
+													<ul className="jira-sync-warning-list">
+														{azureDevOpsSyncPreview.warnings.map((warning) => (
+															<li key={warning}>{warning}</li>
+														))}
+													</ul>
+												)}
+											</div>
+										)}
+
+										{azureDevOpsSyncResults && (
+											<div className="jira-sync-results-summary">
+												<h4>Last sync result</h4>
+												<ul className="jira-sync-apply-list">
+													{azureDevOpsSyncResults.results?.map((result) => (
+														<li key={`${result.work_item_id}-${result.status}`}>
+															<strong>#{result.work_item_id}</strong> — {result.status}
+															{result.message ? `: ${result.message}` : ""}
+														</li>
+													))}
+												</ul>
+											</div>
+										)}
+									</div>
+								)}
+
+								{renderRequirementReviewReport()}
+
+								{requirements.length > 0 && (
+									<div className="feedback-section">
+										<h3>Human Feedback</h3>
+										<p className="feedback-description">
+											Provide feedback on the extracted requirements. The AI will refine them based on your input.
+										</p>
+										<textarea
+											className="feedback-textarea"
+											placeholder="Enter your feedback here... e.g., 'Merge REQ-003 and REQ-004 into one', 'Split REQ-001 into multiple requirements', 'REQ-005 is too vague, make it more specific', 'Add a requirement for error handling', etc."
+											value={reqFeedback}
+											onChange={(e) => setReqFeedback(e.target.value)}
+											rows={4}
 										/>
-									)}
+										<div className="feedback-actions">
+											<button
+												onClick={() => parseRequirements(true)}
+												disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
+												className="feedback-button"
+											>
+												{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
+											</button>
+										</div>
+									</div>
+								)}
+
+								<div className="panel-nav">
+									<button onClick={goNext} className="secondary">
+										Next
+									</button>
 								</div>
-							</div>
-						) : (
-							<div className="result-section">
-								<h3>Generated Test Cases</h3>
-								<span className="helper-text">
-									No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis, and
-									diagnostics.
-								</span>
-							</div>
+							</section>
 						)}
 
-						<div className="panel-nav">
-							<button onClick={goPrev} className="secondary">
-								Back
-							</button>
-							<button onClick={goNext} disabled={testCases.length === 0}>
-								Next
-							</button>
-						</div>
-					</section>
-				)}
+						{activeTab === 1 && (
+							<ContextInputsPanel
+								appLink={appLink}
+								setAppLink={setAppLink}
+								prototypeLink={prototypeLink}
+								setPrototypeLink={setPrototypeLink}
+								diagramLinks={diagramLinks}
+								setDiagramLinks={setDiagramLinks}
+								imageLinks={imageLinks}
+								setImageLinks={setImageLinks}
+								hasContextInputs={hasContextInputs}
+								analyzeContext={analyzeContext}
+								isAnalyzingContext={isAnalyzingContext}
+								authActionDisabled={authActionDisabled}
+								enrichedContext={enrichedContext}
+								resetContextAnalysis={resetContextAnalysis}
+								selectedArtifactSourceIds={selectedArtifactSourceIds}
+								setSelectedArtifactSourceIds={setSelectedArtifactSourceIds}
+								goPrev={goPrev}
+								goNext={goNext}
+							/>
+						)}
 
-				{activeTab === 4 && (
-					<AutomationPanel
-						testCases={testCases}
-						executionTargetBaseUrl={executionTargetBaseUrl}
-						setExecutionTargetBaseUrl={setExecutionTargetBaseUrl}
-						executionTargetEnvironment={executionTargetEnvironment}
-						setExecutionTargetEnvironment={setExecutionTargetEnvironment}
-						executionPreview={executionPreview}
-						executionRunResult={executionRunResult}
-						isPreviewingExecution={isPreviewingExecution}
-						isRunningExecution={isRunningExecution}
-						authActionDisabled={authActionDisabled}
-						previewExecution={previewExecution}
-						runApprovedExecution={runApprovedExecution}
-						goPrev={goPrev}
-						goNext={goNext}
-					/>
-				)}
+						{activeTab === 2 && (
+							<TemplateSetupPanel
+								templateName={templateName}
+								setTemplateName={setTemplateName}
+								templateFormat={templateFormat}
+								setTemplateFormat={setTemplateFormat}
+								goPrev={goPrev}
+								goNext={goNext}
+							/>
+						)}
 
-				{activeTab === 5 && (
-					<ExportPanel
-						testCases={testCases}
-						testCaseReview={testCaseReview}
-						exportReviewApproved={exportReviewApproved}
-						exportRequiresOverride={exportRequiresOverride}
-						exportGateLocked={exportGateLocked}
-						draftExportOverrideRequested={draftExportOverrideRequested}
-						setDraftExportOverrideRequested={setDraftExportOverrideRequested}
-						draftExportOverrideReason={draftExportOverrideReason}
-						setDraftExportOverrideReason={setDraftExportOverrideReason}
-						isExporting={isExporting}
-						authActionDisabled={authActionDisabled}
-						exportToFormat={exportToFormat}
-						exportMessage={exportMessage}
-						goPrev={goPrev}
-					/>
-				)}
+						{activeTab === 3 && (
+							<section className="panel">
+								<h2 className="panel-title">Generate Test Cases</h2>
+								<p className="panel-description">
+									Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
+								</p>
+								{requirements.length > 0 && (
+									<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
+										<div>
+											<strong>
+												{upstreamChangedForImpact
+													? "Existing suite needs impact analysis"
+													: canGenerateFromApprovedRequirements
+														? "Ready for approved-requirement generation"
+														: "Approval required before generation"}
+											</strong>
+											<p>
+												{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review • {rejectedRequirementCount}{" "}
+												rejected
+												{upstreamChangedForImpact
+													? ". The current suite is preserved while impact analysis reviews changed inputs."
+													: ". Only approved requirements are sent to the test-case agents."}
+											</p>
+										</div>
+										{!canGenerateFromApprovedRequirements && (
+											<button type="button" className="secondary small" onClick={() => setActiveTab(0)}>
+												Review requirements
+											</button>
+										)}
+									</div>
+								)}
+								<div className="panel-form button-row">
+									{upstreamChangedForImpact ? (
+										<>
+											<button onClick={analyzeImpact} disabled={!canAnalyzeImpact || isAnalyzingImpact || testCaseActionDisabled}>
+												{isAnalyzingImpact
+													? "⏳ Analyzing impact..."
+													: impactChangedItemCount
+														? `Analyze Impact for ${impactChangedItemCount} Changed Item${impactChangedItemCount === 1 ? "" : "s"}`
+														: "Analyze Impact for Changed Items"}
+											</button>
+											<button
+												className="secondary"
+												onClick={() => generateTestCases(false)}
+												disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
+											>
+												{isGenerating ? "⏳ Regenerating..." : `Full Regenerate from ${approvedRequirementCount || 0} Approved`}
+											</button>
+										</>
+									) : (
+										<button
+											onClick={() => generateTestCases(false)}
+											disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
+										>
+											{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
+										</button>
+									)}
+								</div>
+
+								{renderImpactAnalysisPanel()}
+
+								{testCaseReview && (
+									<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
+										<div className="review-banner-header">
+											<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
+											<div className="review-banner-metrics">
+												<span className="review-metric-pill review-metric-pill-strong">{testCaseReviewMeta.scoreLabel}</span>
+												{testCaseReviewMeta.thresholdLabel && (
+													<span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>
+												)}
+											</div>
+										</div>
+										<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
+										{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
+											<ul className="review-issues">
+												{testCaseReview.blocking_issues.slice(0, 3).map((issue) => (
+													<li key={issue}>{issue}</li>
+												))}
+											</ul>
+										)}
+									</div>
+								)}
+
+								{hasGenerateResults ? (
+									<div className="generate-results-workspace">
+										<div className="generate-results-header">
+											<div>
+												<h3>Generation Results</h3>
+												<p>
+													Review the generated cases, traceability, coverage, analysis, and workflow diagnostics without scrolling through a
+													wall of artifacts.
+												</p>
+											</div>
+											<span className="generate-results-summary-pill">
+												{testCases.length} test case{testCases.length === 1 ? "" : "s"}
+											</span>
+										</div>
+										<div className="generate-results-tabs" role="tablist" aria-label="Generation result sections">
+											{generateResultTabs.map((tab) => (
+												<button
+													type="button"
+													key={tab.id}
+													className={`generate-result-tab ${activeGenerateResultTab === tab.id ? "active" : ""} ${tab.variant ? `generate-result-tab-${tab.variant}` : ""}`}
+													onClick={() => setActiveGenerateResultTab(tab.id)}
+													role="tab"
+													aria-selected={activeGenerateResultTab === tab.id}
+													aria-controls="generate-result-panel"
+												>
+													<span>{tab.label}</span>
+													<span className={`generate-result-tab-badge ${tab.variant ? `generate-result-tab-badge-${tab.variant}` : ""}`}>
+														{tab.badge}
+													</span>
+												</button>
+											))}
+										</div>
+										<div
+											id="generate-result-panel"
+											className="generate-result-panel"
+											role="tabpanel"
+											aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
+										>
+											{activeGenerateResultTab === "diagnostics" &&
+												(renderWorkflowDiagnostics(
+													"Test-case workflow diagnostics",
+													testCaseWorkflowDiagnostics,
+													appliedTestCaseWorkflowSettings,
+													testCaseIterationHistory
+												) || (
+													<div className="generate-result-empty">
+														<h3>Diagnostics</h3>
+														<p>No workflow diagnostics are available for this run.</p>
+													</div>
+												))}
+
+											{activeGenerateResultTab === "coverage" && (
+												<ScenarioCoveragePanel
+													coveragePlan={coveragePlan}
+													coveredScenarioTotal={coveredScenarioTotal}
+													plannedScenarioTotal={plannedScenarioTotal}
+													mustHaveCoveredScenarioTotal={mustHaveCoveredScenarioTotal}
+													mustHaveScenarioTotal={mustHaveScenarioTotal}
+													missingScenarioCount={missingScenarioCount}
+													getRequirementScenarioSummary={getRequirementScenarioSummary}
+												/>
+											)}
+
+											{activeGenerateResultTab === "analysis" && (
+												<RequirementAnalysisPanel
+													requirementAnalysis={requirementAnalysis}
+													coverageMetrics={coverageMetrics}
+													requirementAnalysisGapCount={requirementAnalysisGapCount}
+													getRequirementAnalysisSummary={getRequirementAnalysisSummary}
+													getRequirementAnalysisGaps={getRequirementAnalysisGaps}
+												/>
+											)}
+
+											{activeGenerateResultTab === "traceability" && (
+												<TraceabilityMatrixPanel
+													approvedRequirements={approvedRequirements}
+													requirementTraceabilityRows={requirementTraceabilityRows}
+													tracedRequirementCount={tracedRequirementCount}
+													coverageMetrics={coverageMetrics}
+													testCases={testCases}
+												/>
+											)}
+
+											{activeGenerateResultTab === "test-cases" && (
+												<GeneratedTestCasesView
+													testCases={testCases}
+													templateFormat={templateFormat}
+													expandedRows={expandedRows}
+													onToggleRowExpansion={toggleRowExpansion}
+													feedback={feedback}
+													onFeedbackChange={setFeedback}
+													onRefineTestCases={() => generateTestCases(true)}
+													isGenerating={isGenerating}
+													testCaseActionDisabled={testCaseActionDisabled}
+												/>
+											)}
+										</div>
+									</div>
+								) : (
+									<div className="result-section">
+										<h3>Generated Test Cases</h3>
+										<span className="helper-text">
+											No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis, and
+											diagnostics.
+										</span>
+									</div>
+								)}
+
+								<div className="panel-nav">
+									<button onClick={goPrev} className="secondary">
+										Back
+									</button>
+									<button onClick={goNext} disabled={testCases.length === 0}>
+										Next
+									</button>
+								</div>
+							</section>
+						)}
+
+						{activeTab === 4 && (
+							<AutomationPanel
+								testCases={testCases}
+								executionTargetBaseUrl={executionTargetBaseUrl}
+								setExecutionTargetBaseUrl={setExecutionTargetBaseUrl}
+								executionTargetEnvironment={executionTargetEnvironment}
+								setExecutionTargetEnvironment={setExecutionTargetEnvironment}
+								executionPreview={executionPreview}
+								executionRunResult={executionRunResult}
+								isPreviewingExecution={isPreviewingExecution}
+								isRunningExecution={isRunningExecution}
+								authActionDisabled={authActionDisabled}
+								previewExecution={previewExecution}
+								runApprovedExecution={runApprovedExecution}
+								goPrev={goPrev}
+								goNext={goNext}
+							/>
+						)}
+
+						{activeTab === 5 && (
+							<ExportPanel
+								testCases={testCases}
+								testCaseReview={testCaseReview}
+								exportReviewApproved={exportReviewApproved}
+								exportRequiresOverride={exportRequiresOverride}
+								exportGateLocked={exportGateLocked}
+								draftExportOverrideRequested={draftExportOverrideRequested}
+								setDraftExportOverrideRequested={setDraftExportOverrideRequested}
+								draftExportOverrideReason={draftExportOverrideReason}
+								setDraftExportOverrideReason={setDraftExportOverrideReason}
+								isExporting={isExporting}
+								authActionDisabled={authActionDisabled}
+								exportToFormat={exportToFormat}
+								exportMessage={exportMessage}
+								goPrev={goPrev}
+							/>
+						)}
+					</div>
+				</main>
 			</div>
 		</div>
 	);

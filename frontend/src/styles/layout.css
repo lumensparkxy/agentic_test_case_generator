@@ -608,6 +608,156 @@
 	background: #1a1a1a;
 }
 
+/* Workflow Navigation */
+.workflow-shell {
+	display: grid;
+	grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+	gap: 1.15rem;
+	align-items: start;
+}
+
+.workflow-main {
+	min-width: 0;
+}
+
+.workflow-navigation-drawer {
+	position: sticky;
+	top: 1rem;
+	display: grid;
+	gap: 0.9rem;
+	padding: 0.9rem;
+	border: 1px solid rgba(191, 219, 254, 0.75);
+	border-radius: var(--radius-lg);
+	background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+	box-shadow: var(--shadow-sm);
+}
+
+.workflow-navigation-header {
+	display: grid;
+	gap: 0.2rem;
+	padding: 0.15rem 0.25rem 0.35rem;
+}
+
+.workflow-navigation-header span {
+	color: #64748b;
+	font-size: 0.72rem;
+	font-weight: 800;
+	text-transform: uppercase;
+}
+
+.workflow-navigation-header strong {
+	color: #0f172a;
+	font-size: 1rem;
+	line-height: 1.2;
+}
+
+.workflow-navigation-list {
+	display: grid;
+	gap: 0.4rem;
+}
+
+.workflow-navigation-item {
+	display: grid;
+	grid-template-columns: 2rem minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 0.65rem;
+	width: 100%;
+	padding: 0.72rem 0.7rem;
+	border: 1px solid transparent;
+	border-radius: 1rem;
+	background: transparent;
+	color: #475569;
+	text-align: left;
+	box-shadow: none;
+}
+
+.workflow-navigation-item:hover {
+	border-color: rgba(59, 130, 246, 0.22);
+	background: #eff6ff;
+	color: #0f172a;
+	transform: none;
+}
+
+.workflow-navigation-item.active {
+	border-color: rgba(37, 99, 235, 0.28);
+	background: #dbeafe;
+	color: #0f172a;
+	box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+}
+
+.workflow-navigation-marker {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2rem;
+	height: 2rem;
+	border-radius: 9999px;
+	background: #f1f5f9;
+	color: #64748b;
+	font-size: 0.78rem;
+	font-weight: 850;
+}
+
+.workflow-navigation-item.active .workflow-navigation-marker {
+	background: #2563eb;
+	color: #ffffff;
+}
+
+.workflow-navigation-item.complete .workflow-navigation-marker {
+	background: #dcfce7;
+	color: #047857;
+}
+
+.workflow-navigation-item.blocked .workflow-navigation-marker {
+	background: #ffedd5;
+	color: #c2410c;
+}
+
+.workflow-navigation-copy {
+	display: grid;
+	gap: 0.05rem;
+	min-width: 0;
+}
+
+.workflow-navigation-copy strong,
+.workflow-navigation-copy span {
+	overflow-wrap: anywhere;
+}
+
+.workflow-navigation-copy strong {
+	color: inherit;
+	font-size: 0.9rem;
+	font-weight: 780;
+}
+
+.workflow-navigation-copy span {
+	color: #64748b;
+	font-size: 0.72rem;
+}
+
+.workflow-navigation-state {
+	justify-self: end;
+	padding: 0.18rem 0.42rem;
+	border-radius: 9999px;
+	background: rgba(255, 255, 255, 0.72);
+	color: #64748b;
+	font-size: 0.68rem;
+	font-weight: 800;
+}
+
+.workflow-navigation-item.active .workflow-navigation-state {
+	background: #ffffff;
+	color: #1d4ed8;
+}
+
+.workflow-navigation-item.complete .workflow-navigation-state {
+	color: #047857;
+}
+
+.workflow-navigation-item.blocked .workflow-navigation-state {
+	color: #c2410c;
+}
+
 /* Tab Navigation */
 .tabs {
 	display: flex;

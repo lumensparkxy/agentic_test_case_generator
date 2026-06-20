@@ -40,6 +40,8 @@ should preserve when changing the application.
 - Main backend runtime entry: `backend/app/main.py`.
 - Frontend runtime entry: `frontend/src/main.jsx`.
 - Frontend orchestration component: `frontend/src/App.jsx`.
+- Frontend workflow navigation shell:
+  `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`.
 - Frontend project cockpit component:
   `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`.
 - Frontend style entry point: `frontend/src/styles/index.css`.
