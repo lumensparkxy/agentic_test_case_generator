@@ -120,6 +120,8 @@ Evidence: `.github/workflows/ci.yml`.
 - JIRA and Azure DevOps sync tests verify direct source metadata paths avoid
   unnecessary Firestore mapping reads where possible.
 - Frontend focused E2E tests mock API responses and use a local Vite server.
+- Projects menu E2E coverage verifies project selection, refresh, inline
+  creation, and the absence of the former QA Project workspace card.
 - Workflow shell collapse tests keep localStorage-backed layout preferences
   browser-local and verify that collapsed left/right rails do not change
   workflow behavior. Icon-specific assertions check that destination markers

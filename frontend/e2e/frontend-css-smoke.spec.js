@@ -204,6 +204,8 @@ test.describe("Frontend CSS smoke", () => {
 
 			await page.goto("/");
 			await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+			await expect(page.getByRole("heading", { name: /^QA Project$/i })).toHaveCount(0);
+			await expect(page.getByText(/^No project selected$/i)).toHaveCount(0);
 			await expectNoHorizontalOverflow(page, `${label} requirements`);
 
 			await page

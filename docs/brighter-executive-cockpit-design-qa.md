@@ -14,7 +14,8 @@ Final result: passed.
 
 ## Visual Contract
 
-- Top app bar remains the global product and project control surface.
+- Top app bar remains the global product and project control surface, including
+  project selection, refresh, and creation.
 - Left workflow navigation owns Upload, Context, Template, Generate,
   Automation, and Export, uses line icons for destination recognition, and can
   collapse to a compact icon rail.
@@ -45,6 +46,7 @@ Final result: passed.
 
 - Left workflow navigation destinations and active state.
 - Workflow destination icons and left/right directional collapse affordances.
+- Projects menu selection, refresh, and inline creation.
 - Generate command banner, primary/secondary orchestrator actions, and blocker
   messaging.
 - Right rail status overview, stage progress, blockers, agent timeline, last
