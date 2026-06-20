@@ -524,8 +524,14 @@ test.describe("Orchestrator cockpit", () => {
 		await expect(rail.getByText(/Impact QA · revision 5/i)).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Analyze Impact$/i })).toBeVisible();
 		await expect(cockpit.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
+		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
+		await expect(rail.getByLabel("Stage progress")).toContainText("Impact Analysis");
+		await expect(rail.getByLabel("Blockers")).toContainText("1");
 		await expect(rail.getByText("Test cases are stale because requirements changed.")).toBeVisible();
+		await expect(rail.getByLabel("Agent Timeline")).toContainText("Generate completed");
 		await expect(rail.getByText("Test case agent produced baseline suite.")).toBeVisible();
+		await expect(rail.getByLabel("Last run")).toContainText("Generate");
+		await expect(rail.getByLabel("Project evidence")).toContainText("Pending");
 		await expect(rail.getByText(/Test Cases snap-test-v1/i)).toBeVisible();
 
 		await page.reload();
