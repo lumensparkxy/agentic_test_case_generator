@@ -171,6 +171,11 @@ class WorkflowDiagnostics(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     best_iteration: Optional[int] = None
     attempt_count: int = 1
+    shard_count: int = 0
+    worker_count: int = 0
+    failed_shard_count: int = 0
+    fallback_shard_count: int = 0
+    merge_warnings: List[str] = Field(default_factory=list)
 
 
 class WorkflowIteration(BaseModel):

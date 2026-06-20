@@ -29,6 +29,10 @@ Primary constraints:
   requirements, use cases, impact, test cases, automation, execution, review,
   and reporting, with local adapters registered behind an ADK-compatible
   dispatcher boundary.
+- Use-case planning is split from full test-case generation. The orchestrator
+  `use_cases` specialist uses a bounded backend coordinator that shards
+  requirements, merges requirement analysis and coverage plans centrally, and
+  leaves project snapshot writes to the existing router/service flow.
 - Orchestrator run records, timeline events, and checkpoints are persisted
   under QA projects so action progress, blockers, retries, produced snapshots,
   and execution links can resume after reloads or backend restarts.
@@ -52,7 +56,7 @@ flowchart LR
     auth["Auth layer\nFirebase ID token\nlegacy JWT\nGoogle credential login"]
     models["Pydantic contracts\nbackend/app/contracts\nbackend/app/models.py facade"]
 
-    agents["Agent workflows\nADK/Gemini\nrequirements, analysis,\ntest generation, impact update,\nautomation"]
+    agents["Agent workflows\nADK/Gemini\nrequirements, use-case planning,\ntest generation, impact update,\nautomation"]
     services["Domain services\naudit, billing, versioning,\nproject lifecycle, orchestrator,\ngrounding, execution, reporting"]
     adapters["Provider adapters\nJIRA Cloud\nAzure DevOps"]
     petf["Plain-English test framework\nspec parser -> IR ->\nPlaywright generator"]
@@ -111,10 +115,12 @@ Typical generate flow:
    workflow, checks billing where relevant, validates Pydantic request models,
    and delegates work.
 4. Agent modules such as `backend/app/adk_client.py`,
-   `backend/app/agents/analysis_agent.py`, and
-   `backend/app/agents/test_case_agent.py` orchestrate model calls, parsing,
-   and workflow loops. Focused test-case helper modules own coverage metrics,
-   review scoring, deterministic fallback output, and response hydration.
+   `backend/app/agents/analysis_agent.py`,
+   `backend/app/agents/use_case_agent.py`, and
+   `backend/app/agents/test_case_agent.py` orchestrate model calls, shard
+   coordination, parsing, and workflow loops. Focused helper modules own
+   coverage metrics, review scoring, deterministic fallback output, and
+   response hydration.
 5. Service modules persist audit/version/billing/integration metadata through
    repository boundaries and the shared Firestore adapter where configured, or
    return warnings/fallback behavior where the code explicitly supports missing
@@ -270,7 +276,7 @@ test-case snapshots automatically.
 | FastAPI app | App construction, middleware, CORS, router registration, health, metrics | Feature endpoint logic beyond global middleware | `backend/app/main.py` |
 | Routers | HTTP contracts, auth dependencies, audit lifecycle calls, billing access calls, endpoint-level errors | Provider HTTP implementation or model prompt design | `backend/app/routers/*.py` |
 | Models | Pydantic request/response/data contracts grouped by domain with a compatibility facade | Runtime business behavior | `backend/app/contracts/*.py`, `backend/app/models.py` |
-| Agents | Requirement extraction, analysis, test-case generation orchestration, specialist task contracts/registry, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
+| Agents | Requirement extraction, analysis, bounded use-case planning, test-case generation orchestration, specialist task contracts/registry, impact recommendation logic, review/refinement loops, deterministic fallback generation, coverage metrics, response hydration, automation POM generation | HTTP transport and UI rendering | `backend/app/adk_client.py`, `backend/app/agents/*.py` |
 | Services | Billing, audit, versioning, project lifecycle, orchestrator decisions, orchestrator run persistence, impact update apply, reporting, persistence repository boundaries, execution conversion/run, context grounding | Route decorators or React state | `backend/app/services/*.py` |
 | Adapters | JIRA and Azure DevOps remote API calls and provider-specific normalization | Cross-provider workflow policy | `backend/app/adapters/*.py` |
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
@@ -291,6 +297,7 @@ test-case snapshots automatically.
 | Orchestrator decision model | `orchestrator_service.py`, orchestrator contracts in `contracts/orchestrator.py` | Derives deterministic next actions and blockers from durable project snapshots |
 | Orchestrator run persistence | `orchestrator_run_service.py`, orchestrator run/checkpoint/event contracts in `contracts/orchestrator.py` | Keeps action progress, retries, blockers, produced snapshots, and execution links resumable across reloads and backend restarts |
 | Specialist agent task registry | `specialist_contracts.py`, `specialist_registry.py` | Gives orchestrator actions stable typed task envelopes/results and lets local or future ADK adapters plug in behind the same contract |
+| Use-case stage coordinator | `use_case_agent.py`, `test_case_coverage.py`, `analysis_agent.py` | Lets the orchestrator generate requirement analysis and scenario coverage plans without producing/discarding full test cases, while keeping merge validation deterministic |
 | Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe or unsupported public URLs and returns partial enrichment warnings instead of crashing |
