@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 from types import SimpleNamespace
 import sys
@@ -112,6 +113,76 @@ def _settings(root: Path) -> ExecutionSettings:
         runtime_cwd=runtime,
         max_cases_per_request=20,
     )
+
+
+def _write_playwright_report(artifacts_dir: Path, statuses_by_case_id: dict[str, str]) -> None:
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "html-report").mkdir(parents=True, exist_ok=True)
+    suites = []
+    for case_id, status in statuses_by_case_id.items():
+        playwright_status = "expected" if status == "passed" else "unexpected"
+        suites.append(
+            {
+                "title": f"{case_id}.spec.ts",
+                "file": f"{case_id}.spec.ts",
+                "specs": [
+                    {
+                        "title": f"{case_id} generated case",
+                        "id": f"{case_id}-spec",
+                        "file": f"{case_id}.spec.ts",
+                        "ok": status == "passed",
+                        "tests": [
+                            {
+                                "annotations": [
+                                    {"type": "specId", "description": case_id},
+                                    {"type": "caseId", "description": case_id},
+                                ],
+                                "status": playwright_status,
+                                "results": [
+                                    {
+                                        "status": status,
+                                        "stdout": [{"text": f"{case_id} stdout"}],
+                                        "stderr": [],
+                                        "errors": [] if status == "passed" else [{"message": f"{case_id} assertion failed"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    report = {
+        "config": {},
+        "errors": [],
+        "stats": {
+            "expected": sum(1 for status in statuses_by_case_id.values() if status == "passed"),
+            "unexpected": sum(1 for status in statuses_by_case_id.values() if status != "passed"),
+            "flaky": 0,
+            "skipped": 0,
+        },
+        "suites": [{"title": "generated", "file": "", "specs": [], "suites": suites}],
+    }
+    (artifacts_dir / "results.json").write_text(json.dumps(report), encoding="utf-8")
+
+
+def _fake_batch_run(statuses_by_case_id: dict[str, str], *, returncode: int = 0):
+    def _run(spec_paths, *, generated_dir, artifacts_dir, config_path, cwd):
+        artifacts = Path(artifacts_dir)
+        _write_playwright_report(artifacts, statuses_by_case_id)
+        return SimpleNamespace(
+            returncode=returncode,
+            stdout="batch stdout",
+            stderr="batch stderr",
+            generated_spec_path=None,
+            generated_spec_paths=tuple(Path(path) for path in spec_paths),
+            paths=SimpleNamespace(
+                artifacts_dir=artifacts,
+                html_report_dir=artifacts / "html-report",
+            ),
+        )
+
+    return _run
 
 
 class ExecutionServiceTests(unittest.TestCase):
@@ -276,49 +347,39 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(unsupported_step.action, "Execute SAP GUI transaction SU01")
         self.assertEqual(unsupported_step.test_data, "SAP user ID")
 
-    def test_run_compiles_and_invokes_local_runner_once_per_executable_candidate(self) -> None:
+    def test_run_compiles_candidates_and_invokes_playwright_once_per_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = _settings(root)
-            fake_run = SimpleNamespace(
-                returncode=0,
-                stdout="passed",
-                stderr="",
-                generated_spec_path=root / "generated" / "tc_001.spec.ts",
-                paths=SimpleNamespace(
-                    artifacts_dir=root / "artifacts" / "run",
-                    html_report_dir=root / "artifacts" / "run" / "html-report",
-                ),
-            )
 
-            with patch("app.services.execution_service.run_local_playwright", return_value=fake_run) as runner:
-                response = run_execution([_browser_case()], settings=settings)
+            with patch(
+                "app.services.execution_service.run_local_playwright_specs",
+                side_effect=_fake_batch_run({"tc_001": "passed", "tc_002": "passed"}),
+            ) as runner:
+                response = run_execution([_browser_case(), _browser_case("TC-002")], settings=settings)
 
         self.assertEqual(response.status, "passed")
-        self.assertEqual(response.summary.passed, 1)
+        self.assertEqual(response.summary.passed, 2)
+        self.assertEqual(len(response.results), 2)
         self.assertEqual(response.results[0].status, "passed")
         self.assertTrue(response.results[0].ir_path.endswith("tc_001.ir.json"))
-        self.assertEqual(response.playwright_report_paths, [str(root / "artifacts" / "run" / "html-report")])
-        self.assertEqual(response.results[0].report_json_path, str(root / "artifacts" / "run" / "results.json"))
-        self.assertEqual(response.results[0].playwright_report_path, str(root / "artifacts" / "run" / "html-report"))
+        self.assertTrue(response.results[1].ir_path.endswith("tc_002.ir.json"))
+        self.assertEqual(len(response.playwright_report_paths), 1)
+        self.assertTrue(response.playwright_report_paths[0].endswith("artifacts/playwright/run/html-report"))
+        self.assertTrue(response.results[0].report_json_path.endswith("artifacts/playwright/run/results.json"))
+        self.assertEqual(response.results[0].playwright_report_path, response.playwright_report_paths[0])
+        self.assertEqual(response.results[1].playwright_report_path, response.playwright_report_paths[0])
         runner.assert_called_once()
+        self.assertEqual(len(runner.call_args.args[0]), 2)
 
     def test_run_compiles_documentation_url_assertion_before_invoking_runner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = _settings(root)
-            fake_run = SimpleNamespace(
-                returncode=0,
-                stdout="passed",
-                stderr="",
-                generated_spec_path=root / "generated" / "tc_doc.spec.ts",
-                paths=SimpleNamespace(
-                    artifacts_dir=root / "artifacts" / "run",
-                    html_report_dir=root / "artifacts" / "run" / "html-report",
-                ),
-            )
-
-            with patch("app.services.execution_service.run_local_playwright", return_value=fake_run) as runner:
+            with patch(
+                "app.services.execution_service.run_local_playwright_specs",
+                side_effect=_fake_batch_run({"tc_doc": "passed"}),
+            ) as runner:
                 response = run_execution(
                     [_documentation_case()],
                     target_base_url="https://playwright.dev/python/",
@@ -330,28 +391,48 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertTrue(response.results[0].ir_path.endswith("tc_doc.ir.json"))
         runner.assert_called_once()
 
-    def test_run_returns_failed_when_one_playwright_candidate_fails(self) -> None:
+    def test_run_maps_per_case_status_from_consolidated_playwright_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = _settings(root)
-            fake_run = SimpleNamespace(
-                returncode=1,
-                stdout="",
-                stderr="expect failed",
-                generated_spec_path=root / "generated" / "tc_001.spec.ts",
-                paths=SimpleNamespace(
-                    artifacts_dir=root / "artifacts" / "run",
-                    html_report_dir=root / "artifacts" / "run" / "html-report",
-                ),
-            )
 
-            with patch("app.services.execution_service.run_local_playwright", return_value=fake_run):
-                response = run_execution([_browser_case()], settings=settings)
+            with patch(
+                "app.services.execution_service.run_local_playwright_specs",
+                side_effect=_fake_batch_run({"tc_001": "passed", "tc_002": "failed"}, returncode=1),
+            ):
+                response = run_execution([_browser_case(), _browser_case("TC-002")], settings=settings)
 
         self.assertEqual(response.status, "failed")
         self.assertEqual(response.summary.failed, 1)
-        self.assertEqual(response.results[0].status, "failed")
-        self.assertEqual(response.results[0].returncode, 1)
+        self.assertEqual(response.summary.passed, 1)
+        self.assertEqual([item.status for item in response.results], ["passed", "failed"])
+        self.assertEqual(response.results[1].returncode, 1)
+        self.assertEqual(response.results[1].stderr, "batch stderr")
+        self.assertEqual(response.results[1].issues[0].message, "tc_002 assertion failed")
+
+    def test_run_keeps_selected_non_executable_cases_skipped_outside_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = _settings(root)
+            manual_case = _browser_case("TC-MANUAL")
+            manual_case.automation_status = "Manual"
+
+            with patch(
+                "app.services.execution_service.run_local_playwright_specs",
+                side_effect=_fake_batch_run({"tc_001": "passed"}),
+            ) as runner:
+                response = run_execution(
+                    [_browser_case(), manual_case],
+                    selected_test_case_ids=["TC-001", "TC-MANUAL"],
+                    settings=settings,
+                )
+
+        self.assertEqual(response.status, "passed")
+        self.assertEqual(response.summary.passed, 1)
+        self.assertEqual(response.summary.skipped, 1)
+        self.assertEqual([item.status for item in response.results], ["passed", "skipped"])
+        self.assertEqual(response.results[1].source_test_case_id, "TC-MANUAL")
+        runner.assert_called_once()
 
     def test_run_does_not_publish_report_paths_when_runner_fails_before_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -359,7 +440,7 @@ class ExecutionServiceTests(unittest.TestCase):
             settings = _settings(root)
             runner_error = LocalPlaywrightRunnerError((ValidationIssue("$", "npx was not found", "runner.npx_missing"),))
 
-            with patch("app.services.execution_service.run_local_playwright", side_effect=runner_error):
+            with patch("app.services.execution_service.run_local_playwright_specs", side_effect=runner_error):
                 response = run_execution([_browser_case()], settings=settings)
 
         self.assertEqual(response.status, "failed")

@@ -44,7 +44,8 @@ class LocalPlaywrightRun:
     """Completed local Playwright invocation metadata."""
 
     command: tuple[str, ...]
-    generated_spec_path: Path
+    generated_spec_path: Path | None
+    generated_spec_paths: tuple[Path, ...]
     paths: LocalPlaywrightPaths
     returncode: int
     stdout: str
@@ -79,15 +80,70 @@ def run_local_playwright(
 
     working_dir = Path(cwd) if cwd is not None else Path.cwd()
     spec_path = generate_local_playwright_spec(ir_path, generated_dir=generated_dir)
+    return run_local_playwright_specs(
+        [spec_path],
+        generated_dir=generated_dir,
+        artifacts_dir=artifacts_dir,
+        config_path=config_path,
+        extra_args=extra_args,
+        cwd=working_dir,
+        env_overrides=_example_app_env(ir_path),
+    )
+
+
+def run_local_playwright_batch(
+    ir_paths: Sequence[str | Path],
+    *,
+    generated_dir: str | Path = DEFAULT_GENERATED_DIR,
+    artifacts_dir: str | Path = DEFAULT_ARTIFACTS_DIR,
+    config_path: str | Path = DEFAULT_CONFIG_PATH,
+    extra_args: Sequence[str] = (),
+    cwd: str | Path | None = None,
+) -> LocalPlaywrightRun:
+    """Generate Playwright specs from multiple IR files and execute them in one run."""
+
+    if not ir_paths:
+        raise LocalPlaywrightRunnerError((ValidationIssue("$", "at least one IR file is required", "runner.no_specs"),))
+
+    working_dir = Path(cwd) if cwd is not None else Path.cwd()
+    spec_paths = tuple(generate_local_playwright_spec(ir_path, generated_dir=generated_dir) for ir_path in ir_paths)
+    return run_local_playwright_specs(
+        spec_paths,
+        generated_dir=generated_dir,
+        artifacts_dir=artifacts_dir,
+        config_path=config_path,
+        extra_args=extra_args,
+        cwd=working_dir,
+        env_overrides=_example_app_env(ir_paths[0]),
+    )
+
+
+def run_local_playwright_specs(
+    spec_paths: Sequence[str | Path],
+    *,
+    generated_dir: str | Path = DEFAULT_GENERATED_DIR,
+    artifacts_dir: str | Path = DEFAULT_ARTIFACTS_DIR,
+    config_path: str | Path = DEFAULT_CONFIG_PATH,
+    extra_args: Sequence[str] = (),
+    cwd: str | Path | None = None,
+    env_overrides: Mapping[str, str] | None = None,
+) -> LocalPlaywrightRun:
+    """Execute already-generated Playwright specs in one local Playwright Test run."""
+
+    if not spec_paths:
+        raise LocalPlaywrightRunnerError((ValidationIssue("$", "at least one generated spec file is required", "runner.no_specs"),))
+
+    working_dir = Path(cwd) if cwd is not None else Path.cwd()
+    generated_spec_paths = tuple(Path(path) for path in spec_paths)
     paths = _build_paths(generated_dir=generated_dir, artifacts_dir=artifacts_dir)
     paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    spec_hash_before = _file_sha256(spec_path)
+    spec_hashes_before = {path: _file_sha256(path) for path in generated_spec_paths}
 
     command = (
         "npx",
         "playwright",
         "test",
-        str(spec_path),
+        *(str(path) for path in generated_spec_paths),
         "--config",
         str(config_path),
         *tuple(extra_args),
@@ -95,7 +151,7 @@ def run_local_playwright(
     env = {
         "PETF_PLAYWRIGHT_TEST_DIR": str(paths.generated_dir),
         "PETF_PLAYWRIGHT_ARTIFACTS_DIR": str(paths.artifacts_dir),
-        **_example_app_env(ir_path),
+        **(env_overrides or {}),
         **_node_resolution_env(working_dir),
     }
 
@@ -113,15 +169,16 @@ def run_local_playwright(
             (ValidationIssue("$", "npx was not found; install Node.js and npm before running Playwright", "runner.npx_missing"),)
         ) from exc
 
-    spec_hash_after = _file_sha256(spec_path)
-    if spec_hash_after != spec_hash_before:
+    mutated_paths = [path for path, digest in spec_hashes_before.items() if _file_sha256(path) != digest]
+    if mutated_paths:
         raise LocalPlaywrightRunnerError(
-            (ValidationIssue(str(spec_path), "Playwright runner modified the generated spec file", "runner.generated_spec_mutated"),)
+            tuple(ValidationIssue(str(path), "Playwright runner modified the generated spec file", "runner.generated_spec_mutated") for path in mutated_paths)
         )
 
     return LocalPlaywrightRun(
         command=command,
-        generated_spec_path=spec_path,
+        generated_spec_path=generated_spec_paths[0] if len(generated_spec_paths) == 1 else None,
+        generated_spec_paths=generated_spec_paths,
         paths=paths,
         returncode=completed.returncode,
         stdout=completed.stdout,
@@ -188,4 +245,6 @@ __all__ = [
     "LocalPlaywrightRunnerError",
     "generate_local_playwright_spec",
     "run_local_playwright",
+    "run_local_playwright_batch",
+    "run_local_playwright_specs",
 ]

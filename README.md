@@ -160,7 +160,9 @@ The Playwright config uses your installed Microsoft Edge browser by default thro
 
 - `npx playwright install msedge`
 
-Generated execution files are written under `EXECUTION_ARTIFACT_ROOT` and ignored by git. The internal handoff is generated `TestCase` JSON from the webapp, not Excel.
+Generated execution files are written under `EXECUTION_ARTIFACT_ROOT` and ignored by git. Each execution run writes shared specs under
+`generated/playwright/`, per-case IR under `ir/`, and one consolidated Playwright `results.json` plus `html-report` under
+`artifacts/playwright/run/`. The internal handoff is generated `TestCase` JSON from the webapp, not Excel.
 
 ### 3.0.2) Clean generated artifacts
 

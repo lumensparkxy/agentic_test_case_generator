@@ -70,17 +70,20 @@ function PlaywrightExecutionReport({ report }) {
 						</p>
 					)}
 					{visibleReportPaths.length ? (
-						<ul className="playwright-report-paths">
-							{visibleReportPaths.map((path) => (
-								<li key={path}>
-									<code>{path}</code>
-								</li>
-							))}
-						</ul>
+						<>
+							<p className="helper-text">Consolidated report path:</p>
+							<ul className="playwright-report-paths">
+								{visibleReportPaths.map((path) => (
+									<li key={path}>
+										<code>{path}</code>
+									</li>
+								))}
+							</ul>
+						</>
 					) : (
 						<p className="helper-text">No Playwright report path was returned for this execution run.</p>
 					)}
-					{hiddenReportPathCount > 0 && <p className="helper-text">+ {hiddenReportPathCount} more report paths</p>}
+					{hiddenReportPathCount > 0 && <p className="helper-text">+ {hiddenReportPathCount} additional report paths</p>}
 				</div>
 			) : (
 				<div className="playwright-report-card empty">
