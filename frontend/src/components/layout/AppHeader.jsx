@@ -45,10 +45,12 @@ function AuthPanel({
 				<span className="auth-message">Checking session...</span>
 			) : isAuthenticated ? (
 				<div className="auth-user">
-					{currentUser?.picture && <img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />}
-					<div className="auth-user-meta">
-						<strong>{currentUser?.name}</strong>
-						<span>{currentUser?.email || getAuthProviderLabel(currentUser?.provider) || currentUser?.sub}</span>
+					<div className="auth-user-identity">
+						{currentUser?.picture && <img src={currentUser.picture} alt={currentUser.name} className="auth-avatar" />}
+						<div className="auth-user-meta">
+							<strong>{currentUser?.name}</strong>
+							<span>{currentUser?.email || getAuthProviderLabel(currentUser?.provider) || currentUser?.sub}</span>
+						</div>
 					</div>
 					<button type="button" onClick={handleLogout} className="secondary auth-logout-btn" disabled={isAuthenticating}>
 						{isAuthenticating ? "Signing out..." : "Sign Out"}
@@ -279,7 +281,7 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 	);
 }
 
-export default function CommandDeckHeader({
+export default function AppNavigationControls({
 	isAuthenticated,
 	billingStatusItems,
 	statusUsageItems,
@@ -310,7 +312,7 @@ export default function CommandDeckHeader({
 	const healthLabel = isAuthenticated ? "System healthy" : "Sign in required";
 
 	return (
-		<header className="command-header">
+		<div className="app-navigation-controls" aria-label="Workspace controls">
 			<ProjectMenu
 				projects={projects}
 				currentProject={currentProject}
@@ -325,48 +327,46 @@ export default function CommandDeckHeader({
 				onRefreshProjects={onRefreshProjects}
 			/>
 
-			<div className="command-actions">
-				<details className={`command-health ${isAuthenticated ? "status-authenticated" : ""}`}>
-					<summary>
-						<span className="command-health-dot" aria-hidden="true" />
-						<span className="status-message">{healthLabel}</span>
-					</summary>
-					<div className="command-health-details">
-						<p>
-							{isAuthenticated ? "Session active. Workflow messages stay in the active workspace." : "Sign in to enable workflow actions."}
-						</p>
-						{isAuthenticated && (
-							<StatusUsagePills
-								billingStatusItems={billingStatusItems}
-								statusUsageItems={statusUsageItems}
-								isUsageLoading={isUsageLoading}
-								isBillingLoading={isBillingLoading}
-							/>
-						)}
-					</div>
-				</details>
-				<button
-					type="button"
-					className="settings-open-btn"
-					data-testid="settings-open-button"
-					onClick={onOpenSettings}
-					aria-label="Open settings"
-				>
-					Settings
-				</button>
-				<AuthPanel
-					isVerifyingSession={isVerifyingSession}
-					isAuthenticated={isAuthenticated}
-					currentUser={currentUser}
-					getAuthProviderLabel={getAuthProviderLabel}
-					handleLogout={handleLogout}
-					isAuthenticating={isAuthenticating}
-					hasFirebaseAuthConfig={hasFirebaseAuthConfig}
-					hasVisibleAuthProviders={hasVisibleAuthProviders}
-					openSignInDialog={openSignInDialog}
-					currentAuthProviderLabel={currentAuthProviderLabel}
-				/>
-			</div>
-		</header>
+			<details className={`command-health ${isAuthenticated ? "status-authenticated" : ""}`}>
+				<summary>
+					<span className="command-health-dot" aria-hidden="true" />
+					<span className="status-message">{healthLabel}</span>
+				</summary>
+				<div className="command-health-details">
+					<p>
+						{isAuthenticated ? "Session active. Workflow messages stay in the active workspace." : "Sign in to enable workflow actions."}
+					</p>
+					{isAuthenticated && (
+						<StatusUsagePills
+							billingStatusItems={billingStatusItems}
+							statusUsageItems={statusUsageItems}
+							isUsageLoading={isUsageLoading}
+							isBillingLoading={isBillingLoading}
+						/>
+					)}
+				</div>
+			</details>
+			<button
+				type="button"
+				className="settings-open-btn"
+				data-testid="settings-open-button"
+				onClick={onOpenSettings}
+				aria-label="Open settings"
+			>
+				Settings
+			</button>
+			<AuthPanel
+				isVerifyingSession={isVerifyingSession}
+				isAuthenticated={isAuthenticated}
+				currentUser={currentUser}
+				getAuthProviderLabel={getAuthProviderLabel}
+				handleLogout={handleLogout}
+				isAuthenticating={isAuthenticating}
+				hasFirebaseAuthConfig={hasFirebaseAuthConfig}
+				hasVisibleAuthProviders={hasVisibleAuthProviders}
+				openSignInDialog={openSignInDialog}
+				currentAuthProviderLabel={currentAuthProviderLabel}
+			/>
+		</div>
 	);
 }
