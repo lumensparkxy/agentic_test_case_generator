@@ -91,6 +91,11 @@ const renderRunResults = (runResult) => {
 	}
 	const summary = runResult.summary || {};
 	const resultMessage = `Execution ${runResult.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`;
+	const directReportPaths = Array.isArray(runResult.playwright_report_paths) ? runResult.playwright_report_paths : [];
+	const resultReportPaths = Array.isArray(runResult.results)
+		? runResult.results.map((result) => result?.playwright_report_path).filter(Boolean)
+		: [];
+	const reportPaths = [...new Set([...directReportPaths, ...resultReportPaths])];
 
 	return (
 		<div className="result-section">
@@ -115,6 +120,12 @@ const renderRunResults = (runResult) => {
 			{runResult.artifacts_root && (
 				<p className="helper-text">
 					Artifacts root: <code>{runResult.artifacts_root}</code>
+				</p>
+			)}
+			{reportPaths.length > 0 && (
+				<p className="helper-text">
+					Consolidated report: <code>{reportPaths[0]}</code>
+					{reportPaths.length > 1 ? ` (+ ${reportPaths.length - 1} more)` : ""}
 				</p>
 			)}
 			{runResult.results?.length > 0 && (

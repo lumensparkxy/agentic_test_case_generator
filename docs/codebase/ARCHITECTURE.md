@@ -351,9 +351,12 @@ test-case snapshots automatically.
   collection lookup. Audit dead letters can also be mirrored to an optional
   Firestore sink for compliance deployments. PostgreSQL schema, adapter, and
   migration work remain future implementation stories.
-- The execution runtime shells out to `npx playwright test`. The artifact root,
-  runtime cwd, browser channel, and generated paths need careful configuration
-  in every deployment environment.
+- The execution runtime shells out to `npx playwright test`. Each execution run
+  compiles selected executable candidates into shared run-local specs, invokes
+  Playwright once, and maps the consolidated JSON report back to per-case
+  results through generated `caseId` annotations. The artifact root, runtime
+  cwd, browser channel, and generated paths need careful configuration in every
+  deployment environment.
 
 ## 7) Evidence
 

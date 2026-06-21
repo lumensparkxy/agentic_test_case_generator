@@ -97,7 +97,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Frontend format check | Yes | Prettier formatting baseline | `npm run format:check` |
 | Frontend build | Yes | React/Vite production build | `npm run build` |
 | Frontend E2E | Yes | Mocked browser workflow slices | `frontend/e2e/export-approval-gate.spec.js`, `workflow.spec.js`, `jira-workflow.spec.js` |
-| Backend execution runtime | Partial | Playwright Test availability and generated spec execution | Runtime list check in validation; full run covered by `scripts/e2e_playwright_workflow.py` when backend and credentials are available |
+| Backend execution runtime | Partial | Playwright Test availability, generated spec execution, consolidated run report mapping | Unit tests cover one Playwright invocation per run and per-case status mapping from the consolidated JSON report; runtime list check remains in validation; full run covered by `scripts/e2e_playwright_workflow.py` when backend and credentials are available |
 | Coverage thresholds | [TODO] | [TODO] | No tracked coverage tool or threshold was found |
 
 ## 4) Mocking and Isolation Strategy
@@ -160,7 +160,7 @@ The first successful next-version workflow is captured by
 6. CSV, XLSX, and JSON export.
 7. Playwright POM stub generation.
 8. Execution preview.
-9. Selected Playwright execution run and report artifact generation.
+9. Selected Playwright execution run with one consolidated report artifact and per-case result rows.
 
 Prerequisites:
 
