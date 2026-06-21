@@ -166,7 +166,7 @@ class AutomationEndpointTests(unittest.TestCase):
             status="failed",
             run_id="exec_staging",
             artifacts_root="/tmp/exec_staging",
-            playwright_report_paths=["/tmp/exec_staging/artifacts/playwright/tc_001/html-report"],
+            playwright_report_paths=["/tmp/exec_staging/artifacts/playwright/run/html-report"],
             preview=ExecutionPreviewResponse(),
             summary=ExecutionRunSummary(passed=0, failed=1),
         )
@@ -202,11 +202,11 @@ class AutomationEndpointTests(unittest.TestCase):
         self.assertEqual(report_call["source_snapshot_id"], "snap-exec-v1")
         self.assertEqual(report_call["idempotency_key"], "reports.execution_summary:req-exec-staging:staging")
         self.assertEqual(report_call["payload"]["artifacts_root"], "/tmp/exec_staging")
-        self.assertEqual(report_call["payload"]["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/tc_001/html-report"])
+        self.assertEqual(report_call["payload"]["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
         self.assertEqual(record_call["target_environment"], "staging")
         self.assertEqual(record_call["target_base_url"], "https://staging.example.test/app")
         self.assertEqual(record_call["artifacts_root"], "/tmp/exec_staging")
-        self.assertEqual(record_call["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/tc_001/html-report"])
+        self.assertEqual(record_call["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
         self.assertEqual(record_call["source_snapshot_id"], "snap-test-v1")
         self.assertEqual(record_call["selected_test_case_ids"], ["TC-001"])
         self.assertEqual(record_call["idempotency_key"], "automation.execution.run_record:req-exec-staging:staging")

@@ -12,7 +12,11 @@ import yaml
 
 from plain_english_test_framework.compiler import CompilerError, compile_spec_file
 from plain_english_test_framework.ir_validator import IrValidationError
-from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, run_local_playwright
+from plain_english_test_framework.local_runner import (
+    LocalPlaywrightRunnerError,
+    generate_local_playwright_spec,
+    run_local_playwright_specs,
+)
 from plain_english_test_framework.playwright_generator import PlaywrightGenerationError
 from plain_english_test_framework.spec_parser import SpecValidationError
 from plain_english_test_framework.validation import ValidationIssue
@@ -87,6 +91,22 @@ UNSUPPORTED_DOMAIN_TERMS = (
 class _ConvertedStep:
     kind: str
     body: str
+
+
+@dataclass(frozen=True)
+class _PreparedExecutionCandidate:
+    candidate: ExecutionCandidate
+    spec_path: Path
+    ir_path: Path
+    generated_spec_path: Path
+
+
+@dataclass(frozen=True)
+class _PlaywrightCaseResult:
+    status: str
+    stdout: str = ""
+    stderr: str = ""
+    issues: tuple[ExecutionIssue, ...] = ()
 
 
 def preview_execution(
@@ -170,6 +190,7 @@ def run_execution(
     ir_dir = run_root / "ir"
     generated_dir = run_root / "generated" / "playwright"
     artifacts_root = run_root / "artifacts" / "playwright"
+    run_artifacts_dir = artifacts_root / "run"
     env_path = run_root / "environment.yaml"
     data_dir = run_root / "data"
 
@@ -178,20 +199,33 @@ def run_execution(
     data_dir.mkdir(parents=True, exist_ok=True)
     env_path.write_text(yaml.safe_dump({"baseUrl": _normalize_base_url(target_base_url or settings.default_base_url)}, sort_keys=False), encoding="utf-8")
 
-    results: list[ExecutionRunItem] = []
+    result_by_candidate_id: dict[str, ExecutionRunItem] = {}
+    prepared_candidates: list[_PreparedExecutionCandidate] = []
     for candidate in executable_candidates:
-        results.append(
-            _run_candidate(
-                candidate,
-                specs_dir=specs_dir,
-                ir_dir=ir_dir,
-                data_dir=data_dir,
-                env_path=env_path,
-                generated_dir=generated_dir,
-                artifacts_root=artifacts_root,
-                settings=settings,
-            )
+        prepared, invalid_result = _prepare_candidate(
+            candidate,
+            specs_dir=specs_dir,
+            ir_dir=ir_dir,
+            data_dir=data_dir,
+            env_path=env_path,
+            generated_dir=generated_dir,
+            artifacts_dir=run_artifacts_dir,
         )
+        if invalid_result:
+            result_by_candidate_id[candidate.id] = invalid_result
+        elif prepared:
+            prepared_candidates.append(prepared)
+
+    if prepared_candidates:
+        for item in _run_prepared_candidates(
+            prepared_candidates,
+            generated_dir=generated_dir,
+            artifacts_dir=run_artifacts_dir,
+            settings=settings,
+        ):
+            result_by_candidate_id[item.id] = item
+
+    results = [result_by_candidate_id[candidate.id] for candidate in executable_candidates if candidate.id in result_by_candidate_id]
 
     for candidate in selected_non_executable:
         results.append(
@@ -212,7 +246,7 @@ def run_execution(
 
     summary = _summarize_run(results, preview)
     status = "passed" if summary.failed == 0 and summary.invalid == 0 else "failed"
-    playwright_report_paths = [item.playwright_report_path for item in results if item.playwright_report_path]
+    playwright_report_paths = list(dict.fromkeys(item.playwright_report_path for item in results if item.playwright_report_path))
     return ExecutionRunResponse(
         status=status,
         run_id=run_id,
@@ -431,7 +465,7 @@ def _render_structured_steps(steps: list[_ConvertedStep]) -> list[str]:
     return rendered
 
 
-def _run_candidate(
+def _prepare_candidate(
     candidate: ExecutionCandidate,
     *,
     specs_dir: Path,
@@ -439,12 +473,10 @@ def _run_candidate(
     data_dir: Path,
     env_path: Path,
     generated_dir: Path,
-    artifacts_root: Path,
-    settings: ExecutionSettings,
-) -> ExecutionRunItem:
+    artifacts_dir: Path,
+) -> tuple[_PreparedExecutionCandidate | None, ExecutionRunItem | None]:
     spec_path = specs_dir / f"{candidate.id}.yaml"
     ir_path = ir_dir / f"{candidate.id}.ir.json"
-    artifacts_dir = artifacts_root / candidate.id
     try:
         spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
         ir = compile_spec_file(
@@ -454,41 +486,243 @@ def _run_candidate(
             data_dir=data_dir,
         )
         ir_path.write_text(json.dumps(ir.raw, indent=2, sort_keys=True), encoding="utf-8")
-        run = run_local_playwright(
-            ir_path,
+        generated_spec_path = generate_local_playwright_spec(ir_path, generated_dir=generated_dir)
+    except (CompilerError, SpecValidationError, IrValidationError, PlaywrightGenerationError) as exc:
+        return None, _invalid_execution_item(candidate, ir_path=ir_path, artifacts_dir=artifacts_dir, issues=_issues_from_exception(exc))
+
+    return (
+        _PreparedExecutionCandidate(
+            candidate=candidate,
+            spec_path=spec_path,
+            ir_path=ir_path,
+            generated_spec_path=generated_spec_path,
+        ),
+        None,
+    )
+
+
+def _run_prepared_candidates(
+    prepared_candidates: list[_PreparedExecutionCandidate],
+    *,
+    generated_dir: Path,
+    artifacts_dir: Path,
+    settings: ExecutionSettings,
+) -> list[ExecutionRunItem]:
+    try:
+        run = run_local_playwright_specs(
+            [prepared.generated_spec_path for prepared in prepared_candidates],
             generated_dir=generated_dir,
             artifacts_dir=artifacts_dir,
             config_path=settings.playwright_config_path,
             cwd=settings.runtime_cwd,
         )
-    except (CompilerError, SpecValidationError, IrValidationError, PlaywrightGenerationError, LocalPlaywrightRunnerError) as exc:
-        return ExecutionRunItem(
-            id=candidate.id,
-            source_test_case_id=candidate.source_test_case_id,
-            title=candidate.title,
-            status="invalid",
-            spec_id=candidate.id,
-            ir_path=str(ir_path) if ir_path.exists() else None,
-            artifacts_dir=str(artifacts_dir),
-            issues=_issues_from_exception(exc),
+    except LocalPlaywrightRunnerError as exc:
+        issues = _issues_from_exception(exc)
+        return [
+            _invalid_execution_item(
+                prepared.candidate,
+                ir_path=prepared.ir_path,
+                generated_spec_path=prepared.generated_spec_path,
+                artifacts_dir=artifacts_dir,
+                issues=issues,
+            )
+            for prepared in prepared_candidates
+        ]
+
+    report_json_path = run.paths.artifacts_dir / "results.json"
+    html_report_dir = run.paths.html_report_dir
+    report_json_path_value = str(report_json_path) if report_json_path.exists() else None
+    html_report_dir_value = str(html_report_dir) if html_report_dir.exists() else None
+    case_results, report_issues = _load_playwright_case_results(report_json_path)
+
+    results: list[ExecutionRunItem] = []
+    for prepared in prepared_candidates:
+        candidate = prepared.candidate
+        case_result = case_results.get(candidate.id)
+        if case_result:
+            result_status = case_result.status
+            result_stdout = case_result.stdout or run.stdout
+            result_stderr = case_result.stderr or run.stderr
+            result_issues = list(case_result.issues)
+        else:
+            result_status = "invalid"
+            result_stdout = run.stdout
+            result_stderr = run.stderr
+            result_issues = [
+                *report_issues,
+                ExecutionIssue(
+                    path="$",
+                    message="No matching Playwright JSON result was found for this execution candidate.",
+                    code="playwright.result_missing",
+                ),
+            ]
+
+        results.append(
+            ExecutionRunItem(
+                id=candidate.id,
+                source_test_case_id=candidate.source_test_case_id,
+                title=candidate.title,
+                status=result_status,
+                spec_id=candidate.id,
+                ir_path=str(prepared.ir_path),
+                generated_spec_path=str(prepared.generated_spec_path),
+                artifacts_dir=str(run.paths.artifacts_dir),
+                report_json_path=report_json_path_value,
+                playwright_report_path=html_report_dir_value,
+                returncode=run.returncode,
+                stdout=result_stdout,
+                stderr=result_stderr,
+                issues=result_issues,
+            )
         )
 
-    status = "passed" if run.returncode == 0 else "failed"
+    return results
+
+
+def _invalid_execution_item(
+    candidate: ExecutionCandidate,
+    *,
+    ir_path: Path,
+    artifacts_dir: Path,
+    issues: list[ExecutionIssue],
+    generated_spec_path: Path | None = None,
+) -> ExecutionRunItem:
     return ExecutionRunItem(
         id=candidate.id,
         source_test_case_id=candidate.source_test_case_id,
         title=candidate.title,
-        status=status,
+        status="invalid",
         spec_id=candidate.id,
-        ir_path=str(ir_path),
-        generated_spec_path=str(run.generated_spec_path),
-        artifacts_dir=str(run.paths.artifacts_dir),
-        report_json_path=str(run.paths.artifacts_dir / "results.json"),
-        playwright_report_path=str(run.paths.html_report_dir),
-        returncode=run.returncode,
-        stdout=run.stdout,
-        stderr=run.stderr,
+        ir_path=str(ir_path) if ir_path.exists() else None,
+        generated_spec_path=str(generated_spec_path) if generated_spec_path else None,
+        artifacts_dir=str(artifacts_dir),
+        issues=issues,
     )
+
+
+def _load_playwright_case_results(report_json_path: Path) -> tuple[dict[str, _PlaywrightCaseResult], list[ExecutionIssue]]:
+    if not report_json_path.exists():
+        return {}, [
+            ExecutionIssue(
+                path="$",
+                message=f"Playwright JSON report was not found at {report_json_path}.",
+                code="playwright.report_missing",
+            )
+        ]
+
+    try:
+        report = json.loads(report_json_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {}, [
+            ExecutionIssue(
+                path="$",
+                message=f"Playwright JSON report could not be parsed: {exc}.",
+                code="playwright.report_parse",
+            )
+        ]
+    if not isinstance(report, dict):
+        return {}, [
+            ExecutionIssue(
+                path="$",
+                message="Playwright JSON report root must be an object.",
+                code="playwright.report_type",
+            )
+        ]
+
+    results: dict[str, _PlaywrightCaseResult] = {}
+    for test in _iter_playwright_tests(report):
+        case_id = _annotation_description(test, "caseId") or _annotation_description(test, "specId")
+        if not case_id:
+            continue
+        results[case_id] = _playwright_case_result(test)
+    return results, []
+
+
+def _iter_playwright_tests(report: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    for suite in report.get("suites") or []:
+        yield from _iter_playwright_suite_tests(suite)
+
+
+def _iter_playwright_suite_tests(suite: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    for spec in suite.get("specs") or []:
+        for test in spec.get("tests") or []:
+            yield test
+    for child_suite in suite.get("suites") or []:
+        yield from _iter_playwright_suite_tests(child_suite)
+
+
+def _annotation_description(test: dict[str, Any], annotation_type: str) -> str | None:
+    annotations = list(test.get("annotations") or [])
+    for result in test.get("results") or []:
+        annotations.extend(result.get("annotations") or [])
+
+    for annotation in annotations:
+        if annotation.get("type") == annotation_type and annotation.get("description"):
+            return str(annotation["description"])
+    return None
+
+
+def _playwright_case_result(test: dict[str, Any]) -> _PlaywrightCaseResult:
+    results = list(test.get("results") or [])
+    return _PlaywrightCaseResult(
+        status=_playwright_status(test),
+        stdout=_playwright_stdio_text(results, "stdout"),
+        stderr=_playwright_stdio_text(results, "stderr"),
+        issues=tuple(_playwright_issues(results)),
+    )
+
+
+def _playwright_status(test: dict[str, Any]) -> str:
+    test_status = str(test.get("status") or "").strip()
+    result_statuses = {str(result.get("status") or "").strip() for result in test.get("results") or []}
+
+    if test_status == "skipped" or result_statuses == {"skipped"}:
+        return "skipped"
+    if test_status in {"expected", "flaky"}:
+        return "passed"
+    if "passed" in result_statuses and not (result_statuses & {"failed", "timedOut", "interrupted"}):
+        return "passed"
+    return "failed"
+
+
+def _playwright_stdio_text(results: list[dict[str, Any]], field: str) -> str:
+    parts: list[str] = []
+    for result in results:
+        for entry in result.get(field) or []:
+            if isinstance(entry, dict):
+                if "text" in entry:
+                    parts.append(str(entry["text"]))
+                elif "buffer" in entry:
+                    parts.append(str(entry["buffer"]))
+    return "".join(parts)
+
+
+def _playwright_issues(results: list[dict[str, Any]]) -> list[ExecutionIssue]:
+    issues: list[ExecutionIssue] = []
+    for index, result in enumerate(results):
+        if result.get("error"):
+            issues.append(
+                ExecutionIssue(
+                    path=f"$.results[{index}].error",
+                    message=_playwright_error_message(result["error"]),
+                    code="playwright.error",
+                )
+            )
+        for error_index, error in enumerate(result.get("errors") or []):
+            issues.append(
+                ExecutionIssue(
+                    path=f"$.results[{index}].errors[{error_index}]",
+                    message=_playwright_error_message(error),
+                    code="playwright.error",
+                )
+            )
+    return issues
+
+
+def _playwright_error_message(error: Any) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("value") or error)
+    return str(error)
 
 
 def _summarize_run(results: list[ExecutionRunItem], preview: ExecutionPreviewResponse) -> ExecutionRunSummary:
