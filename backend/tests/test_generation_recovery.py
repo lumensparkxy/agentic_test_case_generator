@@ -173,6 +173,8 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertIsNone(result["workflow_diagnostics"]["failure_reason"])
         self.assertEqual(result["workflow_diagnostics"]["recovery_reason"], "coverage_augmentation")
         self.assertEqual(len(result["workflow_diagnostics"]["parser_recoveries"]), 2)
+        self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"]["model_recovered"], len(partial_model_cases))
+        self.assertGreater(result["workflow_diagnostics"]["generation_source_counts"]["deterministic_coverage_completion"], 0)
         self.assertFalse(any("recovered usable test-case JSON" in warning for warning in result["workflow_diagnostics"]["warnings"]))
         self.assertTrue(
             any(
@@ -191,6 +193,11 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertGreater(evidence["deterministic_additions_total"], 0)
         self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
         self.assertEqual(evidence["passes"][1]["review_status"], "approved")
+        model_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "model_recovered"]
+        completion_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_coverage_completion"]
+        self.assertEqual([test_case.source_case_id for test_case in model_cases], ["TC-MODEL-001"])
+        self.assertTrue(all(test_case.coverage_completion_reason == "coverage_augmentation" for test_case in completion_cases))
+        self.assertTrue(all(test_case.generation_pass_id == evidence["passes"][1]["pass_id"] for test_case in completion_cases))
 
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:
         requirements = [Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password.")]
@@ -214,6 +221,10 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(evidence["deterministic_additions_total"], len(result["test_cases"]))
         self.assertEqual(evidence["passes"][0]["raw_output_summary"]["model_case_count"], 0)
         self.assertEqual(evidence["passes"][0]["raw_output_summary"]["fallback_case_count"], len(result["test_cases"]))
+        self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"], {"deterministic_full_fallback": len(result["test_cases"])})
+        self.assertTrue(all(test_case.generation_source == "deterministic_full_fallback" for test_case in result["test_cases"]))
+        self.assertTrue(all(test_case.generation_pass_id == evidence["passes"][0]["pass_id"] for test_case in result["test_cases"]))
+        self.assertTrue(all(test_case.source_case_id for test_case in result["test_cases"]))
 
 
 if __name__ == "__main__":

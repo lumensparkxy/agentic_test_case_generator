@@ -44,6 +44,19 @@ class TestCase(BaseModel):
     tags: Optional[List[str]] = None  # Includes linked requirement IDs
     linked_requirement_ids: List[str] = Field(default_factory=list)  # Structured requirement traceability
     scenario_refs: List[str] = Field(default_factory=list)  # Coverage-plan scenario IDs implemented by this case
+    generation_source: Optional[
+        Literal[
+            "model",
+            "model_recovered",
+            "parallel_retry",
+            "deterministic_full_fallback",
+            "deterministic_coverage_completion",
+        ]
+    ] = None
+    generation_pass_id: Optional[str] = None
+    source_shard_id: Optional[str] = None
+    source_case_id: Optional[str] = None
+    coverage_completion_reason: Optional[str] = None
     source_refs: Optional[List[str]] = None  # Grounded context artifact IDs used by this test case
     artifact_set_id: Optional[str] = None
     artifact_item_id: Optional[str] = None

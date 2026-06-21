@@ -83,6 +83,11 @@ STATE_VALIDATION_FEEDBACK = "validation_feedback"
 STATE_COVERAGE_PLAN = "coverage_plan"
 STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 EVIDENCE_PAYLOAD_STRATEGY = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
+GENERATION_SOURCE_MODEL = "model"
+GENERATION_SOURCE_MODEL_RECOVERED = "model_recovered"
+GENERATION_SOURCE_PARALLEL_RETRY = "parallel_retry"
+GENERATION_SOURCE_DETERMINISTIC_FULL_FALLBACK = "deterministic_full_fallback"
+GENERATION_SOURCE_DETERMINISTIC_COVERAGE_COMPLETION = "deterministic_coverage_completion"
 
 
 def _get_model_settings_or_none() -> Any | None:
@@ -108,6 +113,7 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
         "warnings": [],
         "best_iteration": None,
         "attempt_count": attempt_count,
+        "generation_source_counts": {},
     }
 
 
@@ -294,6 +300,63 @@ def _raw_output_summary(*, model_case_count: int, fallback_case_count: int = 0) 
     }
 
 
+def _model_generation_source(diagnostics: Optional[Dict[str, Any]]) -> str:
+    diagnostics = diagnostics or {}
+    return GENERATION_SOURCE_MODEL_RECOVERED if diagnostics.get("parser_recoveries") else GENERATION_SOURCE_MODEL
+
+
+def _with_test_case_provenance(
+    test_cases: List[Dict[str, Any]],
+    *,
+    generation_source: str,
+    generation_pass_id: Optional[str],
+    source_shard_id: Optional[str] = None,
+    coverage_completion_reason: Optional[str] = None,
+    preserve_existing: bool = False,
+) -> List[Dict[str, Any]]:
+    enriched: List[Dict[str, Any]] = []
+    for raw_test_case in test_cases or []:
+        test_case = dict(raw_test_case)
+        original_id = str(test_case.get("id") or "").strip()
+        if original_id and (not preserve_existing or not test_case.get("source_case_id")):
+            test_case["source_case_id"] = original_id
+        if not preserve_existing or not test_case.get("generation_source"):
+            test_case["generation_source"] = generation_source
+        if generation_pass_id and (not preserve_existing or not test_case.get("generation_pass_id")):
+            test_case["generation_pass_id"] = generation_pass_id
+        if source_shard_id and (not preserve_existing or not test_case.get("source_shard_id")):
+            test_case["source_shard_id"] = source_shard_id
+        if coverage_completion_reason and (not preserve_existing or not test_case.get("coverage_completion_reason")):
+            test_case["coverage_completion_reason"] = coverage_completion_reason
+        enriched.append(test_case)
+    return enriched
+
+
+def _generation_source_counts(test_cases: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for test_case in test_cases or []:
+        source = str(test_case.get("generation_source") or "").strip()
+        if source:
+            counts[source] = counts.get(source, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _update_generation_source_counts(diagnostics: Dict[str, Any], test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+    diagnostics["generation_source_counts"] = _generation_source_counts(test_cases)
+    return diagnostics
+
+
+def _last_generation_pass_id(evidence: Optional[Dict[str, Any]], *, exclude_pass_types: Optional[set[str]] = None) -> Optional[str]:
+    exclude_pass_types = exclude_pass_types or set()
+    for pass_evidence in reversed(list((evidence or {}).get("passes") or [])):
+        if pass_evidence.get("pass_type") in exclude_pass_types:
+            continue
+        pass_id = str(pass_evidence.get("pass_id") or "").strip()
+        if pass_id:
+            return pass_id
+    return None
+
+
 def _coverage_gap_counts(
     *,
     original_test_cases: List[Dict[str, Any]],
@@ -369,13 +432,14 @@ def _generation_pass_evidence(
     deterministic_counts: Optional[Dict[str, int]] = None,
     prompt_metadata: Optional[Dict[str, Any]] = None,
     shards: Optional[List[Dict[str, Any]]] = None,
+    pass_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     diagnostics = diagnostics or {}
     deterministic_counts = deterministic_counts or {}
     full_fallback = pass_type == "deterministic_full_fallback"
     used_fallback = bool(diagnostics.get("used_fallback")) or full_fallback
     return {
-        "pass_id": str(uuid.uuid4()),
+        "pass_id": pass_id or str(uuid.uuid4()),
         "pass_type": pass_type,
         "model_name": model_name,
         "requirement_count": len(requirements or []),
@@ -1739,6 +1803,8 @@ def _merge_parallel_test_cases(
     shard_results: List[_ParallelTestCaseShardResult],
     requirements: List[Requirement],
     coverage_plan: List[Dict[str, Any]],
+    generation_mode: str,
+    generation_pass_id: str,
 ) -> tuple[List[Dict[str, Any]], List[str]]:
     requirement_id_set = {requirement.id for requirement in requirements}
     scenario_by_id = _scenario_lookup(coverage_plan)
@@ -1747,7 +1813,20 @@ def _merge_parallel_test_cases(
     raw_cases: List[Dict[str, Any]] = []
 
     for result in sorted(shard_results, key=lambda item: item.shard.index):
-        raw_cases.extend(dict(test_case) for test_case in result.test_cases)
+        if result.used_fallback:
+            generation_source = GENERATION_SOURCE_DETERMINISTIC_FULL_FALLBACK
+        elif generation_mode == "parallel_retry":
+            generation_source = GENERATION_SOURCE_PARALLEL_RETRY
+        else:
+            generation_source = _model_generation_source(result.diagnostics)
+        raw_cases.extend(
+            _with_test_case_provenance(
+                list(result.test_cases or []),
+                generation_source=generation_source,
+                generation_pass_id=generation_pass_id,
+                source_shard_id=result.shard.shard_id,
+            )
+        )
 
     def sort_key(item: tuple[int, Dict[str, Any]]) -> tuple[int, int]:
         index, test_case = item
@@ -1891,6 +1970,7 @@ def _run_parallel_test_case_generation_sync(
             worker_count=worker_count,
         )
 
+        generation_pass_id = str(uuid.uuid4())
         result_by_index: Dict[int, _ParallelTestCaseShardResult] = {}
         with ThreadPoolExecutor(max_workers=max(1, worker_count)) as executor:
             future_by_shard = {
@@ -1920,8 +2000,15 @@ def _run_parallel_test_case_generation_sync(
                     )
 
         shard_results = [result_by_index[shard.index] for shard in shards]
-        merged_test_cases, merge_warnings = _merge_parallel_test_cases(shard_results, requirements, coverage_plan)
+        merged_test_cases, merge_warnings = _merge_parallel_test_cases(
+            shard_results,
+            requirements,
+            coverage_plan,
+            generation_mode,
+            generation_pass_id,
+        )
         _merge_parallel_diagnostics(diagnostics, shard_results, merge_warnings)
+        _update_generation_source_counts(diagnostics, merged_test_cases)
         review = _heuristic_test_case_review(
             merged_test_cases,
             requirements,
@@ -1991,6 +2078,7 @@ def _run_parallel_test_case_generation_sync(
                     human_feedback=human_feedback,
                 ),
                 shards=shard_evidence,
+                pass_id=generation_pass_id,
             ),
         )
         return {
@@ -2093,6 +2181,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
     approved = bool(workflow.get("approved", False))
     coverage_plan = _hydrate_coverage_plan(normalized_coverage_plan, requirements)
     requirement_analysis = _hydrate_requirement_analysis(raw_requirement_analysis, requirements)
+    workflow_diagnostics = _update_generation_source_counts(dict(workflow.get("workflow_diagnostics") or {}), serialized)
 
     return {
         "test_cases": test_cases,
@@ -2103,7 +2192,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "requirement_analysis": requirement_analysis,
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
-        "workflow_diagnostics": public_workflow_diagnostics(dict(workflow.get("workflow_diagnostics") or {})),
+        "workflow_diagnostics": public_workflow_diagnostics(workflow_diagnostics),
         "generation_evidence": dict(workflow.get("generation_evidence") or {}),
     }
 
@@ -2281,6 +2370,15 @@ def generate_test_cases(
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if settings is not None and not workflow.get("generation_evidence"):
         diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+        sequential_generation_pass_id = str(uuid.uuid4()) if raw_test_cases else None
+        if raw_test_cases:
+            raw_test_cases = _with_test_case_provenance(
+                list(raw_test_cases),
+                generation_source=_model_generation_source(diagnostics),
+                generation_pass_id=sequential_generation_pass_id,
+            )
+            workflow["test_cases"] = raw_test_cases
+            workflow["workflow_diagnostics"] = _update_generation_source_counts(diagnostics, raw_test_cases)
         workflow["generation_evidence"] = _append_generation_pass(
             _new_generation_evidence(
                 requirements=payload.requirements,
@@ -2306,12 +2404,19 @@ def generate_test_cases(
                     template=payload.template,
                     human_feedback=payload.feedback,
                 ),
+                pass_id=sequential_generation_pass_id,
             ),
         )
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
         record_agent_fallback(workflow=operation or "testcases.generate", reason="fallback_generated_artifacts")
+        fallback_generation_pass_id = str(uuid.uuid4())
         raw_test_cases = _fallback_raw_test_cases(payload.requirements, payload.context, coverage_plan=coverage_plan)
+        raw_test_cases = _with_test_case_provenance(
+            raw_test_cases,
+            generation_source=GENERATION_SOURCE_DETERMINISTIC_FULL_FALLBACK,
+            generation_pass_id=fallback_generation_pass_id,
+        )
         fallback_review = _heuristic_test_case_review(
             raw_test_cases,
             payload.requirements,
@@ -2335,6 +2440,7 @@ def generate_test_cases(
             workflow_diagnostics["warnings"],
             "Test-case fallback produced deterministic draft artifacts because the generation workflow returned no test cases.",
         )
+        _update_generation_source_counts(workflow_diagnostics, raw_test_cases)
         generation_evidence = _append_generation_pass(
             dict(
                 workflow.get("generation_evidence")
@@ -2369,6 +2475,7 @@ def generate_test_cases(
                     template=payload.template,
                     human_feedback=payload.feedback,
                 ),
+                pass_id=fallback_generation_pass_id,
             ),
         )
         workflow = {
@@ -2420,6 +2527,7 @@ def generate_test_cases(
             coverage_plan,
         )
         if len(recovery_test_cases) > len(raw_test_cases):
+            original_test_case_count = len(raw_test_cases)
             recovery_review = _heuristic_test_case_review(
                 recovery_test_cases,
                 payload.requirements,
@@ -2431,6 +2539,22 @@ def generate_test_cases(
             current_review = dict(workflow.get("review") or {})
             if _prefer_review(recovery_review, current_review):
                 workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+                completion_generation_pass_id = str(uuid.uuid4())
+                source_generation_pass_id = _last_generation_pass_id(
+                    dict(workflow.get("generation_evidence") or {}),
+                    exclude_pass_types={GENERATION_SOURCE_DETERMINISTIC_COVERAGE_COMPLETION},
+                ) or str(uuid.uuid4())
+                recovery_test_cases = _with_test_case_provenance(
+                    recovery_test_cases[:original_test_case_count],
+                    generation_source=_model_generation_source(workflow_diagnostics),
+                    generation_pass_id=source_generation_pass_id,
+                    preserve_existing=True,
+                ) + _with_test_case_provenance(
+                    recovery_test_cases[original_test_case_count:],
+                    generation_source=GENERATION_SOURCE_DETERMINISTIC_COVERAGE_COMPLETION,
+                    generation_pass_id=completion_generation_pass_id,
+                    coverage_completion_reason="coverage_augmentation",
+                )
                 deterministic_counts = _coverage_gap_counts(
                     original_test_cases=raw_test_cases,
                     augmented_test_cases=recovery_test_cases,
@@ -2454,6 +2578,7 @@ def generate_test_cases(
                     workflow_diagnostics["warnings"],
                     recovery_warning,
                 )
+                _update_generation_source_counts(workflow_diagnostics, recovery_test_cases)
                 iteration_history = list(workflow.get("iteration_history") or [])
                 iteration_history.append(
                     _make_history_entry(
@@ -2486,12 +2611,13 @@ def generate_test_cases(
                         review=recovery_review,
                         model_case_count=0,
                         merged_case_count=len(recovery_test_cases),
-                        fallback_case_count=max(0, len(recovery_test_cases) - len(raw_test_cases)),
+                        fallback_case_count=max(0, len(recovery_test_cases) - original_test_case_count),
                         deterministic_counts=deterministic_counts,
                         prompt_metadata={
                             "raw_prompt_stored": False,
                             "source": "deterministic coverage completion",
                         },
+                        pass_id=completion_generation_pass_id,
                     ),
                 )
                 workflow = {

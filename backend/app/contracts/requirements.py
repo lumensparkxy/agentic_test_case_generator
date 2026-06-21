@@ -176,6 +176,7 @@ class WorkflowDiagnostics(BaseModel):
     failed_shard_count: int = 0
     fallback_shard_count: int = 0
     merge_warnings: List[str] = Field(default_factory=list)
+    generation_source_counts: Dict[str, int] = Field(default_factory=dict)
 
 
 class WorkflowIteration(BaseModel):

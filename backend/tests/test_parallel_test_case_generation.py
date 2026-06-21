@@ -107,6 +107,7 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertEqual(len(evidence["passes"][0]["shards"]), 3)
         self.assertTrue(all(shard["raw_output_count"] > 0 for shard in evidence["passes"][0]["shards"]))
         self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
+        self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"], {"model": len(result["test_cases"])})
         GenerateTestCasesResponse(**result)
 
     def test_parallel_merge_remaps_duplicate_ids_and_repairs_traceability(self) -> None:
@@ -123,6 +124,10 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertEqual(ids, [f"TC-{index:03d}" for index in range(1, len(test_cases) + 1)])
         self.assertTrue(all(test_case.linked_requirement_ids for test_case in test_cases))
         self.assertTrue(all(len(test_case.scenario_refs) == len(set(test_case.scenario_refs)) for test_case in test_cases))
+        self.assertTrue(all(test_case.generation_source == "model" for test_case in test_cases))
+        self.assertTrue(all(test_case.source_case_id == "TC-001" for test_case in test_cases))
+        self.assertTrue(all(test_case.source_shard_id for test_case in test_cases))
+        self.assertTrue(all(test_case.generation_pass_id == result["generation_evidence"]["passes"][0]["pass_id"] for test_case in test_cases))
         self.assertIn("Remapped worker-generated test-case IDs", " ".join(result["workflow_diagnostics"]["merge_warnings"]))
         self.assertEqual(result["coverage_metrics"]["scenario_coverage_ratio"], 1.0)
 
@@ -154,6 +159,13 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertEqual(sum(shard["fallback_case_count"] for shard in shard_evidence), expected_fallback_count)
         self.assertGreater(result["generation_evidence"]["passes"][0]["model_case_count_before_review"], 0)
         self.assertEqual(result["generation_evidence"]["passes"][0]["review_status"], "approved")
+        source_counts = result["workflow_diagnostics"]["generation_source_counts"]
+        self.assertGreater(source_counts["model"], 0)
+        self.assertEqual(source_counts["deterministic_full_fallback"], expected_fallback_count)
+        fallback_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_full_fallback"]
+        self.assertEqual(len(fallback_cases), expected_fallback_count)
+        self.assertTrue(all(test_case.source_shard_id == "test-case-shard-02" for test_case in fallback_cases))
+        self.assertTrue(all(test_case.source_case_id for test_case in fallback_cases))
         GenerateTestCasesResponse(**result)
 
     def test_small_precomputed_suite_uses_existing_sequential_workflow(self) -> None:
@@ -190,6 +202,8 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertTrue(result["approved"])
         self.assertEqual(result["generation_evidence"]["passes"][0]["pass_type"], "sequential")
         self.assertEqual(result["generation_evidence"]["passes"][0]["review_status"], "approved")
+        self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"], {"model": len(result["test_cases"])})
+        self.assertTrue(all(test_case.generation_source == "model" for test_case in result["test_cases"]))
 
 
 if __name__ == "__main__":
