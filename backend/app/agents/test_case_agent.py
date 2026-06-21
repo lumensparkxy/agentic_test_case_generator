@@ -1763,6 +1763,95 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
     }
 
 
+def _maybe_retry_with_parallel_generation(
+    *,
+    workflow: Dict[str, Any],
+    payload: GenerateTestCasesInput,
+    settings: Any,
+    generation_settings: GenerationSettings,
+    requirement_analysis: List[Dict[str, Any]],
+    coverage_plan: List[Dict[str, Any]],
+    actor_user_id: Optional[str],
+    request_id: Optional[str],
+    workflow_run_id: Optional[str],
+    operation: Optional[str],
+) -> Dict[str, Any]:
+    """Recover model-authored coverage when a single-shot pass under-produces.
+
+    The sequential pipeline generates every test case in one model call, which
+    under-delivers for large requirement sets and forces heavy deterministic
+    backfill. When the internally generated coverage plan is large enough to
+    qualify for bounded parallel generation, retry with the existing sharded
+    generator so the model itself produces the missing coverage before
+    deterministic augmentation runs. Returns the original workflow when a retry
+    is not applicable or does not improve the result.
+    """
+    if not _should_use_parallel_test_case_generation(requirement_analysis, coverage_plan, generation_settings):
+        return workflow
+
+    raw_test_cases = list(workflow.get("test_cases") or [])
+    planned_scenarios = _scenario_count(coverage_plan)
+    if planned_scenarios <= len(raw_test_cases):
+        return workflow
+
+    # Only reshard when there are more requirements than shards, i.e. when a
+    # single model call must cover a slice large enough to risk truncation.
+    # Small requirement sets are handled well by a single pass plus cheap
+    # deterministic coverage augmentation, so avoid the extra model passes there.
+    if len(payload.requirements) <= generation_settings.parallel_test_case_max_workers:
+        return workflow
+
+    _log_test_case_workflow(
+        "parallel_generation_retry",
+        requirement_count=len(payload.requirements),
+        planned_scenario_count=planned_scenarios,
+        produced_test_case_count=len(raw_test_cases),
+    )
+
+    try:
+        parallel_workflow = _run_parallel_test_case_generation_sync(
+            requirements=payload.requirements,
+            context=payload.context,
+            template=payload.template,
+            model=settings.model_name,
+            requirement_analysis=requirement_analysis,
+            coverage_plan=coverage_plan,
+            human_feedback=payload.feedback if payload.feedback else None,
+            workflow_settings=payload.workflow_settings,
+            generation_settings=generation_settings,
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation=operation,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logging.exception("[TestCase Workflow] Parallel regeneration retry failed: %s", exc)
+        return workflow
+
+    parallel_test_cases = list(parallel_workflow.get("test_cases") or [])
+    if not parallel_test_cases:
+        return workflow
+
+    current_review = dict(workflow.get("review") or {})
+    parallel_review = dict(parallel_workflow.get("review") or {})
+    if len(parallel_test_cases) <= len(raw_test_cases) and not _prefer_review(parallel_review, current_review):
+        return workflow
+
+    parallel_diagnostics = {**_new_workflow_diagnostics(), **dict(parallel_workflow.get("workflow_diagnostics") or {})}
+    parallel_diagnostics["recovery_reason"] = "parallel_generation_retry"
+    if parallel_diagnostics.get("status") == "completed":
+        parallel_diagnostics["status"] = "partial"
+    _append_unique_message(
+        parallel_diagnostics["warnings"],
+        (
+            f"Single-pass generation produced {len(raw_test_cases)} case(s) for {planned_scenarios} planned scenario(s); "
+            f"regenerated with parallel shards to recover model coverage ({len(parallel_test_cases)} case(s))."
+        ),
+    )
+    parallel_workflow["workflow_diagnostics"] = parallel_diagnostics
+    return parallel_workflow
+
+
 def generate_test_cases(
     payload: GenerateTestCasesInput,
     actor_user_id: Optional[str] = None,
@@ -1891,6 +1980,23 @@ def generate_test_cases(
             "workflow_diagnostics": workflow_diagnostics,
         }
     elif not bool(workflow.get("approved", False)):
+        workflow = _maybe_retry_with_parallel_generation(
+            workflow=workflow,
+            payload=payload,
+            settings=settings,
+            generation_settings=generation_settings,
+            requirement_analysis=requirement_analysis,
+            coverage_plan=coverage_plan,
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation=operation,
+        )
+        raw_test_cases = list(workflow.get("test_cases") or raw_test_cases)
+        requirement_analysis = list(workflow.get("requirement_analysis") or requirement_analysis)
+        coverage_plan = list(workflow.get("coverage_plan") or coverage_plan)
+        resolved_settings = dict(workflow.get("workflow_settings") or resolved_settings)
+        threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
         recovery_test_cases = _augment_with_fallback_coverage(
             raw_test_cases,
             payload.requirements,
