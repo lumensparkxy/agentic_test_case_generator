@@ -11,6 +11,7 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
@@ -81,6 +82,7 @@ STATE_TEST_CASES = "current_test_cases"
 STATE_VALIDATION_FEEDBACK = "validation_feedback"
 STATE_COVERAGE_PLAN = "coverage_plan"
 STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
+EVIDENCE_PAYLOAD_STRATEGY = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
 
 
 def _get_model_settings_or_none() -> Any | None:
@@ -223,6 +225,288 @@ def _coverage_augmentation_warning(
     restored_label = " and ".join(restored_parts) if restored_parts else "missing coverage"
     source_label = "Recovered partial model output" if diagnostics.get("parser_recoveries") else "Model output"
     return f"{source_label} left {restored_label} uncovered; added {added_count} deterministic coverage case(s)."
+
+
+def _model_dump_payload(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return {str(key): _model_dump_payload(item) for key, item in value.items() if item is not None}
+    if isinstance(value, (list, tuple)):
+        return [_model_dump_payload(item) for item in value if item is not None]
+    return value
+
+
+def _generation_settings_payload(
+    *,
+    workflow_settings: Optional[Dict[str, Any]] = None,
+    generation_settings: Optional[GenerationSettings] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    if workflow_settings:
+        payload["workflow_settings"] = _model_dump_payload(workflow_settings)
+    if generation_settings is not None:
+        payload["generation_settings"] = _model_dump_payload(generation_settings)
+    return payload
+
+
+def _prompt_metadata(
+    *,
+    context: Optional[Any],
+    template: Any,
+    human_feedback: Optional[str],
+    raw_prompt_stored: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "context_provided": context is not None,
+        "feedback_provided": bool(human_feedback),
+        "template_name": getattr(template, "name", None),
+        "template_format": getattr(template, "format", None),
+        "template_field_count": len(getattr(template, "fields", []) or []),
+        "raw_prompt_stored": raw_prompt_stored,
+    }
+
+
+def _parser_status(diagnostics: Optional[Dict[str, Any]]) -> str:
+    diagnostics = diagnostics or {}
+    if diagnostics.get("parser_failures"):
+        return "failed"
+    if diagnostics.get("parser_recoveries"):
+        return "recovered"
+    return "clean"
+
+
+def _review_status(review: Optional[Dict[str, Any]], *, fallback: bool = False) -> str:
+    if fallback:
+        return "fallback"
+    if not review:
+        return "not_run"
+    return "approved" if bool(review.get("approved")) else "rejected"
+
+
+def _raw_output_summary(*, model_case_count: int, fallback_case_count: int = 0) -> Dict[str, Any]:
+    return {
+        "raw_content_stored": False,
+        "model_case_count": max(0, int(model_case_count or 0)),
+        "fallback_case_count": max(0, int(fallback_case_count or 0)),
+    }
+
+
+def _coverage_gap_counts(
+    *,
+    original_test_cases: List[Dict[str, Any]],
+    augmented_test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+) -> Dict[str, int]:
+    added_total = max(0, len(augmented_test_cases or []) - len(original_test_cases or []))
+    scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, original_test_cases, requirements)
+    missing_must_have = len(scenario_metrics.get("missing_must_have_scenarios") or [])
+    missing_planned = len(scenario_metrics.get("missing_scenarios") or [])
+    must_have_additions = min(added_total, missing_must_have)
+    optional_additions = min(max(0, added_total - must_have_additions), max(0, missing_planned - missing_must_have))
+    return {
+        "deterministic_additions_total": added_total,
+        "deterministic_must_have_additions": must_have_additions,
+        "deterministic_optional_additions": optional_additions,
+    }
+
+
+def _new_generation_evidence(
+    *,
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+    model_name: Optional[str],
+    operation: Optional[str],
+    request_id: Optional[str],
+    workflow_run_id: Optional[str],
+    workflow_settings: Optional[Dict[str, Any]] = None,
+    generation_settings: Optional[GenerationSettings] = None,
+) -> Dict[str, Any]:
+    return {
+        "evidence_id": str(uuid.uuid4()),
+        "request_id": request_id,
+        "workflow_run_id": workflow_run_id,
+        "operation": operation,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "model_name": model_name,
+        "generation_settings": _generation_settings_payload(
+            workflow_settings=workflow_settings,
+            generation_settings=generation_settings,
+        ),
+        "requirement_count": len(requirements or []),
+        "coverage_plan_count": len(coverage_plan or []),
+        "planned_scenario_count": _scenario_count(coverage_plan),
+        "model_case_count_before_review": 0,
+        "model_case_count_after_merge": 0,
+        "final_test_case_count": 0,
+        "deterministic_additions_total": 0,
+        "deterministic_must_have_additions": 0,
+        "deterministic_optional_additions": 0,
+        "parser_failure_count": 0,
+        "parser_recovery_count": 0,
+        "final_status": None,
+        "recovery_reason": None,
+        "warning_count": 0,
+        "payload_strategy": EVIDENCE_PAYLOAD_STRATEGY,
+        "passes": [],
+    }
+
+
+def _generation_pass_evidence(
+    *,
+    pass_type: str,
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+    model_name: Optional[str],
+    diagnostics: Optional[Dict[str, Any]],
+    review: Optional[Dict[str, Any]] = None,
+    model_case_count: int = 0,
+    merged_case_count: Optional[int] = None,
+    fallback_case_count: int = 0,
+    deterministic_counts: Optional[Dict[str, int]] = None,
+    prompt_metadata: Optional[Dict[str, Any]] = None,
+    shards: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    diagnostics = diagnostics or {}
+    deterministic_counts = deterministic_counts or {}
+    full_fallback = pass_type == "deterministic_full_fallback"
+    used_fallback = bool(diagnostics.get("used_fallback")) or full_fallback
+    return {
+        "pass_id": str(uuid.uuid4()),
+        "pass_type": pass_type,
+        "model_name": model_name,
+        "requirement_count": len(requirements or []),
+        "coverage_plan_count": len(coverage_plan or []),
+        "planned_scenario_count": _scenario_count(coverage_plan),
+        "prompt_metadata": prompt_metadata or {},
+        "raw_output_summary": _raw_output_summary(
+            model_case_count=0 if full_fallback else model_case_count,
+            fallback_case_count=fallback_case_count,
+        ),
+        "model_case_count_before_review": 0 if full_fallback else max(0, int(model_case_count or 0)),
+        "model_case_count_after_review": 0 if full_fallback else max(0, int(model_case_count or 0)),
+        "merged_case_count": max(0, int(merged_case_count if merged_case_count is not None else model_case_count or 0)),
+        "deterministic_additions_total": int(deterministic_counts.get("deterministic_additions_total") or 0),
+        "deterministic_must_have_additions": int(deterministic_counts.get("deterministic_must_have_additions") or 0),
+        "deterministic_optional_additions": int(deterministic_counts.get("deterministic_optional_additions") or 0),
+        "parser_failure_count": len(diagnostics.get("parser_failures") or []),
+        "parser_recovery_count": len(diagnostics.get("parser_recoveries") or []),
+        "review_status": _review_status(review, fallback=full_fallback),
+        "review_score": review.get("score") if review else None,
+        "review_threshold": review.get("threshold") if review else None,
+        "approved": bool(review.get("approved")) if review else False,
+        "used_fallback": used_fallback,
+        "failure_reason": diagnostics.get("failure_reason"),
+        "shards": shards or [],
+    }
+
+
+def _shard_evidence(
+    *,
+    shard: Any,
+    test_cases: List[Dict[str, Any]],
+    diagnostics: Optional[Dict[str, Any]],
+    used_fallback: bool,
+    failed: bool,
+) -> Dict[str, Any]:
+    diagnostics = diagnostics or {}
+    return {
+        "shard_id": getattr(shard, "shard_id", f"test-case-shard-{getattr(shard, 'index', 0):02d}"),
+        "requirement_count": len(getattr(shard, "requirements", []) or []),
+        "planned_scenario_count": _scenario_count(getattr(shard, "coverage_plan", []) or []),
+        "raw_output_count": 0 if used_fallback else len(test_cases or []),
+        "fallback_case_count": len(test_cases or []) if used_fallback else 0,
+        "parser_status": "not_run"
+        if used_fallback and not diagnostics.get("parser_failures") and not diagnostics.get("parser_recoveries")
+        else _parser_status(diagnostics),
+        "review_status": "fallback" if used_fallback else "not_run",
+        "used_fallback": bool(used_fallback),
+        "failed": bool(failed),
+        "failure_reason": diagnostics.get("failure_reason"),
+        "parser_failure_count": len(diagnostics.get("parser_failures") or []),
+        "parser_recovery_count": len(diagnostics.get("parser_recoveries") or []),
+        "warning_count": len(diagnostics.get("warnings") or []),
+    }
+
+
+def _append_generation_pass(evidence: Dict[str, Any], pass_evidence: Dict[str, Any]) -> Dict[str, Any]:
+    evidence = dict(evidence or {})
+    evidence["passes"] = list(evidence.get("passes") or []) + [pass_evidence]
+    return evidence
+
+
+def _retag_generation_passes(evidence: Dict[str, Any], *, pass_type: str) -> Dict[str, Any]:
+    evidence = dict(evidence or {})
+    evidence["passes"] = [{**dict(item), "pass_type": pass_type} for item in evidence.get("passes") or []]
+    return evidence
+
+
+def _merge_generation_evidence(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+    evidence = dict(primary or secondary or {})
+    evidence["passes"] = list((primary or {}).get("passes") or []) + list((secondary or {}).get("passes") or [])
+    return evidence
+
+
+def _finalize_generation_evidence(
+    *,
+    evidence: Optional[Dict[str, Any]],
+    workflow: Dict[str, Any],
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+    final_test_cases: List[Dict[str, Any]],
+    model_name: Optional[str],
+    operation: Optional[str],
+    request_id: Optional[str],
+    workflow_run_id: Optional[str],
+    workflow_settings: Optional[Dict[str, Any]] = None,
+    generation_settings: Optional[GenerationSettings] = None,
+) -> Dict[str, Any]:
+    diagnostics = dict(workflow.get("workflow_diagnostics") or {})
+    evidence = evidence or _new_generation_evidence(
+        requirements=requirements,
+        coverage_plan=coverage_plan,
+        model_name=model_name,
+        operation=operation,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        workflow_settings=workflow_settings,
+        generation_settings=generation_settings,
+    )
+    evidence = dict(evidence)
+    evidence["model_name"] = evidence.get("model_name") or model_name
+    evidence["operation"] = evidence.get("operation") or operation
+    evidence["request_id"] = evidence.get("request_id") or request_id
+    evidence["workflow_run_id"] = evidence.get("workflow_run_id") or workflow_run_id
+    evidence["generation_settings"] = {
+        **dict(evidence.get("generation_settings") or {}),
+        **_generation_settings_payload(
+            workflow_settings=workflow_settings,
+            generation_settings=generation_settings,
+        ),
+    }
+    evidence["requirement_count"] = len(requirements or [])
+    evidence["coverage_plan_count"] = len(coverage_plan or [])
+    evidence["planned_scenario_count"] = _scenario_count(coverage_plan)
+    evidence["final_test_case_count"] = len(final_test_cases or [])
+    evidence["parser_failure_count"] = len(diagnostics.get("parser_failures") or [])
+    evidence["parser_recovery_count"] = len(diagnostics.get("parser_recoveries") or [])
+    evidence["final_status"] = diagnostics.get("status")
+    evidence["recovery_reason"] = diagnostics.get("recovery_reason")
+    evidence["warning_count"] = len(diagnostics.get("warnings") or [])
+    passes = list(evidence.get("passes") or [])
+    evidence["model_case_count_before_review"] = next(
+        (int(item.get("model_case_count_before_review") or 0) for item in passes if not item.get("used_fallback")),
+        0,
+    )
+    evidence["model_case_count_after_merge"] = max([int(item.get("merged_case_count") or 0) for item in passes if not item.get("used_fallback")] or [0])
+    evidence["deterministic_additions_total"] = sum(int(item.get("deterministic_additions_total") or 0) for item in passes)
+    evidence["deterministic_must_have_additions"] = sum(int(item.get("deterministic_must_have_additions") or 0) for item in passes)
+    evidence["deterministic_optional_additions"] = sum(int(item.get("deterministic_optional_additions") or 0) for item in passes)
+    evidence["payload_strategy"] = evidence.get("payload_strategy") or EVIDENCE_PAYLOAD_STRATEGY
+    return evidence
 
 
 def _combined_event_text(event: Any) -> str:
@@ -1142,6 +1426,7 @@ class _ParallelTestCaseShardResult:
     diagnostics: Dict[str, Any]
     used_fallback: bool = False
     failed: bool = False
+    evidence: Optional[Dict[str, Any]] = None
 
 
 def _serialize_contract_items(items: List[Any]) -> List[Dict[str, Any]]:
@@ -1329,6 +1614,13 @@ async def _run_parallel_test_case_shard_workflow_async(
     return {
         "test_cases": current_test_cases,
         "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
+        "generation_evidence": _shard_evidence(
+            shard=shard,
+            test_cases=current_test_cases,
+            diagnostics=diagnostics,
+            used_fallback=bool(diagnostics.get("used_fallback")),
+            failed=False,
+        ),
     }
 
 
@@ -1365,12 +1657,20 @@ def _fallback_parallel_test_case_shard(
         }
     )
     _append_unique_message(diagnostics["warnings"], warning)
+    fallback_test_cases = _fallback_raw_test_cases(shard.requirements, context, coverage_plan=shard.coverage_plan)
     return _ParallelTestCaseShardResult(
         shard=shard,
-        test_cases=_fallback_raw_test_cases(shard.requirements, context, coverage_plan=shard.coverage_plan),
+        test_cases=fallback_test_cases,
         diagnostics=diagnostics,
         used_fallback=True,
         failed=failed,
+        evidence=_shard_evidence(
+            shard=shard,
+            test_cases=fallback_test_cases,
+            diagnostics=diagnostics,
+            used_fallback=True,
+            failed=failed,
+        ),
     )
 
 
@@ -1413,6 +1713,7 @@ def _run_parallel_test_case_shard_with_fallback(
         diagnostics=diagnostics,
         used_fallback=bool(diagnostics.get("used_fallback")),
         failed=False,
+        evidence=dict(workflow.get("generation_evidence") or {}),
     )
 
 
@@ -1554,6 +1855,7 @@ def _run_parallel_test_case_generation_sync(
     request_id: Optional[str],
     workflow_run_id: Optional[str],
     operation: Optional[str],
+    generation_mode: str = "parallel_direct",
 ) -> Dict[str, Any]:
     context_token = bind_log_context(
         request_id=request_id,
@@ -1650,6 +1952,47 @@ def _run_parallel_test_case_generation_sync(
             fallback_shard_count=diagnostics["fallback_shard_count"],
             failed_shard_count=diagnostics["failed_shard_count"],
         )
+        shard_evidence = [
+            result.evidence
+            or _shard_evidence(
+                shard=result.shard,
+                test_cases=result.test_cases,
+                diagnostics=result.diagnostics,
+                used_fallback=result.used_fallback,
+                failed=result.failed,
+            )
+            for result in shard_results
+        ]
+        generation_evidence = _new_generation_evidence(
+            requirements=requirements,
+            coverage_plan=coverage_plan,
+            model_name=model,
+            operation=operation,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            workflow_settings=resolved_settings,
+            generation_settings=generation_settings,
+        )
+        generation_evidence = _append_generation_pass(
+            generation_evidence,
+            _generation_pass_evidence(
+                pass_type=generation_mode,
+                requirements=requirements,
+                coverage_plan=coverage_plan,
+                model_name=model,
+                diagnostics=diagnostics,
+                review=review,
+                model_case_count=sum(0 if result.used_fallback else len(result.test_cases) for result in shard_results),
+                merged_case_count=len(merged_test_cases),
+                fallback_case_count=sum(len(result.test_cases) for result in shard_results if result.used_fallback),
+                prompt_metadata=_prompt_metadata(
+                    context=context,
+                    template=template,
+                    human_feedback=human_feedback,
+                ),
+                shards=shard_evidence,
+            ),
+        )
         return {
             "test_cases": merged_test_cases,
             "requirement_analysis": requirement_analysis,
@@ -1660,6 +2003,7 @@ def _run_parallel_test_case_generation_sync(
             "coverage_metrics": coverage_metrics,
             "workflow_settings": resolved_settings,
             "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
+            "generation_evidence": generation_evidence,
         }
     finally:
         reset_log_context(context_token)
@@ -1760,6 +2104,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": public_workflow_diagnostics(dict(workflow.get("workflow_diagnostics") or {})),
+        "generation_evidence": dict(workflow.get("generation_evidence") or {}),
     }
 
 
@@ -1823,6 +2168,7 @@ def _maybe_retry_with_parallel_generation(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation=operation,
+            generation_mode="parallel_retry",
         )
     except Exception as exc:  # pragma: no cover - defensive guard
         logging.exception("[TestCase Workflow] Parallel regeneration retry failed: %s", exc)
@@ -1849,6 +2195,10 @@ def _maybe_retry_with_parallel_generation(
         ),
     )
     parallel_workflow["workflow_diagnostics"] = parallel_diagnostics
+    parallel_workflow["generation_evidence"] = _merge_generation_evidence(
+        dict(workflow.get("generation_evidence") or {}),
+        _retag_generation_passes(dict(parallel_workflow.get("generation_evidence") or {}), pass_type="parallel_retry"),
+    )
     return parallel_workflow
 
 
@@ -1929,6 +2279,35 @@ def generate_test_cases(
     coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(payload.requirements))
     resolved_settings = dict(workflow.get("workflow_settings") or _resolve_test_case_workflow_settings(payload.workflow_settings))
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
+    if settings is not None and not workflow.get("generation_evidence"):
+        diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+        workflow["generation_evidence"] = _append_generation_pass(
+            _new_generation_evidence(
+                requirements=payload.requirements,
+                coverage_plan=coverage_plan,
+                model_name=settings.model_name,
+                operation=operation or "testcases.generate",
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                workflow_settings=resolved_settings,
+                generation_settings=generation_settings,
+            ),
+            _generation_pass_evidence(
+                pass_type="sequential",
+                requirements=payload.requirements,
+                coverage_plan=coverage_plan,
+                model_name=settings.model_name,
+                diagnostics=diagnostics,
+                review=dict(workflow.get("review") or {}),
+                model_case_count=len(raw_test_cases or []),
+                merged_case_count=len(raw_test_cases or []),
+                prompt_metadata=_prompt_metadata(
+                    context=payload.context,
+                    template=payload.template,
+                    human_feedback=payload.feedback,
+                ),
+            ),
+        )
     if not raw_test_cases:
         logging.warning("[TestCase Workflow] No test cases from pipeline, using deterministic fallback")
         record_agent_fallback(workflow=operation or "testcases.generate", reason="fallback_generated_artifacts")
@@ -1956,6 +2335,42 @@ def generate_test_cases(
             workflow_diagnostics["warnings"],
             "Test-case fallback produced deterministic draft artifacts because the generation workflow returned no test cases.",
         )
+        generation_evidence = _append_generation_pass(
+            dict(
+                workflow.get("generation_evidence")
+                or _new_generation_evidence(
+                    requirements=payload.requirements,
+                    coverage_plan=coverage_plan,
+                    model_name=settings.model_name if settings is not None else None,
+                    operation=operation or "testcases.generate",
+                    request_id=request_id,
+                    workflow_run_id=workflow_run_id,
+                    workflow_settings=resolved_settings,
+                    generation_settings=generation_settings,
+                )
+            ),
+            _generation_pass_evidence(
+                pass_type="deterministic_full_fallback",
+                requirements=payload.requirements,
+                coverage_plan=coverage_plan,
+                model_name=settings.model_name if settings is not None else None,
+                diagnostics=workflow_diagnostics,
+                review=fallback_review,
+                model_case_count=0,
+                merged_case_count=len(raw_test_cases),
+                fallback_case_count=len(raw_test_cases),
+                deterministic_counts={
+                    "deterministic_additions_total": len(raw_test_cases),
+                    "deterministic_must_have_additions": min(len(raw_test_cases), _scenario_count(coverage_plan)),
+                    "deterministic_optional_additions": 0,
+                },
+                prompt_metadata=_prompt_metadata(
+                    context=payload.context,
+                    template=payload.template,
+                    human_feedback=payload.feedback,
+                ),
+            ),
+        )
         workflow = {
             "test_cases": raw_test_cases,
             "requirement_analysis": requirement_analysis,
@@ -1978,6 +2393,7 @@ def generate_test_cases(
             },
             "workflow_settings": resolved_settings,
             "workflow_diagnostics": workflow_diagnostics,
+            "generation_evidence": generation_evidence,
         }
     elif not bool(workflow.get("approved", False)):
         workflow = _maybe_retry_with_parallel_generation(
@@ -2015,6 +2431,12 @@ def generate_test_cases(
             current_review = dict(workflow.get("review") or {})
             if _prefer_review(recovery_review, current_review):
                 workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+                deterministic_counts = _coverage_gap_counts(
+                    original_test_cases=raw_test_cases,
+                    augmented_test_cases=recovery_test_cases,
+                    requirements=payload.requirements,
+                    coverage_plan=coverage_plan,
+                )
                 recovery_warning = _coverage_augmentation_warning(
                     original_test_cases=raw_test_cases,
                     augmented_test_cases=recovery_test_cases,
@@ -2041,6 +2463,37 @@ def generate_test_cases(
                         test_cases=recovery_test_cases,
                     )
                 )
+                generation_evidence = _append_generation_pass(
+                    dict(
+                        workflow.get("generation_evidence")
+                        or _new_generation_evidence(
+                            requirements=payload.requirements,
+                            coverage_plan=coverage_plan,
+                            model_name=settings.model_name,
+                            operation=operation or "testcases.generate",
+                            request_id=request_id,
+                            workflow_run_id=workflow_run_id,
+                            workflow_settings=resolved_settings,
+                            generation_settings=generation_settings,
+                        )
+                    ),
+                    _generation_pass_evidence(
+                        pass_type="deterministic_coverage_completion",
+                        requirements=payload.requirements,
+                        coverage_plan=coverage_plan,
+                        model_name=settings.model_name,
+                        diagnostics=workflow_diagnostics,
+                        review=recovery_review,
+                        model_case_count=0,
+                        merged_case_count=len(recovery_test_cases),
+                        fallback_case_count=max(0, len(recovery_test_cases) - len(raw_test_cases)),
+                        deterministic_counts=deterministic_counts,
+                        prompt_metadata={
+                            "raw_prompt_stored": False,
+                            "source": "deterministic coverage completion",
+                        },
+                    ),
+                )
                 workflow = {
                     "test_cases": recovery_test_cases,
                     "requirement_analysis": requirement_analysis,
@@ -2056,8 +2509,22 @@ def generate_test_cases(
                     },
                     "workflow_settings": resolved_settings,
                     "workflow_diagnostics": workflow_diagnostics,
+                    "generation_evidence": generation_evidence,
                 }
 
+    workflow["generation_evidence"] = _finalize_generation_evidence(
+        evidence=dict(workflow.get("generation_evidence") or {}),
+        workflow=workflow,
+        requirements=payload.requirements,
+        coverage_plan=coverage_plan,
+        final_test_cases=list(workflow.get("test_cases") or raw_test_cases or []),
+        model_name=settings.model_name if settings is not None else None,
+        operation=operation or "testcases.generate",
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        workflow_settings=resolved_settings,
+        generation_settings=generation_settings,
+    )
     test_cases = _hydrate_test_cases(raw_test_cases)
     return _build_response(test_cases, workflow, payload.requirements, payload.context)
 

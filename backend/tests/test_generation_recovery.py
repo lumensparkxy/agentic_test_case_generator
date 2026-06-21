@@ -184,6 +184,13 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
             )
         )
         self.assertEqual(result["iteration_history"][-1]["actor"], "FallbackCoverageRecovery")
+        evidence = result["generation_evidence"]
+        self.assertEqual(evidence["final_status"], "partial")
+        self.assertEqual(evidence["parser_recovery_count"], 2)
+        self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["sequential", "deterministic_coverage_completion"])
+        self.assertGreater(evidence["deterministic_additions_total"], 0)
+        self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
+        self.assertEqual(evidence["passes"][1]["review_status"], "approved")
 
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:
         requirements = [Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password.")]
@@ -201,6 +208,12 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertTrue(result["approved"])
         self.assertTrue(result["workflow_diagnostics"]["used_fallback"])
         self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "missing_model_credentials")
+        evidence = result["generation_evidence"]
+        self.assertEqual(evidence["final_status"], "fallback")
+        self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["deterministic_full_fallback"])
+        self.assertEqual(evidence["deterministic_additions_total"], len(result["test_cases"]))
+        self.assertEqual(evidence["passes"][0]["raw_output_summary"]["model_case_count"], 0)
+        self.assertEqual(evidence["passes"][0]["raw_output_summary"]["fallback_case_count"], len(result["test_cases"]))
 
 
 if __name__ == "__main__":

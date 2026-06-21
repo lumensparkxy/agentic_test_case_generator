@@ -28,7 +28,7 @@ next-version end-to-end Playwright documentation workflow succeeded.
 
 ### Phase 3 - Architecture Hardening
 
-Status markers below reflect the GitHub issue state as of 2026-06-13.
+Status markers below reflect the GitHub issue state as of 2026-06-21.
 
 - Epic [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35) - Reduce high-churn architecture hotspots
   - Done: [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
@@ -42,6 +42,14 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
   - Done: [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
   - Done: [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
+- Epic [#159](https://github.com/lumensparkxy/agentic_test_case_generator/issues/159) - Make test-case generation shard-first and provenance-aware
+  - In progress: [#160](https://github.com/lumensparkxy/agentic_test_case_generator/issues/160) - Persist test-case generation run evidence
+  - Ready: [#161](https://github.com/lumensparkxy/agentic_test_case_generator/issues/161) - Preserve provenance for model and deterministic test cases
+  - Blocked: [#162](https://github.com/lumensparkxy/agentic_test_case_generator/issues/162) - Use dynamic shard-first generation for large coverage plans
+  - Blocked: [#163](https://github.com/lumensparkxy/agentic_test_case_generator/issues/163) - Enforce exact planned scenario references in coverage review
+  - Blocked: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
+  - Blocked: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
+  - Blocked: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
 
 ### Phase 4 - Operational Readiness
 
@@ -61,7 +69,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-13.
   - Done: [#92](https://github.com/lumensparkxy/agentic_test_case_generator/issues/92) - Orchestrate automation and multi-environment execution
   - Done: [#93](https://github.com/lumensparkxy/agentic_test_case_generator/issues/93) - Orchestrate review and evidence-backed reporting
   - Done: [#94](https://github.com/lumensparkxy/agentic_test_case_generator/issues/94) - Add orchestrator evaluation and end-to-end validation suite
-  - In progress: [#151](https://github.com/lumensparkxy/agentic_test_case_generator/issues/151) - Consolidate Playwright execution reports per run
+  - Done: [#151](https://github.com/lumensparkxy/agentic_test_case_generator/issues/151) - Consolidate Playwright execution reports per run
 - Epic [#38](https://github.com/lumensparkxy/agentic_test_case_generator/issues/38) - Harden operational security and production readiness
   - Done: [#52](https://github.com/lumensparkxy/agentic_test_case_generator/issues/52) - Protect or scope the metrics endpoint for production
   - Done: [#53](https://github.com/lumensparkxy/agentic_test_case_generator/issues/53) - Define artifact retention policy and cleanup command

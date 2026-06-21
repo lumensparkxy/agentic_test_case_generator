@@ -327,6 +327,7 @@ export interface GenerateTestCasesResponse {
 	approved?: boolean;
 	coverage_metrics?: Record<string, unknown>;
 	coverage_plan?: Array<RequirementCoveragePlan>;
+	generation_evidence?: TestCaseGenerationEvidence;
 	iteration_history?: Array<WorkflowIteration>;
 	requirement_analysis?: Array<RequirementAnalysis>;
 	review?: ReviewResult;
@@ -763,6 +764,74 @@ export interface TestCase {
 	test_data?: string | null;
 	title: string;
 	type?: "Functional" | "Integration" | "E2E" | "Regression" | "Smoke" | "Security" | "Performance" | "Usability" | "UAT";
+}
+
+export interface TestCaseGenerationEvidence {
+	coverage_plan_count?: number;
+	created_at?: string;
+	deterministic_additions_total?: number;
+	deterministic_must_have_additions?: number;
+	deterministic_optional_additions?: number;
+	evidence_id?: string;
+	final_status?: string | null;
+	final_test_case_count?: number;
+	generation_settings?: Record<string, unknown>;
+	model_case_count_after_merge?: number;
+	model_case_count_before_review?: number;
+	model_name?: string | null;
+	operation?: string | null;
+	parser_failure_count?: number;
+	parser_recovery_count?: number;
+	passes?: Array<TestCaseGenerationPassEvidence>;
+	payload_strategy?: string;
+	planned_scenario_count?: number;
+	recovery_reason?: string | null;
+	request_id?: string | null;
+	requirement_count?: number;
+	warning_count?: number;
+	workflow_run_id?: string | null;
+}
+
+export interface TestCaseGenerationPassEvidence {
+	approved?: boolean;
+	coverage_plan_count?: number;
+	deterministic_additions_total?: number;
+	deterministic_must_have_additions?: number;
+	deterministic_optional_additions?: number;
+	failure_reason?: string | null;
+	merged_case_count?: number;
+	model_case_count_after_review?: number;
+	model_case_count_before_review?: number;
+	model_name?: string | null;
+	parser_failure_count?: number;
+	parser_recovery_count?: number;
+	pass_id?: string;
+	pass_type: "sequential" | "parallel_direct" | "parallel_retry" | "deterministic_full_fallback" | "deterministic_coverage_completion" | "refinement";
+	planned_scenario_count?: number;
+	prompt_metadata?: Record<string, unknown>;
+	raw_output_summary?: Record<string, unknown>;
+	requirement_count?: number;
+	review_score?: number | null;
+	review_status?: "not_run" | "approved" | "rejected" | "fallback";
+	review_threshold?: number | null;
+	shards?: Array<TestCaseGenerationShardEvidence>;
+	used_fallback?: boolean;
+}
+
+export interface TestCaseGenerationShardEvidence {
+	failed?: boolean;
+	failure_reason?: string | null;
+	fallback_case_count?: number;
+	parser_failure_count?: number;
+	parser_recovery_count?: number;
+	parser_status?: "not_run" | "clean" | "recovered" | "failed";
+	planned_scenario_count?: number;
+	raw_output_count?: number;
+	requirement_count?: number;
+	review_status?: "not_run" | "approved" | "rejected" | "fallback";
+	shard_id: string;
+	used_fallback?: boolean;
+	warning_count?: number;
 }
 
 export interface TestCaseTemplate {
