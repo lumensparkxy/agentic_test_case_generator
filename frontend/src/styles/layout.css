@@ -9,7 +9,7 @@
 /* Header */
 .command-header {
 	display: grid;
-	grid-template-columns: minmax(240px, 1.1fr) minmax(280px, 0.8fr) auto;
+	grid-template-columns: minmax(280px, 430px) minmax(0, 1fr);
 	align-items: center;
 	gap: 1.25rem;
 	margin: -0.25rem -0.5rem 1.25rem;
@@ -32,21 +32,6 @@
 	align-items: flex-end;
 	gap: 0.75rem;
 	min-width: 320px;
-}
-
-.title {
-	font-size: 1.45rem;
-	font-weight: 800;
-	letter-spacing: 0;
-	margin: 0;
-	color: #0f172a;
-}
-
-.subtitle {
-	color: var(--text-muted);
-	font-size: 0.86rem;
-	margin: 0.25rem 0 0;
-	max-width: 520px;
 }
 
 .command-project-control {
