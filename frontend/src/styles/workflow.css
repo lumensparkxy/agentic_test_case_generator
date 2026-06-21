@@ -821,6 +821,12 @@
 	color: #9a3412;
 }
 
+.workflow-diagnostics-block.info {
+	background: #eff6ff;
+	border-color: #bfdbfe;
+	color: #1d4ed8;
+}
+
 .workflow-diagnostics-block.alert {
 	background: #fef2f2;
 	border-color: #fecaca;

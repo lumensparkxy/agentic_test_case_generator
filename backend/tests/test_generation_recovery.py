@@ -81,7 +81,7 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(diagnostics["parser_failures"], [])
         self.assertEqual(len(diagnostics["parser_recoveries"]), 1)
         self.assertIn("TestCaseGeneratorAgent: invalid JSON payload", diagnostics["parser_recoveries"][0])
-        self.assertIn("recovered usable test-case JSON", diagnostics["warnings"][0])
+        self.assertEqual(diagnostics["warnings"], [])
 
     def test_combined_event_text_allows_parser_to_receive_full_payload(self) -> None:
         event = SimpleNamespace(
@@ -143,7 +143,16 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
             "iteration_history": [],
             "coverage_metrics": {},
             "workflow_settings": {"approval_threshold": 90},
-            "workflow_diagnostics": {"status": "completed", "used_fallback": False, "failure_reason": "quality_rejection"},
+            "workflow_diagnostics": {
+                "status": "partial",
+                "used_fallback": False,
+                "failure_reason": "quality_rejection",
+                "parser_recoveries": [
+                    "TestCaseGeneratorAgent: invalid JSON payload: Unterminated string; recovered 1 complete test_cases entries",
+                    "TestCaseRefinerAgent: invalid JSON payload: EOF while parsing; recovered 1 complete test_cases entries",
+                ],
+                "warnings": [],
+            },
         }
         payload = GenerateTestCasesInput(
             requirements=requirements,
@@ -163,6 +172,17 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertFalse(result["workflow_diagnostics"]["used_fallback"])
         self.assertIsNone(result["workflow_diagnostics"]["failure_reason"])
         self.assertEqual(result["workflow_diagnostics"]["recovery_reason"], "coverage_augmentation")
+        self.assertEqual(len(result["workflow_diagnostics"]["parser_recoveries"]), 2)
+        self.assertFalse(any("recovered usable test-case JSON" in warning for warning in result["workflow_diagnostics"]["warnings"]))
+        self.assertTrue(
+            any(
+                warning.startswith("Recovered partial model output left ")
+                and "requirement(s)" in warning
+                and "must-have scenario(s)" in warning
+                and "added " in warning
+                for warning in result["workflow_diagnostics"]["warnings"]
+            )
+        )
         self.assertEqual(result["iteration_history"][-1]["actor"], "FallbackCoverageRecovery")
 
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:

@@ -191,7 +191,6 @@ def _record_parser_recovery(
     _append_unique_message(diagnostics["parser_recoveries"], message)
     if diagnostics["status"] == "completed":
         diagnostics["status"] = "partial"
-    _append_unique_message(diagnostics["warnings"], f"{author}: recovered usable {artifact_label} JSON from malformed output.")
     _log_test_case_workflow(
         "parser_recovery",
         author=author,
@@ -201,6 +200,29 @@ def _record_parser_recovery(
         parser_recovery_count=len(diagnostics["parser_recoveries"]),
         status=diagnostics["status"],
     )
+
+
+def _coverage_augmentation_warning(
+    *,
+    original_test_cases: List[Dict[str, Any]],
+    augmented_test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+    diagnostics: Dict[str, Any],
+) -> str:
+    added_count = max(0, len(augmented_test_cases) - len(original_test_cases))
+    coverage_metrics = _compute_test_case_coverage_metrics(original_test_cases, requirements)
+    scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, original_test_cases, requirements)
+    missing_requirements = list(coverage_metrics.get("requirements_without_tests") or [])
+    missing_must_have = list(scenario_metrics.get("missing_must_have_scenarios") or [])
+    restored_parts: List[str] = []
+    if missing_requirements:
+        restored_parts.append(f"{len(missing_requirements)} requirement(s)")
+    if missing_must_have:
+        restored_parts.append(f"{len(missing_must_have)} must-have scenario(s)")
+    restored_label = " and ".join(restored_parts) if restored_parts else "missing coverage"
+    source_label = "Recovered partial model output" if diagnostics.get("parser_recoveries") else "Model output"
+    return f"{source_label} left {restored_label} uncovered; added {added_count} deterministic coverage case(s)."
 
 
 def _combined_event_text(event: Any) -> str:
@@ -1886,8 +1908,15 @@ def generate_test_cases(
             )
             current_review = dict(workflow.get("review") or {})
             if _prefer_review(recovery_review, current_review):
-                raw_test_cases = recovery_test_cases
                 workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+                recovery_warning = _coverage_augmentation_warning(
+                    original_test_cases=raw_test_cases,
+                    augmented_test_cases=recovery_test_cases,
+                    requirements=payload.requirements,
+                    coverage_plan=coverage_plan,
+                    diagnostics=workflow_diagnostics,
+                )
+                raw_test_cases = recovery_test_cases
                 workflow_diagnostics["status"] = "partial"
                 workflow_diagnostics["used_fallback"] = False
                 workflow_diagnostics["recovery_reason"] = "coverage_augmentation"
@@ -1895,7 +1924,7 @@ def generate_test_cases(
                     workflow_diagnostics["failure_reason"] = None
                 _append_unique_message(
                     workflow_diagnostics["warnings"],
-                    "Recovered model output was augmented with deterministic coverage cases to restore requirement and scenario coverage.",
+                    recovery_warning,
                 )
                 iteration_history = list(workflow.get("iteration_history") or [])
                 iteration_history.append(

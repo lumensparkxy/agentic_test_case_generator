@@ -4,6 +4,7 @@ export default function WorkflowDiagnostics({ title, diagnostics, appliedSetting
 	}
 
 	const warnings = diagnostics?.warnings || [];
+	const parserRecoveries = diagnostics?.parser_recoveries || [];
 	const parserFailures = diagnostics?.parser_failures || [];
 	const pillEntries = [
 		appliedSettings?.approval_threshold != null ? `Threshold ${appliedSettings.approval_threshold}` : null,
@@ -37,6 +38,16 @@ export default function WorkflowDiagnostics({ title, diagnostics, appliedSetting
 					<ul>
 						{warnings.map((warning) => (
 							<li key={warning}>{warning}</li>
+						))}
+					</ul>
+				</div>
+			)}
+			{parserRecoveries.length > 0 && (
+				<div className="workflow-diagnostics-block info">
+					<strong>Parser recoveries</strong>
+					<ul>
+						{parserRecoveries.map((recovery) => (
+							<li key={recovery}>{recovery}</li>
 						))}
 					</ul>
 				</div>
