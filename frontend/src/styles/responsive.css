@@ -1,13 +1,13 @@
 /* Responsive */
 @media (max-width: 1100px) {
 	.workflow-shell {
-		--workflow-nav-column: minmax(84px, 96px);
+		--workflow-nav-column: minmax(240px, 280px);
 
 		grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr);
 	}
 
 	.workflow-shell.nav-collapsed {
-		--workflow-nav-column: 64px;
+		--workflow-nav-column: 72px;
 	}
 
 	.project-information-rail {
@@ -18,21 +18,6 @@
 
 	.workflow-navigation-drawer {
 		padding: 0.7rem;
-	}
-
-	.workflow-navigation-header strong,
-	.workflow-navigation-copy,
-	.workflow-navigation-copy span,
-	.workflow-navigation-state {
-		display: none;
-	}
-
-	.workflow-navigation-item {
-		grid-template-columns: 1fr;
-		justify-items: center;
-		gap: 0.35rem;
-		padding: 0.62rem 0.45rem;
-		text-align: center;
 	}
 }
 
@@ -82,18 +67,6 @@
 	.workflow-navigation-state {
 		grid-column: 2;
 		justify-self: start;
-	}
-
-	.command-header {
-		grid-template-columns: 1fr;
-		gap: 0.85rem;
-		margin-left: 0;
-		margin-right: 0;
-	}
-
-	.command-actions {
-		justify-content: flex-start;
-		flex-wrap: wrap;
 	}
 
 	.command-project-control {
@@ -159,15 +132,6 @@
 	.auth-panel,
 	.auth-login {
 		justify-content: flex-start;
-	}
-
-	.settings-open-btn {
-		align-self: flex-start;
-	}
-
-	.auth-user {
-		justify-content: flex-start;
-		flex-wrap: wrap;
 	}
 
 	.auth-dialog-overlay {

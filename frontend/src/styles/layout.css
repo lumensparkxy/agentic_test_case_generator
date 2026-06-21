@@ -6,17 +6,6 @@
 	min-height: 100vh;
 }
 
-/* Header */
-.command-header {
-	display: grid;
-	grid-template-columns: minmax(280px, 430px) minmax(0, 1fr);
-	align-items: center;
-	gap: 1.25rem;
-	margin: -0.25rem -0.5rem 1.25rem;
-	padding: 0.9rem 0.5rem 1.1rem;
-	border-bottom: 1px solid rgba(148, 163, 184, 0.24);
-}
-
 .header {
 	display: flex;
 	justify-content: space-between;
@@ -32,6 +21,18 @@
 	align-items: flex-end;
 	gap: 0.75rem;
 	min-width: 320px;
+}
+
+.app-navigation-controls {
+	display: grid;
+	gap: 0.75rem;
+	min-width: 0;
+	padding-top: 0.85rem;
+	border-top: 1px solid rgba(148, 163, 184, 0.26);
+}
+
+.app-navigation-controls > * {
+	min-width: 0;
 }
 
 .command-project-control {
@@ -262,17 +263,9 @@
 	white-space: nowrap;
 }
 
-.command-actions {
-	display: flex;
-	align-items: center;
-	justify-content: flex-end;
-	gap: 0.75rem;
-	min-width: 0;
-}
-
 .command-health {
 	position: relative;
-	min-width: 170px;
+	min-width: 0;
 	border: 1px solid #cfe0f7;
 	border-radius: var(--radius-md);
 	background: #ffffff;
@@ -303,16 +296,16 @@
 }
 
 .command-health-details {
-	position: absolute;
+	position: static;
 	z-index: 5;
-	top: calc(100% + 0.4rem);
-	right: 0;
-	width: min(360px, 88vw);
+	width: 100%;
+	box-sizing: border-box;
+	margin-top: 0.4rem;
 	padding: 0.85rem;
 	border: 1px solid var(--border-color);
 	border-radius: var(--radius-md);
 	background: #ffffff;
-	box-shadow: var(--shadow-lg);
+	box-shadow: none;
 }
 
 .command-health-details p {
@@ -407,24 +400,33 @@
 
 .auth-panel {
 	display: flex;
-	align-items: center;
-	justify-content: flex-end;
+	align-items: stretch;
+	justify-content: flex-start;
 	width: 100%;
-	min-height: 42px;
+	min-height: 0;
 }
 
 .auth-login {
 	display: flex;
-	justify-content: flex-end;
+	justify-content: flex-start;
+	width: 100%;
+}
+
+.auth-login button {
 	width: 100%;
 }
 
 .auth-user {
+	display: grid;
+	gap: 0.65rem;
+	width: 100%;
+}
+
+.auth-user-identity {
 	display: flex;
 	align-items: center;
-	justify-content: flex-end;
-	gap: 0.75rem;
-	width: 100%;
+	gap: 0.65rem;
+	min-width: 0;
 }
 
 .auth-avatar {
@@ -438,8 +440,16 @@
 .auth-user-meta {
 	display: flex;
 	flex-direction: column;
-	text-align: right;
+	min-width: 0;
+	text-align: left;
 	line-height: 1.2;
+}
+
+.auth-user-meta strong,
+.auth-user-meta span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .auth-user-meta strong {
@@ -453,6 +463,7 @@
 }
 
 .auth-logout-btn {
+	width: 100%;
 	padding: 0.5rem 0.8rem;
 	font-size: 0.8rem;
 }
@@ -460,7 +471,9 @@
 .settings-open-btn {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 0.45rem;
+	width: 100%;
 	padding: 0.62rem 0.85rem;
 	border: 1px solid var(--border-color);
 	background: var(--card-bg);
@@ -804,7 +817,7 @@
 
 /* Workflow Navigation */
 .workflow-shell {
-	--workflow-nav-column: minmax(210px, 240px);
+	--workflow-nav-column: minmax(260px, 300px);
 	--project-rail-column: minmax(300px, 360px);
 
 	display: grid;
@@ -893,6 +906,12 @@
 .workflow-navigation-list {
 	display: grid;
 	gap: 0.4rem;
+}
+
+.workflow-navigation-controls {
+	display: grid;
+	gap: 0.75rem;
+	min-width: 0;
 }
 
 .workflow-navigation-item {
@@ -1020,6 +1039,7 @@
 
 .workflow-navigation-drawer.collapsed .workflow-navigation-header > div,
 .workflow-navigation-drawer.collapsed .workflow-navigation-header strong,
+.workflow-navigation-drawer.collapsed .workflow-navigation-controls,
 .workflow-navigation-drawer.collapsed .workflow-navigation-copy,
 .workflow-navigation-drawer.collapsed .workflow-navigation-copy span,
 .workflow-navigation-drawer.collapsed .workflow-navigation-state {

@@ -7,7 +7,7 @@ import {
 	hasFirebaseAuthConfig,
 	visibleFirebaseAuthProviders,
 } from "./firebase";
-import CommandDeckHeader, { SignInDialog } from "./components/layout/AppHeader";
+import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
 import AutomationPanel from "./components/automation/AutomationPanel";
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import ExportPanel from "./components/export/ExportPanel";
@@ -3121,39 +3121,39 @@ export default function App() {
 		deleteStoredAzureDevOpsConnection,
 		isDeletingAzureDevOpsConnection,
 	};
+	const navigationControls = (
+		<AppNavigationControls
+			isAuthenticated={isAuthenticated}
+			billingStatusItems={billingStatusItems}
+			statusUsageItems={statusUsageItems}
+			isUsageLoading={isUsageLoading}
+			isBillingLoading={isBillingLoading}
+			onOpenSettings={() => openSettingsDialog("workflow")}
+			isVerifyingSession={isVerifyingSession}
+			currentUser={currentUser}
+			getAuthProviderLabel={getAuthProviderLabel}
+			handleLogout={handleLogout}
+			isAuthenticating={isAuthenticating}
+			hasFirebaseAuthConfig={hasFirebaseAuthConfig}
+			hasVisibleAuthProviders={hasVisibleAuthProviders}
+			openSignInDialog={openSignInDialog}
+			currentAuthProviderLabel={currentAuthProviderLabel}
+			projects={projects}
+			currentProject={currentProject}
+			isLoadingProjects={isLoadingProjects}
+			isOpeningProject={isOpeningProject}
+			authActionDisabled={authActionDisabled}
+			newProjectName={newProjectName}
+			setNewProjectName={setNewProjectName}
+			isCreatingProject={isCreatingProject}
+			onOpenProject={(projectId) => openProject(projectId)}
+			onCreateProject={createProject}
+			onRefreshProjects={() => loadProjects()}
+		/>
+	);
 
 	return (
 		<div className="page">
-			<CommandDeckHeader
-				status={status}
-				isAuthenticated={isAuthenticated}
-				billingStatusItems={billingStatusItems}
-				statusUsageItems={statusUsageItems}
-				isUsageLoading={isUsageLoading}
-				isBillingLoading={isBillingLoading}
-				onOpenSettings={() => openSettingsDialog("workflow")}
-				isVerifyingSession={isVerifyingSession}
-				currentUser={currentUser}
-				getAuthProviderLabel={getAuthProviderLabel}
-				handleLogout={handleLogout}
-				isAuthenticating={isAuthenticating}
-				hasFirebaseAuthConfig={hasFirebaseAuthConfig}
-				hasVisibleAuthProviders={hasVisibleAuthProviders}
-				openSignInDialog={openSignInDialog}
-				currentAuthProviderLabel={currentAuthProviderLabel}
-				projects={projects}
-				currentProject={currentProject}
-				isLoadingProjects={isLoadingProjects}
-				isOpeningProject={isOpeningProject}
-				authActionDisabled={authActionDisabled}
-				newProjectName={newProjectName}
-				setNewProjectName={setNewProjectName}
-				isCreatingProject={isCreatingProject}
-				onOpenProject={(projectId) => openProject(projectId)}
-				onCreateProject={createProject}
-				onRefreshProjects={() => loadProjects()}
-			/>
-
 			{!isAuthenticated && !isVerifyingSession && (
 				<div className="auth-warning-banner">🔐 Sign in to parse requirements, generate test cases, and export artifacts.</div>
 			)}
@@ -3192,6 +3192,7 @@ export default function App() {
 					statusByTabId={workflowNavStatusByTabId}
 					isCollapsed={isWorkflowNavCollapsed}
 					onToggleCollapsed={toggleWorkflowNavCollapsed}
+					controls={navigationControls}
 				/>
 
 				<main className="workflow-main" aria-label="Workflow workspace">

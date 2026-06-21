@@ -23,6 +23,7 @@ export default function WorkflowNavigationDrawer({
 	statusByTabId = {},
 	isCollapsed = false,
 	onToggleCollapsed,
+	controls = null,
 }) {
 	const toggleLabel = isCollapsed ? "Expand workflow navigation" : "Collapse workflow navigation";
 	const ToggleIcon = isCollapsed ? PanelLeftOpen : PanelLeftClose;
@@ -71,6 +72,7 @@ export default function WorkflowNavigationDrawer({
 					);
 				})}
 			</div>
+			{controls && <div className="workflow-navigation-controls">{controls}</div>}
 		</nav>
 	);
 }
