@@ -86,6 +86,7 @@ def _use_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, 
         "coverage_metrics": _model_payload(response.coverage_metrics),
         "workflow_settings": _model_payload(response.workflow_settings),
         "workflow_diagnostics": _model_payload(response.workflow_diagnostics),
+        "generation_evidence": _model_payload(response.generation_evidence),
     }
 
 
@@ -100,6 +101,7 @@ def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str,
         "coverage_metrics": _model_payload(response.coverage_metrics),
         "workflow_settings": _model_payload(response.workflow_settings),
         "workflow_diagnostics": _model_payload(response.workflow_diagnostics),
+        "generation_evidence": _model_payload(response.generation_evidence),
     }
 
 

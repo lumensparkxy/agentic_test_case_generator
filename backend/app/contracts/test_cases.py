@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -59,6 +61,81 @@ class TestCaseTemplate(BaseModel):
     fields: List[str]
 
 
+class TestCaseGenerationShardEvidence(BaseModel):
+    shard_id: str
+    requirement_count: int = 0
+    planned_scenario_count: int = 0
+    raw_output_count: int = 0
+    fallback_case_count: int = 0
+    parser_status: Literal["not_run", "clean", "recovered", "failed"] = "not_run"
+    review_status: Literal["not_run", "approved", "rejected", "fallback"] = "not_run"
+    used_fallback: bool = False
+    failed: bool = False
+    failure_reason: Optional[str] = None
+    parser_failure_count: int = 0
+    parser_recovery_count: int = 0
+    warning_count: int = 0
+
+
+class TestCaseGenerationPassEvidence(BaseModel):
+    pass_id: str = Field(default_factory=lambda: str(uuid4()))
+    pass_type: Literal[
+        "sequential",
+        "parallel_direct",
+        "parallel_retry",
+        "deterministic_full_fallback",
+        "deterministic_coverage_completion",
+        "refinement",
+    ]
+    model_name: Optional[str] = None
+    requirement_count: int = 0
+    coverage_plan_count: int = 0
+    planned_scenario_count: int = 0
+    prompt_metadata: Dict[str, Any] = Field(default_factory=dict)
+    raw_output_summary: Dict[str, Any] = Field(default_factory=dict)
+    model_case_count_before_review: int = 0
+    model_case_count_after_review: int = 0
+    merged_case_count: int = 0
+    deterministic_additions_total: int = 0
+    deterministic_must_have_additions: int = 0
+    deterministic_optional_additions: int = 0
+    parser_failure_count: int = 0
+    parser_recovery_count: int = 0
+    review_status: Literal["not_run", "approved", "rejected", "fallback"] = "not_run"
+    review_score: Optional[int] = None
+    review_threshold: Optional[int] = None
+    approved: bool = False
+    used_fallback: bool = False
+    failure_reason: Optional[str] = None
+    shards: List[TestCaseGenerationShardEvidence] = Field(default_factory=list)
+
+
+class TestCaseGenerationEvidence(BaseModel):
+    evidence_id: str = Field(default_factory=lambda: str(uuid4()))
+    request_id: Optional[str] = None
+    workflow_run_id: Optional[str] = None
+    operation: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    model_name: Optional[str] = None
+    generation_settings: Dict[str, Any] = Field(default_factory=dict)
+    requirement_count: int = 0
+    coverage_plan_count: int = 0
+    planned_scenario_count: int = 0
+    model_case_count_before_review: int = 0
+    model_case_count_after_merge: int = 0
+    final_test_case_count: int = 0
+    deterministic_additions_total: int = 0
+    deterministic_must_have_additions: int = 0
+    deterministic_optional_additions: int = 0
+    parser_failure_count: int = 0
+    parser_recovery_count: int = 0
+    final_status: Optional[str] = None
+    recovery_reason: Optional[str] = None
+    warning_count: int = 0
+    payload_strategy: str = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
+    passes: List[TestCaseGenerationPassEvidence] = Field(default_factory=list)
+
+
 class GenerateTestCasesInput(BaseModel):
     requirements: List[Requirement]
     template: TestCaseTemplate
@@ -92,6 +169,7 @@ class GenerateTestCasesResponse(BaseModel):
     coverage_metrics: Dict[str, Any] = Field(default_factory=dict)
     workflow_settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
     workflow_diagnostics: WorkflowDiagnostics = Field(default_factory=WorkflowDiagnostics)
+    generation_evidence: TestCaseGenerationEvidence = Field(default_factory=TestCaseGenerationEvidence)
 
 
 __all__ = [
@@ -99,6 +177,9 @@ __all__ = [
     "TestCase",
     "TestCasesOutput",
     "TestCaseTemplate",
+    "TestCaseGenerationShardEvidence",
+    "TestCaseGenerationPassEvidence",
+    "TestCaseGenerationEvidence",
     "GenerateTestCasesInput",
     "RefineTestCasesInput",
     "GenerateTestCasesResponse",

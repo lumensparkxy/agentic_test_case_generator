@@ -102,6 +102,11 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertEqual(result["workflow_diagnostics"]["worker_count"], 3)
         self.assertEqual(result["workflow_diagnostics"]["failed_shard_count"], 0)
         self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 0)
+        evidence = result["generation_evidence"]
+        self.assertEqual(evidence["passes"][0]["pass_type"], "parallel_direct")
+        self.assertEqual(len(evidence["passes"][0]["shards"]), 3)
+        self.assertTrue(all(shard["raw_output_count"] > 0 for shard in evidence["passes"][0]["shards"]))
+        self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
         GenerateTestCasesResponse(**result)
 
     def test_parallel_merge_remaps_duplicate_ids_and_repairs_traceability(self) -> None:
@@ -142,6 +147,13 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertEqual(result["workflow_diagnostics"]["failed_shard_count"], 1)
         self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 1)
         self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "shard_fallback")
+        shard_evidence = result["generation_evidence"]["passes"][0]["shards"]
+        self.assertEqual(sum(1 for shard in shard_evidence if shard["used_fallback"]), 1)
+        fallback_plan = _fallback_coverage_plan([payload.requirements[1]])
+        expected_fallback_count = sum(len(item.get("scenarios") or []) for item in fallback_plan)
+        self.assertEqual(sum(shard["fallback_case_count"] for shard in shard_evidence), expected_fallback_count)
+        self.assertGreater(result["generation_evidence"]["passes"][0]["model_case_count_before_review"], 0)
+        self.assertEqual(result["generation_evidence"]["passes"][0]["review_status"], "approved")
         GenerateTestCasesResponse(**result)
 
     def test_small_precomputed_suite_uses_existing_sequential_workflow(self) -> None:
@@ -176,6 +188,8 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         sequential_mock.assert_called_once()
         worker_mock.assert_not_called()
         self.assertTrue(result["approved"])
+        self.assertEqual(result["generation_evidence"]["passes"][0]["pass_type"], "sequential")
+        self.assertEqual(result["generation_evidence"]["passes"][0]["review_status"], "approved")
 
 
 if __name__ == "__main__":

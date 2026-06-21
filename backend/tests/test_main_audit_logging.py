@@ -12,7 +12,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.main import app, get_current_user
-from app.models import AuthUser, Requirement, TestCase, TestStep
+from app.models import AuthUser, GenerateTestCasesResponse, Requirement, TestCase, TestCaseGenerationEvidence, TestStep
+from app.routers.testcases import _test_case_project_payload
 
 
 class MainAuditLoggingTests(unittest.TestCase):
@@ -187,6 +188,24 @@ class MainAuditLoggingTests(unittest.TestCase):
         record_event.assert_called_once()
         persist_test_cases.assert_called_once()
         self.assertEqual(response.json()["test_cases"][0]["artifact_set_id"], "tc-set-1")
+        self.assertIn("generation_evidence", response.json())
+
+    def test_test_case_project_payload_persists_generation_evidence(self) -> None:
+        response = GenerateTestCasesResponse(
+            test_cases=[TestCase(id="TC-1", title="Login test", steps=[TestStep(step=1, action="Act", expected="Observe")])],
+            generation_evidence=TestCaseGenerationEvidence(
+                request_id="req-1",
+                workflow_run_id="run-1",
+                operation="testcases.generate",
+                final_test_case_count=1,
+            ),
+        )
+
+        payload = _test_case_project_payload(response)
+
+        self.assertEqual(payload["generation_evidence"]["request_id"], "req-1")
+        self.assertEqual(payload["generation_evidence"]["workflow_run_id"], "run-1")
+        self.assertEqual(payload["generation_evidence"]["final_test_case_count"], 1)
 
 
 if __name__ == "__main__":
