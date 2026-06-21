@@ -311,11 +311,6 @@ export default function CommandDeckHeader({
 
 	return (
 		<header className="command-header">
-			<div className="command-brand">
-				<h1 className="title">Agentic Test Case Generator</h1>
-				<p className="subtitle">QA command deck for requirements, generation, automation, and export.</p>
-			</div>
-
 			<ProjectMenu
 				projects={projects}
 				currentProject={currentProject}
