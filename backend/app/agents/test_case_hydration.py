@@ -39,6 +39,13 @@ from ..models import (
 STEP_TEXT_PREFIX_PATTERN = re.compile(r"^\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
 STEP_TEXT_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
 STEP_BULLET_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*[-*\u2022]\s+")
+GENERATION_SOURCE_VALUES = {
+    "model",
+    "model_recovered",
+    "parallel_retry",
+    "deterministic_full_fallback",
+    "deterministic_coverage_completion",
+}
 
 
 def _extract_step_text_blocks(text: str, marker_pattern: re.Pattern[str]) -> List[str]:
@@ -54,6 +61,13 @@ def _extract_step_text_blocks(text: str, marker_pattern: re.Pattern[str]) -> Lis
         if block:
             blocks.append(block)
     return blocks
+
+
+def _normalize_generation_source(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    if normalized in GENERATION_SOURCE_VALUES:
+        return normalized
+    return None
 
 
 def _normalize_raw_steps(raw_steps: Any) -> List[Any]:
@@ -171,6 +185,13 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     tags=normalized_tags,
                     linked_requirement_ids=linked_requirement_ids,
                     scenario_refs=scenario_refs,
+                    generation_source=_normalize_generation_source(raw_test_case.get("generation_source")),
+                    generation_pass_id=str(raw_test_case["generation_pass_id"]) if raw_test_case.get("generation_pass_id") is not None else None,
+                    source_shard_id=str(raw_test_case["source_shard_id"]) if raw_test_case.get("source_shard_id") is not None else None,
+                    source_case_id=str(raw_test_case["source_case_id"]) if raw_test_case.get("source_case_id") is not None else None,
+                    coverage_completion_reason=str(raw_test_case["coverage_completion_reason"])
+                    if raw_test_case.get("coverage_completion_reason") is not None
+                    else None,
                     source_refs=_normalize_source_refs(raw_test_case.get("source_refs")),
                 )
             )
@@ -209,6 +230,11 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
                 "tags": test_case.tags or [],
                 "linked_requirement_ids": test_case.linked_requirement_ids or _extract_linked_requirement_ids_from_test_case({"tags": test_case.tags or []}),
                 "scenario_refs": test_case.scenario_refs or [],
+                "generation_source": test_case.generation_source,
+                "generation_pass_id": test_case.generation_pass_id,
+                "source_shard_id": test_case.source_shard_id,
+                "source_case_id": test_case.source_case_id,
+                "coverage_completion_reason": test_case.coverage_completion_reason,
                 "source_refs": test_case.source_refs or [],
             }
         )

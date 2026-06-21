@@ -749,15 +749,20 @@ export interface TestCase {
 	artifact_version_number?: number | null;
 	automation_status?: "Manual" | "Automated" | "To Be Automated";
 	component?: string | null;
+	coverage_completion_reason?: string | null;
 	description?: string | null;
 	estimated_time?: string | null;
 	expected_result?: string | null;
+	generation_pass_id?: string | null;
+	generation_source?: "model" | "model_recovered" | "parallel_retry" | "deterministic_full_fallback" | "deterministic_coverage_completion" | null;
 	id: string;
 	linked_requirement_ids?: Array<string>;
 	preconditions?: string | null;
 	priority?: "Critical" | "High" | "Medium" | "Low";
 	scenario_refs?: Array<string>;
+	source_case_id?: string | null;
 	source_refs?: Array<string> | null;
+	source_shard_id?: string | null;
 	status?: "Draft" | "Ready" | "In Review" | "Approved" | "Deprecated";
 	steps: Array<TestStep>;
 	tags?: Array<string> | null;
@@ -853,6 +858,7 @@ export interface WorkflowDiagnostics {
 	failed_shard_count?: number;
 	failure_reason?: string | null;
 	fallback_shard_count?: number;
+	generation_source_counts?: Record<string, number>;
 	max_iterations_reached?: boolean;
 	merge_warnings?: Array<string>;
 	parser_failures?: Array<string>;
