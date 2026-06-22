@@ -178,6 +178,9 @@ class WorkflowDiagnostics(BaseModel):
     fallback_shard_count: int = 0
     merge_warnings: List[str] = Field(default_factory=list)
     generation_source_counts: Dict[str, int] = Field(default_factory=dict)
+    scenario_ref_coverage_degraded: bool = False
+    scenario_ref_missing_case_count: int = 0
+    scenario_ref_heuristic_fallback_case_count: int = 0
 
 
 class WorkflowIteration(BaseModel):

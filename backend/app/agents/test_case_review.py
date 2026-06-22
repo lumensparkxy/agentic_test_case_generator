@@ -118,6 +118,21 @@ def _heuristic_test_case_review(
             suggestions.append(f"Add more planned scenario coverage: {preview}" + ("." if len(scenario_metrics["missing_scenarios"]) <= 3 else ", ..."))
             score -= min(12, len(scenario_metrics["missing_scenarios"]) * 2)
 
+        if scenario_metrics.get("scenario_ref_coverage_degraded"):
+            fallback_count = int(scenario_metrics.get("scenario_ref_heuristic_fallback_case_count") or 0)
+            unknown_count = len(scenario_metrics.get("unknown_scenario_refs") or [])
+            issue_parts = []
+            if fallback_count:
+                issue_parts.append(f"{fallback_count} test case(s) missing planned scenario_refs")
+            if unknown_count:
+                issue_parts.append(f"{unknown_count} unknown scenario_ref value(s)")
+            details = " and ".join(issue_parts) if issue_parts else "missing exact planned scenario_refs"
+            suggestions.append(
+                f"Coverage review used heuristic scenario-type inference because {details}; emit exact scenario_refs for every planned scenario a case covers."
+            )
+            unmet_criteria.append("Generated planned-scenario suites should use exact scenario_refs instead of heuristic scenario-type inference.")
+            score -= min(10, max(1, fallback_count) * 2 + unknown_count)
+
         if analysis_metrics["high_risk_items_without_tests"]:
             preview = ", ".join(analysis_metrics["high_risk_items_without_tests"][:3])
             blocking_issues.append(

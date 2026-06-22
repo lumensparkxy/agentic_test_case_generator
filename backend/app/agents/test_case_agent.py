@@ -115,6 +115,9 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
         "best_iteration": None,
         "attempt_count": attempt_count,
         "generation_source_counts": {},
+        "scenario_ref_coverage_degraded": False,
+        "scenario_ref_missing_case_count": 0,
+        "scenario_ref_heuristic_fallback_case_count": 0,
     }
 
 
@@ -344,6 +347,22 @@ def _generation_source_counts(test_cases: List[Dict[str, Any]]) -> Dict[str, int
 
 def _update_generation_source_counts(diagnostics: Dict[str, Any], test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
     diagnostics["generation_source_counts"] = _generation_source_counts(test_cases)
+    return diagnostics
+
+
+def _update_scenario_ref_diagnostics(diagnostics: Dict[str, Any], coverage_metrics: Dict[str, Any]) -> Dict[str, Any]:
+    degraded = bool(coverage_metrics.get("scenario_ref_coverage_degraded"))
+    missing_count = int(coverage_metrics.get("scenario_ref_missing_case_count") or 0)
+    fallback_count = int(coverage_metrics.get("scenario_ref_heuristic_fallback_case_count") or 0)
+    diagnostics["scenario_ref_coverage_degraded"] = degraded
+    diagnostics["scenario_ref_missing_case_count"] = missing_count
+    diagnostics["scenario_ref_heuristic_fallback_case_count"] = fallback_count
+    if degraded:
+        diagnostics.setdefault("warnings", [])
+        _append_unique_message(
+            diagnostics["warnings"],
+            (f"Coverage review used heuristic scenario-type inference because {fallback_count} test case(s) were missing exact planned scenario_refs."),
+        )
     return diagnostics
 
 
@@ -721,7 +740,7 @@ def _build_review_loop(
 2. Steps are executable and expected results are specific.
 3. Steps are sequential, actor-aware, and contain an action plus an observable expected result.
 4. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
-5. Every must-have scenario from the coverage plan is represented by at least one test case.
+5. Every must-have scenario from the coverage plan is represented by exact `scenario_refs` on at least one test case.
 6. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
 7. Tags include a scenario marker formatted like scenario:happy-path or scenario:negative.
 8. Priority, type, status, and automation status are valid.
@@ -834,11 +853,11 @@ def _build_test_case_generator_agent(
 {feedback_section}
 **Rules:**
 1. Generate at least one executable test case for every must-have scenario in the coverage plan.
-2. Prefer one test case per planned scenario; combine scenarios only when they share the same actor, setup, and expected outcome.
+2. Prefer one test case per planned scenario; combine scenarios only when they share the same actor, setup, and expected outcome and `scenario_refs` lists every covered planned scenario ID.
 3. Reflect business rules, field constraints, role permissions, state transitions, and risks from the requirement analysis whenever they apply.
 4. Set `linked_requirement_ids` to a JSON array containing every requirement ID covered by the test case.
 5. Also include those requirement IDs in `tags` for backward compatibility, plus one scenario tag using the format scenario:<kebab-case-scenario-type>.
-6. Set `scenario_refs` to the coverage-plan scenario ID(s) implemented by the test case when available.
+6. Set `scenario_refs` to the exact coverage-plan scenario ID(s) implemented by the test case; do not omit it when the coverage plan contains scenario IDs.
 7. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
 8. Include detailed steps, expected results, realistic priorities, and execution metadata.
 9. Keep each test case centered on one primary scenario from the coverage plan.
@@ -933,7 +952,7 @@ Rules:
 2. Add, merge, split, or remove cases as needed.
 3. Keep structured `linked_requirement_ids` intact or improve them; also mirror linked requirement IDs in `tags` for backward compatibility.
 4. Ensure each test case includes a scenario tag formatted like scenario:happy-path.
-5. Preserve or improve `scenario_refs` from the coverage plan when available.
+5. Preserve or improve exact `scenario_refs` from the coverage plan; combined cases must list every covered planned scenario ID.
 6. Preserve or improve any grounded-context `source_refs` when grounded context is available.
 7. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
 8. For browser or documentation workflows, replace inferred assertions or synthetic click labels with exact grounded headings, accessible link names, and hrefs from the context whenever available.
@@ -2203,6 +2222,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
     coverage_plan = _hydrate_coverage_plan(normalized_coverage_plan, requirements)
     requirement_analysis = _hydrate_requirement_analysis(raw_requirement_analysis, requirements)
     workflow_diagnostics = _update_generation_source_counts(dict(workflow.get("workflow_diagnostics") or {}), serialized)
+    workflow_diagnostics = _update_scenario_ref_diagnostics(workflow_diagnostics, coverage_metrics)
 
     return {
         "test_cases": test_cases,

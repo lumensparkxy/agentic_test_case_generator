@@ -39,6 +39,10 @@ Primary constraints:
   `TC-*` IDs, restores coverage-plan order, and applies one suite-level
   heuristic review before the router records billing, usage, versions, or
   project snapshots.
+- Planned scenario coverage is exact-ID first. Generated cases should preserve
+  `scenario_refs` for every covered coverage-plan scenario; scenario-type
+  inference remains a degraded compatibility fallback for legacy or malformed
+  cases and is reported in workflow diagnostics.
 - Automation generation is assembled centrally from bounded component/page
   fragments. Workers may draft generated test modules only; shared project
   files, final paths, duplicate symbol handling, and case-level manual or
@@ -309,7 +313,7 @@ test-case snapshots automatically.
 | Orchestrator run persistence | `orchestrator_run_service.py`, orchestrator run/checkpoint/event contracts in `contracts/orchestrator.py` | Keeps action progress, retries, blockers, produced snapshots, and execution links resumable across reloads and backend restarts |
 | Specialist agent task registry | `specialist_contracts.py`, `specialist_registry.py` | Gives orchestrator actions stable typed task envelopes/results and lets local or future ADK adapters plug in behind the same contract |
 | Use-case stage coordinator | `use_case_agent.py`, `test_case_coverage.py`, `analysis_agent.py` | Lets the orchestrator generate requirement analysis and scenario coverage plans without producing/discarding full test cases, while keeping merge validation deterministic |
-| Test-case shard coordinator | `test_case_agent.py`, `test_case_coverage.py`, `test_case_fallback.py`, `test_case_review.py`, `test_case_hydration.py` | Reuses approved coverage plans for large suites, bounds parallel workers, merges draft cases centrally, and keeps final approval at the whole-suite boundary |
+| Test-case shard coordinator | `test_case_agent.py`, `test_case_coverage.py`, `test_case_fallback.py`, `test_case_review.py`, `test_case_hydration.py` | Reuses approved coverage plans for large suites, bounds parallel workers, merges draft cases centrally, enforces exact `scenario_refs` before heuristic coverage fallback, and keeps final approval at the whole-suite boundary |
 | Automation fragment coordinator | `automation_agent.py` | Splits large approved suites by component/page group, assembles shared Playwright project files centrally, dedupes fragment names and symbols, and reports every case as generated, manual, unsupported, or fallback |
 | Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |

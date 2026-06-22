@@ -7,6 +7,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents.test_case_coverage import (
+    _compute_planned_scenario_metrics,
     _compute_requirement_analysis_metrics,
     _extract_scenario_types_from_test_case,
     _normalize_coverage_plan,
@@ -272,6 +273,183 @@ class CoveragePlanNormalizationTests(unittest.TestCase):
 
         self.assertFalse(any("Missing must-have planned scenarios" in issue for issue in review["blocking_issues"]))
         self.assertGreaterEqual(review["score"], 90)
+
+    def test_exact_scenario_refs_cover_one_to_one_and_combined_cases(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall support manager approval with audit capture.",
+            )
+        ]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Manager approves a submitted report",
+                        "objective": "Verify manager approval succeeds.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-02",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Integration",
+                        "title": "Audit record is written",
+                        "objective": "Verify approval writes audit history.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                ],
+            }
+        ]
+
+        one_to_one_metrics = _compute_planned_scenario_metrics(
+            coverage_plan,
+            [
+                {
+                    "id": "TC-001",
+                    "title": "Manager approves report",
+                    "linked_requirement_ids": ["REQ-001"],
+                    "scenario_refs": ["REQ-001-SCN-01"],
+                    "tags": ["scenario:happy-path"],
+                },
+                {
+                    "id": "TC-002",
+                    "title": "Approval audit record",
+                    "linked_requirement_ids": ["REQ-001"],
+                    "scenario_refs": ["REQ-001-SCN-02"],
+                    "tags": ["scenario:integration"],
+                },
+            ],
+            requirements,
+        )
+        combined_metrics = _compute_planned_scenario_metrics(
+            coverage_plan,
+            [
+                {
+                    "id": "TC-003",
+                    "title": "Manager approval writes audit",
+                    "linked_requirement_ids": ["REQ-001"],
+                    "scenario_refs": ["REQ-001-SCN-01", "REQ-001-SCN-02"],
+                    "tags": ["scenario:happy-path", "scenario:integration"],
+                }
+            ],
+            requirements,
+        )
+
+        self.assertEqual(one_to_one_metrics["scenario_coverage_ratio"], 1.0)
+        self.assertEqual(combined_metrics["scenario_coverage_ratio"], 1.0)
+        self.assertEqual(combined_metrics["scenario_ref_coverage_mode"], "exact")
+        self.assertFalse(combined_metrics["scenario_ref_coverage_degraded"])
+
+    def test_exact_scenario_refs_take_precedence_over_scenario_type_inference(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall support two independent happy-path approval variants.",
+            )
+        ]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Manager approves a standard report",
+                        "objective": "Verify standard approval.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-02",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Manager approves an escalated report",
+                        "objective": "Verify escalated approval.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                ],
+            }
+        ]
+
+        metrics = _compute_planned_scenario_metrics(
+            coverage_plan,
+            [
+                {
+                    "id": "TC-001",
+                    "title": "Manager approves standard report",
+                    "linked_requirement_ids": ["REQ-001"],
+                    "scenario_refs": ["REQ-001-SCN-01"],
+                    "tags": ["scenario:happy-path"],
+                }
+            ],
+            requirements,
+        )
+
+        self.assertEqual(metrics["covered_scenario_ids"], ["REQ-001-SCN-01"])
+        self.assertEqual(metrics["missing_scenario_ids"], ["REQ-001-SCN-02"])
+        self.assertEqual(metrics["scenario_ref_coverage_mode"], "exact")
+        self.assertFalse(metrics["scenario_ref_coverage_degraded"])
+
+    def test_missing_scenario_refs_are_marked_as_degraded_heuristic_coverage(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall display the dashboard summary for the signed-in user.",
+            )
+        ]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Dashboard summary is displayed",
+                        "objective": "Verify dashboard summary after sign-in.",
+                        "priority": "High",
+                        "must_have": True,
+                    }
+                ],
+            }
+        ]
+        test_cases = [
+            {
+                "id": "TC-001",
+                "title": "Signed-in user sees dashboard summary",
+                "description": "Verify the dashboard summary appears after sign-in.",
+                "priority": "High",
+                "type": "Functional",
+                "status": "Draft",
+                "preconditions": "A user is signed in.",
+                "steps": [
+                    {"step": 1, "action": "Sign in with valid credentials", "expected": "Dashboard loads", "test_data": None},
+                    {"step": 2, "action": "View the dashboard summary", "expected": "Summary widgets are visible", "test_data": None},
+                ],
+                "expected_result": "The signed-in user sees the dashboard summary.",
+                "linked_requirement_ids": ["REQ-001"],
+                "tags": ["scenario:happy-path"],
+            }
+        ]
+
+        metrics = _compute_planned_scenario_metrics(coverage_plan, test_cases, requirements)
+        review = _heuristic_test_case_review(test_cases, requirements, 90, coverage_plan=coverage_plan)
+
+        self.assertEqual(metrics["scenario_ref_coverage_mode"], "heuristic")
+        self.assertTrue(metrics["scenario_ref_coverage_degraded"])
+        self.assertEqual(metrics["scenario_ref_missing_case_count"], 1)
+        self.assertTrue(any("heuristic scenario-type inference" in suggestion for suggestion in review["suggestions"]))
 
     def test_custom_scenario_tags_map_back_to_canonical_coverage_types(self) -> None:
         test_case = {

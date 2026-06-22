@@ -865,6 +865,9 @@ export interface WorkflowDiagnostics {
 	parser_failures?: Array<string>;
 	parser_recoveries?: Array<string>;
 	recovery_reason?: string | null;
+	scenario_ref_coverage_degraded?: boolean;
+	scenario_ref_heuristic_fallback_case_count?: number;
+	scenario_ref_missing_case_count?: number;
 	shard_count?: number;
 	stalled?: boolean;
 	status?: "completed" | "partial" | "fallback" | "failed";

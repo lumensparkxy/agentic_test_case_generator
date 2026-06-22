@@ -199,6 +199,168 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertTrue(all(test_case.coverage_completion_reason == "coverage_augmentation" for test_case in completion_cases))
         self.assertTrue(all(test_case.generation_pass_id == evidence["passes"][1]["pass_id"] for test_case in completion_cases))
 
+    def test_coverage_completion_adds_exact_missing_scenario_refs(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall allow managers to approve standard and escalated reports.",
+            )
+        ]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Manager approves a standard report",
+                        "objective": "Verify standard approval succeeds.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                    {
+                        "id": "REQ-001-SCN-02",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Manager approves an escalated report",
+                        "objective": "Verify escalated approval succeeds.",
+                        "priority": "High",
+                        "must_have": True,
+                    },
+                ],
+            }
+        ]
+        partial_model_cases = [
+            {
+                "id": "TC-MODEL-001",
+                "title": "Manager approves escalated report",
+                "description": "Verify a manager can approve an escalated report.",
+                "priority": "High",
+                "type": "Functional",
+                "status": "Ready",
+                "preconditions": "An escalated report exists in Submitted status.",
+                "steps": [
+                    {"step": 1, "action": "Open the escalated report as a manager.", "expected": "The approval action is available."},
+                    {"step": 2, "action": "Approve the escalated report.", "expected": "The report is approved."},
+                ],
+                "expected_result": "The escalated report is approved.",
+                "automation_status": "To Be Automated",
+                "component": "Approvals",
+                "linked_requirement_ids": ["REQ-001"],
+                "scenario_refs": ["REQ-001-SCN-02"],
+                "tags": ["REQ-001", "scenario:happy-path"],
+            }
+        ]
+        workflow = {
+            "test_cases": partial_model_cases,
+            "requirement_analysis": fallback_requirement_analysis(requirements),
+            "coverage_plan": coverage_plan,
+            "review": {
+                "approved": False,
+                "score": 72,
+                "threshold": 90,
+                "summary": "Model output missed one planned scenario.",
+                "blocking_issues": ["Missing must-have planned scenarios: REQ-001-SCN-01."],
+                "suggestions": [],
+                "unmet_criteria": ["Every must-have scenario needs a corresponding test case."],
+            },
+            "approved": False,
+            "iteration_history": [],
+            "coverage_metrics": {},
+            "workflow_settings": {"approval_threshold": 90},
+            "workflow_diagnostics": {"status": "partial", "used_fallback": False, "failure_reason": "quality_rejection", "warnings": []},
+        }
+        payload = GenerateTestCasesInput(
+            requirements=requirements,
+            template=TestCaseTemplate(name="default", format="table", fields=["id", "title", "steps", "tags"]),
+        )
+
+        settings = type("Settings", (), {"model_name": "test-model"})()
+        with patch("app.agents.test_case_agent.get_settings", return_value=settings):
+            with patch("app.agents.test_case_agent._run_workflow_sync", return_value=workflow):
+                result = generate_test_cases(payload)
+
+        completion_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_coverage_completion"]
+        completion_refs = {reference for test_case in completion_cases for reference in test_case.scenario_refs}
+        self.assertIn("REQ-001-SCN-01", completion_refs)
+        self.assertIn("REQ-001-SCN-02", {reference for test_case in result["test_cases"] for reference in test_case.scenario_refs})
+        self.assertEqual(result["coverage_metrics"]["scenario_ref_coverage_mode"], "exact")
+        self.assertFalse(result["workflow_diagnostics"]["scenario_ref_coverage_degraded"])
+
+    def test_missing_scenario_refs_are_reported_in_workflow_diagnostics(self) -> None:
+        requirements = [Requirement(id="REQ-001", text="The system shall display the dashboard summary for the signed-in user.")]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Dashboard summary is displayed",
+                        "objective": "Verify the signed-in user sees the dashboard summary.",
+                        "priority": "High",
+                        "must_have": True,
+                    }
+                ],
+            }
+        ]
+        workflow = {
+            "test_cases": [
+                {
+                    "id": "TC-MODEL-001",
+                    "title": "Signed-in user sees dashboard summary",
+                    "description": "Verify the dashboard summary appears after sign-in.",
+                    "priority": "High",
+                    "type": "Functional",
+                    "status": "Ready",
+                    "preconditions": "A user is signed in.",
+                    "steps": [
+                        {"step": 1, "action": "Sign in with valid credentials.", "expected": "Dashboard loads."},
+                        {"step": 2, "action": "View the dashboard summary.", "expected": "Summary widgets are visible."},
+                    ],
+                    "expected_result": "The signed-in user sees the dashboard summary.",
+                    "automation_status": "To Be Automated",
+                    "component": "Dashboard",
+                    "linked_requirement_ids": ["REQ-001"],
+                    "tags": ["REQ-001", "scenario:happy-path"],
+                }
+            ],
+            "requirement_analysis": fallback_requirement_analysis(requirements),
+            "coverage_plan": coverage_plan,
+            "review": {
+                "approved": True,
+                "score": 94,
+                "threshold": 90,
+                "summary": "Approved by model review.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+            "approved": True,
+            "iteration_history": [],
+            "coverage_metrics": {},
+            "workflow_settings": {"approval_threshold": 90},
+            "workflow_diagnostics": {"status": "completed", "used_fallback": False, "warnings": []},
+        }
+        payload = GenerateTestCasesInput(
+            requirements=requirements,
+            template=TestCaseTemplate(name="default", format="table", fields=["id", "title", "steps", "tags"]),
+        )
+
+        settings = type("Settings", (), {"model_name": "test-model"})()
+        with patch("app.agents.test_case_agent.get_settings", return_value=settings):
+            with patch("app.agents.test_case_agent._run_workflow_sync", return_value=workflow):
+                result = generate_test_cases(payload)
+
+        self.assertTrue(result["workflow_diagnostics"]["scenario_ref_coverage_degraded"])
+        self.assertEqual(result["workflow_diagnostics"]["scenario_ref_missing_case_count"], 1)
+        self.assertEqual(result["coverage_metrics"]["scenario_ref_coverage_mode"], "heuristic")
+        self.assertTrue(any("heuristic scenario-type inference" in warning for warning in result["workflow_diagnostics"]["warnings"]))
+
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:
         requirements = [Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password.")]
         payload = GenerateTestCasesInput(
