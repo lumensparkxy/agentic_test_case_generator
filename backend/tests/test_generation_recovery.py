@@ -17,11 +17,12 @@ from app.agents.test_case_agent import (
     _coverage_augmentation_warning,
     _coverage_gap_counts,
     _new_workflow_diagnostics,
+    _prepare_workflow_inputs,
     _record_parser_recovery,
     generate_test_cases,
 )
 from app.agents.test_case_coverage import _fallback_coverage_plan
-from app.models import GenerateTestCasesInput, Requirement, TestCaseTemplate
+from app.models import EnrichInput, GenerateTestCasesInput, GroundedContext, GroundedUIElement, Requirement, TestCaseTemplate
 from app.utils.llm_json import parse_test_cases_json_detailed
 
 
@@ -66,6 +67,60 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertIsNone(getattr(refinement_agent, "output_schema", None))
         self.assertEqual(refinement_agent.output_key, "current_test_cases")
         self.assertEqual(refinement_agent.generate_content_config.response_mime_type, "application/json")
+
+    def test_test_case_prompts_include_browser_assertion_negative_examples(self) -> None:
+        generation_pipeline = _build_generation_pipeline(
+            "test-model",
+            "REQ-001: The docs page shall show installation guidance.",
+            'Grounded UI elements: Heading: exact text "Install Playwright"',
+            "Name: default, Format: table, Fields: id, title, steps, tags",
+            threshold=90,
+            max_iterations=1,
+        )
+        generation_agent = next(agent for agent in generation_pipeline.sub_agents if agent.name == "TestCaseGeneratorAgent")
+        review_loop = next(agent for agent in generation_pipeline.sub_agents if agent.name == "ValidationLoop")
+        validator_agent = next(agent for agent in review_loop.sub_agents if agent.name == "TestCaseValidatorAgent")
+        refinement_pipeline = _build_refinement_pipeline(
+            "test-model",
+            "REQ-001: The docs page shall show installation guidance.",
+            'Grounded UI elements: Heading: exact text "Install Playwright"',
+            "Name: default, Format: table, Fields: id, title, steps, tags",
+            threshold=90,
+            max_iterations=1,
+            human_feedback="Tighten browser assertions.",
+        )
+        refinement_agent = next(agent for agent in refinement_pipeline.sub_agents if agent.name == "TestCaseRefinementAgent")
+
+        for instruction in (generation_agent.instruction, validator_agent.instruction, refinement_agent.instruction):
+            self.assertIn('"heading" should be visible', instruction)
+            self.assertIn('heading "Exact accessible name" is visible', instruction)
+            self.assertIn('"#email-input" should be visible', instruction)
+
+    def test_grounded_context_prompt_preserves_element_type_and_exact_accessible_name(self) -> None:
+        requirements = [Requirement(id="REQ-001", text="The docs page shall show installation guidance.")]
+        context = EnrichInput(
+            requirements=requirements,
+            grounded_context=GroundedContext(
+                ui_elements=[
+                    GroundedUIElement(
+                        id="ART-APP-01-UI-H-01",
+                        source_id="ART-APP-01",
+                        name="Install Playwright",
+                        element_type="Heading",
+                        description="Documentation installation heading.",
+                        href="/docs/intro",
+                    )
+                ]
+            ),
+        )
+
+        _, context_text, _ = _prepare_workflow_inputs(
+            requirements,
+            context,
+            TestCaseTemplate(name="default", format="table", fields=["id", "title", "steps", "tags"]),
+        )
+
+        self.assertIn('Heading: exact text "Install Playwright" -> /docs/intro', context_text)
 
     def test_parser_recovery_diagnostics_do_not_populate_failures(self) -> None:
         diagnostics = _new_workflow_diagnostics()
