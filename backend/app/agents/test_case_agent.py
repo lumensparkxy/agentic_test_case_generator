@@ -685,11 +685,17 @@ def _finalize_generation_evidence(
     evidence["recovery_reason"] = diagnostics.get("recovery_reason")
     evidence["warning_count"] = len(diagnostics.get("warnings") or [])
     passes = list(evidence.get("passes") or [])
+    model_passes = [
+        item
+        for item in passes
+        if item.get("pass_type") not in {GENERATION_SOURCE_DETERMINISTIC_FULL_FALLBACK, GENERATION_SOURCE_DETERMINISTIC_COVERAGE_COMPLETION}
+        and not item.get("used_fallback")
+    ]
     evidence["model_case_count_before_review"] = next(
-        (int(item.get("model_case_count_before_review") or 0) for item in passes if not item.get("used_fallback")),
+        (int(item.get("model_case_count_before_review") or 0) for item in model_passes),
         0,
     )
-    evidence["model_case_count_after_merge"] = max([int(item.get("merged_case_count") or 0) for item in passes if not item.get("used_fallback")] or [0])
+    evidence["model_case_count_after_merge"] = max([int(item.get("merged_case_count") or 0) for item in model_passes] or [0])
     evidence["deterministic_additions_total"] = sum(int(item.get("deterministic_additions_total") or 0) for item in passes)
     evidence["deterministic_total_additions"] = sum(
         int(item.get("deterministic_total_additions") or item.get("deterministic_additions_total") or 0) for item in passes
@@ -2372,6 +2378,10 @@ def _maybe_retry_with_parallel_generation(
     deterministic augmentation runs. Returns the original workflow when a retry
     is not applicable or does not improve the result.
     """
+    current_diagnostics = dict(workflow.get("workflow_diagnostics") or {})
+    if current_diagnostics.get("generation_route") == "direct_parallel":
+        return workflow
+
     if not _should_use_parallel_test_case_generation(requirement_analysis, coverage_plan, generation_settings):
         return workflow
 

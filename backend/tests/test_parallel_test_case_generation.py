@@ -40,15 +40,15 @@ def _payload(requirement_count: int) -> GenerateTestCasesInput:
     )
 
 
-def _scenario(requirement_id: str, index: int) -> dict:
+def _scenario(requirement_id: str, index: int, *, must_have: bool = True) -> dict:
     return {
         "id": f"{requirement_id}-SCN-{index:02d}",
         "requirement_id": requirement_id,
-        "scenario_type": "Happy Path",
+        "scenario_type": "Happy Path" if must_have else "Validation",
         "title": f"Scenario {index} for {requirement_id}",
         "objective": f"Validate scenario {index} for {requirement_id}.",
-        "priority": "High",
-        "must_have": True,
+        "priority": "High" if must_have else "Medium",
+        "must_have": must_have,
     }
 
 
@@ -103,6 +103,62 @@ def _worker_output(shard, **_kwargs):
                     "source_refs": [],
                 }
             )
+    return {
+        "test_cases": test_cases,
+        "workflow_diagnostics": {
+            "status": "completed",
+            "used_fallback": False,
+            "warnings": [],
+            "parser_failures": [],
+            "parser_recoveries": [],
+        },
+    }
+
+
+def _large_plan_payload() -> tuple[GenerateTestCasesInput, set[str], set[str]]:
+    requirements = _requirements(11)
+    coverage_plan = [
+        {
+            "requirement_id": requirement.id,
+            "requirement_text": requirement.text,
+            "scenarios": [_scenario(requirement.id, index, must_have=index <= 6) for index in range(1, 12)],
+        }
+        for requirement in requirements
+    ]
+    missing_must_have = {"REQ-001-SCN-01"}
+    missing_optional = {f"REQ-{index:03d}-SCN-11" for index in range(2, 12)}
+    payload = GenerateTestCasesInput(
+        requirements=requirements,
+        template=TestCaseTemplate(
+            name="Large Plan Regression",
+            format="structured",
+            fields=["id", "title", "steps", "expected_result", "scenario_refs"],
+        ),
+        requirement_analysis=fallback_requirement_analysis(requirements),
+        coverage_plan=coverage_plan,
+    )
+    return payload, missing_must_have, missing_optional
+
+
+def _large_plan_worker_output(shard, *, omitted_scenario_ids: set[str], **_kwargs):
+    test_cases = []
+    for plan in shard.coverage_plan:
+        requirement_id = plan["requirement_id"]
+        for scenario in plan["scenarios"]:
+            scenario_id = scenario["id"]
+            if scenario_id in omitted_scenario_ids:
+                continue
+            raw_case = _raw_case(f"TC-SHARD-{scenario_id}", requirement_id, scenario_id)
+            raw_case["title"] = f"Model draft for {scenario_id}"
+            raw_case["description"] = f"Model-authored draft covering planned scenario {scenario_id}."
+            raw_case["steps"].append(
+                {
+                    "step": 2,
+                    "action": f"Validate the expected outcome for {scenario_id}.",
+                    "expected": scenario["objective"],
+                }
+            )
+            test_cases.append(raw_case)
     return {
         "test_cases": test_cases,
         "workflow_diagnostics": {
@@ -187,6 +243,97 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertEqual(result["workflow_diagnostics"]["shard_count"], worker_mock.call_count)
         self.assertEqual(result["workflow_diagnostics"]["worker_count"], generation_settings.parallel_test_case_max_workers)
         self.assertEqual(result["workflow_diagnostics"]["generation_route"], "direct_parallel")
+
+    def test_large_plan_regression_records_backfill_provenance_and_split_counts(self) -> None:
+        payload, missing_must_have, missing_optional = _large_plan_payload()
+        omitted_scenario_ids = missing_must_have | missing_optional
+        generation_settings = GenerationSettings(
+            parallel_test_case_min_scenarios=8,
+            parallel_test_case_max_workers=3,
+            parallel_test_case_target_scenarios_per_shard=10,
+            parallel_test_case_max_shards=24,
+        )
+
+        with (
+            patch("app.agents.test_case_agent._get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+            patch("app.agents.test_case_agent.get_generation_settings", return_value=generation_settings),
+            patch("app.agents.test_case_agent._run_workflow_sync") as sequential_mock,
+            patch(
+                "app.agents.test_case_agent._run_parallel_test_case_shard_workflow_sync",
+                side_effect=lambda shard, **kwargs: _large_plan_worker_output(shard, omitted_scenario_ids=omitted_scenario_ids, **kwargs),
+            ) as worker_mock,
+        ):
+            result = generate_test_cases(payload)
+
+        sequential_mock.assert_not_called()
+        self.assertEqual(worker_mock.call_count, 11)
+        self.assertTrue(result["approved"])
+        self.assertEqual(len(result["test_cases"]), 121)
+        self.assertEqual(result["workflow_diagnostics"]["generation_route"], "direct_parallel")
+        self.assertEqual(result["workflow_diagnostics"]["shard_count"], 11)
+        self.assertEqual(result["workflow_diagnostics"]["worker_count"], 3)
+        self.assertEqual(result["workflow_diagnostics"]["failed_shard_count"], 0)
+        self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 0)
+
+        coverage_metrics = result["coverage_metrics"]
+        self.assertEqual(coverage_metrics["planned_scenarios_total"], 121)
+        self.assertEqual(coverage_metrics["covered_planned_scenarios"], 121)
+        self.assertEqual(coverage_metrics["scenario_coverage_ratio"], 1.0)
+        self.assertEqual(coverage_metrics["must_have_scenario_coverage_ratio"], 1.0)
+        self.assertEqual(coverage_metrics["missing_scenario_ids"], [])
+        self.assertFalse(coverage_metrics["scenario_ref_coverage_degraded"])
+
+        diagnostics = result["workflow_diagnostics"]
+        self.assertEqual(
+            diagnostics["generation_source_counts"],
+            {"deterministic_coverage_completion": 11, "model": 110},
+        )
+        self.assertEqual(diagnostics["completion_source"], "coverage_completion")
+        self.assertEqual(diagnostics["missing_requirements_count"], 0)
+        self.assertEqual(diagnostics["missing_must_have_scenario_count"], 1)
+        self.assertEqual(diagnostics["missing_optional_scenario_count"], 10)
+        self.assertEqual(diagnostics["deterministic_total_additions"], 11)
+        self.assertEqual(diagnostics["deterministic_must_have_additions"], 1)
+        self.assertEqual(diagnostics["deterministic_optional_additions"], 10)
+        self.assertTrue(
+            any(
+                "1 must-have scenario" in warning
+                and "10 optional/planned scenarios" in warning
+                and "1 must-have deterministic case and 10 optional deterministic cases" in warning
+                and "11 total deterministic coverage cases" in warning
+                for warning in diagnostics["warnings"]
+            )
+        )
+
+        evidence = result["generation_evidence"]
+        self.assertEqual(evidence["planned_scenario_count"], 121)
+        self.assertEqual(evidence["model_case_count_before_review"], 110)
+        self.assertEqual(evidence["model_case_count_after_merge"], 110)
+        self.assertEqual(evidence["final_test_case_count"], 121)
+        self.assertEqual(evidence["deterministic_total_additions"], 11)
+        self.assertEqual(evidence["deterministic_must_have_additions"], 1)
+        self.assertEqual(evidence["deterministic_optional_additions"], 10)
+        self.assertEqual(evidence["completion_source"], "coverage_completion")
+        self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["parallel_direct", "deterministic_coverage_completion"])
+        self.assertEqual(evidence["passes"][0]["review_status"], "rejected")
+        self.assertEqual(evidence["passes"][0]["model_case_count_before_review"], 110)
+        self.assertEqual(evidence["passes"][0]["merged_case_count"], 110)
+        self.assertEqual(len(evidence["passes"][0]["shards"]), 11)
+        self.assertTrue(all(shard["planned_scenario_count"] == 11 for shard in evidence["passes"][0]["shards"]))
+        self.assertTrue(all(shard["raw_output_count"] == 10 for shard in evidence["passes"][0]["shards"]))
+        self.assertEqual(evidence["passes"][1]["review_status"], "approved")
+        self.assertEqual(evidence["passes"][1]["deterministic_total_additions"], 11)
+
+        completion_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_coverage_completion"]
+        model_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "model"]
+        self.assertEqual(len(model_cases), 110)
+        self.assertEqual(len(completion_cases), 11)
+        self.assertEqual({scenario_ref for test_case in completion_cases for scenario_ref in test_case.scenario_refs}, omitted_scenario_ids)
+        self.assertTrue(all(test_case.generation_pass_id for test_case in result["test_cases"]))
+        self.assertTrue(all(test_case.source_case_id for test_case in result["test_cases"]))
+        self.assertTrue(all(test_case.source_shard_id for test_case in model_cases))
+        self.assertTrue(all(test_case.coverage_completion_reason == "coverage_augmentation" for test_case in completion_cases))
+        GenerateTestCasesResponse(**result)
 
     def test_parallel_merge_remaps_duplicate_ids_and_repairs_traceability(self) -> None:
         payload = _payload(3)
