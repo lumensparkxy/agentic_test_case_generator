@@ -16,7 +16,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import ExecutionSettings
 from app.models import TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
-from plain_english_test_framework.compiler import compile_spec_file
+from plain_english_test_framework.compiler import CompilerError, compile_spec_file
 from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
 from plain_english_test_framework.playwright_generator import generate_playwright_spec
 from plain_english_test_framework.validation import ValidationIssue
@@ -285,6 +285,91 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(assertion_step["locator"]["role"], "heading")
         generated = generate_playwright_spec(ir).contents
         self.assertIn('page.getByRole("heading", { name: "Running and debugging tests" })', generated)
+
+    def test_preview_rejects_role_only_visible_assertions(self) -> None:
+        role_only_case = TestCase(
+            id="TC-ROLE-ONLY",
+            title="Reject role-only heading assertion",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action="Open https://playwright.dev/",
+                    expected='"heading" should be visible',
+                )
+            ],
+        )
+
+        response = preview_execution([role_only_case], target_base_url="https://playwright.dev/")
+
+        self.assertEqual(response.summary.executable, 0)
+        self.assertEqual(response.summary.unsupported, 1)
+        candidate = response.unsupported[0]
+        reason_codes = {step.reason_code for step in candidate.unsupported_steps}
+        self.assertIn("ambiguous_semantic_assertion", reason_codes)
+        self.assertIn("missing_assertion", reason_codes)
+        self.assertIn("exact accessible name", candidate.unsupported_steps[0].suggested_next_action)
+
+    def test_preview_omits_ambiguous_semantic_assertions_from_executable_spec(self) -> None:
+        mixed_case = TestCase(
+            id="TC-MIXED-SEMANTIC",
+            title="Keep exact copy and omit role-only assertion",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action="Open https://playwright.dev/",
+                    expected='"Playwright enables reliable web automation for testing, scripting, and AI agents." is visible',
+                ),
+                TestStep(step=2, action='"heading" should be visible', expected=""),
+            ],
+        )
+
+        response = preview_execution([mixed_case], target_base_url="https://playwright.dev/")
+
+        self.assertEqual(response.summary.executable, 1)
+        candidate = response.executable[0]
+        self.assertIn("ambiguous_semantic_assertion", {step.reason_code for step in candidate.unsupported_steps})
+        self.assertNotIn('And "heading" should be visible', candidate.spec["steps"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "mixed_case.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://playwright.dev/"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        generated = generate_playwright_spec(ir).contents
+        self.assertNotIn('getByText("heading")', generated)
+        self.assertIn('page.getByText("Playwright enables reliable web automation for testing, scripting, and AI agents")', generated)
+
+    def test_compiler_rejects_ambiguous_semantic_visible_text_specs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "ambiguous_heading.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "schemaVersion": "1.0",
+                        "id": "ambiguous_heading",
+                        "title": "Ambiguous heading assertion",
+                        "steps": [
+                            'Given I open "https://playwright.dev/"',
+                            'Then "heading" should be visible',
+                        ],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://playwright.dev/"}), encoding="utf-8")
+
+            with self.assertRaises(CompilerError) as context:
+                compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        self.assertEqual(context.exception.issues[0].code, "step.ambiguous_semantic_assertion")
 
     def test_preview_does_not_treat_launch_command_text_as_navigation(self) -> None:
         command_case = TestCase(

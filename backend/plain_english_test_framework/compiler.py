@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from plain_english_test_framework.ir_validator import ValidatedIr, parse_ir_document
+from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
 from plain_english_test_framework.spec_parser import ParsedSpec, parse_spec_file
 from plain_english_test_framework.validation import ValidationIssue, deduplicate_issues, find_secret_issues
 
@@ -271,6 +272,19 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
 
     if match := VISIBLE_PATTERN.match(body):
         text = _resolve_text(match.group("text"), environment, data, path=f"$.steps[{source_step_index}]")
+        if is_ambiguous_semantic_visible_text(text):
+            raise CompilerError(
+                (
+                    ValidationIssue(
+                        f"$.steps[{source_step_index}]",
+                        (
+                            f'visible text assertion "{text}" names a UI role or locator concept; '
+                            'use an exact accessible name such as heading "Dashboard" should be visible'
+                        ),
+                        "step.ambiguous_semantic_assertion",
+                    ),
+                )
+            )
         return {
             "id": _slug_identifier(f"assert {text}"),
             "sourceStepIndex": source_step_index,

@@ -21,6 +21,15 @@ work. Active roadmap work is tracked in the Phase 3 and Phase 4 sections below.
 - [#11](https://github.com/lumensparkxy/agentic_test_case_generator/issues/11) — Phase 2: expand backend and E2E regression coverage
 - [#17](https://github.com/lumensparkxy/agentic_test_case_generator/issues/17) — Update project dependencies to latest compatible versions
 
+## Created semantic Playwright execution hardening issues
+
+Status markers below reflect the GitHub issue state as of 2026-06-22.
+
+- Epic [#175](https://github.com/lumensparkxy/agentic_test_case_generator/issues/175) - Harden semantic Playwright execution assertions
+  - Done: [#176](https://github.com/lumensparkxy/agentic_test_case_generator/issues/176) - Reject literal semantic words in execution assertions
+  - Ready: [#177](https://github.com/lumensparkxy/agentic_test_case_generator/issues/177) - Ground browser assertions before approval
+  - Ready: [#178](https://github.com/lumensparkxy/agentic_test_case_generator/issues/178) - Expand DSL coverage for semantic browser assertions
+
 ## Created concern hardening issues
 
 These issues were created from `docs/codebase/CONCERNS.md` after the first
