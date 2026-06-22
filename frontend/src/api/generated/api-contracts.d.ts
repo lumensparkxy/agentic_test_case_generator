@@ -772,15 +772,20 @@ export interface TestCase {
 }
 
 export interface TestCaseGenerationEvidence {
+	completion_source?: "coverage_completion" | "full_fallback" | null;
 	coverage_plan_count?: number;
 	created_at?: string;
 	deterministic_additions_total?: number;
 	deterministic_must_have_additions?: number;
 	deterministic_optional_additions?: number;
+	deterministic_total_additions?: number;
 	evidence_id?: string;
 	final_status?: string | null;
 	final_test_case_count?: number;
 	generation_settings?: Record<string, unknown>;
+	missing_must_have_scenario_count?: number;
+	missing_optional_scenario_count?: number;
+	missing_requirements_count?: number;
 	model_case_count_after_merge?: number;
 	model_case_count_before_review?: number;
 	model_name?: string | null;
@@ -799,12 +804,17 @@ export interface TestCaseGenerationEvidence {
 
 export interface TestCaseGenerationPassEvidence {
 	approved?: boolean;
+	completion_source?: "coverage_completion" | "full_fallback" | null;
 	coverage_plan_count?: number;
 	deterministic_additions_total?: number;
 	deterministic_must_have_additions?: number;
 	deterministic_optional_additions?: number;
+	deterministic_total_additions?: number;
 	failure_reason?: string | null;
 	merged_case_count?: number;
+	missing_must_have_scenario_count?: number;
+	missing_optional_scenario_count?: number;
+	missing_requirements_count?: number;
 	model_case_count_after_review?: number;
 	model_case_count_before_review?: number;
 	model_name?: string | null;
@@ -855,6 +865,10 @@ export interface TestStep {
 export interface WorkflowDiagnostics {
 	attempt_count?: number;
 	best_iteration?: number | null;
+	completion_source?: "coverage_completion" | "full_fallback" | null;
+	deterministic_must_have_additions?: number;
+	deterministic_optional_additions?: number;
+	deterministic_total_additions?: number;
 	failed_shard_count?: number;
 	failure_reason?: string | null;
 	fallback_shard_count?: number;
@@ -862,6 +876,9 @@ export interface WorkflowDiagnostics {
 	generation_source_counts?: Record<string, number>;
 	max_iterations_reached?: boolean;
 	merge_warnings?: Array<string>;
+	missing_must_have_scenario_count?: number;
+	missing_optional_scenario_count?: number;
+	missing_requirements_count?: number;
 	parser_failures?: Array<string>;
 	parser_recoveries?: Array<string>;
 	recovery_reason?: string | null;

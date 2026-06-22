@@ -181,6 +181,13 @@ class WorkflowDiagnostics(BaseModel):
     scenario_ref_coverage_degraded: bool = False
     scenario_ref_missing_case_count: int = 0
     scenario_ref_heuristic_fallback_case_count: int = 0
+    missing_requirements_count: int = 0
+    missing_must_have_scenario_count: int = 0
+    missing_optional_scenario_count: int = 0
+    deterministic_total_additions: int = 0
+    deterministic_must_have_additions: int = 0
+    deterministic_optional_additions: int = 0
+    completion_source: Optional[Literal["coverage_completion", "full_fallback"]] = None
 
 
 class WorkflowIteration(BaseModel):

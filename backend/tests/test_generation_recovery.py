@@ -14,6 +14,8 @@ from app.agents.test_case_agent import (
     _build_generation_pipeline,
     _build_refinement_pipeline,
     _combined_event_text,
+    _coverage_augmentation_warning,
+    _coverage_gap_counts,
     _new_workflow_diagnostics,
     _record_parser_recovery,
     generate_test_cases,
@@ -178,12 +180,16 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertFalse(any("recovered usable test-case JSON" in warning for warning in result["workflow_diagnostics"]["warnings"]))
         self.assertTrue(
             any(
-                warning.startswith("Recovered partial model output left ")
-                and "requirement(s)" in warning
-                and "must-have scenario(s)" in warning
-                and "added " in warning
+                warning.startswith("Recovered partial model output needed deterministic coverage completion")
+                and "must-have scenario" in warning
+                and "total deterministic coverage case" in warning
                 for warning in result["workflow_diagnostics"]["warnings"]
             )
+        )
+        self.assertEqual(result["workflow_diagnostics"]["completion_source"], "coverage_completion")
+        self.assertEqual(
+            result["workflow_diagnostics"]["deterministic_total_additions"],
+            result["workflow_diagnostics"]["generation_source_counts"]["deterministic_coverage_completion"],
         )
         self.assertEqual(result["iteration_history"][-1]["actor"], "FallbackCoverageRecovery")
         evidence = result["generation_evidence"]
@@ -191,6 +197,8 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(evidence["parser_recovery_count"], 2)
         self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["sequential", "deterministic_coverage_completion"])
         self.assertGreater(evidence["deterministic_additions_total"], 0)
+        self.assertEqual(evidence["deterministic_total_additions"], evidence["deterministic_additions_total"])
+        self.assertEqual(evidence["completion_source"], "coverage_completion")
         self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
         self.assertEqual(evidence["passes"][1]["review_status"], "approved")
         model_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "model_recovered"]
@@ -361,6 +369,108 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(result["coverage_metrics"]["scenario_ref_coverage_mode"], "heuristic")
         self.assertTrue(any("heuristic scenario-type inference" in warning for warning in result["workflow_diagnostics"]["warnings"]))
 
+    def test_coverage_completion_warning_splits_must_have_and_optional_counts(self) -> None:
+        requirements = [Requirement(id="REQ-001", text="The system shall validate approval scenarios.")]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {"id": "REQ-001-SCN-01", "scenario_type": "Happy Path", "title": "Primary approval", "must_have": True},
+                    {"id": "REQ-001-SCN-02", "scenario_type": "Authorization", "title": "Manager approval", "must_have": True},
+                    {"id": "REQ-001-SCN-03", "scenario_type": "Negative", "title": "Reject invalid approval", "must_have": False},
+                    {"id": "REQ-001-SCN-04", "scenario_type": "Integration", "title": "Audit capture", "must_have": False},
+                ],
+            }
+        ]
+        original_cases = [
+            {
+                "id": "TC-001",
+                "title": "Primary approval",
+                "linked_requirement_ids": ["REQ-001"],
+                "scenario_refs": ["REQ-001-SCN-01"],
+                "tags": ["REQ-001", "scenario:happy-path"],
+            }
+        ]
+        augmented_cases = original_cases + [
+            {"id": "TC-002", "linked_requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-02"], "tags": ["REQ-001", "scenario:authorization"]},
+            {"id": "TC-003", "linked_requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-03"], "tags": ["REQ-001", "scenario:negative"]},
+            {"id": "TC-004", "linked_requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-04"], "tags": ["REQ-001", "scenario:integration"]},
+        ]
+
+        counts = _coverage_gap_counts(
+            original_test_cases=original_cases,
+            augmented_test_cases=augmented_cases,
+            requirements=requirements,
+            coverage_plan=coverage_plan,
+        )
+        warning = _coverage_augmentation_warning(
+            original_test_cases=original_cases,
+            augmented_test_cases=augmented_cases,
+            requirements=requirements,
+            coverage_plan=coverage_plan,
+            diagnostics={},
+            deterministic_counts=counts,
+        )
+
+        self.assertEqual(counts["missing_must_have_scenario_count"], 1)
+        self.assertEqual(counts["missing_optional_scenario_count"], 2)
+        self.assertEqual(counts["deterministic_must_have_additions"], 1)
+        self.assertEqual(counts["deterministic_optional_additions"], 2)
+        self.assertIn("1 must-have scenario", warning)
+        self.assertIn("2 optional/planned scenarios", warning)
+        self.assertIn("1 must-have deterministic case and 2 optional deterministic cases", warning)
+        self.assertIn("3 total deterministic coverage cases", warning)
+
+    def test_coverage_completion_warning_handles_optional_only_additions(self) -> None:
+        requirements = [Requirement(id="REQ-001", text="The system shall validate dashboard scenarios.")]
+        coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": requirements[0].text,
+                "scenarios": [
+                    {"id": "REQ-001-SCN-01", "scenario_type": "Happy Path", "title": "Dashboard loads", "must_have": True},
+                    {"id": "REQ-001-SCN-02", "scenario_type": "Data Variation", "title": "Alternate widget data", "must_have": False},
+                ],
+            }
+        ]
+        original_cases = [
+            {
+                "id": "TC-001",
+                "title": "Dashboard loads",
+                "linked_requirement_ids": ["REQ-001"],
+                "scenario_refs": ["REQ-001-SCN-01"],
+                "tags": ["REQ-001", "scenario:happy-path"],
+            }
+        ]
+        augmented_cases = original_cases + [
+            {"id": "TC-002", "linked_requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-02"], "tags": ["REQ-001", "scenario:data-variation"]}
+        ]
+
+        counts = _coverage_gap_counts(
+            original_test_cases=original_cases,
+            augmented_test_cases=augmented_cases,
+            requirements=requirements,
+            coverage_plan=coverage_plan,
+        )
+        warning = _coverage_augmentation_warning(
+            original_test_cases=original_cases,
+            augmented_test_cases=augmented_cases,
+            requirements=requirements,
+            coverage_plan=coverage_plan,
+            diagnostics={},
+            deterministic_counts=counts,
+        )
+
+        self.assertEqual(counts["missing_must_have_scenario_count"], 0)
+        self.assertEqual(counts["missing_optional_scenario_count"], 1)
+        self.assertEqual(counts["deterministic_must_have_additions"], 0)
+        self.assertEqual(counts["deterministic_optional_additions"], 1)
+        self.assertIn("all must-have scenarios were covered", warning)
+        self.assertIn("1 optional/planned scenario remained", warning)
+        self.assertIn("1 optional deterministic case", warning)
+        self.assertNotIn("must-have deterministic case", warning)
+
     def test_missing_model_credentials_use_deterministic_generation_fallback(self) -> None:
         requirements = [Requirement(id="REQ-001", text="The system shall allow users to sign in using email and password.")]
         payload = GenerateTestCasesInput(
@@ -381,6 +491,10 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(evidence["final_status"], "fallback")
         self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["deterministic_full_fallback"])
         self.assertEqual(evidence["deterministic_additions_total"], len(result["test_cases"]))
+        self.assertEqual(result["workflow_diagnostics"]["completion_source"], "full_fallback")
+        self.assertEqual(result["workflow_diagnostics"]["deterministic_total_additions"], len(result["test_cases"]))
+        self.assertTrue(any("deterministic draft artifacts" in warning for warning in result["workflow_diagnostics"]["warnings"]))
+        self.assertFalse(any("deterministic coverage completion" in warning for warning in result["workflow_diagnostics"]["warnings"]))
         self.assertEqual(evidence["passes"][0]["raw_output_summary"]["model_case_count"], 0)
         self.assertEqual(evidence["passes"][0]["raw_output_summary"]["fallback_case_count"], len(result["test_cases"]))
         self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"], {"deterministic_full_fallback": len(result["test_cases"])})
