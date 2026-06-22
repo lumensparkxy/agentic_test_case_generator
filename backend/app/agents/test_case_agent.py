@@ -104,6 +104,7 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
         "status": "completed",
         "used_fallback": False,
         "failure_reason": None,
+        "generation_route": None,
         "timed_out": False,
         "stalled": False,
         "max_iterations_reached": False,
@@ -1526,7 +1527,8 @@ def _plan_parallel_test_case_shards(
     requirement_analysis: List[Dict[str, Any]],
     coverage_plan: List[Dict[str, Any]],
     *,
-    max_workers: int,
+    target_scenarios_per_shard: int,
+    max_shards: int,
 ) -> List[_ParallelTestCaseShard]:
     requirement_by_id = {requirement.id: requirement for requirement in requirements}
     analysis_by_id = {str(item.get("requirement_id") or "").strip(): item for item in requirement_analysis or []}
@@ -1534,11 +1536,28 @@ def _plan_parallel_test_case_shards(
     if not plan_items:
         return []
 
-    worker_count = max(1, min(max_workers, len(plan_items)))
-    shard_size = (len(plan_items) + worker_count - 1) // worker_count
+    target_scenarios = max(1, int(target_scenarios_per_shard or 1))
+    shard_limit = max(1, min(int(max_shards or 1), len(plan_items)))
+    shard_plans: List[List[Dict[str, Any]]] = []
+    current_plan: List[Dict[str, Any]] = []
+    current_scenario_count = 0
+
+    for plan_item in plan_items:
+        scenario_count = max(1, len(plan_item.get("scenarios") or []))
+        would_exceed_target = current_plan and current_scenario_count + scenario_count > target_scenarios
+        can_open_shard = len(shard_plans) + 1 < shard_limit
+        if would_exceed_target and can_open_shard:
+            shard_plans.append(current_plan)
+            current_plan = []
+            current_scenario_count = 0
+        current_plan.append(plan_item)
+        current_scenario_count += scenario_count
+
+    if current_plan:
+        shard_plans.append(current_plan)
+
     shards: List[_ParallelTestCaseShard] = []
-    for index, start in enumerate(range(0, len(plan_items), shard_size), start=1):
-        shard_plan = plan_items[start : start + shard_size]
+    for index, shard_plan in enumerate(shard_plans, start=1):
         shard_requirements = [requirement_by_id[str(item.get("requirement_id") or "").strip()] for item in shard_plan]
         shards.append(
             _ParallelTestCaseShard(
@@ -1949,12 +1968,14 @@ def _run_parallel_test_case_generation_sync(
             requirements,
             requirement_analysis,
             coverage_plan,
-            max_workers=generation_settings.parallel_test_case_max_workers,
+            target_scenarios_per_shard=generation_settings.parallel_test_case_target_scenarios_per_shard,
+            max_shards=generation_settings.parallel_test_case_max_shards,
         )
         worker_count = min(generation_settings.parallel_test_case_max_workers, len(shards)) if shards else 0
         diagnostics = _new_workflow_diagnostics()
         diagnostics.update(
             {
+                "generation_route": "parallel_retry" if generation_mode == "parallel_retry" else "direct_parallel",
                 "shard_count": len(shards),
                 "worker_count": worker_count,
                 "failed_shard_count": 0,
@@ -2273,6 +2294,7 @@ def _maybe_retry_with_parallel_generation(
         return workflow
 
     parallel_diagnostics = {**_new_workflow_diagnostics(), **dict(parallel_workflow.get("workflow_diagnostics") or {})}
+    parallel_diagnostics["generation_route"] = "parallel_retry"
     parallel_diagnostics["recovery_reason"] = "parallel_generation_retry"
     if parallel_diagnostics.get("status") == "completed":
         parallel_diagnostics["status"] = "partial"
@@ -2283,6 +2305,16 @@ def _maybe_retry_with_parallel_generation(
             f"regenerated with parallel shards to recover model coverage ({len(parallel_test_cases)} case(s))."
         ),
     )
+    if len(parallel_test_cases) < len(raw_test_cases):
+        _append_unique_message(
+            parallel_diagnostics["warnings"],
+            (
+                "Accepted lower-count parallel retry because review quality improved "
+                f"from {current_review.get('score', 0)}/{current_review.get('threshold', DEFAULT_TEST_CASE_THRESHOLD)} "
+                f"to {parallel_review.get('score', 0)}/{parallel_review.get('threshold', DEFAULT_TEST_CASE_THRESHOLD)}; "
+                f"case count delta {len(parallel_test_cases) - len(raw_test_cases)}."
+            ),
+        )
     parallel_workflow["workflow_diagnostics"] = parallel_diagnostics
     parallel_workflow["generation_evidence"] = _merge_generation_evidence(
         dict(workflow.get("generation_evidence") or {}),
@@ -2323,6 +2355,7 @@ def generate_test_cases(
                 "status": "fallback",
                 "used_fallback": True,
                 "failure_reason": "missing_model_credentials",
+                "generation_route": "deterministic_full_fallback",
                 "warnings": ["Model credentials are unavailable; deterministic fallback was used."],
             },
         }
@@ -2370,6 +2403,7 @@ def generate_test_cases(
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     if settings is not None and not workflow.get("generation_evidence"):
         diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+        diagnostics["generation_route"] = diagnostics.get("generation_route") or "sequential"
         sequential_generation_pass_id = str(uuid.uuid4()) if raw_test_cases else None
         if raw_test_cases:
             raw_test_cases = _with_test_case_provenance(
@@ -2436,6 +2470,7 @@ def generate_test_cases(
         workflow_diagnostics["status"] = "fallback"
         workflow_diagnostics["used_fallback"] = True
         workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "fallback_generated_artifacts"
+        workflow_diagnostics["generation_route"] = "deterministic_full_fallback"
         _append_unique_message(
             workflow_diagnostics["warnings"],
             "Test-case fallback produced deterministic draft artifacts because the generation workflow returned no test cases.",

@@ -858,6 +858,7 @@ export interface WorkflowDiagnostics {
 	failed_shard_count?: number;
 	failure_reason?: string | null;
 	fallback_shard_count?: number;
+	generation_route?: "sequential" | "direct_parallel" | "parallel_retry" | "deterministic_full_fallback" | null;
 	generation_source_counts?: Record<string, number>;
 	max_iterations_reached?: boolean;
 	merge_warnings?: Array<string>;

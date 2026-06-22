@@ -43,7 +43,7 @@ PR history.
 Copy .env.example to .env and set values:
 - GEMINI_API_KEY (required)
 - MODEL_NAME (default: gemini-3.5-flash)
-- PARALLEL_TEST_CASE_GENERATION_ENABLED, PARALLEL_TEST_CASE_MIN_SCENARIOS, PARALLEL_TEST_CASE_MAX_WORKERS (optional tuning for bounded parallel generation from approved coverage plans)
+- PARALLEL_TEST_CASE_GENERATION_ENABLED, PARALLEL_TEST_CASE_MIN_SCENARIOS, PARALLEL_TEST_CASE_MAX_WORKERS, PARALLEL_TEST_CASE_TARGET_SCENARIOS_PER_SHARD, PARALLEL_TEST_CASE_MAX_SHARDS (optional tuning for bounded parallel generation from approved coverage plans)
 - PARALLEL_AUTOMATION_GENERATION_ENABLED, PARALLEL_AUTOMATION_MIN_CASES, PARALLEL_AUTOMATION_MAX_WORKERS (optional tuning for bounded automation fragment generation)
 - GOOGLE_CLIENT_ID (optional; required only for compatibility-mode `/auth/google/login`)
 - GOOGLE_CLIENT_IDS (optional compatibility-mode comma-separated allow-list for multiple web client IDs)

@@ -136,6 +136,8 @@ class GenerationSettings(BaseModel):
     parallel_test_case_generation_enabled: bool = True
     parallel_test_case_min_scenarios: int = 8
     parallel_test_case_max_workers: int = 3
+    parallel_test_case_target_scenarios_per_shard: int = 10
+    parallel_test_case_max_shards: int = 24
     parallel_automation_generation_enabled: bool = True
     parallel_automation_min_cases: int = 12
     parallel_automation_max_workers: int = 3
@@ -451,6 +453,19 @@ def get_generation_settings() -> GenerationSettings:
             os.getenv("PARALLEL_TEST_CASE_MAX_WORKERS", str(default_settings.parallel_test_case_max_workers)),
             default=default_settings.parallel_test_case_max_workers,
             env_name="PARALLEL_TEST_CASE_MAX_WORKERS",
+        ),
+        parallel_test_case_target_scenarios_per_shard=_parse_positive_int_env(
+            os.getenv(
+                "PARALLEL_TEST_CASE_TARGET_SCENARIOS_PER_SHARD",
+                str(default_settings.parallel_test_case_target_scenarios_per_shard),
+            ),
+            default=default_settings.parallel_test_case_target_scenarios_per_shard,
+            env_name="PARALLEL_TEST_CASE_TARGET_SCENARIOS_PER_SHARD",
+        ),
+        parallel_test_case_max_shards=_parse_positive_int_env(
+            os.getenv("PARALLEL_TEST_CASE_MAX_SHARDS", str(default_settings.parallel_test_case_max_shards)),
+            default=default_settings.parallel_test_case_max_shards,
+            env_name="PARALLEL_TEST_CASE_MAX_SHARDS",
         ),
         parallel_automation_generation_enabled=_parse_bool_env(
             os.getenv("PARALLEL_AUTOMATION_GENERATION_ENABLED", "true"),
