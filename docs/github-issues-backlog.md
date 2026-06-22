@@ -48,8 +48,8 @@ Status markers below reflect the GitHub issue state as of 2026-06-22.
   - Done: [#162](https://github.com/lumensparkxy/agentic_test_case_generator/issues/162) - Use dynamic shard-first generation for large coverage plans
   - Done: [#163](https://github.com/lumensparkxy/agentic_test_case_generator/issues/163) - Enforce exact planned scenario references in coverage review
   - Done: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
-  - In progress: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
-  - Ready: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
+  - Done: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
+  - In progress: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
 
 ### Phase 4 - Operational Readiness
 

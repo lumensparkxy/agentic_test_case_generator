@@ -1236,17 +1236,25 @@ export default function App() {
 
 		const generationPayload = testCasePayload || {};
 		const useCases = useCasePayload || generationPayload;
+		const hydratedTestCaseDiagnostics = generationPayload.workflow_diagnostics || useCases.workflow_diagnostics || null;
+		const hydratedGenerationPayload = {
+			...generationPayload,
+			coverage_metrics: generationPayload.coverage_metrics || useCases.coverage_metrics || null,
+			workflow_diagnostics: hydratedTestCaseDiagnostics,
+		};
 		setRequirementAnalysis(useCases.requirement_analysis || []);
 		setCoveragePlan(useCases.coverage_plan || []);
 		setCoverageMetrics(useCases.coverage_metrics || null);
 		setTestCases(generationPayload.test_cases || []);
 		setTestCaseReview(generationPayload.review || useCases.review || null);
-		setTestCaseWorkflowDiagnostics(generationPayload.workflow_diagnostics || useCases.workflow_diagnostics || null);
+		setTestCaseWorkflowDiagnostics(hydratedTestCaseDiagnostics);
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
 		setExpandedRows({});
-		setActiveGenerateResultTab((generationPayload.test_cases || []).length ? "test-cases" : "analysis");
+		setActiveGenerateResultTab(
+			(generationPayload.test_cases || []).length ? chooseGenerateResultTab(hydratedGenerationPayload) : "analysis"
+		);
 		resetExportWorkflowState();
 
 		setExecutionTargetBaseUrl(executionPayload?.target_base_url || "");
