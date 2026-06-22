@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from .test_case_coverage import (
     _default_scenarios_for_requirement,
     _extract_linked_requirement_ids_from_test_case,
+    _extract_scenario_refs_from_test_case,
     _extract_scenario_types_from_test_case,
     _fallback_coverage_plan,
     _normalize_coverage_plan,
@@ -313,6 +314,24 @@ def _covered_requirement_scenario_pairs(
     return covered_pairs
 
 
+def _planned_scenario_ids(coverage_plan: List[Dict[str, Any]]) -> set[str]:
+    scenario_ids: set[str] = set()
+    for plan_item in coverage_plan or []:
+        requirement_id = str(plan_item.get("requirement_id") or "").strip()
+        for index, scenario in enumerate(plan_item.get("scenarios") or [], start=1):
+            scenario_id = str(scenario.get("id") or f"{requirement_id}-SCN-{index:02d}").strip()
+            if scenario_id:
+                scenario_ids.add(scenario_id)
+    return scenario_ids
+
+
+def _covered_planned_scenario_ids(test_cases: List[Dict[str, Any]], planned_scenario_ids: set[str]) -> set[str]:
+    covered_ids: set[str] = set()
+    for test_case in test_cases:
+        covered_ids.update(reference for reference in _extract_scenario_refs_from_test_case(test_case) if reference in planned_scenario_ids)
+    return covered_ids
+
+
 def _assign_recovery_case_id(test_case: Dict[str, Any], used_ids: set[str], sequence: int) -> None:
     candidate_id = str(test_case.get("id") or "").strip()
     if candidate_id and candidate_id not in used_ids:
@@ -338,8 +357,26 @@ def _augment_with_fallback_coverage(
     covered_pairs = _covered_requirement_scenario_pairs(augmented_cases, requirements)
     used_ids = {str(test_case.get("id") or "").strip() for test_case in augmented_cases if str(test_case.get("id") or "").strip()}
     fallback_cases = _fallback_raw_test_cases(requirements, context, coverage_plan=coverage_plan)
+    planned_scenario_ids = _planned_scenario_ids(coverage_plan)
+    if not planned_scenario_ids:
+        planned_scenario_ids = _planned_scenario_ids(_normalize_coverage_plan(coverage_plan or _fallback_coverage_plan(requirements), requirements))
+    covered_scenario_ids = _covered_planned_scenario_ids(augmented_cases, planned_scenario_ids)
+    use_exact_completion = bool(planned_scenario_ids and covered_scenario_ids)
 
     for sequence, fallback_case in enumerate(fallback_cases, start=1):
+        if use_exact_completion:
+            fallback_scenario_ids = set(_extract_scenario_refs_from_test_case(fallback_case)).intersection(planned_scenario_ids)
+            if not fallback_scenario_ids:
+                continue
+            if fallback_scenario_ids and fallback_scenario_ids.issubset(covered_scenario_ids):
+                continue
+
+            recovered_case = dict(fallback_case)
+            _assign_recovery_case_id(recovered_case, used_ids, sequence)
+            augmented_cases.append(recovered_case)
+            covered_scenario_ids.update(fallback_scenario_ids)
+            continue
+
         fallback_pairs = _covered_requirement_scenario_pairs([fallback_case], requirements)
         if fallback_pairs and fallback_pairs.issubset(covered_pairs):
             continue

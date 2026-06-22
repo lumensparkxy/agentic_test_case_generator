@@ -460,16 +460,13 @@ def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[
 
         requirement = requirement_lookup[requirement_id]
         normalized_scenarios: List[Dict[str, Any]] = []
-        seen_scenario_types: set[str] = set()
+        seen_scenario_ids: set[str] = set()
 
         for raw_scenario in raw_item.get("scenarios") or []:
             if not isinstance(raw_scenario, dict):
                 continue
 
             scenario_type = _normalize_scenario_type(raw_scenario.get("scenario_type") or raw_scenario.get("type"))
-            if scenario_type in seen_scenario_types:
-                continue
-
             title = str(raw_scenario.get("title") or f"{scenario_type} coverage for {requirement_id}").strip()
             objective = str(
                 raw_scenario.get("objective")
@@ -479,9 +476,16 @@ def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[
             if not title or not objective:
                 continue
 
+            sequence = len(normalized_scenarios) + 1
+            scenario_id = str(raw_scenario.get("id") or f"{requirement_id}-SCN-{sequence:02d}").strip()
+            while scenario_id in seen_scenario_ids:
+                sequence += 1
+                scenario_id = f"{requirement_id}-SCN-{sequence:02d}"
+            seen_scenario_ids.add(scenario_id)
+
             normalized_scenarios.append(
                 {
-                    "id": str(raw_scenario.get("id") or f"{requirement_id}-SCN-{len(normalized_scenarios) + 1:02d}"),
+                    "id": scenario_id,
                     "requirement_id": requirement_id,
                     "scenario_type": scenario_type,
                     "title": title,
@@ -490,7 +494,6 @@ def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[
                     "must_have": _coerce_bool(raw_scenario.get("must_have"), default=True),
                 }
             )
-            seen_scenario_types.add(scenario_type)
 
         normalized_by_requirement[requirement_id] = {
             "requirement_id": requirement_id,
@@ -582,16 +585,49 @@ def _compute_planned_scenario_metrics(
 ) -> Dict[str, Any]:
     requirement_ids = _serialize_requirement_ids(requirements)
     requirement_id_set = set(requirement_ids)
-    scenarios_covered_by_requirement: Dict[str, set[str]] = {requirement_id: set() for requirement_id in requirement_ids}
+    scenario_by_id: Dict[str, Dict[str, Any]] = {}
+    planned_scenario_ids_by_requirement: Dict[str, List[str]] = {requirement_id: [] for requirement_id in requirement_ids}
+
+    for plan_item in coverage_plan or []:
+        requirement_id = str(plan_item.get("requirement_id") or "").strip()
+        for index, scenario in enumerate(plan_item.get("scenarios") or [], start=1):
+            scenario_id = str(scenario.get("id") or f"{requirement_id}-SCN-{index:02d}").strip()
+            if not scenario_id:
+                continue
+            scenario_by_id[scenario_id] = {
+                "requirement_id": requirement_id,
+                "scenario_type": _normalize_scenario_type(scenario.get("scenario_type")),
+                "title": str(scenario.get("title") or "").strip(),
+                "must_have": _coerce_bool(scenario.get("must_have"), default=True),
+            }
+            planned_scenario_ids_by_requirement.setdefault(requirement_id, []).append(scenario_id)
+
+    exact_covered_scenario_ids: set[str] = set()
+    heuristic_slots_by_requirement_type: Dict[tuple[str, str], int] = {}
+    scenario_ref_missing_case_count = 0
+    scenario_ref_heuristic_fallback_case_count = 0
+    unknown_scenario_refs: List[str] = []
 
     for test_case in test_cases:
+        scenario_refs = _extract_scenario_refs_from_test_case(test_case)
+        valid_scenario_refs = [reference for reference in scenario_refs if reference in scenario_by_id]
+        invalid_scenario_refs = [reference for reference in scenario_refs if reference and reference not in scenario_by_id]
+        unknown_scenario_refs.extend(invalid_scenario_refs)
+        if valid_scenario_refs:
+            exact_covered_scenario_ids.update(valid_scenario_refs)
+            continue
+
         linked_requirements = set(_extract_linked_requirement_ids_from_test_case(test_case, requirement_id_set))
         if not linked_requirements:
             continue
 
+        scenario_ref_missing_case_count += 1
+        scenario_ref_heuristic_fallback_case_count += 1
         scenario_types = _extract_scenario_types_from_test_case(test_case)
         for requirement_id in linked_requirements:
-            scenarios_covered_by_requirement[requirement_id].update(scenario_types)
+            for scenario_type in scenario_types:
+                key = (requirement_id, scenario_type)
+                heuristic_slots_by_requirement_type[key] = heuristic_slots_by_requirement_type.get(key, 0) + 1
 
     planned_total = 0
     covered_total = 0
@@ -599,43 +635,78 @@ def _compute_planned_scenario_metrics(
     must_have_covered = 0
     missing_scenarios: List[str] = []
     missing_must_have_scenarios: List[str] = []
+    covered_scenario_ids: List[str] = []
+    missing_scenario_ids: List[str] = []
+    heuristic_covered_scenario_ids: List[str] = []
     requirement_summary: Dict[str, Dict[str, Any]] = {}
 
     for plan_item in coverage_plan:
         requirement_id = str(plan_item.get("requirement_id") or "").strip()
         planned_scenarios = []
         covered_scenarios = []
+        planned_scenario_ids = []
+        covered_requirement_scenario_ids = []
         missing_scenario_types = []
-        matched_scenarios = scenarios_covered_by_requirement.get(requirement_id, set())
 
-        for scenario in plan_item.get("scenarios") or []:
+        for index, scenario in enumerate(plan_item.get("scenarios") or [], start=1):
+            scenario_id = str(scenario.get("id") or f"{requirement_id}-SCN-{index:02d}").strip()
             scenario_type = _normalize_scenario_type(scenario.get("scenario_type"))
             planned_total += 1
             planned_scenarios.append(scenario_type)
+            planned_scenario_ids.append(scenario_id)
 
             is_must_have = _coerce_bool(scenario.get("must_have"), default=True)
             if is_must_have:
                 must_have_total += 1
 
-            if scenario_type in matched_scenarios:
+            covered_by_exact_ref = bool(scenario_id and scenario_id in exact_covered_scenario_ids)
+            covered_by_heuristic = False
+            if not covered_by_exact_ref:
+                key = (requirement_id, scenario_type)
+                available_slots = heuristic_slots_by_requirement_type.get(key, 0)
+                if available_slots > 0:
+                    covered_by_heuristic = True
+                    heuristic_slots_by_requirement_type[key] = available_slots - 1
+
+            if covered_by_exact_ref or covered_by_heuristic:
                 covered_total += 1
                 covered_scenarios.append(scenario_type)
+                covered_scenario_ids.append(scenario_id)
+                covered_requirement_scenario_ids.append(scenario_id)
+                if covered_by_heuristic:
+                    heuristic_covered_scenario_ids.append(scenario_id)
                 if is_must_have:
                     must_have_covered += 1
                 continue
 
-            label = f"{requirement_id} - {scenario_type}: {scenario.get('title') or scenario_type}"
+            label = f"{requirement_id} - {scenario_id or scenario_type} - {scenario_type}: {scenario.get('title') or scenario_type}"
             missing_scenarios.append(label)
+            missing_scenario_ids.append(scenario_id)
             missing_scenario_types.append(scenario_type)
             if is_must_have:
                 missing_must_have_scenarios.append(label)
 
         requirement_summary[requirement_id] = {
-            "planned_scenarios": len(_dedupe_preserve(planned_scenarios)),
-            "covered_scenarios": len(_dedupe_preserve(covered_scenarios)),
+            "planned_scenarios": len(_dedupe_preserve(planned_scenario_ids)),
+            "covered_scenarios": len(_dedupe_preserve(covered_requirement_scenario_ids)),
+            "planned_scenario_ids": _dedupe_preserve(planned_scenario_ids),
+            "covered_scenario_ids": _dedupe_preserve(covered_requirement_scenario_ids),
             "missing_scenario_types": _dedupe_preserve(missing_scenario_types),
             "covered_scenario_types": _dedupe_preserve(covered_scenarios),
         }
+
+    has_exact_coverage = bool(exact_covered_scenario_ids)
+    has_heuristic_coverage = bool(heuristic_covered_scenario_ids)
+    if has_exact_coverage and has_heuristic_coverage:
+        coverage_mode = "mixed"
+    elif has_exact_coverage:
+        coverage_mode = "exact"
+    elif has_heuristic_coverage:
+        coverage_mode = "heuristic"
+    elif planned_total:
+        coverage_mode = "none"
+    else:
+        coverage_mode = "not_applicable"
 
     return {
         "planned_scenarios_total": planned_total,
@@ -646,6 +717,14 @@ def _compute_planned_scenario_metrics(
         "must_have_scenario_coverage_ratio": round(must_have_covered / must_have_total, 2) if must_have_total else 1.0,
         "missing_scenarios": missing_scenarios,
         "missing_must_have_scenarios": missing_must_have_scenarios,
+        "covered_scenario_ids": _dedupe_preserve(covered_scenario_ids),
+        "missing_scenario_ids": _dedupe_preserve(missing_scenario_ids),
+        "heuristic_covered_scenario_ids": _dedupe_preserve(heuristic_covered_scenario_ids),
+        "unknown_scenario_refs": _dedupe_preserve(unknown_scenario_refs),
+        "scenario_ref_coverage_mode": coverage_mode,
+        "scenario_ref_coverage_degraded": bool(scenario_ref_heuristic_fallback_case_count or unknown_scenario_refs),
+        "scenario_ref_missing_case_count": scenario_ref_missing_case_count,
+        "scenario_ref_heuristic_fallback_case_count": scenario_ref_heuristic_fallback_case_count,
         "requirement_scenario_summary": requirement_summary,
     }
 
