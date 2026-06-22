@@ -164,6 +164,21 @@
               },
               {
                 "$ref": "#/$defs/assertUrlStep"
+              },
+              {
+                "$ref": "#/$defs/assertTitleStep"
+              },
+              {
+                "$ref": "#/$defs/assertCheckedStep"
+              },
+              {
+                "$ref": "#/$defs/assertEnabledStep"
+              },
+              {
+                "$ref": "#/$defs/assertAttributeEqualsStep"
+              },
+              {
+                "$ref": "#/$defs/assertCountStep"
               }
             ]
           }
@@ -206,6 +221,10 @@
         },
         "expected": {
           "$ref": "#/$defs/scalar"
+        },
+        "attribute": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -416,6 +435,216 @@
               {
                 "required": [
                   "expected"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "assertTitleStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "expected"
+          ],
+          "properties": {
+            "action": {
+              "const": "assert_title"
+            },
+            "expected": {
+              "type": "string"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "locator"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              },
+              {
+                "required": [
+                  "attribute"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "assertCheckedStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "locator",
+            "expected"
+          ],
+          "properties": {
+            "action": {
+              "const": "assert_checked"
+            },
+            "expected": {
+              "type": "boolean"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              },
+              {
+                "required": [
+                  "attribute"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "assertEnabledStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "locator",
+            "expected"
+          ],
+          "properties": {
+            "action": {
+              "const": "assert_enabled"
+            },
+            "expected": {
+              "type": "boolean"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              },
+              {
+                "required": [
+                  "attribute"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "assertAttributeEqualsStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "locator",
+            "attribute",
+            "expected"
+          ],
+          "properties": {
+            "action": {
+              "const": "assert_attribute_equals"
+            },
+            "attribute": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected": {
+              "type": "string"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "assertCountStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "type": "object",
+          "required": [
+            "locator",
+            "expected"
+          ],
+          "properties": {
+            "action": {
+              "const": "assert_count"
+            },
+            "expected": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              },
+              {
+                "required": [
+                  "attribute"
                 ]
               }
             ]

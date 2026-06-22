@@ -10,6 +10,20 @@ from typing import Any, Mapping, Sequence
 from plain_english_test_framework.ir_validator import ValidatedIr, parse_ir_document, parse_ir_file
 from plain_english_test_framework.validation import ValidationIssue
 
+SUPPORTED_ACTIONS = {
+    "navigate",
+    "fill",
+    "click",
+    "assert_visible",
+    "assert_text_equals",
+    "assert_url",
+    "assert_title",
+    "assert_checked",
+    "assert_enabled",
+    "assert_attribute_equals",
+    "assert_count",
+}
+
 
 class PlaywrightGenerationError(Exception):
     """Raised when schema-valid IR cannot be represented as Playwright code."""
@@ -77,12 +91,7 @@ def _render_case(document: Mapping[str, Any], case: Mapping[str, Any]) -> list[s
 
 def _render_step(step: Mapping[str, Any]) -> list[str]:
     action = step["action"]
-    lines = [
-        f"    await test.step({_js_string(step['original'])}, async () => {{",
-        f"      {_render_action(step)}",
-        "    });",
-    ]
-    if action not in {"navigate", "fill", "click", "assert_visible", "assert_text_equals", "assert_url"}:
+    if action not in SUPPORTED_ACTIONS:
         raise PlaywrightGenerationError(
             (
                 ValidationIssue(
@@ -92,6 +101,12 @@ def _render_step(step: Mapping[str, Any]) -> list[str]:
                 ),
             )
         )
+
+    lines = [
+        f"    await test.step({_js_string(step['original'])}, async () => {{",
+        f"      {_render_action(step)}",
+        "    });",
+    ]
     return lines
 
 
@@ -109,6 +124,23 @@ def _render_action(step: Mapping[str, Any]) -> str:
         return f"await expect({_render_locator(step['locator'])}).toHaveText({_js_string(_to_playwright_text(step['expected']))});"
     if action == "assert_url":
         return f"await expect(page).toHaveURL({_js_string(step['url'])});"
+    if action == "assert_title":
+        return f"await expect(page).toHaveTitle({_js_string(_to_playwright_text(step['expected']))});"
+    if action == "assert_checked":
+        if _to_bool(step["expected"]):
+            return f"await expect({_render_locator(step['locator'])}).toBeChecked();"
+        return f"await expect({_render_locator(step['locator'])}).not.toBeChecked();"
+    if action == "assert_enabled":
+        if _to_bool(step["expected"]):
+            return f"await expect({_render_locator(step['locator'])}).toBeEnabled();"
+        return f"await expect({_render_locator(step['locator'])}).toBeDisabled();"
+    if action == "assert_attribute_equals":
+        return (
+            f"await expect({_render_locator(step['locator'])}).toHaveAttribute("
+            f"{_js_string(step['attribute'])}, {_js_string(_to_playwright_text(step['expected']))});"
+        )
+    if action == "assert_count":
+        return f"await expect({_render_locator(step['locator'])}).toHaveCount({_to_non_negative_int(step['expected'])});"
     return ""
 
 
@@ -142,6 +174,28 @@ def _to_playwright_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+    raise PlaywrightGenerationError((ValidationIssue("$", f"expected boolean assertion value, got {value!r}", "playwright.expected_type"),))
+
+
+def _to_non_negative_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise PlaywrightGenerationError((ValidationIssue("$", f"expected integer assertion value, got {value!r}", "playwright.expected_type"),)) from exc
+    if parsed < 0:
+        raise PlaywrightGenerationError((ValidationIssue("$", f"expected non-negative count, got {parsed}", "playwright.expected_type"),))
+    return parsed
 
 
 def _js_string(value: Any) -> str:

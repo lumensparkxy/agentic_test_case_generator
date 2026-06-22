@@ -136,6 +136,11 @@ Evidence: `.github/workflows/ci.yml`.
 - Execution service tests validate preview classification, conversion, and
   local runner behavior without requiring every generated case to hit a live
   product site.
+- Execution assertion DSL supports deterministic page title, role-visible,
+  CSS/test-id visible, checked/not checked, enabled/disabled, attribute
+  equality, and count equality assertions. Unsupported runtime/CLI assertions,
+  page-title-as-visible text, and attribute-name-as-visible text must remain
+  preview diagnostics instead of generated `getByText(...)` checks.
 
 Common failure modes:
 

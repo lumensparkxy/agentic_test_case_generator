@@ -286,6 +286,95 @@ class ExecutionServiceTests(unittest.TestCase):
         generated = generate_playwright_spec(ir).contents
         self.assertIn('page.getByRole("heading", { name: "Running and debugging tests" })', generated)
 
+    def test_preview_compiler_and_generator_support_explicit_browser_assertion_dsl(self) -> None:
+        semantic_case = TestCase(
+            id="TC-SEMANTIC-DSL",
+            title="Assert supported browser semantics",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test/settings", expected='page title should be "Settings"'),
+                TestStep(step=2, action='Verify css "#subscribe-checkbox" should be checked', expected=""),
+                TestStep(step=3, action='Verify css "#next-link" should be disabled', expected=""),
+                TestStep(step=4, action='Verify css "a.docs" attribute "href" should equal "/docs"', expected=""),
+                TestStep(step=5, action='Verify css ".result" count should be 3', expected=""),
+                TestStep(step=6, action='Verify test id "email-input" should be visible', expected=""),
+                TestStep(step=7, action='Verify link "Docs" is visible', expected=""),
+            ],
+        )
+
+        response = preview_execution([semantic_case], target_base_url="https://example.test")
+
+        self.assertEqual(response.summary.executable, 1)
+        candidate = response.executable[0]
+        self.assertIn('Then page title should be "Settings"', candidate.spec["steps"])
+        self.assertIn('And css "#subscribe-checkbox" should be checked', candidate.spec["steps"])
+        self.assertIn('And css "#next-link" should be disabled', candidate.spec["steps"])
+        self.assertIn('And css "a.docs" attribute "href" should equal "/docs"', candidate.spec["steps"])
+        self.assertIn('And css ".result" count should be 3', candidate.spec["steps"])
+        self.assertIn('And test id "email-input" should be visible', candidate.spec["steps"])
+        self.assertIn('And link "Docs" should be visible', candidate.spec["steps"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "semantic_dsl.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        actions = [step["action"] for step in ir.raw["cases"][0]["steps"]]
+        self.assertIn("assert_title", actions)
+        self.assertIn("assert_checked", actions)
+        self.assertIn("assert_enabled", actions)
+        self.assertIn("assert_attribute_equals", actions)
+        self.assertIn("assert_count", actions)
+
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('await expect(page).toHaveTitle("Settings");', generated)
+        self.assertIn('await expect(page.locator("#subscribe-checkbox")).toBeChecked();', generated)
+        self.assertIn('await expect(page.locator("#next-link")).toBeDisabled();', generated)
+        self.assertIn('await expect(page.locator("a.docs")).toHaveAttribute("href", "/docs");', generated)
+        self.assertIn('await expect(page.locator(".result")).toHaveCount(3);', generated)
+        self.assertIn('await expect(page.getByTestId("email-input")).toBeVisible();', generated)
+        self.assertIn('await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();', generated)
+
+    def test_preview_marks_runtime_and_title_visible_assertions_unsupported(self) -> None:
+        unsupported_case = TestCase(
+            id="TC-UNSUPPORTED-BROWSER-ASSERTIONS",
+            title="Do not convert runtime or title mismatch text into page text",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test", expected='"Welcome" is visible'),
+                TestStep(step=2, action='Verify "ScopeMismatch: locator failed" is visible in stderr', expected=""),
+                TestStep(step=3, action='"Incorrect Page Title" should be visible', expected=""),
+            ],
+        )
+
+        response = preview_execution([unsupported_case], target_base_url="https://example.test")
+
+        self.assertEqual(response.summary.executable, 1)
+        candidate = response.executable[0]
+        self.assertEqual(
+            [step.reason_code for step in candidate.unsupported_steps],
+            ["unsupported_browser_assertion", "unsupported_browser_assertion"],
+        )
+        self.assertIn('Then "Welcome" should be visible', candidate.spec["steps"])
+        self.assertNotIn("ScopeMismatch: locator failed", "\n".join(candidate.spec["steps"]))
+        self.assertNotIn("Incorrect Page Title", "\n".join(candidate.spec["steps"]))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "unsupported_dsl.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        generated = generate_playwright_spec(ir).contents
+        self.assertNotIn('getByText("ScopeMismatch: locator failed")', generated)
+        self.assertNotIn('getByText("Incorrect Page Title")', generated)
+        self.assertIn('getByText("Welcome")', generated)
+
     def test_preview_rejects_role_only_visible_assertions(self) -> None:
         role_only_case = TestCase(
             id="TC-ROLE-ONLY",

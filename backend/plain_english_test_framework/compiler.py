@@ -22,10 +22,16 @@ OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into "(?P<label>[^"]+)"$')
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
-HEADING_VISIBLE_PATTERN = re.compile(r'^heading "(?P<text>[^"]+)" should be visible$')
+ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<role>heading|link|button) "(?P<text>[^"]+)" should be visible$')
+LOCATOR_VISIBLE_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be visible$')
 VISIBLE_PATTERN = re.compile(r'^"(?P<text>[^"]+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
 URL_EQUALS_PATTERN = re.compile(r'^URL should be "(?P<url>[^"]+)"$')
+TITLE_EQUALS_PATTERN = re.compile(r'^page title should be "(?P<title>[^"]*)"$')
+LOCATOR_CHECKED_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should (?P<negation>not )?be checked$')
+LOCATOR_ENABLED_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be (?P<state>enabled|disabled)$')
+LOCATOR_ATTRIBUTE_EQUALS_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" attribute "(?P<attribute>[^"]+)" should equal "(?P<expected>[^"]*)"$')
+LOCATOR_COUNT_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" count should be (?P<count>\d+)$')
 SCALAR_TYPES = (str, int, float, bool, type(None))
 
 
@@ -256,18 +262,87 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             },
         }
 
-    if match := HEADING_VISIBLE_PATTERN.match(body):
+    if match := ROLE_VISIBLE_PATTERN.match(body):
+        role = str(match.group("role")).lower()
         text = _resolve_text(match.group("text"), environment, data, path=f"$.steps[{source_step_index}]")
         return {
-            "id": _slug_identifier(f"assert heading {text}"),
+            "id": _slug_identifier(f"assert {role} {text}"),
             "sourceStepIndex": source_step_index,
             "original": original,
             "action": "assert_visible",
             "locator": {
                 "strategy": "role",
-                "role": "heading",
+                "role": role,
                 "value": text,
             },
+        }
+
+    if match := LOCATOR_VISIBLE_PATTERN.match(body):
+        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+        return {
+            "id": _slug_identifier(f"assert {match.group('kind')} {value} visible"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_visible",
+            "locator": _locator_for_kind(match.group("kind"), value),
+        }
+
+    if match := TITLE_EQUALS_PATTERN.match(body):
+        title = _resolve_text(match.group("title"), environment, data, path=f"$.steps[{source_step_index}]")
+        return {
+            "id": _slug_identifier(f"assert title {title}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_title",
+            "expected": title,
+        }
+
+    if match := LOCATOR_CHECKED_PATTERN.match(body):
+        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+        expected = not bool(match.group("negation"))
+        return {
+            "id": _slug_identifier(f"assert checked {value}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_checked",
+            "locator": _locator_for_kind(match.group("kind"), value),
+            "expected": expected,
+        }
+
+    if match := LOCATOR_ENABLED_PATTERN.match(body):
+        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+        expected = str(match.group("state")).lower() == "enabled"
+        return {
+            "id": _slug_identifier(f"assert enabled {value}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_enabled",
+            "locator": _locator_for_kind(match.group("kind"), value),
+            "expected": expected,
+        }
+
+    if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.match(body):
+        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+        expected = _resolve_text(match.group("expected"), environment, data, path=f"$.steps[{source_step_index}]")
+        return {
+            "id": _slug_identifier(f"assert attribute {match.group('attribute')} {value}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_attribute_equals",
+            "locator": _locator_for_kind(match.group("kind"), value),
+            "attribute": match.group("attribute"),
+            "expected": expected,
+        }
+
+    if match := LOCATOR_COUNT_PATTERN.match(body):
+        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+        return {
+            "id": _slug_identifier(f"assert count {value}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_count",
+            "locator": _locator_for_kind(match.group("kind"), value),
+            "expected": int(match.group("count")),
         }
 
     if match := VISIBLE_PATTERN.match(body):
@@ -330,6 +405,13 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             ),
         )
     )
+
+
+def _locator_for_kind(kind: str, value: str) -> dict[str, str]:
+    normalized = kind.strip().lower().replace("-", " ")
+    if normalized == "test id":
+        return {"strategy": "test_id", "value": value}
+    return {"strategy": "css", "value": value}
 
 
 def _resolve_text(text: str, environment: Mapping[str, Any], data: Mapping[str, Any], *, path: str) -> str:
