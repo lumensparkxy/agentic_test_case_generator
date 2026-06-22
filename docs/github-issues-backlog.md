@@ -42,14 +42,14 @@ Status markers below reflect the GitHub issue state as of 2026-06-22.
   - Done: [#45](https://github.com/lumensparkxy/agentic_test_case_generator/issues/45) - Deduplicate execution settings in .env.example and docs
   - Done: [#46](https://github.com/lumensparkxy/agentic_test_case_generator/issues/46) - Refresh planning docs to distinguish history from roadmap
   - Done: [#47](https://github.com/lumensparkxy/agentic_test_case_generator/issues/47) - Exclude ignored generated artifacts from codebase scans
-- Epic [#159](https://github.com/lumensparkxy/agentic_test_case_generator/issues/159) - Make test-case generation shard-first and provenance-aware
+- Done Epic [#159](https://github.com/lumensparkxy/agentic_test_case_generator/issues/159) - Make test-case generation shard-first and provenance-aware
   - Done: [#160](https://github.com/lumensparkxy/agentic_test_case_generator/issues/160) - Persist test-case generation run evidence
   - Done: [#161](https://github.com/lumensparkxy/agentic_test_case_generator/issues/161) - Preserve provenance for model and deterministic test cases
   - Done: [#162](https://github.com/lumensparkxy/agentic_test_case_generator/issues/162) - Use dynamic shard-first generation for large coverage plans
   - Done: [#163](https://github.com/lumensparkxy/agentic_test_case_generator/issues/163) - Enforce exact planned scenario references in coverage review
   - Done: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
   - Done: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
-  - In progress: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
+  - Done: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
 
 ### Phase 4 - Operational Readiness
 
