@@ -110,8 +110,13 @@ class TestCaseGenerationPassEvidence(BaseModel):
     model_case_count_after_review: int = 0
     merged_case_count: int = 0
     deterministic_additions_total: int = 0
+    deterministic_total_additions: int = 0
     deterministic_must_have_additions: int = 0
     deterministic_optional_additions: int = 0
+    missing_requirements_count: int = 0
+    missing_must_have_scenario_count: int = 0
+    missing_optional_scenario_count: int = 0
+    completion_source: Optional[Literal["coverage_completion", "full_fallback"]] = None
     parser_failure_count: int = 0
     parser_recovery_count: int = 0
     review_status: Literal["not_run", "approved", "rejected", "fallback"] = "not_run"
@@ -138,8 +143,13 @@ class TestCaseGenerationEvidence(BaseModel):
     model_case_count_after_merge: int = 0
     final_test_case_count: int = 0
     deterministic_additions_total: int = 0
+    deterministic_total_additions: int = 0
     deterministic_must_have_additions: int = 0
     deterministic_optional_additions: int = 0
+    missing_requirements_count: int = 0
+    missing_must_have_scenario_count: int = 0
+    missing_optional_scenario_count: int = 0
+    completion_source: Optional[Literal["coverage_completion", "full_fallback"]] = None
     parser_failure_count: int = 0
     parser_recovery_count: int = 0
     final_status: Optional[str] = None

@@ -43,6 +43,11 @@ Primary constraints:
   `scenario_refs` for every covered coverage-plan scenario; scenario-type
   inference remains a degraded compatibility fallback for legacy or malformed
   cases and is reported in workflow diagnostics.
+- Deterministic test-case completion uses structured count diagnostics. Coverage
+  completion reports missing requirements, missing must-have scenarios,
+  optional/planned scenario gaps, must-have deterministic additions, optional
+  deterministic additions, total additions, and a `completion_source` distinct
+  from full deterministic fallback.
 - Automation generation is assembled centrally from bounded component/page
   fragments. Workers may draft generated test modules only; shared project
   files, final paths, duplicate symbol handling, and case-level manual or

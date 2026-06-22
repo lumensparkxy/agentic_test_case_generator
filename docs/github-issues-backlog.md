@@ -46,8 +46,8 @@ Status markers below reflect the GitHub issue state as of 2026-06-21.
   - Done: [#160](https://github.com/lumensparkxy/agentic_test_case_generator/issues/160) - Persist test-case generation run evidence
   - Done: [#161](https://github.com/lumensparkxy/agentic_test_case_generator/issues/161) - Preserve provenance for model and deterministic test cases
   - Done: [#162](https://github.com/lumensparkxy/agentic_test_case_generator/issues/162) - Use dynamic shard-first generation for large coverage plans
-  - In progress: [#163](https://github.com/lumensparkxy/agentic_test_case_generator/issues/163) - Enforce exact planned scenario references in coverage review
-  - Blocked: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
+  - Done: [#163](https://github.com/lumensparkxy/agentic_test_case_generator/issues/163) - Enforce exact planned scenario references in coverage review
+  - In progress: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
   - Blocked: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
   - Blocked: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
 

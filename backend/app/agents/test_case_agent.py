@@ -118,6 +118,13 @@ def _new_workflow_diagnostics(*, attempt_count: int = 1) -> Dict[str, Any]:
         "scenario_ref_coverage_degraded": False,
         "scenario_ref_missing_case_count": 0,
         "scenario_ref_heuristic_fallback_case_count": 0,
+        "missing_requirements_count": 0,
+        "missing_must_have_scenario_count": 0,
+        "missing_optional_scenario_count": 0,
+        "deterministic_total_additions": 0,
+        "deterministic_must_have_additions": 0,
+        "deterministic_optional_additions": 0,
+        "completion_source": None,
     }
 
 
@@ -214,6 +221,18 @@ def _record_parser_recovery(
     )
 
 
+def _count_label(count: int, singular: str, plural: Optional[str] = None) -> str:
+    return f"{count} {singular if count == 1 else plural or singular + 's'}"
+
+
+def _join_human_counts(parts: List[str]) -> str:
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    return f"{', '.join(parts[:-1])} and {parts[-1]}"
+
+
 def _coverage_augmentation_warning(
     *,
     original_test_cases: List[Dict[str, Any]],
@@ -221,20 +240,46 @@ def _coverage_augmentation_warning(
     requirements: List[Requirement],
     coverage_plan: List[Dict[str, Any]],
     diagnostics: Dict[str, Any],
+    deterministic_counts: Optional[Dict[str, Any]] = None,
 ) -> str:
-    added_count = max(0, len(augmented_test_cases) - len(original_test_cases))
-    coverage_metrics = _compute_test_case_coverage_metrics(original_test_cases, requirements)
-    scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, original_test_cases, requirements)
-    missing_requirements = list(coverage_metrics.get("requirements_without_tests") or [])
-    missing_must_have = list(scenario_metrics.get("missing_must_have_scenarios") or [])
-    restored_parts: List[str] = []
-    if missing_requirements:
-        restored_parts.append(f"{len(missing_requirements)} requirement(s)")
-    if missing_must_have:
-        restored_parts.append(f"{len(missing_must_have)} must-have scenario(s)")
-    restored_label = " and ".join(restored_parts) if restored_parts else "missing coverage"
+    deterministic_counts = deterministic_counts or _coverage_gap_counts(
+        original_test_cases=original_test_cases,
+        augmented_test_cases=augmented_test_cases,
+        requirements=requirements,
+        coverage_plan=coverage_plan,
+    )
+    added_total = int(deterministic_counts.get("deterministic_total_additions") or deterministic_counts.get("deterministic_additions_total") or 0)
+    must_have_missing = int(deterministic_counts.get("missing_must_have_scenario_count") or 0)
+    optional_missing = int(deterministic_counts.get("missing_optional_scenario_count") or 0)
+    requirements_missing = int(deterministic_counts.get("missing_requirements_count") or 0)
+    must_have_additions = int(deterministic_counts.get("deterministic_must_have_additions") or 0)
+    optional_additions = int(deterministic_counts.get("deterministic_optional_additions") or 0)
+
+    missing_parts: List[str] = []
+    if requirements_missing:
+        missing_parts.append(_count_label(requirements_missing, "requirement"))
+    if must_have_missing:
+        missing_parts.append(_count_label(must_have_missing, "must-have scenario"))
+    if optional_missing:
+        missing_parts.append(_count_label(optional_missing, "optional/planned scenario"))
+
+    addition_parts: List[str] = []
+    if must_have_additions:
+        addition_parts.append(f"{_count_label(must_have_additions, 'must-have deterministic case')}")
+    if optional_additions:
+        addition_parts.append(f"{_count_label(optional_additions, 'optional deterministic case')}")
+    if not addition_parts:
+        addition_parts.append(_count_label(added_total, "deterministic coverage case"))
+
+    if must_have_missing == 0 and optional_missing > 0 and requirements_missing == 0:
+        missing_label = f"all must-have scenarios were covered, but {_count_label(optional_missing, 'optional/planned scenario')} remained"
+    else:
+        missing_label = f"{_join_human_counts(missing_parts)} remained uncovered" if missing_parts else "planned coverage gaps remained"
     source_label = "Recovered partial model output" if diagnostics.get("parser_recoveries") else "Model output"
-    return f"{source_label} left {restored_label} uncovered; added {added_count} deterministic coverage case(s)."
+    return (
+        f"{source_label} needed deterministic coverage completion because {missing_label}; "
+        f"added {_join_human_counts(addition_parts)} ({_count_label(added_total, 'total deterministic coverage case')})."
+    )
 
 
 def _model_dump_payload(value: Any) -> Any:
@@ -366,6 +411,18 @@ def _update_scenario_ref_diagnostics(diagnostics: Dict[str, Any], coverage_metri
     return diagnostics
 
 
+def _update_completion_diagnostics(diagnostics: Dict[str, Any], deterministic_counts: Dict[str, Any]) -> Dict[str, Any]:
+    total_additions = int(deterministic_counts.get("deterministic_total_additions") or deterministic_counts.get("deterministic_additions_total") or 0)
+    diagnostics["missing_requirements_count"] = int(deterministic_counts.get("missing_requirements_count") or 0)
+    diagnostics["missing_must_have_scenario_count"] = int(deterministic_counts.get("missing_must_have_scenario_count") or 0)
+    diagnostics["missing_optional_scenario_count"] = int(deterministic_counts.get("missing_optional_scenario_count") or 0)
+    diagnostics["deterministic_total_additions"] = total_additions
+    diagnostics["deterministic_must_have_additions"] = int(deterministic_counts.get("deterministic_must_have_additions") or 0)
+    diagnostics["deterministic_optional_additions"] = int(deterministic_counts.get("deterministic_optional_additions") or 0)
+    diagnostics["completion_source"] = deterministic_counts.get("completion_source") or diagnostics.get("completion_source")
+    return diagnostics
+
+
 def _last_generation_pass_id(evidence: Optional[Dict[str, Any]], *, exclude_pass_types: Optional[set[str]] = None) -> Optional[str]:
     exclude_pass_types = exclude_pass_types or set()
     for pass_evidence in reversed(list((evidence or {}).get("passes") or [])):
@@ -383,17 +440,52 @@ def _coverage_gap_counts(
     augmented_test_cases: List[Dict[str, Any]],
     requirements: List[Requirement],
     coverage_plan: List[Dict[str, Any]],
-) -> Dict[str, int]:
+) -> Dict[str, Any]:
     added_total = max(0, len(augmented_test_cases or []) - len(original_test_cases or []))
+    coverage_metrics = _compute_test_case_coverage_metrics(original_test_cases, requirements)
     scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, original_test_cases, requirements)
+    missing_requirements = len(coverage_metrics.get("requirements_without_tests") or [])
     missing_must_have = len(scenario_metrics.get("missing_must_have_scenarios") or [])
     missing_planned = len(scenario_metrics.get("missing_scenarios") or [])
+    missing_optional = max(0, missing_planned - missing_must_have)
     must_have_additions = min(added_total, missing_must_have)
-    optional_additions = min(max(0, added_total - must_have_additions), max(0, missing_planned - missing_must_have))
+    optional_additions = min(max(0, added_total - must_have_additions), missing_optional)
     return {
         "deterministic_additions_total": added_total,
+        "deterministic_total_additions": added_total,
         "deterministic_must_have_additions": must_have_additions,
         "deterministic_optional_additions": optional_additions,
+        "missing_requirements_count": missing_requirements,
+        "missing_must_have_scenario_count": missing_must_have,
+        "missing_optional_scenario_count": missing_optional,
+        "completion_source": "coverage_completion",
+    }
+
+
+def _deterministic_full_fallback_counts(
+    *,
+    fallback_test_cases: List[Dict[str, Any]],
+    requirements: List[Requirement],
+    coverage_plan: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    added_total = len(fallback_test_cases or [])
+    coverage_metrics = _compute_test_case_coverage_metrics([], requirements)
+    scenario_metrics = _compute_planned_scenario_metrics(coverage_plan, [], requirements)
+    missing_requirements = len(coverage_metrics.get("requirements_without_tests") or [])
+    missing_must_have = len(scenario_metrics.get("missing_must_have_scenarios") or [])
+    missing_planned = len(scenario_metrics.get("missing_scenarios") or [])
+    missing_optional = max(0, missing_planned - missing_must_have)
+    must_have_additions = min(added_total, missing_must_have)
+    optional_additions = min(max(0, added_total - must_have_additions), missing_optional)
+    return {
+        "deterministic_additions_total": added_total,
+        "deterministic_total_additions": added_total,
+        "deterministic_must_have_additions": must_have_additions,
+        "deterministic_optional_additions": optional_additions,
+        "missing_requirements_count": missing_requirements,
+        "missing_must_have_scenario_count": missing_must_have,
+        "missing_optional_scenario_count": missing_optional,
+        "completion_source": "full_fallback",
     }
 
 
@@ -426,8 +518,13 @@ def _new_generation_evidence(
         "model_case_count_after_merge": 0,
         "final_test_case_count": 0,
         "deterministic_additions_total": 0,
+        "deterministic_total_additions": 0,
         "deterministic_must_have_additions": 0,
         "deterministic_optional_additions": 0,
+        "missing_requirements_count": 0,
+        "missing_must_have_scenario_count": 0,
+        "missing_optional_scenario_count": 0,
+        "completion_source": None,
         "parser_failure_count": 0,
         "parser_recovery_count": 0,
         "final_status": None,
@@ -474,8 +571,15 @@ def _generation_pass_evidence(
         "model_case_count_after_review": 0 if full_fallback else max(0, int(model_case_count or 0)),
         "merged_case_count": max(0, int(merged_case_count if merged_case_count is not None else model_case_count or 0)),
         "deterministic_additions_total": int(deterministic_counts.get("deterministic_additions_total") or 0),
+        "deterministic_total_additions": int(
+            deterministic_counts.get("deterministic_total_additions") or deterministic_counts.get("deterministic_additions_total") or 0
+        ),
         "deterministic_must_have_additions": int(deterministic_counts.get("deterministic_must_have_additions") or 0),
         "deterministic_optional_additions": int(deterministic_counts.get("deterministic_optional_additions") or 0),
+        "missing_requirements_count": int(deterministic_counts.get("missing_requirements_count") or 0),
+        "missing_must_have_scenario_count": int(deterministic_counts.get("missing_must_have_scenario_count") or 0),
+        "missing_optional_scenario_count": int(deterministic_counts.get("missing_optional_scenario_count") or 0),
+        "completion_source": deterministic_counts.get("completion_source"),
         "parser_failure_count": len(diagnostics.get("parser_failures") or []),
         "parser_recovery_count": len(diagnostics.get("parser_recoveries") or []),
         "review_status": _review_status(review, fallback=full_fallback),
@@ -587,8 +691,15 @@ def _finalize_generation_evidence(
     )
     evidence["model_case_count_after_merge"] = max([int(item.get("merged_case_count") or 0) for item in passes if not item.get("used_fallback")] or [0])
     evidence["deterministic_additions_total"] = sum(int(item.get("deterministic_additions_total") or 0) for item in passes)
+    evidence["deterministic_total_additions"] = sum(
+        int(item.get("deterministic_total_additions") or item.get("deterministic_additions_total") or 0) for item in passes
+    )
     evidence["deterministic_must_have_additions"] = sum(int(item.get("deterministic_must_have_additions") or 0) for item in passes)
     evidence["deterministic_optional_additions"] = sum(int(item.get("deterministic_optional_additions") or 0) for item in passes)
+    evidence["missing_requirements_count"] = sum(int(item.get("missing_requirements_count") or 0) for item in passes)
+    evidence["missing_must_have_scenario_count"] = sum(int(item.get("missing_must_have_scenario_count") or 0) for item in passes)
+    evidence["missing_optional_scenario_count"] = sum(int(item.get("missing_optional_scenario_count") or 0) for item in passes)
+    evidence["completion_source"] = next((item.get("completion_source") for item in passes if item.get("completion_source")), None)
     evidence["payload_strategy"] = evidence.get("payload_strategy") or EVIDENCE_PAYLOAD_STRATEGY
     return evidence
 
@@ -2495,6 +2606,12 @@ def generate_test_cases(
             workflow_diagnostics["warnings"],
             "Test-case fallback produced deterministic draft artifacts because the generation workflow returned no test cases.",
         )
+        deterministic_counts = _deterministic_full_fallback_counts(
+            fallback_test_cases=raw_test_cases,
+            requirements=payload.requirements,
+            coverage_plan=coverage_plan,
+        )
+        _update_completion_diagnostics(workflow_diagnostics, deterministic_counts)
         _update_generation_source_counts(workflow_diagnostics, raw_test_cases)
         generation_evidence = _append_generation_pass(
             dict(
@@ -2520,11 +2637,7 @@ def generate_test_cases(
                 model_case_count=0,
                 merged_case_count=len(raw_test_cases),
                 fallback_case_count=len(raw_test_cases),
-                deterministic_counts={
-                    "deterministic_additions_total": len(raw_test_cases),
-                    "deterministic_must_have_additions": min(len(raw_test_cases), _scenario_count(coverage_plan)),
-                    "deterministic_optional_additions": 0,
-                },
+                deterministic_counts=deterministic_counts,
                 prompt_metadata=_prompt_metadata(
                     context=payload.context,
                     template=payload.template,
@@ -2622,6 +2735,7 @@ def generate_test_cases(
                     requirements=payload.requirements,
                     coverage_plan=coverage_plan,
                     diagnostics=workflow_diagnostics,
+                    deterministic_counts=deterministic_counts,
                 )
                 raw_test_cases = recovery_test_cases
                 workflow_diagnostics["status"] = "partial"
@@ -2633,6 +2747,7 @@ def generate_test_cases(
                     workflow_diagnostics["warnings"],
                     recovery_warning,
                 )
+                _update_completion_diagnostics(workflow_diagnostics, deterministic_counts)
                 _update_generation_source_counts(workflow_diagnostics, recovery_test_cases)
                 iteration_history = list(workflow.get("iteration_history") or [])
                 iteration_history.append(
