@@ -28,7 +28,7 @@ next-version end-to-end Playwright documentation workflow succeeded.
 
 ### Phase 3 - Architecture Hardening
 
-Status markers below reflect the GitHub issue state as of 2026-06-21.
+Status markers below reflect the GitHub issue state as of 2026-06-22.
 
 - Epic [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35) - Reduce high-churn architecture hotspots
   - Done: [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
@@ -47,9 +47,9 @@ Status markers below reflect the GitHub issue state as of 2026-06-21.
   - Done: [#161](https://github.com/lumensparkxy/agentic_test_case_generator/issues/161) - Preserve provenance for model and deterministic test cases
   - Done: [#162](https://github.com/lumensparkxy/agentic_test_case_generator/issues/162) - Use dynamic shard-first generation for large coverage plans
   - Done: [#163](https://github.com/lumensparkxy/agentic_test_case_generator/issues/163) - Enforce exact planned scenario references in coverage review
-  - In progress: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
-  - Blocked: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
-  - Blocked: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
+  - Done: [#164](https://github.com/lumensparkxy/agentic_test_case_generator/issues/164) - Split deterministic coverage completion warning counts
+  - In progress: [#165](https://github.com/lumensparkxy/agentic_test_case_generator/issues/165) - Add large-plan regression for deterministic backfill behavior
+  - Ready: [#166](https://github.com/lumensparkxy/agentic_test_case_generator/issues/166) - Show generation source breakdown in workflow diagnostics
 
 ### Phase 4 - Operational Readiness
 
