@@ -18,6 +18,7 @@ from plain_english_test_framework.local_runner import (
     run_local_playwright_specs,
 )
 from plain_english_test_framework.playwright_generator import PlaywrightGenerationError
+from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
 from plain_english_test_framework.spec_parser import SpecValidationError
 from plain_english_test_framework.validation import ValidationIssue
 
@@ -289,7 +290,11 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
             continue
 
         step_conversions = _convert_step(step, base_url=base_url)
+        if ambiguous_reason := _ambiguous_semantic_assertion_reason(step):
+            unsupported_steps.append(_unsupported_step(step, "ambiguous_semantic_assertion", ambiguous_reason))
         if not step_conversions:
+            if ambiguous_reason:
+                continue
             unsupported_steps.append(_unsupported_step(step, "unsupported_step", "locator_mapping_or_manual_execution"))
             continue
         converted_steps.extend(step_conversions)
@@ -302,6 +307,18 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
             status="unsupported",
             metadata=metadata,
             unsupported_steps=fatal_unsupported_steps,
+            review_reasons=["One or more source steps cannot be represented by the current browser DSL."],
+            traceability_ids=traceability_ids,
+        )
+
+    if not converted_steps and unsupported_steps:
+        return ExecutionCandidate(
+            id=candidate_id,
+            source_test_case_id=test_case.id,
+            title=test_case.title,
+            status="unsupported",
+            metadata=metadata,
+            unsupported_steps=unsupported_steps,
             review_reasons=["One or more source steps cannot be represented by the current browser DSL."],
             traceability_ids=traceability_ids,
         )
@@ -338,6 +355,7 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
             status="unsupported",
             metadata=metadata,
             unsupported_steps=[
+                *unsupported_steps,
                 ExecutionUnsupportedStep(
                     step=test_case.steps[-1].step if test_case.steps else 0,
                     action=test_case.steps[-1].action if test_case.steps else "",
@@ -345,7 +363,7 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
                     test_data=test_case.test_data,
                     reason_code="missing_assertion",
                     suggested_next_action="Add a visible text or text equality assertion.",
-                )
+                ),
             ],
             review_reasons=["Executable browser cases need at least one deterministic assertion."],
             traceability_ids=traceability_ids,
@@ -426,12 +444,15 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
 
     quoted_values = QUOTED_PATTERN.findall(text)
     if quoted_values and re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
-        return _ConvertedStep("assert_visible", f'"{_escape_step_text(quoted_values[-1])}" should be visible')
+        visible_text = _clean_value(quoted_values[-1])
+        if not is_ambiguous_semantic_visible_text(visible_text):
+            return _ConvertedStep("assert_visible", f'"{_escape_step_text(visible_text)}" should be visible')
+        return None
 
     for pattern in (VISIBLE_PATTERN, LOADS_PATTERN):
         if match := pattern.search(text):
             visible_text = _clean_visible_text(match.group("text"))
-            if visible_text:
+            if visible_text and not is_ambiguous_semantic_visible_text(visible_text):
                 return _ConvertedStep("assert_visible", f'"{_escape_step_text(visible_text)}" should be visible')
 
     return None
@@ -442,6 +463,8 @@ def _convert_visual_lookup(text: str) -> _ConvertedStep | None:
         return None
     quoted_values = [value.strip() for value in QUOTED_PATTERN.findall(text) if value.strip()]
     if not quoted_values:
+        return None
+    if is_ambiguous_semantic_visible_text(quoted_values[0]):
         return None
     return _ConvertedStep("assert_visible", f'"{_escape_step_text(quoted_values[0])}" should be visible')
 
@@ -771,6 +794,34 @@ def _unsupported_domain_reason(step: TestStep) -> str | None:
         if term in text:
             return "unsupported_non_browser_domain"
     return None
+
+
+def _ambiguous_semantic_assertion_reason(step: TestStep) -> str | None:
+    for value in (step.action, step.expected):
+        if _contains_ambiguous_semantic_visible_assertion(_normalize_text(value)):
+            return (
+                'Use an exact accessible name such as heading "Dashboard" should be visible, '
+                "or keep the step manual until the role/locator can be mapped deterministically."
+            )
+    return None
+
+
+def _contains_ambiguous_semantic_visible_assertion(text: str) -> bool:
+    if not text or not re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
+        return False
+
+    if HEADING_VISIBLE_PATTERN.search(text):
+        return False
+
+    quoted_values = QUOTED_PATTERN.findall(text)
+    if any(is_ambiguous_semantic_visible_text(_clean_value(value)) for value in quoted_values):
+        return True
+
+    if match := VISIBLE_PATTERN.search(text):
+        visible_text = _clean_visible_text(match.group("text"))
+        return is_ambiguous_semantic_visible_text(visible_text)
+
+    return False
 
 
 def _looks_like_navigation(text: str) -> bool:
