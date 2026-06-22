@@ -863,8 +863,9 @@ def _build_review_loop(
 8. Priority, type, status, and automation status are valid.
 9. Test data, preconditions, and overall expected_result are present when needed.
 10. Browser/documentation cases use exact grounded headings, link names, and hrefs when grounded context provides them.
-11. Cases are realistic enough for manual execution and future Playwright automation: no vague steps, TBD values, or unsupported feature invention.
-12. Human feedback has been addressed without treating feedback as an instruction to weaken quality gates.
+11. Do not approve generic browser assertions such as `"heading" should be visible`, `"href" should be visible`, `"page" should be visible`, or `"#email-input" should be visible`; require `heading "Exact accessible name" is visible`, `link "Exact link name" is visible`, direct href validation, or unsupported/manual status.
+12. Cases are realistic enough for manual execution and future Playwright automation: no vague steps, TBD values, or unsupported feature invention.
+13. Human feedback has been addressed without treating feedback as an instruction to weaken quality gates.
 
 **Response Rules:**
 - Return ONLY a JSON object with this exact shape:
@@ -981,12 +982,13 @@ def _build_test_case_generator_agent(
 10. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
 11. For browser or documentation workflows, assertions MUST prefer exact grounded headings, visible text, accessible link names, and hrefs from the context instead of inferred marketing phrases or synthetic labels.
 12. Navigation steps MUST use real accessible link text from grounded context or direct href URLs; never invent labels such as "link/button for ...".
-13. Never return `steps` as a single string, markdown list, or paragraph.
-14. Make steps real-world executable: name the actor/role, setup data, UI/API action, validation point, and observable outcome.
-15. Use concrete but non-sensitive test data. If exact data is unknown, put explicit assumptions in preconditions or test_data; never use TBD/placeholder text.
-16. Include negative, boundary, authorization, and error-handling coverage when the coverage plan or requirement analysis calls for it; do not overproduce only happy paths.
-17. Prefer business-readable test data such as `qa.manager@example.test`, `INV-1001`, or `2026-05-10`; do not use real personal data or secrets.
-18. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
+13. Do not write generic quoted browser assertions such as `"heading" should be visible`, `"href" should be visible`, `"page" should be visible`, or `"#email-input" should be visible`; write `heading "Exact accessible name" is visible`, `link "Exact link name" is visible`, direct href validation, or mark unsupported/manual.
+14. Never return `steps` as a single string, markdown list, or paragraph.
+15. Make steps real-world executable: name the actor/role, setup data, UI/API action, validation point, and observable outcome.
+16. Use concrete but non-sensitive test data. If exact data is unknown, put explicit assumptions in preconditions or test_data; never use TBD/placeholder text.
+17. Include negative, boundary, authorization, and error-handling coverage when the coverage plan or requirement analysis calls for it; do not overproduce only happy paths.
+18. Prefer business-readable test data such as `qa.manager@example.test`, `INV-1001`, or `2026-05-10`; do not use real personal data or secrets.
+19. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",
         output_key=STATE_TEST_CASES,
@@ -1073,10 +1075,11 @@ Rules:
 6. Preserve or improve any grounded-context `source_refs` when grounded context is available.
 7. The `steps` field MUST remain a JSON array of objects with `step`, `action`, `expected`, and optional `test_data`.
 8. For browser or documentation workflows, replace inferred assertions or synthetic click labels with exact grounded headings, accessible link names, and hrefs from the context whenever available.
-9. Never return `steps` as a plain string, markdown list, or free-form paragraph.
-10. Remove generic actions like "navigate to the feature area" when a more concrete UI/API action can be inferred.
-11. Add missing negative, boundary, authorization, state-transition, or integration cases when feedback or coverage gaps require them.
-12. Output ONLY the JSON object.
+9. Replace generic quoted browser assertions such as `"heading" should be visible`, `"href" should be visible`, `"page" should be visible`, or `"#email-input" should be visible` with `heading "Exact accessible name" is visible`, `link "Exact link name" is visible`, direct href validation, or unsupported/manual status.
+10. Never return `steps` as a plain string, markdown list, or free-form paragraph.
+11. Remove generic actions like "navigate to the feature area" when a more concrete UI/API action can be inferred.
+12. Add missing negative, boundary, authorization, state-transition, or integration cases when feedback or coverage gaps require them.
+13. Output ONLY the JSON object.
 """,
         description="Applies human feedback to an existing test-case set before re-validation",
         output_key=STATE_TEST_CASES,

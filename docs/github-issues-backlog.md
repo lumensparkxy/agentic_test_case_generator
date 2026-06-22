@@ -27,7 +27,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-22.
 
 - Epic [#175](https://github.com/lumensparkxy/agentic_test_case_generator/issues/175) - Harden semantic Playwright execution assertions
   - Done: [#176](https://github.com/lumensparkxy/agentic_test_case_generator/issues/176) - Reject literal semantic words in execution assertions
-  - Ready: [#177](https://github.com/lumensparkxy/agentic_test_case_generator/issues/177) - Ground browser assertions before approval
+  - Done: [#177](https://github.com/lumensparkxy/agentic_test_case_generator/issues/177) - Ground browser assertions before approval
   - Ready: [#178](https://github.com/lumensparkxy/agentic_test_case_generator/issues/178) - Expand DSL coverage for semantic browser assertions
 
 ## Created concern hardening issues

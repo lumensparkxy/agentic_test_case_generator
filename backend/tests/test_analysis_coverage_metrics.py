@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from typing import Any, Dict
 import unittest
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -18,7 +19,7 @@ from app.agents.test_case_review import (
     _prefer_review,
     _resolve_test_case_workflow_settings,
 )
-from app.models import Requirement, WorkflowSettings
+from app.models import EnrichInput, GroundedContext, GroundedUIElement, Requirement, WorkflowSettings
 
 
 class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
@@ -160,6 +161,129 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
 
         self.assertFalse(review["approved"])
         self.assertTrue(any("High-risk requirement analysis items" in issue for issue in review["blocking_issues"]))
+
+
+class BrowserAssertionReviewTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The Playwright documentation page shall show installation guidance.",
+            )
+        ]
+        self.coverage_plan = [
+            {
+                "requirement_id": "REQ-001",
+                "requirement_text": self.requirements[0].text,
+                "scenarios": [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": "REQ-001",
+                        "scenario_type": "Happy Path",
+                        "title": "Documentation installation guidance is visible",
+                        "objective": "Verify the documentation page exposes installation guidance.",
+                        "priority": "High",
+                        "must_have": True,
+                    }
+                ],
+            }
+        ]
+
+    def _browser_case(self, *, expected: str, action: str = "Open https://playwright.dev/") -> Dict[str, Any]:
+        return {
+            "id": "TC-DOCS-001",
+            "title": "Documentation page shows installation guidance",
+            "description": "Verify the docs page exposes the installation guidance.",
+            "priority": "High",
+            "type": "E2E",
+            "status": "Ready",
+            "preconditions": "The public documentation site is reachable.",
+            "steps": [
+                {"step": 1, "action": action, "expected": "The documentation page loads.", "test_data": None},
+                {"step": 2, "action": "Inspect the primary content.", "expected": expected, "test_data": None},
+            ],
+            "expected_result": "The documentation guidance is visible.",
+            "automation_status": "To Be Automated",
+            "component": "Documentation",
+            "linked_requirement_ids": ["REQ-001"],
+            "scenario_refs": ["REQ-001-SCN-01"],
+            "source_refs": ["ART-APP-01"],
+            "tags": ["REQ-001", "scenario:happy-path"],
+        }
+
+    def test_review_blocks_generic_quoted_browser_assertions(self) -> None:
+        context = EnrichInput(
+            requirements=self.requirements,
+            grounded_context=GroundedContext(
+                ui_elements=[
+                    GroundedUIElement(
+                        id="ART-APP-01-UI-H-01",
+                        source_id="ART-APP-01",
+                        name="Playwright enables reliable web automation for testing, scripting, and AI agents.",
+                        element_type="Heading",
+                        description="Hero heading from the docs page.",
+                    )
+                ]
+            ),
+        )
+
+        review = _heuristic_test_case_review(
+            [self._browser_case(expected='"heading" should be visible')],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+            context=context,
+        )
+
+        self.assertFalse(review["approved"])
+        self.assertLess(review["score"], review["threshold"])
+        self.assertTrue(any("Generic browser assertions" in issue and "`heading`" in issue for issue in review["blocking_issues"]))
+        self.assertTrue(any('heading "Playwright enables reliable web automation' in suggestion for suggestion in review["suggestions"]))
+        self.assertTrue(any("grounded accessible names" in criterion for criterion in review["unmet_criteria"]))
+
+    def test_review_blocks_selector_as_visible_text_assertions(self) -> None:
+        review = _heuristic_test_case_review(
+            [self._browser_case(expected='"#email-input" should be visible')],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+
+        self.assertFalse(review["approved"])
+        self.assertTrue(any("raw selector `#email-input`" in issue for issue in review["blocking_issues"]))
+
+    def test_review_blocks_implementation_only_visible_text_assertions(self) -> None:
+        review = _heuristic_test_case_review(
+            [self._browser_case(expected='"exact ScopeMismatch error" should be visible')],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+
+        self.assertFalse(review["approved"])
+        self.assertTrue(any("implementation/runtime concept `exact ScopeMismatch error`" in issue for issue in review["blocking_issues"]))
+
+    def test_review_blocks_synthetic_browser_control_labels(self) -> None:
+        review = _heuristic_test_case_review(
+            [self._browser_case(action="Click the link/button for browser downloads.", expected="The target page is visible.")],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+
+        self.assertFalse(review["approved"])
+        self.assertTrue(any("synthetic browser control label" in issue for issue in review["blocking_issues"]))
+
+    def test_review_allows_exact_grounded_heading_assertions(self) -> None:
+        review = _heuristic_test_case_review(
+            [self._browser_case(expected='heading "Playwright enables reliable web automation for testing, scripting, and AI agents." is visible')],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+
+        self.assertTrue(review["approved"])
+        self.assertFalse(any("Generic browser assertions" in issue for issue in review["blocking_issues"]))
 
 
 class CoveragePlanNormalizationTests(unittest.TestCase):
