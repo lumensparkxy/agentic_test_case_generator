@@ -162,6 +162,7 @@ class WorkflowDiagnostics(BaseModel):
     status: Literal["completed", "partial", "fallback", "failed"] = "completed"
     used_fallback: bool = False
     failure_reason: Optional[str] = None
+    generation_route: Optional[Literal["sequential", "direct_parallel", "parallel_retry", "deterministic_full_fallback"]] = None
     timed_out: bool = False
     stalled: bool = False
     max_iterations_reached: bool = False

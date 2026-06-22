@@ -167,6 +167,8 @@ class ConfigSettingsTests(unittest.TestCase):
                 "PARALLEL_TEST_CASE_GENERATION_ENABLED": "false",
                 "PARALLEL_TEST_CASE_MIN_SCENARIOS": "12",
                 "PARALLEL_TEST_CASE_MAX_WORKERS": "4",
+                "PARALLEL_TEST_CASE_TARGET_SCENARIOS_PER_SHARD": "11",
+                "PARALLEL_TEST_CASE_MAX_SHARDS": "17",
             },
             clear=True,
         ):
@@ -176,6 +178,8 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertFalse(settings.parallel_test_case_generation_enabled)
         self.assertEqual(settings.parallel_test_case_min_scenarios, 12)
         self.assertEqual(settings.parallel_test_case_max_workers, 4)
+        self.assertEqual(settings.parallel_test_case_target_scenarios_per_shard, 11)
+        self.assertEqual(settings.parallel_test_case_max_shards, 17)
 
     def test_get_generation_settings_parses_parallel_automation_controls(self) -> None:
         with patch.dict(
