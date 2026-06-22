@@ -63,7 +63,70 @@ HEADING_VISIBLE_PATTERN = re.compile(
     r"\bheading\s+['\"](?P<text>[^'\"]+)['\"]\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
     re.IGNORECASE,
 )
+ROLE_VISIBLE_PATTERN = re.compile(
+    r"\b(?P<role>heading|link|button)\s+['\"](?P<text>[^'\"]+)['\"]\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    re.IGNORECASE,
+)
+PAGE_TITLE_EQUALS_PATTERN = re.compile(
+    r"\b(?:page\s+)?title\s+(?:is|should\s+be|equals?|should\s+equal)\s+['\"](?P<title>[^'\"]*)['\"]",
+    re.IGNORECASE,
+)
+LOCATOR_VISIBLE_PATTERN = re.compile(
+    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
+    r"(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    re.IGNORECASE,
+)
+LOCATOR_CHECKED_PATTERN = re.compile(
+    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
+    r"should\s+(?P<negation>not\s+)?be\s+checked\b",
+    re.IGNORECASE,
+)
+LOCATOR_ENABLED_PATTERN = re.compile(
+    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
+    r"(?:is|should be)\s+(?P<state>enabled|disabled)\b",
+    re.IGNORECASE,
+)
+LOCATOR_ATTRIBUTE_EQUALS_PATTERN = re.compile(
+    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
+    r"(?:attribute|attr)\s+['\"](?P<attribute>[^'\"]+)['\"]\s+(?:is|should\s+be|equals?|should\s+equal)\s+"
+    r"['\"](?P<expected>[^'\"]*)['\"]",
+    re.IGNORECASE,
+)
+LOCATOR_COUNT_PATTERN = re.compile(
+    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
+    r"count\s+(?:is|should\s+be|equals?|should\s+equal)\s+(?P<count>\d+)\b",
+    re.IGNORECASE,
+)
 LOADS_PATTERN = re.compile(r"(?P<text>.+?)\s+loads\s+successfully\b", re.IGNORECASE)
+ASSERTION_KINDS = {
+    "assert_visible",
+    "assert_text_equals",
+    "assert_url",
+    "assert_title",
+    "assert_checked",
+    "assert_enabled",
+    "assert_attribute_equals",
+    "assert_count",
+}
+RUNTIME_ASSERTION_TERMS = (
+    "cli",
+    "command",
+    "console",
+    "exit code",
+    "return code",
+    "scope mismatch",
+    "scopemismatch",
+    "stack trace",
+    "stderr",
+    "stdout",
+    "terminal",
+    "traceback",
+    "typeerror",
+)
+STATE_ASSERTION_PATTERN = re.compile(
+    r"\b(?:attribute|attr|checked|count|disabled|enabled|href|page title|return code|scopemismatch|src|stderr|stdout|title)\b",
+    re.IGNORECASE,
+)
 UNSUPPORTED_DOMAIN_TERMS = (
     "sap gui",
     "hana studio",
@@ -292,8 +355,10 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
         step_conversions = _convert_step(step, base_url=base_url)
         if ambiguous_reason := _ambiguous_semantic_assertion_reason(step):
             unsupported_steps.append(_unsupported_step(step, "ambiguous_semantic_assertion", ambiguous_reason))
+        if browser_assertion_reason := _unsupported_browser_assertion_reason(step):
+            unsupported_steps.append(_unsupported_step(step, "unsupported_browser_assertion", browser_assertion_reason))
         if not step_conversions:
-            if ambiguous_reason:
+            if ambiguous_reason or browser_assertion_reason:
                 continue
             unsupported_steps.append(_unsupported_step(step, "unsupported_step", "locator_mapping_or_manual_execution"))
             continue
@@ -347,7 +412,7 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
         )
         converted_steps.insert(0, _ConvertedStep("navigate", f'I open "{_escape_step_text(base_url)}"'))
 
-    if not any(step.kind in {"assert_visible", "assert_text_equals", "assert_url"} for step in converted_steps):
+    if not any(step.kind in ASSERTION_KINDS for step in converted_steps):
         return ExecutionCandidate(
             id=candidate_id,
             source_test_case_id=test_case.id,
@@ -362,7 +427,7 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
                     expected=test_case.expected_result or (test_case.steps[-1].expected if test_case.steps else None),
                     test_data=test_case.test_data,
                     reason_code="missing_assertion",
-                    suggested_next_action="Add a visible text or text equality assertion.",
+                    suggested_next_action="Add a deterministic browser assertion such as visible text, title, locator state, or URL.",
                 ),
             ],
             review_reasons=["Executable browser cases need at least one deterministic assertion."],
@@ -431,10 +496,50 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
         if match := URL_PATTERN.search(text):
             return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(match.group(0))}"')
 
-    if match := HEADING_VISIBLE_PATTERN.search(text):
-        heading_text = _clean_value(match.group("text"))
-        if heading_text:
-            return _ConvertedStep("assert_visible", f'heading "{_escape_step_text(heading_text)}" should be visible')
+    if _contains_runtime_assertion_intent(text) or _contains_page_title_visible_assertion(text) or _contains_attribute_visible_assertion(text):
+        return None
+
+    if match := PAGE_TITLE_EQUALS_PATTERN.search(text):
+        title = _clean_value(match.group("title"))
+        return _ConvertedStep("assert_title", f'page title should be "{_escape_step_text(title)}"')
+
+    if match := ROLE_VISIBLE_PATTERN.search(text):
+        role = str(match.group("role")).lower()
+        role_text = _clean_value(match.group("text"))
+        if role_text:
+            return _ConvertedStep("assert_visible", f'{role} "{_escape_step_text(role_text)}" should be visible')
+
+    if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.search(text):
+        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
+        if locator:
+            attribute = _clean_value(match.group("attribute"))
+            expected = _clean_value(match.group("expected"))
+            return _ConvertedStep(
+                "assert_attribute_equals",
+                f'{locator} attribute "{_escape_step_text(attribute)}" should equal "{_escape_step_text(expected)}"',
+            )
+
+    if match := LOCATOR_COUNT_PATTERN.search(text):
+        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
+        if locator:
+            return _ConvertedStep("assert_count", f"{locator} count should be {int(match.group('count'))}")
+
+    if match := LOCATOR_CHECKED_PATTERN.search(text):
+        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
+        if locator:
+            negation = "not " if match.group("negation") else ""
+            return _ConvertedStep("assert_checked", f"{locator} should {negation}be checked")
+
+    if match := LOCATOR_ENABLED_PATTERN.search(text):
+        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
+        if locator:
+            state = str(match.group("state")).lower()
+            return _ConvertedStep("assert_enabled", f"{locator} should be {state}")
+
+    if match := LOCATOR_VISIBLE_PATTERN.search(text):
+        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
+        if locator:
+            return _ConvertedStep("assert_visible", f"{locator} should be visible")
 
     if match := TEXT_EQUALS_PATTERN.search(text):
         label = _clean_label(match.group("label"))
@@ -461,6 +566,8 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
 def _convert_visual_lookup(text: str) -> _ConvertedStep | None:
     if not VISUAL_LOOKUP_PATTERN.search(text):
         return None
+    if _contains_runtime_assertion_intent(text) or _contains_page_title_visible_assertion(text) or _contains_attribute_visible_assertion(text):
+        return None
     quoted_values = [value.strip() for value in QUOTED_PATTERN.findall(text) if value.strip()]
     if not quoted_values:
         return None
@@ -476,7 +583,7 @@ def _render_structured_steps(steps: list[_ConvertedStep]) -> list[str]:
     for index, step in enumerate(steps):
         if index == 0 and step.kind == "navigate":
             keyword = "Given"
-        elif step.kind in {"assert_visible", "assert_text_equals", "assert_url"}:
+        elif step.kind in ASSERTION_KINDS:
             keyword = "And" if emitted_assertion else "Then"
             emitted_assertion = True
         elif step.kind == "navigate":
@@ -806,12 +913,46 @@ def _ambiguous_semantic_assertion_reason(step: TestStep) -> str | None:
     return None
 
 
+def _unsupported_browser_assertion_reason(step: TestStep) -> str | None:
+    for value in (step.action, step.expected):
+        if reason := _unsupported_browser_assertion_text_reason(_normalize_text(value)):
+            return reason
+    return None
+
+
+def _unsupported_browser_assertion_text_reason(text: str) -> str | None:
+    if not text or _convert_assertion(text):
+        return None
+
+    if _contains_runtime_assertion_intent(text):
+        return "Runtime, CLI, stdout/stderr, and exception assertions are not browser DOM assertions; keep them manual or add runtime-level checks."
+
+    if _contains_page_title_visible_assertion(text):
+        return 'Use page title should be "Exact Title" instead of asserting page title text is visible.'
+
+    if _contains_attribute_visible_assertion(text):
+        return 'Use css "selector" attribute "name" should equal "value" or test id "id" attribute "name" should equal "value".'
+
+    if STATE_ASSERTION_PATTERN.search(text) and _looks_like_assertion_statement(text):
+        return (
+            'Use a supported explicit assertion such as css "#id" should be checked, '
+            'css "#id" should be disabled, css "a" attribute "href" should equal "/path", '
+            'or css ".item" count should be 3.'
+        )
+
+    return None
+
+
 def _contains_ambiguous_semantic_visible_assertion(text: str) -> bool:
     if not text or not re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
         return False
 
-    if HEADING_VISIBLE_PATTERN.search(text):
+    if ROLE_VISIBLE_PATTERN.search(text):
         return False
+
+    for match in LOCATOR_VISIBLE_PATTERN.finditer(text):
+        if _locator_assertion_body(match.group("kind"), match.group("value")):
+            return False
 
     quoted_values = QUOTED_PATTERN.findall(text)
     if any(is_ambiguous_semantic_visible_text(_clean_value(value)) for value in quoted_values):
@@ -822,6 +963,53 @@ def _contains_ambiguous_semantic_visible_assertion(text: str) -> bool:
         return is_ambiguous_semantic_visible_text(visible_text)
 
     return False
+
+
+def _contains_runtime_assertion_intent(text: str) -> bool:
+    if _has_supported_locator_visible_assertion(text):
+        return False
+    lowered = text.lower()
+    if not any(term in lowered for term in RUNTIME_ASSERTION_TERMS):
+        return False
+    return _looks_like_assertion_statement(text)
+
+
+def _contains_page_title_visible_assertion(text: str) -> bool:
+    if not re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
+        return False
+    if _has_supported_locator_visible_assertion(text):
+        return False
+    visible_values = [_clean_value(value).lower() for value in QUOTED_PATTERN.findall(text)]
+    if any("page title" in value or "title mismatch" in value or "incorrect page title" in value for value in visible_values):
+        return True
+    return bool(re.search(r"\bpage title\b", text, re.IGNORECASE))
+
+
+def _contains_attribute_visible_assertion(text: str) -> bool:
+    if not re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
+        return False
+    if _has_supported_locator_visible_assertion(text):
+        return False
+    attribute_names = {"aria-label", "class", "data-testid", "href", "id", "name", "role", "src", "value"}
+    quoted_values = {_clean_value(value).lower() for value in QUOTED_PATTERN.findall(text)}
+    return bool(quoted_values & attribute_names)
+
+
+def _has_supported_locator_visible_assertion(text: str) -> bool:
+    for match in LOCATOR_VISIBLE_PATTERN.finditer(text):
+        if _locator_assertion_body(match.group("kind"), match.group("value")):
+            return True
+    return False
+
+
+def _looks_like_assertion_statement(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:assert|confirm|displayed|equals?|expect|expected|present|shown|should|verify|visible)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_navigation(text: str) -> bool:
@@ -897,6 +1085,13 @@ def _clean_value(value: str) -> str:
     return normalized
 
 
+def _clean_locator_value(value: str) -> str:
+    normalized = _normalize_text(value).strip()
+    if quoted := QUOTED_PATTERN.findall(normalized):
+        return quoted[0].strip()
+    return normalized
+
+
 def _clean_label(value: str) -> str:
     normalized = _clean_value(value)
     normalized = re.sub(r"^(?:the|a|an)\s+", "", normalized, flags=re.IGNORECASE)
@@ -909,6 +1104,43 @@ def _clean_visible_text(value: str) -> str:
     normalized = re.sub(r"^(?:the|a|an)\s+", "", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\b(?:page|screen|message|form|label|section)$", "", normalized, flags=re.IGNORECASE).strip()
     return normalized
+
+
+def _locator_assertion_body(kind: str | None, value: str) -> str | None:
+    locator_value = _clean_locator_value(value)
+    if not locator_value:
+        return None
+
+    locator_kind = _normalize_locator_kind(kind)
+    if locator_kind == "test id":
+        return f'test id "{_escape_step_text(locator_value)}"'
+    if locator_kind == "css" or _looks_like_selector_value(locator_value):
+        return f'css "{_escape_step_text(locator_value)}"'
+    return None
+
+
+def _normalize_locator_kind(kind: str | None) -> str | None:
+    normalized = re.sub(r"[\s_-]+", " ", str(kind or "").strip().lower())
+    if not normalized:
+        return None
+    if normalized in {"test id", "data testid", "data-testid"}:
+        return "test id"
+    if normalized in {"css", "selector"}:
+        return "css"
+    return None
+
+
+def _looks_like_selector_value(value: str) -> bool:
+    normalized = value.strip()
+    if not normalized:
+        return False
+    if normalized.startswith(("#", ".", "[", ":", ">")):
+        return True
+    if re.search(r"\[[^\]]+\]", normalized):
+        return True
+    if re.search(r"^[a-zA-Z][\w-]*(?:[#.][\w-]+)+$", normalized):
+        return True
+    return bool(re.search(r"^[a-zA-Z][\w-]*\s+[.#\[]", normalized))
 
 
 def _escape_step_text(value: str) -> str:
