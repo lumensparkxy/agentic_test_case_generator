@@ -71,6 +71,28 @@ test.describe("Export approval gate", () => {
 						automation_status: "Automated",
 						component: "Reports",
 						tags: ["REQ-001", "scenario:happy-path"],
+						generation_source: "model",
+					},
+					{
+						id: "TC-002",
+						title: "Deterministic export failure coverage",
+						description: "Verify export failures are represented after coverage completion.",
+						priority: "Medium",
+						type: "Functional",
+						status: "Draft",
+						preconditions: "A report exists.",
+						steps: [
+							{ step: 1, action: "Open reports", expected: "Reports page is visible", test_data: null },
+							{ step: 2, action: "Simulate an export failure", expected: "The failure is shown", test_data: null },
+						],
+						expected_result: "The user can understand why export failed.",
+						test_data: null,
+						estimated_time: "5 mins",
+						automation_status: "To Be Automated",
+						component: "Reports",
+						tags: ["REQ-001", "scenario:negative"],
+						generation_source: "deterministic_coverage_completion",
+						coverage_completion_reason: "coverage_augmentation",
 					},
 				],
 				review: {
@@ -84,7 +106,26 @@ test.describe("Export approval gate", () => {
 				coverage_plan: [],
 				requirement_analysis: [],
 				coverage_metrics: {},
-				workflow_diagnostics: { status: "partial", warnings: [], parser_failures: [] },
+				workflow_diagnostics: {
+					status: "partial",
+					generation_route: "direct_parallel",
+					generation_source_counts: { model: 1, deterministic_coverage_completion: 1 },
+					completion_source: "coverage_completion",
+					missing_requirements_count: 0,
+					missing_must_have_scenario_count: 1,
+					missing_optional_scenario_count: 1,
+					deterministic_must_have_additions: 1,
+					deterministic_optional_additions: 1,
+					deterministic_total_additions: 2,
+					shard_count: 2,
+					worker_count: 2,
+					used_fallback: false,
+					warnings: [
+						"Model output needed deterministic coverage completion because 1 must-have scenario and 1 optional/planned scenario remained uncovered; added 1 must-have deterministic case and 1 optional deterministic case (2 total deterministic coverage cases).",
+					],
+					parser_recoveries: ["TestCaseGeneratorAgent: recovered 1 complete test_cases entry from truncated JSON"],
+					parser_failures: [],
+				},
 				iteration_history: [],
 			})
 		);
@@ -169,6 +210,19 @@ test.describe("Export approval gate", () => {
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
+		await page.getByRole("tab", { name: /diagnostics/i }).click();
+		await expect(page.getByText("Route Direct Parallel")).toBeVisible();
+		await expect(page.getByText("Generation sources")).toBeVisible();
+		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Model-authored" }).getByText("1")).toBeVisible();
+		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Deterministic completion" }).getByText("1")).toBeVisible();
+		await expect(page.getByText("Completion source")).toBeVisible();
+		await expect(page.getByText("Coverage Completion")).toBeVisible();
+		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Must-have gaps" }).getByText("1")).toBeVisible();
+		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Optional/planned gaps" }).getByText("1")).toBeVisible();
+		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Total additions" }).getByText("2")).toBeVisible();
+		await expect(page.getByText("Parser recoveries")).toBeVisible();
+		await expect(page.getByText(/recovered 1 complete test_cases entry/i)).toBeVisible();
+		await expect(page.locator(".workflow-diagnostics-block.warning")).toHaveCount(0);
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
 		await page.getByRole("button", { name: /preview execution/i }).click();
