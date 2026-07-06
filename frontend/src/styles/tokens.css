@@ -1,29 +1,47 @@
 :root {
-	--primary: #0b6bff;
-	--primary-hover: #0052cc;
-	--primary-strong: #0046bf;
-	--primary-tonal: #e8f1ff;
-	--primary-container: #d8e8ff;
-	--success: #12a150;
-	--success-tonal: #e6f7ed;
-	--warning: #f59e0b;
-	--warning-tonal: #fff4d8;
-	--danger: #ef4b3f;
-	--danger-tonal: #ffebe8;
+	/* Brand */
+	--primary: #2563eb;
+	--primary-hover: #1d4ed8;
+	--primary-strong: #1e40af;
+	--primary-tonal: #eef4ff;
+	--primary-container: #dbe7ff;
+	--primary-glow: rgb(37 99 235 / 0.28);
+
+	/* Semantic */
+	--success: #059669;
+	--success-tonal: #ecfdf5;
+	--warning: #d97706;
+	--warning-tonal: #fffbeb;
+	--danger: #dc2626;
+	--danger-tonal: #fef2f2;
 	--info: #7c3aed;
-	--info-tonal: #f0e8ff;
-	--bg-color: #f3f8ff;
+	--info-tonal: #f5f3ff;
+
+	/* Surfaces */
+	--bg-color: #f4f6fb;
 	--card-bg: #ffffff;
-	--surface-container: #f8fbff;
-	--surface-container-high: #eef5ff;
-	--text-main: #10213f;
-	--text-muted: #5d6b86;
-	--border-color: #d8e3f2;
-	--shadow-sm: 0 1px 2px 0 rgb(16 33 63 / 0.06), 0 1px 8px 0 rgb(11 107 255 / 0.04);
-	--shadow-md: 0 8px 24px -14px rgb(16 33 63 / 0.28), 0 2px 8px -4px rgb(11 107 255 / 0.18);
-	--shadow-lg: 0 20px 36px -20px rgb(16 33 63 / 0.34), 0 8px 18px -12px rgb(11 107 255 / 0.22);
-	--radius-md: 0.5rem;
-	--radius-lg: 0.75rem;
-	--radius-sm: 0.375rem;
-	--font-sans: "Inter", system-ui, -apple-system, sans-serif;
+	--surface-container: #f8fafd;
+	--surface-container-high: #eef2f9;
+	--surface-glass: rgb(255 255 255 / 0.78);
+
+	/* Text and borders */
+	--text-main: #0f1c33;
+	--text-muted: #5b6b85;
+	--border-color: #e2e8f2;
+	--border-strong: #c9d5e8;
+
+	/* Elevation */
+	--shadow-sm: 0 1px 2px rgb(15 28 51 / 0.05), 0 1px 3px rgb(15 28 51 / 0.04);
+	--shadow-md: 0 2px 4px rgb(15 28 51 / 0.04), 0 10px 24px -10px rgb(15 28 51 / 0.12);
+	--shadow-lg: 0 4px 8px rgb(15 28 51 / 0.05), 0 24px 48px -16px rgb(15 28 51 / 0.2);
+	--ring: 0 0 0 3px rgb(37 99 235 / 0.18);
+
+	/* Shape */
+	--radius-sm: 0.5rem;
+	--radius-md: 0.75rem;
+	--radius-lg: 1rem;
+	--radius-xl: 1.25rem;
+
+	/* Typography */
+	--font-sans: "Inter", "InterVariable", system-ui, -apple-system, "Segoe UI", sans-serif;
 }

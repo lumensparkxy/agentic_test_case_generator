@@ -499,10 +499,11 @@
 
 .auth-warning-banner {
 	margin-bottom: 1rem;
-	padding: 0.75rem 1rem;
-	border: 1px solid #fcd34d;
+	padding: 0.85rem 1.1rem;
+	border: 1px solid #fde68a;
 	border-radius: var(--radius-md);
-	background: #fffbeb;
+	background: linear-gradient(180deg, #fffdf5 0%, #fffbeb 100%);
+	box-shadow: var(--shadow-sm);
 	color: #92400e;
 	font-size: 0.9rem;
 }
@@ -843,11 +844,13 @@
 	top: 1rem;
 	display: grid;
 	gap: 0.9rem;
-	padding: 0.9rem;
-	border: 1px solid #cfe0f7;
-	border-radius: var(--radius-lg);
-	background: linear-gradient(180deg, #ffffff 0%, #f2f7ff 100%);
-	box-shadow: var(--shadow-sm);
+	padding: 1rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-xl);
+	background: var(--surface-glass);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+	box-shadow: var(--shadow-md);
 }
 
 .workflow-navigation-header {
@@ -885,9 +888,9 @@
 	width: 2.05rem;
 	height: 2.05rem;
 	padding: 0;
-	border: 1px solid #bfd4f5;
+	border: 1px solid var(--border-strong);
 	border-radius: 9999px;
-	background: #ffffff;
+	background: var(--card-bg);
 	color: var(--primary-hover);
 	box-shadow: var(--shadow-sm);
 	line-height: 1;
@@ -922,27 +925,32 @@
 	width: 100%;
 	padding: 0.72rem 0.7rem;
 	border: 1px solid transparent;
-	border-radius: 1rem;
+	border-radius: var(--radius-md);
 	background: transparent;
 	color: #40516f;
 	text-align: left;
 	box-shadow: none;
+	transition:
+		background 0.15s ease,
+		border-color 0.15s ease,
+		color 0.15s ease,
+		box-shadow 0.2s ease;
 }
 
 .workflow-navigation-item:hover {
-	border-color: #bfd4f5;
+	border-color: var(--border-color);
 	background: var(--primary-tonal);
 	color: var(--text-main);
 	transform: none;
 }
 
 .workflow-navigation-item.active {
-	border-color: #88b8ff;
-	background: linear-gradient(180deg, var(--primary) 0%, var(--primary-hover) 100%);
+	border-color: transparent;
+	background: linear-gradient(135deg, #3b82f6 0%, var(--primary) 45%, var(--primary-hover) 100%);
 	color: #ffffff;
 	box-shadow:
-		inset 4px 0 0 rgb(255 255 255 / 0.82),
-		var(--shadow-sm);
+		inset 0 1px 0 rgb(255 255 255 / 0.22),
+		0 8px 20px -8px var(--primary-glow);
 }
 
 .workflow-navigation-marker {
@@ -951,11 +959,14 @@
 	justify-content: center;
 	width: 2rem;
 	height: 2rem;
-	border-radius: 9999px;
-	background: #eef3fb;
+	border-radius: 0.65rem;
+	background: var(--surface-container-high);
 	color: var(--text-muted);
 	font-size: 0.78rem;
 	font-weight: 850;
+	transition:
+		background 0.15s ease,
+		color 0.15s ease;
 }
 
 .workflow-navigation-marker svg {
@@ -1006,16 +1017,17 @@
 
 .workflow-navigation-state {
 	justify-self: end;
-	padding: 0.18rem 0.42rem;
+	padding: 0.2rem 0.5rem;
 	border-radius: 9999px;
-	background: rgba(255, 255, 255, 0.72);
+	background: rgb(15 28 51 / 0.05);
 	color: var(--text-muted);
 	font-size: 0.68rem;
-	font-weight: 800;
+	font-weight: 700;
+	letter-spacing: 0.02em;
 }
 
 .workflow-navigation-item.active .workflow-navigation-state {
-	background: #ffffff;
+	background: rgb(255 255 255 / 0.92);
 	color: var(--primary-hover);
 }
 
@@ -1141,21 +1153,21 @@
 /* Tab Content */
 .tab-content {
 	background: var(--card-bg);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-xl);
 	border: 1px solid var(--border-color);
 	box-shadow: var(--shadow-md);
 	min-height: 500px;
 }
 
 .panel {
-	padding: 2rem;
-	animation: fadeIn 0.2s ease-out;
+	padding: 2.25rem;
+	animation: fadeIn 0.25s ease-out;
 }
 
 @keyframes fadeIn {
 	from {
 		opacity: 0;
-		transform: translateY(10px);
+		transform: translateY(8px);
 	}
 
 	to {
@@ -1165,8 +1177,9 @@
 }
 
 .panel-title {
-	font-size: 1.5rem;
-	font-weight: 700;
+	font-size: 1.6rem;
+	font-weight: 750;
+	letter-spacing: -0.025em;
 	margin: 0 0 0.5rem 0;
 	color: var(--text-main);
 }
@@ -1174,5 +1187,6 @@
 .panel-description {
 	color: var(--text-muted);
 	margin-bottom: 2rem;
-	font-size: 1rem;
+	font-size: 0.98rem;
+	max-width: 68ch;
 }

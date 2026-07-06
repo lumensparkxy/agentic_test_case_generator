@@ -1,9 +1,54 @@
+html {
+	scroll-behavior: smooth;
+}
+
 body {
 	margin: 0;
 	padding: 0;
 	font-family: var(--font-sans);
-	background: linear-gradient(180deg, #f8fbff 0%, var(--bg-color) 44%, #ffffff 100%);
+	font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+	background-color: var(--bg-color);
+	background-image:
+		radial-gradient(1100px 520px at 8% -6%, rgb(37 99 235 / 0.09), transparent 62%),
+		radial-gradient(900px 480px at 96% -12%, rgb(124 58 237 / 0.07), transparent 58%),
+		radial-gradient(1200px 700px at 50% 118%, rgb(37 99 235 / 0.05), transparent 60%);
+	background-attachment: fixed;
 	color: var(--text-main);
 	-webkit-font-smoothing: antialiased;
-	line-height: 1.5;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+	line-height: 1.55;
+}
+
+::selection {
+	background: var(--primary-container);
+	color: var(--primary-strong);
+}
+
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--border-strong);
+	border-radius: 9999px;
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+h1,
+h2,
+h3,
+h4 {
+	letter-spacing: -0.02em;
 }
