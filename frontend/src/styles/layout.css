@@ -1,8 +1,10 @@
 /* Page Layout */
 .page {
-	max-width: 1400px;
+	box-sizing: border-box;
+	width: 100%;
+	max-width: none;
 	margin: 0 auto;
-	padding: 2rem;
+	padding: clamp(1rem, 2vw, 2.5rem);
 	min-height: 100vh;
 }
 
@@ -818,12 +820,12 @@
 
 /* Workflow Navigation */
 .workflow-shell {
-	--workflow-nav-column: minmax(260px, 300px);
-	--project-rail-column: minmax(300px, 360px);
+	--workflow-nav-column: clamp(240px, 18vw, 300px);
+	--project-rail-column: clamp(280px, 20vw, 360px);
 
 	display: grid;
-	grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr) var(--project-rail-column);
-	gap: 1.15rem;
+	grid-template-columns: var(--workflow-nav-column) minmax(760px, 1fr) var(--project-rail-column);
+	gap: clamp(0.875rem, 1vw, 1.15rem);
 	align-items: start;
 }
 

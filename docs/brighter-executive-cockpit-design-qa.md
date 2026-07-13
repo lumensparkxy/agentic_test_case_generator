@@ -20,7 +20,8 @@ Final result: passed.
   Automation, and Export, uses line icons for destination recognition, and can
   collapse to a compact icon rail.
 - Center workspace owns the active workflow and keeps the vivid command banner
-  for recommended Generate/orchestrator actions.
+  for recommended Generate/orchestrator actions. The page uses the full
+  available desktop width so dense workflow tables benefit from wider screens.
 - Right information rail owns operational status, stage progress, blockers,
   agent timeline, last run, project evidence, and report evidence; it can
   collapse to a compact status handle with a directional icon control.
@@ -53,9 +54,12 @@ Final result: passed.
   run, project evidence, and latest report evidence.
 - Independent collapse/expand controls for the left workflow navigation and
   right project information rail, including persisted browser preferences.
+- Responsive shell placement at 1280px (project rail below the center), 1440px
+  and 1920px (three columns), plus the existing 390px mobile stack.
 - Core upload, context, generation, automation, export, orchestrator lifecycle,
   and report-evidence workflows.
-- Desktop and mobile CSS smoke surfaces for clipped text and overflow.
+- Laptop, desktop, wide-desktop, and mobile CSS smoke surfaces for center width,
+  clipped text, and overflow.
 
 ## Automated Coverage Map
 
@@ -66,7 +70,7 @@ Final result: passed.
 | Reload, impact update, execution, review, and report lifecycle | `frontend/e2e/orchestrator-lifecycle.spec.js` |
 | Named automation execution history | `frontend/e2e/multi-environment-execution.spec.js` |
 | Latest report evidence after reload | `frontend/e2e/report-evidence.spec.js` |
-| Mobile and desktop overflow smoke | `frontend/e2e/frontend-css-smoke.spec.js` |
+| Responsive shell width, placement, collapse gain, and overflow smoke | `frontend/e2e/frontend-css-smoke.spec.js` |
 | Authenticated parse, generate, and export path | `frontend/e2e/workflow.spec.js` |
 
 ## Manual Visual QA
@@ -79,3 +83,9 @@ Manual screenshots from issue #122 were inspected after the brighter token pass:
 Observed result: brighter command banner, selected left navigation state, right
 rail readability, and mobile stacking showed no clipped text or incoherent
 overlap.
+
+Issue #186 manual visual checks passed at 1280px expanded, 1440px expanded,
+1920px expanded and fully collapsed, and 390px mobile. The measured center
+widths were 964px, 795px, 1,146px, and 1,630px respectively, with no browser
+console warnings or errors. Screenshots remain local test evidence and are not
+committed.
