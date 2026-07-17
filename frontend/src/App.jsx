@@ -3,10 +3,8 @@ import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
 import {
 	GlobalDestinationPlaceholderPage,
-	HomeRoutePage,
 	ProjectLoadingPage,
 	ProjectOverviewPage,
-	ProjectsRoutePage,
 	RouteRecoveryPage,
 	UseCasesPlaceholderPage,
 } from "./app/RoutePages";
@@ -46,7 +44,11 @@ import useRequirementWorkflowState from "./hooks/useRequirementWorkflowState";
 import useTestCaseWorkflowState from "./hooks/useTestCaseWorkflowState";
 import useWorkflowNavigationState from "./hooks/useWorkflowNavigationState";
 import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
+import useWorkspaceSummary from "./hooks/useWorkspaceSummary";
+import HomePage from "./pages/HomePage";
+import ProjectsPage from "./pages/ProjectsPage";
 import {
+	GLOBAL_DESTINATIONS,
 	buildProjectPath,
 	getDestinationForLegacyTab,
 	getLegacyTabForDestination,
@@ -100,6 +102,12 @@ const PROJECT_API_PATHS = Object.freeze({
 	impactAnalysis: (projectId) => `/projects/${projectId}/impact-analysis`,
 	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
+
+const createCancelledOperationError = () => {
+	const error = new Error("Project creation was cancelled because the workspace changed.");
+	error.name = "AbortError";
+	return error;
+};
 
 const getAuthProviderLabel = (providerKeyOrId) => {
 	const provider = visibleFirebaseAuthProviders.find(({ id, providerId }) => providerKeyOrId === id || providerKeyOrId === providerId);
@@ -220,6 +228,8 @@ export default function App() {
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const { route, navigate } = useBrowserNavigation();
 	const projectRouteRequestRef = useRef(0);
+	const projectCreateRequestRef = useRef(0);
+	const projectListRequestRef = useRef(0);
 	const projectOperationScopeRef = useRef({ projectId: "", userId: "", generation: 0 });
 	const projectOperationUserRef = useRef("");
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
@@ -922,6 +932,8 @@ export default function App() {
 	};
 
 	const clearAuthState = (nextStatus = null) => {
+		projectCreateRequestRef.current += 1;
+		projectListRequestRef.current += 1;
 		projectOperationUserRef.current = "";
 		syncProjectOperationScope();
 		setAuthToken("");
@@ -937,7 +949,7 @@ export default function App() {
 		setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 		setOrchestratorError("");
 		setIsLoadingOrchestrator(false);
-		setIsLoadingOrchestrator(false);
+		setIsCreatingProject(false);
 		setRequirementSourceMode("file");
 		setJiraConnectionStatus(EMPTY_JIRA_CONNECTION_STATUS);
 		setJiraConnectionForm(EMPTY_JIRA_CONNECTION_FORM);
@@ -970,7 +982,12 @@ export default function App() {
 	};
 
 	const persistAuthState = (token, user) => {
-		projectOperationUserRef.current = user?.sub || "";
+		const nextUserId = user?.sub || "";
+		if (projectOperationUserRef.current !== nextUserId) {
+			projectCreateRequestRef.current += 1;
+			projectListRequestRef.current += 1;
+		}
+		projectOperationUserRef.current = nextUserId;
 		syncProjectOperationScope();
 		setAuthToken(token);
 		setCurrentUser(user);
@@ -1263,6 +1280,31 @@ export default function App() {
 
 		return res;
 	};
+	const {
+		summary: workspaceSummary,
+		error: workspaceSummaryError,
+		isLoading: isWorkspaceSummaryLoading,
+		isRefreshing: isWorkspaceSummaryRefreshing,
+		refresh: refreshWorkspaceSummary,
+		retry: retryWorkspaceSummary,
+	} = useWorkspaceSummary({
+		request: apiRequest,
+		enabled: isAuthenticated && !isVerifyingSession,
+		identity: currentUser?.sub || "",
+	});
+	const previousWorkspaceRouteRef = useRef({ kind: route.kind, destination: route.destination });
+
+	useEffect(() => {
+		const previousRoute = previousWorkspaceRouteRef.current;
+		previousWorkspaceRouteRef.current = { kind: route.kind, destination: route.destination };
+		const enteredWorkspaceFromProject =
+			previousRoute.kind === "project" &&
+			route.kind === "global" &&
+			[GLOBAL_DESTINATIONS.HOME, GLOBAL_DESTINATIONS.PROJECTS].includes(route.destination);
+		if (enteredWorkspaceFromProject && isAuthenticated && !isVerifyingSession) {
+			void refreshWorkspaceSummary();
+		}
+	}, [route.kind, route.destination, isAuthenticated, isVerifyingSession, refreshWorkspaceSummary]);
 
 	const hydrateProjectWorkflow = (project) => {
 		const snapshots = project?.current_snapshots || {};
@@ -1360,6 +1402,7 @@ export default function App() {
 		setOrchestratorStatus(null);
 		setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 		setOrchestratorError("");
+		setIsLoadingOrchestrator(false);
 		setIsParsing(false);
 		setIsAnalyzingContext(false);
 		setIsGenerating(false);
@@ -1430,7 +1473,14 @@ export default function App() {
 		}
 	};
 
-	const loadProjects = async ({ silent = false } = {}) => {
+	const loadProjects = async ({ silent = false, requestIsCurrent = null } = {}) => {
+		const requestId = projectListRequestRef.current + 1;
+		projectListRequestRef.current = requestId;
+		const requestUserId = projectOperationUserRef.current;
+		const canApplyResponse = () =>
+			projectListRequestRef.current === requestId &&
+			projectOperationUserRef.current === requestUserId &&
+			(typeof requestIsCurrent !== "function" || requestIsCurrent());
 		if (!isAuthenticated) {
 			setProjects([]);
 			setCurrentProject(null);
@@ -1449,16 +1499,19 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			const data = await res.json();
+			if (!canApplyResponse()) {
+				return null;
+			}
 			const nextProjects = data.projects || [];
 			setProjects(nextProjects);
 			return nextProjects;
 		} catch (error) {
-			if (!silent) {
+			if (!silent && canApplyResponse()) {
 				setStatus(`Project load failed: ${error.message}`);
 			}
 			return null;
 		} finally {
-			if (!silent) {
+			if (canApplyResponse()) {
 				setIsLoadingProjects(false);
 			}
 		}
@@ -1533,9 +1586,39 @@ export default function App() {
 		return openProject(operationScope.projectId, { hydrate, silent: true, operationScope });
 	};
 
-	const createProject = async () => {
-		const name = newProjectName.trim();
-		if (!name) return null;
+	const createProject = async (nameOverride = null, { throwOnError = false } = {}) => {
+		const name = `${nameOverride ?? newProjectName}`.trim();
+		if (!name) {
+			const error = new Error("Enter a project name before creating a project.");
+			if (throwOnError) {
+				throw error;
+			}
+			return null;
+		}
+		const requestId = projectCreateRequestRef.current + 1;
+		projectCreateRequestRef.current = requestId;
+		const requestScope = {
+			requestId,
+			userId: projectOperationUserRef.current,
+			routeRequestId: projectRouteRequestRef.current,
+			pathname: typeof window === "undefined" ? route.pathname : window.location.pathname,
+		};
+		const isCreateMutationCurrent = () =>
+			projectCreateRequestRef.current === requestScope.requestId && projectOperationUserRef.current === requestScope.userId;
+		const isCreateRequestCurrent = () =>
+			isCreateMutationCurrent() &&
+			projectRouteRequestRef.current === requestScope.routeRequestId &&
+			(typeof window === "undefined" ? route.pathname : window.location.pathname) === requestScope.pathname;
+		const assertCreateMutationCurrent = () => {
+			if (!isCreateMutationCurrent()) {
+				throw createCancelledOperationError();
+			}
+		};
+		const assertCreateRequestCurrent = () => {
+			if (!isCreateRequestCurrent()) {
+				throw createCancelledOperationError();
+			}
+		};
 		setIsCreatingProject(true);
 		setStatus("Creating QA project...");
 		try {
@@ -1544,26 +1627,42 @@ export default function App() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ name }),
 			});
+			assertCreateMutationCurrent();
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to create project");
+				assertCreateMutationCurrent();
 				throw new Error(errorMessage);
 			}
 			const data = await res.json();
-			setCurrentProject(data || null);
-			hydrateProjectWorkflow(data);
-			if (data?.project_id) {
-				localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, data.project_id);
-				await loadProjectOrchestrator(data.project_id, { silent: true });
+			assertCreateMutationCurrent();
+			if (!data?.project_id) {
+				throw new Error("The created project response did not include a project ID.");
 			}
+			await loadProjects({ silent: true, requestIsCurrent: isCreateMutationCurrent });
+			assertCreateMutationCurrent();
+			await refreshWorkspaceSummary();
+			assertCreateMutationCurrent();
+			assertCreateRequestCurrent();
 			setNewProjectName("");
-			await loadProjects({ silent: true });
 			setStatus(`Created ${data.name}.`);
-			return data || null;
+			return data;
 		} catch (error) {
+			if (error?.name === "AbortError" || !isCreateRequestCurrent()) {
+				const cancelledError = error?.name === "AbortError" ? error : createCancelledOperationError();
+				if (throwOnError) {
+					throw cancelledError;
+				}
+				return null;
+			}
 			setStatus(`Project create failed: ${error.message}`);
+			if (throwOnError) {
+				throw error;
+			}
 			return null;
 		} finally {
-			setIsCreatingProject(false);
+			if (projectCreateRequestRef.current === requestScope.requestId) {
+				setIsCreatingProject(false);
+			}
 		}
 	};
 
@@ -1573,7 +1672,7 @@ export default function App() {
 			clearProjectWorkspace({ removeStoredProject: true });
 			setProjectRouteStatus("idle");
 			setProjectRouteError("");
-			navigate("/projects");
+			navigate("/");
 			return null;
 		}
 
@@ -1581,12 +1680,22 @@ export default function App() {
 		return projects.find((project) => project.project_id === projectId) || { project_id: projectId };
 	};
 
-	const createProjectAndNavigate = async () => {
-		const createdProject = await createProject();
+	const createProjectAndNavigate = async (nameOverride = null, options = {}) => {
+		const createdProject = await createProject(nameOverride, options);
 		if (createdProject?.project_id) {
 			navigate(buildProjectPath(createdProject.project_id));
 		}
 		return createdProject;
+	};
+
+	const createWorkspaceProject = (name) => createProject(name, { throwOnError: true });
+
+	const openWorkspaceProject = ({ projectId, destination } = {}) => {
+		if (!projectId) {
+			return null;
+		}
+		navigate(buildProjectPath(projectId, destination));
+		return projects.find((project) => project.project_id === projectId) || { project_id: projectId };
 	};
 
 	useEffect(() => {
@@ -1598,9 +1707,14 @@ export default function App() {
 			setOrchestratorError("");
 			return;
 		}
-		loadProjects({ silent: true }).then((nextProjects) => {
+		const requestUserId = currentUser?.sub || "";
+		const requestIsCurrent = () => projectOperationUserRef.current === requestUserId;
+		loadProjects({ silent: true, requestIsCurrent }).then((nextProjects) => {
+			if (!requestIsCurrent() || !Array.isArray(nextProjects)) {
+				return;
+			}
 			const storedProjectId = localStorage.getItem(STORAGE_CURRENT_PROJECT_ID);
-			if (storedProjectId && Array.isArray(nextProjects) && !nextProjects.some((project) => project.project_id === storedProjectId)) {
+			if (storedProjectId && !nextProjects.some((project) => project.project_id === storedProjectId)) {
 				localStorage.removeItem(STORAGE_CURRENT_PROJECT_ID);
 			}
 		});
@@ -3575,8 +3689,6 @@ export default function App() {
 			onRefreshProjects={() => loadProjects()}
 		/>
 	);
-	const storedProjectId = typeof window === "undefined" ? "" : localStorage.getItem(STORAGE_CURRENT_PROJECT_ID) || "";
-	const continueProject = projects.find((project) => project.project_id === storedProjectId) || null;
 	const recoveryKind =
 		projectRouteStatus === "not-found"
 			? "missing"
@@ -3621,13 +3733,24 @@ export default function App() {
 			<GlobalAppShell route={route} navigate={navigate} controls={navigationControls}>
 				{route.kind === "global" ? (
 					route.destination === "home" ? (
-						<HomeRoutePage navigate={navigate} continueProject={continueProject} />
+						<HomePage
+							summary={workspaceSummary}
+							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
+							isRefreshing={isWorkspaceSummaryRefreshing}
+							error={isAuthenticated ? workspaceSummaryError : ""}
+							onRetry={retryWorkspaceSummary}
+							onOpenProject={openWorkspaceProject}
+							onCreateProject={() => navigate("/projects")}
+						/>
 					) : route.destination === "projects" ? (
-						<ProjectsRoutePage
-							navigate={navigate}
-							projects={projects}
-							isLoading={isLoadingProjects || isVerifyingSession}
-							onRetry={() => loadProjects()}
+						<ProjectsPage
+							projects={workspaceSummary?.projects || []}
+							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession) && !workspaceSummary}
+							error={isAuthenticated ? workspaceSummaryError : ""}
+							onRetry={retryWorkspaceSummary}
+							onCreateProject={createWorkspaceProject}
+							onOpenProject={openWorkspaceProject}
+							isCreatingProject={isCreatingProject}
 						/>
 					) : (
 						<GlobalDestinationPlaceholderPage destination={route.destination} navigate={navigate} />
