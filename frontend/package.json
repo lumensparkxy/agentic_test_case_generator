@@ -11,6 +11,7 @@
     "format:check": "prettier --check \"src/**/*.{js,jsx,css}\" \"e2e/**/*.{js,mjs}\" \"*.js\"",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:home-first": "playwright test e2e/export-approval-gate.spec.js e2e/home-workspace.spec.js e2e/workflow-navigation.spec.js e2e/contextual-next-action.spec.js e2e/use-case-review.spec.js e2e/review-inbox.spec.js e2e/automation-preview-consistency.spec.js e2e/multi-environment-execution.spec.js e2e/responsive-reflow.spec.js e2e/runs-reports-index.spec.js e2e/accessibility-navigation.spec.js",
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
     "@vitejs/plugin-react": "^6.0.2",

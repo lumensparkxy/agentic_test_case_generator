@@ -215,8 +215,6 @@ async function expectNoProjectShell(page) {
 test.describe("Global Review Inbox", () => {
 	test("preserves server order, deduplicates snapshot work, and opens every canonical review workbench", async ({ page }) => {
 		const api = await openInbox(page, { summary: POPULATED_SUMMARY });
-		const heading = page.getByRole("heading", { name: /^Review Inbox$/i, level: 1 });
-		await expect(heading).toBeFocused();
 		await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Reviews$/i })).toHaveAttribute(
 			"aria-current",
 			"page"
@@ -387,9 +385,11 @@ test.describe("Global Review Inbox", () => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await openInbox(page, { summary: RESPONSIVE_SUMMARY });
 
-		const heading = page.getByRole("heading", { name: /^Review Inbox$/i, level: 1 });
 		await expect(inboxList(page).getByRole("listitem")).toHaveCount(3);
-		await expect(heading).toBeFocused();
+		await page.keyboard.press("Tab");
+		await expect(page.getByRole("link", { name: /^Skip to main content$/i })).toBeFocused();
+		await page.keyboard.press("Enter");
+		await expect(inbox(page)).toBeFocused();
 		await page.keyboard.press("Tab");
 		await expect(inbox(page).getByRole("button", { name: /^Refresh reviews$/i })).toBeFocused();
 		await page.keyboard.press("Tab");

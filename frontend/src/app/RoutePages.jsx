@@ -28,7 +28,7 @@ function RecoveryLinks({ navigate, projectId = null, includeProjectOverview = fa
 export function HomeRoutePage({ navigate, continueProject = null }) {
 	const continueProjectId = continueProject?.project_id || continueProject?.projectId || "";
 	return (
-		<main className="route-page" aria-labelledby="home-route-title">
+		<main id="main-content" className="route-page" aria-labelledby="home-route-title" tabIndex={-1}>
 			<header className="route-page-header">
 				<span className="route-page-kicker">Workspace</span>
 				<h1 id="home-route-title">Home</h1>
@@ -63,7 +63,7 @@ export function HomeRoutePage({ navigate, continueProject = null }) {
 
 export function ProjectsRoutePage({ navigate, projects = [], isLoading = false, error = "", onRetry = null }) {
 	return (
-		<main className="route-page" aria-labelledby="projects-route-title" aria-busy={isLoading || undefined}>
+		<main id="main-content" className="route-page" aria-labelledby="projects-route-title" aria-busy={isLoading || undefined} tabIndex={-1}>
 			<header className="route-page-header">
 				<span className="route-page-kicker">Workspace</span>
 				<h1 id="projects-route-title">Projects</h1>
@@ -111,7 +111,7 @@ export function ProjectsRoutePage({ navigate, projects = [], isLoading = false, 
 export function GlobalDestinationPlaceholderPage({ destination, navigate }) {
 	const label = GLOBAL_PAGE_LABELS[destination] || "Workspace destination";
 	return (
-		<main className="route-page" aria-labelledby="global-placeholder-title">
+		<main id="main-content" className="route-page" aria-labelledby="global-placeholder-title" tabIndex={-1}>
 			<header className="route-page-header">
 				<span className="route-page-kicker">Workspace</span>
 				<h1 id="global-placeholder-title">{label}</h1>
@@ -144,7 +144,7 @@ export function RouteRecoveryPage({ kind = "not-found", title = "", message = ""
 					: "The requested address does not match an available workspace page.");
 
 	return (
-		<main className="route-page route-recovery-page" aria-labelledby="route-recovery-title">
+		<main id="main-content" className="route-page route-recovery-page" aria-labelledby="route-recovery-title" tabIndex={-1}>
 			<header className="route-page-header">
 				<span className="route-page-kicker">Recovery</span>
 				<h1 id="route-recovery-title">{resolvedTitle}</h1>
@@ -157,7 +157,14 @@ export function RouteRecoveryPage({ kind = "not-found", title = "", message = ""
 
 export function ProjectLoadingPage({ projectId = "" }) {
 	return (
-		<main className="route-page route-loading-page" aria-labelledby="project-loading-title" aria-live="polite" aria-busy="true">
+		<main
+			id="main-content"
+			className="route-page route-loading-page"
+			aria-labelledby="project-loading-title"
+			aria-live="polite"
+			aria-busy="true"
+			tabIndex={-1}
+		>
 			<header className="route-page-header">
 				<span className="route-page-kicker">Project</span>
 				<h1 id="project-loading-title">Opening project…</h1>
@@ -173,7 +180,7 @@ export function ProjectOverviewPage({ project, status = null, navigate, contextu
 	const currentStage = status?.current_stage || project?.latest_stage || "requirements";
 
 	return (
-		<main className="route-page" aria-labelledby="project-overview-title">
+		<main id="main-content" className="route-page" aria-labelledby="project-overview-title" tabIndex={-1}>
 			<header className="route-page-header">
 				<span className="route-page-kicker">Project overview</span>
 				<h1 id="project-overview-title">{project?.name || "Project"}</h1>

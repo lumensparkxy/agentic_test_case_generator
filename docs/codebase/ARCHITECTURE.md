@@ -420,6 +420,22 @@ center workspace through 1727px, with the three-column shell beginning at
 1728px; this transition preserves at least the usable center width established
 at 1280px instead of making the 1440px workspace narrower.
 
+The app shell owns cross-route accessibility behavior. A global skip link is
+the first keyboard destination on an initial document load and targets the one
+active `#main-content` region. Initial loads preserve the browser's document
+entry focus; client-side route changes and Back/Forward navigation focus the
+new destination main after project hydration completes. Reused project mains
+carry a route-specific accessible name and are deliberately refocused so
+Back/Forward announces the changed workbench. One persistent polite, atomic
+status region announces non-blocking application updates that do not already
+have a local live-region owner; completed execution, impact, export, and review
+results retain their local owner, while blocking Automation failures render a
+local assertive alert. The project chooser moves
+focus into its selected or first control and restores its trigger on Escape;
+when nested inside compact workspace controls, Escape closes only the chooser.
+The protected Home-first browser gate exercises these semantics and runs
+serious/critical WCAG A/AA Axe scans without rule or selector exclusions.
+
 Document-level horizontal scrolling is not a responsive escape hatch. Layout
 and ordinary labels must reflow inside the viewport. Intrinsically
 two-dimensional requirements, generated-case, traceability, automation,

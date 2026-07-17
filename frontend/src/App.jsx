@@ -240,6 +240,7 @@ export default function App() {
 	const workflowMainRef = useRef(null);
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
+	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
 	const {
 		isWorkflowNavCollapsed,
 		isCompactWorkflowNavigation,
@@ -340,6 +341,8 @@ export default function App() {
 		setSelectedExecutionCandidateIds,
 		executionRunResult,
 		setExecutionRunResult,
+		executionError,
+		setExecutionError,
 		isPreviewingExecution,
 		setIsPreviewingExecution,
 		isRunningExecution,
@@ -360,6 +363,7 @@ export default function App() {
 		invalidateExecutionPreviewRequest();
 		invalidateExecutionRunRequest();
 		resetExecutionState();
+		setApplicationLiveStatus("");
 	};
 	const {
 		isExporting,
@@ -393,7 +397,6 @@ export default function App() {
 		setOrchestratorError,
 	} = useProjectWorkspaceState();
 	const {
-		status,
 		setStatus,
 		authToken,
 		setAuthToken,
@@ -1329,6 +1332,9 @@ export default function App() {
 		identity: currentUser?.sub || "",
 	});
 	const previousWorkspaceRouteRef = useRef({ kind: route.kind, destination: route.destination });
+	const routeFocusKey = `${route.kind}:${route.projectId || ""}:${route.destination || ""}`;
+	const previousRouteFocusKeyRef = useRef(routeFocusKey);
+	const pendingRouteFocusRef = useRef(false);
 
 	const storeExecutionPreview = (rawPreview, { source = "live", consistencyMessage = null, selectedCandidateIds = null } = {}) => {
 		const normalizedPreview = normalizeAutomationPreview(rawPreview, { source });
@@ -1365,6 +1371,31 @@ export default function App() {
 			void refreshWorkspaceSummary();
 		}
 	}, [route.kind, route.destination, isAuthenticated, isVerifyingSession, refreshWorkspaceSummary]);
+
+	useEffect(() => {
+		if (previousRouteFocusKeyRef.current !== routeFocusKey) {
+			previousRouteFocusKeyRef.current = routeFocusKey;
+			pendingRouteFocusRef.current = true;
+		}
+		if (!pendingRouteFocusRef.current) {
+			return undefined;
+		}
+		if (route.kind === "project" && ["idle", "loading"].includes(projectRouteStatus)) {
+			return undefined;
+		}
+		const focusFrame = window.requestAnimationFrame(() => {
+			const main = document.getElementById("main-content");
+			if (!main) {
+				return;
+			}
+			if (document.activeElement === main) {
+				main.blur();
+			}
+			main.focus();
+			pendingRouteFocusRef.current = false;
+		});
+		return () => window.cancelAnimationFrame(focusFrame);
+	}, [projectRouteStatus, route.kind, routeFocusKey]);
 
 	const hydrateProjectWorkflow = (project) => {
 		invalidateExecutionPreviewRequest();
@@ -1571,10 +1602,15 @@ export default function App() {
 			}
 			const nextProjects = data.projects || [];
 			setProjects(nextProjects);
+			if (!silent) {
+				setApplicationLiveStatus(`Projects refreshed: ${nextProjects.length} available.`);
+			}
 			return nextProjects;
 		} catch (error) {
 			if (!silent && canApplyResponse()) {
-				setStatus(`Project load failed: ${error.message}`);
+				const message = `Project load failed: ${error.message}`;
+				setStatus(message);
+				setApplicationLiveStatus(message);
 			}
 			return null;
 		} finally {
@@ -2936,7 +2972,9 @@ export default function App() {
 		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
 		if (!casesToPreview.length) {
 			if (updateStatus) {
-				setStatus("Generate test cases before previewing execution.");
+				const message = "Generate test cases before previewing execution.";
+				setStatus(message);
+				setApplicationLiveStatus(message);
 			}
 			return null;
 		}
@@ -2944,7 +2982,9 @@ export default function App() {
 		const previewRequestId = executionPreviewRequestIdRef.current;
 		setIsPreviewingExecution(true);
 		if (updateStatus) {
-			setStatus("Previewing execution readiness...");
+			const message = "Previewing execution readiness...";
+			setStatus(message);
+			setApplicationLiveStatus(message);
 		}
 		try {
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, {
@@ -2966,12 +3006,14 @@ export default function App() {
 			const normalizedPreview = storeExecutionPreview(data, { source: "live" });
 			if (updateStatus) {
 				if (!normalizedPreview.isConsistent) {
-					setStatus("Execution preview data was inconsistent. Preview again before running candidates.");
+					const message = "Execution preview data was inconsistent. Preview again before running candidates.";
+					setStatus(message);
+					setApplicationLiveStatus(message);
 				} else {
 					const summary = normalizedPreview.summary;
-					setStatus(
-						`Execution preview ready: ${summary.executable} executable, ${summary.manual} manual, ${summary.unsupported} unsupported.`
-					);
+					const message = `Execution preview ready: ${summary.executable} executable, ${summary.manual} manual, ${summary.unsupported} unsupported.`;
+					setStatus(message);
+					setApplicationLiveStatus(message);
 				}
 			}
 			if (persistProject) {
@@ -2982,8 +3024,10 @@ export default function App() {
 			}
 			return normalizedPreview;
 		} catch (error) {
-			if (updateStatus && isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
-				setStatus(`Execution preview failed: ${error.message}`);
+			if (isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
+				const message = `Execution preview failed: ${error.message}`;
+				setApplicationLiveStatus("");
+				setExecutionError(message);
 			}
 			return null;
 		} finally {
@@ -3018,8 +3062,11 @@ export default function App() {
 
 		executionRunRequestIdRef.current += 1;
 		const executionRunRequestId = executionRunRequestIdRef.current;
+		setExecutionError("");
 		setIsRunningExecution(true);
-		setStatus(`Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`);
+		const runningMessage = `Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`;
+		setStatus(runningMessage);
+		setApplicationLiveStatus(runningMessage);
 		try {
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionRun.path, {
 				method: "POST",
@@ -3060,6 +3107,7 @@ export default function App() {
 				source: "live",
 				selectedCandidateIds: executableCandidates.map((candidate) => candidate.id),
 			});
+			setApplicationLiveStatus("");
 			const summary = data?.summary || {};
 			setStatus(
 				`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`
@@ -3067,7 +3115,9 @@ export default function App() {
 			await refreshCurrentProject({ hydrate: false, operationScope });
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
-				setStatus(`Execution run failed: ${error.message}`);
+				const message = `Execution run failed: ${error.message}`;
+				setApplicationLiveStatus("");
+				setExecutionError(message);
 			}
 		} finally {
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
@@ -3822,6 +3872,7 @@ export default function App() {
 	const goNext = () => selectWorkflowTab(Math.min(activeTab + 1, 5));
 	const goPrev = () => selectWorkflowTab(Math.max(activeTab - 1, 0));
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
+	const activeProjectDestinationLabel = tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
 	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
 		destination: PROJECT_DESTINATIONS.TEST_CASES,
 	}).primaryAction;
@@ -3905,6 +3956,12 @@ export default function App() {
 
 	return (
 		<div className="page">
+			<a className="skip-link" href="#main-content">
+				Skip to main content
+			</a>
+			<div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="application-live-status">
+				{applicationLiveStatus}
+			</div>
 			{!isAuthenticated && !isVerifyingSession && (
 				<div className="auth-warning-banner">🔐 Sign in to parse requirements, generate test cases, and export artifacts.</div>
 			)}
@@ -4060,7 +4117,13 @@ export default function App() {
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
 							/>
 						) : (
-							<main ref={workflowMainRef} className="workflow-main" aria-label="Workflow workspace" tabIndex={-1}>
+							<main
+								id="main-content"
+								ref={workflowMainRef}
+								className="workflow-main"
+								aria-label={`Workflow workspace: ${activeProjectDestinationLabel}`}
+								tabIndex={-1}
+							>
 								{route.destination === "test-cases" ? (
 									<div className="test-cases-section-tabs" role="tablist" aria-label="Test Cases sections">
 										<button type="button" role="tab" aria-selected={activeTab === 2} onClick={() => selectWorkflowTab(2)}>
@@ -4972,6 +5035,7 @@ export default function App() {
 											selectedExecutionCandidateIds={selectedExecutionCandidateIds}
 											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
+											executionError={executionError}
 											isPreviewingExecution={isPreviewingExecution}
 											isRunningExecution={isRunningExecution}
 											authActionDisabled={authActionDisabled}

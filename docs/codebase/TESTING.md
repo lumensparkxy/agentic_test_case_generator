@@ -33,6 +33,7 @@ npm run test:e2e -- e2e/responsive-reflow.spec.js e2e/frontend-css-smoke.spec.js
 npm run test:e2e -- e2e/home-workspace.spec.js e2e/workflow-navigation.spec.js
 npm run test:e2e -- e2e/use-case-review.spec.js e2e/orchestrator-lifecycle.spec.js
 npm run test:e2e -- e2e/export-approval-gate.spec.js
+npm run test:e2e:home-first
 
 cd backend/execution_runtime
 npm ci
@@ -42,7 +43,16 @@ npm run test:playwright -- --list
 The Playwright config expects an existing `E2E_BASE_URL`. For local frontend
 E2E runs, start `npm run dev -- --host 127.0.0.1` in a separate frontend shell
 and run the specs with `E2E_BASE_URL=http://127.0.0.1:5173`; CI performs the
-same server startup and readiness check explicitly.
+same server startup and readiness check explicitly. The exact protected
+Home-first UX gate is:
+
+```bash
+CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first
+```
+
+The script is intentionally synthetic: it uses mocked API fixtures, a seeded
+test session, and local Vite only. It does not call Firebase, a model, a live
+backend, production, or an external integration.
 
 CI currently runs:
 
@@ -57,7 +67,13 @@ CI currently runs:
 - Frontend ESLint check.
 - Frontend Prettier format check.
 - Frontend production build.
-- Focused mocked frontend E2E spec `e2e/export-approval-gate.spec.js`.
+- The focused mocked Home-first E2E gate, including Home/routing, contextual
+  actions, Use Cases and Inbox review, Automation preview truth,
+  multi-environment execution, Runs/Reports, responsive reflow, export gating,
+  keyboard/focus semantics, and Axe checks.
+- Playwright HTML reports, failure screenshots/videos, and retry traces uploaded
+  as `frontend-playwright-<run>-<attempt>` Actions artifacts for 14 days. No
+  generated artifact is committed.
 
 Evidence: `.github/workflows/ci.yml`.
 
@@ -100,9 +116,10 @@ Evidence: `.github/workflows/ci.yml`.
 | Automation preview consistency | Yes | Empty, executable, mixed, unsupported, and invalid count/list invariants; malformed summaries and responses; duplicate/slug-colliding candidate IDs with repeated source IDs; persisted/live hydration; target-change and execution reset; latest-response ownership; selected-candidate Run counts and request IDs; zero-selection request suppression; contextual preview-before-run behavior; and distinct no-preview versus zero-executable states | `backend/tests/test_execution_service.py` and `backend/tests/test_automation_endpoint.py` cover the producer contract, collision-safe candidate execution, and persisted snapshot fields; `frontend/e2e/automation-preview-consistency.spec.js` covers mismatched live summaries, persisted compact previews, stale-snapshot refresh gating, selection preservation, preview/run response races, target reset, malformed payloads, contextual Execute, and empty-state consumers; `frontend/e2e/multi-environment-execution.spec.js` preserves named-environment run compatibility |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
 | Workspace summary read model | Yes | Empty accounts, owner/archive isolation, authoritative stage/action normalization, Use Cases review counts, deterministic ranking/deduplication, bounded runs/reports, query validation, and safe persistence failure | `backend/tests/test_workspace_summary_service.py` and `backend/tests/test_workspace_summary_endpoint.py` use synthetic project fixtures and patched Firestore/service boundaries |
-| Frontend Home and Projects | Yes | Zero/one/many-project Home states, subject-scoped and refreshed server ranking, stable My work groups, stale stored selection cleanup, bounded client search, create/open/clear behavior, delayed-create route/logout races, latest-wins project-list reads, loading/retry semantics, populated reflow at 390/760/900/1280/1440/1920, status containment, and canonical project links | `frontend/e2e/home-workspace.spec.js` uses deterministic workspace/project fixtures from `frontend/e2e/support/workspace.js`; `frontend/e2e/workflow-navigation.spec.js` preserves URL and browser-history authority |
+| Frontend Home and Projects | Yes | Zero/one/many-project Home states, subject-scoped and refreshed server ranking, stable My work groups, stale stored selection cleanup, bounded client search, create/open/clear behavior, delayed-create route/logout races, latest-wins project-list reads, loading/retry semantics, populated reflow at 320/390/640/760/900/1280/1440/1920, status containment, and canonical project links | `frontend/e2e/home-workspace.spec.js` uses deterministic workspace/project fixtures from `frontend/e2e/support/workspace.js`; `frontend/e2e/workflow-navigation.spec.js` preserves URL and browser-history authority |
 | Frontend Review Inbox | Yes | Server-ranked ordering, exact project/stage/snapshot deduplication, distinct-snapshot preservation, actionable versus informational/completed views, stage/status filters without refetch, canonical rendered Use Cases/Requirements/Test Cases destinations, cold and cached loading/error/retry states, invalid-filter normalization, empty and filtered-empty states, route and dynamic-action focus, full keyboard order, long-name containment and reflow at 390/639/640/899/900/1280/1920, and removal after a durable Use Cases decision refreshes the shared summary | `frontend/e2e/review-inbox.spec.js` uses bounded synthetic workspace and Use Cases review fixtures; `frontend/e2e/workflow-navigation.spec.js` preserves global navigation and route authority |
 | Frontend Runs and Reports indexes | Yes | Bounded workspace-summary projections, local search/status/environment/type/format filters without refetch or mutation, exact durable run status/count/timestamp rendering, non-color approved/draft/stale report status and evidence identity, canonical project Automation/Reports links, source-empty and filtered-empty states, cold loading/error/retry behavior, predictable route/filter/retry focus, and long-content containment from 320px through 1920px | `frontend/e2e/runs-reports-index.spec.js` uses deterministic workspace activity fixtures; `frontend/e2e/workflow-navigation.spec.js` preserves global destination, URL, and browser-history authority |
+| Home-first UX and accessibility release gate | Yes | Zero/one/many-project route truth, stale-state isolation, exact action routing, review durability, mixed/empty/inconsistent Automation previews, selected candidate IDs, Home/Overview/Use Cases/contextual task/Automation/Reports reflow at 320/390/640/760/900/1280/1440/1920, global skip link, route and history focus, compact disclosure restoration, persistent polite status, assertive errors, busy states, and WCAG A/AA Axe scans at 390/1440 | `npm run test:e2e:home-first` runs the exact protected suite. `frontend/e2e/accessibility-navigation.spec.js` and `frontend/e2e/support/accessibility.js` scan empty/populated Home, Overview, Use Cases, and Automation with no Axe exclusions and fail on serious/critical violations. Manual VoiceOver + Chrome steps and results live in `docs/home-first-accessibility-smoke.md`; this evidence is not WCAG certification. |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Integration observability | Yes | JIRA/Azure DevOps provider metrics, duration summaries, and safe structured logs | `backend/tests/test_integration_observability.py`, adapter tests, and `backend/tests/test_observability_metrics.py` |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |
@@ -153,6 +170,13 @@ Evidence: `.github/workflows/ci.yml`.
 - JIRA and Azure DevOps sync tests verify direct source metadata paths avoid
   unnecessary Firestore mapping reads where possible.
 - Frontend focused E2E tests mock API responses and use a local Vite server.
+- The Home-first accessibility helper disables animation only to obtain a
+  deterministic final visual state, applies supported WCAG A/AA rule tags, and
+  does not exclude selectors or rules. Empty and populated Home scans wait for
+  their distinct final states before analysis.
+- Playwright keeps a trace on first retry, a screenshot on failure, and video on
+  failure. CI uploads the report and result directories even when a retry later
+  passes, then expires the diagnostic artifact after 14 days.
 - Projects menu E2E coverage verifies project selection, refresh, inline
   creation, and the absence of the former QA Project workspace card.
 - Workflow shell collapse tests keep localStorage-backed layout preferences
@@ -291,6 +315,11 @@ Use the smallest gate that proves the change:
   focused execution-service and automation-endpoint tests, frontend build,
   `frontend/e2e/automation-preview-consistency.spec.js`, and
   `frontend/e2e/multi-environment-execution.spec.js`.
+- Home-first routes, task/review workflow, navigation, responsive behavior, or
+  accessibility change: frontend lint, format check, build, and
+  `CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first`. Repeat the
+  manual Home and Use Cases smoke in `docs/home-first-accessibility-smoke.md`
+  when semantics or focus behavior changes.
 - Report/export evidence or stale report decision change: export endpoint,
   orchestrator service, and focused report evidence E2E tests.
 - End-to-end workflow or release confidence change: run
@@ -310,6 +339,8 @@ the issue, PR, or handoff note.
 - `backend/tests/`
 - `frontend/e2e/`
 - `frontend/playwright.config.js`
+- `frontend/e2e/support/accessibility.js`
+- `docs/home-first-accessibility-smoke.md`
 - `backend/execution_runtime/package.json`
 - `backend/execution_runtime/playwright.config.ts`
 - `scripts/evaluate_requirements.py`

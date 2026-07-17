@@ -542,7 +542,7 @@ test.describe("Contextual next task", () => {
 		releaseGeneration();
 		await expect(dialog).toHaveCount(0);
 		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
-		await expect(page.getByRole("main", { name: "Workflow workspace" })).toBeFocused();
+		await expect(page.getByRole("main", { name: "Workflow workspace: Test Cases" })).toBeFocused();
 		await expect(newCaseRow).toBeVisible();
 		await expect(oldCaseRow).toHaveCount(0);
 		expect(requests.generation).toBe(1);

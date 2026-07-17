@@ -102,10 +102,6 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 	const effectiveFormat = format === "all" || formatOptions.some((option) => option.value === format) ? format : "all";
 
 	useEffect(() => {
-		headingRef.current?.focus();
-	}, []);
-
-	useEffect(() => {
 		if (effectiveStatus !== status) setStatus(effectiveStatus);
 		if (effectiveType !== type) setType(effectiveType);
 		if (effectiveFormat !== format) setFormat(effectiveFormat);
@@ -145,9 +141,11 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 
 	return (
 		<main
+			id="main-content"
 			className="workspace-page activity-index-page"
 			aria-labelledby="reports-page-title"
 			aria-busy={isLoading || isRefreshing || undefined}
+			tabIndex={-1}
 		>
 			<header className="workspace-page-header activity-index-page-header">
 				<div>

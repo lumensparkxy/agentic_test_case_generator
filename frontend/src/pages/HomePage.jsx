@@ -49,9 +49,11 @@ export default function HomePage({
 
 	return (
 		<main
+			id="main-content"
 			className="workspace-page workspace-home-page"
 			aria-labelledby="workspace-home-title"
 			aria-busy={isLoading || isRefreshing || undefined}
+			tabIndex={-1}
 		>
 			<header className="workspace-page-header">
 				<div>

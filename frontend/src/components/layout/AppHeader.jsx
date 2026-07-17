@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, FolderOpen, Plus, RefreshCw } from "lucide-react";
 
 import AuthProviderIcon from "../auth/AuthProviderIcon";
@@ -90,15 +90,26 @@ function ProjectMenu({
 }) {
 	const [isOpen, setIsOpen] = useState(false);
 	const menuRef = useRef(null);
+	const dialogRef = useRef(null);
+	const triggerRef = useRef(null);
 	const selectedProjectId = currentProject?.project_id || "";
 	const isDisabled = authActionDisabled || isLoadingProjects || isOpeningProject;
 	const triggerText = currentProject?.name || "Select project";
 	const triggerMeta = currentProject ? `revision ${currentProject.current_revision}` : "Projects";
+	const closeAndRestoreFocus = useCallback(() => {
+		setIsOpen(false);
+		window.requestAnimationFrame(() => triggerRef.current?.focus());
+	}, []);
 
 	useEffect(() => {
 		if (!isOpen) {
 			return undefined;
 		}
+		const focusFrame = window.requestAnimationFrame(() => {
+			const selectedProject = dialogRef.current?.querySelector('.command-project-option[aria-current="true"]');
+			const firstControl = dialogRef.current?.querySelector("button:not(:disabled), input:not(:disabled)");
+			(selectedProject || firstControl)?.focus();
+		});
 
 		const handlePointerDown = (event) => {
 			if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -107,17 +118,19 @@ function ProjectMenu({
 		};
 		const handleKeyDown = (event) => {
 			if (event.key === "Escape") {
-				setIsOpen(false);
+				event.preventDefault();
+				closeAndRestoreFocus();
 			}
 		};
 
 		document.addEventListener("mousedown", handlePointerDown);
 		document.addEventListener("keydown", handleKeyDown);
 		return () => {
+			window.cancelAnimationFrame(focusFrame);
 			document.removeEventListener("mousedown", handlePointerDown);
 			document.removeEventListener("keydown", handleKeyDown);
 		};
-	}, [isOpen]);
+	}, [closeAndRestoreFocus, isOpen]);
 
 	const handleOpenProject = async (projectId) => {
 		await onOpenProject(projectId);
@@ -136,6 +149,7 @@ function ProjectMenu({
 		<div className="command-project-control" ref={menuRef}>
 			<span className="command-project-label">Projects</span>
 			<button
+				ref={triggerRef}
 				type="button"
 				className="command-project-trigger"
 				onClick={() => setIsOpen((current) => !current)}
@@ -152,7 +166,18 @@ function ProjectMenu({
 			</button>
 
 			{isOpen && (
-				<div className="command-project-menu" role="dialog" aria-label="Projects">
+				<div
+					ref={dialogRef}
+					className="command-project-menu"
+					role="dialog"
+					aria-label="Projects"
+					onKeyDown={(event) => {
+						if (event.key !== "Escape") return;
+						event.preventDefault();
+						event.stopPropagation();
+						closeAndRestoreFocus();
+					}}
+				>
 					<div className="command-project-menu-header">
 						<div>
 							<strong>Projects</strong>

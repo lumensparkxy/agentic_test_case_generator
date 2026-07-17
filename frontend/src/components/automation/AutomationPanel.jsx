@@ -215,6 +215,7 @@ export default function AutomationPanel({
 	selectedExecutionCandidateIds,
 	setSelectedExecutionCandidateIds,
 	executionRunResult,
+	executionError,
 	isPreviewingExecution,
 	isRunningExecution,
 	authActionDisabled,
@@ -233,13 +234,14 @@ export default function AutomationPanel({
 	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
 
 	return (
-		<section className="panel">
+		<section className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
 			<h2 className="panel-title">Automation</h2>
 			<p className="panel-description">Review executable candidates and run approved browser cases through Playwright.</p>
 			<div className="panel-form two-cols">
 				<div className="form-group">
-					<label>Target environment</label>
+					<label htmlFor="automation-target-environment">Target environment</label>
 					<input
+						id="automation-target-environment"
 						value={executionTargetEnvironment}
 						onChange={(event) => setExecutionTargetEnvironment(event.target.value)}
 						placeholder="staging, dev, customer-a"
@@ -247,8 +249,9 @@ export default function AutomationPanel({
 					/>
 				</div>
 				<div className="form-group">
-					<label>Target base URL</label>
+					<label htmlFor="automation-target-base-url">Target base URL</label>
 					<input
+						id="automation-target-base-url"
 						value={executionTargetBaseUrl}
 						onChange={(event) => setExecutionTargetBaseUrl(event.target.value)}
 						placeholder="Use backend default"
@@ -264,6 +267,11 @@ export default function AutomationPanel({
 					</button>
 				</div>
 			</div>
+			{executionError ? (
+				<div className="workflow-result-notice warning" role="alert">
+					<p>{executionError}</p>
+				</div>
+			) : null}
 
 			{executionPreview ? (
 				<div className="generate-results-workspace">

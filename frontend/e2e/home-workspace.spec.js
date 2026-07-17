@@ -250,7 +250,9 @@ async function openCreateProjectForm(page) {
 
 test.describe("Authenticated Home workspace", () => {
 	for (const viewport of [
+		{ width: 320, height: 900 },
 		{ width: 390, height: 844 },
+		{ width: 640, height: 900 },
 		{ width: 760, height: 900 },
 	]) {
 		test(`keeps the zero-project heading and Create Project CTA above the fold at ${viewport.width}px`, async ({ page }) => {
@@ -282,7 +284,9 @@ test.describe("Authenticated Home workspace", () => {
 	}
 
 	for (const viewport of [
+		{ width: 320, height: 900 },
 		{ width: 390, height: 844 },
+		{ width: 640, height: 900 },
 		{ width: 760, height: 900 },
 		{ width: 900, height: 900 },
 		{ width: 1280, height: 900 },

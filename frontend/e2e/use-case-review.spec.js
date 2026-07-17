@@ -523,24 +523,24 @@ test.describe("Use Cases review workbench", () => {
 	});
 
 	test("reflows by available workbench width without cramped columns or mobile overflow", async ({ page }) => {
-		await page.setViewportSize({ width: 390, height: 844 });
+		await page.setViewportSize({ width: 320, height: 900 });
 		await openUseCaseReview(page);
-		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-		const mobileSearchBox = await reviewMain(page)
-			.getByRole("searchbox", { name: /^Search use cases$/i })
-			.boundingBox();
-		expect(mobileSearchBox.height).toBeGreaterThanOrEqual(40);
-
 		const collection = reviewMain(page).getByRole("region", { name: /^Use case scenarios$/i });
-		await page.setViewportSize({ width: 1440, height: 900 });
-		const [laptopCollection, laptopDecision] = await Promise.all([collection.boundingBox(), decisionPanel(page).boundingBox()]);
-		expect(laptopDecision.x).toBeGreaterThan(laptopCollection.x + laptopCollection.width - 4);
-		expect(Math.abs(laptopCollection.y - laptopDecision.y)).toBeLessThanOrEqual(4);
-
-		await page.setViewportSize({ width: 1920, height: 1080 });
-		const [wideCollection, wideDecision] = await Promise.all([collection.boundingBox(), decisionPanel(page).boundingBox()]);
-		expect(wideDecision.x).toBeGreaterThan(wideCollection.x + wideCollection.width - 4);
-		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+		for (const width of [320, 390, 640, 760, 900, 1280, 1440, 1920]) {
+			await page.setViewportSize({ width, height: width === 390 ? 844 : width === 1920 ? 1080 : 900 });
+			await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+			if (width <= 390) {
+				const searchBox = await reviewMain(page)
+					.getByRole("searchbox", { name: /^Search use cases$/i })
+					.boundingBox();
+				expect(searchBox.height).toBeGreaterThanOrEqual(40);
+			}
+			if (width >= 1440) {
+				const [collectionBox, decisionBox] = await Promise.all([collection.boundingBox(), decisionPanel(page).boundingBox()]);
+				expect(decisionBox.x).toBeGreaterThan(collectionBox.x + collectionBox.width - 4);
+				expect(Math.abs(collectionBox.y - decisionBox.y)).toBeLessThanOrEqual(4);
+			}
+		}
 	});
 
 	test("prevents double submission while a review decision is pending", async ({ page }) => {

@@ -270,7 +270,7 @@ test.describe("Multi-environment execution", () => {
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect(page.getByRole("region", { name: "Execution results table" })).toHaveAttribute("tabindex", "0");
-		await expect(page.getByText(/Execution failed: 0 passed, 1 failed/i)).toBeVisible();
+		await expect(page.locator("#main-content").getByText(/Execution failed: 0 passed, 1 failed/i)).toBeVisible();
 		const stagingRun = page.locator(".project-run-row", { hasText: "staging" });
 		await expect(stagingRun).toBeVisible();
 		await expect(stagingRun).toContainText("failed");
@@ -280,7 +280,7 @@ test.describe("Multi-environment execution", () => {
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
-		await expect(page.getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
+		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
 		const productionLikeRun = page.locator(".project-run-row", { hasText: "production-like" });
 		await expect(productionLikeRun).toBeVisible();
 		await expect(productionLikeRun).toContainText("passed");
