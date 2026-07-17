@@ -253,8 +253,9 @@ test.describe("Report evidence", () => {
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Report Evidence QA");
 
-		const cockpit = page.getByLabel("Orchestrator Cockpit");
-		await expect(cockpit.getByRole("button", { name: /^Regenerate Evidence Report$/ })).toBeVisible();
+		const task = page.getByLabel("Contextual task");
+		await expect(task.getByRole("heading", { name: /^Regenerate Evidence Report$/ })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Open workbench$/ })).toBeVisible();
 
 		const reportBlock = page.getByLabel("Project information rail").locator(".project-history-block", { hasText: "Latest Report" });
 		await expect(reportBlock).toBeVisible();

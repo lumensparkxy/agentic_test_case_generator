@@ -1,27 +1,53 @@
-import NextActionPanel from "./NextActionPanel";
+import ContextualTaskCard from "./ContextualTaskCard";
+import { selectContextualTask } from "./contextualTask";
 
-const normalizeList = (value) => (Array.isArray(value) ? value : []);
-
-export default function OrchestratorCockpitPanel({ currentProject, status, isLoading, error, authActionDisabled, actionBusy, onAction }) {
-	if (!currentProject) {
+export default function OrchestratorCockpitPanel({
+	currentProject,
+	status,
+	currentDestination,
+	isOverview = false,
+	hidden = false,
+	isLoading,
+	error,
+	authActionDisabled,
+	actionBusy,
+	actionDisabled,
+	focusFallbackRef,
+	onAction,
+}) {
+	if (!currentProject || hidden) {
 		return null;
 	}
 
-	const nextActions = normalizeList(status?.next_actions);
-	const primaryActions = nextActions.filter((action) => action.primary);
-	const secondaryActions = nextActions.filter((action) => action.secondary || !action.primary);
-	const busyMap = actionBusy || {};
+	const { primaryAction, secondaryActions } = selectContextualTask(status, {
+		destination: currentDestination,
+		overview: isOverview,
+	});
+
+	if (!primaryAction && !secondaryActions.length && !error) {
+		return null;
+	}
 
 	return (
-		<section className="orchestrator-cockpit" aria-label="Orchestrator Cockpit">
-			{error && <div className="orchestrator-error">{error}</div>}
-			<NextActionPanel
-				primaryActions={primaryActions}
-				secondaryActions={secondaryActions}
-				busyMap={busyMap}
-				disabled={authActionDisabled || isLoading}
-				onAction={onAction}
-			/>
+		<section className="contextual-task-region" aria-label="Contextual task">
+			{error ? (
+				<div className="orchestrator-error" role="alert">
+					{error}
+				</div>
+			) : null}
+			{primaryAction || secondaryActions.length ? (
+				<ContextualTaskCard
+					action={primaryAction}
+					secondaryActions={secondaryActions}
+					status={status}
+					busyMap={actionBusy || {}}
+					disabled={authActionDisabled || isLoading}
+					disabledMap={actionDisabled || {}}
+					navigationOnly={isOverview}
+					focusFallbackRef={focusFallbackRef}
+					onAction={onAction}
+				/>
+			) : null}
 		</section>
 	);
 }

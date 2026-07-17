@@ -20,6 +20,7 @@ export default function GeneratedTestCasesView({
 	onRefineTestCases,
 	isGenerating,
 	testCaseActionDisabled,
+	allowRefinement = true,
 }) {
 	return (
 		<>
@@ -175,7 +176,7 @@ export default function GeneratedTestCasesView({
 				)}
 			</div>
 
-			{testCases.length > 0 && (
+			{testCases.length > 0 && allowRefinement && (
 				<div className="feedback-section">
 					<h3>Human Feedback</h3>
 					<p className="feedback-description">Provide feedback on the generated test cases. The AI will refine them based on your input.</p>

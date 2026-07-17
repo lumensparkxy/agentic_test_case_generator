@@ -209,7 +209,7 @@ async function openInbox(page, options = {}) {
 async function expectNoProjectShell(page) {
 	await expect(page.getByRole("navigation", { name: /^Project navigation$/i })).toHaveCount(0);
 	await expect(page.getByLabel("Project information rail")).toHaveCount(0);
-	await expect(page.getByLabel("Orchestrator Cockpit")).toHaveCount(0);
+	await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 }
 
 test.describe("Global Review Inbox", () => {

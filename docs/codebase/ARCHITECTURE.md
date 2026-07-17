@@ -346,10 +346,22 @@ sections instead of competing project destinations, so the existing `Next` and
 `Back` behavior remains reachable while refresh and browser history restore the
 canonical workbench.
 
-`frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
-the center workspace as the action surface. It preserves
-`aria-label="Orchestrator Cockpit"` and existing action handlers while removing
-the repeated visible cockpit/run-details headers from the center workspace.
+`frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is a thin
+route-scoped adapter for the center workspace. Its
+`frontend/src/components/projects/contextualTask.js` selector filters the
+server-ranked `next_actions` through the shared semantic action-to-destination
+resolver and renders only a primary recommendation owned by the current
+workbench. Project Overview may show the first server-ranked primary action;
+unrelated workbenches and empty recommendations render no action surface.
+`frontend/src/components/projects/ContextualTaskCard.jsx` presents one primary
+CTA and one reason, with source-snapshot provenance, specialist diagnostics,
+and rare secondary actions inside Details. Full regeneration is secondary and
+requires an explicit confirmation. A local invocation lock prevents duplicate
+submissions, cancel performs no mutation, and the existing suite remains
+rendered until a successful generation response replaces it; failures keep the
+confirmation recoverable and the current suite intact. Routing remains in
+`frontend/src/app/workflowRoutes.js`, so contextual actions do not introduce a
+parallel numeric-tab mapping.
 Project selection, refresh, and creation live in the global workspace controls;
 opening and creating a project navigates to its stable overview URL, while
 clearing the selection returns to Home and removes project-derived state.

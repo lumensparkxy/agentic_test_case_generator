@@ -750,7 +750,11 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Test Cases,/i })
 			.click();
-		await page.getByRole("button", { name: /^Generate from 10 Approved$/ }).click();
+		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Generate First Test Suite$/i })).toBeVisible();
+		await page
+			.getByLabel("Contextual task")
+			.getByRole("button", { name: /^Start generation$/i })
+			.click();
 		await expect(page.locator(".generate-results-summary-pill", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByText(/Generated v1 baseline suite/i)).toBeVisible();
 
@@ -773,8 +777,11 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Test Cases,/i })
 			.click();
-		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toBeVisible();
-		await page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i }).click();
+		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
+		await page
+			.getByLabel("Contextual task")
+			.getByRole("button", { name: /^Start analysis$/i })
+			.click();
 		await expect(page.getByRole("heading", { name: /^Impact Analysis$/i })).toBeVisible();
 		await expect(page.getByText("REQ-003 modified")).toBeVisible();
 		await expect(page.getByText("Update TC-010")).toBeVisible();
@@ -792,16 +799,27 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect(page.getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
 
-		const cockpit = page.getByLabel("Orchestrator Cockpit");
 		await page
 			.getByLabel("Project information rail")
 			.getByRole("button", { name: /^Refresh status$/ })
 			.click();
-		await expect(cockpit.getByRole("button", { name: /^Review Evidence$/ })).toBeVisible();
-		await cockpit.getByRole("button", { name: /^Review Evidence$/ }).click();
+		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
+		await page
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Overview,/i })
+			.click();
+		let task = page.getByLabel("Contextual task");
+		await expect(task.getByRole("heading", { name: /^Create Evidence Report$/i })).toBeVisible();
+		await task.getByText(/^Details$/i).click();
+		await task.getByRole("button", { name: /^Review Evidence$/i }).click();
 		await expect(page.getByText(/Approved for export/i)).toBeVisible();
 
-		await cockpit.getByRole("button", { name: /^Create Evidence Report$/ }).click();
+		await page
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Overview,/i })
+			.click();
+		task = page.getByLabel("Contextual task");
+		await task.getByRole("button", { name: /^Open workbench$/i }).click();
 		await expect(page.getByRole("heading", { name: /^Export Test Cases$/ })).toBeVisible();
 		await page.getByRole("button", { name: /JSON/i }).click();
 		await expect(page.getByText(/Exported to JSON successfully/i)).toBeVisible();

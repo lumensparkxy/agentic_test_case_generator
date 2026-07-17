@@ -481,7 +481,7 @@ async function mockShell(page, projects) {
 	await page.route("**/projects", async (route) => apiJsonResponse(route, { projects: projects.map(projectSummary) }));
 }
 
-test.describe("Orchestrator cockpit", () => {
+test.describe("Contextual task and project evidence", () => {
 	test("first-time projects show generation without impact noise", async ({ page }) => {
 		const project = firstTimeProject();
 
@@ -497,12 +497,13 @@ test.describe("Orchestrator cockpit", () => {
 		await page.goto(projectPath);
 		await expect(page).toHaveURL(projectPath);
 
-		const cockpit = page.getByLabel("Orchestrator Cockpit");
+		const task = page.getByLabel("Contextual task");
 		const rail = page.getByLabel("Project information rail");
-		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(task).toBeVisible({ timeout: 30_000 });
 		await expect(rail.getByText(/Baseline suite/i)).toBeVisible();
-		await expect(cockpit.getByRole("button", { name: /^Generate Test Cases$/i })).toBeVisible();
-		await expect(cockpit.getByRole("button", { name: /Analyze Impact/i })).toHaveCount(0);
+		await expect(task.getByRole("heading", { name: /^Generate Test Cases$/i })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Start generation$/i })).toBeVisible();
+		await expect(task.getByText(/Analyze Impact/i)).toHaveCount(0);
 	});
 
 	test("reopened stale projects show impact as primary path with durable timeline", async ({ page }) => {
@@ -526,12 +527,15 @@ test.describe("Orchestrator cockpit", () => {
 		await page.goto(projectPath);
 		await expect(page).toHaveURL(projectPath);
 
-		const cockpit = page.getByLabel("Orchestrator Cockpit");
+		const task = page.getByLabel("Contextual task");
 		const rail = page.getByLabel("Project information rail");
-		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(task).toBeVisible({ timeout: 30_000 });
 		await expect(rail.getByText(/Impact QA · revision 5/i)).toBeVisible();
-		await expect(cockpit.getByRole("button", { name: /^Analyze Impact$/i })).toBeVisible();
-		await expect(cockpit.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
+		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toHaveCount(0);
+		await task.getByText(/^Details$/i).click();
+		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
 		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
 		await expect(rail.getByLabel("Stage progress")).toContainText("Impact Analysis");
 		await expect(rail.getByLabel("Blockers")).toContainText("1");
@@ -551,16 +555,17 @@ test.describe("Orchestrator cockpit", () => {
 
 		await page.reload();
 		await expect(page).toHaveURL(projectPath);
-		await expect(cockpit).toBeVisible({ timeout: 30_000 });
+		await expect(task).toBeVisible({ timeout: 30_000 });
 		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
 		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
 		await rail.getByRole("button", { name: /^Expand project information$/i }).click();
 		await expect(rail.getByRole("button", { name: /^Collapse project information$/i })).toBeVisible();
 		await expect(rail.getByText(/Impact QA · revision 5/)).toBeVisible();
-		await expect(cockpit.getByRole("button", { name: /^Analyze Impact$/i })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
 
-		await cockpit.getByRole("button", { name: /^Analyze Impact$/i }).click();
-		await expect(cockpit.getByRole("button", { name: /^Apply Accepted Updates$/i })).toBeVisible();
+		await task.getByRole("button", { name: /^Start analysis$/i }).click();
+		await expect(task.getByRole("heading", { name: /^Apply Accepted Updates$/i })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Apply accepted changes$/i })).toBeVisible();
 		await expect(rail.getByText("Impact agent identified 2 changed items.")).toBeVisible();
 		await expect(rail.getByText(/Impact Analysis snap-impact-v1/i)).toBeVisible();
 	});

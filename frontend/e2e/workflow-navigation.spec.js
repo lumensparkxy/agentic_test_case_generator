@@ -9,6 +9,7 @@ import {
 	parseWorkflowRoute,
 	resolveOrchestratorDestination,
 } from "../src/app/workflowRoutes.js";
+import { selectContextualTask } from "../src/components/projects/contextualTask.js";
 import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
 
 const STORAGE_CURRENT_PROJECT_ID = "tcg.current.project_id";
@@ -276,8 +277,11 @@ test.describe("Workflow route contract", () => {
 		}
 
 		const actionCases = [
+			[{ action: "approve", stage: "requirements" }, "requirements"],
 			[{ action: "approve", stage: "use_cases" }, "use-cases"],
 			[{ action: "refine", stage: "requirements" }, "requirements"],
+			[{ action: "refine", stage: "context" }, "context"],
+			[{ action: "approve", stage: "test_cases" }, "test-cases"],
 			[{ action: "generate", stage: "test_cases" }, "test-cases"],
 			[{ action: "full_regenerate", stage: "test_cases" }, "test-cases"],
 			[{ action: "analyze_impact", stage: "impact_analysis" }, "test-cases"],
@@ -291,6 +295,24 @@ test.describe("Workflow route contract", () => {
 			expect(resolveOrchestratorDestination(recommendation)).toBe(destination);
 		}
 		expect(resolveOrchestratorDestination({ action: "unknown", stage: "unknown" })).toBeNull();
+
+		const rankedActions = actionCases.slice(0, 3).map(([action], index) => ({
+			...action,
+			enabled: true,
+			primary: index === 0,
+			secondary: index > 0,
+		}));
+		expect(selectContextualTask({ next_actions: rankedActions }, { destination: "requirements" }).primaryAction).toEqual(rankedActions[0]);
+		expect(selectContextualTask({ next_actions: rankedActions }, { destination: "context" }).primaryAction).toBeNull();
+		expect(selectContextualTask({ next_actions: [] }, { destination: "requirements" }).primaryAction).toBeNull();
+
+		const misrankedRegeneration = [
+			{ action: "full_regenerate", stage: "test_cases", primary: true, secondary: false },
+			{ action: "analyze_impact", stage: "impact_analysis", primary: false, secondary: true },
+		];
+		const safeRegenerationTask = selectContextualTask({ next_actions: misrankedRegeneration }, { destination: "test-cases" });
+		expect(safeRegenerationTask.primaryAction).toEqual(misrankedRegeneration[1]);
+		expect(safeRegenerationTask.secondaryActions).toContain(misrankedRegeneration[0]);
 	});
 });
 
@@ -307,7 +329,7 @@ test.describe("Route-driven application shell", () => {
 		await expectSingleCurrent(page.getByRole("navigation", { name: "Global navigation" }), "Home");
 		await expect(page.getByRole("navigation", { name: "Project navigation" })).toHaveCount(0);
 		await expect(page.getByRole("heading", { name: /^Upload Requirements$/i })).toHaveCount(0);
-		await expect(page.getByLabel("Orchestrator Cockpit")).toHaveCount(0);
+		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expect.poll(() => api.projectListRequests.length).toBeGreaterThan(0);
 		await settleBrowserEffects(page);
@@ -329,7 +351,7 @@ test.describe("Route-driven application shell", () => {
 		for (const destination of destinations) {
 			await page.goto(destination.path);
 			await expect(page).toHaveURL(new RegExp(`${destination.path === "/" ? "/" : destination.path}/?$`));
-			await expect(page.getByRole("heading", { name: new RegExp(`^${destination.heading}$`, "i") })).toBeVisible({
+			await expect(page.getByRole("heading", { name: new RegExp(`^${destination.heading}$`, "i"), level: 1 })).toBeVisible({
 				timeout: 30_000,
 			});
 			const globalNavigation = page.getByRole("navigation", { name: "Global navigation" });

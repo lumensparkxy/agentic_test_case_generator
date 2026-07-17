@@ -167,11 +167,11 @@ test.describe("Use Cases review workbench", () => {
 	test("routes an Approve Use Cases recommendation to this workbench and never Upload", async ({ page }) => {
 		await installUseCaseReviewApi(page);
 		await seedAuthenticatedSession(page);
-		await page.goto(buildProjectPath(USE_CASE_PROJECT_ID, "requirements"));
+		await page.goto(buildProjectPath(USE_CASE_PROJECT_ID));
 
-		const cockpit = page.getByLabel("Orchestrator Cockpit");
-		await expect(cockpit.getByRole("button", { name: /^Approve Use Cases$/i })).toBeVisible({ timeout: 30_000 });
-		await cockpit.getByRole("button", { name: /^Approve Use Cases$/i }).click();
+		const task = page.getByLabel("Contextual task");
+		await expect(task.getByRole("heading", { name: /^Approve Use Cases$/i })).toBeVisible({ timeout: 30_000 });
+		await task.getByRole("button", { name: /^Open workbench$/i }).click();
 
 		await expect(page).toHaveURL(buildProjectPath(USE_CASE_PROJECT_ID, "use-cases"));
 		await expect(reviewMain(page)).toBeVisible();
@@ -202,11 +202,12 @@ test.describe("Use Cases review workbench", () => {
 		await expect(
 			page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", { name: /^Use Cases, Pending$/i })
 		).toBeVisible();
+		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Approve Use Cases$/i })).toBeVisible();
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Requirements,/i })
 			.click();
-		await expect(page.getByLabel("Orchestrator Cockpit").getByRole("button", { name: /^Approve Use Cases$/i })).toBeVisible();
+		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 	});
 
 	test("approves the exact snapshot and revision, then refreshes durable project, orchestrator, Home, and future Inbox state", async ({
