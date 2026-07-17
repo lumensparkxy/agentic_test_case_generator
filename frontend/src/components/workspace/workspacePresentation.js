@@ -12,7 +12,11 @@ const STATUS_LABELS = Object.freeze({
 	archived: "Archived",
 	approved: "Approved",
 	draft: "Draft",
+	queued: "Queued",
+	running: "Running",
 	passed: "Passed",
+	disabled: "Disabled",
+	cancelled: "Cancelled",
 	partial: "Completed with issues",
 });
 
@@ -66,9 +70,9 @@ export const formatWorkspaceDate = (value) => {
 
 export const getWorkspaceStatusTone = (status) => {
 	if (["failed", "attention_required"].includes(status)) return "danger";
-	if (["blocked", "stale", "draft", "partial"].includes(status)) return "warning";
+	if (["blocked", "stale", "draft", "partial", "cancelled", "disabled"].includes(status)) return "warning";
 	if (["completed", "approved", "passed"].includes(status)) return "success";
-	if (["ready", "active"].includes(status)) return "info";
+	if (["ready", "active", "running"].includes(status)) return "info";
 	return "neutral";
 };
 

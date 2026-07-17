@@ -265,7 +265,7 @@ different project selected while the request was in flight.
 Authenticated workspace overview flow:
 
 ```text
-Authenticated session -> bounded GET /workspace/summary -> Home or Projects projection -> canonical project destination
+Authenticated session -> bounded GET /workspace/summary -> global workspace projection -> canonical project destination
 ```
 
 `frontend/src/hooks/useWorkspaceSummary.js` and
@@ -287,6 +287,26 @@ create succeeds after navigation changes, the read models still refresh so Home
 reflects the durable project without forcing a redirect. Project-list reads use
 a per-session request sequence as well as the authenticated subject, so an
 older response cannot overwrite a post-create list or clear its stored project.
+
+Global activity indexes flow:
+
+```text
+Bounded recent_runs/recent_reports -> local filters -> exact server projection -> project Automation or Reports
+```
+
+`frontend/src/pages/RunsPage.jsx`, `frontend/src/pages/ReportsPage.jsx`, and
+their shared activity-index components project the workspace summary into the
+read-only `/runs` and `/reports` routes. The client requests at most 20 runs and
+20 reports and filters only those returned rows; it does not hydrate projects,
+refetch on filter changes, or recompute persisted values. Run rows preserve the
+server's durable status, environment, selected/executed and
+passed/failed/invalid counts, and timestamp. Report rows preserve the projected
+approved, draft, or stale status, type/format, report snapshot identity,
+optional evidence count, and timestamp; status always has an icon and text in
+addition to color. Rows link to the owning project's canonical Automation or Reports
+workbench. Both routes distinguish loading, retained-data refresh failure,
+retry, source-empty, and filtered-empty states and restore predictable heading,
+filter, or retry focus without introducing mutations.
 
 Review Inbox flow:
 
@@ -332,7 +352,7 @@ subject scoping prevents late responses from overwriting another workbench.
 Frontend shell flow:
 
 ```text
-Global navigation + workspace controls -> Home/Projects/Reviews/global recovery page
+Global navigation + workspace controls -> Home/Projects/Reviews/Runs/Reports/global recovery page
 Global navigation + project navigation -> active project workbench -> project information rail
 ```
 
