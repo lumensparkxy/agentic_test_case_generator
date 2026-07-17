@@ -22,7 +22,7 @@ should preserve when changing the application.
 | `backend/tests/` | Backend unit and integration-style tests using `unittest` and local fakes/patches | `backend/tests/test_*.py` |
 | `frontend/` | React/Vite web application, E2E specs, frontend Dockerfile, Nginx config | `frontend/src/main.jsx`, `frontend/package.json`, `frontend/Dockerfile` |
 | `frontend/src/app/` | Pure route contracts plus global/project shell, navigation, loading, placeholder, and recovery components | `frontend/src/app/workflowRoutes.js`, `frontend/src/app/GlobalAppShell.jsx`, `frontend/src/app/RoutePages.jsx` |
-| `frontend/src/pages/` | Route-level authenticated workspace experiences composed from feature components | `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/ProjectsPage.jsx`, `frontend/src/pages/UseCaseReviewPage.jsx` |
+| `frontend/src/pages/` | Route-level authenticated workspace experiences composed from feature components | `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/ProjectsPage.jsx`, `frontend/src/pages/ReviewsPage.jsx`, `frontend/src/pages/UseCaseReviewPage.jsx` |
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/api/` | Generated frontend API contract declarations and endpoint constants | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/api/generated/api-contracts.js` |
 | `frontend/src/services/` | Frontend API helper functions, bounded read-model clients, and review-decision transports | `frontend/src/services/apiClient.js`, `frontend/src/services/workspaceSummaryClient.js`, `frontend/src/services/useCaseReviewClient.js` |
@@ -43,8 +43,12 @@ should preserve when changing the application.
 - Frontend runtime entry: `frontend/src/main.jsx`.
 - Frontend orchestration component: `frontend/src/App.jsx`.
 - Authenticated workspace pages: `frontend/src/pages/HomePage.jsx`,
-  `frontend/src/pages/ProjectsPage.jsx`, and
+  `frontend/src/pages/ProjectsPage.jsx`,
+  `frontend/src/pages/ReviewsPage.jsx`, and
   `frontend/src/pages/UseCaseReviewPage.jsx`.
+- Global Review Inbox projection:
+  `frontend/src/components/reviews/ReviewInbox.jsx` and
+  `frontend/src/styles/review-inbox.css`.
 - Use Cases review state and decision transport:
   `frontend/src/hooks/useUseCaseReview.js` and
   `frontend/src/services/useCaseReviewClient.js`.

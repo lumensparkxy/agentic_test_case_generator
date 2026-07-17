@@ -42,6 +42,11 @@ export const GLOBAL_NAV_ITEMS = Object.freeze(
 			label: "Projects",
 			path: GLOBAL_PATH_BY_DESTINATION[GLOBAL_DESTINATIONS.PROJECTS],
 		},
+		{
+			id: GLOBAL_DESTINATIONS.REVIEWS,
+			label: "Reviews",
+			path: GLOBAL_PATH_BY_DESTINATION[GLOBAL_DESTINATIONS.REVIEWS],
+		},
 	].map(Object.freeze)
 );
 

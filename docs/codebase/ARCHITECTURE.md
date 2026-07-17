@@ -288,6 +288,27 @@ reflects the durable project without forcing a redirect. Project-list reads use
 a per-session request sequence as well as the authenticated subject, so an
 older response cannot overwrite a post-create list or clear its stored project.
 
+Review Inbox flow:
+
+```text
+Bounded workspace work_items -> preserve server rank + deduplicate project/stage/snapshot -> actionable or informational view -> local stage/status filter -> canonical project workbench
+```
+
+`frontend/src/pages/ReviewsPage.jsx` and
+`frontend/src/components/reviews/ReviewInbox.jsx` project the same
+subject-scoped workspace summary into `/reviews`; they never hydrate individual
+projects to build the queue. The first server-ranked item for each
+`(project_id, stage, current_snapshot_id)` identity wins, so defensive frontend
+deduplication cannot reorder authoritative results. Enabled pending work is the
+default view. Disabled, completed, and informational states remain available in
+a separate view, while stage and durable-status filters operate entirely in the
+browser. Every row resolves through the shared stage/action route contract.
+Returning from a project workbench refreshes the shared summary, so a durable
+Use Cases decision removes or updates its Inbox item without inventing client
+state. Manual refresh and retry reuse the same bounded read. A failed refresh
+labels retained rows as the last available queue, and a replacement summary
+normalizes filters whose stage or status no longer exists.
+
 Use Cases workbench flow:
 
 ```text
@@ -311,7 +332,7 @@ subject scoping prevents late responses from overwriting another workbench.
 Frontend shell flow:
 
 ```text
-Global navigation + workspace controls -> Home/Projects/global recovery page
+Global navigation + workspace controls -> Home/Projects/Reviews/global recovery page
 Global navigation + project navigation -> active project workbench -> project information rail
 ```
 

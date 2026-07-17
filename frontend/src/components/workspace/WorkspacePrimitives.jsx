@@ -69,7 +69,7 @@ export function ProjectProgress({ completed = 0, total = 0 }) {
 	);
 }
 
-export function ProjectOpenLink({ projectId, destination, onOpenProject, children, className = "workspace-open-link" }) {
+export function ProjectOpenLink({ projectId, destination, onOpenProject, children, className = "workspace-open-link", ariaLabel }) {
 	if (!projectId) {
 		return (
 			<span className={`${className} workspace-open-link-disabled`} aria-disabled="true">
@@ -82,6 +82,7 @@ export function ProjectOpenLink({ projectId, destination, onOpenProject, childre
 		<a
 			href={path}
 			className={className}
+			aria-label={ariaLabel}
 			onClick={(event) => {
 				if (!onOpenProject || !isPlainPrimaryClick(event)) return;
 				event.preventDefault();
