@@ -321,7 +321,7 @@ test.describe("Route-driven application shell", () => {
 		const destinations = [
 			{ path: "/", heading: "Home", active: "Home" },
 			{ path: "/projects", heading: "Projects", active: "Projects" },
-			{ path: "/reviews", heading: "Review Inbox", active: null },
+			{ path: "/reviews", heading: "Review Inbox", active: "Reviews" },
 			{ path: "/runs", heading: "Runs", active: null },
 			{ path: "/reports", heading: "Reports", active: null },
 		];

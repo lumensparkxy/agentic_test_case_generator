@@ -1,0 +1,453 @@
+.review-inbox-page {
+	max-width: 1260px;
+}
+
+.review-inbox-page-header {
+	align-items: flex-start;
+}
+
+.review-inbox-page-header h1:focus {
+	outline: none;
+}
+
+.review-inbox-header-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 0.55rem;
+}
+
+.review-inbox-header-actions time {
+	color: var(--text-muted);
+	font-size: 0.72rem;
+}
+
+.review-inbox-refresh-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.38rem;
+	min-height: 2.45rem;
+	white-space: nowrap;
+}
+
+.review-inbox {
+	display: grid;
+	gap: 1rem;
+	min-width: 0;
+}
+
+.review-inbox-controls {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 0.85rem;
+	min-width: 0;
+	min-inline-size: 0;
+	margin: 0;
+	padding: 0.75rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-xl);
+	background: var(--card-bg);
+	box-shadow: var(--shadow-sm);
+}
+
+.review-inbox-view-switch {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	padding: 0.25rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-lg);
+	background: var(--surface-container);
+}
+
+.review-inbox-view-switch button,
+.review-inbox-clear-filters {
+	min-height: 2.45rem;
+	padding: 0.48rem 0.72rem;
+	border: 1px solid transparent;
+	border-radius: var(--radius-md);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+	font-weight: 780;
+}
+
+.review-inbox-view-switch button.active {
+	border-color: #bfd4f5;
+	background: var(--card-bg);
+	box-shadow: var(--shadow-sm);
+	color: var(--primary-hover);
+}
+
+.review-inbox-view-switch button:focus-visible,
+.review-inbox-clear-filters:focus-visible {
+	outline: none;
+	box-shadow: var(--ring);
+}
+
+.review-inbox-selects {
+	display: flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 0.55rem;
+	min-width: 0;
+}
+
+.review-inbox-selects label {
+	display: grid;
+	gap: 0.25rem;
+	min-width: 150px;
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	font-weight: 780;
+}
+
+.review-inbox-selects select {
+	min-height: 2.45rem;
+	padding: 0.42rem 2rem 0.42rem 0.65rem;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-md);
+	background-color: var(--card-bg);
+	color: var(--text-main);
+	font: inherit;
+	font-size: 0.8rem;
+}
+
+.review-inbox-clear-filters {
+	border-color: var(--border-color);
+	background: var(--card-bg);
+	color: var(--primary-hover);
+}
+
+.review-inbox-results-heading {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0 0.15rem;
+}
+
+.review-inbox-results-heading > div {
+	display: grid;
+	gap: 0.18rem;
+}
+
+.review-inbox-results-heading h2,
+.review-inbox-empty h2,
+.review-inbox-empty p,
+.review-inbox-row h3,
+.review-inbox-row p {
+	margin: 0;
+}
+
+.review-inbox-results-heading h2 {
+	font-size: clamp(1.15rem, 2vw, 1.4rem);
+}
+
+.review-inbox-results-heading h2:focus {
+	outline: 2px solid var(--primary);
+	outline-offset: 0.2rem;
+}
+
+.review-inbox-results-heading > span {
+	color: var(--text-muted);
+	font-size: 0.75rem;
+	font-weight: 700;
+}
+
+.review-inbox-list {
+	display: grid;
+	gap: 0.7rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.review-inbox-row {
+	display: grid;
+	grid-template-columns: 86px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 1rem;
+	min-width: 0;
+	padding: 1rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-xl);
+	background: var(--card-bg);
+	box-shadow: var(--shadow-sm);
+}
+
+.review-inbox-kind {
+	display: grid;
+	justify-items: center;
+	gap: 0.35rem;
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	font-weight: 800;
+}
+
+.review-inbox-kind-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.35rem;
+	height: 2.35rem;
+	border-radius: var(--radius-md);
+	background: var(--primary-tonal);
+	color: var(--primary);
+}
+
+.review-inbox-row-copy {
+	display: grid;
+	gap: 0.4rem;
+	min-width: 0;
+}
+
+.review-inbox-row-heading {
+	display: flex;
+	align-items: start;
+	justify-content: space-between;
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.review-inbox-row-heading > div {
+	display: grid;
+	gap: 0.1rem;
+	min-width: 0;
+}
+
+.review-inbox-project {
+	overflow: hidden;
+	color: var(--primary-hover);
+	font-size: 0.72rem;
+	font-weight: 800;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.review-inbox-row h3 {
+	overflow: hidden;
+	font-size: 1rem;
+	line-height: 1.3;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.review-inbox-row p {
+	color: var(--text-muted);
+	font-size: 0.82rem;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.review-inbox-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	max-width: 100%;
+	min-height: 1.65rem;
+	padding: 0.18rem 0.48rem;
+	border: 1px solid var(--border-color);
+	border-radius: 999px;
+	background: var(--surface-container);
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	font-weight: 800;
+	line-height: 1.2;
+	overflow-wrap: anywhere;
+	text-align: center;
+}
+
+.review-inbox-status-info {
+	border-color: #bfdbfe;
+	background: var(--primary-tonal);
+	color: var(--primary-hover);
+}
+
+.review-inbox-status-success {
+	border-color: #a7f3d0;
+	background: var(--success-tonal);
+	color: #047857;
+}
+
+.review-inbox-status-warning {
+	border-color: #fde68a;
+	background: var(--warning-tonal);
+	color: #a15c00;
+}
+
+.review-inbox-status-danger {
+	border-color: #fecaca;
+	background: var(--danger-tonal);
+	color: #b91c1c;
+}
+
+.review-inbox-row-meta {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	color: var(--text-muted);
+	font-size: 0.7rem;
+}
+
+.review-inbox-row-meta > * + *::before {
+	margin-right: 0.4rem;
+	color: var(--border-strong);
+	content: "•";
+}
+
+.review-inbox-stage {
+	font-weight: 780;
+}
+
+.review-inbox-open-link {
+	min-height: 2.55rem;
+}
+
+.review-inbox-empty {
+	display: flex;
+	align-items: center;
+	gap: 0.85rem;
+	min-width: 0;
+	padding: 1.2rem;
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius-xl);
+	background: var(--surface-container);
+}
+
+.review-inbox-empty > span {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: var(--radius-md);
+	background: var(--primary-tonal);
+	color: var(--primary);
+}
+
+.review-inbox-empty > div {
+	display: grid;
+	flex: 1 1 auto;
+	gap: 0.2rem;
+	min-width: 0;
+}
+
+.review-inbox-empty h2 {
+	font-size: 1rem;
+}
+
+.review-inbox-empty p {
+	color: var(--text-muted);
+	font-size: 0.82rem;
+	line-height: 1.45;
+}
+
+@media (width < 900px) {
+	.review-inbox-controls {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.review-inbox-view-switch {
+		align-self: flex-start;
+	}
+
+	.review-inbox-selects {
+		justify-content: flex-start;
+	}
+
+	.review-inbox-row {
+		grid-template-columns: 62px minmax(0, 1fr);
+	}
+
+	.review-inbox-open-link {
+		grid-column: 2;
+		justify-self: start;
+	}
+}
+
+@media (width < 640px) {
+	.review-inbox-header-actions {
+		align-items: stretch;
+		justify-content: flex-start;
+		width: 100%;
+	}
+
+	.review-inbox-refresh-button {
+		width: 100%;
+	}
+
+	.review-inbox-view-switch,
+	.review-inbox-view-switch button,
+	.review-inbox-selects,
+	.review-inbox-selects label,
+	.review-inbox-selects select,
+	.review-inbox-clear-filters {
+		width: 100%;
+	}
+
+	.review-inbox-view-switch {
+		display: grid;
+	}
+
+	.review-inbox-results-heading,
+	.review-inbox-row-heading,
+	.review-inbox-empty {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.review-inbox-results-heading > span {
+		align-self: flex-start;
+	}
+
+	.review-inbox-row {
+		grid-template-columns: 1fr;
+		padding: 0.85rem;
+	}
+
+	.review-inbox-kind {
+		grid-template-columns: auto 1fr;
+		align-items: center;
+		justify-items: start;
+	}
+
+	.review-inbox-kind-icon {
+		width: 2rem;
+		height: 2rem;
+	}
+
+	.review-inbox-status {
+		align-self: flex-start;
+	}
+
+	.review-inbox-row h3 {
+		overflow: visible;
+		text-overflow: clip;
+		white-space: normal;
+	}
+
+	.review-inbox-project {
+		overflow: visible;
+		text-overflow: clip;
+		white-space: normal;
+	}
+
+	.review-inbox-open-link {
+		grid-column: 1;
+		width: 100%;
+	}
+
+	.review-inbox-empty > button {
+		width: 100%;
+	}
+}

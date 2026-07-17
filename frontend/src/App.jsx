@@ -41,6 +41,7 @@ import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
 import useWorkspaceSummary from "./hooks/useWorkspaceSummary";
 import HomePage from "./pages/HomePage";
 import ProjectsPage from "./pages/ProjectsPage";
+import ReviewsPage from "./pages/ReviewsPage";
 import UseCaseReviewPage from "./pages/UseCaseReviewPage";
 import {
 	GLOBAL_DESTINATIONS,
@@ -1303,7 +1304,7 @@ export default function App() {
 		const enteredWorkspaceFromProject =
 			previousRoute.kind === "project" &&
 			route.kind === "global" &&
-			[GLOBAL_DESTINATIONS.HOME, GLOBAL_DESTINATIONS.PROJECTS].includes(route.destination);
+			[GLOBAL_DESTINATIONS.HOME, GLOBAL_DESTINATIONS.PROJECTS, GLOBAL_DESTINATIONS.REVIEWS].includes(route.destination);
 		if (enteredWorkspaceFromProject && isAuthenticated && !isVerifyingSession) {
 			void refreshWorkspaceSummary();
 		}
@@ -3798,6 +3799,16 @@ export default function App() {
 							onCreateProject={createWorkspaceProject}
 							onOpenProject={openWorkspaceProject}
 							isCreatingProject={isCreatingProject}
+						/>
+					) : route.destination === "reviews" ? (
+						<ReviewsPage
+							summary={workspaceSummary}
+							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
+							isRefreshing={isWorkspaceSummaryRefreshing}
+							error={isAuthenticated ? workspaceSummaryError : ""}
+							onRetry={retryWorkspaceSummary}
+							onRefresh={refreshWorkspaceSummary}
+							onOpenProject={openWorkspaceProject}
 						/>
 					) : (
 						<GlobalDestinationPlaceholderPage destination={route.destination} navigate={navigate} />
