@@ -31,7 +31,14 @@ class FrontendApiContractGenerationTests(unittest.TestCase):
         self.assertIn("include_archived?: boolean;", declarations)
         self.assertIn("projects_limit?: number;", declarations)
         self.assertIn("work_items_limit?: number;", declarations)
+        self.assertIn("export type ProjectUseCasesReviewRequest = UseCaseReviewRequest;", declarations)
+        self.assertIn("export type ProjectUseCasesReviewResponse = UseCaseReviewResponse;", declarations)
+        self.assertIn('decision: "approve" | "request_changes";', declarations)
         self.assertIn('workspaceSummary: Object.freeze({ method: "GET", path: "/workspace/summary" })', runtime)
+        self.assertIn(
+            'projectUseCasesReview: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/reviews" })',
+            runtime,
+        )
 
     def test_collects_referenced_component_schemas_recursively(self) -> None:
         openapi = app.openapi()
@@ -42,6 +49,7 @@ class FrontendApiContractGenerationTests(unittest.TestCase):
                 "GenerateTestCasesResponse",
                 "BillingEntitlementResponse",
                 "WorkspaceSummaryResponse",
+                "UseCaseReviewResponse",
             },
         )
 
@@ -52,6 +60,8 @@ class FrontendApiContractGenerationTests(unittest.TestCase):
         self.assertIn("WorkspaceWorkItem", component_names)
         self.assertIn("WorkspaceRunSummary", component_names)
         self.assertIn("WorkspaceReportSummary", component_names)
+        self.assertIn("UseCaseReviewRecord", component_names)
+        self.assertIn("OrchestratorStatusResponse", component_names)
 
 
 if __name__ == "__main__":

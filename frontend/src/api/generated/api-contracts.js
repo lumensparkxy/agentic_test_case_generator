@@ -13,6 +13,7 @@ export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	projectImpactAnalysis: Object.freeze({ method: "POST", path: "/projects/{project_id}/impact-analysis" }),
 	projectImpactUpdateApply: Object.freeze({ method: "POST", path: "/projects/{project_id}/impact-update/apply" }),
 	projectUseCasesSave: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases" }),
+	projectUseCasesReview: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/reviews" }),
 	requirementsParse: Object.freeze({ method: "POST", path: "/requirements/parse" }),
 	requirementsEnrich: Object.freeze({ method: "POST", path: "/requirements/enrich" }),
 	testCasesGenerate: Object.freeze({ method: "POST", path: "/testcases/generate" }),

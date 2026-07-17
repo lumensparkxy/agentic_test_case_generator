@@ -20,6 +20,7 @@ export interface ApiContractOperations {
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
+	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
 	requirementsParse: ApiOperation<RequirementsParseRequest, RequirementsParseResponse, "POST", "/requirements/parse">;
 	requirementsEnrich: ApiOperation<RequirementsEnrichRequest, RequirementsEnrichResponse, "POST", "/requirements/enrich">;
 	testCasesGenerate: ApiOperation<TestCasesGenerateRequest, TestCasesGenerateResponse, "POST", "/testcases/generate">;
@@ -63,6 +64,8 @@ export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
 export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
 export type ProjectUseCasesSaveResponse = QaProjectDetail;
+export type ProjectUseCasesReviewRequest = UseCaseReviewRequest;
+export type ProjectUseCasesReviewResponse = UseCaseReviewResponse;
 export type RequirementsParseRequest = Body_parse_requirements_requirements_parse_post;
 export type RequirementsParseResponse = RequirementsWorkflowResponse;
 export type RequirementsEnrichRequest = EnrichInput;
@@ -871,6 +874,39 @@ export interface TestStep {
 	expected: string;
 	step: number;
 	test_data?: string | null;
+}
+
+export interface UseCaseReviewRecord {
+	base_project_revision: number;
+	comment?: string | null;
+	decided_at: string;
+	decision: "approve" | "request_changes";
+	idempotency_key: string;
+	project_id: string;
+	request_fingerprint: string;
+	request_id: string;
+	resulting_project_revision: number;
+	review_id: string;
+	reviewer_email?: string | null;
+	reviewer_name?: string | null;
+	reviewer_user_id: string;
+	snapshot_id: string;
+	stage?: "use_cases";
+	timeline_event_id: string;
+}
+
+export interface UseCaseReviewRequest {
+	base_project_revision: number;
+	comment?: string | null;
+	decision: "approve" | "request_changes";
+	snapshot_id: string;
+}
+
+export interface UseCaseReviewResponse {
+	orchestrator_status: OrchestratorStatusResponse;
+	project_revision: number;
+	review: UseCaseReviewRecord;
+	use_cases_state: QaProjectStageState;
 }
 
 export interface WorkflowDiagnostics {

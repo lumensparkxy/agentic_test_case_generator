@@ -33,3 +33,10 @@ def get_required_firestore_collection(
         raise RuntimeError(unavailable_message) from exc
 
     return client.collection(collection_name)
+
+
+def get_required_firestore_client(*, unavailable_message: str) -> Any:
+    try:
+        return get_firestore_client()
+    except Exception as exc:  # pragma: no cover - depends on Firebase runtime state
+        raise RuntimeError(unavailable_message) from exc

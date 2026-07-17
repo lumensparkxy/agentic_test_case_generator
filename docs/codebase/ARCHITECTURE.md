@@ -33,6 +33,10 @@ Primary constraints:
   `use_cases` specialist uses a bounded backend coordinator that shards
   requirements, merges requirement analysis and coverage plans centrally, and
   leaves project snapshot writes to the existing router/service flow.
+- Human Use Cases review is a separate durable decision from generated content.
+  `POST /projects/{id}/use-cases/reviews` records an approval or requested-change
+  decision against the exact current snapshot and project revision without
+  modifying the immutable snapshot body.
 - Large test-case generation can reuse approved requirement-analysis and
   coverage-plan artifacts. A bounded backend coordinator shards planned
   scenarios by requirement group, runs draft-only workers, remaps duplicate
@@ -160,6 +164,25 @@ snapshot through `backend/app/services/workflow_project_service.py`. Upstream
 changes mark downstream stages stale without deleting old versions, execution
 runs, or report/export records. Calls without `project_id` keep the earlier
 one-shot behavior.
+
+Use Cases review decision flow:
+
+```text
+Current Use Cases snapshot + base project revision + request ID -> /projects/{id}/use-cases/reviews -> atomic decision + stage update + timeline event -> recomputed orchestrator status
+```
+
+`backend/app/services/use_case_review_service.py` validates project ownership,
+the exact current snapshot, and the caller's base project revision before it
+writes. One Firestore transaction persists the reviewer identity, decision,
+comment, request/idempotency evidence, resulting project revision, stage
+approval metadata, and deterministic timeline event. `request_changes`
+requires a non-blank comment and keeps the stage unapproved so its reason is an
+authorized-reader-visible orchestrator blocker. `approve` changes only the
+approval state for the unchanged current content; it does not rewrite the
+snapshot or mark downstream stages stale. A stale snapshot or revision returns
+HTTP 409 with reload guidance and no partial writes. Repeating an identical
+request identity resolves to the same decision and event instead of duplicating
+audit history.
 
 Impact update flow:
 
@@ -314,6 +337,7 @@ test-case snapshots automatically.
 | Workflow audit lifecycle | `start_workflow_run()`, `complete_workflow_run()`, `record_usage_event()` | Links operations to request IDs, users, billing, reports, and trace metadata |
 | Persistence repository boundary | `audit_repository.py`, `billing_repository.py`, `usage_event_repository.py`, `firestore_repository.py` | Keeps routers and agents insulated from Firestore-specific client setup and gives PostgreSQL adapters a defined insertion point |
 | Durable project aggregate | `projects.py`, `workflow_project_service.py`, project contracts in `contracts/projects.py` | Gives users a resumable QA workspace while preserving legacy unscoped calls |
+| Auditable Use Cases review decision | `use_case_review_service.py`, review contracts in `contracts/use_case_reviews.py`, and the project router | Applies ownership and optimistic-concurrency guards, stores human decision provenance atomically, preserves snapshot immutability, and recomputes orchestrator state |
 | Orchestrator decision model | `orchestrator_service.py`, orchestrator contracts in `contracts/orchestrator.py` | Derives deterministic next actions and blockers from durable project snapshots |
 | Orchestrator run persistence | `orchestrator_run_service.py`, orchestrator run/checkpoint/event contracts in `contracts/orchestrator.py` | Keeps action progress, retries, blockers, produced snapshots, and execution links resumable across reloads and backend restarts |
 | Specialist agent task registry | `specialist_contracts.py`, `specialist_registry.py` | Gives orchestrator actions stable typed task envelopes/results and lets local or future ADK adapters plug in behind the same contract |
@@ -351,8 +375,9 @@ test-case snapshots automatically.
   `AUTH_TOKEN_MODE=firebase-or-backend-jwt`; production uses
   `AUTH_TOKEN_MODE=firebase-only`.
 - Firestore is the current durable service path for audit, versioning, billing,
-  integration mappings, QA project snapshots, orchestrator run/event/checkpoint
-  records, and reports. `docs/persistence-target-decision.md`
+  integration mappings, QA project snapshots, Use Cases review decisions,
+  orchestrator run/event/checkpoint records, and reports.
+  `docs/persistence-target-decision.md`
   accepts a staged approach: keep Firestore as the transitional runtime store
   and target PostgreSQL for compliance-grade audit, billing, reporting, and
   versioned artifacts. Repository boundaries now isolate audit writes,
