@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
-
-const STORAGE_CURRENT_PROJECT_ID = "tcg.current.project_id";
 
 function jsonResponse(route, payload, status = 200) {
 	return route.fulfill({
@@ -10,6 +9,13 @@ function jsonResponse(route, payload, status = 200) {
 		contentType: "application/json",
 		body: JSON.stringify(payload),
 	});
+}
+
+function apiJsonResponse(route, payload, status = 200) {
+	if (!["fetch", "xhr"].includes(route.request().resourceType())) {
+		return route.fallback();
+	}
+	return jsonResponse(route, payload, status);
 }
 
 function requirement(id, text) {
@@ -472,7 +478,7 @@ async function mockShell(page, projects) {
 		}
 		return jsonResponse(route, { connected: false, connection: null });
 	});
-	await page.route("**/projects", async (route) => jsonResponse(route, { projects: projects.map(projectSummary) }));
+	await page.route("**/projects", async (route) => apiJsonResponse(route, { projects: projects.map(projectSummary) }));
 }
 
 test.describe("Orchestrator cockpit", () => {
@@ -480,15 +486,16 @@ test.describe("Orchestrator cockpit", () => {
 		const project = firstTimeProject();
 
 		await mockShell(page, [project]);
-		await page.route("**/projects/project-first/orchestrator/status", async (route) => jsonResponse(route, statusForFirstProject()));
+		await page.route("**/projects/project-first/orchestrator/status", async (route) => apiJsonResponse(route, statusForFirstProject()));
 		await page.route("**/projects/project-first/orchestrator/runs", async (route) =>
-			jsonResponse(route, { runs: [], events: [], checkpoints: [] })
+			apiJsonResponse(route, { runs: [], events: [], checkpoints: [] })
 		);
-		await page.route("**/projects/project-first", async (route) => jsonResponse(route, project));
+		await page.route("**/projects/project-first", async (route) => apiJsonResponse(route, project));
 
 		await seedAuthenticatedSession(page);
-		await page.addInitScript((storageKey) => window.localStorage.setItem(storageKey, "project-first"), STORAGE_CURRENT_PROJECT_ID);
-		await page.goto("/");
+		const projectPath = buildProjectPath("project-first", "test-cases");
+		await page.goto(projectPath);
+		await expect(page).toHaveURL(projectPath);
 
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
 		const rail = page.getByLabel("Project information rail");
@@ -504,19 +511,20 @@ test.describe("Orchestrator cockpit", () => {
 		let currentRuns = runsForStaleImpact();
 
 		await mockShell(page, [currentProject]);
-		await page.route("**/projects/project-1/orchestrator/status", async (route) => jsonResponse(route, currentStatus));
-		await page.route("**/projects/project-1/orchestrator/runs", async (route) => jsonResponse(route, currentRuns));
+		await page.route("**/projects/project-1/orchestrator/status", async (route) => apiJsonResponse(route, currentStatus));
+		await page.route("**/projects/project-1/orchestrator/runs", async (route) => apiJsonResponse(route, currentRuns));
 		await page.route("**/projects/project-1/impact-analysis", async (route) => {
 			currentProject = staleImpactProject({ withAnalysis: true });
 			currentStatus = statusForStaleImpact({ withAnalysis: true });
 			currentRuns = runsForStaleImpact({ withAnalysis: true });
-			return jsonResponse(route, currentProject);
+			return apiJsonResponse(route, currentProject);
 		});
-		await page.route("**/projects/project-1", async (route) => jsonResponse(route, currentProject));
+		await page.route("**/projects/project-1", async (route) => apiJsonResponse(route, currentProject));
 
 		await seedAuthenticatedSession(page);
-		await page.addInitScript((storageKey) => window.localStorage.setItem(storageKey, "project-1"), STORAGE_CURRENT_PROJECT_ID);
-		await page.goto("/");
+		const projectPath = buildProjectPath("project-1", "test-cases");
+		await page.goto(projectPath);
+		await expect(page).toHaveURL(projectPath);
 
 		const cockpit = page.getByLabel("Orchestrator Cockpit");
 		const rail = page.getByLabel("Project information rail");
@@ -542,6 +550,7 @@ test.describe("Orchestrator cockpit", () => {
 		await expect(rail.getByLabel("Stage progress")).toHaveCount(0);
 
 		await page.reload();
+		await expect(page).toHaveURL(projectPath);
 		await expect(cockpit).toBeVisible({ timeout: 30_000 });
 		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
 		await expect(rail.getByLabel("Status overview")).toContainText("Stale");

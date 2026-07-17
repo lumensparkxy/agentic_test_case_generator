@@ -1,4 +1,14 @@
-import { BookOpen, Bot, CloudUpload, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, WandSparkles } from "lucide-react";
+import {
+	BookOpen,
+	Bot,
+	ClipboardCheck,
+	CloudUpload,
+	Download,
+	LayoutGrid,
+	PanelLeftClose,
+	PanelLeftOpen,
+	WandSparkles,
+} from "lucide-react";
 
 const STATE_LABELS = {
 	active: "Active",
@@ -14,6 +24,7 @@ const WORKFLOW_ICONS = {
 	3: WandSparkles,
 	4: Bot,
 	5: Download,
+	6: ClipboardCheck,
 };
 
 export default function WorkflowNavigationDrawer({
@@ -29,7 +40,7 @@ export default function WorkflowNavigationDrawer({
 	const ToggleIcon = isCollapsed ? PanelLeftOpen : PanelLeftClose;
 
 	return (
-		<nav className={`workflow-navigation-drawer ${isCollapsed ? "collapsed" : ""}`} aria-label="Workflow navigation">
+		<nav className={`workflow-navigation-drawer ${isCollapsed ? "collapsed" : ""}`} aria-label="Project navigation">
 			<div className="workflow-navigation-header">
 				<div>
 					<span>Workflow</span>
@@ -51,15 +62,8 @@ export default function WorkflowNavigationDrawer({
 					const state = statusByTabId[tab.id] || "pending";
 					const stateLabel = isActive ? STATE_LABELS.active : STATE_LABELS[state] || STATE_LABELS.pending;
 					const WorkflowIcon = WORKFLOW_ICONS[tab.id] || LayoutGrid;
-					return (
-						<button
-							type="button"
-							key={tab.id}
-							className={`workflow-navigation-item ${state} ${isActive ? "active" : ""}`}
-							onClick={() => onTabChange(tab.id)}
-							aria-current={isActive ? "page" : undefined}
-							aria-label={`${tab.label}, ${stateLabel}`}
-						>
+					const itemContent = (
+						<>
 							<span className="workflow-navigation-marker" aria-hidden="true">
 								<WorkflowIcon size={18} strokeWidth={2.15} />
 							</span>
@@ -68,6 +72,41 @@ export default function WorkflowNavigationDrawer({
 								<span>{tab.title}</span>
 							</span>
 							<span className="workflow-navigation-state">{stateLabel}</span>
+						</>
+					);
+					const itemClassName = `workflow-navigation-item ${state} ${isActive ? "active" : ""}`;
+
+					if (tab.href) {
+						return (
+							<a
+								key={tab.id}
+								href={tab.href}
+								className={itemClassName}
+								onClick={(event) => {
+									if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+										return;
+									}
+									event.preventDefault();
+									onTabChange(tab.id);
+								}}
+								aria-current={isActive ? "page" : undefined}
+								aria-label={`${tab.label}, ${stateLabel}`}
+							>
+								{itemContent}
+							</a>
+						);
+					}
+
+					return (
+						<button
+							type="button"
+							key={tab.id}
+							className={itemClassName}
+							onClick={() => onTabChange(tab.id)}
+							aria-current={isActive ? "page" : undefined}
+							aria-label={`${tab.label}, ${stateLabel}`}
+						>
+							{itemContent}
 						</button>
 					);
 				})}

@@ -95,7 +95,7 @@ Status markers below reflect the GitHub issue state as of 2026-06-22.
 - Epic [#188](https://github.com/lumensparkxy/agentic_test_case_generator/issues/188) - Build a Home-first production workspace
   - Done: [#189](https://github.com/lumensparkxy/agentic_test_case_generator/issues/189) - Add aggregated workspace summary API
   - Done: [#190](https://github.com/lumensparkxy/agentic_test_case_generator/issues/190) - Add auditable Use Cases review decisions
-  - Ready: [#194](https://github.com/lumensparkxy/agentic_test_case_generator/issues/194) - Establish global and project route shells
+  - Done: [#194](https://github.com/lumensparkxy/agentic_test_case_generator/issues/194) - Establish global and project route shells
   - Blocked: [#195](https://github.com/lumensparkxy/agentic_test_case_generator/issues/195) - Build authenticated Home and Projects experiences
   - Blocked: [#196](https://github.com/lumensparkxy/agentic_test_case_generator/issues/196) - Build the Use Cases review workbench
   - Blocked: [#197](https://github.com/lumensparkxy/agentic_test_case_generator/issues/197) - Build a global Review Inbox
