@@ -93,6 +93,26 @@ Routers should continue to call service functions rather than storage adapters
 directly. The repository boundary belongs under `backend/app/services/` so
 routers, agents, and frontend contracts can remain stable while storage changes.
 
+### Workspace summary Firestore indexes
+
+`GET /workspace/summary` deliberately uses hard-limited queries and does not
+fall back to a collection scan. Deployments must create the following composite
+indexes before enabling the Home-first workspace:
+
+| Scope | Fields in query order |
+| --- | --- |
+| `qa_projects` collection, active-only | `owner_user_id ASC`, `status ASC`, `updated_at DESC`, `project_id ASC` |
+| `qa_projects` collection, including archived | `owner_user_id ASC`, `updated_at DESC`, `project_id ASC` |
+| `execution_runs` collection group | `actor_user_id ASC`, `project_id ASC`, `created_at DESC`, `run_record_id ASC` |
+
+The project query is bounded by `projects_limit` (maximum 50). For each returned
+owned project, at most the seven current stage snapshots are read by document
+identity and execution history is queried with the validated `runs_limit`
+(maximum 50). This makes the read cost bounded by request limits and prevents
+cross-user project or execution records from entering the response. Missing
+indexes surface as a safe HTTP 503 so operators see a configuration failure
+instead of receiving a partial or misleading workspace.
+
 ## Required Guarantees
 
 | Domain | Required guarantee | Decision impact |

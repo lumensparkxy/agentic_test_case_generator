@@ -27,6 +27,7 @@ class SelectedOperation(NamedTuple):
 
 
 SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
+    SelectedOperation("workspaceSummary", "get", "/workspace/summary", "WorkspaceSummaryGetRequest", "WorkspaceSummaryGetResponse"),
     SelectedOperation("projectsCreate", "post", "/projects", "ProjectsCreateRequest", "ProjectsCreateResponse"),
     SelectedOperation("projectsList", "get", "/projects", "ProjectsListRequest", "ProjectsListResponse"),
     SelectedOperation("projectGet", "get", "/projects/{project_id}", "ProjectGetRequest", "ProjectGetResponse"),
@@ -112,10 +113,24 @@ def schema_from_content(content: dict[str, Any] | None, preferred_media_types: I
 
 
 def request_schema(operation: dict[str, Any]) -> dict[str, Any] | None:
-    return schema_from_content(
+    body_schema = schema_from_content(
         operation.get("requestBody", {}).get("content"),
         ("application/json", "multipart/form-data"),
     )
+    query_parameters = [parameter for parameter in operation.get("parameters") or [] if parameter.get("in") == "query"]
+    if not query_parameters:
+        return body_schema
+
+    query_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {str(parameter["name"]): dict(parameter.get("schema") or {}) for parameter in query_parameters if parameter.get("name")},
+    }
+    required_parameters = [str(parameter["name"]) for parameter in query_parameters if parameter.get("name") and parameter.get("required")]
+    if required_parameters:
+        query_schema["required"] = required_parameters
+    if body_schema is None:
+        return query_schema
+    return {"allOf": [body_schema, query_schema]}
 
 
 def response_schema(operation: dict[str, Any]) -> dict[str, Any] | None:

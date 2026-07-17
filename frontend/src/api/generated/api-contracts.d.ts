@@ -9,6 +9,7 @@ export interface ApiOperation<Request, Response, Method extends string, Path ext
 }
 
 export interface ApiContractOperations {
+	workspaceSummary: ApiOperation<WorkspaceSummaryGetRequest, WorkspaceSummaryGetResponse, "GET", "/workspace/summary">;
 	projectsCreate: ApiOperation<ProjectsCreateRequest, ProjectsCreateResponse, "POST", "/projects">;
 	projectsList: ApiOperation<ProjectsListRequest, ProjectsListResponse, "GET", "/projects">;
 	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
@@ -32,9 +33,19 @@ export interface ApiContractOperations {
 	billingEntitlementsMe: ApiOperation<BillingEntitlementsMeRequest, BillingEntitlementsMeResponse, "GET", "/entitlements/me">;
 }
 
+export type WorkspaceSummaryGetRequest = {
+	include_archived?: boolean;
+	projects_limit?: number;
+	reports_limit?: number;
+	runs_limit?: number;
+	work_items_limit?: number;
+};
+export type WorkspaceSummaryGetResponse = WorkspaceSummaryResponse;
 export type ProjectsCreateRequest = QaProjectCreateInput;
 export type ProjectsCreateResponse = QaProjectDetail;
-export type ProjectsListRequest = undefined;
+export type ProjectsListRequest = {
+	include_archived?: boolean;
+};
 export type ProjectsListResponse = QaProjectListResponse;
 export type ProjectGetRequest = undefined;
 export type ProjectGetResponse = QaProjectDetail;
@@ -913,4 +924,82 @@ export interface WorkflowSettings {
 	retry_attempts?: number | null;
 	stall_iteration_limit?: number | null;
 	timeout_seconds?: number | null;
+}
+
+export interface WorkspaceProjectSummary {
+	completed_stage_count: number;
+	current_snapshot_id?: string | null;
+	current_stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+	current_status: "not_started" | "ready" | "blocked" | "completed" | "stale" | "failed" | "attention_required";
+	name: string;
+	project_id: string;
+	project_revision: number;
+	project_status: "active" | "archived";
+	reason?: string | null;
+	total_stage_count: number;
+	updated_at: string;
+}
+
+export interface WorkspaceReportSummary {
+	approved?: boolean;
+	count?: number | null;
+	execution_run_ids?: Array<string>;
+	format?: string | null;
+	operation: string;
+	project_id: string;
+	project_name: string;
+	project_revision: number;
+	report_id: string;
+	report_type: string;
+	source_snapshot_id?: string | null;
+	stage?: "reports";
+	stale?: boolean;
+	status: "approved" | "draft" | "stale";
+	updated_at: string;
+}
+
+export interface WorkspaceRunSummary {
+	executed_count: number;
+	failed_count: number;
+	invalid_count: number;
+	passed_count: number;
+	project_id: string;
+	project_name: string;
+	project_revision: number;
+	run_id: string;
+	run_record_id: string;
+	selected_count: number;
+	skipped_count: number;
+	snapshot_id?: string | null;
+	source_snapshot_id?: string | null;
+	stage?: "execution";
+	status: string;
+	target_environment: string;
+	updated_at: string;
+}
+
+export interface WorkspaceSummaryResponse {
+	continue_working?: WorkspaceWorkItem | null;
+	generated_at: string;
+	projects?: Array<WorkspaceProjectSummary>;
+	recent_reports?: Array<WorkspaceReportSummary>;
+	recent_runs?: Array<WorkspaceRunSummary>;
+	work_items?: Array<WorkspaceWorkItem>;
+}
+
+export interface WorkspaceWorkItem {
+	action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
+	count?: number | null;
+	current_snapshot_id?: string | null;
+	enabled?: boolean;
+	kind: "review" | "action" | "information";
+	primary?: boolean;
+	project_id: string;
+	project_name: string;
+	project_revision: number;
+	reason: string;
+	stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
+	status: "not_started" | "ready" | "blocked" | "completed" | "stale" | "failed" | "attention_required";
+	updated_at: string;
+	work_item_id: string;
 }
