@@ -732,6 +732,11 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByLabel("Project information rail").getByText(/Lifecycle QA · revision 0/)).toBeVisible();
 		await expect(page.getByRole("heading", { name: /^QA Project$/i })).toHaveCount(0);
 		await expect(page.getByText(/^No project selected$/i)).toHaveCount(0);
+		await page
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Requirements,/i })
+			.click();
+		await expect(page).toHaveURL(`/projects/${PROJECT_ID}/requirements`);
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /^Parse Requirements$/ }).click();
@@ -742,8 +747,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 		}
 
 		await page
-			.getByRole("navigation", { name: "Workflow navigation" })
-			.getByRole("button", { name: /^Generate,/i })
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Test Cases,/i })
 			.click();
 		await page.getByRole("button", { name: /^Generate from 10 Approved$/ }).click();
 		await expect(page.locator(".generate-results-summary-pill", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
@@ -756,8 +761,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 		).toContainText("Present");
 
 		await page
-			.getByRole("navigation", { name: "Workflow navigation" })
-			.getByRole("button", { name: /^Upload,/i })
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Requirements,/i })
 			.click();
 		await page
 			.getByPlaceholder(/Enter your feedback here/i)
@@ -765,8 +770,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await page.getByRole("button", { name: /Implement Changes/i }).click();
 
 		await page
-			.getByRole("navigation", { name: "Workflow navigation" })
-			.getByRole("button", { name: /^Generate,/i })
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Test Cases,/i })
 			.click();
 		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toBeVisible();
 		await page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i }).click();
@@ -777,8 +782,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByText(/Impact update applied: 8 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
 
 		await page
-			.getByRole("navigation", { name: "Workflow navigation" })
-			.getByRole("button", { name: /^Automation,/i })
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Automation,/i })
 			.click();
 		await page.getByPlaceholder("staging, dev, customer-a").fill("staging");
 		await page.getByPlaceholder("Use backend default").fill("https://staging.example.test/app");

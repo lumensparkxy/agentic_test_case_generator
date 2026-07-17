@@ -376,6 +376,8 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         latest_review = self.project["stage_state"]["use_cases"]["metadata"]["latest_human_review"]
         self.assertEqual(latest_review["review_id"], response.review.review_id)
         self.assertEqual(latest_review["decision"], "approve")
+        self.assertEqual(latest_review["reviewer_name"], self.actor.name)
+        self.assertEqual(latest_review["reviewer_email"], self.actor.email)
         self.assertEqual(latest_review["resulting_project_revision"], PROJECT_REVISION + 1)
         self.assertEqual(self.store[snapshot_path], snapshot_before, "reviewing must not mutate the immutable snapshot")
         self.assertEqual(

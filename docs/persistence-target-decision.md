@@ -120,6 +120,11 @@ instead of receiving a partial or misleading workspace.
 snapshot as immutable evidence. A Firestore transaction reads the owned project,
 deterministic review identity, and exact current snapshot before writing the
 review record, updated project stage/revision, and deterministic timeline event.
+Automated quality approval remains snapshot payload evidence and cannot satisfy
+the human stage gate; only a matching current-snapshot human approval does.
+Durable stage metadata retains the authorized reviewer's user ID, display name,
+and email so the UI can present a human-readable actor while keeping the raw ID
+in secondary provenance.
 The transaction function is retry-safe: the stable request identity resolves
 to the existing equivalent decision, while a changed payload, stale snapshot,
 or stale base revision returns HTTP 409 without a partial write. Approval-only

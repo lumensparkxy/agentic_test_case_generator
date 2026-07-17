@@ -133,7 +133,9 @@ def _append_project_generation_snapshots(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             source_event_id=source_event_id,
-            approved=response.approved,
+            # Automated quality approval stays in payload.review. Advancing the
+            # durable Use Cases stage requires an explicit human review record.
+            approved=False,
             title="Use cases updated",
             metadata={
                 "requirement_analysis_count": len(response.requirement_analysis),

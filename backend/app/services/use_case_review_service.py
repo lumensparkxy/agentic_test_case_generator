@@ -171,6 +171,8 @@ def _apply_review_transaction(
         "decision": decision,
         "comment": comment,
         "reviewer_user_id": actor.sub,
+        "reviewer_name": actor.name,
+        "reviewer_email": actor.email,
         "reviewed_at": decided_at.isoformat(),
         "resulting_project_revision": resulting_revision,
     }
