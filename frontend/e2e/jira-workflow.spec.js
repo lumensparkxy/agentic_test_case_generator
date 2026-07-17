@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { buildTestUser, seedAuthenticatedSession } from "./support/auth.js";
+import { installWorkspaceApi, projectDetailFixture, workspaceProjectFixture, workspaceSummaryFixture } from "./support/workspace.js";
+
+const PROJECT_ID = "jira-workflow-project";
 
 function jsonResponse(route, payload, status = 200) {
 	return route.fulfill({
@@ -257,10 +261,21 @@ async function mockJiraWorkflow(page, user = buildTestUser()) {
 test.describe("JIRA requirements workflow", () => {
 	test("authenticated user can connect, import, refine, preview, and sync JIRA requirements", async ({ page }) => {
 		const user = buildTestUser();
+		const workspaceProject = workspaceProjectFixture({
+			project_id: PROJECT_ID,
+			name: "JIRA Requirements Workspace",
+			project_revision: 1,
+			current_stage: "requirements",
+			current_status: "ready",
+		});
+		await installWorkspaceApi(page, {
+			summary: workspaceSummaryFixture({ projects: [workspaceProject] }),
+			projectDetails: { [PROJECT_ID]: projectDetailFixture(workspaceProject) },
+		});
 		const jiraState = await mockJiraWorkflow(page, user);
 		await seedAuthenticatedSession(page, user);
 
-		await page.goto("/");
+		await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 
 		await page.getByTestId("settings-open-button").click();
@@ -287,6 +302,7 @@ test.describe("JIRA requirements workflow", () => {
 		await expect(projectSelect).toHaveValue("PROJ");
 
 		await page.getByRole("button", { name: /^Search$/ }).click();
+		await expect(page.getByRole("region", { name: "Jira issue search results table" })).toHaveAttribute("tabindex", "0");
 		const jiraIssueOption = page.getByRole("radio", { name: /select jira issue proj-101/i });
 		await expect(jiraIssueOption).toBeVisible();
 		await jiraIssueOption.check();

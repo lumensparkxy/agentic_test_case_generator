@@ -200,7 +200,7 @@ test.describe("Use Cases review workbench", () => {
 			.getByRole("link", { name: /^Overview,/i })
 			.click();
 		await expect(
-			page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", { name: /^Use Cases, Pending$/i })
+			page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", { name: /^Use Cases, Needs attention$/i })
 		).toBeVisible();
 		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Approve Use Cases$/i })).toBeVisible();
 		await page
@@ -534,8 +534,8 @@ test.describe("Use Cases review workbench", () => {
 		const collection = reviewMain(page).getByRole("region", { name: /^Use case scenarios$/i });
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const [laptopCollection, laptopDecision] = await Promise.all([collection.boundingBox(), decisionPanel(page).boundingBox()]);
-		expect(Math.abs(laptopCollection.x - laptopDecision.x)).toBeLessThanOrEqual(4);
-		expect(laptopDecision.y).toBeGreaterThan(laptopCollection.y + laptopCollection.height - 4);
+		expect(laptopDecision.x).toBeGreaterThan(laptopCollection.x + laptopCollection.width - 4);
+		expect(Math.abs(laptopCollection.y - laptopDecision.y)).toBeLessThanOrEqual(4);
 
 		await page.setViewportSize({ width: 1920, height: 1080 });
 		const [wideCollection, wideDecision] = await Promise.all([collection.boundingBox(), decisionPanel(page).boundingBox()]);

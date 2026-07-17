@@ -1,5 +1,6 @@
 .global-app-shell {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
 	gap: 1rem;
 }
 
@@ -19,6 +20,10 @@
 	min-width: min(100%, 280px);
 }
 
+.global-app-shell-controls[hidden] {
+	display: none;
+}
+
 .global-navigation {
 	min-width: 0;
 }
@@ -32,6 +37,11 @@
 	list-style: none;
 }
 
+.global-navigation-list li {
+	min-width: 0;
+	max-width: 100%;
+}
+
 .global-navigation-link {
 	display: inline-flex;
 	align-items: center;
@@ -43,6 +53,19 @@
 	font-size: 0.88rem;
 	font-weight: 760;
 	text-decoration: none;
+	max-width: min(100%, 12rem);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.global-app-shell-controls-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	min-height: 2.5rem;
+	white-space: nowrap;
 }
 
 .global-navigation-link:hover {
@@ -86,6 +109,7 @@
 	color: var(--text-main);
 	font-size: clamp(1.75rem, 4vw, 2.6rem);
 	line-height: 1.08;
+	overflow-wrap: anywhere;
 }
 
 .route-page-header p,
@@ -276,5 +300,28 @@
 
 	.route-project-card .route-secondary-link {
 		width: 100%;
+	}
+}
+
+@media (max-width: 900px) {
+	.global-app-shell-header.compact {
+		align-items: center;
+		flex-wrap: wrap;
+	}
+
+	.global-app-shell-header.compact .global-app-shell-controls {
+		flex-basis: 100%;
+		width: 100%;
+	}
+}
+
+@media (max-width: 768px) {
+	.global-app-shell-header.compact .global-app-shell-controls {
+		align-self: stretch;
+		box-sizing: border-box;
+		flex-basis: auto;
+		width: auto;
+		min-width: 0;
+		max-width: 100%;
 	}
 }

@@ -9,12 +9,16 @@ import {
 	PanelLeftOpen,
 	WandSparkles,
 } from "lucide-react";
+import { useRef } from "react";
+
+import StatusBadge from "../workflow/StatusBadge";
 
 const STATE_LABELS = {
-	active: "Active",
+	active: "Current",
 	complete: "Complete",
 	blocked: "Blocked",
 	pending: "Pending",
+	attention: "Needs attention",
 };
 
 const WORKFLOW_ICONS = {
@@ -33,30 +37,63 @@ export default function WorkflowNavigationDrawer({
 	onTabChange,
 	statusByTabId = {},
 	isCollapsed = false,
+	isCompact = false,
 	onToggleCollapsed,
+	onRequestClose,
 	controls = null,
 }) {
-	const toggleLabel = isCollapsed ? "Expand workflow navigation" : "Collapse workflow navigation";
+	const toggleLabel = isCompact
+		? isCollapsed
+			? "Open project navigation"
+			: "Close project navigation"
+		: isCollapsed
+			? "Expand project navigation"
+			: "Collapse project navigation";
 	const ToggleIcon = isCollapsed ? PanelLeftOpen : PanelLeftClose;
+	const toggleRef = useRef(null);
+	const navigationItemsId = "project-workflow-navigation-items";
+	const itemsHidden = isCompact && isCollapsed;
+
+	const closeCompactNavigation = ({ restoreFocus = false } = {}) => {
+		if (!isCompact || isCollapsed) return;
+		onRequestClose?.();
+		if (restoreFocus) window.requestAnimationFrame(() => toggleRef.current?.focus());
+	};
+
+	const handleSelection = (tabId) => {
+		onTabChange(tabId);
+		closeCompactNavigation();
+	};
 
 	return (
-		<nav className={`workflow-navigation-drawer ${isCollapsed ? "collapsed" : ""}`} aria-label="Project navigation">
+		<nav
+			className={`workflow-navigation-drawer ${isCollapsed ? "collapsed" : ""} ${isCompact ? "compact" : ""}`.trim()}
+			aria-label="Project navigation"
+			onKeyDown={(event) => {
+				if (event.key !== "Escape" || !isCompact || isCollapsed) return;
+				event.preventDefault();
+				closeCompactNavigation({ restoreFocus: true });
+			}}
+		>
 			<div className="workflow-navigation-header">
 				<div>
 					<span>Workflow</span>
 					<strong>{tabs.find((tab) => tab.id === activeTab)?.label || "Workspace"}</strong>
 				</div>
 				<button
+					ref={toggleRef}
 					type="button"
 					className="workflow-navigation-toggle"
 					onClick={onToggleCollapsed}
 					aria-label={toggleLabel}
 					title={toggleLabel}
+					aria-expanded={isCompact ? !isCollapsed : undefined}
+					aria-controls={isCompact ? navigationItemsId : undefined}
 				>
 					<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
 				</button>
 			</div>
-			<div className="workflow-navigation-list">
+			<div id={navigationItemsId} className="workflow-navigation-list" hidden={itemsHidden}>
 				{tabs.map((tab) => {
 					const isActive = activeTab === tab.id;
 					const state = statusByTabId[tab.id] || "pending";
@@ -71,7 +108,13 @@ export default function WorkflowNavigationDrawer({
 								<strong>{tab.label}</strong>
 								<span>{tab.title}</span>
 							</span>
-							<span className="workflow-navigation-state">{stateLabel}</span>
+							<StatusBadge
+								className="workflow-navigation-state"
+								status={isActive ? "active" : state}
+								label={stateLabel}
+								compact={isCollapsed}
+								accessibleLabel={isCollapsed ? `${tab.label} status: ${stateLabel}` : ""}
+							/>
 						</>
 					);
 					const itemClassName = `workflow-navigation-item ${state} ${isActive ? "active" : ""}`;
@@ -87,7 +130,7 @@ export default function WorkflowNavigationDrawer({
 										return;
 									}
 									event.preventDefault();
-									onTabChange(tab.id);
+									handleSelection(tab.id);
 								}}
 								aria-current={isActive ? "page" : undefined}
 								aria-label={`${tab.label}, ${stateLabel}`}
@@ -102,7 +145,7 @@ export default function WorkflowNavigationDrawer({
 							type="button"
 							key={tab.id}
 							className={itemClassName}
-							onClick={() => onTabChange(tab.id)}
+							onClick={() => handleSelection(tab.id)}
 							aria-current={isActive ? "page" : undefined}
 							aria-label={`${tab.label}, ${stateLabel}`}
 						>
@@ -111,7 +154,11 @@ export default function WorkflowNavigationDrawer({
 					);
 				})}
 			</div>
-			{controls && <div className="workflow-navigation-controls">{controls}</div>}
+			{controls && (
+				<div className="workflow-navigation-controls" hidden={itemsHidden}>
+					{controls}
+				</div>
+			)}
 		</nav>
 	);
 }

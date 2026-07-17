@@ -1,5 +1,6 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 
+import StatusBadge from "../workflow/StatusBadge";
 import ProjectSummaryPanel from "./ProjectSummaryPanel";
 
 const STAGE_ORDER = [
@@ -45,9 +46,9 @@ const formatDateTime = (value) => {
 
 const normalizeList = (value) => (Array.isArray(value) ? value : []);
 
-function StatusPill({ status }) {
-	const normalized = `${status || "not_started"}`.replaceAll("_", "-");
-	return <span className={`orchestrator-status-pill ${normalized}`}>{STATUS_LABELS[status] || formatLabel(status)}</span>;
+function ProjectStatusBadge({ status, compact = false }) {
+	const label = STATUS_LABELS[status] || formatLabel(status);
+	return <StatusBadge status={status} label={label} compact={compact} accessibleLabel={compact ? `Project status: ${label}` : ""} />;
 }
 
 function StageRail({ stages }) {
@@ -110,7 +111,7 @@ function RunTimeline({ runsPayload }) {
 								: "No orchestrated runs yet."}
 					</p>
 				</div>
-				{latestRun && <StatusPill status={latestRun.status} />}
+				{latestRun && <ProjectStatusBadge status={latestRun.status} />}
 			</div>
 			{events.length ? (
 				<div className="orchestrator-event-list">
@@ -242,7 +243,7 @@ function LastRunSummary({ currentProject, runsPayload }) {
 		<section className="project-rail-section" aria-label="Last run">
 			<div className="project-rail-section-header">
 				<h3>Last run</h3>
-				<StatusPill status={latestRun.status} />
+				<ProjectStatusBadge status={latestRun.status} />
 			</div>
 			<div className="project-last-run">
 				<strong>{latestRun.target_environment || formatLabel(latestRun.current_action) || "Execution"}</strong>
@@ -301,7 +302,7 @@ export default function ProjectInformationRail({
 					</p>
 				</div>
 				<div className="project-rail-header-actions">
-					<StatusPill status={statusValue} />
+					<ProjectStatusBadge status={statusValue} compact={isCollapsed} />
 					<button type="button" className="project-rail-toggle" onClick={onToggleCollapsed} aria-label={toggleLabel} title={toggleLabel}>
 						<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
 					</button>

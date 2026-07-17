@@ -29,7 +29,7 @@ export default function GeneratedTestCasesView({
 				{testCases.length === 0 ? (
 					<span className="helper-text">No test cases generated yet.</span>
 				) : templateFormat === "table" ? (
-					<div className="test-cases-table-wrapper">
+					<div className="test-cases-table-wrapper" role="region" aria-label="Generated test cases table" tabIndex={0}>
 						<table className="test-cases-table">
 							<thead>
 								<tr>

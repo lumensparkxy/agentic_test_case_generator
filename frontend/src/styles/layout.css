@@ -27,6 +27,7 @@
 
 .app-navigation-controls {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
 	gap: 0.75rem;
 	min-width: 0;
 	padding-top: 0.85rem;
@@ -913,6 +914,11 @@
 	gap: 0.4rem;
 }
 
+.workflow-navigation-list[hidden],
+.workflow-navigation-controls[hidden] {
+	display: none;
+}
+
 .workflow-navigation-controls {
 	display: grid;
 	gap: 0.75rem;
@@ -986,14 +992,19 @@
 	color: rgb(255 255 255 / 0.84);
 }
 
-.workflow-navigation-item.complete .workflow-navigation-marker {
+.workflow-navigation-item:not(.active).complete .workflow-navigation-marker {
 	background: var(--success-tonal);
 	color: var(--success);
 }
 
-.workflow-navigation-item.blocked .workflow-navigation-marker {
+.workflow-navigation-item:not(.active).blocked .workflow-navigation-marker {
 	background: var(--warning-tonal);
 	color: #b45309;
+}
+
+.workflow-navigation-item:not(.active).attention .workflow-navigation-marker {
+	background: var(--warning-tonal);
+	color: #92400e;
 }
 
 .workflow-navigation-copy {
@@ -1004,7 +1015,9 @@
 
 .workflow-navigation-copy strong,
 .workflow-navigation-copy span {
-	overflow-wrap: anywhere;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .workflow-navigation-copy strong {
@@ -1020,26 +1033,99 @@
 
 .workflow-navigation-state {
 	justify-self: end;
-	padding: 0.2rem 0.5rem;
-	border-radius: 9999px;
-	background: rgb(15 28 51 / 0.05);
-	color: var(--text-muted);
-	font-size: 0.68rem;
-	font-weight: 700;
-	letter-spacing: 0.02em;
 }
 
-.workflow-navigation-item.active .workflow-navigation-state {
+.workflow-navigation-item.active .workflow-navigation-state,
+.workflow-navigation-item.active .status-badge-token {
 	background: rgb(255 255 255 / 0.92);
 	color: var(--primary-hover);
 }
 
-.workflow-navigation-item.complete .workflow-navigation-state {
+.workflow-navigation-item:not(.active).complete .workflow-navigation-state {
 	color: var(--success);
 }
 
-.workflow-navigation-item.blocked .workflow-navigation-state {
+.workflow-navigation-item:not(.active).blocked .workflow-navigation-state {
 	color: #b45309;
+}
+
+.status-badge-token {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	min-width: 0;
+	max-width: 100%;
+	padding: 0.22rem 0.5rem;
+	border: 1px solid transparent;
+	border-radius: 9999px;
+	background: rgb(15 28 51 / 0.05);
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	font-weight: 760;
+	letter-spacing: 0.01em;
+	line-height: 1.2;
+}
+
+.status-badge-token svg {
+	flex: 0 0 auto;
+}
+
+.status-badge-token-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.status-badge-token--active {
+	border-color: #93bff8;
+	background: var(--primary-tonal);
+	color: var(--primary-hover);
+}
+
+.status-badge-token--complete {
+	border-color: #bbf7d0;
+	background: var(--success-tonal);
+	color: #166534;
+}
+
+.status-badge-token--blocked,
+.status-badge-token--attention {
+	border-color: #fed7aa;
+	background: var(--warning-tonal);
+	color: #92400e;
+}
+
+.status-badge-token--failed {
+	border-color: #fecaca;
+	background: var(--danger-tonal);
+	color: #b91c1c;
+}
+
+.status-badge-token--running {
+	border-color: #bfdbfe;
+	background: #eff6ff;
+	color: #1d4ed8;
+}
+
+.status-badge-token.compact {
+	justify-content: center;
+	width: 2rem;
+	height: 2rem;
+	box-sizing: border-box;
+	padding: 0;
+}
+
+.status-badge-token.compact .status-badge-token-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
 }
 
 .workflow-navigation-drawer.collapsed {
@@ -1052,12 +1138,11 @@
 	text-align: center;
 }
 
-.workflow-navigation-drawer.collapsed .workflow-navigation-header > div,
-.workflow-navigation-drawer.collapsed .workflow-navigation-header strong,
-.workflow-navigation-drawer.collapsed .workflow-navigation-controls,
-.workflow-navigation-drawer.collapsed .workflow-navigation-copy,
-.workflow-navigation-drawer.collapsed .workflow-navigation-copy span,
-.workflow-navigation-drawer.collapsed .workflow-navigation-state {
+.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-header > div,
+.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-header strong,
+.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-controls,
+.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-copy,
+.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-copy span {
 	display: none;
 }
 
@@ -1067,6 +1152,10 @@
 	gap: 0.35rem;
 	padding: 0.62rem 0.45rem;
 	text-align: center;
+}
+
+.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-state {
+	justify-self: center;
 }
 
 /* Tab Navigation */

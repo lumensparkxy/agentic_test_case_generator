@@ -10,7 +10,7 @@ const renderCandidateTable = (candidates) => {
 	}
 
 	return (
-		<div className="selection-table-wrapper">
+		<div className="selection-table-wrapper" role="region" aria-label="Executable automation candidates table" tabIndex={0}>
 			<table className="selection-table">
 				<thead>
 					<tr>
@@ -129,7 +129,7 @@ const renderRunResults = (runResult) => {
 				</p>
 			)}
 			{runResult.results?.length > 0 && (
-				<div className="selection-table-wrapper">
+				<div className="selection-table-wrapper" role="region" aria-label="Execution results table" tabIndex={0}>
 					<table className="selection-table">
 						<thead>
 							<tr>

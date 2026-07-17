@@ -54,8 +54,9 @@ Final result: passed.
   run, project evidence, and latest report evidence.
 - Independent collapse/expand controls for the left workflow navigation and
   right project information rail, including persisted browser preferences.
-- Responsive shell placement at 1280px (project rail below the center), 1440px
-  and 1920px (three columns), plus the existing 390px mobile stack.
+- Responsive shell placement at 1280px and 1440px (project rail below the
+  center), the 1728px three-column transition, 1920px wide-desktop columns, and
+  the existing 390px mobile stack.
 - Core upload, context, generation, automation, export, orchestrator lifecycle,
   and report-evidence workflows.
 - Laptop, desktop, wide-desktop, and mobile CSS smoke surfaces for center width,

@@ -275,6 +275,10 @@ test.describe("Export approval gate", () => {
 		await expect(page).toHaveURL(testCasesPath);
 		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
+		await page.getByRole("tab", { name: /test cases/i }).click();
+		await expect(page.getByRole("region", { name: "Generated test cases table" })).toHaveAttribute("tabindex", "0");
+		await page.getByRole("tab", { name: /traceability/i }).click();
+		await expect(page.getByRole("region", { name: "Requirement traceability table" })).toHaveAttribute("tabindex", "0");
 		await page.getByRole("tab", { name: /diagnostics/i }).click();
 		await expect(page.getByText("Route Direct Parallel")).toBeVisible();
 		await expect(page.getByText("Generation sources")).toBeVisible();

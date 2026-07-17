@@ -1,230 +1,20 @@
 import { expect, test } from "@playwright/test";
 
-import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
+import { expectNoDocumentOverflow } from "./support/layout";
 
 const viewportCases = [
+	{ label: "mobile", size: { width: 390, height: 844 } },
+	{ label: "tablet", size: { width: 760, height: 900 } },
 	{ label: "laptop", size: { width: 1280, height: 900 } },
 	{ label: "desktop", size: { width: 1440, height: 900 } },
 	{ label: "wide desktop", size: { width: 1920, height: 1080 } },
-	{ label: "mobile", size: { width: 390, height: 844 } },
 ];
 
-const CENTER_WIDTH_TARGETS = {
-	laptop: 900,
-	desktop: 760,
-	"wide desktop": 1100,
-};
-
-function jsonResponse(route, payload, status = 200, headers = {}) {
-	return route.fulfill({
-		status,
-		contentType: "application/json",
-		headers,
-		body: JSON.stringify(payload),
-	});
-}
-
-async function installMockRoutes(page) {
-	await page.route("**/auth/me", async (route) =>
-		jsonResponse(route, {
-			sub: "playwright-css-smoke-user",
-			email: "playwright-css-smoke@example.com",
-			name: "Playwright CSS Smoke",
-			picture: null,
-		})
-	);
-	await page.route("**/reports/usage/me", async (route) => jsonResponse(route, { groups: [] }));
-	await page.route("**/entitlements/me", async (route) =>
-		jsonResponse(route, {
-			account: { plan_tier: "premium", support_contact_email: "support@example.test" },
-			requirements: { remaining: 500, exhausted: false },
-			test_cases: { remaining: 500, exhausted: false },
-			wallet: { balance_units: 5000, balance_token_display: "5000" },
-			shadow_mode: false,
-		})
-	);
-	await page.route("**/integrations/jira/connection", async (route) =>
-		jsonResponse(route, {
-			connected: false,
-			connection: null,
-		})
-	);
-	await page.route("**/integrations/azure-devops/connection", async (route) =>
-		jsonResponse(route, {
-			connected: false,
-			connection: null,
-		})
-	);
-	await page.route("**/requirements/parse", async (route) =>
-		jsonResponse(route, {
-			source_name: "sample-requirements.md",
-			raw_text: "The system shall allow users to export reports. The system shall block invalid exports.",
-			requirements: [
-				{
-					id: "REQ-001",
-					text: "The system shall allow users to export reports.",
-					review_status: "Approved",
-					source_system: "file",
-					source_path: "sample-requirements.md",
-				},
-				{
-					id: "REQ-002",
-					text: "The system shall block invalid exports.",
-					review_status: "Approved",
-					source_system: "file",
-					source_path: "sample-requirements.md",
-				},
-			],
-			review: { approved: true, score: 95, threshold: 85, summary: "Requirements approved.", blocking_issues: [] },
-			coverage_metrics: {
-				total_requirements: 2,
-				unique_requirements: 2,
-				duplicate_requirements: 0,
-				shall_format_count: 2,
-				requirements_per_document: 2,
-			},
-			workflow_diagnostics: { status: "completed", warnings: [], parser_failures: [] },
-			iteration_history: [],
-		})
-	);
-	await page.route("**/requirements/enrich", async (route) => {
-		const payload = route.request().postDataJSON();
-		return jsonResponse(route, {
-			...payload,
-			grounded_context: {
-				artifact_sources: [
-					{ id: "ART-APP-01", source_type: "app", label: "Export workspace", url: "https://example.test/app", status: "Analyzed" },
-				],
-				ui_elements: [
-					{
-						id: "ART-APP-01-UI-01",
-						source_id: "ART-APP-01",
-						label: "Export",
-						element_type: "Button",
-						description: "Starts report export.",
-					},
-				],
-				workflows: [{ id: "ART-APP-01-WF-01", source_id: "ART-APP-01", name: "Export report", steps: ["Open report", "Choose export"] }],
-			},
-		});
-	});
-	await page.route("**/testcases/generate", async (route) =>
-		jsonResponse(route, {
-			test_cases: [
-				{
-					id: "TC-001",
-					title: "Export report",
-					description: "Verify an approved report can be exported.",
-					priority: "High",
-					type: "Functional",
-					status: "Ready",
-					preconditions: "A report exists.",
-					steps: [
-						{ step: 1, action: "Open the report", expected: "Report details are visible", test_data: null },
-						{ step: 2, action: "Export the report", expected: "The export downloads", test_data: null },
-					],
-					expected_result: "The report export completes.",
-					test_data: null,
-					estimated_time: "5 mins",
-					automation_status: "To Be Automated",
-					component: "Reports",
-					tags: ["REQ-001"],
-				},
-			],
-			review: { approved: true, score: 96, threshold: 90, summary: "Generated cases approved.", blocking_issues: [] },
-			approved: true,
-			coverage_plan: [],
-			requirement_analysis: [],
-			coverage_metrics: { total_test_cases: 1, requirements_total: 2, requirements_covered: 1 },
-			workflow_diagnostics: { status: "completed", warnings: [], parser_failures: [] },
-			iteration_history: [],
-		})
-	);
-}
-
-async function expectNoHorizontalOverflow(page, screenName) {
-	const metrics = await page.evaluate(() => {
-		const viewportWidth = window.innerWidth;
-		const hasHorizontalScrollAncestor = (element) => {
-			let current = element.parentElement;
-			while (current && current !== document.body) {
-				const style = window.getComputedStyle(current);
-				if (current.scrollWidth > current.clientWidth + 1 && ["auto", "scroll"].includes(style.overflowX)) {
-					return true;
-				}
-				current = current.parentElement;
-			}
-			return false;
-		};
-		const overflowing = Array.from(document.querySelectorAll("body *"))
-			.filter((element) => {
-				const rect = element.getBoundingClientRect();
-				if (rect.width === 0 || rect.height === 0) {
-					return false;
-				}
-				if (hasHorizontalScrollAncestor(element)) {
-					return false;
-				}
-				return rect.left < -1 || rect.right > viewportWidth + 1;
-			})
-			.slice(0, 5)
-			.map((element) => ({
-				tag: element.tagName.toLowerCase(),
-				className: String(element.className || ""),
-				text: element.textContent?.trim().replace(/\s+/g, " ").slice(0, 80),
-			}));
-
-		return {
-			viewportWidth,
-			scrollWidth: document.documentElement.scrollWidth,
-			overflowing,
-		};
-	});
-
-	const message = `${screenName} overflow metrics: ${JSON.stringify(metrics)}`;
-	expect(metrics.scrollWidth, message).toBeLessThanOrEqual(metrics.viewportWidth + 2);
-	expect(metrics.overflowing, message).toEqual([]);
-}
-
-async function readShellMetrics(page) {
-	return page.evaluate(() => {
-		const readRect = (selector) => {
-			const rect = document.querySelector(selector)?.getBoundingClientRect();
-			if (!rect) return null;
-			return {
-				left: Math.round(rect.left),
-				right: Math.round(rect.right),
-				top: Math.round(rect.top),
-				bottom: Math.round(rect.bottom),
-				width: Math.round(rect.width),
-			};
-		};
-
-		return {
-			viewportWidth: window.innerWidth,
-			left: readRect(".workflow-navigation-drawer"),
-			main: readRect(".workflow-main"),
-			right: readRect(".project-information-rail"),
-		};
-	});
-}
-
-function expectExpandedShellLayout(metrics, label) {
-	const targetWidth = CENTER_WIDTH_TARGETS[label];
-	if (targetWidth) {
-		expect(metrics.main.width, `${label} center workspace width`).toBeGreaterThanOrEqual(targetWidth);
-	}
-
-	if (label === "laptop") {
-		expect(metrics.right.top, "laptop project rail should render below the center workspace").toBeGreaterThanOrEqual(metrics.main.bottom);
-		expect(
-			Math.abs(metrics.right.left - metrics.main.left),
-			"laptop project rail should align with the center workspace"
-		).toBeLessThanOrEqual(2);
-	}
-
-	if (["desktop", "wide desktop"].includes(label)) {
-		expect(Math.abs(metrics.right.top - metrics.main.top), `${label} should use the three-column shell`).toBeLessThanOrEqual(2);
+async function openWorkspaceControlsWhenCompact(page) {
+	const toggle = page.getByRole("button", { name: /^Open workspace controls$/i });
+	if (await toggle.isVisible().catch(() => false)) {
+		await toggle.click();
+		await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toBeVisible();
 	}
 }
 
@@ -233,91 +23,19 @@ test.describe("Frontend CSS smoke", () => {
 		test(`renders auth and settings surfaces without overflow on ${label}`, async ({ page }) => {
 			await page.setViewportSize(size);
 			await page.goto("/");
+			await openWorkspaceControlsWhenCompact(page);
 			await expect(page.getByRole("button", { name: /^sign in$/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} auth`);
+			await expectNoDocumentOverflow(page, `${label} auth`);
 
 			await page.getByRole("button", { name: /settings/i }).click();
 			await expect(page.getByRole("dialog", { name: /settings/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} workflow settings`);
+			await expectNoDocumentOverflow(page, `${label} workflow settings`);
 
 			await page.getByRole("button", { name: /integrations/i }).click();
 			await expect(page.getByRole("heading", { name: /integration connections/i })).toBeVisible();
 			await expect(page.getByRole("heading", { name: /jira cloud/i })).toBeVisible();
 			await expect(page.getByRole("heading", { name: /azure devops/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} integration settings`);
-		});
-
-		test(`renders primary workflow screens without overflow on ${label}`, async ({ page }) => {
-			await page.setViewportSize(size);
-			await installMockRoutes(page);
-			await seedAuthenticatedSession(page);
-
-			await page.goto("/");
-			await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-			await expect(page.getByRole("heading", { name: /^QA Project$/i })).toHaveCount(0);
-			await expect(page.getByText(/^No project selected$/i)).toHaveCount(0);
-			await expectNoHorizontalOverflow(page, `${label} requirements`);
-			const expandedShellMetrics = await readShellMetrics(page);
-			expectExpandedShellLayout(expandedShellMetrics, label);
-
-			await page
-				.getByRole("navigation", { name: "Workflow navigation" })
-				.getByRole("button", { name: /^Collapse workflow navigation$/i })
-				.click();
-			await page
-				.getByLabel("Project information rail")
-				.getByRole("button", { name: /^Collapse project information$/i })
-				.click();
-			await expect(
-				page.getByRole("navigation", { name: "Workflow navigation" }).getByRole("button", { name: /^Expand workflow navigation$/i })
-			).toBeVisible();
-			await expect(
-				page.getByLabel("Project information rail").getByRole("button", { name: /^Expand project information$/i })
-			).toBeVisible();
-			const collapsedShellMetrics = await readShellMetrics(page);
-			if (label !== "mobile") {
-				expect(collapsedShellMetrics.main.width, `${label} collapsed center workspace width`).toBeGreaterThan(
-					expandedShellMetrics.main.width
-				);
-			}
-			if (label === "laptop") {
-				expect(collapsedShellMetrics.right.width, "collapsed laptop project rail width").toBe(104);
-				expect(Math.abs(collapsedShellMetrics.right.right - collapsedShellMetrics.main.right)).toBeLessThanOrEqual(2);
-			}
-			if (label === "wide desktop") {
-				expect(collapsedShellMetrics.main.width, "wide desktop collapsed center workspace width").toBeGreaterThanOrEqual(1500);
-			}
-			await expectNoHorizontalOverflow(page, `${label} collapsed shell`);
-
-			await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
-			await page.getByRole("button", { name: /parse requirements/i }).click();
-			await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(2);
-			await expectNoHorizontalOverflow(page, `${label} requirement review`);
-
-			await page.getByRole("button", { name: /^Next$/ }).click();
-			await expect(page.getByRole("heading", { name: /context inputs/i })).toBeVisible();
-			await page.locator('input[placeholder="https://your-app"]').fill("https://example.test/app");
-			await page.getByRole("button", { name: /analyze context/i }).click();
-			await expect(page.getByRole("heading", { name: /grounded context/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} context`);
-
-			await page.getByRole("button", { name: /^Next$/ }).click();
-			await expect(page.getByRole("heading", { name: /template setup/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} template`);
-
-			await page.getByRole("button", { name: /^Next$/ }).click();
-			await expect(page.getByRole("heading", { name: /generate test cases/i })).toBeVisible();
-			await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
-			await expect(page.locator(".test-cases-table tbody tr").or(page.locator(".case-card")).first()).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} generate`);
-
-			await page.getByRole("button", { name: /^Next$/ }).click();
-			await expect(page.getByRole("heading", { name: /^automation$/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} automation`);
-
-			await page.getByRole("button", { name: /^Next$/ }).click();
-			await expect(page.getByRole("heading", { name: /export test cases/i })).toBeVisible();
-			await expectNoHorizontalOverflow(page, `${label} export`);
+			await expectNoDocumentOverflow(page, `${label} integration settings`);
 		});
 	}
 });

@@ -54,6 +54,8 @@ should preserve when changing the application.
   `frontend/src/services/useCaseReviewClient.js`.
 - Frontend workflow navigation shell:
   `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`.
+- Shared workflow/project status presentation:
+  `frontend/src/components/workflow/StatusBadge.jsx`.
 - Frontend route-scoped contextual task surface:
   `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`,
   `frontend/src/components/projects/ContextualTaskCard.jsx`, and
@@ -65,6 +67,8 @@ should preserve when changing the application.
 - Backend use-case planning coordinator:
   `backend/app/agents/use_case_agent.py`.
 - Frontend E2E config: `frontend/playwright.config.js`.
+- Shared responsive E2E geometry and overflow assertions:
+  `frontend/e2e/support/layout.js`.
 - Backend container entry: `backend/Dockerfile`.
 - Frontend container entry: `frontend/Dockerfile`.
 - Local container entry: `compose.yaml`.
@@ -123,7 +127,8 @@ exposes `/metrics`.
   `integrations_azure_devops.py`.
 - Frontend component directories are grouped by feature or layout, for example
   `automation/`, `generation/`, `integrations/`, `projects/`,
-  `requirements/`, and `layout/`.
+  `requirements/`, `workflow/`, and `layout/`. Shared status semantics belong
+  in `workflow/StatusBadge.jsx` instead of feature-specific pill variants.
 - Frontend generated API contracts live under `frontend/src/api/generated/` and
   are refreshed with `python scripts/generate_frontend_api_types.py`.
 - Frontend CSS is imported through `frontend/src/styles/index.css`; shared
@@ -173,8 +178,10 @@ Do not document generated files as source conventions and do not commit them.
 - `frontend/src/api/generated/api-contracts.d.ts`
 - `frontend/src/api/generated/api-contracts.js`
 - `frontend/src/components/`
+- `frontend/src/components/workflow/StatusBadge.jsx`
 - `frontend/src/styles/`
 - `frontend/src/services/apiClient.js`
 - `frontend/e2e/`
+- `frontend/e2e/support/layout.js`
 - `.gitignore`
 - `.dockerignore`
