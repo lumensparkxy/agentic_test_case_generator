@@ -236,33 +236,47 @@ link source/output snapshots, agent output references, and execution records.
 The `GET /projects/{id}/orchestrator/runs` endpoint returns timeline-friendly
 runs, events, and checkpoints for the frontend cockpit tracked by issue #90.
 
-Frontend orchestrator cockpit flow:
+Frontend route and project hydration flow:
 
 ```text
-Stored current project ID -> project reopen -> status/runs fetch -> cockpit recommended action, blockers, and timeline
+Browser URL -> shared route parser -> global shell or project shell -> exact URL project fetch -> workflow hydration + status/runs
 ```
 
-Frontend workflow shell flow:
+`frontend/src/app/workflowRoutes.js` is the pure routing contract for global
+destinations, project destinations, legacy panel compatibility, orchestrator
+stages, and orchestrator actions. `frontend/src/hooks/useBrowserNavigation.js`
+owns dependency-free History API navigation and `popstate` restoration. The URL
+project ID is authoritative: global pages never auto-open the locally stored
+project, project deep links hydrate only their exact ID, and failed or superseded
+loads clear project-derived state before rendering recovery content. Project
+workflow mutations carry the originating route project and authenticated-user
+generation through nested refreshes, so a delayed response cannot overwrite a
+different project selected while the request was in flight.
+
+Frontend shell flow:
 
 ```text
-Top command bar with Projects menu -> left workflow navigation -> active tab workspace -> right project information rail
+Global navigation + workspace controls -> Home/Projects/global recovery page
+Global navigation + project navigation -> active project workbench -> project information rail
 ```
 
 `frontend/src/components/layout/WorkflowNavigationDrawer.jsx` renders the
-Material 3-inspired workflow navigation introduced for issue #120. It consumes
-the same tab IDs owned by `frontend/src/App.jsx` (`Upload`, `Context`,
-`Template`, `Generate`, `Automation`, and `Export`) so existing tab state,
-workflow actions, and `Next`/`Back` behavior remain unchanged while the
-horizontal stepper is no longer the primary navigation surface. The rail uses
-`lucide-react` line icons for the six workflow destinations and keeps the
-button `aria-label` values as the stable navigation contract.
+project navigation introduced for issue #120. Its semantic destinations are
+Overview, Requirements, Context, Use Cases, Test Cases, Automation, and Reports;
+each is a real history-compatible link whose active state comes from the URL.
+The existing numeric panels remain an internal compatibility seam in
+`frontend/src/App.jsx`. Template setup and generation are internal Test Cases
+sections instead of competing project destinations, so the existing `Next` and
+`Back` behavior remains reachable while refresh and browser history restore the
+canonical workbench.
 
 `frontend/src/components/projects/OrchestratorCockpitPanel.jsx` is embedded in
 the center workspace as the action surface. It preserves
 `aria-label="Orchestrator Cockpit"` and existing action handlers while removing
 the repeated visible cockpit/run-details headers from the center workspace.
-Project selection, refresh, and creation live in the top command bar Projects
-menu so the center workspace stays focused on workflow actions.
+Project selection, refresh, and creation live in the global workspace controls;
+opening and creating a project navigates to its stable overview URL, while
+clearing the selection returns to Projects and removes project-derived state.
 `frontend/src/components/projects/ProjectInformationRail.jsx` owns the durable
 status presentation in the right rail: status overview, stage progress,
 blockers, agent timeline, project evidence, latest report evidence, and last
@@ -325,7 +339,7 @@ test-case snapshots automatically.
 | Auth | Firebase token verification, legacy JWT decoding, Google credential login, role/admin checks | Billing, generation, or integration sync logic | `backend/app/auth/*.py` |
 | Observability | JSON logging, request context, metrics rendering, optional tracing | Business decisions | `backend/app/observability/*.py` |
 | Plain-English framework | Spec parsing, secret detection, environment/data resolution, schema-valid IR generation, Playwright spec generation, local runner | User auth, billing, external integrations | `backend/plain_english_test_framework/*.py` |
-| React app | Top-level workflow composition, auth session orchestration, domain workflow hooks, component props, API actions | Backend persistence or agent logic | `frontend/src/App.jsx`, `frontend/src/hooks/`, `frontend/src/components/` |
+| React app | Top-level workflow composition, URL-authoritative route/project hydration, auth session orchestration, domain workflow hooks, component props, API actions | Backend persistence or agent logic | `frontend/src/App.jsx`, `frontend/src/app/`, `frontend/src/hooks/`, `frontend/src/components/` |
 | Frontend styles | Shared design tokens, base rules, layout styles, and feature-owned selectors imported through one cascade entry point | React state, backend contracts, or visual redesign outside the owning feature | `frontend/src/styles/index.css`, `frontend/src/styles/*.css` |
 
 ## 5) Reused Patterns

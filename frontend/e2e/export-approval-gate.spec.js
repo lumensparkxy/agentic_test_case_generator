@@ -1,6 +1,23 @@
 import { expect, test } from "@playwright/test";
 
+import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
+
+const PROJECT_ID = "project-export-gate";
+const PROJECT = {
+	project_id: PROJECT_ID,
+	name: "Export Gate QA",
+	description: null,
+	status: "active",
+	owner_user_id: "playwright-e2e-user",
+	current_revision: 0,
+	created_at: "2026-07-17T08:00:00Z",
+	updated_at: "2026-07-17T08:00:00Z",
+	stage_state: {},
+	current_snapshots: {},
+	timeline: [],
+	execution_runs: [],
+};
 
 function jsonResponse(route, payload, status = 200, headers = {}) {
 	return route.fulfill({
@@ -9,6 +26,42 @@ function jsonResponse(route, payload, status = 200, headers = {}) {
 		headers,
 		body: JSON.stringify(payload),
 	});
+}
+
+function apiJsonResponse(route, payload, status = 200, headers = {}) {
+	if (!["fetch", "xhr"].includes(route.request().resourceType())) {
+		return route.fallback();
+	}
+	return jsonResponse(route, payload, status, headers);
+}
+
+function projectSummary() {
+	return {
+		project_id: PROJECT.project_id,
+		name: PROJECT.name,
+		description: PROJECT.description,
+		status: PROJECT.status,
+		owner_user_id: PROJECT.owner_user_id,
+		current_revision: PROJECT.current_revision,
+		created_at: PROJECT.created_at,
+		updated_at: PROJECT.updated_at,
+		stage_state: PROJECT.stage_state,
+	};
+}
+
+function orchestratorStatus() {
+	return {
+		project_id: PROJECT_ID,
+		project_revision: 0,
+		current_stage: "requirements",
+		stages: {},
+		next_actions: [],
+		blockers: [],
+		has_baseline_test_suite: false,
+		upstream_changed: false,
+		changed_upstream_stages: [],
+		generated_at: "2026-07-17T08:00:00Z",
+	};
 }
 
 test.describe("Export approval gate", () => {
@@ -33,6 +86,12 @@ test.describe("Export approval gate", () => {
 				shadow_mode: false,
 			})
 		);
+		await page.route("**/projects", async (route) => apiJsonResponse(route, { projects: [projectSummary()] }));
+		await page.route(`**/projects/${PROJECT_ID}/orchestrator/status`, async (route) => apiJsonResponse(route, orchestratorStatus()));
+		await page.route(`**/projects/${PROJECT_ID}/orchestrator/runs`, async (route) =>
+			apiJsonResponse(route, { runs: [], events: [], checkpoints: [] })
+		);
+		await page.route(`**/projects/${PROJECT_ID}`, async (route) => apiJsonResponse(route, PROJECT));
 		await page.route("**/requirements/parse", async (route) =>
 			jsonResponse(route, {
 				source_name: "sample-requirements.md",
@@ -198,7 +257,12 @@ test.describe("Export approval gate", () => {
 		});
 
 		await seedAuthenticatedSession(page);
-		await page.goto("/");
+		const requirementsPath = buildProjectPath(PROJECT_ID, "requirements");
+		const testCasesPath = buildProjectPath(PROJECT_ID, "test-cases");
+		const automationPath = buildProjectPath(PROJECT_ID, "automation");
+		const reportsPath = buildProjectPath(PROJECT_ID, "reports");
+		await page.goto(requirementsPath);
+		await expect(page).toHaveURL(requirementsPath);
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
@@ -208,6 +272,7 @@ test.describe("Export approval gate", () => {
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await page.getByRole("button", { name: /^Next$/ }).click();
+		await expect(page).toHaveURL(testCasesPath);
 		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
 		await page.getByRole("tab", { name: /diagnostics/i }).click();
@@ -224,12 +289,14 @@ test.describe("Export approval gate", () => {
 		await expect(page.getByText(/recovered 1 complete test_cases entry/i)).toBeVisible();
 		await expect(page.locator(".workflow-diagnostics-block.warning")).toHaveCount(0);
 		await page.getByRole("button", { name: /^Next$/ }).click();
+		await expect(page).toHaveURL(automationPath);
 		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
 		await page.getByRole("button", { name: /preview execution/i }).click();
 		await expect(page.getByRole("button", { name: /run 1 candidate/i })).toBeVisible();
 		await page.getByRole("button", { name: /run 1 candidate/i }).click();
 		await expect(page.getByText(/Execution passed: 1 passed/i)).toBeVisible();
 		await page.getByRole("button", { name: /^Next$/ }).click();
+		await expect(page).toHaveURL(reportsPath);
 		await expect(page.getByRole("heading", { name: /^Playwright Execution Report$/i })).toBeVisible();
 		const reportCard = page.locator(".playwright-report-card").first();
 		await expect(reportCard.getByText("Run exec_export_report")).toBeVisible();

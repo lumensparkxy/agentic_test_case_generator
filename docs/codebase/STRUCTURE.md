@@ -21,6 +21,7 @@ should preserve when changing the application.
 | `backend/execution_runtime/` | Node-based Playwright Test runtime used by backend execution endpoints | `backend/execution_runtime/package.json`, `backend/execution_runtime/playwright.config.ts` |
 | `backend/tests/` | Backend unit and integration-style tests using `unittest` and local fakes/patches | `backend/tests/test_*.py` |
 | `frontend/` | React/Vite web application, E2E specs, frontend Dockerfile, Nginx config | `frontend/src/main.jsx`, `frontend/package.json`, `frontend/Dockerfile` |
+| `frontend/src/app/` | Pure route contracts plus global/project shell, navigation, loading, placeholder, and recovery components | `frontend/src/app/workflowRoutes.js`, `frontend/src/app/GlobalAppShell.jsx`, `frontend/src/app/RoutePages.jsx` |
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/api/` | Generated frontend API contract declarations and endpoint constants | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/api/generated/api-contracts.js` |
 | `frontend/src/services/` | Frontend API helper functions | `frontend/src/services/apiClient.js` |
@@ -78,6 +79,7 @@ exposes `/metrics`.
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
 | `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace and orchestrator cockpit | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/app/` | Canonical global/project route parsing and path building, route links, and route-level shell/page composition | Backend authorization policy, project persistence, or workflow mutation behavior |
 | `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |
 | `frontend/src/styles/` | Design tokens, base styles, layout styles, and selectors grouped by feature ownership | React state, API calls, or unrelated visual redesigns |
 | `frontend/src/services/` | API base URL, request ID, API error parsing, download helpers | Large workflow state or JSX markup |
@@ -153,6 +155,7 @@ Do not document generated files as source conventions and do not commit them.
 - `backend/plain_english_test_framework/`
 - `backend/execution_runtime/package.json`
 - `frontend/src/App.jsx`
+- `frontend/src/app/`
 - `frontend/src/api/generated/api-contracts.d.ts`
 - `frontend/src/api/generated/api-contracts.js`
 - `frontend/src/components/`

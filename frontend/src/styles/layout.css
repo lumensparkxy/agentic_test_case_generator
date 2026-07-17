@@ -931,6 +931,7 @@
 	background: transparent;
 	color: #40516f;
 	text-align: left;
+	text-decoration: none;
 	box-shadow: none;
 	transition:
 		background 0.15s ease,
