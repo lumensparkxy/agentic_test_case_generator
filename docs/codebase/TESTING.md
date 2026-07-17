@@ -29,12 +29,18 @@ npm ci
 npm run lint
 npm run format:check
 npm run build
+npm run test:e2e -- e2e/home-workspace.spec.js e2e/workflow-navigation.spec.js
 npm run test:e2e -- e2e/export-approval-gate.spec.js
 
 cd backend/execution_runtime
 npm ci
 npm run test:playwright -- --list
 ```
+
+The Playwright config expects an existing `E2E_BASE_URL`. For local frontend
+E2E runs, start `npm run dev -- --host 127.0.0.1` in a separate frontend shell
+and run the specs with `E2E_BASE_URL=http://127.0.0.1:5173`; CI performs the
+same server startup and readiness check explicitly.
 
 CI currently runs:
 
@@ -88,6 +94,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
 | Workspace summary read model | Yes | Empty accounts, owner/archive isolation, authoritative stage/action normalization, Use Cases review counts, deterministic ranking/deduplication, bounded runs/reports, query validation, and safe persistence failure | `backend/tests/test_workspace_summary_service.py` and `backend/tests/test_workspace_summary_endpoint.py` use synthetic project fixtures and patched Firestore/service boundaries |
+| Frontend Home and Projects | Yes | Zero/one/many-project Home states, subject-scoped and refreshed server ranking, stable My work groups, stale stored selection cleanup, bounded client search, create/open/clear behavior, delayed-create route/logout races, latest-wins project-list reads, loading/retry semantics, populated reflow at 390/760/900/1280/1440/1920, status containment, and canonical project links | `frontend/e2e/home-workspace.spec.js` uses deterministic workspace/project fixtures from `frontend/e2e/support/workspace.js`; `frontend/e2e/workflow-navigation.spec.js` preserves URL and browser-history authority |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Integration observability | Yes | JIRA/Azure DevOps provider metrics, duration summaries, and safe structured logs | `backend/tests/test_integration_observability.py`, adapter tests, and `backend/tests/test_observability_metrics.py` |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |

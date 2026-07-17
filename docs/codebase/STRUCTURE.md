@@ -22,9 +22,10 @@ should preserve when changing the application.
 | `backend/tests/` | Backend unit and integration-style tests using `unittest` and local fakes/patches | `backend/tests/test_*.py` |
 | `frontend/` | React/Vite web application, E2E specs, frontend Dockerfile, Nginx config | `frontend/src/main.jsx`, `frontend/package.json`, `frontend/Dockerfile` |
 | `frontend/src/app/` | Pure route contracts plus global/project shell, navigation, loading, placeholder, and recovery components | `frontend/src/app/workflowRoutes.js`, `frontend/src/app/GlobalAppShell.jsx`, `frontend/src/app/RoutePages.jsx` |
+| `frontend/src/pages/` | Route-level authenticated workspace experiences composed from feature components | `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/ProjectsPage.jsx` |
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/api/` | Generated frontend API contract declarations and endpoint constants | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/api/generated/api-contracts.js` |
-| `frontend/src/services/` | Frontend API helper functions | `frontend/src/services/apiClient.js` |
+| `frontend/src/services/` | Frontend API helper functions and bounded read-model clients | `frontend/src/services/apiClient.js`, `frontend/src/services/workspaceSummaryClient.js` |
 | `frontend/src/hooks/` | Reusable React hooks, including domain workflow state hooks for projects, requirements, context, generation, integrations, execution, export, and app session state | `frontend/src/hooks/*.js` |
 | `frontend/src/styles/` | Shared CSS entry point, design tokens, base rules, layout styles, and feature-owned selector modules | `frontend/src/styles/index.css`, `frontend/src/styles/*.css` |
 | `frontend/src/utils/` | Pure frontend helpers | `frontend/src/utils/*.js` |
@@ -41,6 +42,8 @@ should preserve when changing the application.
 - Main backend runtime entry: `backend/app/main.py`.
 - Frontend runtime entry: `frontend/src/main.jsx`.
 - Frontend orchestration component: `frontend/src/App.jsx`.
+- Authenticated workspace pages: `frontend/src/pages/HomePage.jsx` and
+  `frontend/src/pages/ProjectsPage.jsx`.
 - Frontend workflow navigation shell:
   `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`.
 - Frontend project cockpit action surface:
@@ -79,6 +82,7 @@ exposes `/metrics`.
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
 | `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace and orchestrator cockpit | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/pages/` | Route-level composition for Home, Projects, and future global destinations | Backend persistence policy or duplicate workflow routing contracts |
 | `frontend/src/app/` | Canonical global/project route parsing and path building, route links, and route-level shell/page composition | Backend authorization policy, project persistence, or workflow mutation behavior |
 | `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |
 | `frontend/src/styles/` | Design tokens, base styles, layout styles, and selectors grouped by feature ownership | React state, API calls, or unrelated visual redesigns |

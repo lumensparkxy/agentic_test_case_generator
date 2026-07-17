@@ -253,6 +253,32 @@ workflow mutations carry the originating route project and authenticated-user
 generation through nested refreshes, so a delayed response cannot overwrite a
 different project selected while the request was in flight.
 
+Authenticated workspace overview flow:
+
+```text
+Authenticated session -> bounded GET /workspace/summary -> Home or Projects projection -> canonical project destination
+```
+
+`frontend/src/hooks/useWorkspaceSummary.js` and
+`frontend/src/services/workspaceSummaryClient.js` own the single bounded
+workspace-summary read. The hook aborts superseded requests and exposes stable
+loading, refresh, error, and retry states. Its cache is keyed to the
+authenticated subject, and returning from a project workbench refreshes the
+authoritative ranking. `frontend/src/pages/HomePage.jsx`
+renders the server-ranked `Continue working` item, grouped `My work`, recent
+projects, and bounded run/report activity without hydrating each project.
+`frontend/src/pages/ProjectsPage.jsx` filters that same bounded project list in
+the browser and delegates create/open actions back to `App.jsx`. A stored
+project ID records an explicit selection only; it never replaces the server's
+ranking or redirects `/` away from Home. Creating a project refreshes both the
+project selector and workspace summary before navigation. Create responses are
+scoped to the initiating user and route, so a late response cannot repopulate
+state after logout or override newer navigation. If the same user's server-side
+create succeeds after navigation changes, the read models still refresh so Home
+reflects the durable project without forcing a redirect. Project-list reads use
+a per-session request sequence as well as the authenticated subject, so an
+older response cannot overwrite a post-create list or clear its stored project.
+
 Frontend shell flow:
 
 ```text
@@ -276,7 +302,7 @@ the center workspace as the action surface. It preserves
 the repeated visible cockpit/run-details headers from the center workspace.
 Project selection, refresh, and creation live in the global workspace controls;
 opening and creating a project navigates to its stable overview URL, while
-clearing the selection returns to Projects and removes project-derived state.
+clearing the selection returns to Home and removes project-derived state.
 `frontend/src/components/projects/ProjectInformationRail.jsx` owns the durable
 status presentation in the right rail: status overview, stage progress,
 blockers, agent timeline, project evidence, latest report evidence, and last
