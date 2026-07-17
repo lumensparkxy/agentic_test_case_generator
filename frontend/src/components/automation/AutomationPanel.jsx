@@ -4,16 +4,48 @@ const renderBucketCount = (label, value, tone = "") => (
 	</span>
 );
 
-const renderCandidateTable = (candidates) => {
+const renderCandidateTable = ({ candidates, selectedCandidateIds, setSelectedCandidateIds, selectionDisabled }) => {
 	if (!candidates.length) {
-		return <span className="helper-text">No executable candidates in the current preview.</span>;
+		return <span className="helper-text">Preview completed with zero executable candidates.</span>;
 	}
+	const selectedIds = new Set(selectedCandidateIds);
+	const selectedCount = candidates.filter((candidate) => selectedIds.has(candidate.id)).length;
+	const allSelected = selectedCount === candidates.length;
+	const selectionIsMixed = selectedCount > 0 && !allSelected;
+	const sourceIdCounts = candidates.reduce((counts, candidate) => {
+		counts.set(candidate.source_test_case_id, (counts.get(candidate.source_test_case_id) || 0) + 1);
+		return counts;
+	}, new Map());
+	const updateCandidateSelection = (candidateId, checked) => {
+		setSelectedCandidateIds((currentIds) => {
+			const nextIds = new Set(currentIds);
+			if (checked) {
+				nextIds.add(candidateId);
+			} else {
+				nextIds.delete(candidateId);
+			}
+			return [...nextIds];
+		});
+	};
 
 	return (
 		<div className="selection-table-wrapper" role="region" aria-label="Executable automation candidates table" tabIndex={0}>
 			<table className="selection-table">
 				<thead>
 					<tr>
+						<th>
+							<input
+								ref={(input) => {
+									if (input) input.indeterminate = selectionIsMixed;
+								}}
+								type="checkbox"
+								aria-label="Select all executable candidates"
+								aria-checked={selectionIsMixed ? "mixed" : allSelected}
+								checked={allSelected}
+								disabled={selectionDisabled}
+								onChange={(event) => setSelectedCandidateIds(event.target.checked ? candidates.map((candidate) => candidate.id) : [])}
+							/>
+						</th>
 						<th>Case</th>
 						<th>Title</th>
 						<th>Spec</th>
@@ -21,18 +53,33 @@ const renderCandidateTable = (candidates) => {
 					</tr>
 				</thead>
 				<tbody>
-					{candidates.map((candidate) => (
-						<tr key={candidate.id}>
-							<td>
-								<strong>{candidate.source_test_case_id}</strong>
-							</td>
-							<td>{candidate.title}</td>
-							<td>
-								{candidate.spec?.steps?.length || 0} step{(candidate.spec?.steps?.length || 0) === 1 ? "" : "s"}
-							</td>
-							<td>{candidate.traceability_ids?.join(", ") || "None"}</td>
-						</tr>
-					))}
+					{candidates.map((candidate) => {
+						const selectionLabel =
+							sourceIdCounts.get(candidate.source_test_case_id) > 1
+								? `Select ${candidate.source_test_case_id} candidate ${candidate.id} for execution`
+								: `Select ${candidate.source_test_case_id} for execution`;
+						return (
+							<tr key={candidate.id}>
+								<td>
+									<input
+										type="checkbox"
+										aria-label={selectionLabel}
+										checked={selectedIds.has(candidate.id)}
+										disabled={selectionDisabled}
+										onChange={(event) => updateCandidateSelection(candidate.id, event.target.checked)}
+									/>
+								</td>
+								<td>
+									<strong>{candidate.source_test_case_id}</strong>
+								</td>
+								<td>{candidate.title}</td>
+								<td>
+									{candidate.spec?.steps?.length || 0} step{(candidate.spec?.steps?.length || 0) === 1 ? "" : "s"}
+								</td>
+								<td>{candidate.traceability_ids?.join(", ") || "None"}</td>
+							</tr>
+						);
+					})}
 				</tbody>
 			</table>
 		</div>
@@ -56,9 +103,9 @@ const renderManualList = (candidates) => {
 	);
 };
 
-const renderUnsupportedList = (candidates) => {
+const renderUnsupportedList = (candidates, emptyMessage = "No unsupported cases in the current preview.") => {
 	if (!candidates.length) {
-		return <span className="helper-text">No unsupported cases in the current preview.</span>;
+		return <span className="helper-text">{emptyMessage}</span>;
 	}
 
 	return (
@@ -165,6 +212,8 @@ export default function AutomationPanel({
 	executionTargetEnvironment,
 	setExecutionTargetEnvironment,
 	executionPreview,
+	selectedExecutionCandidateIds,
+	setSelectedExecutionCandidateIds,
 	executionRunResult,
 	isPreviewingExecution,
 	isRunningExecution,
@@ -175,9 +224,13 @@ export default function AutomationPanel({
 	goNext,
 }) {
 	const previewSummary = executionPreview?.summary || {};
-	const executableCount = previewSummary.executable || 0;
+	const executableCandidates = executionPreview?.executable || [];
+	const actualCandidateIds = new Set(executableCandidates.map((candidate) => candidate.id));
+	const selectedExecutableCount = selectedExecutionCandidateIds.filter((candidateId) => actualCandidateIds.has(candidateId)).length;
+	const previewIsActionable = executionPreview?.isConsistent === true && !executionPreview?.requiresRefresh;
 	const previewDisabled = !testCases.length || isPreviewingExecution || isRunningExecution || authActionDisabled;
-	const runDisabled = previewDisabled || executableCount === 0;
+	const runDisabled = previewDisabled || !previewIsActionable || selectedExecutableCount === 0;
+	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
 
 	return (
 		<section className="panel">
@@ -190,6 +243,7 @@ export default function AutomationPanel({
 						value={executionTargetEnvironment}
 						onChange={(event) => setExecutionTargetEnvironment(event.target.value)}
 						placeholder="staging, dev, customer-a"
+						disabled={inputsDisabled}
 					/>
 				</div>
 				<div className="form-group">
@@ -198,6 +252,7 @@ export default function AutomationPanel({
 						value={executionTargetBaseUrl}
 						onChange={(event) => setExecutionTargetBaseUrl(event.target.value)}
 						placeholder="Use backend default"
+						disabled={inputsDisabled}
 					/>
 				</div>
 				<div className="feedback-actions">
@@ -205,7 +260,7 @@ export default function AutomationPanel({
 						{isPreviewingExecution ? "Previewing..." : "Preview Execution"}
 					</button>
 					<button onClick={runApprovedExecution} disabled={runDisabled}>
-						{isRunningExecution ? "Running..." : `Run ${executableCount || 0} Candidate${executableCount === 1 ? "" : "s"}`}
+						{isRunningExecution ? "Running..." : `Run ${selectedExecutableCount} Candidate${selectedExecutableCount === 1 ? "" : "s"}`}
 					</button>
 				</div>
 			</div>
@@ -226,10 +281,20 @@ export default function AutomationPanel({
 						{renderBucketCount("Unsupported", previewSummary.unsupported, "warning")}
 						{renderBucketCount("Invalid", previewSummary.invalid, "warning")}
 					</div>
+					{!previewIsActionable && (
+						<div className="workflow-result-notice warning" role="alert">
+							<p>{executionPreview.consistencyMessage || "This stored preview must be refreshed before execution."}</p>
+						</div>
+					)}
 
 					<div className="result-section">
 						<h3>Executable</h3>
-						{renderCandidateTable(executionPreview.executable || [])}
+						{renderCandidateTable({
+							candidates: executableCandidates,
+							selectedCandidateIds: selectedExecutionCandidateIds,
+							setSelectedCandidateIds: setSelectedExecutionCandidateIds,
+							selectionDisabled: !previewIsActionable || isPreviewingExecution || isRunningExecution || authActionDisabled,
+						})}
 					</div>
 
 					<div className="result-section">
@@ -239,7 +304,12 @@ export default function AutomationPanel({
 
 					<div className="result-section">
 						<h3>Unsupported</h3>
-						{renderUnsupportedList([...(executionPreview.unsupported || []), ...(executionPreview.invalid || [])])}
+						{renderUnsupportedList(executionPreview.unsupported || [])}
+					</div>
+
+					<div className="result-section">
+						<h3>Invalid</h3>
+						{renderUnsupportedList(executionPreview.invalid || [], "No invalid cases in the current preview.")}
 					</div>
 
 					{executionPreview.warnings?.length > 0 && (
@@ -253,7 +323,11 @@ export default function AutomationPanel({
 			) : (
 				<div className="result-section">
 					<h3>Execution Preview</h3>
-					<span className="helper-text">Generate test cases to preview automation readiness.</span>
+					<span className="helper-text">
+						{testCases.length
+							? "No preview yet. Preview execution readiness for the current test cases."
+							: "Generate test cases to preview automation readiness."}
+					</span>
 				</div>
 			)}
 

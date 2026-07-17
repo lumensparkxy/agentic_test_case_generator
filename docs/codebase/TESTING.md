@@ -97,6 +97,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Frontend orchestrator lifecycle | Yes | Create project, generate v1, reload, change requirements, impact update, execute, review, and report | `frontend/e2e/orchestrator-lifecycle.spec.js` uses synthetic project and orchestrator fixtures |
 | Frontend Use Cases workbench | Yes | Exact-snapshot rendering, canonical scenario counts and requirement grouping, Use Cases coverage metrics, machine-versus-human review state, truthful prerequisites and headers, approve/request-changes payloads, durable reloads, stale conflicts, partial-refresh recovery, retry idempotency, reviewer provenance, required-field and focus semantics, 390/1440/1920 reflow, double-submit prevention, and late-response route isolation | `frontend/e2e/use-case-review.spec.js` uses deterministic project, workspace, orchestrator, success, conflict, superseding-artifact, and service-failure fixtures from `frontend/e2e/support/use-case-review.js`; `frontend/e2e/orchestrator-lifecycle.spec.js` preserves the adjacent project workflow |
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
+| Automation preview consistency | Yes | Empty, executable, mixed, unsupported, and invalid count/list invariants; malformed summaries and responses; duplicate/slug-colliding candidate IDs with repeated source IDs; persisted/live hydration; target-change and execution reset; latest-response ownership; selected-candidate Run counts and request IDs; zero-selection request suppression; contextual preview-before-run behavior; and distinct no-preview versus zero-executable states | `backend/tests/test_execution_service.py` and `backend/tests/test_automation_endpoint.py` cover the producer contract, collision-safe candidate execution, and persisted snapshot fields; `frontend/e2e/automation-preview-consistency.spec.js` covers mismatched live summaries, persisted compact previews, stale-snapshot refresh gating, selection preservation, preview/run response races, target reset, malformed payloads, contextual Execute, and empty-state consumers; `frontend/e2e/multi-environment-execution.spec.js` preserves named-environment run compatibility |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
 | Workspace summary read model | Yes | Empty accounts, owner/archive isolation, authoritative stage/action normalization, Use Cases review counts, deterministic ranking/deduplication, bounded runs/reports, query validation, and safe persistence failure | `backend/tests/test_workspace_summary_service.py` and `backend/tests/test_workspace_summary_endpoint.py` use synthetic project fixtures and patched Firestore/service boundaries |
 | Frontend Home and Projects | Yes | Zero/one/many-project Home states, subject-scoped and refreshed server ranking, stable My work groups, stale stored selection cleanup, bounded client search, create/open/clear behavior, delayed-create route/logout races, latest-wins project-list reads, loading/retry semantics, populated reflow at 390/760/900/1280/1440/1920, status containment, and canonical project links | `frontend/e2e/home-workspace.spec.js` uses deterministic workspace/project fixtures from `frontend/e2e/support/workspace.js`; `frontend/e2e/workflow-navigation.spec.js` preserves URL and browser-history authority |
@@ -130,6 +131,15 @@ Evidence: `.github/workflows/ci.yml`.
 - Multi-environment execution tests use named synthetic environments and
   source snapshot IDs to prove reruns preserve environment-specific history and
   failed executions become review signals without mutating upstream snapshots.
+- Automation preview backend tests deliberately provide mismatched summaries
+  and duplicate or slug-colliding IDs; browser tests provide a mismatched live
+  summary, repeated source IDs with unique candidate IDs, a stale compact
+  project snapshot, zero executable collections, malformed response bodies,
+  changed targets, and deliberately out-of-order preview/run responses.
+  Together they prove every emitted and persisted count matches its collection,
+  unsafe or obsolete data cannot become runnable, contextual Execute stops for
+  candidate review, and the run payload contains only selected candidate IDs
+  from the current executable collection.
 - Report evidence tests mock current project snapshots and execution runs so
   exported report snapshots cite exact source IDs and stale reports are visible
   as regeneration actions in the frontend.
@@ -276,6 +286,10 @@ Use the smallest gate that proves the change:
 - Project execution history or orchestrator execution change: workflow project,
   automation endpoint, orchestrator service, and focused multi-environment
   E2E tests.
+- Automation preview contract, hydration, selection, or Run-availability change:
+  focused execution-service and automation-endpoint tests, frontend build,
+  `frontend/e2e/automation-preview-consistency.spec.js`, and
+  `frontend/e2e/multi-environment-execution.spec.js`.
 - Report/export evidence or stale report decision change: export endpoint,
   orchestrator service, and focused report evidence E2E tests.
 - End-to-end workflow or release confidence change: run

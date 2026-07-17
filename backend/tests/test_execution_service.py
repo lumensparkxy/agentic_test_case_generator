@@ -14,7 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import ExecutionSettings
-from app.models import TestCase, TestStep
+from app.models import ExecutionCandidate, ExecutionPreviewResponse, TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
 from plain_english_test_framework.compiler import CompilerError, compile_spec_file
 from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
@@ -207,6 +207,97 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(settings.max_cases_per_request, 9999)
         self.assertEqual(response.summary.executable, 25)
         self.assertEqual(response.warnings, [])
+
+    def test_preview_summary_matches_every_classified_bucket(self) -> None:
+        manual_case = _browser_case("TC-MANUAL")
+        manual_case.automation_status = "Manual"
+        unsupported_case = TestCase(
+            id="TC-UNSUPPORTED",
+            title="Reset SAP user",
+            automation_status="Automated",
+            steps=[TestStep(step=1, action="Execute SAP GUI transaction SU01", expected="User maintenance screen opens")],
+        )
+        invalid_case = TestCase(
+            id="TC-INVALID",
+            title="No browser steps",
+            automation_status="Automated",
+            steps=[],
+        )
+        fixtures = {
+            "empty": ([], {"executable": 0, "manual": 0, "unsupported": 0, "invalid": 0}),
+            "executable": ([_browser_case()], {"executable": 1, "manual": 0, "unsupported": 0, "invalid": 0}),
+            "mixed": (
+                [_browser_case(), manual_case, unsupported_case, invalid_case],
+                {"executable": 1, "manual": 1, "unsupported": 1, "invalid": 1},
+            ),
+            "unsupported": ([unsupported_case], {"executable": 0, "manual": 0, "unsupported": 1, "invalid": 0}),
+            "invalid": ([invalid_case], {"executable": 0, "manual": 0, "unsupported": 0, "invalid": 1}),
+        }
+
+        for fixture_name, (cases, expected_counts) in fixtures.items():
+            with self.subTest(fixture=fixture_name):
+                response = preview_execution(cases, target_base_url="https://example.test")
+                actual_counts = {
+                    "executable": len(response.executable),
+                    "manual": len(response.manual),
+                    "unsupported": len(response.unsupported),
+                    "invalid": len(response.invalid),
+                }
+                self.assertEqual(actual_counts, expected_counts)
+                self.assertEqual(response.summary.model_dump(), actual_counts)
+
+    def test_preview_contract_normalizes_mismatched_summary_to_candidate_lists(self) -> None:
+        candidate = ExecutionCandidate(
+            id="tc_001",
+            source_test_case_id="TC-001",
+            title="Sign in",
+            status="executable",
+        )
+
+        response = ExecutionPreviewResponse(
+            executable=[candidate],
+            summary={"executable": 20, "manual": 4, "unsupported": 3, "invalid": 2},
+        )
+
+        self.assertEqual(
+            response.summary.model_dump(),
+            {"executable": 1, "manual": 0, "unsupported": 0, "invalid": 0},
+        )
+
+    def test_preview_assigns_unique_candidate_and_spec_ids_for_collisions(self) -> None:
+        response = preview_execution(
+            [_browser_case("TC-1"), _browser_case("TC 1"), _browser_case("TC-1")],
+            target_base_url="https://example.test",
+        )
+
+        candidate_ids = [candidate.id for candidate in response.executable]
+        self.assertEqual(candidate_ids, ["tc_1", "tc_1_2", "tc_1_3"])
+        self.assertEqual([candidate.spec["id"] for candidate in response.executable], candidate_ids)
+        self.assertEqual(
+            response.warnings,
+            ["Duplicate or colliding test case IDs were assigned unique execution candidate IDs."],
+        )
+        self.assertEqual(response.summary.executable, 3)
+
+    def test_run_selects_one_colliding_source_case_by_unique_candidate_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = _settings(Path(temp_dir))
+            with patch(
+                "app.services.execution_service.run_local_playwright_specs",
+                side_effect=_fake_batch_run({"tc_1_3": "passed"}),
+            ) as runner:
+                response = run_execution(
+                    [_browser_case("TC-1"), _browser_case("TC 1"), _browser_case("TC-1")],
+                    selected_test_case_ids=["tc_1_3"],
+                    settings=settings,
+                )
+
+        self.assertEqual(response.status, "passed")
+        self.assertEqual(response.summary.passed, 1)
+        self.assertEqual([item.id for item in response.results], ["tc_1_3"])
+        self.assertEqual(response.results[0].source_test_case_id, "TC-1")
+        runner.assert_called_once()
+        self.assertEqual(len(runner.call_args.args[0]), 1)
 
     def test_preview_converts_safe_browser_steps_to_candidate_spec(self) -> None:
         response = preview_execution([_browser_case()], target_base_url="https://example.test")

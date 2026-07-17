@@ -62,6 +62,10 @@ should preserve when changing the application.
   `frontend/src/components/projects/contextualTask.js`.
 - Frontend project information rail:
   `frontend/src/components/projects/ProjectInformationRail.jsx`.
+- Automation preview normalization, selection guards, and presentation:
+  `frontend/src/components/automation/automationPreview.js`,
+  `frontend/src/components/automation/AutomationPanel.jsx`, and
+  `frontend/src/hooks/useExecutionWorkflowState.js`.
 - Frontend style entry point: `frontend/src/styles/index.css`.
 - Backend execution runtime config: `backend/execution_runtime/playwright.config.ts`.
 - Backend use-case planning coordinator:
@@ -95,7 +99,7 @@ exposes `/metrics`.
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
-| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace, information rail, and route-scoped contextual task | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace, information rail, route-scoped contextual task, and pure feature helpers such as Automation preview normalization | Backend persistence policy or direct transport side effects hidden inside presentation components |
 | `frontend/src/pages/` | Route-level composition for Home, Projects, and project workbenches | Backend persistence policy or duplicate workflow routing contracts |
 | `frontend/src/app/` | Canonical global/project route parsing and path building, route links, and route-level shell/page composition | Backend authorization policy, project persistence, or workflow mutation behavior |
 | `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |
@@ -121,7 +125,7 @@ exposes `/metrics`.
 - JSX component files use PascalCase, for example `AutomationPanel.jsx` and
   `RequirementReviewWorkbench.jsx`.
 - Frontend helper files use camelCase or lower-case domain names, for example
-  `apiClient.js`, `useBillingStatus.js`, and `workflow.js`.
+  `apiClient.js`, `automationPreview.js`, `useBillingStatus.js`, and `workflow.js`.
 - Backend route modules are grouped by product area, for example
   `projects.py`, `requirements.py`, `testcases.py`, `integrations_jira.py`, and
   `integrations_azure_devops.py`.
@@ -178,6 +182,7 @@ Do not document generated files as source conventions and do not commit them.
 - `frontend/src/api/generated/api-contracts.d.ts`
 - `frontend/src/api/generated/api-contracts.js`
 - `frontend/src/components/`
+- `frontend/src/components/automation/automationPreview.js`
 - `frontend/src/components/workflow/StatusBadge.jsx`
 - `frontend/src/styles/`
 - `frontend/src/services/apiClient.js`

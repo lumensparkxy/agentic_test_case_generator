@@ -434,9 +434,45 @@ The conversion and run path is implemented by
 `backend/app/services/execution_service.py` and
 `backend/plain_english_test_framework/`, with Node runtime configuration in
 `backend/execution_runtime/playwright.config.ts`.
+
+Execution preview has one count/list invariant for the `executable`, `manual`,
+`unsupported`, and `invalid` buckets: every `summary` count equals the length of
+its matching candidate collection. `ExecutionPreviewResponse` derives the
+summary at the Pydantic boundary instead of trusting a second producer, and the
+execution service assigns deterministic unique candidate IDs when duplicate or
+slug-colliding source IDs would otherwise overwrite specs or run results. A
+renamed executable candidate receives the same unique ID in its generated spec,
+and one preview warning explains that collision handling occurred.
+
+Live responses expose the four candidate arrays at the response root. Durable
+project preview snapshots retain reduced candidates under `candidates`, together
+with `candidate_counts` and `summary`. The frontend normalization boundary in
+`frontend/src/components/automation/automationPreview.js` accepts either shape,
+validates candidate identity and bucket status, blocks ambiguous candidate-ID
+collisions, and recomputes visible counts from the surviving arrays. Repeated
+source test-case IDs remain valid when their execution candidate IDs are unique,
+because candidate ID is the selection and request identity. A malformed or
+legacy payload therefore cannot display a stale count as current truth.
+Inconsistent, legacy, and persisted previews remain inspectable with a
+recoverable consistency message but require a fresh live preview before
+execution.
+
+Candidate selection is stored by unique execution candidate ID. The visible Run
+count and the run request are both derived by intersecting selected IDs with the
+current normalized executable array; zero selected executable candidates disable
+Run and emit no execution request. Changing the target environment/base URL,
+replacing the test-case suite, changing projects, or starting a new preview
+clears the prior preview, run result, and selection together.
+Monotonic preview and run request generations prevent late responses from
+restoring candidate data after a newer request or execution-state reset.
+Contextual Execute creates a fresh reviewable preview when none is actionable;
+it never previews and runs candidates in the same interaction. Preview and run
+responses must also pass shape validation before they can update workflow state.
+
 When execution requests include `project_id`, `backend/app/routers/automation.py`
-records the target environment, optional target base URL, selected test-case
-IDs, and source test-case snapshot ID. `workflow_project_service.py` stores
+records the target environment, optional target base URL, selected candidate IDs
+in the legacy-named `selected_test_case_ids` transport field, and source
+test-case snapshot ID. `workflow_project_service.py` stores
 environment-specific execution records in the project `execution_runs`
 subcollection, so staging, production-like, and other named runs remain visible
 without overwriting each other. Failed execution records update execution/review
@@ -475,6 +511,7 @@ test-case snapshots automatically.
 | Use-case stage coordinator | `use_case_agent.py`, `test_case_coverage.py`, `analysis_agent.py` | Lets the orchestrator generate requirement analysis and scenario coverage plans without producing/discarding full test cases, while keeping merge validation deterministic |
 | Test-case shard coordinator | `test_case_agent.py`, `test_case_coverage.py`, `test_case_fallback.py`, `test_case_review.py`, `test_case_hydration.py` | Reuses approved coverage plans for large suites, bounds parallel workers, merges draft cases centrally, enforces exact `scenario_refs` before heuristic coverage fallback, and keeps final approval at the whole-suite boundary |
 | Automation fragment coordinator | `automation_agent.py` | Splits large approved suites by component/page group, assembles shared Playwright project files centrally, dedupes fragment names and symbols, and reports every case as generated, manual, unsupported, or fallback |
+| Automation preview invariant | `contracts/execution.py`, `execution_service.py`, `automationPreview.js`, `AutomationPanel.jsx`, execution state in `App.jsx` | Keeps summary counts, rendered buckets, selected candidate IDs, Run availability, and live/persisted hydration derived from one validated candidate classification |
 | Impact update snapshotting | `impact_update_agent.py`, `impact_update_service.py`, `versioning_service.py` | Lets changed requirement/use-case slices update the current suite without regenerating unchanged coverage |
 | Deterministic fallback | Requirement/test-case agents and automation agent | Keeps workflow usable when model output is malformed, unavailable, or incomplete |
 | Safe artifact fetch | `artifact_fetcher.py` plus `context_grounding.py` | Blocks unsafe or unsupported public URLs and returns partial enrichment warnings instead of crashing |
