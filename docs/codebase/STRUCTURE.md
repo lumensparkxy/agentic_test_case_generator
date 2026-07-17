@@ -54,8 +54,10 @@ should preserve when changing the application.
   `frontend/src/services/useCaseReviewClient.js`.
 - Frontend workflow navigation shell:
   `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`.
-- Frontend project cockpit action surface:
-  `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`.
+- Frontend route-scoped contextual task surface:
+  `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`,
+  `frontend/src/components/projects/ContextualTaskCard.jsx`, and
+  `frontend/src/components/projects/contextualTask.js`.
 - Frontend project information rail:
   `frontend/src/components/projects/ProjectInformationRail.jsx`.
 - Frontend style entry point: `frontend/src/styles/index.css`.
@@ -89,7 +91,7 @@ exposes `/metrics`.
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
-| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace and orchestrator cockpit | Backend API transport details beyond passed callbacks/data |
+| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace, information rail, and route-scoped contextual task | Backend API transport details beyond passed callbacks/data |
 | `frontend/src/pages/` | Route-level composition for Home, Projects, and project workbenches | Backend persistence policy or duplicate workflow routing contracts |
 | `frontend/src/app/` | Canonical global/project route parsing and path building, route links, and route-level shell/page composition | Backend authorization policy, project persistence, or workflow mutation behavior |
 | `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |

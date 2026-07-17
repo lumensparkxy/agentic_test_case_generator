@@ -1,12 +1,5 @@
 import RouteLink from "./RouteLink";
-import {
-	GLOBAL_DESTINATIONS,
-	PROJECT_DESTINATIONS,
-	PROJECT_NAV_ITEMS,
-	buildGlobalPath,
-	buildProjectPath,
-	getDestinationForStage,
-} from "./workflowRoutes";
+import { GLOBAL_DESTINATIONS, PROJECT_DESTINATIONS, PROJECT_NAV_ITEMS, buildGlobalPath, buildProjectPath } from "./workflowRoutes";
 
 const GLOBAL_PAGE_LABELS = Object.freeze({
 	[GLOBAL_DESTINATIONS.REVIEWS]: "Review Inbox",
@@ -175,10 +168,9 @@ export function ProjectLoadingPage({ projectId = "" }) {
 	);
 }
 
-export function ProjectOverviewPage({ project, status = null, navigate }) {
+export function ProjectOverviewPage({ project, status = null, navigate, contextualTask = null }) {
 	const projectId = project?.project_id || "";
 	const currentStage = status?.current_stage || project?.latest_stage || "requirements";
-	const recommendedDestination = getDestinationForStage(currentStage) || PROJECT_DESTINATIONS.REQUIREMENTS;
 
 	return (
 		<main className="route-page" aria-labelledby="project-overview-title">
@@ -191,13 +183,7 @@ export function ProjectOverviewPage({ project, status = null, navigate }) {
 			</header>
 			{projectId ? (
 				<>
-					<section className="route-page-card" aria-labelledby="project-continue-title">
-						<h2 id="project-continue-title">Continue this project</h2>
-						<p>Open the workbench that matches the project’s current orchestrator stage.</p>
-						<RouteLink className="route-primary-link" to={buildProjectPath(projectId, recommendedDestination)} navigate={navigate}>
-							Continue working
-						</RouteLink>
-					</section>
+					{contextualTask}
 					<ul className="route-workbench-list" aria-label="Project workbenches">
 						{PROJECT_NAV_ITEMS.filter((item) => item.id !== PROJECT_DESTINATIONS.OVERVIEW).map((item) => (
 							<li key={item.id}>

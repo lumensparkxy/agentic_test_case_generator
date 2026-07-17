@@ -287,11 +287,117 @@ function projectDetail({ withAnalysis = false, afterApply = false } = {}) {
 	};
 }
 
+function orchestratorStatus(phase = "stale") {
+	const withAnalysis = phase === "analysis" || phase === "applied";
+	const afterApply = phase === "applied";
+	return {
+		project_id: "project-1",
+		project_revision: afterApply ? 7 : withAnalysis ? 6 : 5,
+		current_stage: afterApply ? "automation" : withAnalysis ? "test_cases" : "impact_analysis",
+		stages: {
+			requirements: {
+				stage: "requirements",
+				status: "completed",
+				current_snapshot_id: "snap-req-v2",
+				version: 2,
+				approved: true,
+				stale: false,
+				summary: {},
+				blockers: [],
+			},
+			use_cases: {
+				stage: "use_cases",
+				status: "stale",
+				current_snapshot_id: "snap-use-v1",
+				version: 1,
+				approved: true,
+				stale: true,
+				summary: {},
+				blockers: [],
+			},
+			impact_analysis: {
+				stage: "impact_analysis",
+				status: withAnalysis ? "completed" : "ready",
+				current_snapshot_id: withAnalysis ? "snap-impact-v1" : null,
+				version: withAnalysis ? 1 : 0,
+				approved: false,
+				stale: false,
+				summary: withAnalysis ? { changed_item_count: 2 } : {},
+				blockers: [],
+			},
+			test_cases: {
+				stage: "test_cases",
+				status: afterApply ? "completed" : withAnalysis ? "ready" : "stale",
+				current_snapshot_id: afterApply ? "snap-test-v2" : "snap-test-v1",
+				version: afterApply ? 2 : 1,
+				approved: true,
+				stale: !afterApply && !withAnalysis,
+				summary: {},
+				blockers: [],
+			},
+		},
+		next_actions: afterApply
+			? [
+					{
+						action: "automate",
+						label: "Preview Automation",
+						stage: "automation",
+						enabled: true,
+						primary: true,
+						secondary: false,
+						reason: "Updated coverage is ready for automation preview.",
+						blockers: [],
+					},
+				]
+			: withAnalysis
+				? [
+						{
+							action: "apply_update",
+							label: "Apply Accepted Updates",
+							stage: "test_cases",
+							enabled: true,
+							primary: true,
+							secondary: false,
+							reason: "Accepted impact recommendations are ready to apply.",
+							blockers: [],
+						},
+					]
+				: [
+						{
+							action: "analyze_impact",
+							label: "Analyze Impact",
+							stage: "impact_analysis",
+							enabled: true,
+							primary: true,
+							secondary: false,
+							reason: "Changed requirements should be reviewed against the current suite.",
+							blockers: [],
+						},
+						{
+							action: "full_regenerate",
+							label: "Full Regenerate",
+							stage: "test_cases",
+							enabled: true,
+							primary: false,
+							secondary: true,
+							reason: "Rebuild the complete suite as an explicit fallback.",
+							blockers: [],
+						},
+					],
+		blockers: [],
+		has_baseline_test_suite: true,
+		upstream_changed: !afterApply,
+		changed_upstream_stages: afterApply ? [] : ["requirements"],
+		generated_at: "2026-06-12T00:00:00Z",
+	};
+}
+
 test.describe("Impact update flow", () => {
 	test("stale existing suite uses impact analysis as the primary path", async ({ page }) => {
 		const projectBefore = projectDetail();
 		const projectWithAnalysis = projectDetail({ withAnalysis: true });
 		const projectAfterApply = projectDetail({ afterApply: true });
+		let orchestratorPhase = "stale";
 
 		await page.route("**/auth/me", async (route) =>
 			jsonResponse(route, {
@@ -318,8 +424,20 @@ test.describe("Impact update flow", () => {
 			}
 			return jsonResponse(route, { connected: false, connection: null });
 		});
-		await page.route("**/projects/project-1/impact-analysis", async (route) => jsonResponse(route, projectWithAnalysis));
-		await page.route("**/projects/project-1/impact-update/apply", async (route) => jsonResponse(route, projectAfterApply));
+		await page.route("**/projects/project-1/orchestrator/status", async (route) =>
+			jsonResponse(route, orchestratorStatus(orchestratorPhase))
+		);
+		await page.route("**/projects/project-1/orchestrator/runs", async (route) =>
+			jsonResponse(route, { runs: [], events: [], checkpoints: [] })
+		);
+		await page.route("**/projects/project-1/impact-analysis", async (route) => {
+			orchestratorPhase = "analysis";
+			return jsonResponse(route, projectWithAnalysis);
+		});
+		await page.route("**/projects/project-1/impact-update/apply", async (route) => {
+			orchestratorPhase = "applied";
+			return jsonResponse(route, projectAfterApply);
+		});
 		await page.route("**/projects/project-1", async (route) => jsonResponse(route, projectBefore));
 		await page.route("**/projects**", async (route) => {
 			const url = new URL(route.request().url());
@@ -358,19 +476,21 @@ test.describe("Impact update flow", () => {
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Impact QA");
 		await expect(page.getByLabel("Project information rail").getByText(/Impact QA · revision 5/)).toBeVisible();
+		await page
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Test Cases,/i })
+			.click();
 
 		await page.reload();
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByLabel("Project information rail").getByText(/Impact QA · revision 5/)).toBeVisible();
 
-		await page
-			.getByRole("navigation", { name: "Workflow navigation" })
-			.getByRole("button", { name: /^Generate,/i })
-			.click();
-		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toBeVisible();
-		await expect(page.getByRole("button", { name: /Full Regenerate from 10 Approved/i })).toBeVisible();
+		const task = page.getByLabel("Contextual task");
+		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
+		await expect(page.getByRole("button", { name: /Full Regenerate from 10 Approved/i })).toHaveCount(0);
 
-		await page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i }).click();
+		await task.getByRole("button", { name: /^Start analysis$/i }).click();
 		await expect(page.getByRole("heading", { name: /^Impact Analysis$/i })).toBeVisible();
 		await expect(page.getByText("REQ-003 modified")).toBeVisible();
 		await expect(page.getByText("Update TC-010")).toBeVisible();
@@ -379,6 +499,6 @@ test.describe("Impact update flow", () => {
 		await page.getByRole("button", { name: /Apply 3 Accepted Recommendations/i }).click();
 		await expect(page.getByText(/Impact update applied: 1 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
 		await expect(page.getByText(/3 test cases/i)).toBeVisible();
-		await expect(page.getByRole("button", { name: /Analyze Impact for 2 Changed Items/i })).toHaveCount(0);
+		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toHaveCount(0);
 	});
 });

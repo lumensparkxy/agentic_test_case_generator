@@ -20,6 +20,7 @@ import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixP
 import BillingBanner from "./components/layout/BillingBanner";
 import ProjectInformationRail from "./components/projects/ProjectInformationRail";
 import OrchestratorCockpitPanel from "./components/projects/OrchestratorCockpitPanel";
+import { selectContextualTask } from "./components/projects/contextualTask";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
@@ -45,6 +46,7 @@ import ReviewsPage from "./pages/ReviewsPage";
 import UseCaseReviewPage from "./pages/UseCaseReviewPage";
 import {
 	GLOBAL_DESTINATIONS,
+	PROJECT_DESTINATIONS,
 	buildProjectPath,
 	getDestinationForLegacyTab,
 	getLegacyTabForDestination,
@@ -228,6 +230,7 @@ export default function App() {
 	const projectListRequestRef = useRef(0);
 	const projectOperationScopeRef = useRef({ projectId: "", userId: "", generation: 0 });
 	const projectOperationUserRef = useRef("");
+	const workflowMainRef = useRef(null);
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
 	const { isWorkflowNavCollapsed, isProjectRailCollapsed, toggleWorkflowNavCollapsed, toggleProjectRailCollapsed } =
@@ -2967,27 +2970,27 @@ export default function App() {
 		}
 	};
 
-	const generateTestCases = async (withFeedback = false) => {
+	const generateTestCases = async (withFeedback = false, { fullRegeneration = false } = {}) => {
 		if (testCaseWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Test-case workflows are locked. Contact ${contactEmail} to upgrade.`);
-			return;
+			return false;
 		}
 		if (!canGenerateFromApprovedRequirements) {
 			setStatus("Approve at least one requirement before generating test cases.");
-			return;
+			return false;
 		}
 		const requirementsForGeneration = approvedRequirements;
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
 			setStatus("Open a QA project before generating test cases.");
-			return;
+			return false;
 		}
 		setIsGenerating(true);
 		setStatus(
 			withFeedback
 				? "Refining test cases with approved requirements..."
-				: `Generating test cases from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}...`
+				: `${fullRegeneration ? "Regenerating the full suite" : "Generating test cases"} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}...`
 		);
 		try {
 			const requestId = createRequestId();
@@ -3057,7 +3060,7 @@ export default function App() {
 			}
 			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) {
-				return;
+				return false;
 			}
 			setTestCases(data.test_cases || []);
 			setRequirementAnalysis(data.requirement_analysis || []);
@@ -3078,25 +3081,27 @@ export default function App() {
 			if (generatedCount > 0) {
 				await refreshCurrentProject({ hydrate: false, operationScope });
 				if (!isProjectOperationCurrent(operationScope)) {
-					return;
+					return false;
 				}
 				await previewExecution(data.test_cases || [], { updateStatus: false, persistProject: false, operationScope });
 				if (!isProjectOperationCurrent(operationScope)) {
-					return;
+					return false;
 				}
 			}
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (!isProjectOperationCurrent(operationScope)) {
-				return;
+				return false;
 			}
 			setStatus(
-				`${withFeedback ? "Test cases refined" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
+				`${withFeedback ? "Test cases refined" : fullRegeneration ? "Regenerated" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
 			);
 			if (withFeedback) setFeedback("");
+			return true;
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Generation failed: ${error.message}`);
 			}
+			return false;
 		} finally {
 			if (isProjectOperationCurrent(operationScope)) {
 				setIsGenerating(false);
@@ -3229,50 +3234,62 @@ export default function App() {
 		if (!recommendation?.enabled) {
 			const blockerMessage = recommendation?.blockers?.[0]?.message || "This orchestrator action is blocked.";
 			setStatus(blockerMessage);
-			return;
+			return false;
 		}
 		const destination = resolveOrchestratorDestination(recommendation);
-		if (destination) {
-			setActiveTab(getLegacyTabForDestination(destination));
-		}
 		if (currentProjectId && destination) {
 			navigate(buildProjectPath(currentProjectId, destination));
 		}
 
 		if (action === "analyze_impact") {
 			await analyzeImpact();
-			return;
+			return true;
 		}
 		if (action === "apply_update") {
 			await applyImpactUpdate();
-			return;
+			return true;
 		}
-		if (action === "generate" || action === "full_regenerate") {
-			await generateTestCases(false);
-			return;
+		if (action === "generate") {
+			return generateTestCases(false);
+		}
+		if (action === "full_regenerate") {
+			return generateTestCases(false, { fullRegeneration: true });
 		}
 		if (action === "automate") {
 			await previewExecution();
-			return;
+			return true;
 		}
 		if (action === "execute") {
 			await runApprovedExecution();
-			return;
+			return true;
 		}
 		if (action === "report") {
 			setStatus("Review report and export options.");
-			return;
+			return true;
 		}
 		if (action === "refine" || action === "approve") {
 			setStatus(recommendation.reason || "Review and approve the required stage before continuing.");
-			return;
+			return true;
 		}
 		if (action === "review") {
 			setStatus(recommendation.reason || "Review the current test-case evidence.");
-			return;
+			return true;
 		}
 
 		setStatus(recommendation?.reason || "Open the relevant workflow tab to continue.");
+		return Boolean(destination);
+	};
+
+	const openOrchestratorWorkbench = async (recommendation) => {
+		if (!recommendation?.enabled || !currentProjectId) {
+			return false;
+		}
+		const destination = resolveOrchestratorDestination(recommendation);
+		if (!destination) {
+			return false;
+		}
+		navigate(buildProjectPath(currentProjectId, destination));
+		return true;
 	};
 
 	const orchestratorActionBusy = {
@@ -3282,6 +3299,12 @@ export default function App() {
 		full_regenerate: isGenerating,
 		automate: isPreviewingExecution,
 		execute: isRunningExecution,
+	};
+	const orchestratorActionDisabled = {
+		generate: testCaseActionDisabled,
+		full_regenerate: testCaseActionDisabled,
+		analyze_impact: testCaseActionDisabled,
+		apply_update: testCaseActionDisabled,
 	};
 	const exportReviewApproved = Boolean(testCaseReview?.approved);
 	const exportRequiresOverride = Boolean(testCases.length > 0 && testCaseReview && !testCaseReview.approved);
@@ -3670,6 +3693,11 @@ export default function App() {
 	const goNext = () => selectWorkflowTab(Math.min(activeTab + 1, 5));
 	const goPrev = () => selectWorkflowTab(Math.max(activeTab - 1, 0));
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
+	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
+		destination: PROJECT_DESTINATIONS.TEST_CASES,
+	}).primaryAction;
+	const hasOrchestratorRecommendations = Boolean(Array.isArray(orchestratorStatus?.next_actions) && orchestratorStatus.next_actions.length);
+	const allowLegacyTestCaseMutations = !hasOrchestratorRecommendations;
 	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
 	const workflowShellClassName = [
 		"workflow-shell",
@@ -3852,7 +3880,25 @@ export default function App() {
 						/>
 
 						{route.destination === "overview" ? (
-							<ProjectOverviewPage project={currentProject} status={orchestratorStatus} navigate={navigate} />
+							<ProjectOverviewPage
+								project={currentProject}
+								status={orchestratorStatus}
+								navigate={navigate}
+								contextualTask={
+									<OrchestratorCockpitPanel
+										currentProject={currentProject}
+										status={orchestratorStatus}
+										currentDestination={PROJECT_DESTINATIONS.OVERVIEW}
+										isOverview
+										isLoading={isLoadingOrchestrator}
+										error={orchestratorError}
+										authActionDisabled={authActionDisabled}
+										actionBusy={orchestratorActionBusy}
+										actionDisabled={orchestratorActionDisabled}
+										onAction={openOrchestratorWorkbench}
+									/>
+								}
+							/>
 						) : route.destination === "use-cases" ? (
 							<UseCaseReviewPage
 								project={currentProject}
@@ -3863,7 +3909,7 @@ export default function App() {
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
 							/>
 						) : (
-							<main className="workflow-main" aria-label="Workflow workspace">
+							<main ref={workflowMainRef} className="workflow-main" aria-label="Workflow workspace" tabIndex={-1}>
 								{route.destination === "test-cases" ? (
 									<div className="test-cases-section-tabs" role="tablist" aria-label="Test Cases sections">
 										<button type="button" role="tab" aria-selected={activeTab === 2} onClick={() => selectWorkflowTab(2)}>
@@ -3877,10 +3923,14 @@ export default function App() {
 								<OrchestratorCockpitPanel
 									currentProject={currentProject}
 									status={orchestratorStatus}
+									currentDestination={route.destination}
+									hidden={route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2}
 									isLoading={isLoadingOrchestrator}
 									error={orchestratorError}
 									authActionDisabled={authActionDisabled}
 									actionBusy={orchestratorActionBusy}
+									actionDisabled={orchestratorActionDisabled}
+									focusFallbackRef={workflowMainRef}
 									onAction={handleOrchestratorAction}
 								/>
 
@@ -4579,9 +4629,11 @@ export default function App() {
 													)}
 												</div>
 											)}
-											<div className="panel-form button-row">
-												{upstreamChangedForImpact ? (
-													<>
+											{!contextualTestCaseTask &&
+											allowLegacyTestCaseMutations &&
+											(!hasExistingTestCaseBaseline || upstreamChangedForImpact) ? (
+												<div className="panel-form button-row">
+													{upstreamChangedForImpact ? (
 														<button onClick={analyzeImpact} disabled={!canAnalyzeImpact || isAnalyzingImpact || testCaseActionDisabled}>
 															{isAnalyzingImpact
 																? "⏳ Analyzing impact..."
@@ -4589,23 +4641,16 @@ export default function App() {
 																	? `Analyze Impact for ${impactChangedItemCount} Changed Item${impactChangedItemCount === 1 ? "" : "s"}`
 																	: "Analyze Impact for Changed Items"}
 														</button>
+													) : (
 														<button
-															className="secondary"
 															onClick={() => generateTestCases(false)}
 															disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
 														>
-															{isGenerating ? "⏳ Regenerating..." : `Full Regenerate from ${approvedRequirementCount || 0} Approved`}
+															{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
 														</button>
-													</>
-												) : (
-													<button
-														onClick={() => generateTestCases(false)}
-														disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
-													>
-														{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
-													</button>
-												)}
-											</div>
+													)}
+												</div>
+											) : null}
 
 											{renderImpactAnalysisPanel()}
 
@@ -4727,6 +4772,7 @@ export default function App() {
 																onRefineTestCases={() => generateTestCases(true)}
 																isGenerating={isGenerating}
 																testCaseActionDisabled={testCaseActionDisabled}
+																allowRefinement={allowLegacyTestCaseMutations}
 															/>
 														)}
 													</div>

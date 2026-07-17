@@ -216,10 +216,8 @@
 	.coverage-plan-header,
 	.workflow-settings-header,
 	.workflow-diagnostics-header,
-	.orchestrator-cockpit-header,
 	.project-rail-header,
 	.project-rail-section-header,
-	.next-action-panel,
 	.orchestrator-timeline-header,
 	.jira-card-header,
 	.jira-sync-preview-header,
@@ -254,7 +252,6 @@
 		grid-template-columns: 1fr;
 	}
 
-	.orchestrator-command-grid,
 	.orchestrator-summary-grid,
 	.project-history-grid {
 		grid-template-columns: 1fr;
@@ -286,15 +283,29 @@
 		width: 100%;
 	}
 
-	.orchestrator-cockpit-actions,
-	.orchestrator-action-grid,
 	.orchestrator-summary-grid {
 		grid-template-columns: 1fr;
 		width: 100%;
 	}
 
-	.orchestrator-cockpit-actions {
-		justify-content: flex-start;
+	.contextual-task-card {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.contextual-task-controls {
+		align-items: flex-start;
+		justify-content: space-between;
+		width: 100%;
+	}
+
+	.contextual-task-controls > button {
+		min-width: 0;
+	}
+
+	.contextual-task-details-body {
+		right: auto;
+		left: 0;
 	}
 
 	.orchestrator-stage-rail {
@@ -324,6 +335,17 @@
 }
 
 @media (max-width: 520px) {
+	.contextual-task-controls,
+	.contextual-task-dialog-actions {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.contextual-task-controls > button,
+	.contextual-task-dialog-actions button {
+		width: 100%;
+	}
+
 	.workflow-navigation-list {
 		grid-template-columns: 1fr;
 	}

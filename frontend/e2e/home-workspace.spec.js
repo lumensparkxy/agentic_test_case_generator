@@ -211,7 +211,7 @@ async function expectProjectLink(region, projectName, expectedPath) {
 async function expectNoProjectShell(page) {
 	await expect(page.getByRole("navigation", { name: "Project navigation" })).toHaveCount(0);
 	await expect(page.getByLabel("Project information rail")).toHaveCount(0);
-	await expect(page.getByLabel("Orchestrator Cockpit")).toHaveCount(0);
+	await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 }
 
 async function expectWithinInitialViewport(locator, viewportHeight) {
