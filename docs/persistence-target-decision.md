@@ -85,6 +85,7 @@ PostgreSQL transaction isolation behavior.
 | Billing repository | `backend/app/services/billing_repository.py`, `backend/app/services/firestore_repository.py` | `user_profiles`, `billing_accounts`, `billing_wallet_ledger`, `billing_allocations`, `billing_consumption` |
 | Reporting | `backend/app/services/reporting_service.py`, `backend/app/services/usage_event_repository.py` | streamed `usage_events` grouped by user, organization, and event type |
 | Artifact versioning | `backend/app/services/versioning_service.py`, `backend/app/services/firestore_repository.py` | `requirements_sets`, `test_case_sets`, item subcollections, version subcollections |
+| QA project review decisions | `backend/app/services/use_case_review_service.py`, `backend/app/services/workflow_project_service.py`, `backend/app/services/firestore_repository.py` | immutable Use Cases snapshots, project stage approval metadata, `use_case_reviews` provenance records, and project `timeline` events |
 | JIRA connections and mappings | `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py`, `backend/app/services/firestore_repository.py` | encrypted connection records and requirement sync mappings |
 | Azure DevOps connections and mappings | `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py`, `backend/app/services/firestore_repository.py` | encrypted connection records and work item sync mappings |
 | API contracts and data models | `backend/app/models.py` | `AuthUser`, billing models, usage report models, requirement/test-case artifact metadata |
@@ -113,6 +114,19 @@ cross-user project or execution records from entering the response. Missing
 indexes surface as a safe HTTP 503 so operators see a configuration failure
 instead of receiving a partial or misleading workspace.
 
+### Use Cases review transaction
+
+`POST /projects/{project_id}/use-cases/reviews` treats the generated Use Cases
+snapshot as immutable evidence. A Firestore transaction reads the owned project,
+deterministic review identity, and exact current snapshot before writing the
+review record, updated project stage/revision, and deterministic timeline event.
+The transaction function is retry-safe: the stable request identity resolves
+to the existing equivalent decision, while a changed payload, stale snapshot,
+or stale base revision returns HTTP 409 without a partial write. Approval-only
+updates do not mark downstream artifacts stale because no generated content
+changed. A future PostgreSQL adapter must preserve the same uniqueness,
+optimistic-concurrency, atomicity, ownership, and immutable-snapshot guarantees.
+
 ## Required Guarantees
 
 | Domain | Required guarantee | Decision impact |
@@ -121,6 +135,7 @@ instead of receiving a partial or misleading workspace.
 | Workflow audit | Start/complete records and usage events linked by request ID, workflow run ID, actor, trace ID, status, and operation | Repository contract must preserve existing audit payload fields and local dead-letter behavior |
 | Reporting | Query by user, organization, event type, status, and time window without streaming all events in process | PostgreSQL target read model or rollups; current Firestore reporting remains compatibility behavior |
 | Versioned artifacts | Immutable versions linked to source event and previous version where available | PostgreSQL target schema should model sets, items, versions, source events, and content hashes |
+| Human review decisions | Immutable decision provenance keyed by request identity, optimistic project revision checks, and atomic decision/stage/timeline writes without changing reviewed snapshots | PostgreSQL target schema and transitional Firestore implementation must preserve reviewer, snapshot, comment, request, revision, and timeline evidence |
 | Integration metadata | Per-user encrypted connection records and provider sync mappings | Can remain Firestore-backed until audit/billing/reporting migration proves the boundary pattern |
 | Local/E2E tests | No real Firebase or database dependency for default local validation | Keep fake/patchable repositories and preserve deterministic test behavior |
 

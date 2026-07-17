@@ -123,8 +123,21 @@ def _review_blockers(project: QaProjectDetail) -> list[OrchestratorBlocker]:
         blocking_issues = [str(item) for item in review.get("blocking_issues") or []]
         unmet_criteria = [str(item) for item in review.get("unmet_criteria") or []]
         review_approved = review.get("approved")
-        if (review_approved is False or blocking_issues or unmet_criteria) and state and not state.stale:
-            detail = "; ".join([*blocking_issues, *unmet_criteria]) or f"{stage.replace('_', ' ').title()} review is unresolved."
+        latest_human_review = state.metadata.get("latest_human_review") if state else None
+        if not isinstance(latest_human_review, dict):
+            latest_human_review = {}
+        latest_human_decision = str(latest_human_review.get("decision") or "")
+        latest_human_comment = str(latest_human_review.get("comment") or "")
+        human_review_matches = bool(stage == "use_cases" and state and latest_human_review.get("snapshot_id") == state.current_snapshot_id)
+        human_approved = bool(human_review_matches and state and state.approved and latest_human_decision == "approve")
+        human_changes_requested = human_review_matches and latest_human_decision == "request_changes"
+        machine_review_unresolved = review_approved is False or blocking_issues or unmet_criteria
+        if (human_changes_requested or (machine_review_unresolved and not human_approved)) and state and not state.stale:
+            detail = (
+                latest_human_comment
+                if human_changes_requested and latest_human_comment
+                else "; ".join([*blocking_issues, *unmet_criteria]) or f"{stage.replace('_', ' ').title()} review is unresolved."
+            )
             blockers.append(
                 _blocker(
                     "unresolved_review",
@@ -505,12 +518,22 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         return actions
 
     if not use_cases_state.approved or use_cases_state.stale:
+        latest_human_review = use_cases_state.metadata.get("latest_human_review")
+        latest_review_comment = (
+            str(latest_human_review.get("comment") or "").strip()
+            if isinstance(latest_human_review, dict) and latest_human_review.get("decision") == "request_changes"
+            else ""
+        )
         actions.append(
             _action(
                 "approve",
                 "Approve Use Cases",
                 "use_cases",
-                reason="Use cases must be approved before a test-suite update or export.",
+                reason=(
+                    f"Changes were requested: {latest_review_comment}"
+                    if latest_review_comment
+                    else "Use cases must be approved before a test-suite update or export."
+                ),
                 primary=True,
             )
         )

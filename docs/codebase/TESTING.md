@@ -80,6 +80,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Test-case generation coordinator | Yes | Reuse of approved use-case artifacts, safe-size threshold routing, duplicate global ID remap, traceability repair, failed-shard fallback, and endpoint billing/versioning boundaries | `backend/tests/test_parallel_test_case_generation.py`, `backend/tests/test_config.py`, and `backend/tests/test_main_audit_logging.py` use synthetic fixtures and patched model workers |
 | Automation fragment coordinator | Yes | Component/page grouping, all-case representation past old caps, manual/unsupported diagnostics, duplicate fragment/symbol handling, failed-shard fallback, and endpoint billing boundaries | `backend/tests/test_automation_agent.py`, `backend/tests/test_config.py`, and `backend/tests/test_automation_endpoint.py` use synthetic fixtures and patched automation workers |
 | Orchestrator decisions | Yes | Stage health, approval blockers, stale downstream state, impact-analysis priority, apply-update blockers, execution/review/report actions | `backend/tests/test_orchestrator_service.py` uses fake Firestore project snapshots and `TestClient` |
+| Use Cases review decisions | Yes | Approval and requested-change transitions, required comments, ownership, reviewer/timeline provenance, stale snapshot and revision conflicts, idempotent retries, snapshot immutability, downstream-staleness regression, and recomputed orchestrator actions | `backend/tests/test_use_case_review_service.py` uses transaction-aware fake Firestore documents plus endpoint/service patches and verifies decision-derived blockers and actions |
 | Orchestrator run persistence | Yes | Run creation/resume, idempotent events, checkpoint history, blockers, completion links, timeline endpoint payloads | `backend/tests/test_orchestrator_run_service.py` uses fake Firestore subcollections and `TestClient` |
 | Offline orchestrator lifecycle benchmarks | Yes | v1 first-generation routing, v2 two-requirement impact precision, unchanged-test preservation versus full regeneration, resumability, and governance gates | `scripts/evaluate_orchestrator.py`, `backend/tests/test_orchestrator_evaluation.py`, `scripts/benchmark_orchestrator_*` |
 | Frontend orchestrator cockpit | Yes | First-time project actions, resumed stale-impact action priority, collapsible right rail status overview, blockers, run/checkpoint timeline output, project evidence, last run, and reload restore | `frontend/e2e/orchestrator-cockpit.spec.js` uses mocked project, status, run, event, and checkpoint payloads |
@@ -109,6 +110,10 @@ Evidence: `.github/workflows/ci.yml`.
 - Orchestrator run persistence tests use project-scoped fake Firestore
   subcollections and request IDs/idempotency keys to prove retries do not create
   duplicate runs, events, snapshots, execution records, or checkpoints.
+- Use Cases review tests exercise one transaction across the owned project,
+  immutable snapshot, durable review decision, and project timeline event. They
+  prove stale optimistic-concurrency guards write nothing and an identical
+  request ID does not increment the revision or duplicate evidence.
 - Multi-environment execution tests use named synthetic environments and
   source snapshot IDs to prove reruns preserve environment-specific history and
   failed executions become review signals without mutating upstream snapshots.

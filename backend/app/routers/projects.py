@@ -16,10 +16,13 @@ from ..models import (
     QaProjectTimelineEvent,
     QaProjectUpdateInput,
     QaProjectUseCaseSnapshotInput,
+    UseCaseReviewRequest,
+    UseCaseReviewResponse,
 )
 from ..services.impact_update_service import analyze_project_impact, apply_project_impact_update, impact_error_to_http
 from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
+from ..services.use_case_review_service import review_use_case_snapshot, use_case_review_error_to_http
 from ..services.workflow_project_service import (
     append_stage_snapshot,
     create_project,
@@ -209,3 +212,28 @@ async def save_qa_project_use_cases(
         return await run_in_threadpool(get_project, project_id, actor=current_user)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/use-cases/reviews",
+    response_model=UseCaseReviewResponse,
+)
+async def review_qa_project_use_cases(
+    project_id: str,
+    request: Request,
+    payload: UseCaseReviewRequest,
+    current_user: AuthUser = Depends(get_current_user),
+) -> UseCaseReviewResponse:
+    try:
+        return await run_in_threadpool(
+            review_use_case_snapshot,
+            project_id=project_id,
+            snapshot_id=payload.snapshot_id,
+            base_project_revision=payload.base_project_revision,
+            decision=payload.decision,
+            comment=payload.comment,
+            actor=current_user,
+            request_id=_get_request_id(request),
+        )
+    except Exception as exc:
+        raise use_case_review_error_to_http(exc) from exc

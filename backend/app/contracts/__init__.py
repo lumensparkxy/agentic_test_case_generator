@@ -14,6 +14,7 @@ from .automation import *
 from .reporting import *
 from .billing import *
 from .workspace import *
+from .use_case_reviews import *
 
 __all__ = [
     "Requirement",
@@ -172,4 +173,8 @@ __all__ = [
     "WorkspaceRunSummary",
     "WorkspaceReportSummary",
     "WorkspaceSummaryResponse",
+    "UseCaseReviewDecision",
+    "UseCaseReviewRequest",
+    "UseCaseReviewRecord",
+    "UseCaseReviewResponse",
 ]
