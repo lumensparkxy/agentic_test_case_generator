@@ -6,8 +6,15 @@ import { formatWorkspaceStatus, getProjectPath, getWorkspaceStatusTone } from ".
 const isPlainPrimaryClick = (event) =>
 	!event.defaultPrevented && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
-export function WorkspaceSearch({ value, onChange, label = "Search workspace", placeholder = "Search projects and work" }) {
-	const inputRef = useRef(null);
+export function WorkspaceSearch({
+	value,
+	onChange,
+	label = "Search workspace",
+	placeholder = "Search projects and work",
+	inputRef: providedInputRef,
+}) {
+	const internalInputRef = useRef(null);
+	const inputRef = providedInputRef || internalInputRef;
 
 	useEffect(() => {
 		const focusSearch = (event) => {

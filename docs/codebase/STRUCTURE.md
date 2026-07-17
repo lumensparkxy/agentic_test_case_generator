@@ -22,7 +22,7 @@ should preserve when changing the application.
 | `backend/tests/` | Backend unit and integration-style tests using `unittest` and local fakes/patches | `backend/tests/test_*.py` |
 | `frontend/` | React/Vite web application, E2E specs, frontend Dockerfile, Nginx config | `frontend/src/main.jsx`, `frontend/package.json`, `frontend/Dockerfile` |
 | `frontend/src/app/` | Pure route contracts plus global/project shell, navigation, loading, placeholder, and recovery components | `frontend/src/app/workflowRoutes.js`, `frontend/src/app/GlobalAppShell.jsx`, `frontend/src/app/RoutePages.jsx` |
-| `frontend/src/pages/` | Route-level authenticated workspace experiences composed from feature components | `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/ProjectsPage.jsx`, `frontend/src/pages/ReviewsPage.jsx`, `frontend/src/pages/UseCaseReviewPage.jsx` |
+| `frontend/src/pages/` | Route-level authenticated workspace experiences composed from feature components | `frontend/src/pages/HomePage.jsx`, `frontend/src/pages/ProjectsPage.jsx`, `frontend/src/pages/ReviewsPage.jsx`, `frontend/src/pages/RunsPage.jsx`, `frontend/src/pages/ReportsPage.jsx`, `frontend/src/pages/UseCaseReviewPage.jsx` |
 | `frontend/src/components/` | Focused UI components grouped by feature or layout | `frontend/src/components/**` |
 | `frontend/src/api/` | Generated frontend API contract declarations and endpoint constants | `frontend/src/api/generated/api-contracts.d.ts`, `frontend/src/api/generated/api-contracts.js` |
 | `frontend/src/services/` | Frontend API helper functions, bounded read-model clients, and review-decision transports | `frontend/src/services/apiClient.js`, `frontend/src/services/workspaceSummaryClient.js`, `frontend/src/services/useCaseReviewClient.js` |
@@ -44,11 +44,16 @@ should preserve when changing the application.
 - Frontend orchestration component: `frontend/src/App.jsx`.
 - Authenticated workspace pages: `frontend/src/pages/HomePage.jsx`,
   `frontend/src/pages/ProjectsPage.jsx`,
-  `frontend/src/pages/ReviewsPage.jsx`, and
+  `frontend/src/pages/ReviewsPage.jsx`,
+  `frontend/src/pages/RunsPage.jsx`,
+  `frontend/src/pages/ReportsPage.jsx`, and
   `frontend/src/pages/UseCaseReviewPage.jsx`.
 - Global Review Inbox projection:
   `frontend/src/components/reviews/ReviewInbox.jsx` and
   `frontend/src/styles/review-inbox.css`.
+- Global read-only activity indexes:
+  `frontend/src/components/workspace/ActivityIndex.jsx` and
+  `frontend/src/styles/activity-index.css`.
 - Use Cases review state and decision transport:
   `frontend/src/hooks/useUseCaseReview.js` and
   `frontend/src/services/useCaseReviewClient.js`.
@@ -99,8 +104,8 @@ exposes `/metrics`.
 | `backend/app/auth/` | Bearer token resolution, Firebase verification, Google credential verification, role normalization | Business workflow behavior |
 | `backend/app/observability/` | Logging context, metric counters, optional OpenTelemetry wiring | Endpoint business logic |
 | `backend/plain_english_test_framework/` | Structured-English spec to schema-valid IR to Playwright generation | API billing, user auth, remote artifact fetching |
-| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace, information rail, route-scoped contextual task, and pure feature helpers such as Automation preview normalization | Backend persistence policy or direct transport side effects hidden inside presentation components |
-| `frontend/src/pages/` | Route-level composition for Home, Projects, and project workbenches | Backend persistence policy or duplicate workflow routing contracts |
+| `frontend/src/components/` | Presentational and workflow UI components receiving props, including the project workspace, information rail, route-scoped contextual task, read-only activity indexes, and pure feature helpers such as Automation preview normalization | Backend persistence policy or direct transport side effects hidden inside presentation components |
+| `frontend/src/pages/` | Route-level composition for global Home, Projects, Reviews, Runs, Reports, and project workbenches | Backend persistence policy or duplicate workflow routing contracts |
 | `frontend/src/app/` | Canonical global/project route parsing and path building, route links, and route-level shell/page composition | Backend authorization policy, project persistence, or workflow mutation behavior |
 | `frontend/src/api/` | Generated API contract declarations and high-traffic endpoint constants derived from FastAPI OpenAPI | Hand-written API behavior or generated files edited manually |
 | `frontend/src/styles/` | Design tokens, base styles, layout styles, and selectors grouped by feature ownership | React state, API calls, or unrelated visual redesigns |

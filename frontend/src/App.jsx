@@ -47,7 +47,9 @@ import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
 import useWorkspaceSummary from "./hooks/useWorkspaceSummary";
 import HomePage from "./pages/HomePage";
 import ProjectsPage from "./pages/ProjectsPage";
+import ReportsPage from "./pages/ReportsPage";
 import ReviewsPage from "./pages/ReviewsPage";
+import RunsPage from "./pages/RunsPage";
 import UseCaseReviewPage from "./pages/UseCaseReviewPage";
 import {
 	GLOBAL_DESTINATIONS,
@@ -1352,7 +1354,13 @@ export default function App() {
 		const enteredWorkspaceFromProject =
 			previousRoute.kind === "project" &&
 			route.kind === "global" &&
-			[GLOBAL_DESTINATIONS.HOME, GLOBAL_DESTINATIONS.PROJECTS, GLOBAL_DESTINATIONS.REVIEWS].includes(route.destination);
+			[
+				GLOBAL_DESTINATIONS.HOME,
+				GLOBAL_DESTINATIONS.PROJECTS,
+				GLOBAL_DESTINATIONS.REVIEWS,
+				GLOBAL_DESTINATIONS.RUNS,
+				GLOBAL_DESTINATIONS.REPORTS,
+			].includes(route.destination);
 		if (enteredWorkspaceFromProject && isAuthenticated && !isVerifyingSession) {
 			void refreshWorkspaceSummary();
 		}
@@ -3951,6 +3959,26 @@ export default function App() {
 						/>
 					) : route.destination === "reviews" ? (
 						<ReviewsPage
+							summary={workspaceSummary}
+							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
+							isRefreshing={isWorkspaceSummaryRefreshing}
+							error={isAuthenticated ? workspaceSummaryError : ""}
+							onRetry={retryWorkspaceSummary}
+							onRefresh={refreshWorkspaceSummary}
+							onOpenProject={openWorkspaceProject}
+						/>
+					) : route.destination === "runs" ? (
+						<RunsPage
+							summary={workspaceSummary}
+							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
+							isRefreshing={isWorkspaceSummaryRefreshing}
+							error={isAuthenticated ? workspaceSummaryError : ""}
+							onRetry={retryWorkspaceSummary}
+							onRefresh={refreshWorkspaceSummary}
+							onOpenProject={openWorkspaceProject}
+						/>
+					) : route.destination === "reports" ? (
+						<ReportsPage
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}

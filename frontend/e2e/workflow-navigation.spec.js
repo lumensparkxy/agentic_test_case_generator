@@ -336,7 +336,7 @@ test.describe("Route-driven application shell", () => {
 		expect(api.detailProjectIds).toEqual([]);
 	});
 
-	test("renders global destinations without exposing unavailable pages as active navigation", async ({ page }) => {
+	test("renders every global destination with one active navigation item", async ({ page }) => {
 		await installRouteShellApi(page);
 		await seedAuthenticatedSession(page);
 
@@ -344,8 +344,8 @@ test.describe("Route-driven application shell", () => {
 			{ path: "/", heading: "Home", active: "Home" },
 			{ path: "/projects", heading: "Projects", active: "Projects" },
 			{ path: "/reviews", heading: "Review Inbox", active: "Reviews" },
-			{ path: "/runs", heading: "Runs", active: null },
-			{ path: "/reports", heading: "Reports", active: null },
+			{ path: "/runs", heading: "Runs", active: "Runs" },
+			{ path: "/reports", heading: "Reports", active: "Reports" },
 		];
 
 		for (const destination of destinations) {
@@ -355,14 +355,7 @@ test.describe("Route-driven application shell", () => {
 				timeout: 30_000,
 			});
 			const globalNavigation = page.getByRole("navigation", { name: "Global navigation" });
-			if (destination.active) {
-				await expectSingleCurrent(globalNavigation, destination.active);
-			} else {
-				await expect(globalNavigation.locator('[aria-current="page"]')).toHaveCount(0);
-				const main = page.getByRole("main");
-				await expect(main.getByRole("link", { name: /home/i })).toBeVisible();
-				await expect(main.getByRole("link", { name: /projects/i })).toBeVisible();
-			}
+			await expectSingleCurrent(globalNavigation, destination.active);
 			await expect(page.getByRole("navigation", { name: "Project navigation" })).toHaveCount(0);
 		}
 	});
