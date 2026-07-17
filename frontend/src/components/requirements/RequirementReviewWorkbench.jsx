@@ -55,7 +55,7 @@ export default function RequirementReviewWorkbench({
 									{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}
 								</span>
 							</div>
-							<div className="requirement-table-wrapper">
+							<div className="requirement-table-wrapper" role="region" aria-label={`${group.label} requirements table`} tabIndex={0}>
 								<table className="requirement-review-table">
 									<thead>
 										<tr>

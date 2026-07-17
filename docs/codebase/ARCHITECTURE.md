@@ -378,6 +378,35 @@ collapse the left navigation toward the left edge and the right rail toward the
 right edge, preserving the same tab and orchestrator data contracts while
 changing only presentation density.
 
+`frontend/src/components/workflow/StatusBadge.jsx` is the shared visual and
+semantic state primitive for project and workflow status. It normalizes active,
+complete, pending, blocked, attention, running, and failed variants into an icon
+plus text token, so state does not depend on color alone. A collapsed desktop
+rail uses the compact icon treatment while retaining a complete accessible
+name; ordinary status and navigation labels use bounded ellipsis rather than
+arbitrary mid-word breaking. The route-current project destination alone owns
+the active treatment and `aria-current="page"`; completion, blockers, and
+attention remain secondary state metadata.
+
+The responsive shell separates durable desktop density preferences from
+temporary compact disclosure state. At 900 CSS pixels and below,
+`useWorkflowShellLayoutState.js` starts project navigation closed without
+overwriting the stored desktop collapse preference. `GlobalAppShell.jsx` and
+`WorkflowNavigationDrawer.jsx` expose named native-button disclosures, close on
+route selection or Escape, and restore focus to their trigger after an Escape
+close. This puts the route heading and contextual CTA before a full navigation
+stack at mobile and tablet sizes. The project information rail moves below the
+center workspace through 1727px, with the three-column shell beginning at
+1728px; this transition preserves at least the usable center width established
+at 1280px instead of making the 1440px workspace narrower.
+
+Document-level horizontal scrolling is not a responsive escape hatch. Layout
+and ordinary labels must reflow inside the viewport. Intrinsically
+two-dimensional requirements, generated-case, traceability, automation,
+execution, change-impact, JIRA, and Azure DevOps tables may scroll within their
+own focusable `role="region"` containers, each with an accessible label. Result
+tabs wrap rather than creating another horizontal scroller.
+
 Review and evidence-backed reporting flow:
 
 ```text

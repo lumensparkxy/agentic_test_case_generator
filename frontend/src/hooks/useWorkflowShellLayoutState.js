@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import { STORAGE_PROJECT_RAIL_COLLAPSED, STORAGE_WORKFLOW_NAV_COLLAPSED } from "../constants/workflow";
 
+const COMPACT_WORKFLOW_NAV_QUERY = "(max-width: 900px)";
+
 const readStoredBoolean = (key) => {
 	try {
 		return window.localStorage.getItem(key) === "true";
@@ -18,22 +20,54 @@ const writeStoredBoolean = (key, value) => {
 	}
 };
 
+const readCompactWorkflowNavigation = () => {
+	try {
+		return window.matchMedia(COMPACT_WORKFLOW_NAV_QUERY).matches;
+	} catch {
+		return false;
+	}
+};
+
 export default function useWorkflowShellLayoutState() {
-	const [isWorkflowNavCollapsed, setIsWorkflowNavCollapsed] = useState(() => readStoredBoolean(STORAGE_WORKFLOW_NAV_COLLAPSED));
+	const [isDesktopWorkflowNavCollapsed, setIsDesktopWorkflowNavCollapsed] = useState(() =>
+		readStoredBoolean(STORAGE_WORKFLOW_NAV_COLLAPSED)
+	);
+	const [isCompactWorkflowNavigation, setIsCompactWorkflowNavigation] = useState(readCompactWorkflowNavigation);
+	const [isCompactWorkflowNavigationOpen, setIsCompactWorkflowNavigationOpen] = useState(false);
 	const [isProjectRailCollapsed, setIsProjectRailCollapsed] = useState(() => readStoredBoolean(STORAGE_PROJECT_RAIL_COLLAPSED));
 
 	useEffect(() => {
-		writeStoredBoolean(STORAGE_WORKFLOW_NAV_COLLAPSED, isWorkflowNavCollapsed);
-	}, [isWorkflowNavCollapsed]);
+		writeStoredBoolean(STORAGE_WORKFLOW_NAV_COLLAPSED, isDesktopWorkflowNavCollapsed);
+	}, [isDesktopWorkflowNavCollapsed]);
 
 	useEffect(() => {
 		writeStoredBoolean(STORAGE_PROJECT_RAIL_COLLAPSED, isProjectRailCollapsed);
 	}, [isProjectRailCollapsed]);
 
+	useEffect(() => {
+		const mediaQuery = window.matchMedia(COMPACT_WORKFLOW_NAV_QUERY);
+		const handleChange = (event) => {
+			setIsCompactWorkflowNavigation(event.matches);
+			if (event.matches) setIsCompactWorkflowNavigationOpen(false);
+		};
+		mediaQuery.addEventListener("change", handleChange);
+		return () => mediaQuery.removeEventListener("change", handleChange);
+	}, []);
+
+	const isWorkflowNavCollapsed = isCompactWorkflowNavigation ? !isCompactWorkflowNavigationOpen : isDesktopWorkflowNavCollapsed;
+
 	return {
 		isWorkflowNavCollapsed,
+		isCompactWorkflowNavigation,
 		isProjectRailCollapsed,
-		toggleWorkflowNavCollapsed: () => setIsWorkflowNavCollapsed((value) => !value),
+		toggleWorkflowNavCollapsed: () => {
+			if (isCompactWorkflowNavigation) {
+				setIsCompactWorkflowNavigationOpen((value) => !value);
+				return;
+			}
+			setIsDesktopWorkflowNavCollapsed((value) => !value);
+		},
+		closeCompactWorkflowNavigation: () => setIsCompactWorkflowNavigationOpen(false),
 		toggleProjectRailCollapsed: () => setIsProjectRailCollapsed((value) => !value),
 	};
 }

@@ -30,7 +30,7 @@ export default function TraceabilityMatrixPanel({
 					Scenario coverage {coverageMetrics?.covered_planned_scenarios ?? 0}/{coverageMetrics?.planned_scenarios_total ?? 0}
 				</span>
 			</div>
-			<div className="traceability-table-wrapper">
+			<div className="traceability-table-wrapper" role="region" aria-label="Requirement traceability table" tabIndex={0}>
 				<table className="traceability-table">
 					<thead>
 						<tr>

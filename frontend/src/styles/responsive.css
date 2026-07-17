@@ -1,5 +1,5 @@
 /* Responsive */
-@media (max-width: 1439px) {
+@media (max-width: 1727px) {
 	.workflow-shell {
 		grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr);
 	}
@@ -26,9 +26,9 @@
 	}
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
 	.workflow-shell {
-		grid-template-columns: 1fr;
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.project-information-rail {
@@ -44,9 +44,20 @@
 		position: static;
 	}
 
+	.workflow-navigation-drawer.compact.collapsed {
+		gap: 0;
+		padding: 0.6rem 0.75rem;
+	}
+
 	.workflow-navigation-header {
 		align-items: baseline;
 		justify-content: space-between;
+	}
+
+	.workflow-navigation-drawer.compact.collapsed .workflow-navigation-header {
+		display: flex;
+		width: 100%;
+		padding-bottom: 0;
 	}
 
 	.workflow-navigation-header strong,
@@ -78,7 +89,9 @@
 		grid-column: 2;
 		justify-self: start;
 	}
+}
 
+@media (max-width: 768px) {
 	.command-project-control {
 		width: 100%;
 	}
@@ -226,6 +239,11 @@
 		align-items: flex-start;
 	}
 
+	.project-rail-header-actions {
+		flex-basis: auto;
+		width: 100%;
+	}
+
 	.requirement-report-flags {
 		justify-content: flex-start;
 	}
@@ -344,6 +362,18 @@
 	.contextual-task-controls > button,
 	.contextual-task-dialog-actions button {
 		width: 100%;
+	}
+
+	.contextual-task-details {
+		width: 100%;
+	}
+
+	.contextual-task-details-body {
+		position: static;
+		width: 100%;
+		max-height: none;
+		margin-top: 0.55rem;
+		box-shadow: none;
 	}
 
 	.workflow-navigation-list {

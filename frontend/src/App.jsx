@@ -233,8 +233,14 @@ export default function App() {
 	const workflowMainRef = useRef(null);
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
-	const { isWorkflowNavCollapsed, isProjectRailCollapsed, toggleWorkflowNavCollapsed, toggleProjectRailCollapsed } =
-		useWorkflowShellLayoutState();
+	const {
+		isWorkflowNavCollapsed,
+		isCompactWorkflowNavigation,
+		isProjectRailCollapsed,
+		toggleWorkflowNavCollapsed,
+		closeCompactWorkflowNavigation,
+		toggleProjectRailCollapsed,
+	} = useWorkflowShellLayoutState();
 	const {
 		file,
 		setFile,
@@ -866,7 +872,7 @@ export default function App() {
 				</div>
 
 				{requirementReportStats.length > 0 && (
-					<div className="requirement-report-table-wrapper">
+					<div className="requirement-report-table-wrapper" role="region" aria-label="Requirement review summary table" tabIndex={0}>
 						<table className="requirement-report-table">
 							<thead>
 								<tr>
@@ -3528,7 +3534,7 @@ export default function App() {
 				{changedItems.length > 0 && (
 					<div className="impact-table-block">
 						<h4>Changed Inputs</h4>
-						<div className="selection-table-wrapper">
+						<div className="selection-table-wrapper" role="region" aria-label="Changed inputs table" tabIndex={0}>
 							<table className="selection-table impact-table">
 								<thead>
 									<tr>
@@ -3669,18 +3675,30 @@ export default function App() {
 		: [];
 	const workflowNavStatusByTabId = {
 		7: currentProject ? "complete" : "pending",
-		0: requirements.length ? "complete" : "pending",
+		0: requirements.length ? (reviewPendingRequirementCount || rejectedRequirementCount ? "attention" : "complete") : "pending",
 		1: enrichedContext?.grounded_context ? "complete" : hasContextInputs ? "pending" : "pending",
 		6: useCasesHumanApproved
 			? "complete"
 			: projectStageState.use_cases?.current_snapshot_id
-				? "pending"
+				? "attention"
 				: requirements.length
 					? "pending"
 					: "blocked",
-		3: testCases.length ? "complete" : canGenerateFromApprovedRequirements ? "pending" : "blocked",
+		3: testCases.length
+			? testCaseStageState.stale || (testCaseReview && !testCaseReview.approved)
+				? "attention"
+				: "complete"
+			: canGenerateFromApprovedRequirements
+				? "pending"
+				: "blocked",
 		4: executionPreview || executionRunResult ? "complete" : testCases.length ? "pending" : "blocked",
-		5: exportMessage ? "complete" : testCases.length && !exportGateLocked ? "pending" : "blocked",
+		5: projectStageState.reports?.stale
+			? "attention"
+			: exportMessage
+				? "complete"
+				: testCases.length && !exportGateLocked
+					? "pending"
+					: "blocked",
 	};
 
 	const selectWorkflowTab = (nextTab) => {
@@ -3806,7 +3824,7 @@ export default function App() {
 				azureDevOpsSettings={azureDevOpsSettings}
 			/>
 
-			<GlobalAppShell route={route} navigate={navigate} controls={navigationControls}>
+			<GlobalAppShell route={route} navigate={navigate} controls={navigationControls} compactControls={isCompactWorkflowNavigation}>
 				{route.kind === "global" ? (
 					route.destination === "home" ? (
 						<HomePage
@@ -3876,7 +3894,9 @@ export default function App() {
 							onTabChange={selectWorkflowTab}
 							statusByTabId={workflowNavStatusByTabId}
 							isCollapsed={isWorkflowNavCollapsed}
+							isCompact={isCompactWorkflowNavigation}
 							onToggleCollapsed={toggleWorkflowNavCollapsed}
+							onRequestClose={closeCompactWorkflowNavigation}
 						/>
 
 						{route.destination === "overview" ? (
@@ -4050,7 +4070,12 @@ export default function App() {
 														</div>
 
 														{jiraIssueResults.length > 0 ? (
-															<div className="selection-table-wrapper">
+															<div
+																className="selection-table-wrapper"
+																role="region"
+																aria-label="Jira issue search results table"
+																tabIndex={0}
+															>
 																<table className="selection-table">
 																	<thead>
 																		<tr>
@@ -4193,7 +4218,12 @@ export default function App() {
 														</div>
 
 														{azureDevOpsWorkItemResults.length > 0 ? (
-															<div className="selection-table-wrapper">
+															<div
+																className="selection-table-wrapper"
+																role="region"
+																aria-label="Azure DevOps work item search results table"
+																tabIndex={0}
+															>
 																<table className="selection-table">
 																	<thead>
 																		<tr>
@@ -4277,7 +4307,9 @@ export default function App() {
 															</span>
 														</summary>
 														<div className="collapsible-panel-body">
-															<pre className="raw-text-pre">{rawText}</pre>
+															<pre className="raw-text-pre" role="region" aria-label="Raw extracted requirements text" tabIndex={0}>
+																{rawText}
+															</pre>
 														</div>
 													</details>
 												</div>

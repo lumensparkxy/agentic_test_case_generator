@@ -29,6 +29,7 @@ npm ci
 npm run lint
 npm run format:check
 npm run build
+npm run test:e2e -- e2e/responsive-reflow.spec.js e2e/frontend-css-smoke.spec.js e2e/workflow-navigation.spec.js
 npm run test:e2e -- e2e/home-workspace.spec.js e2e/workflow-navigation.spec.js
 npm run test:e2e -- e2e/use-case-review.spec.js e2e/orchestrator-lifecycle.spec.js
 npm run test:e2e -- e2e/export-approval-gate.spec.js
@@ -92,6 +93,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Offline orchestrator lifecycle benchmarks | Yes | v1 first-generation routing, v2 two-requirement impact precision, unchanged-test preservation versus full regeneration, resumability, and governance gates | `scripts/evaluate_orchestrator.py`, `backend/tests/test_orchestrator_evaluation.py`, `scripts/benchmark_orchestrator_*` |
 | Frontend orchestrator cockpit | Yes | First-time project actions, resumed stale-impact action priority, collapsible right rail status overview, blockers, run/checkpoint timeline output, project evidence, last run, and reload restore | `frontend/e2e/orchestrator-cockpit.spec.js` uses mocked project, status, run, event, and checkpoint payloads |
 | Frontend contextual task | Yes | Workbench-scoped and empty recommendations, one primary CTA and reason, hidden provenance/diagnostics/secondary actions, secondary-only regeneration, disabled blockers without mutation, semantic action routing, Use Cases approval routing without legacy generation or refinement bypass, incremental-update priority, and keyboard-safe full-regeneration cancel/confirm/failure/double-submit behavior with suite preservation and valid focus restoration after success | `frontend/e2e/contextual-next-action.spec.js` uses deterministic project, pending-approval, status, generation-success, delayed-success, and failure fixtures; `frontend/e2e/workflow-navigation.spec.js`, `frontend/e2e/use-case-review.spec.js`, and `frontend/e2e/impact-update-flow.spec.js` preserve shared routing and adjacent workflow behavior |
+| Frontend responsive shell | Yes | Global/project/status containment at 320/390/640/760/900/1280/1440/1727/1728/1920 CSS pixels, initial-viewport task visibility, compact disclosure keyboard behavior and focus restoration, exactly one route-current item, non-color status semantics, center-width monotonicity, two-pixel overflow tolerance, and named focusable intrinsic scrollers | `frontend/e2e/responsive-reflow.spec.js` uses deterministic long project/status/localized-label fixtures and shared bounding-box, viewport, active-state, scroll-region, and center-width assertions from `frontend/e2e/support/layout.js`; `frontend/e2e/frontend-css-smoke.spec.js` and `frontend/e2e/workflow-navigation.spec.js` preserve adjacent shell surfaces and route behavior |
 | Frontend orchestrator lifecycle | Yes | Create project, generate v1, reload, change requirements, impact update, execute, review, and report | `frontend/e2e/orchestrator-lifecycle.spec.js` uses synthetic project and orchestrator fixtures |
 | Frontend Use Cases workbench | Yes | Exact-snapshot rendering, canonical scenario counts and requirement grouping, Use Cases coverage metrics, machine-versus-human review state, truthful prerequisites and headers, approve/request-changes payloads, durable reloads, stale conflicts, partial-refresh recovery, retry idempotency, reviewer provenance, required-field and focus semantics, 390/1440/1920 reflow, double-submit prevention, and late-response route isolation | `frontend/e2e/use-case-review.spec.js` uses deterministic project, workspace, orchestrator, success, conflict, superseding-artifact, and service-failure fixtures from `frontend/e2e/support/use-case-review.js`; `frontend/e2e/orchestrator-lifecycle.spec.js` preserves the adjacent project workflow |
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
@@ -146,10 +148,17 @@ Evidence: `.github/workflows/ci.yml`.
   browser-local and verify that collapsed left/right rails do not change
   workflow behavior. Icon-specific assertions check that destination markers
   and collapse controls render as SVG icons while retaining accessible names.
-- Workflow shell responsive tests cover 390px, 1280px, 1440px, and 1920px
-  viewports. They verify the mobile stack, the laptop two-column shell with the
-  project rail below the center, the desktop three-column shell, center-width
-  targets, the width reclaimed by collapsed rails, and document-level overflow.
+- Workflow shell responsive tests cover 320px and 640px reflow proxies plus
+  390px, 760px, 900px, 1280px, 1440px, 1727px, 1728px, and 1920px shell states.
+  They verify compact global/project disclosures, initial-viewport task access,
+  long-label and status containment, the two-column-to-three-column center-width
+  transition, and document-level overflow with a two-pixel rendering tolerance.
+  Manual PR evidence at actual Chrome 200% and 400% zoom from a 1280px window is
+  still required; automated proxy widths do not replace browser zoom validation.
+- Horizontal scrolling assertions allow only focusable, named `role="region"`
+  containers that are, or directly contain, an intrinsic table or code surface.
+  Ordinary navigation, status, tabs, and page layout must reflow without their
+  own horizontal scrollers.
 - Brighter Executive Cockpit design QA maps the selected visual target to
   tested surfaces in `docs/brighter-executive-cockpit-design-qa.md`.
 - Offline evaluation scripts use deterministic fallback behavior instead of

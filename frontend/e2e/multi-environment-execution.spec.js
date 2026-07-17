@@ -260,14 +260,16 @@ test.describe("Multi-environment execution", () => {
 		await expect(page.getByLabel("Project information rail").getByText(/Environment QA · revision 4/)).toBeVisible();
 
 		await page
-			.getByRole("navigation", { name: "Workflow navigation" })
-			.getByRole("button", { name: /^Automation,/i })
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Automation,/i })
 			.click();
 		await page.getByPlaceholder("staging, dev, customer-a").fill("staging");
 		await page.getByPlaceholder("Use backend default").fill("https://staging.example.test/app");
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+		await expect(page.getByRole("region", { name: "Executable automation candidates table" })).toHaveAttribute("tabindex", "0");
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
+		await expect(page.getByRole("region", { name: "Execution results table" })).toHaveAttribute("tabindex", "0");
 		await expect(page.getByText(/Execution failed: 0 passed, 1 failed/i)).toBeVisible();
 		const stagingRun = page.locator(".project-run-row", { hasText: "staging" });
 		await expect(stagingRun).toBeVisible();
