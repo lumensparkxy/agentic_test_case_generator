@@ -11,6 +11,11 @@ import {
 } from "./firebase";
 import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
 import AutomationPanel from "./components/automation/AutomationPanel";
+import {
+	getDefaultSelectedCandidateIds,
+	normalizeAutomationPreview,
+	resolveSelectedExecutableCandidates,
+} from "./components/automation/automationPreview";
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import ExportPanel from "./components/export/ExportPanel";
 import GeneratedTestCasesView from "./components/generation/GeneratedTestCasesView";
@@ -329,14 +334,31 @@ export default function App() {
 		setExecutionTargetEnvironment,
 		executionPreview,
 		setExecutionPreview,
+		selectedExecutionCandidateIds,
+		setSelectedExecutionCandidateIds,
 		executionRunResult,
 		setExecutionRunResult,
 		isPreviewingExecution,
 		setIsPreviewingExecution,
 		isRunningExecution,
 		setIsRunningExecution,
-		resetExecutionWorkflowState,
+		resetExecutionWorkflowState: resetExecutionState,
 	} = useExecutionWorkflowState();
+	const executionPreviewRequestIdRef = useRef(0);
+	const executionRunRequestIdRef = useRef(0);
+	const invalidateExecutionPreviewRequest = () => {
+		executionPreviewRequestIdRef.current += 1;
+		setIsPreviewingExecution(false);
+	};
+	const invalidateExecutionRunRequest = () => {
+		executionRunRequestIdRef.current += 1;
+		setIsRunningExecution(false);
+	};
+	const resetExecutionWorkflowState = () => {
+		invalidateExecutionPreviewRequest();
+		invalidateExecutionRunRequest();
+		resetExecutionState();
+	};
 	const {
 		isExporting,
 		setIsExporting,
@@ -544,7 +566,7 @@ export default function App() {
 		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.test_cases?.exhausted
 	);
 	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked;
-	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked;
+	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked || isPreviewingExecution || isRunningExecution;
 	const jiraConnection = jiraConnectionStatus?.connection || null;
 	const jiraConnected = Boolean(jiraConnectionStatus?.connected && jiraConnection);
 	const hasJiraRequirements = requirements.some((requirement) => isJiraLinkedRequirement(requirement));
@@ -974,8 +996,7 @@ export default function App() {
 		setSelectedJiraIssueKey("");
 		setJiraSyncPreview(null);
 		setJiraSyncResults(null);
-		setExecutionPreview(null);
-		setExecutionRunResult(null);
+		resetExecutionWorkflowState();
 		setAzureDevOpsConnectionStatus(EMPTY_AZURE_DEVOPS_CONNECTION_STATUS);
 		setAzureDevOpsConnectionForm(EMPTY_AZURE_DEVOPS_CONNECTION_FORM);
 		setAzureDevOpsProjects([]);
@@ -1307,6 +1328,24 @@ export default function App() {
 	});
 	const previousWorkspaceRouteRef = useRef({ kind: route.kind, destination: route.destination });
 
+	const storeExecutionPreview = (rawPreview, { source = "live", consistencyMessage = null, selectedCandidateIds = null } = {}) => {
+		const normalizedPreview = normalizeAutomationPreview(rawPreview, { source });
+		const nextPreview = consistencyMessage
+			? {
+					...normalizedPreview,
+					requiresRefresh: true,
+					consistencyMessage,
+				}
+			: normalizedPreview;
+		setExecutionPreview(nextPreview);
+		setSelectedExecutionCandidateIds(
+			selectedCandidateIds === null
+				? getDefaultSelectedCandidateIds(nextPreview)
+				: resolveSelectedExecutableCandidates(nextPreview, selectedCandidateIds).map((candidate) => candidate.id)
+		);
+		return nextPreview;
+	};
+
 	useEffect(() => {
 		const previousRoute = previousWorkspaceRouteRef.current;
 		previousWorkspaceRouteRef.current = { kind: route.kind, destination: route.destination };
@@ -1320,13 +1359,16 @@ export default function App() {
 	}, [route.kind, route.destination, isAuthenticated, isVerifyingSession, refreshWorkspaceSummary]);
 
 	const hydrateProjectWorkflow = (project) => {
+		invalidateExecutionPreviewRequest();
+		invalidateExecutionRunRequest();
 		const snapshots = project?.current_snapshots || {};
 		const requirementPayload = snapshots.requirements?.payload || null;
 		const contextPayload = snapshots.context?.payload || null;
 		const useCasePayload = snapshots.use_cases?.payload || null;
 		const impactPayload = snapshots.impact_analysis?.payload || null;
 		const testCasePayload = snapshots.test_cases?.payload || null;
-		const executionPayload = snapshots.execution?.payload || null;
+		const executionSnapshot = snapshots.execution || null;
+		const executionPayload = executionSnapshot?.payload || null;
 
 		setFile(null);
 		setReqFeedback("");
@@ -1395,14 +1437,18 @@ export default function App() {
 				preview: null,
 			});
 			setExecutionPreview(null);
-		} else if (executionPayload?.summary) {
-			setExecutionPreview({
-				executable: [],
-				manual: [],
-				unsupported: [],
-				invalid: [],
-				warnings: executionPayload.warnings || [],
-				summary: executionPayload.summary || {},
+			setSelectedExecutionCandidateIds([]);
+		} else if (executionPayload) {
+			const currentTestCaseSnapshotId = snapshots.test_cases?.snapshot_id || null;
+			const previewSourceSnapshotId = executionSnapshot?.source_snapshot_id || null;
+			const previewIsStale = Boolean(
+				currentTestCaseSnapshotId && previewSourceSnapshotId && currentTestCaseSnapshotId !== previewSourceSnapshotId
+			);
+			storeExecutionPreview(executionPayload, {
+				source: "persisted",
+				consistencyMessage: previewIsStale
+					? "This stored preview belongs to an older test-case snapshot. Preview execution again before running."
+					: null,
 			});
 			setExecutionRunResult(null);
 		} else {
@@ -2413,8 +2459,7 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
-			setExecutionPreview(null);
-			setExecutionRunResult(null);
+			resetExecutionWorkflowState();
 			setReqFeedback("");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (!isProjectOperationCurrent(operationScope)) {
@@ -2497,8 +2542,7 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
-			setExecutionPreview(null);
-			setExecutionRunResult(null);
+			resetExecutionWorkflowState();
 			setReqFeedback("");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 			if (!isProjectOperationCurrent(operationScope)) {
@@ -2829,8 +2873,7 @@ export default function App() {
 			resetContextAnalysis();
 			setExpandedRows({});
 			setFeedback("");
-			setExecutionPreview(null);
-			setExecutionRunResult(null);
+			resetExecutionWorkflowState();
 			await refreshCurrentProject({ hydrate: false, operationScope });
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
@@ -2865,12 +2908,23 @@ export default function App() {
 		};
 	};
 
+	const changeExecutionTargetBaseUrl = (value) => {
+		setExecutionTargetBaseUrl(value);
+		resetExecutionWorkflowState();
+	};
+
+	const changeExecutionTargetEnvironment = (value) => {
+		setExecutionTargetEnvironment(value);
+		resetExecutionWorkflowState();
+	};
+
 	const previewExecution = async (casesOverride = testCases, options = {}) => {
 		const { updateStatus = true, persistProject = true, operationScope: providedOperationScope = null } = options;
 		const operationScope = providedOperationScope || captureProjectOperationScope();
 		if (!operationScope || !isProjectOperationCurrent(operationScope)) {
 			return null;
 		}
+		resetExecutionWorkflowState();
 		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
 		if (!casesToPreview.length) {
 			if (updateStatus) {
@@ -2879,6 +2933,7 @@ export default function App() {
 			return null;
 		}
 
+		const previewRequestId = executionPreviewRequestIdRef.current;
 		setIsPreviewingExecution(true);
 		if (updateStatus) {
 			setStatus("Previewing execution readiness...");
@@ -2894,31 +2949,37 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
+			if (!data || typeof data !== "object" || Array.isArray(data)) {
+				throw new Error("Preview response did not include candidate data.");
+			}
+			if (!isProjectOperationCurrent(operationScope) || previewRequestId !== executionPreviewRequestIdRef.current) {
 				return null;
 			}
-			setExecutionPreview(data || null);
-			setExecutionRunResult(null);
+			const normalizedPreview = storeExecutionPreview(data, { source: "live" });
 			if (updateStatus) {
-				const summary = data?.summary || {};
-				setStatus(
-					`Execution preview ready: ${summary.executable || 0} executable, ${summary.manual || 0} manual, ${summary.unsupported || 0} unsupported.`
-				);
+				if (!normalizedPreview.isConsistent) {
+					setStatus("Execution preview data was inconsistent. Preview again before running candidates.");
+				} else {
+					const summary = normalizedPreview.summary;
+					setStatus(
+						`Execution preview ready: ${summary.executable} executable, ${summary.manual} manual, ${summary.unsupported} unsupported.`
+					);
+				}
 			}
 			if (persistProject) {
 				await refreshCurrentProject({ hydrate: false, operationScope });
-				if (!isProjectOperationCurrent(operationScope)) {
+				if (!isProjectOperationCurrent(operationScope) || previewRequestId !== executionPreviewRequestIdRef.current) {
 					return null;
 				}
 			}
-			return data;
+			return normalizedPreview;
 		} catch (error) {
-			if (updateStatus && isProjectOperationCurrent(operationScope)) {
+			if (updateStatus && isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
 				setStatus(`Execution preview failed: ${error.message}`);
 			}
 			return null;
 		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
+			if (isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
 				setIsPreviewingExecution(false);
 			}
 		}
@@ -2929,16 +2990,26 @@ export default function App() {
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
 			return;
 		}
-		const preview = executionPreview || (await previewExecution(testCases, { updateStatus: false, persistProject: false, operationScope }));
+		const preview = executionPreview;
 		if (!isProjectOperationCurrent(operationScope)) {
 			return;
 		}
-		const executableCandidates = preview?.executable || [];
+		if (!preview) {
+			setStatus("Preview execution and review candidate selection before running.");
+			return;
+		}
+		if (!preview?.isConsistent || preview.requiresRefresh) {
+			setStatus("Preview execution again before running candidates.");
+			return;
+		}
+		const executableCandidates = resolveSelectedExecutableCandidates(preview, selectedExecutionCandidateIds);
 		if (!executableCandidates.length) {
-			setStatus("No executable candidates are available to run.");
+			setStatus("Select at least one executable candidate before running.");
 			return;
 		}
 
+		executionRunRequestIdRef.current += 1;
+		const executionRunRequestId = executionRunRequestIdRef.current;
 		setIsRunningExecution(true);
 		setStatus(`Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`);
 		try {
@@ -2947,7 +3018,7 @@ export default function App() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					...buildExecutionPayload(testCases, { operationScope }),
-					selected_test_case_ids: executableCandidates.map((candidate) => candidate.source_test_case_id),
+					selected_test_case_ids: executableCandidates.map((candidate) => candidate.id),
 				}),
 			});
 			if (!res.ok) {
@@ -2955,22 +3026,43 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
+			const runResponseIsValid = Boolean(
+				data &&
+				typeof data === "object" &&
+				!Array.isArray(data) &&
+				typeof data.run_id === "string" &&
+				data.run_id.trim() &&
+				typeof data.status === "string" &&
+				data.summary &&
+				typeof data.summary === "object" &&
+				!Array.isArray(data.summary) &&
+				data.preview &&
+				typeof data.preview === "object" &&
+				!Array.isArray(data.preview) &&
+				Array.isArray(data.results)
+			);
+			if (!runResponseIsValid) {
+				throw new Error("Execution response did not include valid run data.");
+			}
+			if (!isProjectOperationCurrent(operationScope) || executionRunRequestId !== executionRunRequestIdRef.current) {
 				return;
 			}
-			setExecutionRunResult(data || null);
-			setExecutionPreview(data?.preview || preview);
+			setExecutionRunResult(data);
+			storeExecutionPreview(data.preview, {
+				source: "live",
+				selectedCandidateIds: executableCandidates.map((candidate) => candidate.id),
+			});
 			const summary = data?.summary || {};
 			setStatus(
 				`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`
 			);
 			await refreshCurrentProject({ hydrate: false, operationScope });
 		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
+			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
 				setStatus(`Execution run failed: ${error.message}`);
 			}
 		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
+			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
 				setIsRunningExecution(false);
 			}
 		}
@@ -3080,8 +3172,7 @@ export default function App() {
 			setActiveGenerateResultTab(chooseGenerateResultTab(data));
 			setDraftExportOverrideRequested(false);
 			setDraftExportOverrideReason("");
-			setExecutionPreview(null);
-			setExecutionRunResult(null);
+			resetExecutionWorkflowState();
 			const generatedCount = Array.isArray(data.test_cases) ? data.test_cases.length : 0;
 			const reviewStatus = data.review ? ` Review ${data.review.approved ? "approved" : "needs refinement"}.` : "";
 			if (generatedCount > 0) {
@@ -3266,6 +3357,10 @@ export default function App() {
 			return true;
 		}
 		if (action === "execute") {
+			if (!executionPreview || !executionPreview.isConsistent || executionPreview.requiresRefresh) {
+				await previewExecution();
+				return true;
+			}
 			await runApprovedExecution();
 			return true;
 		}
@@ -3303,8 +3398,8 @@ export default function App() {
 		apply_update: isApplyingImpactUpdate,
 		generate: isGenerating,
 		full_regenerate: isGenerating,
-		automate: isPreviewingExecution,
-		execute: isRunningExecution,
+		automate: isPreviewingExecution || isRunningExecution,
+		execute: isPreviewingExecution || isRunningExecution,
 	};
 	const orchestratorActionDisabled = {
 		generate: testCaseActionDisabled,
@@ -3691,7 +3786,15 @@ export default function App() {
 			: canGenerateFromApprovedRequirements
 				? "pending"
 				: "blocked",
-		4: executionPreview || executionRunResult ? "complete" : testCases.length ? "pending" : "blocked",
+		4: executionRunResult
+			? "complete"
+			: executionPreview
+				? executionPreview.isConsistent && !executionPreview.requiresRefresh
+					? "complete"
+					: "attention"
+				: testCases.length
+					? "pending"
+					: "blocked",
 		5: projectStageState.reports?.stale
 			? "attention"
 			: exportMessage
@@ -4834,10 +4937,12 @@ export default function App() {
 										<AutomationPanel
 											testCases={testCases}
 											executionTargetBaseUrl={executionTargetBaseUrl}
-											setExecutionTargetBaseUrl={setExecutionTargetBaseUrl}
+											setExecutionTargetBaseUrl={changeExecutionTargetBaseUrl}
 											executionTargetEnvironment={executionTargetEnvironment}
-											setExecutionTargetEnvironment={setExecutionTargetEnvironment}
+											setExecutionTargetEnvironment={changeExecutionTargetEnvironment}
 											executionPreview={executionPreview}
+											selectedExecutionCandidateIds={selectedExecutionCandidateIds}
+											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
 											isPreviewingExecution={isPreviewingExecution}
 											isRunningExecution={isRunningExecution}

@@ -27,7 +27,6 @@ from ..models import (
     ExecutionCandidate,
     ExecutionIssue,
     ExecutionPreviewResponse,
-    ExecutionPreviewSummary,
     ExecutionRunItem,
     ExecutionRunResponse,
     ExecutionRunSummary,
@@ -149,6 +148,7 @@ UNSUPPORTED_DOMAIN_TERMS = (
     "sla",
     "performance timing",
 )
+DUPLICATE_CANDIDATE_ID_WARNING = "Duplicate or colliding test case IDs were assigned unique execution candidate IDs."
 
 
 @dataclass(frozen=True)
@@ -190,10 +190,14 @@ def preview_execution(
     manual: list[ExecutionCandidate] = []
     unsupported: list[ExecutionCandidate] = []
     invalid: list[ExecutionCandidate] = []
+    used_candidate_ids: set[str] = set()
     base_url = _normalize_base_url(target_base_url or settings.default_base_url)
 
     for test_case in cases:
         candidate = _candidate_for_test_case(test_case, base_url=base_url)
+        candidate, candidate_id_changed = _with_unique_candidate_id(candidate, used_candidate_ids=used_candidate_ids)
+        if candidate_id_changed and DUPLICATE_CANDIDATE_ID_WARNING not in warnings:
+            warnings.append(DUPLICATE_CANDIDATE_ID_WARNING)
         if candidate.status == "executable":
             executable.append(candidate)
         elif candidate.status == "manual":
@@ -209,12 +213,6 @@ def preview_execution(
         unsupported=unsupported,
         invalid=invalid,
         warnings=warnings,
-        summary=ExecutionPreviewSummary(
-            executable=len(executable),
-            manual=len(manual),
-            unsupported=len(unsupported),
-            invalid=len(invalid),
-        ),
     )
 
 
@@ -456,6 +454,28 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
         review_reasons=(["Some source steps were not executable and were omitted from the generated browser spec."] if unsupported_steps else []),
         traceability_ids=traceability_ids,
     )
+
+
+def _with_unique_candidate_id(
+    candidate: ExecutionCandidate,
+    *,
+    used_candidate_ids: set[str],
+) -> tuple[ExecutionCandidate, bool]:
+    base_id = candidate.id
+    unique_id = base_id
+    suffix = 2
+    while unique_id in used_candidate_ids:
+        unique_id = f"{base_id}_{suffix}"
+        suffix += 1
+    used_candidate_ids.add(unique_id)
+
+    if unique_id == base_id:
+        return candidate, False
+
+    updates: dict[str, Any] = {"id": unique_id}
+    if candidate.spec is not None:
+        updates["spec"] = {**candidate.spec, "id": unique_id}
+    return candidate.model_copy(update=updates), True
 
 
 def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:

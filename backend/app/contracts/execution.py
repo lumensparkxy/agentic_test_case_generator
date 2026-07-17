@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from .test_cases import TestCase
 
@@ -54,6 +54,16 @@ class ExecutionPreviewResponse(BaseModel):
     invalid: List[ExecutionCandidate] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     summary: ExecutionPreviewSummary = Field(default_factory=ExecutionPreviewSummary)
+
+    @model_validator(mode="after")
+    def align_summary_with_candidates(self):
+        self.summary = ExecutionPreviewSummary(
+            executable=len(self.executable),
+            manual=len(self.manual),
+            unsupported=len(self.unsupported),
+            invalid=len(self.invalid),
+        )
+        return self
 
 
 class ExecutionRunInput(ExecutionPreviewInput):

@@ -11,7 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.main import app, get_current_user
-from app.models import AuthUser, AutomationResponse, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
+from app.models import AuthUser, AutomationResponse, ExecutionCandidate, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
 
 
 class AutomationEndpointTests(unittest.TestCase):
@@ -109,6 +109,86 @@ class AutomationEndpointTests(unittest.TestCase):
         complete_run.assert_called_once()
         record_event.assert_called_once()
         self.assertEqual(record_event.call_args.kwargs["event_type"], "automation.execution.previewed")
+
+    def test_project_execution_preview_persists_matching_counts_and_candidates(self) -> None:
+        payload = {
+            "test_cases": [
+                {
+                    "id": "TC-001",
+                    "title": "Verify checkout",
+                    "steps": [{"step": 1, "action": "Open checkout", "expected": "Checkout is displayed"}],
+                    "automation_status": "Automated",
+                },
+                {
+                    "id": "TC-MANUAL",
+                    "title": "Review payment receipt",
+                    "steps": [{"step": 1, "action": "Review receipt", "expected": "Receipt is correct"}],
+                    "automation_status": "Manual",
+                },
+            ],
+            "target_base_url": "https://staging.example.test/app",
+            "target_environment": "staging",
+            "project_id": "project-1",
+            "base_project_revision": 7,
+        }
+        executable_candidate = ExecutionCandidate(
+            id="tc_001",
+            source_test_case_id="TC-001",
+            title="Verify checkout",
+            status="executable",
+            spec={"schemaVersion": "1.0", "id": "tc_001", "title": "Verify checkout", "steps": []},
+        )
+        manual_candidate = ExecutionCandidate(
+            id="tc_manual",
+            source_test_case_id="TC-MANUAL",
+            title="Review payment receipt",
+            status="manual",
+        )
+        service_response = ExecutionPreviewResponse(
+            executable=[executable_candidate],
+            manual=[manual_candidate],
+            summary={"executable": 20, "manual": 0, "unsupported": 9, "invalid": 4},
+        )
+        project = SimpleNamespace(current_snapshots={"test_cases": SimpleNamespace(snapshot_id="snap-test-v1")})
+
+        with patch("app.main.start_workflow_run", return_value="run-execution-preview-1"):
+            with patch("app.main.complete_workflow_run"):
+                with patch("app.main.record_usage_event", return_value="event-execution-preview-1") as record_event:
+                    with patch("app.main.preview_execution", return_value=service_response):
+                        with patch("app.routers.automation.get_project", return_value=project):
+                            with patch("app.routers.automation.append_stage_snapshot") as append_snapshot:
+                                with TestClient(app) as client:
+                                    response = client.post(
+                                        "/automation/execution/preview",
+                                        json=payload,
+                                        headers={"X-Request-ID": "req-preview-staging"},
+                                    )
+
+        self.assertEqual(response.status_code, 200)
+        expected_counts = {"executable": 1, "manual": 1, "unsupported": 0, "invalid": 0}
+        self.assertEqual(response.json()["summary"], expected_counts)
+        snapshot_call = append_snapshot.call_args.kwargs
+        snapshot_payload = snapshot_call["payload"]
+        self.assertEqual(snapshot_payload["summary"], expected_counts)
+        self.assertEqual(snapshot_payload["candidate_counts"], expected_counts)
+        self.assertEqual(
+            {bucket: len(candidates) for bucket, candidates in snapshot_payload["candidates"].items()},
+            expected_counts,
+        )
+        self.assertEqual(
+            snapshot_payload["candidates"]["executable"][0],
+            {"id": "tc_001", "source_test_case_id": "TC-001", "title": "Verify checkout", "status": "executable"},
+        )
+        self.assertEqual(snapshot_call["metadata"]["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(
+            {key: snapshot_call["metadata"][f"{key}_count"] for key in expected_counts},
+            expected_counts,
+        )
+        event_metadata = record_event.call_args.kwargs["metadata"]
+        self.assertEqual(
+            {key: event_metadata[f"{key}_count"] for key in expected_counts},
+            expected_counts,
+        )
 
     def test_execution_run_logs_usage_and_returns_summary(self) -> None:
         payload = {
