@@ -97,8 +97,15 @@ class OrchestratorServiceTests(unittest.TestCase):
             title=title,
         )
 
-    def _append_use_cases(self, project_id: str, *, approved: bool = True, source_snapshot_id: str | None = None):
-        return append_stage_snapshot(
+    def _append_use_cases(
+        self,
+        project_id: str,
+        *,
+        approved: bool = True,
+        source_snapshot_id: str | None = None,
+        human_reviewed: bool = True,
+    ):
+        snapshot = append_stage_snapshot(
             project_id=project_id,
             stage="use_cases",
             payload={
@@ -109,6 +116,14 @@ class OrchestratorServiceTests(unittest.TestCase):
                     }
                 ],
                 "requirement_analysis": [],
+                "review": {
+                    "approved": approved,
+                    "score": 100 if approved else 70,
+                    "threshold": 90,
+                    "blocking_issues": [] if approved else ["Use Case quality review requires attention"],
+                    "suggestions": [],
+                    "unmet_criteria": [],
+                },
             },
             operation="testcases.generate.use_cases",
             actor=self.actor,
@@ -117,6 +132,18 @@ class OrchestratorServiceTests(unittest.TestCase):
             source_snapshot_id=source_snapshot_id,
             title="Use cases",
         )
+        if approved and human_reviewed:
+            use_cases_state = self.store[f"qa_projects/{project_id}"]["stage_state"]["use_cases"]
+            use_cases_state.setdefault("metadata", {})["latest_human_review"] = {
+                "review_id": "review-use-cases",
+                "snapshot_id": snapshot.snapshot_id,
+                "decision": "approve",
+                "comment": None,
+                "reviewer_user_id": self.actor.sub,
+                "reviewer_name": self.actor.name,
+                "reviewed_at": "2026-07-17T12:00:00+00:00",
+            }
+        return snapshot
 
     def _append_test_cases(self, project_id: str, *, approved: bool = True, source_snapshot_id: str | None = None):
         return append_stage_snapshot(
@@ -230,6 +257,24 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertEqual(status.next_actions[0].action, "refine")
         self.assertFalse(status.next_actions[0].enabled)
         self.assertEqual(status.blockers[0].code, "missing_project")
+
+    def test_machine_approved_use_cases_still_require_matching_human_review(self) -> None:
+        project = self._create_project()
+        requirement_snapshot = self._append_requirements(project.project_id)
+        self._append_use_cases(
+            project.project_id,
+            approved=True,
+            human_reviewed=False,
+            source_snapshot_id=requirement_snapshot.snapshot_id,
+        )
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+
+        self.assertEqual(status.stages["use_cases"].status, "attention_required")
+        self.assertFalse(status.stages["use_cases"].approved)
+        approval = self._action(status, "approve")
+        self.assertEqual(approval.stage, "use_cases")
+        self.assertTrue(approval.primary)
 
     def test_no_baseline_recommends_first_time_generation(self) -> None:
         project = self._seed_first_generation_ready()

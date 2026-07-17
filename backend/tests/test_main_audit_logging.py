@@ -2,6 +2,7 @@ from contextlib import ExitStack
 from io import BytesIO
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.main import app, get_current_user
 from app.models import AuthUser, GenerateTestCasesResponse, Requirement, TestCase, TestCaseGenerationEvidence, TestStep
-from app.routers.testcases import _test_case_project_payload
+from app.routers.testcases import _append_project_generation_snapshots, _test_case_project_payload
 
 
 class MainAuditLoggingTests(unittest.TestCase):
@@ -206,6 +207,49 @@ class MainAuditLoggingTests(unittest.TestCase):
         self.assertEqual(payload["generation_evidence"]["request_id"], "req-1")
         self.assertEqual(payload["generation_evidence"]["workflow_run_id"], "run-1")
         self.assertEqual(payload["generation_evidence"]["final_test_case_count"], 1)
+
+    def test_project_generation_keeps_machine_and_human_use_case_approval_separate(self) -> None:
+        response = GenerateTestCasesResponse(
+            test_cases=[TestCase(id="TC-1", title="Login test", steps=[TestStep(step=1, action="Act", expected="Observe")])],
+            approved=True,
+            review={
+                "approved": True,
+                "score": 100,
+                "threshold": 90,
+                "summary": "Automated quality checks passed.",
+                "blocking_issues": [],
+                "suggestions": [],
+                "unmet_criteria": [],
+            },
+        )
+
+        with (
+            patch(
+                "app.routers.testcases.get_project",
+                return_value=SimpleNamespace(current_snapshots={}),
+            ),
+            patch(
+                "app.routers.testcases.append_stage_snapshot",
+                side_effect=[SimpleNamespace(snapshot_id="snap-use-cases"), SimpleNamespace(snapshot_id="snap-test-cases")],
+            ) as append_snapshot,
+        ):
+            _append_project_generation_snapshots(
+                project_id="project-1",
+                response=response,
+                operation="testcases.generate",
+                actor=AuthUser(sub="user-1", email="user@example.com", name="User"),
+                request_id="request-1",
+                workflow_run_id="run-1",
+                source_event_id="event-1",
+                base_project_revision=4,
+            )
+
+        use_case_call, test_case_call = append_snapshot.call_args_list
+        self.assertEqual(use_case_call.kwargs["stage"], "use_cases")
+        self.assertFalse(use_case_call.kwargs["approved"])
+        self.assertTrue(use_case_call.kwargs["payload"]["review"]["approved"])
+        self.assertEqual(test_case_call.kwargs["stage"], "test_cases")
+        self.assertTrue(test_case_call.kwargs["approved"])
 
 
 if __name__ == "__main__":

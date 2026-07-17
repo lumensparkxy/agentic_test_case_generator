@@ -215,33 +215,3 @@ export function ProjectOverviewPage({ project, status = null, navigate }) {
 		</main>
 	);
 }
-
-export function UseCasesPlaceholderPage({ project, navigate }) {
-	const projectId = project?.project_id || "";
-	const snapshot = project?.current_snapshots?.use_cases || null;
-	return (
-		<main className="route-page" aria-labelledby="use-cases-placeholder-title">
-			<header className="route-page-header">
-				<span className="route-page-kicker">{project?.name || "Project"}</span>
-				<h1 id="use-cases-placeholder-title">Use Cases</h1>
-				<p>
-					{snapshot
-						? "The current use-case artifact is preserved. The dedicated review workbench is not available yet."
-						: "No current use-case artifact is available. Continue through Test Cases to generate project coverage."}
-				</p>
-			</header>
-			{projectId ? (
-				<div className="route-recovery-actions">
-					<RouteLink className="route-primary-link" to={buildProjectPath(projectId, PROJECT_DESTINATIONS.TEST_CASES)} navigate={navigate}>
-						Open Test Cases
-					</RouteLink>
-					<RouteLink className="route-secondary-link" to={buildProjectPath(projectId)} navigate={navigate}>
-						Back to project overview
-					</RouteLink>
-				</div>
-			) : (
-				<RecoveryLinks navigate={navigate} />
-			)}
-		</main>
-	);
-}

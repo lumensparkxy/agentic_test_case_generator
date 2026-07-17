@@ -114,6 +114,20 @@ def _snapshot_payload(project: QaProjectDetail, stage: ProjectStageName) -> dict
     return dict(snapshot.payload or {}) if snapshot else {}
 
 
+def _matching_use_case_human_review(state: Optional[QaProjectStageState]) -> dict[str, Any]:
+    if state is None:
+        return {}
+    latest_review = state.metadata.get("latest_human_review")
+    if not isinstance(latest_review, dict) or latest_review.get("snapshot_id") != state.current_snapshot_id:
+        return {}
+    return latest_review
+
+
+def _use_cases_human_approved(state: Optional[QaProjectStageState]) -> bool:
+    latest_review = _matching_use_case_human_review(state)
+    return bool(state and state.approved and latest_review.get("decision") == "approve")
+
+
 def _review_blockers(project: QaProjectDetail) -> list[OrchestratorBlocker]:
     blockers: list[OrchestratorBlocker] = []
     for stage in ("requirements", "use_cases", "test_cases"):
@@ -123,14 +137,12 @@ def _review_blockers(project: QaProjectDetail) -> list[OrchestratorBlocker]:
         blocking_issues = [str(item) for item in review.get("blocking_issues") or []]
         unmet_criteria = [str(item) for item in review.get("unmet_criteria") or []]
         review_approved = review.get("approved")
-        latest_human_review = state.metadata.get("latest_human_review") if state else None
-        if not isinstance(latest_human_review, dict):
-            latest_human_review = {}
+        latest_human_review = _matching_use_case_human_review(state) if stage == "use_cases" else {}
         latest_human_decision = str(latest_human_review.get("decision") or "")
         latest_human_comment = str(latest_human_review.get("comment") or "")
-        human_review_matches = bool(stage == "use_cases" and state and latest_human_review.get("snapshot_id") == state.current_snapshot_id)
-        human_approved = bool(human_review_matches and state and state.approved and latest_human_decision == "approve")
-        human_changes_requested = human_review_matches and latest_human_decision == "request_changes"
+        human_review_matches = bool(latest_human_review)
+        human_approved = bool(human_review_matches and _use_cases_human_approved(state))
+        human_changes_requested = bool(human_review_matches and latest_human_decision == "request_changes")
         machine_review_unresolved = review_approved is False or blocking_issues or unmet_criteria
         if (human_changes_requested or (machine_review_unresolved and not human_approved)) and state and not state.stale:
             detail = (
@@ -253,7 +265,9 @@ def _real_stage_status(stage: ProjectStageName, state: Optional[QaProjectStageSt
             return "failed"
         if state.operation == "automation.execution.preview":
             return "ready"
-    if stage in {"requirements", "use_cases", "test_cases", "reports"} and not state.approved:
+    if stage == "use_cases" and not _use_cases_human_approved(state):
+        return "attention_required"
+    if stage in {"requirements", "test_cases", "reports"} and not state.approved:
         return "attention_required"
     return "completed"
 
@@ -283,7 +297,7 @@ def _real_stage(project: QaProjectDetail, stage: ProjectStageName) -> Orchestrat
         status=status,
         current_snapshot_id=state.current_snapshot_id if state else None,
         version=state.version if state else 0,
-        approved=state.approved if state else False,
+        approved=_use_cases_human_approved(state) if stage == "use_cases" else state.approved if state else False,
         stale=state.stale if state else False,
         stale_reason=state.stale_reason if state else None,
         operation=state.operation if state else None,
@@ -430,7 +444,12 @@ def _approval_blockers_for_generation(
         )
     elif not requirements_state.approved or requirements_state.stale:
         blockers.append(_approval_blocker("requirements", action="generate"))
-    if require_approved_use_cases and use_cases_state and use_cases_state.current_snapshot_id and (not use_cases_state.approved or use_cases_state.stale):
+    if (
+        require_approved_use_cases
+        and use_cases_state
+        and use_cases_state.current_snapshot_id
+        and (not _use_cases_human_approved(use_cases_state) or use_cases_state.stale)
+    ):
         blockers.append(_approval_blocker("use_cases", action="generate"))
     return blockers
 
@@ -517,8 +536,8 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         )
         return actions
 
-    if not use_cases_state.approved or use_cases_state.stale:
-        latest_human_review = use_cases_state.metadata.get("latest_human_review")
+    if not _use_cases_human_approved(use_cases_state) or use_cases_state.stale:
+        latest_human_review = _matching_use_case_human_review(use_cases_state)
         latest_review_comment = (
             str(latest_human_review.get("comment") or "").strip()
             if isinstance(latest_human_review, dict) and latest_human_review.get("decision") == "request_changes"

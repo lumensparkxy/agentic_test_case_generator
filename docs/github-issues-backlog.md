@@ -97,10 +97,10 @@ Status markers below reflect the GitHub issue state as of 2026-07-17.
   - Done: [#190](https://github.com/lumensparkxy/agentic_test_case_generator/issues/190) - Add auditable Use Cases review decisions
   - Done: [#194](https://github.com/lumensparkxy/agentic_test_case_generator/issues/194) - Establish global and project route shells
   - Done: [#195](https://github.com/lumensparkxy/agentic_test_case_generator/issues/195) - Build authenticated Home and Projects experiences
-  - Ready: [#196](https://github.com/lumensparkxy/agentic_test_case_generator/issues/196) - Build the Use Cases review workbench
-  - Blocked: [#197](https://github.com/lumensparkxy/agentic_test_case_generator/issues/197) - Build a global Review Inbox
+  - Done: [#196](https://github.com/lumensparkxy/agentic_test_case_generator/issues/196) - Build the Use Cases review workbench
+  - Ready: [#197](https://github.com/lumensparkxy/agentic_test_case_generator/issues/197) - Build a global Review Inbox
   - Ready: [#198](https://github.com/lumensparkxy/agentic_test_case_generator/issues/198) - Build global Runs and Reports indexes
-  - Blocked: [#199](https://github.com/lumensparkxy/agentic_test_case_generator/issues/199) - Replace Next Action billboard with a contextual task
+  - Ready: [#199](https://github.com/lumensparkxy/agentic_test_case_generator/issues/199) - Replace Next Action billboard with a contextual task
   - Ready: [#200](https://github.com/lumensparkxy/agentic_test_case_generator/issues/200) - Fix responsive navigation and status containment
   - Ready: [#201](https://github.com/lumensparkxy/agentic_test_case_generator/issues/201) - Align Automation preview counts and candidate states
   - Blocked: [#202](https://github.com/lumensparkxy/agentic_test_case_generator/issues/202) - Add Home-first UX regression and accessibility gates

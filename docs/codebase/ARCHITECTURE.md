@@ -184,6 +184,15 @@ HTTP 409 with reload guidance and no partial writes. Repeating an identical
 request identity resolves to the same decision and event instead of duplicating
 audit history.
 
+Automated Use Cases quality approval remains evidence inside the immutable
+snapshot payload; generation never treats it as the durable human stage
+decision. `backend/app/services/orchestrator_service.py` considers Use Cases
+approved only when `latest_human_review` matches the current snapshot and its
+decision is `approve`, including for legacy snapshots whose raw stage flag was
+previously set by machine review. Reviewer name and email are retained in the
+authorized stage metadata for durable presentation, while the internal user ID
+remains secondary provenance.
+
 Impact update flow:
 
 ```text
@@ -278,6 +287,26 @@ create succeeds after navigation changes, the read models still refresh so Home
 reflects the durable project without forcing a redirect. Project-list reads use
 a per-session request sequence as well as the authenticated subject, so an
 older response cannot overwrite a post-create list or clear its stored project.
+
+Use Cases workbench flow:
+
+```text
+Canonical project route -> exact current Use Cases snapshot -> grouped review artifact -> explicit human decision -> scoped project and workspace refresh
+```
+
+`frontend/src/pages/UseCaseReviewPage.jsx` and
+`frontend/src/components/reviews/UseCaseReviewWorkbench.jsx` render the current
+immutable Use Cases snapshot as a searchable, requirement-grouped artifact.
+Machine quality review and durable human review state stay visibly distinct, and
+the workbench derives its primary count from the same nested-scenario contract
+as the workspace summary. `frontend/src/hooks/useUseCaseReview.js` owns the
+decision lifecycle while `frontend/src/services/useCaseReviewClient.js` owns the
+review transport contract. The client preserves one request ID for an exact
+retry, submits the snapshot ID and base project revision, and turns structured
+409 responses into an explicit reload path without discarding the reviewer's
+draft. Successful decisions apply the returned orchestrator state and refresh
+the exact project, project list, and workspace summary; route and authenticated
+subject scoping prevents late responses from overwriting another workbench.
 
 Frontend shell flow:
 

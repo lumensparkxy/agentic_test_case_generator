@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
-import {
-	GlobalDestinationPlaceholderPage,
-	ProjectLoadingPage,
-	ProjectOverviewPage,
-	RouteRecoveryPage,
-	UseCasesPlaceholderPage,
-} from "./app/RoutePages";
+import { GlobalDestinationPlaceholderPage, ProjectLoadingPage, ProjectOverviewPage, RouteRecoveryPage } from "./app/RoutePages";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -47,6 +41,7 @@ import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
 import useWorkspaceSummary from "./hooks/useWorkspaceSummary";
 import HomePage from "./pages/HomePage";
 import ProjectsPage from "./pages/ProjectsPage";
+import UseCaseReviewPage from "./pages/UseCaseReviewPage";
 import {
 	GLOBAL_DESTINATIONS,
 	buildProjectPath,
@@ -586,6 +581,14 @@ export default function App() {
 	const reviewPendingRequirementCount = requirements.length - approvedRequirementCount - rejectedRequirementCount;
 	const canGenerateFromApprovedRequirements = approvedRequirementCount > 0;
 	const projectStageState = currentProject?.stage_state || {};
+	const useCasesStageState = projectStageState.use_cases || {};
+	const latestUseCasesHumanReview = useCasesStageState.metadata?.latest_human_review;
+	const useCasesHumanApproved = Boolean(
+		useCasesStageState.approved &&
+		!useCasesStageState.stale &&
+		latestUseCasesHumanReview?.snapshot_id === useCasesStageState.current_snapshot_id &&
+		latestUseCasesHumanReview?.decision === "approve"
+	);
 	const projectSnapshots = currentProject?.current_snapshots || {};
 	const persistedTestCaseCount = projectSnapshots.test_cases?.payload?.test_cases?.length || 0;
 	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount);
@@ -609,7 +612,7 @@ export default function App() {
 		const requirementChanged = item.kind === "requirement" || item.requirement_id;
 		const useCaseChanged = item.kind === "use_case" || item.use_case_id || (item.scenario_ids || []).length > 0;
 		const requirementsBlocked = requirementChanged && (!projectStageState.requirements?.approved || projectStageState.requirements?.stale);
-		const useCasesBlocked = useCaseChanged && (!projectStageState.use_cases?.approved || projectStageState.use_cases?.stale);
+		const useCasesBlocked = useCaseChanged && !useCasesHumanApproved;
 		return requirementsBlocked || useCasesBlocked;
 	});
 	const impactApplyBlockedByApproval = Boolean(
@@ -1517,7 +1520,10 @@ export default function App() {
 		}
 	};
 
-	const openProject = async (projectId, { hydrate = true, silent = false, routeRequestId = null, operationScope = null } = {}) => {
+	const openProject = async (
+		projectId,
+		{ hydrate = true, silent = false, routeRequestId = null, operationScope = null, loadOrchestrator = true } = {}
+	) => {
 		if (!projectId) {
 			clearProjectWorkspace({ removeStoredProject: true });
 			return null;
@@ -1546,7 +1552,9 @@ export default function App() {
 			}
 			if (data?.project_id) {
 				localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, data.project_id);
-				await loadProjectOrchestrator(data.project_id, { silent: true, routeRequestId, operationScope });
+				if (loadOrchestrator) {
+					await loadProjectOrchestrator(data.project_id, { silent: true, routeRequestId, operationScope });
+				}
 				if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
 					return null;
 				}
@@ -1585,6 +1593,45 @@ export default function App() {
 		}
 		return openProject(operationScope.projectId, { hydrate, silent: true, operationScope });
 	};
+
+	const refreshUseCaseReviewProject = async ({ projectId, orchestratorStatus: committedStatus = null } = {}) => {
+		const operationScope = captureProjectOperationScope();
+		if (!operationScope || operationScope.projectId !== projectId || !isProjectOperationCurrent(operationScope)) {
+			return null;
+		}
+		if (committedStatus) {
+			setOrchestratorStatus(committedStatus);
+		}
+		const requestIsCurrent = () => isProjectOperationCurrent(operationScope);
+		const [project, orchestrator, projectList, workspaceSummary] = await Promise.all([
+			openProject(projectId, { hydrate: false, silent: true, operationScope, loadOrchestrator: false }),
+			loadProjectOrchestrator(projectId, { silent: true, operationScope }),
+			loadProjects({ silent: true, requestIsCurrent }),
+			refreshWorkspaceSummary(),
+		]);
+		if (!requestIsCurrent()) {
+			return null;
+		}
+		const failedRefreshes = [
+			!project ? "project" : null,
+			!orchestrator ? "orchestrator" : null,
+			projectList === null ? "project list" : null,
+			!workspaceSummary ? "Home and review inbox" : null,
+		].filter(Boolean);
+		if (failedRefreshes.length) {
+			if (committedStatus) {
+				setOrchestratorStatus(committedStatus);
+			}
+			const prefix = committedStatus ? "Decision saved, but" : "Reload incomplete:";
+			throw new Error(`${prefix} ${failedRefreshes.join(", ")} state could not be refreshed. Reload latest before another decision.`);
+		}
+		return project;
+	};
+
+	const handleUseCaseReviewCommitted = async (response, context) =>
+		refreshUseCaseReviewProject({ projectId: context?.projectId, orchestratorStatus: response?.orchestrator_status || null });
+
+	const reloadLatestUseCases = async (projectId) => refreshUseCaseReviewProject({ projectId });
 
 	const createProject = async (nameOverride = null, { throwOnError = false } = {}) => {
 		const name = `${nameOverride ?? newProjectName}`.trim();
@@ -3600,7 +3647,7 @@ export default function App() {
 		7: currentProject ? "complete" : "pending",
 		0: requirements.length ? "complete" : "pending",
 		1: enrichedContext?.grounded_context ? "complete" : hasContextInputs ? "pending" : "pending",
-		6: projectStageState.use_cases?.approved
+		6: useCasesHumanApproved
 			? "complete"
 			: projectStageState.use_cases?.current_snapshot_id
 				? "pending"
@@ -3796,7 +3843,14 @@ export default function App() {
 						{route.destination === "overview" ? (
 							<ProjectOverviewPage project={currentProject} status={orchestratorStatus} navigate={navigate} />
 						) : route.destination === "use-cases" ? (
-							<UseCasesPlaceholderPage project={currentProject} navigate={navigate} />
+							<UseCaseReviewPage
+								project={currentProject}
+								identity={currentUser?.sub || ""}
+								request={apiRequest}
+								navigate={navigate}
+								onDecisionCommitted={handleUseCaseReviewCommitted}
+								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
+							/>
 						) : (
 							<main className="workflow-main" aria-label="Workflow workspace">
 								{route.destination === "test-cases" ? (
