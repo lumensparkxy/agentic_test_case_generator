@@ -27,17 +27,31 @@ class FrontendApiContractGenerationTests(unittest.TestCase):
         self.assertIn("export type TestCasesGenerateRequest = GenerateTestCasesInput;", declarations)
         self.assertIn("export type ExportCsvResponse = Blob;", declarations)
         self.assertIn("export type BillingEntitlementsMeResponse = BillingEntitlementResponse;", declarations)
+        self.assertIn("export type WorkspaceSummaryGetResponse = WorkspaceSummaryResponse;", declarations)
+        self.assertIn("include_archived?: boolean;", declarations)
+        self.assertIn("projects_limit?: number;", declarations)
+        self.assertIn("work_items_limit?: number;", declarations)
+        self.assertIn('workspaceSummary: Object.freeze({ method: "GET", path: "/workspace/summary" })', runtime)
 
     def test_collects_referenced_component_schemas_recursively(self) -> None:
         openapi = app.openapi()
         component_names = collect_component_names(
             openapi,
-            {"GenerateTestCasesInput", "GenerateTestCasesResponse", "BillingEntitlementResponse"},
+            {
+                "GenerateTestCasesInput",
+                "GenerateTestCasesResponse",
+                "BillingEntitlementResponse",
+                "WorkspaceSummaryResponse",
+            },
         )
 
         self.assertIn("Requirement", component_names)
         self.assertIn("TestCase", component_names)
         self.assertIn("BillingQuotaSummary", component_names)
+        self.assertIn("WorkspaceProjectSummary", component_names)
+        self.assertIn("WorkspaceWorkItem", component_names)
+        self.assertIn("WorkspaceRunSummary", component_names)
+        self.assertIn("WorkspaceReportSummary", component_names)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from .exports import *
 from .automation import *
 from .reporting import *
 from .billing import *
+from .workspace import *
 
 __all__ = [
     "Requirement",
@@ -164,4 +165,11 @@ __all__ = [
     "BillingAllocationResponse",
     "BillingLedgerResponse",
     "BillingOrgSummaryResponse",
+    "WorkspaceWorkItemKind",
+    "WorkspaceReportStatus",
+    "WorkspaceProjectSummary",
+    "WorkspaceWorkItem",
+    "WorkspaceRunSummary",
+    "WorkspaceReportSummary",
+    "WorkspaceSummaryResponse",
 ]

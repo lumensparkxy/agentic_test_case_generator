@@ -360,6 +360,12 @@ test-case snapshots automatically.
   collection lookup. Audit dead letters can also be mirrored to an optional
   Firestore sink for compliance deployments. PostgreSQL schema, adapter, and
   migration work remain future implementation stories.
+- The authenticated workspace read model is exposed through
+  `GET /workspace/summary`. `workspace_summary_service.py` reuses the existing
+  orchestrator decision policy, while `workflow_project_service.py` loads a
+  hard-limited owner/status projection, direct current snapshots, and bounded
+  execution history. The path fails closed when its required Firestore index is
+  unavailable; it never falls back to the legacy unbounded project scan.
 - The execution runtime shells out to `npx playwright test`. Each execution run
   compiles selected executable candidates into shared run-local specs, invokes
   Playwright once, and maps the consolidated JSON report back to per-case

@@ -20,6 +20,7 @@ from .routers.projects import router as projects_router
 from .routers.requirements import _build_grounded_context_from_enrich_input, router as requirements_router
 from .routers.reports import router as reports_router
 from .routers.testcases import router as testcases_router
+from .routers.workspace import router as workspace_router
 from .agents.automation_agent import generate_playwright_pom
 from .services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from .services.execution_service import preview_execution, run_execution
@@ -48,6 +49,7 @@ app.include_router(azure_devops_router)
 app.include_router(export_router)
 app.include_router(testcases_router)
 app.include_router(automation_router)
+app.include_router(workspace_router)
 
 configure_tracing(app)
 

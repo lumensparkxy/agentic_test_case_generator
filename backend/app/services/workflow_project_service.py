@@ -5,6 +5,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from google.cloud.firestore_v1 import FieldFilter, Query
 
 from ..models import (
     AuthUser,
@@ -38,6 +39,27 @@ DOWNSTREAM_STAGES: dict[ProjectStageName, tuple[ProjectStageName, ...]] = {
     "execution": ("reports",),
     "reports": (),
 }
+WORKSPACE_SNAPSHOT_FIELDS: tuple[str, ...] = (
+    "snapshot_id",
+    "project_id",
+    "stage",
+    "version",
+    "project_revision",
+    "operation",
+    "approved",
+    "source_snapshot_id",
+    "title",
+    "metadata",
+    "created_at",
+    "payload.review",
+    "payload.summary",
+    "payload.changed_items",
+    "payload.status",
+    "payload.source",
+    "payload.format",
+    "payload.run_id",
+    "payload.evidence.execution_run_ids",
+)
 
 
 class ProjectConflictError(RuntimeError):
@@ -201,6 +223,135 @@ def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[Qa
         if not include_archived and item.get("status") == "archived":
             continue
         projects.append(_summary_from_payload(item))
+    projects.sort(key=lambda item: item.updated_at, reverse=True)
+    return projects
+
+
+def _workspace_snapshot_for(project_id: str, snapshot_id: str) -> Optional[QaProjectStageSnapshot]:
+    payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get(field_paths=WORKSPACE_SNAPSHOT_FIELDS))
+    if not payload:
+        return None
+    snapshot = QaProjectStageSnapshot.model_validate(payload)
+    if snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id:
+        return None
+    return snapshot
+
+
+def _workspace_execution_runs(
+    project_doc: Any,
+    *,
+    actor: AuthUser,
+    project_id: str,
+    limit: int,
+) -> list[QaProjectExecutionRun]:
+    query = (
+        project_doc.collection("execution_runs")
+        .where(filter=FieldFilter("actor_user_id", "==", actor.sub))
+        .where(filter=FieldFilter("project_id", "==", project_id))
+        .order_by("created_at", direction=Query.DESCENDING)
+        .order_by("run_record_id", direction=Query.ASCENDING)
+        .select(
+            (
+                "run_record_id",
+                "project_id",
+                "run_id",
+                "target_environment",
+                "project_revision",
+                "test_case_count",
+                "status",
+                "summary",
+                "snapshot_id",
+                "source_snapshot_id",
+                "selected_test_case_ids",
+                "actor_user_id",
+                "created_at",
+            )
+        )
+        .limit(limit)
+    )
+    runs = [
+        QaProjectExecutionRun.model_validate(payload)
+        for snapshot in query.stream()
+        if (payload := dict(snapshot.to_dict() or {})).get("run_record_id")
+        and payload.get("actor_user_id") == actor.sub
+        and payload.get("project_id") == project_id
+    ]
+    runs.sort(key=lambda item: item.run_record_id)
+    runs.sort(key=lambda item: item.created_at, reverse=True)
+    return runs
+
+
+def list_workspace_projects(
+    *,
+    actor: AuthUser,
+    include_archived: bool,
+    project_limit: int,
+    execution_run_limit: int,
+) -> list[QaProjectDetail]:
+    """Load a bounded, workspace-safe project projection.
+
+    Production requires a composite ``qa_projects`` index over
+    ``owner_user_id``, ``status`` (for the default view), ``updated_at``
+    descending, and ``project_id`` ascending. The query intentionally fails
+    closed when that index is unavailable instead of falling back to an
+    unbounded collection scan.
+    """
+
+    query = _collection().where(filter=FieldFilter("owner_user_id", "==", actor.sub))
+    if not include_archived:
+        query = query.where(filter=FieldFilter("status", "==", "active"))
+    query = (
+        query.order_by("updated_at", direction=Query.DESCENDING)
+        .order_by("project_id", direction=Query.ASCENDING)
+        .select(
+            (
+                "project_id",
+                "name",
+                "status",
+                "owner_user_id",
+                "current_revision",
+                "created_at",
+                "updated_at",
+                "stage_state",
+            )
+        )
+        .limit(project_limit)
+    )
+
+    projects: list[QaProjectDetail] = []
+    for snapshot in query.stream():
+        payload = dict(snapshot.to_dict() or {})
+        if not payload or payload.get("owner_user_id") != actor.sub:
+            continue
+        if not include_archived and payload.get("status") == "archived":
+            continue
+
+        summary = _summary_from_payload(payload)
+        current_snapshots: dict[ProjectStageName, QaProjectStageSnapshot] = {}
+        for stage, state in summary.stage_state.items():
+            if not state.current_snapshot_id:
+                continue
+            current_snapshot = _workspace_snapshot_for(summary.project_id, state.current_snapshot_id)
+            if current_snapshot is not None and current_snapshot.stage == stage:
+                current_snapshots[stage] = current_snapshot
+
+        project_doc = _get_project_doc(summary.project_id)
+        execution_runs = _workspace_execution_runs(
+            project_doc,
+            actor=actor,
+            project_id=summary.project_id,
+            limit=execution_run_limit,
+        )
+        projects.append(
+            QaProjectDetail(
+                **summary.model_dump(),
+                current_snapshots=current_snapshots,
+                timeline=[],
+                execution_runs=execution_runs,
+            )
+        )
+
+    projects.sort(key=lambda item: item.project_id)
     projects.sort(key=lambda item: item.updated_at, reverse=True)
     return projects
 

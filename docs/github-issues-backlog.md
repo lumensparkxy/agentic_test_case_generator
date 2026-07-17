@@ -91,7 +91,19 @@ Status markers below reflect the GitHub issue state as of 2026-06-22.
   - Done: [#59](https://github.com/lumensparkxy/agentic_test_case_generator/issues/59) - Set up GitHub Wiki and Project tracking workspace
   - Done: [#60](https://github.com/lumensparkxy/agentic_test_case_generator/issues/60) - Create, update, and move detailed documentation to GitHub Wiki
 - Frontend workflow usability
-  - In progress: [#186](https://github.com/lumensparkxy/agentic_test_case_generator/issues/186) - Use responsive wide-screen workflow workspace
+  - Done: [#186](https://github.com/lumensparkxy/agentic_test_case_generator/issues/186) - Use responsive wide-screen workflow workspace
+- Epic [#188](https://github.com/lumensparkxy/agentic_test_case_generator/issues/188) - Build a Home-first production workspace
+  - Done: [#189](https://github.com/lumensparkxy/agentic_test_case_generator/issues/189) - Add aggregated workspace summary API
+  - Ready: [#190](https://github.com/lumensparkxy/agentic_test_case_generator/issues/190) - Add auditable Use Cases review decisions
+  - Ready: [#194](https://github.com/lumensparkxy/agentic_test_case_generator/issues/194) - Establish global and project route shells
+  - Blocked: [#195](https://github.com/lumensparkxy/agentic_test_case_generator/issues/195) - Build authenticated Home and Projects experiences
+  - Blocked: [#196](https://github.com/lumensparkxy/agentic_test_case_generator/issues/196) - Build the Use Cases review workbench
+  - Blocked: [#197](https://github.com/lumensparkxy/agentic_test_case_generator/issues/197) - Build a global Review Inbox
+  - Blocked: [#198](https://github.com/lumensparkxy/agentic_test_case_generator/issues/198) - Build global Runs and Reports indexes
+  - Blocked: [#199](https://github.com/lumensparkxy/agentic_test_case_generator/issues/199) - Replace Next Action billboard with a contextual task
+  - Blocked: [#200](https://github.com/lumensparkxy/agentic_test_case_generator/issues/200) - Fix responsive navigation and status containment
+  - Ready: [#201](https://github.com/lumensparkxy/agentic_test_case_generator/issues/201) - Align Automation preview counts and candidate states
+  - Blocked: [#202](https://github.com/lumensparkxy/agentic_test_case_generator/issues/202) - Add Home-first UX regression and accessibility gates
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
