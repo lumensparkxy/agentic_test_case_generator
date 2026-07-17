@@ -3,9 +3,17 @@ import { expect, test } from "@playwright/test";
 import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
 
 const viewportCases = [
-	{ label: "desktop", size: { width: 1280, height: 900 } },
+	{ label: "laptop", size: { width: 1280, height: 900 } },
+	{ label: "desktop", size: { width: 1440, height: 900 } },
+	{ label: "wide desktop", size: { width: 1920, height: 1080 } },
 	{ label: "mobile", size: { width: 390, height: 844 } },
 ];
+
+const CENTER_WIDTH_TARGETS = {
+	laptop: 900,
+	desktop: 760,
+	"wide desktop": 1100,
+};
 
 function jsonResponse(route, payload, status = 200, headers = {}) {
 	return route.fulfill({
@@ -178,12 +186,54 @@ async function expectNoHorizontalOverflow(page, screenName) {
 	expect(metrics.overflowing, message).toEqual([]);
 }
 
+async function readShellMetrics(page) {
+	return page.evaluate(() => {
+		const readRect = (selector) => {
+			const rect = document.querySelector(selector)?.getBoundingClientRect();
+			if (!rect) return null;
+			return {
+				left: Math.round(rect.left),
+				right: Math.round(rect.right),
+				top: Math.round(rect.top),
+				bottom: Math.round(rect.bottom),
+				width: Math.round(rect.width),
+			};
+		};
+
+		return {
+			viewportWidth: window.innerWidth,
+			left: readRect(".workflow-navigation-drawer"),
+			main: readRect(".workflow-main"),
+			right: readRect(".project-information-rail"),
+		};
+	});
+}
+
+function expectExpandedShellLayout(metrics, label) {
+	const targetWidth = CENTER_WIDTH_TARGETS[label];
+	if (targetWidth) {
+		expect(metrics.main.width, `${label} center workspace width`).toBeGreaterThanOrEqual(targetWidth);
+	}
+
+	if (label === "laptop") {
+		expect(metrics.right.top, "laptop project rail should render below the center workspace").toBeGreaterThanOrEqual(metrics.main.bottom);
+		expect(
+			Math.abs(metrics.right.left - metrics.main.left),
+			"laptop project rail should align with the center workspace"
+		).toBeLessThanOrEqual(2);
+	}
+
+	if (["desktop", "wide desktop"].includes(label)) {
+		expect(Math.abs(metrics.right.top - metrics.main.top), `${label} should use the three-column shell`).toBeLessThanOrEqual(2);
+	}
+}
+
 test.describe("Frontend CSS smoke", () => {
 	for (const { label, size } of viewportCases) {
 		test(`renders auth and settings surfaces without overflow on ${label}`, async ({ page }) => {
 			await page.setViewportSize(size);
 			await page.goto("/");
-			await expect(page.getByRole("heading", { name: /agentic test case generator/i })).toBeVisible();
+			await expect(page.getByRole("button", { name: /^sign in$/i })).toBeVisible();
 			await expectNoHorizontalOverflow(page, `${label} auth`);
 
 			await page.getByRole("button", { name: /settings/i }).click();
@@ -207,6 +257,8 @@ test.describe("Frontend CSS smoke", () => {
 			await expect(page.getByRole("heading", { name: /^QA Project$/i })).toHaveCount(0);
 			await expect(page.getByText(/^No project selected$/i)).toHaveCount(0);
 			await expectNoHorizontalOverflow(page, `${label} requirements`);
+			const expandedShellMetrics = await readShellMetrics(page);
+			expectExpandedShellLayout(expandedShellMetrics, label);
 
 			await page
 				.getByRole("navigation", { name: "Workflow navigation" })
@@ -222,6 +274,19 @@ test.describe("Frontend CSS smoke", () => {
 			await expect(
 				page.getByLabel("Project information rail").getByRole("button", { name: /^Expand project information$/i })
 			).toBeVisible();
+			const collapsedShellMetrics = await readShellMetrics(page);
+			if (label !== "mobile") {
+				expect(collapsedShellMetrics.main.width, `${label} collapsed center workspace width`).toBeGreaterThan(
+					expandedShellMetrics.main.width
+				);
+			}
+			if (label === "laptop") {
+				expect(collapsedShellMetrics.right.width, "collapsed laptop project rail width").toBe(104);
+				expect(Math.abs(collapsedShellMetrics.right.right - collapsedShellMetrics.main.right)).toBeLessThanOrEqual(2);
+			}
+			if (label === "wide desktop") {
+				expect(collapsedShellMetrics.main.width, "wide desktop collapsed center workspace width").toBeGreaterThanOrEqual(1500);
+			}
 			await expectNoHorizontalOverflow(page, `${label} collapsed shell`);
 
 			await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);

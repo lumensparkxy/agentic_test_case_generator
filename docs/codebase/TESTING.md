@@ -129,6 +129,10 @@ Evidence: `.github/workflows/ci.yml`.
   browser-local and verify that collapsed left/right rails do not change
   workflow behavior. Icon-specific assertions check that destination markers
   and collapse controls render as SVG icons while retaining accessible names.
+- Workflow shell responsive tests cover 390px, 1280px, 1440px, and 1920px
+  viewports. They verify the mobile stack, the laptop two-column shell with the
+  project rail below the center, the desktop three-column shell, center-width
+  targets, the width reclaimed by collapsed rails, and document-level overflow.
 - Brighter Executive Cockpit design QA maps the selected visual target to
   tested surfaces in `docs/brighter-executive-cockpit-design-qa.md`.
 - Offline evaluation scripts use deterministic fallback behavior instead of

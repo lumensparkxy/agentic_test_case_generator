@@ -1,8 +1,6 @@
 /* Responsive */
-@media (max-width: 1100px) {
+@media (max-width: 1439px) {
 	.workflow-shell {
-		--workflow-nav-column: minmax(240px, 280px);
-
 		grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr);
 	}
 
@@ -16,7 +14,14 @@
 		max-height: none;
 	}
 
+	.workflow-shell.rail-collapsed .project-information-rail {
+		box-sizing: border-box;
+		width: 104px;
+		justify-self: end;
+	}
+
 	.workflow-navigation-drawer {
+		z-index: 1;
 		padding: 0.7rem;
 	}
 }
@@ -28,6 +33,11 @@
 
 	.project-information-rail {
 		grid-column: auto;
+	}
+
+	.workflow-shell.rail-collapsed .project-information-rail {
+		width: auto;
+		justify-self: stretch;
 	}
 
 	.workflow-navigation-drawer {
