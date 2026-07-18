@@ -105,7 +105,7 @@ Status markers below reflect the GitHub issue state as of 2026-07-18.
   - Done: [#200](https://github.com/lumensparkxy/agentic_test_case_generator/issues/200) - Fix responsive navigation and status containment
   - Done: [#201](https://github.com/lumensparkxy/agentic_test_case_generator/issues/201) - Align Automation preview counts and candidate states
   - Done: [#202](https://github.com/lumensparkxy/agentic_test_case_generator/issues/202) - Add Home-first UX regression and accessibility gates
-- In progress rollout follow-up: [#214](https://github.com/lumensparkxy/agentic_test_case_generator/issues/214) - Deploy Home workspace API and required Firestore indexes
+- Done: [#214](https://github.com/lumensparkxy/agentic_test_case_generator/issues/214) - Deploy Home workspace API and required Firestore indexes
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 

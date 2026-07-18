@@ -190,6 +190,28 @@ Attach the revision names, index states, command outcomes, and read-only browser
 observations to #214. Do not attach credentials, response tokens, browser
 profiles, or screenshots containing private data.
 
+## Recorded production evidence
+
+On 2026-07-18, PR #216 merged to protected `main` as `62a60e9`.
+The additive deployment completed with all three versioned Firestore composite
+indexes `READY`. Cloud Run routed 100% of production traffic to backend revision
+`tcg-backend-00027-tdr` and frontend revision
+`tcg-frontend-00011-w8z`.
+
+An authenticated Computer Use smoke against
+`https://test-engineer-agent.maswadkar.com/` received HTTP 200 from
+`/workspace/summary`, rendered Continue working, My work, Projects, and Recent
+activity on Home, and showed 2 projects, 8 prioritized work items, 2 recent
+runs, and 2 recent reports within the endpoint's default 20/50/20/20 bounds. It
+opened the canonical pending Use Cases route with Use Cases current and its
+review controls keyboard-reachable.
+
+Post-deploy checks confirmed `AUTH_TOKEN_MODE=firebase-only`, the existing
+runtime service account and public-invoker policies, and the exact custom-domain
+CORS origin. No secret or environment configuration changed. The smoke was
+read-only: no project, review, generation, execution, or export mutation was
+submitted.
+
 ## 5. Roll back
 
 If the frontend is unhealthy, route it to the captured frontend revision first.
