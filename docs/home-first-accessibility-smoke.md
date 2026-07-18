@@ -49,7 +49,7 @@ not a WCAG conformance audit or certification.
 
 | Date | Environment/build | macOS / Chrome | Home | Use Cases | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 2026-07-18 | `codex/issue-202-home-first-ux-gates` local branch plus `https://test-engineer-agent.maswadkar.com/` session | macOS 26.5.2 (25F84) / Chrome 150.0.7871.125 | Pending | Pending | Computer Use still reports the macOS lock screen after reconnecting and repeated retries. Do not treat this row as a pass. |
+| 2026-07-18 | `codex/issue-202-home-first-ux-gates` at `0155dc1`; local current-branch Vite/API, deterministic workspace-summary fixture for populated Home, and authenticated Firestore-backed `mytestx` Use Cases data | macOS 26.5.2 (25F84) / Chrome 150.0.7871.125 | Pass | Pass | VoiceOver was enabled and verified in System Settings for the full 1280×720 Chrome keyboard pass, then disabled. Verified first-focus skip links, Home and Use Cases route focus, named/current global and project navigation, chooser focus restoration, all four Home regions, scenario search/details, decision radio states, comment/button order, and Home return focus. No review, generation, execution, or export action was submitted. The deployed API/index rollout gap found during setup is tracked in [#214](https://github.com/lumensparkxy/agentic_test_case_generator/issues/214). This is a targeted smoke result, not WCAG certification. |
 
 ## Automated companion evidence
 

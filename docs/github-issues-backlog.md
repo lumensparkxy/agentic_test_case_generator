@@ -23,7 +23,7 @@ work. Active roadmap work is tracked in the Phase 3 and Phase 4 sections below.
 
 ## Created semantic Playwright execution hardening issues
 
-Status markers below reflect the GitHub issue state as of 2026-07-17.
+Status markers below reflect the GitHub issue state as of 2026-07-18.
 
 - Done Epic [#175](https://github.com/lumensparkxy/agentic_test_case_generator/issues/175) - Harden semantic Playwright execution assertions
   - Done: [#176](https://github.com/lumensparkxy/agentic_test_case_generator/issues/176) - Reject literal semantic words in execution assertions
@@ -37,7 +37,7 @@ next-version end-to-end Playwright documentation workflow succeeded.
 
 ### Phase 3 - Architecture Hardening
 
-Status markers below reflect the GitHub issue state as of 2026-07-17.
+Status markers below reflect the GitHub issue state as of 2026-07-18.
 
 - Epic [#35](https://github.com/lumensparkxy/agentic_test_case_generator/issues/35) - Reduce high-churn architecture hotspots
   - Done: [#39](https://github.com/lumensparkxy/agentic_test_case_generator/issues/39) - Extract frontend workflow state from App.jsx into hooks
@@ -92,7 +92,7 @@ Status markers below reflect the GitHub issue state as of 2026-07-17.
   - Done: [#60](https://github.com/lumensparkxy/agentic_test_case_generator/issues/60) - Create, update, and move detailed documentation to GitHub Wiki
 - Frontend workflow usability
   - Done: [#186](https://github.com/lumensparkxy/agentic_test_case_generator/issues/186) - Use responsive wide-screen workflow workspace
-- Epic [#188](https://github.com/lumensparkxy/agentic_test_case_generator/issues/188) - Build a Home-first production workspace
+- Done Epic [#188](https://github.com/lumensparkxy/agentic_test_case_generator/issues/188) - Build a Home-first production workspace
   - Done: [#189](https://github.com/lumensparkxy/agentic_test_case_generator/issues/189) - Add aggregated workspace summary API
   - Done: [#190](https://github.com/lumensparkxy/agentic_test_case_generator/issues/190) - Add auditable Use Cases review decisions
   - Done: [#194](https://github.com/lumensparkxy/agentic_test_case_generator/issues/194) - Establish global and project route shells
@@ -103,7 +103,8 @@ Status markers below reflect the GitHub issue state as of 2026-07-17.
   - Done: [#199](https://github.com/lumensparkxy/agentic_test_case_generator/issues/199) - Replace Next Action billboard with a contextual task
   - Done: [#200](https://github.com/lumensparkxy/agentic_test_case_generator/issues/200) - Fix responsive navigation and status containment
   - Done: [#201](https://github.com/lumensparkxy/agentic_test_case_generator/issues/201) - Align Automation preview counts and candidate states
-  - In progress: [#202](https://github.com/lumensparkxy/agentic_test_case_generator/issues/202) - Add Home-first UX regression and accessibility gates
+  - Done: [#202](https://github.com/lumensparkxy/agentic_test_case_generator/issues/202) - Add Home-first UX regression and accessibility gates
+- Ready rollout follow-up: [#214](https://github.com/lumensparkxy/agentic_test_case_generator/issues/214) - Deploy Home workspace API and required Firestore indexes
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 
