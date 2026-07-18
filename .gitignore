@@ -31,6 +31,9 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
 
 
 backend/execution_runtime/artifacts/

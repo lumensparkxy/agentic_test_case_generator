@@ -289,6 +289,7 @@ Prerequisites:
 	- `VITE_FIREBASE_APP_ID`
 	- `JWT_SECRET_KEY`
 	- `AUTH_TOKEN_MODE=firebase-only`
+	- `CORS_ALLOW_ORIGINS` including every production frontend/custom-domain origin
 	- `METRICS_ENABLED=false` or `METRICS_ENABLED=true` with `METRICS_ACCESS_TOKEN`
 	- `JIRA_CONNECTION_SECRET_KEY` and `AZURE_DEVOPS_CONNECTION_SECRET_KEY` when production should use dedicated integration encryption keys
 	- `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` and `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS` only during planned integration encryption-key rotation windows
@@ -301,9 +302,9 @@ Set your target project and optionally the region/repository/service names:
 - `export BACKEND_SERVICE=tcg-backend`
 - `export FRONTEND_SERVICE=tcg-frontend`
 
-Run the deploy script from the repo root:
+Run the deploy script from the repo root to bootstrap a new environment:
 
-- `./scripts/deploy_cloud_run.sh`
+- `DEPLOY_MODE=bootstrap ./scripts/deploy_cloud_run.sh`
 
 What the script does:
 
@@ -321,7 +322,28 @@ What the script does:
 - builds and pushes the frontend container with the deployed backend URL and Firebase web config baked in
 - deploys the frontend to Cloud Run
 - updates backend CORS to allow the deployed frontend URL
-- runs a CORS preflight smoke check against the deployed backend
+- runs backend health, frontend HTTP, and CORS preflight smoke checks
+
+For an existing production environment, use the code-only release mode. It
+requires clean synchronized `main`, verifies the live backend is still
+`AUTH_TOKEN_MODE=firebase-only`, tags images with the current commit, preserves
+existing environment variables/CORS/Secret Manager references/IAM/service
+account policy, and updates only the backend/frontend images:
+
+```bash
+git fetch origin --prune
+export DEPLOY_MODE=release
+export CORS_SMOKE_ORIGINS=https://test-engineer-agent.maswadkar.com
+./scripts/deploy_cloud_run.sh
+```
+
+The Home workspace also requires the three versioned composite indexes in
+`firestore.indexes.json`. Follow
+[`docs/home-workspace-production-rollout.md`](docs/home-workspace-production-rollout.md)
+to validate and add the indexes, capture rollback revisions, deploy from
+protected `main`, and run the authenticated read-only production smoke. Do not
+run routine releases through bootstrap mode because bootstrap intentionally
+updates secrets and infrastructure policy.
 
 If you use Firebase Authentication with popup or redirect flows, also add the deployed frontend hostname (without `https://`) to Firebase Console -> Authentication -> Settings -> Authorized domains. For Cloud Run, this is typically both the canonical `*.a.run.app` hostname and the region-scoped `*.run.app` hostname shown by the deploy script.
 

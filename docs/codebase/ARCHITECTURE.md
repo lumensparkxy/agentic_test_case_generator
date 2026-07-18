@@ -594,7 +594,11 @@ test-case snapshots automatically.
   orchestrator decision policy, while `workflow_project_service.py` loads a
   hard-limited owner/status projection, direct current snapshots, and bounded
   execution history. The path fails closed when its required Firestore index is
-  unavailable; it never falls back to the legacy unbounded project scan.
+  unavailable; it never falls back to the legacy unbounded project scan. The
+  three query indexes are versioned in `firestore.indexes.json`, validated by
+  `backend/tests/test_firestore_index_manifest.py`, and deployed additively by
+  `scripts/deploy_firestore_indexes.py` before the Cloud Run release described
+  in `docs/home-workspace-production-rollout.md`.
 - The execution runtime shells out to `npx playwright test`. Each execution run
   compiles selected executable candidates into shared run-local specs, invokes
   Playwright once, and maps the consolidated JSON report back to per-case

@@ -320,6 +320,14 @@ Use the smallest gate that proves the change:
   `CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first`. Repeat the
   manual Home and Use Cases smoke in `docs/home-first-accessibility-smoke.md`
   when semantics or focus behavior changes.
+- Firestore index or production rollout change: parse `firebase.json` and
+  `firestore.indexes.json`, run
+  `backend.tests.test_firestore_index_manifest`, run the pinned Firebase CLI
+  `firestore:indexes` dry run, execute
+  `scripts/deploy_firestore_indexes.py` without `--apply`, and syntax-check
+  `scripts/deploy_cloud_run.sh`. Production apply and read-only smoke follow
+  `docs/home-workspace-production-rollout.md` only after protected `main` is
+  synchronized.
 - Report/export evidence or stale report decision change: export endpoint,
   orchestrator service, and focused report evidence E2E tests.
 - End-to-end workflow or release confidence change: run
@@ -347,6 +355,8 @@ the issue, PR, or handoff note.
 - `scripts/evaluate_generation.py`
 - `scripts/evaluate_orchestrator.py`
 - `scripts/export_openapi.py`
+- `scripts/deploy_firestore_indexes.py`
+- `docs/home-workspace-production-rollout.md`
 - `scripts/e2e_playwright_workflow.py`
 - `docs/requirements_traceability.md`
 - `schemas/spec.schema.json`

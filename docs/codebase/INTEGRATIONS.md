@@ -11,12 +11,12 @@ used by the tracked source.
 | Firebase Authentication | External identity provider | Frontend sign-in and backend Firebase ID token verification | Firebase ID token bearer token | High | `frontend/src/firebase.js`, `backend/app/auth/firebase_auth.py`, `backend/app/services/firebase_admin.py` |
 | Backend-issued JWT | Local/test auth compatibility path | Legacy/local API token support and E2E helper token minting; accepted only behind `AUTH_TOKEN_MODE=firebase-or-backend-jwt` | `JWT_SECRET_KEY`, `JWT_ALGORITHM` | Medium | `backend/app/auth/jwt_auth.py`, `scripts/e2e_playwright_workflow.py`, `docs/production-auth-policy-decision.md` |
 | Google Identity credential verification | Local/test compatibility identity path | `/auth/google/login` exchanges Google credential for backend JWT only in compatibility mode | Google ID token verified against allowed audiences | Medium | `backend/app/auth/google_auth.py`, `backend/app/routers/auth.py`, `docs/production-auth-policy-decision.md` |
-| Firestore | External data store | Audit events, workflow runs, optional audit dead-letter summaries, version records, connection records, billing repository, reporting data | Firebase Admin SDK credentials | High | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, `backend/app/services/audit_repository.py`, `backend/app/services/versioning_service.py`, `backend/app/services/billing_repository.py`, `backend/app/services/usage_event_repository.py` |
+| Firestore | External data store | Audit events, workflow runs, optional audit dead-letter summaries, version records, connection records, billing repository, reporting data, and bounded Home workspace indexes | Firebase Admin SDK credentials; index administration through authenticated `gcloud`/Firebase tooling | High | `backend/app/services/firebase_admin.py`, `backend/app/services/firestore_repository.py`, `firestore.indexes.json`, `scripts/deploy_firestore_indexes.py`, `docs/home-workspace-production-rollout.md` |
 | JIRA Cloud | External API | Store user JIRA connection, import requirements, sync managed requirement blocks, export tests placeholder | User email plus API token, token encrypted before storage | High | `backend/app/adapters/jira.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/jira_requirements_service.py`, `backend/app/services/jira_sync_service.py`, `backend/app/routers/integrations_jira.py` |
 | Azure DevOps Services | External API | Store user Azure DevOps connection, import work items, sync managed requirement blocks | Personal Access Token, encrypted before storage | High | `backend/app/adapters/azure_devops.py`, `backend/app/services/azure_devops_connection_service.py`, `backend/app/services/azure_devops_requirements_service.py`, `backend/app/services/azure_devops_sync_service.py`, `backend/app/routers/integrations_azure_devops.py` |
 | Remote artifact URLs | External HTTP(S) resources | Ground app/prototype/diagram/image links into UI/API/workflow context | Public unauthenticated HTTP(S), textual content only, no embedded credentials | Medium | `backend/app/services/artifact_fetcher.py`, `backend/app/services/context_grounding.py`, `backend/app/routers/requirements.py`, `docs/artifact-fetching-threat-model.md` |
 | Playwright Test execution runtime | Local subprocess/runtime | Convert executable candidates into generated specs, run selected cases, collect reports | Local process, environment config | High for automation feature | `backend/app/services/execution_service.py`, `backend/plain_english_test_framework/local_runner.py`, `backend/execution_runtime/playwright.config.ts` |
-| Cloud Run / Artifact Registry / Secret Manager | Deployment platform | Deploy backend and frontend containers to managed infrastructure | `gcloud` credentials and Secret Manager | Medium | `scripts/deploy_cloud_run.sh`, `backend/Dockerfile`, `frontend/Dockerfile` |
+| Cloud Run / Artifact Registry / Secret Manager | Deployment platform | Bootstrap infrastructure or deploy commit-tagged backend/frontend releases while preserving live runtime policy | `gcloud` credentials and Secret Manager | Medium | `scripts/deploy_cloud_run.sh`, `backend/Dockerfile`, `frontend/Dockerfile`, `docs/home-workspace-production-rollout.md` |
 | Prometheus-compatible metrics | Observability endpoint | Expose request, workflow, fallback, audit failure, audit dead-letter sink, and integration request counters/durations when enabled | `METRICS_ENABLED`, optional bearer `METRICS_ACCESS_TOKEN`, deployment perimeter | Medium | `backend/app/main.py`, `backend/app/observability/metrics.py`, `backend/app/observability/integrations.py`, `scripts/deploy_cloud_run.sh` |
 | OpenTelemetry | Optional tracing | FastAPI tracing and trace ID propagation | `OTEL_*` environment variables | Medium | `backend/app/observability/tracing.py`, `backend/requirements.txt` |
 
@@ -61,10 +61,12 @@ Rotation/lifecycle notes:
   during a rotation window, and expose
   `scripts/reencrypt_integration_credentials.py` to re-encrypt records with the
   primary key before previous keys are removed.
-- `scripts/deploy_cloud_run.sh` creates new Secret Manager versions for managed
-  secrets and now includes optional dedicated JIRA/Azure DevOps connection
-  encryption-key secrets plus previous-key rotation secrets when those values
-  are set.
+- `DEPLOY_MODE=bootstrap scripts/deploy_cloud_run.sh` creates new Secret Manager
+  versions for managed secrets and includes optional dedicated JIRA/Azure DevOps
+  connection encryption-key secrets plus previous-key rotation secrets when
+  those values are set. `DEPLOY_MODE=release` is the routine code path and
+  preserves existing secret references, IAM, service-account, environment, and
+  CORS configuration.
 - `docs/production-auth-policy-decision.md` defines Firebase ID tokens as the
   production protected-endpoint token type and backend JWTs as local/test
   compatibility tokens.
