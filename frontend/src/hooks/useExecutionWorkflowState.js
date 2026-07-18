@@ -6,6 +6,7 @@ export default function useExecutionWorkflowState() {
 	const [executionPreview, setExecutionPreview] = useState(null);
 	const [selectedExecutionCandidateIds, setSelectedExecutionCandidateIds] = useState([]);
 	const [executionRunResult, setExecutionRunResult] = useState(null);
+	const [executionError, setExecutionError] = useState("");
 	const [isPreviewingExecution, setIsPreviewingExecution] = useState(false);
 	const [isRunningExecution, setIsRunningExecution] = useState(false);
 
@@ -13,6 +14,7 @@ export default function useExecutionWorkflowState() {
 		setExecutionPreview(null);
 		setSelectedExecutionCandidateIds([]);
 		setExecutionRunResult(null);
+		setExecutionError("");
 	};
 
 	return {
@@ -26,6 +28,8 @@ export default function useExecutionWorkflowState() {
 		setSelectedExecutionCandidateIds,
 		executionRunResult,
 		setExecutionRunResult,
+		executionError,
+		setExecutionError,
 		isPreviewingExecution,
 		setIsPreviewingExecution,
 		isRunningExecution,

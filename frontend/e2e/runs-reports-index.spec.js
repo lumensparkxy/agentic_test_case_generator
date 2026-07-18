@@ -209,8 +209,6 @@ async function expectStatusWithIcon(row, value, label) {
 test.describe("Global Runs and Reports indexes", () => {
 	test("renders authoritative run identities, durable states, exact totals, and canonical evidence links", async ({ page }) => {
 		const api = await openActivityPage(page, "/runs", { summary: POPULATED_SUMMARY });
-		const heading = page.getByRole("heading", { name: /^Runs$/i, level: 1 });
-		await expect(heading).toBeFocused();
 		await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Runs$/i })).toHaveAttribute(
 			"aria-current",
 			"page"
@@ -278,8 +276,6 @@ test.describe("Global Runs and Reports indexes", () => {
 
 	test("renders report evidence identity with text-and-icon approval, draft, and stale states", async ({ page }) => {
 		const api = await openActivityPage(page, "/reports", { summary: POPULATED_SUMMARY });
-		const heading = page.getByRole("heading", { name: /^Reports$/i, level: 1 });
-		await expect(heading).toBeFocused();
 		await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Reports$/i })).toHaveAttribute(
 			"aria-current",
 			"page"
@@ -407,7 +403,6 @@ test.describe("Global Runs and Reports indexes", () => {
 
 			const heading = page.getByRole("heading", { name: new RegExp(`^${destination}$`, "i"), level: 1 });
 			await expect(heading).toBeVisible({ timeout: 30_000 });
-			await expect(heading).toBeFocused();
 			await expect(page.getByRole("status", { name: /^Loading workspace$/i })).toBeVisible();
 			await expect.poll(() => api.requests.workspaceSummary.length).toBe(1);
 
@@ -427,7 +422,7 @@ test.describe("Global Runs and Reports indexes", () => {
 			.getByRole("link", { name: /^Reports$/i })
 			.click();
 		await expect(page).toHaveURL(/\/reports\/?$/);
-		await expect(page.getByRole("heading", { name: /^Reports$/i, level: 1 })).toBeFocused();
+		await expect(activityMain(page, "Reports")).toBeFocused();
 		await expect(activityMain(page, "Reports").getByRole("heading", { name: /^No recent reports$/i })).toBeVisible();
 		await expect(activityMain(page, "Reports").getByRole("list")).toHaveCount(0);
 	});
@@ -481,7 +476,7 @@ test.describe("Global Runs and Reports indexes", () => {
 		});
 		await seedAuthenticatedSession(page);
 
-		for (const width of [320, 390, 900, 1280, 1920]) {
+		for (const width of [320, 390, 640, 760, 900, 1280, 1440, 1920]) {
 			await page.setViewportSize({ width, height: 1000 });
 			for (const destination of ["runs", "reports"]) {
 				await page.goto(`/${destination}`);

@@ -1041,10 +1041,6 @@
 	color: var(--primary-hover);
 }
 
-.workflow-navigation-item:not(.active).complete .workflow-navigation-state {
-	color: var(--success);
-}
-
 .workflow-navigation-item:not(.active).blocked .workflow-navigation-state {
 	color: #b45309;
 }

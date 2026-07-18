@@ -1,5 +1,5 @@
 import { RefreshCw } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 
 import ReviewInbox from "../components/reviews/ReviewInbox";
 import { formatWorkspaceDate } from "../components/workspace/workspacePresentation";
@@ -8,10 +8,6 @@ import { WorkspaceErrorState, WorkspaceLoadingState } from "../components/worksp
 export default function ReviewsPage({ summary, isLoading = false, isRefreshing = false, error = "", onRetry, onRefresh, onOpenProject }) {
 	const headingRef = useRef(null);
 	const refreshButtonRef = useRef(null);
-
-	useEffect(() => {
-		headingRef.current?.focus();
-	}, []);
 
 	const retryAndRestoreFocus = async () => {
 		await onRetry?.();
@@ -25,9 +21,11 @@ export default function ReviewsPage({ summary, isLoading = false, isRefreshing =
 
 	return (
 		<main
+			id="main-content"
 			className="workspace-page review-inbox-page"
 			aria-labelledby="review-inbox-title"
 			aria-busy={isLoading || isRefreshing || undefined}
+			tabIndex={-1}
 		>
 			<header className="workspace-page-header review-inbox-page-header">
 				<div>

@@ -390,13 +390,22 @@
 		grid-template-columns: 48px minmax(0, 1fr);
 	}
 
+	.activity-index-row-heading {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.activity-index-status {
+		align-self: flex-start;
+	}
+
 	.activity-index-open-link {
 		grid-column: 2;
 		justify-self: start;
 	}
 }
 
-@media (width < 640px) {
+@media (width <= 640px) {
 	.activity-index-header-actions,
 	.activity-index-selects,
 	.activity-index-selects label,

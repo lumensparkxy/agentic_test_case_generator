@@ -254,6 +254,14 @@ test.describe("Responsive project shell", () => {
 			}
 
 			await expectNoDocumentOverflow(page, `${viewport.width}px project overview`);
+
+			await page.goto(buildProjectPath(PROJECT_ID, "automation"));
+			await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
+			await expectNoDocumentOverflow(page, `${viewport.width}px project Automation`);
+
+			await page.goto(buildProjectPath(PROJECT_ID, "reports"));
+			await expect(page.getByRole("heading", { name: /^Export Test Cases$/i })).toBeVisible();
+			await expectNoDocumentOverflow(page, `${viewport.width}px project Reports`);
 		});
 	}
 

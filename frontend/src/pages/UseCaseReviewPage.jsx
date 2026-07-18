@@ -39,9 +39,11 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 
 	return (
 		<main
+			id="main-content"
 			className="use-case-review-page"
 			aria-labelledby="use-case-review-title"
 			aria-busy={review.isSubmitting || review.isReloading || undefined}
+			tabIndex={-1}
 		>
 			<header className="use-case-review-page-header">
 				<div>

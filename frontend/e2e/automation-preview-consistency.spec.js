@@ -43,6 +43,21 @@ function executableCandidate(id, sourceTestCaseId) {
 	};
 }
 
+function nonExecutableCandidate(id, sourceTestCaseId, status) {
+	return {
+		id,
+		source_test_case_id: sourceTestCaseId,
+		title: `${sourceTestCaseId} ${status} coverage`,
+		status,
+		spec: null,
+		metadata: {},
+		unsupported_steps:
+			status === "manual" ? [] : [{ step: 1, reason_code: `${status}_step`, suggested_next_action: `Review the ${status} candidate.` }],
+		review_reasons: [`This candidate requires ${status} review.`],
+		traceability_ids: ["REQ-001"],
+	};
+}
+
 function previewFixture(executable = [], overrides = {}) {
 	return {
 		executable,
@@ -275,6 +290,34 @@ async function openAutomation(page) {
 }
 
 test.describe("Automation preview consistency", () => {
+	test("renders a valid mixed preview with counts that match every candidate collection", async ({ page }) => {
+		const mixedPreview = previewFixture([executableCandidate("candidate-executable", "TC-001")], {
+			manual: [nonExecutableCandidate("candidate-manual", "TC-002", "manual")],
+			unsupported: [nonExecutableCandidate("candidate-unsupported", "TC-003", "unsupported")],
+			invalid: [nonExecutableCandidate("candidate-invalid", "TC-004", "invalid")],
+			summary: { executable: 1, manual: 1, unsupported: 1, invalid: 1 },
+		});
+		await installApi(page, {
+			project: projectFixture({ testCaseIds: ["TC-001", "TC-002", "TC-003", "TC-004"] }),
+			previews: [mixedPreview],
+		});
+		await openAutomation(page);
+
+		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+		for (const bucket of ["Executable", "Manual", "Unsupported", "Invalid"]) {
+			await expect(page.getByText(`${bucket} 1`, { exact: true })).toBeVisible();
+		}
+		await expect(page.getByRole("region", { name: "Executable automation candidates table" }).getByRole("row")).toHaveCount(2);
+		await expect(page.getByRole("heading", { name: "Manual", exact: true }).locator("..").getByRole("listitem")).toHaveCount(1);
+		await expect(
+			page.getByRole("heading", { name: "Unsupported", exact: true }).locator("..").locator(".jira-sync-preview-card")
+		).toHaveCount(1);
+		await expect(page.getByRole("heading", { name: "Invalid", exact: true }).locator("..").locator(".jira-sync-preview-card")).toHaveCount(
+			1
+		);
+		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
+	});
+
 	test("normalizes an inconsistent summary to rendered zero candidates, distinguishes the empty states, and emits no run request", async ({
 		page,
 	}) => {
@@ -322,7 +365,7 @@ test.describe("Automation preview consistency", () => {
 		await runButton.click();
 		await expect.poll(() => requests.runs).toBe(1);
 		expect(requests.runBodies[0].selected_test_case_ids).toEqual(["candidate-checkout"]);
-		await expect(page.getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
+		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
 		await expect(refundCandidate).not.toBeChecked();
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 	});
@@ -417,6 +460,8 @@ test.describe("Automation preview consistency", () => {
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect.poll(() => requests.runs).toBe(1);
 		await expect(page.getByRole("heading", { name: "Execution Results" })).toHaveCount(0);
+		await expect(page.getByRole("alert")).toContainText(/Execution run failed: Execution response did not include valid run data/i);
+		await expect(page.getByTestId("application-live-status")).toBeEmpty();
 		await expect(page.getByText("Executable 1", { exact: true })).toBeVisible();
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 	});
@@ -465,9 +510,43 @@ test.describe("Automation preview consistency", () => {
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
 		await expect(page.getByText("No preview yet. Preview execution readiness for the current test cases.", { exact: true })).toBeVisible();
 		await expect(page.getByText("Preview completed with zero executable candidates.", { exact: true })).toHaveCount(0);
+		await expect(page.getByRole("alert")).toContainText(/Execution preview failed: Preview response did not include candidate data/i);
+		await expect(page.getByTestId("application-live-status")).toBeEmpty();
 		await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
 		expect(requests.previews).toBe(1);
 		expect(requests.runs).toBe(0);
+	});
+
+	test("marks the Automation panel busy and blocks controls while a preview is pending", async ({ page }) => {
+		let releasePreview;
+		const previewGate = new Promise((resolve) => {
+			releasePreview = resolve;
+		});
+		const livePreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const scenario = {
+			project: projectFixture(),
+			previews: [livePreview],
+			handlePreview: async (route) => {
+				await previewGate;
+				return jsonResponse(route, livePreview);
+			},
+		};
+		const requests = await installApi(page, scenario);
+		await openAutomation(page);
+
+		const panel = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: /^Automation$/i }) });
+		const previewButton = page.getByRole("button", { name: /^Preview Execution$/ });
+		await previewButton.click({ noWaitAfter: true });
+		await expect.poll(() => requests.previews).toBe(1);
+		await expect(panel).toHaveAttribute("aria-busy", "true");
+		await expect(page.getByLabel("Target environment")).toBeDisabled();
+		await expect(page.getByLabel("Target base URL")).toBeDisabled();
+		await expect(page.getByRole("button", { name: /^Previewing/ })).toBeDisabled();
+		await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
+
+		releasePreview();
+		await expect(page.getByText("Executable 1", { exact: true })).toBeVisible();
+		await expect(panel).not.toHaveAttribute("aria-busy", "true");
 	});
 
 	test("editing the target clears the prior preview and selection before a zero-candidate refresh", async ({ page }) => {

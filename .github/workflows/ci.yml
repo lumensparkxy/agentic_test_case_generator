@@ -101,8 +101,20 @@ jobs:
       - name: Run focused mocked E2E
         working-directory: frontend
         run: |
-          npm run dev -- --host 127.0.0.1 > /tmp/tcg-vite.log 2>&1 &
+          npm run dev -- --host 127.0.0.1 --strictPort > /tmp/tcg-vite.log 2>&1 &
           VITE_PID=$!
           trap 'kill $VITE_PID' EXIT
           node -e "const http=require('http');let attempts=0;const check=()=>http.get('http://127.0.0.1:5173',res=>{res.resume();process.exit(0)}).on('error',()=>{if(++attempts>60)process.exit(1);setTimeout(check,1000)});check();"
-          E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e -- e2e/export-approval-gate.spec.js
+          E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first
+
+      - name: Upload Playwright diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            /tmp/tcg-vite.log
+          if-no-files-found: warn
+          retention-days: 14

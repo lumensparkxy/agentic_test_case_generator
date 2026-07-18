@@ -797,7 +797,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
-		await expect(page.getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
+		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
 
 		await page
 			.getByLabel("Project information rail")

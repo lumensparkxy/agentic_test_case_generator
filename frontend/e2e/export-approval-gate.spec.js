@@ -298,7 +298,7 @@ test.describe("Export approval gate", () => {
 		await page.getByRole("button", { name: /preview execution/i }).click();
 		await expect(page.getByRole("button", { name: /run 1 candidate/i })).toBeVisible();
 		await page.getByRole("button", { name: /run 1 candidate/i }).click();
-		await expect(page.getByText(/Execution passed: 1 passed/i)).toBeVisible();
+		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed/i)).toBeVisible();
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page).toHaveURL(reportsPath);
 		await expect(page.getByRole("heading", { name: /^Playwright Execution Report$/i })).toBeVisible();

@@ -96,10 +96,6 @@ export default function RunsPage({ summary, isLoading = false, isRefreshing = fa
 		environment === "all" || environmentOptions.some((option) => option.value === environment) ? environment : "all";
 
 	useEffect(() => {
-		headingRef.current?.focus();
-	}, []);
-
-	useEffect(() => {
 		if (effectiveStatus !== status) setStatus(effectiveStatus);
 		if (effectiveEnvironment !== environment) setEnvironment(effectiveEnvironment);
 	}, [effectiveEnvironment, effectiveStatus, environment, status]);
@@ -128,9 +124,11 @@ export default function RunsPage({ summary, isLoading = false, isRefreshing = fa
 
 	return (
 		<main
+			id="main-content"
 			className="workspace-page activity-index-page"
 			aria-labelledby="runs-page-title"
 			aria-busy={isLoading || isRefreshing || undefined}
+			tabIndex={-1}
 		>
 			<header className="workspace-page-header activity-index-page-header">
 				<div>

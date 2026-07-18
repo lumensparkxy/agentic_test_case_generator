@@ -79,9 +79,11 @@ export default function ProjectsPage({
 
 	return (
 		<main
+			id="main-content"
 			className="workspace-page workspace-projects-page"
 			aria-labelledby="workspace-projects-page-title"
 			aria-busy={isLoading || createBusy || undefined}
+			tabIndex={-1}
 		>
 			<header className="workspace-page-header">
 				<div>

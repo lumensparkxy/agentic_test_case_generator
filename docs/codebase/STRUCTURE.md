@@ -76,8 +76,13 @@ should preserve when changing the application.
 - Backend use-case planning coordinator:
   `backend/app/agents/use_case_agent.py`.
 - Frontend E2E config: `frontend/playwright.config.js`.
+- Home-first accessibility regression and Axe helper:
+  `frontend/e2e/accessibility-navigation.spec.js` and
+  `frontend/e2e/support/accessibility.js`.
 - Shared responsive E2E geometry and overflow assertions:
   `frontend/e2e/support/layout.js`.
+- Manual VoiceOver + Chrome smoke procedure and evidence:
+  `docs/home-first-accessibility-smoke.md`.
 - Backend container entry: `backend/Dockerfile`.
 - Frontend container entry: `frontend/Dockerfile`.
 - Local container entry: `compose.yaml`.
