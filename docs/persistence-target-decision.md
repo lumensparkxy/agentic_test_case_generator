@@ -104,7 +104,7 @@ indexes before enabling the Home-first workspace:
 | --- | --- |
 | `qa_projects` collection, active-only | `owner_user_id ASC`, `status ASC`, `updated_at DESC`, `project_id ASC` |
 | `qa_projects` collection, including archived | `owner_user_id ASC`, `updated_at DESC`, `project_id ASC` |
-| `execution_runs` collection group | `actor_user_id ASC`, `project_id ASC`, `created_at DESC`, `run_record_id ASC` |
+| `execution_runs` nested collection (`COLLECTION` query scope) | `actor_user_id ASC`, `project_id ASC`, `created_at DESC`, `run_record_id ASC` |
 
 The project query is bounded by `projects_limit` (maximum 50). For each returned
 owned project, at most the seven current stage snapshots are read by document
@@ -113,6 +113,13 @@ identity and execution history is queried with the validated `runs_limit`
 cross-user project or execution records from entering the response. Missing
 indexes surface as a safe HTTP 503 so operators see a configuration failure
 instead of receiving a partial or misleading workspace.
+
+The exact definitions are versioned in `firestore.indexes.json` and referenced
+by `firebase.json`. `scripts/deploy_firestore_indexes.py` compares that manifest
+with the live database, creates only missing definitions, preserves unmanaged
+indexes, and waits for the three workspace indexes to become `READY` before a
+Cloud Run rollout. Deployment and rollback steps are recorded in
+`docs/home-workspace-production-rollout.md`.
 
 ### Use Cases review transaction
 

@@ -85,6 +85,7 @@ Status markers below reflect the GitHub issue state as of 2026-07-18.
   - Done: [#54](https://github.com/lumensparkxy/agentic_test_case_generator/issues/54) - Document credential rotation for integrations and secrets
   - Done: [#55](https://github.com/lumensparkxy/agentic_test_case_generator/issues/55) - Add integration latency and error metrics for JIRA and Azure DevOps
   - Done: [#56](https://github.com/lumensparkxy/agentic_test_case_generator/issues/56) - Add durable audit dead-letter sink for compliance deployments
+  - Ready: [#215](https://github.com/lumensparkxy/agentic_test_case_generator/issues/215) - Update transitive websocket-driver dependency to patched 0.7.5
   - Done: [#57](https://github.com/lumensparkxy/agentic_test_case_generator/issues/57) - Harden artifact fetching threat model and validation
   - Done: [#77](https://github.com/lumensparkxy/agentic_test_case_generator/issues/77) - Add seamless integration credential key rotation and re-encryption support
 - Operational documentation and tracking
@@ -104,7 +105,7 @@ Status markers below reflect the GitHub issue state as of 2026-07-18.
   - Done: [#200](https://github.com/lumensparkxy/agentic_test_case_generator/issues/200) - Fix responsive navigation and status containment
   - Done: [#201](https://github.com/lumensparkxy/agentic_test_case_generator/issues/201) - Align Automation preview counts and candidate states
   - Done: [#202](https://github.com/lumensparkxy/agentic_test_case_generator/issues/202) - Add Home-first UX regression and accessibility gates
-- Ready rollout follow-up: [#214](https://github.com/lumensparkxy/agentic_test_case_generator/issues/214) - Deploy Home workspace API and required Firestore indexes
+- In progress rollout follow-up: [#214](https://github.com/lumensparkxy/agentic_test_case_generator/issues/214) - Deploy Home workspace API and required Firestore indexes
 
 > Note: issue numbers do not strictly follow the planned sequence because several issues were created in parallel.
 

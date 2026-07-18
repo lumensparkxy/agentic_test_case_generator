@@ -113,7 +113,7 @@ Planned rotation:
      `AZURE_DEVOPS_CONNECTION_SECRET_KEY`.
    - Current old key in `JIRA_CONNECTION_PREVIOUS_SECRET_KEYS` or
      `AZURE_DEVOPS_CONNECTION_PREVIOUS_SECRET_KEYS`.
-   - For Cloud Run, `scripts/deploy_cloud_run.sh` stores primary and previous
+   - For Cloud Run, `DEPLOY_MODE=bootstrap scripts/deploy_cloud_run.sh` stores primary and previous
      key variables in Secret Manager when set locally.
    - Override Secret Manager names with `SECRET_JIRA_CONNECTION_NAME`,
      `SECRET_JIRA_CONNECTION_PREVIOUS_NAME`,
@@ -166,7 +166,7 @@ Rotation steps:
 3. Generate a new long random `JWT_SECRET_KEY`.
 4. Update the runtime secret:
    - Local: update `.env`.
-   - Cloud Run: rerun `scripts/deploy_cloud_run.sh` with the new value or add a
+   - Cloud Run: rerun `DEPLOY_MODE=bootstrap scripts/deploy_cloud_run.sh` with the new value or add a
      new Secret Manager version and redeploy the service.
 5. Restart/redeploy the backend.
 6. Local/E2E backend JWTs minted before the rotation are invalid. Sign out/in or
@@ -177,7 +177,7 @@ Rotation steps:
 1. Create a new Gemini/Google API key with the same intended API access.
 2. Update `GEMINI_API_KEY`:
    - Local: update `.env`.
-   - Cloud Run: rerun `scripts/deploy_cloud_run.sh` or add a new Secret Manager
+   - Cloud Run: rerun `DEPLOY_MODE=bootstrap scripts/deploy_cloud_run.sh` or add a new Secret Manager
      version for the configured Gemini secret and redeploy.
 3. Run offline validation first, then a small model-backed smoke workflow only
    if live model access is approved for the environment.
@@ -200,7 +200,7 @@ For Firebase Admin credentials:
    Firestore access.
 3. Update the local `.env` value or the file referenced by
    `GOOGLE_APPLICATION_CREDENTIALS`.
-4. For Cloud Run, rerun `scripts/deploy_cloud_run.sh`; it uploads
+4. For Cloud Run, run `DEPLOY_MODE=bootstrap scripts/deploy_cloud_run.sh`; it uploads
    `FIREBASE_SERVICE_ACCOUNT_JSON` to Secret Manager when provided, or reads the
    file referenced by `GOOGLE_APPLICATION_CREDENTIALS`.
 5. Redeploy/restart and verify protected endpoint authentication plus a
@@ -209,9 +209,11 @@ For Firebase Admin credentials:
 
 ## Cloud Run Secret Manager Rotation
 
-`scripts/deploy_cloud_run.sh` creates a new Secret Manager version when a
-managed secret already exists. The backend is deployed with `:latest` secret
-references for the values it manages.
+`DEPLOY_MODE=bootstrap scripts/deploy_cloud_run.sh` creates a new Secret Manager
+version when a managed secret already exists. The backend is deployed with
+`:latest` secret references for the values it manages. Routine code releases
+must use `DEPLOY_MODE=release`; release mode preserves existing secret
+references and does not add versions or change secret IAM bindings.
 
 Managed by the helper when set:
 
@@ -230,7 +232,7 @@ Managed by the helper when set:
 Rotation steps:
 
 1. Export the new local environment value without printing it.
-2. Run `./scripts/deploy_cloud_run.sh`.
+2. Run `DEPLOY_MODE=bootstrap ./scripts/deploy_cloud_run.sh`.
 3. Confirm the deployment completed and the runtime service account has
    `roles/secretmanager.secretAccessor` on the relevant secret.
 4. Verify the affected runtime path.

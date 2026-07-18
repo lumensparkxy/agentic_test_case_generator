@@ -36,6 +36,7 @@ should preserve when changing the application.
 | `.github/workflows/` | CI pipeline definitions | `.github/workflows/ci.yml` |
 | `compose.yaml` | Local two-container app orchestration | `compose.yaml` |
 | `.env.example` | Local environment template | `.env.example` |
+| `firebase.json`, `firestore.indexes.json` | Minimal Firebase CLI mapping and versioned bounded-workspace composite indexes | `backend/tests/test_firestore_index_manifest.py` |
 
 ## 2) Entry Points
 
@@ -92,6 +93,10 @@ should preserve when changing the application.
   `scripts/evaluate_orchestrator.py`.
 - OpenAPI export: `scripts/export_openapi.py`.
 - Integration credential re-encryption: `scripts/reencrypt_integration_credentials.py`.
+- Additive Firestore index release: `scripts/deploy_firestore_indexes.py`.
+- Cloud Run bootstrap/code-only release: `scripts/deploy_cloud_run.sh`.
+- Home workspace production rollout and rollback:
+  `docs/home-workspace-production-rollout.md`.
 
 `backend/app/main.py` creates the FastAPI app, installs CORS and request
 middleware, registers routers, configures tracing, exposes `/health`, and
@@ -165,6 +170,9 @@ Do not document generated files as source conventions and do not commit them.
   Node modules, Python caches, and `.venv/` are ignored.
 - Backend execution runtime artifacts under `backend/execution_runtime/artifacts/`
   are ignored.
+- Firebase CLI cache and debug logs (`.firebase/`, `firebase-debug*.log`) are
+  ignored; project bindings and credentials must not be generated into tracked
+  source during a release.
 - Use `python scripts/cleanup_generated_artifacts.py` for a dry-run cleanup
   plan before deleting ignored generated artifacts.
 
