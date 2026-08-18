@@ -20,6 +20,7 @@ work. Active roadmap work is tracked in the Phase 3 and Phase 4 sections below.
 - [#10](https://github.com/lumensparkxy/agentic_test_case_generator/issues/10) — Phase 2: add context analysis preview and review controls to the UI
 - [#11](https://github.com/lumensparkxy/agentic_test_case_generator/issues/11) — Phase 2: expand backend and E2E regression coverage
 - [#17](https://github.com/lumensparkxy/agentic_test_case_generator/issues/17) — Update project dependencies to latest compatible versions
+- [#218](https://github.com/lumensparkxy/agentic_test_case_generator/issues/218) — Upgrade all project dependencies to latest stable releases
 
 ## Created semantic Playwright execution hardening issues
 

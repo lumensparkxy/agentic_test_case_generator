@@ -540,7 +540,7 @@ def _escape_wiql_literal(value: str) -> str:
 def _coerce_optional_int(value: Any) -> Optional[int]:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

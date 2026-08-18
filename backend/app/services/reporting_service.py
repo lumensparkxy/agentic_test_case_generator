@@ -50,7 +50,7 @@ def _normalize_datetime(value: Any) -> Optional[datetime]:
 def _coerce_int(value: Any) -> int:
     try:
         return int(value or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 

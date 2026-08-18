@@ -16,21 +16,21 @@
   },
   "dependencies": {
     "@react-oauth/google": "^0.13.5",
-    "firebase": "^12.14.0",
-    "lucide-react": "^1.21.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "firebase": "^12.17.1",
+    "lucide-react": "^1.32.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.60.0",
-    "@vitejs/plugin-react": "^6.0.2",
+    "@playwright/test": "^1.62.1",
+    "@vitejs/plugin-react": "^6.0.5",
     "dotenv": "^17.4.2",
-    "eslint": "^10.4.1",
-    "globals": "^17.6.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "jsonwebtoken": "^9.0.3",
-    "prettier": "^3.8.4",
-    "vite": "^8.0.16"
+    "prettier": "^3.9.6",
+    "vite": "^8.2.1"
   }
 }

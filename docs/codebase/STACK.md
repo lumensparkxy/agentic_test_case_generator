@@ -9,38 +9,38 @@ generated client submission outputs.
 | Area | Value | Evidence |
 |------|-------|----------|
 | Backend language | Python | `backend/app/main.py`, `backend/requirements.txt` |
-| Backend runtime | Python 3.12 in CI and backend Docker image; README recommends local Python 3.10+ | `.github/workflows/ci.yml`, `backend/Dockerfile`, `README.md` |
+| Backend runtime | Python 3.14 in CI, the backend Docker image, and local setup guidance | `.github/workflows/ci.yml`, `backend/Dockerfile`, `README.md` |
 | Backend package manager | `pip` with `backend/requirements.txt` | `backend/requirements.txt`, `.github/workflows/ci.yml` |
 | Backend web framework | FastAPI served by Uvicorn | `backend/app/main.py`, `backend/requirements.txt`, `backend/Dockerfile` |
 | Frontend language | JavaScript and JSX | `frontend/src/App.jsx`, `frontend/package.json` |
-| Frontend runtime | Node.js for build/dev tooling; browser runtime for React app | `frontend/package.json`, `.github/workflows/ci.yml`, `frontend/Dockerfile` |
+| Frontend runtime | Node.js 26 for CI and container build tooling; browser runtime for React app | `frontend/package.json`, `.github/workflows/ci.yml`, `frontend/Dockerfile` |
 | Frontend package manager | `npm` with checked-in lockfile | `frontend/package.json`, `frontend/package-lock.json` |
 | Frontend build system | Vite | `frontend/package.json`, `frontend/vite.config.js` |
 | Execution runtime | Node.js Playwright Test runtime isolated under `backend/execution_runtime/` | `backend/execution_runtime/package.json`, `backend/execution_runtime/playwright.config.ts` |
-| Container runtime | Backend Python image and frontend Nginx image, composed locally by Docker Compose | `backend/Dockerfile`, `frontend/Dockerfile`, `compose.yaml` |
+| Container runtime | Python 3.14 backend image, Node.js 26 frontend build image, and Nginx 1.30 stable serving image, composed locally by Docker Compose | `backend/Dockerfile`, `frontend/Dockerfile`, `compose.yaml` |
 
 ## 2) Production Frameworks and Dependencies
 
 | Dependency | Version | Role in system | Evidence |
 |------------|---------|----------------|----------|
-| `fastapi` | `>=0.136.3` | Backend API routing, dependency injection, OpenAPI contract | `backend/requirements.txt`, `backend/app/main.py` |
-| `uvicorn` | `>=0.49.0` | ASGI server for local and container backend runs | `backend/requirements.txt`, `backend/Dockerfile` |
+| `fastapi` | `>=0.141.1` | Backend API routing, dependency injection, OpenAPI contract | `backend/requirements.txt`, `backend/app/main.py` |
+| `uvicorn` | `>=0.52.3` | ASGI server for local and container backend runs | `backend/requirements.txt`, `backend/Dockerfile` |
 | `pydantic` | `>=2.13.4` | Request, response, workflow, billing, integration, and execution models | `backend/requirements.txt`, `backend/app/models.py` |
-| `google-adk` | `>=2.2.0,<3.0` | Multi-agent requirement/test-case workflows | `backend/requirements.txt`, `backend/app/adk_client.py`, `backend/app/agents/test_case_agent.py` |
-| `google-genai` | `>=2.8.0,<3.0` | Gemini API calls for agent and automation generation | `backend/requirements.txt`, `backend/app/agents/automation_agent.py` |
-| `firebase-admin` | `>=7.4.0` | Firebase ID token verification and Firestore client access | `backend/requirements.txt`, `backend/app/auth/firebase_auth.py`, `backend/app/services/firebase_admin.py` |
+| `google-adk` | `>=2.7.1,<3.0` | Multi-agent requirement/test-case workflows | `backend/requirements.txt`, `backend/app/adk_client.py`, `backend/app/agents/test_case_agent.py` |
+| `google-genai` | `>=2.18.1,<3.0` | Gemini API calls for agent and automation generation | `backend/requirements.txt`, `backend/app/agents/automation_agent.py` |
+| `firebase-admin` | `>=7.5.0` | Firebase ID token verification and Firestore client access | `backend/requirements.txt`, `backend/app/auth/firebase_auth.py`, `backend/app/services/firebase_admin.py` |
 | `PyJWT` | `>=2.13.0` | Backend-issued legacy/local JWT support and E2E helper token minting | `backend/requirements.txt`, `backend/app/auth/jwt_auth.py`, `scripts/e2e_playwright_workflow.py` |
-| `google-auth` | `>=2.53.0` | Google credential verification for `/auth/google/login` | `backend/requirements.txt`, `backend/app/auth/google_auth.py` |
-| `cryptography` | `>=48.0.1` | Fernet encryption and key-rotation support for stored JIRA tokens and Azure DevOps PATs | `backend/requirements.txt`, `backend/app/services/credential_crypto.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/azure_devops_connection_service.py` |
+| `google-auth` | `>=2.56.3` | Google credential verification for `/auth/google/login` | `backend/requirements.txt`, `backend/app/auth/google_auth.py` |
+| `cryptography` | `>=48.0.1,<49.0.0`; `google-adk 2.7.1` requires `google-auth[pyopenssl]`, and current `pyOpenSSL 26.2.0` caps cryptography below 49 | Fernet encryption and key-rotation support for stored JIRA tokens and Azure DevOps PATs | `backend/requirements.txt`, `backend/app/services/credential_crypto.py`, `backend/app/services/jira_connection_service.py`, `backend/app/services/azure_devops_connection_service.py` |
 | `python-docx` | `>=1.2.0` | Word requirement parsing and client brief generation | `backend/requirements.txt`, `backend/app/routers/requirements.py`, `scripts/build_client_solution_brief.py` |
 | `openpyxl` | `>=3.1.5` | Excel requirement parsing and XLSX export | `backend/requirements.txt`, `backend/app/utils/excel_parser.py`, `backend/app/agents/export_agent.py` |
 | `PyYAML` | `>=6.0.3` | Plain-English spec, IR, environment, and data fixture handling | `backend/requirements.txt`, `backend/plain_english_test_framework/compiler.py` |
 | `jsonschema` | `>=4.26.0` | Schema validation for plain-English spec and IR contracts | `backend/requirements.txt`, `schemas/spec.schema.json`, `schemas/ir.schema.json` |
-| OpenTelemetry packages | pinned around `1.41.1` / `0.62b1` | Optional tracing support | `backend/requirements.txt`, `backend/app/observability/tracing.py` |
-| `react` / `react-dom` | `^19.2.7` | Frontend UI runtime | `frontend/package.json`, `frontend/src/main.jsx` |
-| `firebase` | `^12.14.0` | Frontend Firebase Authentication provider setup | `frontend/package.json`, `frontend/src/firebase.js` |
+| OpenTelemetry packages | pinned around `1.42.1` / `0.63b1`; `google-adk 2.7.1` currently caps the API and SDK at `1.42.1` | Optional tracing support | `backend/requirements.txt`, `backend/app/observability/tracing.py` |
+| `react` / `react-dom` | `^19.2.8` | Frontend UI runtime | `frontend/package.json`, `frontend/src/main.jsx` |
+| `firebase` | `^12.17.1` | Frontend Firebase Authentication provider setup | `frontend/package.json`, `frontend/src/firebase.js` |
 | `@react-oauth/google` | `^0.13.5` | Google OAuth dependency still present in frontend package manifest | `frontend/package.json` |
-| `lucide-react` | `^1.21.0` | Frontend workflow-shell line icons and directional collapse controls | `frontend/package.json`, `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`, `frontend/src/components/projects/ProjectInformationRail.jsx` |
+| `lucide-react` | `^1.32.0` | Frontend workflow-shell line icons and directional collapse controls | `frontend/package.json`, `frontend/src/components/layout/WorkflowNavigationDrawer.jsx`, `frontend/src/components/projects/ProjectInformationRail.jsx` |
 
 ## 3) Development Toolchain
 
@@ -152,6 +152,8 @@ Deployment/runtime constraints:
 - Backend Docker installs Node.js, npm, the execution runtime dependencies, and
   Microsoft Edge Playwright support so backend execution endpoints can generate
   and run Playwright specs.
+- The backend image targets Linux/AMD64 because Microsoft Edge does not publish
+  a Linux ARM64 package; native ARM hosts must build it with AMD64 emulation.
 - Frontend Docker builds static assets with Vite and serves them through Nginx.
 - Local generated execution outputs live under `.execution_artifacts/` and are
   ignored by git.

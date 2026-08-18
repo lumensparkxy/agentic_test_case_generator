@@ -44,12 +44,12 @@ def _normalize_review_result(review: Optional[Dict[str, Any]], threshold: int, d
 
     try:
         score = int(payload.get("score", 0))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         score = 0
 
     try:
         configured_threshold = int(payload.get("threshold", threshold))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         configured_threshold = threshold
 
     summary = str(payload.get("summary") or default_summary).strip() or default_summary
