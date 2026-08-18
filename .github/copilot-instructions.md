@@ -19,7 +19,7 @@ This is a **full-stack web application** for AI-powered test case generation. It
 - **API Base**: Configured via `VITE_API_BASE` env var (default: `http://localhost:8000`)
 
 ### Backend
-- **FastAPI** with Python 3.10+
+- **FastAPI** with Python 3.14
 - **Location**: `backend/`
 - **Entry**: `app/main.py` - REST API endpoints
 - **AI Engine**: Google ADK with Gemini models (multi-agent pipelines)

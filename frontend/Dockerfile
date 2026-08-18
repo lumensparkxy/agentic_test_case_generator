@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:26-alpine AS build
 
 WORKDIR /app/frontend
 
@@ -27,7 +27,7 @@ ENV VITE_FIREBASE_MEASUREMENT_ID=${VITE_FIREBASE_MEASUREMENT_ID}
 COPY frontend/ ./
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine
 
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /app/frontend/dist /usr/share/nginx/html

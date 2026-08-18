@@ -49,13 +49,13 @@ def _coerce_int(value: Any, default: int = 0) -> int:
 
     try:
         return int(float(normalized))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         match = re.search(r"-?\d+(?:\.\d+)?", normalized)
         if not match:
             return default
         try:
             return int(float(match.group(0)))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return default
 
 

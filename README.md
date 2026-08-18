@@ -132,7 +132,7 @@ for per-user PAT rotation and encryption-key rotation behavior.
 
 ### 2) Backend
 
-Create a Python virtual environment (3.10+ recommended) and install deps:
+Create a Python 3.14 virtual environment and install deps:
 - `python -m pip install -r backend/requirements.txt`
 - `python -m pip install -r backend/requirements-dev.txt` for lint and format tooling
 
