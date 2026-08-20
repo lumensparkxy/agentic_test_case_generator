@@ -1,108 +1,124 @@
 # Four-Minute Demo Script
 
-Target runtime: 3:45–3:55. Record in English in one continuous application
-take where possible. Use a small, pre-benchmarked fixture so the real workflow
-finishes reliably.
+Target runtime: 3:45–3:55. Record in English at 1440×900 with a clean browser
+profile, bookmarks and notifications hidden, and no personal email, tokens,
+secrets, billing data, or unrelated cloud projects visible.
 
-## 0:00–0:20 — Friction and promise
+## Prepare off camera
 
-**Screen:** Test Engineer Agent Home, then the two- or three-requirement input.
+1. Deploy the final protected-main revision and confirm both Cloud Run services
+   are healthy.
+2. Create a production project named **Self-Test Demo** from
+   [`demo-requirements.md`](demo-requirements.md).
+3. Parse and approve both synthetic requirements, generate the suite, and
+   pre-vet one executable case against the public application.
+4. Keep three tabs ready: the live app, the architecture diagram, and the Cloud
+   Run service list/log view. Never open an environment-variables or secrets
+   view while recording.
+5. Warm both Cloud Run services immediately before the take.
 
-**Narration:**
+## 0:00–0:16 — Friction and promise
 
-> A small requirement change can trigger hours of QA coordination: interpreting
-> intent, finding risk, planning coverage, updating tests, running them, and
-> proving what happened. Test Engineer Agent turns that chain into traceable
-> evidence while the test engineer keeps release control.
+**Screen:** Live Home page with the custom domain visible. Open **Self-Test
+Demo**.
 
-## 0:20–0:55 — Real input and ADK extraction
+> Test teams lose hours translating changing requirements into coverage, then
+> into automation. Test Engineer Agent turns that chain into traceable evidence
+> and runs the safe browser subset using Google ADK and Gemini 3.5 Flash on
+> Google Cloud.
 
-**Screen:** Upload the fixture and run requirement parsing. Keep the app action
-and visible progress in the same take.
+## 0:16–0:38 — Real source and durable workflow
 
-**Narration:**
+**Screen:** Project overview, then the two source-linked requirements and their
+review state.
 
-> The source can be Markdown, Word, Excel, Jira, or Azure DevOps. Google ADK
-> orchestrates an extractor and a bounded reviewer-refiner loop. Structured
-> outputs retain the source excerpt and quality diagnostics instead of returning
-> an ungrounded list.
+> This is the live production app using two synthetic requirements that test
+> its own public sign-in flow. ADK runs extraction, review, and refinement
+> through SequentialAgent and LoopAgent workflows. The agent handles analysis;
+> a human keeps authority at approval and execution boundaries. The project
+> state shown here is persisted, not mocked.
 
-## 0:55–1:20 — Human authority
+## 0:38–1:18 — Coverage, traceability, and diagnostics
 
-**Screen:** Inspect one source-linked requirement and approve the set.
+**Screen:** Move through **Use Cases**, **Generated Test Cases**,
+**Traceability Matrix**, **Scenario Coverage**, and **Diagnostics**.
 
-**Narration:**
+> Every generated case carries requirement and scenario IDs. This run produced
+> [X] cases covering [Y of Z] requirements and [A of B] must-have scenarios.
+> Diagnostics expose parser recovery, retries, and fallback use instead of
+> hiding uncertainty.
 
-> Machine review and human approval are deliberately different states. The
-> agent may recommend, but it cannot approve release evidence on behalf of the
-> test engineer.
+Replace the bracketed values only with metrics visible in the final take. Do
+not claim zero fallbacks unless the screen proves it.
 
-## 1:20–2:05 — Analysis, coverage, and critique
+## 1:18–2:16 — Safe action, live
 
-**Screen:** Generate the small suite. While it runs, briefly show the
-architecture diagram; return to the completed Analysis and Coverage views.
+**Screen:** In **Automation**, set the target to the public application, choose
+**Preview Execution**, show all four readiness buckets, select the pre-vetted
+case, and choose **Run 1 Candidate**. Keep the real result and run ID visible.
 
-**Narration:**
+> Now it takes action. Preview first classifies every case as executable,
+> manual, unsupported, or invalid. I am approving one generated case to test
+> the agent's own public landing page. The backend compiles bounded plain-English
+> steps into an intermediate representation and a Playwright specification,
+> then runs the selected candidate in its isolated Node runtime. The real result
+> is [passed or failed], with the run ID and evidence visible. Unsupported
+> behavior is surfaced; it is never guessed.
 
-> ADK analysis, coverage-planning, generation, validation, and refinement agents
-> share structured session state. The output is not just test-case prose: every
-> case links back to requirements and planned scenarios, and missing coverage or
-> malformed model output stays visible in diagnostics.
+If the live check fails, narrate the real failure. Fix the cause and record a
+fresh take instead of splicing a different result into the run.
 
-## 2:05–2:45 — Safe action
+## 2:16–2:42 — Report evidence
 
-**Screen:** Open Automation, preview execution, and show the four candidate
-buckets. Run one or two supported candidates.
+**Screen:** Show the execution report, environment, counts, traceability, and
+CSV/Excel/JSON export controls.
 
-**Narration:**
+> The report ties evidence to the project revision, environment, and run.
+> Approved suites export as CSV, Excel, or JSON. A failed quality gate requires
+> an explicit, reasoned override.
 
-> Before action, deterministic services classify every case as executable,
-> manual, unsupported, or invalid. Supported cases pass through a structured
-> intermediate representation and Playwright compiler. The agent never invents
-> executable certainty for an unsupported instruction.
+## 2:42–3:12 — Architecture
 
-## 2:45–3:15 — Evidence and honest failure handling
+**Screen:** Display the architecture diagram full-screen.
 
-**Screen:** Show the run result, traceability/report evidence, and one deliberate
-failure or unsupported case if available.
+> React and FastAPI run as separate Cloud Run services. Google ADK orchestrates
+> requirements, use-case, and test-design review loops on Gemini 3.5 Flash.
+> Automation drafting uses the Google Gen AI SDK outside the ADK boundary, and
+> deterministic services control what reaches Playwright. Firestore preserves
+> project state, reviews, checkpoints, and run metadata; Firebase protects
+> access.
 
-**Narration:**
+## 3:12–3:36 — Google Cloud proof
 
-> A pass becomes durable run evidence. A failure or unsupported case becomes a
-> review signal; it does not silently rewrite an approved requirement. Firestore
-> preserves snapshots, review decisions, checkpoints, runs, and reports across
-> sessions.
+**Screen:** Cloud Run service list, then backend details or logs. Show service
+names, region, green status, current revision, 100% traffic, and a request from
+the live run. Do not expose environment values or secrets.
 
-## 3:15–3:40 — Google Cloud proof
+> This is the actual Google Cloud deployment: frontend and backend services,
+> one hundred percent traffic on the shown revisions, and Cloud Logging for the
+> request we just made.
 
-**Screen:** Show the Cloud Run services `tcg-frontend` and `tcg-backend`, their
-ready revisions, and the backend `/health` response. Do not expose secrets,
-tokens, account email, billing data, or unrelated projects.
+## 3:36–3:52 — Honest close
 
-**Narration:**
+**Screen:** Return to the execution evidence.
 
-> The React frontend and FastAPI backend run as separate Google Cloud Run
-> services. Gemini 3.5 Flash is accessed through the Gemini API, and Firestore
-> supplies product-level persistence outside ADK's per-run in-memory sessions.
+> Browser execution uses a deliberately bounded grammar. Complex desktop,
+> performance, SAP, or ambiguous actions remain manual or unsupported. Test
+> Engineer Agent delivers trustworthy autonomy: less manual design, visible
+> coverage, and executable evidence, while the test engineer retains release
+> authority.
 
-## 3:40–3:55 — Close
+## Final recording checklist
 
-**Screen:** Return to the evidence chain or architecture diagram.
-
-**Narration:**
-
-> Test Engineer Agent is an evidence-preserving QA control loop: ADK reasons,
-> deterministic systems act, and humans remain accountable. From messy
-> requirements to executable evidence—before the next release.
-
-## Recording checklist
-
-- Keep the published video at or below four minutes.
-- Use English narration or accurate English subtitles.
-- Show a real agent action and its result, not only static screenshots.
-- Show Google Cloud proof without revealing personal or secret information.
-- Use sanitized fixtures and a clean browser profile.
-- Avoid claims of full autonomy, persistent ADK memory, universal accuracy, or
-  contest-period authorship of the pre-existing platform.
-- Leave the published video unchanged after the deadline until judging ends.
-
+- Keep the public YouTube or Vimeo video at or below four minutes.
+- Use an unedited live agent action and result; do not use mocked routes or
+  speed-up footage.
+- Use only the synthetic fixture and public application.
+- Blur or crop the account identity in every application shot.
+- Show the final Cloud Run revision and real request logs without opening
+  environment or secret panels.
+- Leave the published video unchanged after the submission deadline until
+  judging ends.
+- Avoid claims of full autonomy, universal executability, perfect coverage,
+  persistent ADK memory, Vertex AI, bonus models, or contest-period authorship
+  of the pre-existing platform.
