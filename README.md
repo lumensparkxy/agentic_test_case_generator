@@ -1,8 +1,89 @@
-# Agentic Test Case Generator
+# Test Engineer Agent
 
-Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Excel), enriching context, generating test cases in a template format, and exporting them as CSV, Excel, or JSON.
+> From messy requirements to executable evidence—before the next release.
+
+![Test Engineer Agent — requirements to traceable tests and evidence](docs/assets/test-engineer-agent-devpost-thumbnail.png)
+
+[Live application](https://test-engineer-agent.maswadkar.com/) ·
+[Architecture diagram](docs/assets/test-engineer-agent-architecture.png) ·
+[Editable diagram source](docs/assets/test-engineer-agent-architecture.drawio) ·
+[Devpost submission package](docs/hackathon/all-things-agentic-submission.md)
+
+Test Engineer Agent is a policy-bounded AI QA teammate that converts fragmented
+requirements and public product context into source-linked use cases, coverage
+plans, structured test cases, executable Playwright candidates, and durable run
+evidence. Google ADK powers the reasoning and quality-control workflows; typed
+contracts and deterministic services compile, execute, persist, and audit the
+results while humans retain approval authority.
+
+## Why Google ADK
+
+This is not a single-prompt wrapper. The requirements workflow combines an
+extractor with a reviewer/refiner `LoopAgent`; the test-design workflow composes
+analysis, coverage planning, generation, validation, and refinement through
+`SequentialAgent` and `LoopAgent` orchestration. ADK session state carries typed
+artifacts between specialists, `Runner` event streams expose agent-level
+diagnostics, and `ToolContext` provides bounded exit conditions for review
+loops.
+
+Agents handle ambiguity, risk analysis, coverage, and test design. Pydantic
+contracts, schema validation, deterministic fallbacks, a structured
+intermediate representation, execution classification, and the Playwright
+compiler control what may become executable. Unsupported or ambiguous cases
+remain visible instead of being converted into misleading automation.
+
+## How it works
+
+1. Import Markdown, Word, Excel, Jira, or Azure DevOps requirements.
+2. ADK agents extract, review, and refine testable requirements.
+3. A test engineer approves the normalized source-linked requirements.
+4. Public product context grounds rules, UI facts, risks, and use-case planning.
+5. ADK agents plan coverage, generate cases, and run bounded critique loops.
+6. Reviewers inspect traceability, scenario coverage, and diagnostics.
+7. Deterministic services classify, compile, and run supported Playwright cases.
+8. Firestore-backed project snapshots preserve reviews, runs, and report evidence.
+
+## Architecture
+
+![Test Engineer Agent architecture](docs/assets/test-engineer-agent-architecture.png)
+
+The blue boundary is the Google ADK reasoning core. Automation drafting through
+the Google Gen AI SDK and deterministic Playwright compilation/execution are
+shown outside that boundary so the diagram does not overstate ADK's role. See
+the [editable draw.io source](docs/assets/test-engineer-agent-architecture.drawio)
+and the detailed [architecture documentation](docs/codebase/ARCHITECTURE.md).
+
+## Validation evidence
+
+| Evidence | Recorded result |
+| --- | --- |
+| Backend regression suite | 375 tests passed |
+| Strict offline requirements evaluation | Score 100 against an 85 threshold on both fixtures |
+| Strict offline generation evaluation | Score 100 against a 90 threshold with 1.00 scenario and requirement traceability |
+| Strict orchestrator evaluation | 3/3 fixtures passed with 1.00 impact precision and preservation |
+| Recorded grounded Playwright workflow | 31 approved cases, 20 executable candidates, and 5/5 selected browser checks passed |
+| Protected Home-first browser gate | 130/130 tests passed; ten Axe scans found no serious or critical issues without exclusions |
+
+The evaluation fixtures and many browser gates are intentionally deterministic
+or synthetic; they are regression evidence, not claims of production accuracy.
+Commands and provenance are recorded in
+[`docs/codebase/TESTING.md`](docs/codebase/TESTING.md) and
+[`docs/requirements_traceability.md`](docs/requirements_traceability.md).
+
+## Hackathon disclosure
+
+This repository contains substantial pre-existing work. Its first commit is
+dated February 4, 2026, before the All Things Agentic Hackathon submission
+period began on August 3, 2026. The architecture, application, ADK workflows,
+integrations, persistence, execution runtime, tests, and initial production
+deployment were substantially developed before the contest. The August 18,
+2026 contest-period change modernized dependencies. This submission does not
+represent the pre-existing implementation as newly created during the
+hackathon. See the full
+[submission disclosure](docs/hackathon/all-things-agentic-submission.md#pre-existing-work-disclosure).
 
 ## Features
+
 - Firebase Authentication sign-in with Google, Microsoft, and Apple providers when enabled
 - Upload requirements (.md, .docx, .xlsx)
 - Parse and extract requirement items
@@ -11,7 +92,7 @@ Web-based, human-in-the-loop workflow for parsing requirements (Word/Markdown/Ex
 - Analyze context links (app, prototype, diagrams, images) into grounded UI/API/workflow facts
 - Generate test cases from a user template with requirement-analysis, scenario-plan, and coverage diagnostics
 - Preview generated test cases for browser automation readiness and run approved executable candidates with Playwright
-- No document retention (in-memory processing only)
+- Raw uploaded documents are processed in memory; durable projects retain derived workflow snapshots, review decisions, runs, and report evidence
 
 ## Documentation Map
 

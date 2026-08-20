@@ -1,0 +1,124 @@
+<mxfile host="app.diagrams.net" modified="2026-08-20T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="test-engineer-agent" name="Architecture">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0" background="#F8FAFC">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="&lt;b&gt;Test Engineer Agent&lt;/b&gt; — Google ADK as the QA reasoning spine" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontColor=#0F172A;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1520" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Human-approved requirements → traceable test design → executable Playwright evidence" style="text;html=1;align=center;verticalAlign=middle;fontSize=15;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="40" y="62" width="1520" height="28" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sourcesGroup" value="&lt;b&gt;REQUIREMENT SOURCES&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#94A3B8;strokeWidth=2;arcSize=10;fontColor=#334155;fontSize=14;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="35" y="135" width="205" height="570" as="geometry" />
+        </mxCell>
+        <mxCell id="files" value="&lt;b&gt;Documents&lt;/b&gt;&lt;br&gt;.md · .docx · .xlsx" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#0F172A;fontSize=13;" vertex="1" parent="sourcesGroup">
+          <mxGeometry x="20" y="65" width="165" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="workitems" value="&lt;b&gt;Work items&lt;/b&gt;&lt;br&gt;Jira · Azure DevOps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#0F172A;fontSize=13;" vertex="1" parent="sourcesGroup">
+          <mxGeometry x="20" y="165" width="165" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="urls" value="&lt;b&gt;Product context&lt;/b&gt;&lt;br&gt;Public app &amp;amp; docs URLs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#0F172A;fontSize=13;" vertex="1" parent="sourcesGroup">
+          <mxGeometry x="20" y="265" width="165" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="human" value="&lt;b&gt;Test engineer&lt;/b&gt;&lt;br&gt;operates approval gates&lt;br&gt;&amp;amp; release authority" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;strokeWidth=2;arcSize=12;fontColor=#92400E;fontSize=13;" vertex="1" parent="sourcesGroup">
+          <mxGeometry x="20" y="400" width="165" height="82" as="geometry" />
+        </mxCell>
+
+        <mxCell id="appGroup" value="&lt;b&gt;PRODUCT &amp;amp; API&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#60A5FA;strokeWidth=2;arcSize=10;fontColor=#1E3A8A;fontSize=14;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="275" y="135" width="245" height="570" as="geometry" />
+        </mxCell>
+        <mxCell id="ui" value="&lt;b&gt;React / Vite QA Workspace&lt;/b&gt;&lt;br&gt;Cloud Run frontend&lt;br&gt;guided next actions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#3B82F6;strokeWidth=2;arcSize=12;fontColor=#1E3A8A;fontSize=13;shadow=1;" vertex="1" parent="appGroup">
+          <mxGeometry x="22" y="65" width="200" height="88" as="geometry" />
+        </mxCell>
+        <mxCell id="api" value="&lt;b&gt;FastAPI / Pydantic&lt;/b&gt;&lt;br&gt;Cloud Run backend&lt;br&gt;auth · audit · routing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#3B82F6;strokeWidth=2;arcSize=12;fontColor=#1E3A8A;fontSize=13;shadow=1;" vertex="1" parent="appGroup">
+          <mxGeometry x="22" y="190" width="200" height="88" as="geometry" />
+        </mxCell>
+        <mxCell id="grounding" value="&lt;b&gt;Grounding &amp;amp; controls&lt;/b&gt;&lt;br&gt;source excerpts · SSRF limits&lt;br&gt;content / size validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#334155;fontSize=12;" vertex="1" parent="appGroup">
+          <mxGeometry x="22" y="315" width="200" height="88" as="geometry" />
+        </mxCell>
+        <mxCell id="firebase" value="Firebase Authentication&lt;br&gt;production ID tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#334155;fontSize=12;" vertex="1" parent="appGroup">
+          <mxGeometry x="22" y="440" width="200" height="62" as="geometry" />
+        </mxCell>
+
+        <mxCell id="adkGroup" value="&lt;b&gt;GOOGLE ADK REASONING CORE&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#64748B&quot;&gt;Gemini 3.5 Flash via Gemini API · structured session state · Runner events&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F3FF;strokeColor=#7C3AED;strokeWidth=3;arcSize=10;fontColor=#4C1D95;fontSize=14;verticalAlign=top;spacingTop=12;" vertex="1" parent="1">
+          <mxGeometry x="565" y="110" width="440" height="625" as="geometry" />
+        </mxCell>
+        <mxCell id="reqAgents" value="&lt;b&gt;Requirements workflow&lt;/b&gt;&lt;br&gt;Initial Extractor&lt;br&gt;Reviewer ↔ Refiner LoopAgent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#7C3AED;strokeWidth=2;arcSize=12;fontColor=#4C1D95;fontSize=13;shadow=1;" vertex="1" parent="adkGroup">
+          <mxGeometry x="24" y="82" width="188" height="102" as="geometry" />
+        </mxCell>
+        <mxCell id="reqGate" value="&lt;b&gt;HUMAN GATE&lt;/b&gt;&lt;br&gt;approve / reject / refine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#F59E0B;strokeWidth=2;arcSize=12;fontColor=#92400E;fontSize=12;" vertex="1" parent="adkGroup">
+          <mxGeometry x="240" y="92" width="170" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="analysisAgents" value="&lt;b&gt;Analysis &amp;amp; use-case planning&lt;/b&gt;&lt;br&gt;rules · risks · permissions&lt;br&gt;state transitions · scenarios" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#7C3AED;strokeWidth=2;arcSize=12;fontColor=#4C1D95;fontSize=13;shadow=1;" vertex="1" parent="adkGroup">
+          <mxGeometry x="24" y="235" width="386" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="testAgents" value="&lt;b&gt;Test-design workflow&lt;/b&gt;&lt;br&gt;Coverage Planner → Generator&lt;br&gt;Validator ↔ Refiner LoopAgent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#7C3AED;strokeWidth=2;arcSize=12;fontColor=#4C1D95;fontSize=13;shadow=1;" vertex="1" parent="adkGroup">
+          <mxGeometry x="24" y="378" width="220" height="102" as="geometry" />
+        </mxCell>
+        <mxCell id="caseGate" value="&lt;b&gt;HUMAN GATE&lt;/b&gt;&lt;br&gt;cases · coverage&lt;br&gt;traceability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#F59E0B;strokeWidth=2;arcSize=12;fontColor=#92400E;fontSize=12;" vertex="1" parent="adkGroup">
+          <mxGeometry x="270" y="388" width="140" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="adkTrust" value="Bounded loops · typed artifacts · stall detection · deterministic completion diagnostics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A78BFA;strokeWidth=1.5;arcSize=12;fontColor=#5B21B6;fontSize=11;" vertex="1" parent="adkGroup">
+          <mxGeometry x="24" y="525" width="386" height="52" as="geometry" />
+        </mxCell>
+
+        <mxCell id="actionGroup" value="&lt;b&gt;SAFE ACTION BOUNDARY&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECFDF5;strokeColor=#10B981;strokeWidth=2;arcSize=10;fontColor=#065F46;fontSize=14;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="135" width="250" height="570" as="geometry" />
+        </mxCell>
+        <mxCell id="automation" value="&lt;b&gt;Automation drafting&lt;/b&gt;&lt;br&gt;Google Gen AI SDK&lt;br&gt;&lt;font color=&quot;#64748B&quot;&gt;outside ADK&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0FDFA;strokeColor=#14B8A6;strokeWidth=1.5;arcSize=12;fontColor=#115E59;fontSize=12;" vertex="1" parent="actionGroup">
+          <mxGeometry x="22" y="65" width="206" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="classifier" value="&lt;b&gt;Execution classifier&lt;/b&gt;&lt;br&gt;executable · manual&lt;br&gt;unsupported · invalid" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1FAE5;strokeColor=#10B981;strokeWidth=2;arcSize=12;fontColor=#065F46;fontSize=12;" vertex="1" parent="actionGroup">
+          <mxGeometry x="22" y="180" width="206" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="compiler" value="&lt;b&gt;Deterministic compiler&lt;/b&gt;&lt;br&gt;plain-English spec → IR&lt;br&gt;IR → Playwright TypeScript" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1FAE5;strokeColor=#10B981;strokeWidth=2;arcSize=12;fontColor=#065F46;fontSize=12;" vertex="1" parent="actionGroup">
+          <mxGeometry x="22" y="295" width="206" height="88" as="geometry" />
+        </mxCell>
+        <mxCell id="runner" value="&lt;b&gt;Isolated Node runtime&lt;/b&gt;&lt;br&gt;selected Playwright cases&lt;br&gt;consolidated results" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1FAE5;strokeColor=#10B981;strokeWidth=2;arcSize=12;fontColor=#065F46;fontSize=12;shadow=1;" vertex="1" parent="actionGroup">
+          <mxGeometry x="22" y="425" width="206" height="82" as="geometry" />
+        </mxCell>
+
+        <mxCell id="evidenceGroup" value="&lt;b&gt;DURABLE EVIDENCE&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#64748B;strokeWidth=2;arcSize=10;fontColor=#334155;fontSize=14;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="135" width="225" height="570" as="geometry" />
+        </mxCell>
+        <mxCell id="firestore" value="&lt;b&gt;Firestore&lt;/b&gt;&lt;br&gt;API + workflow state&lt;br&gt;reviews · checkpoints" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;strokeWidth=2;fontColor=#334155;fontSize=12;" vertex="1" parent="evidenceGroup">
+          <mxGeometry x="25" y="65" width="175" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="traceability" value="&lt;b&gt;Evidence graph&lt;/b&gt;&lt;br&gt;requirement → scenario&lt;br&gt;→ case → run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#334155;fontSize=12;" vertex="1" parent="evidenceGroup">
+          <mxGeometry x="25" y="205" width="175" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="runEvidence" value="&lt;b&gt;Run evidence&lt;/b&gt;&lt;br&gt;pass · fail · unsupported&lt;br&gt;reports &amp;amp; artifacts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#334155;fontSize=12;" vertex="1" parent="evidenceGroup">
+          <mxGeometry x="25" y="330" width="175" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="exports" value="&lt;b&gt;Exports&lt;/b&gt;&lt;br&gt;CSV · XLSX · JSON" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=1.5;arcSize=12;fontColor=#334155;fontSize=12;" vertex="1" parent="evidenceGroup">
+          <mxGeometry x="25" y="455" width="175" height="62" as="geometry" />
+        </mxCell>
+
+        <mxCell id="trust" value="&lt;b&gt;TRUST CONTROLS&lt;/b&gt;  Firebase ID tokens  ·  encrypted integration credentials  ·  schema validation  ·  SSRF limits  ·  immutable versions  ·  request / trace IDs  ·  OpenTelemetry-compatible traces" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0F172A;strokeColor=#0F172A;strokeWidth=2;arcSize=12;fontColor=#FFFFFF;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="35" y="770" width="1530" height="72" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eFilesUi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#64748B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="files" target="ui"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eWorkUi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#64748B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="workitems" target="ui"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eUrlsGround" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#64748B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="urls" target="grounding"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eUiApi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#3B82F6;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="ui" target="api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eFirebaseUi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;dashed=1;strokeColor=#64748B;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="firebase" target="ui"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eApiReq" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7C3AED;strokeWidth=2.5;endArrow=block;endFill=1;" edge="1" parent="1" source="api" target="reqAgents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eGroundAnalysis" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7C3AED;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="grounding" target="analysisAgents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eReqGate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7C3AED;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="reqAgents" target="reqGate"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eGateAnalysis" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#F59E0B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="reqGate" target="analysisAgents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eAnalysisTest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7C3AED;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="analysisAgents" target="testAgents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eTestGate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7C3AED;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="testAgents" target="caseGate"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eCaseAuto" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#10B981;strokeWidth=2.5;endArrow=block;endFill=1;" edge="1" parent="1" source="caseGate" target="automation"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eAutoClassifier" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#10B981;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="automation" target="classifier"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eClassifierCompiler" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#10B981;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="classifier" target="compiler"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eCompilerRunner" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#10B981;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="compiler" target="runner"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eRunnerEvidence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#10B981;strokeWidth=2.5;endArrow=block;endFill=1;" edge="1" parent="1" source="runner" target="runEvidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eEvidenceExports" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#64748B;strokeWidth=1.5;endArrow=block;endFill=1;" edge="1" parent="1" source="runEvidence" target="exports"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
