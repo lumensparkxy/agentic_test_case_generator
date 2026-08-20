@@ -29,7 +29,7 @@ configure_logging()
 logger = logging.getLogger(__name__)
 METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
-app = FastAPI(title="Agentic Test Case Generator")
+app = FastAPI(title="Test Engineer Agent")
 
 app.add_middleware(
     CORSMiddleware,

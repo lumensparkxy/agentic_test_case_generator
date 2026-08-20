@@ -125,6 +125,7 @@ class JiraSyncServiceTests(unittest.TestCase):
         self.assertEqual(issue_key, "EPIC-1")
         rendered_text = str(description_adf)
         self.assertIn("AGENTIC_REQUIREMENTS_START", rendered_text)
+        self.assertIn("managed by Test Engineer Agent", rendered_text)
         self.assertIn("REQ-001", rendered_text)
         self.assertEqual(response.requirements[0].source_issue_updated_at.isoformat(), "2026-04-22T02:00:00+00:00")
 

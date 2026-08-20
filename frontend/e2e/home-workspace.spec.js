@@ -249,6 +249,15 @@ async function openCreateProjectForm(page) {
 }
 
 test.describe("Authenticated Home workspace", () => {
+	test("uses the Devpost project name in browser metadata", async ({ page }) => {
+		await installWorkspaceApi(page, { summary: workspaceSummaryFixture() });
+		await seedAuthenticatedSession(page);
+
+		await page.goto("/");
+
+		await expect(page).toHaveTitle("Test Engineer Agent");
+	});
+
 	for (const viewport of [
 		{ width: 320, height: 900 },
 		{ width: 390, height: 844 },
