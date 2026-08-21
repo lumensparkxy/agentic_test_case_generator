@@ -365,7 +365,7 @@ def _build_managed_block_nodes(requirements: Sequence[Requirement], managed_sect
     ]
     return [
         _paragraph_node(MANAGED_BLOCK_START),
-        _paragraph_node(f"{managed_section_title} (managed by Agentic Test Case Generator)"),
+        _paragraph_node(f"{managed_section_title} (managed by Test Engineer Agent)"),
         {"type": "bulletList", "content": bullet_items},
         _paragraph_node(MANAGED_BLOCK_END),
     ]

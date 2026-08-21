@@ -208,13 +208,14 @@ and GitHub Actions.
 
 ## Testing instructions
 
-The hosted application uses Firebase Authentication; no shared credentials or
-secrets are included in the submission.
+The hosted application uses Firebase Authentication. Evaluators can use any
+provider shown on the sign-in screen with their own account; no invitation,
+shared credential, or paid subscription is required.
 
 Suggested evaluation flow:
 
-1. Download [`sample-requirements.md`](../../sample-requirements.md).
-2. Sign in, create a QA project, and upload the sample file under Requirements.
+1. Download the two-item synthetic [`demo-requirements.md`](demo-requirements.md).
+2. Sign in, create a QA project, and upload the fixture under Requirements.
 3. Review and approve suitable parsed requirements.
 4. Optionally ground a public product or documentation URL under Context.
 5. Generate and review the Use Cases artifact, then record human approval.

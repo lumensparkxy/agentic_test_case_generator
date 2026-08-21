@@ -125,6 +125,8 @@ class AzureDevOpsSyncServiceTests(unittest.TestCase):
         self.assertEqual(calls["work_item_id"], 101)
         self.assertEqual(calls["rev"], 7)
         self.assertIn("AGENTIC_REQUIREMENTS_START", calls["html_description"])
+        self.assertIn("managed by Test Engineer Agent", calls["html_description"])
+        self.assertEqual(calls["history_note"], "Test Engineer Agent synced managed requirements.")
         self.assertEqual(response.requirements[0].source_issue_updated_at, refreshed.changed_at)
 
 

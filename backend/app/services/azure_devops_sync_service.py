@@ -153,7 +153,7 @@ def apply_azure_devops_requirement_sync(
                 work_item_id=plan.work_item_id,
                 html_description=plan.rendered_description_html,
                 rev=plan.rev,
-                history_note="Agentic Test Case Generator synced managed requirements.",
+                history_note="Test Engineer Agent synced managed requirements.",
             )
             refreshed = adapter.get_work_item(plan.project, plan.work_item_id)
         except AzureDevOpsAdapterError as exc:
@@ -422,7 +422,7 @@ def _build_managed_block_html(requirements: Sequence[Requirement], managed_secti
     return (
         f"{MANAGED_BLOCK_START}\n"
         f'<section data-agentic-managed="requirements">'
-        f"<h3>{escape(managed_section_title)} (managed by Agentic Test Case Generator)</h3>"
+        f"<h3>{escape(managed_section_title)} (managed by Test Engineer Agent)</h3>"
         f"<ul>{items}</ul>"
         f"</section>\n"
         f"{MANAGED_BLOCK_END}"
