@@ -381,7 +381,7 @@ test.describe("Route-driven application shell", () => {
 			await expect(page.getByRole("heading", { name: new RegExp(`^${destination.heading}$`, "i") })).toBeVisible({
 				timeout: 30_000,
 			});
-			await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_A.name);
+			await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_A.name);
 			await expectSingleCurrent(page.getByRole("navigation", { name: "Global navigation" }), "Projects");
 			await expectSingleCurrent(page.getByRole("navigation", { name: "Project navigation" }), destination.active);
 		}
@@ -414,13 +414,13 @@ test.describe("Route-driven application shell", () => {
 		await expectSingleCurrent(page.getByRole("navigation", { name: "Project navigation" }), "Test Cases");
 
 		await page.goto(buildProjectPath(PROJECT_B.project_id, "automation"));
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_B.name);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_B.name);
 		await page.goBack();
 		await expect(page).toHaveURL(buildProjectPath(PROJECT_A.project_id, "test-cases"));
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_A.name);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_A.name);
 		await page.goForward();
 		await expect(page).toHaveURL(buildProjectPath(PROJECT_B.project_id, "automation"));
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_B.name);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_B.name);
 	});
 
 	test("makes the URL project ID authoritative over a conflicting stored project", async ({ page }) => {
@@ -431,8 +431,9 @@ test.describe("Route-driven application shell", () => {
 		await page.goto(buildProjectPath(PROJECT_A.project_id, "context"));
 
 		await expect(page.getByRole("heading", { name: /^Context Inputs$/i })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_A.name);
-		await expect(page.getByLabel("Project information rail")).not.toContainText(PROJECT_B.name);
+		const projectMenuTrigger = page.getByRole("button", { name: "Open QA project menu" });
+		await expect(projectMenuTrigger).toContainText(PROJECT_A.name);
+		await expect(projectMenuTrigger).not.toContainText(PROJECT_B.name);
 		await expect
 			.poll(() => page.evaluate((storageKey) => window.localStorage.getItem(storageKey), STORAGE_CURRENT_PROJECT_ID))
 			.toBe(PROJECT_A.project_id);
@@ -508,7 +509,7 @@ test.describe("Route-driven application shell", () => {
 
 		releaseProject();
 		await expect(page.getByRole("heading", { name: /^Upload Requirements$/i })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_A.name);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_A.name);
 	});
 
 	test("ignores a delayed project action after the user switches projects", async ({ page }) => {
@@ -533,7 +534,7 @@ test.describe("Route-driven application shell", () => {
 		await page.getByRole("button", { name: `Open QA project ${PROJECT_B.name}` }).click();
 		await expect(page).toHaveURL(buildProjectPath(PROJECT_B.project_id));
 		await expect(page.getByRole("heading", { name: new RegExp(`^${PROJECT_B.name}$`, "i") })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_B.name);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_B.name);
 
 		const parseResponse = page.waitForResponse(
 			(response) => new URL(response.url()).pathname === "/requirements/parse" && response.request().method() === "POST"
@@ -543,7 +544,7 @@ test.describe("Route-driven application shell", () => {
 		await settleBrowserEffects(page);
 
 		await expect(page).toHaveURL(buildProjectPath(PROJECT_B.project_id));
-		await expect(page.getByLabel("Project information rail")).toContainText(PROJECT_B.name);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_B.name);
 		await expect(page.getByText(lateRequirementText, { exact: true })).toHaveCount(0);
 		await expect
 			.poll(() => page.evaluate((storageKey) => window.localStorage.getItem(storageKey), STORAGE_CURRENT_PROJECT_ID))

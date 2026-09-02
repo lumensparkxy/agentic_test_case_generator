@@ -475,7 +475,8 @@ test.describe("Impact update flow", () => {
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Impact QA");
-		await expect(page.getByLabel("Project information rail").getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Impact QA");
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 5");
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Test Cases,/i })
@@ -483,7 +484,8 @@ test.describe("Impact update flow", () => {
 
 		await page.reload();
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByLabel("Project information rail").getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Impact QA");
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 5");
 
 		const task = page.getByLabel("Contextual task");
 		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();

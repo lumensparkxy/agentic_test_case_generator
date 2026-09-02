@@ -162,7 +162,7 @@ function statusPayload() {
 }
 
 test.describe("Multi-environment execution", () => {
-	test("named environment runs are preserved separately in project history", async ({ page }) => {
+	test("named environment executions report separate results after history rail removal", async ({ page }) => {
 		const executionRuns = [];
 		let currentProject = projectDetail(executionRuns);
 
@@ -257,7 +257,8 @@ test.describe("Multi-environment execution", () => {
 		await page.goto("/");
 		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Environment QA");
-		await expect(page.getByLabel("Project information rail").getByText(/Environment QA · revision 4/)).toBeVisible();
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Environment QA");
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 4");
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
@@ -271,9 +272,7 @@ test.describe("Multi-environment execution", () => {
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect(page.getByRole("region", { name: "Execution results table" })).toHaveAttribute("tabindex", "0");
 		await expect(page.locator("#main-content").getByText(/Execution failed: 0 passed, 1 failed/i)).toBeVisible();
-		const stagingRun = page.locator(".project-run-row", { hasText: "staging" });
-		await expect(stagingRun).toBeVisible();
-		await expect(stagingRun).toContainText("failed");
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 
 		await page.getByPlaceholder("staging, dev, customer-a").fill("production-like");
 		await page.getByPlaceholder("Use backend default").fill("https://production-like.example.test/app");
@@ -281,11 +280,9 @@ test.describe("Multi-environment execution", () => {
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
-		const productionLikeRun = page.locator(".project-run-row", { hasText: "production-like" });
-		await expect(productionLikeRun).toBeVisible();
-		await expect(productionLikeRun).toContainText("passed");
-		await expect(stagingRun).toBeVisible();
-		await expect(stagingRun).toContainText("0 passed / 1 failed");
-		await expect(productionLikeRun).toContainText("1 passed / 0 failed");
+		expect(executionRuns).toMatchObject([
+			{ target_environment: "production-like", status: "passed" },
+			{ target_environment: "staging", status: "failed" },
+		]);
 	});
 });

@@ -257,12 +257,7 @@ test.describe("Report evidence", () => {
 		await expect(task.getByRole("heading", { name: /^Regenerate Evidence Report$/ })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Open workbench$/ })).toBeVisible();
 
-		const reportBlock = page.getByLabel("Project information rail").locator(".project-history-block", { hasText: "Latest Report" });
-		await expect(reportBlock).toBeVisible();
-		await expect(reportBlock).toContainText("Stale");
-		await expect(reportBlock).toContainText("snap-report-v1");
-		await expect(reportBlock).toContainText("snap-test-v2");
-		await expect(reportBlock).toContainText("snap-exec-v1");
-		await expect(reportBlock).toContainText("run-staging");
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Report Evidence QA");
 	});
 });
