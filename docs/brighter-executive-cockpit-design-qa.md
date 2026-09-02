@@ -22,9 +22,9 @@ Final result: passed.
 - Center workspace owns the active workflow and keeps the vivid command banner
   for recommended Generate/orchestrator actions. The page uses the full
   available desktop width so dense workflow tables benefit from wider screens.
-- Right information rail owns operational status, stage progress, blockers,
-  agent timeline, last run, project evidence, and report evidence; it can
-  collapse to a compact status handle with a directional icon control.
+- The duplicate right information rail is intentionally absent. Contextual
+  next-action guidance stays with the active workbench, while durable runs and
+  report evidence remain in their dedicated global indexes.
 - The visual system uses brighter Material 3-inspired tokens without adding a
   Material UI dependency.
 
@@ -35,10 +35,10 @@ Final result: passed.
   stack.
 - The center workspace keeps existing accessible action names so workflow E2E
   coverage and keyboard/user expectations remain stable.
-- Navigation and rail collapse controls are icon-only visually, but keep
-  explicit accessible labels for collapse/expand state.
-- Project evidence and latest report evidence stay in compact rail sections
-  rather than modal-only surfaces so audit context remains visible after reload.
+- The navigation collapse control is icon-only visually, but keeps an explicit
+  accessible label for collapse/expand state.
+- The right rail from the selected mock was removed in issue #225 because its
+  repeated operational detail did not justify its persistent screen space.
 - The selected mock's bright command treatment is applied to the orchestrator
   action surface, while dense review, automation, and export workbenches keep
   their existing task-focused layouts.
@@ -46,17 +46,15 @@ Final result: passed.
 ## Checked Surfaces
 
 - Left workflow navigation destinations and active state.
-- Workflow destination icons and left/right directional collapse affordances.
+- Workflow destination icons and the left navigation collapse affordance.
 - Projects menu selection, refresh, and inline creation.
 - Generate command banner, primary/secondary orchestrator actions, and blocker
   messaging.
-- Right rail status overview, stage progress, blockers, agent timeline, last
-  run, project evidence, and latest report evidence.
-- Independent collapse/expand controls for the left workflow navigation and
-  right project information rail, including persisted browser preferences.
-- Responsive shell placement at 1280px and 1440px (project rail below the
-  center), the 1728px three-column transition, 1920px wide-desktop columns, and
-  the existing 390px mobile stack.
+- Absence of the duplicate right project-information rail at desktop and mobile
+  widths, while contextual guidance remains available in the active workbench.
+- Left workflow-navigation collapse/expand control and its persisted browser
+  preference.
+- Responsive two-column desktop layout and the existing 390px mobile stack.
 - Core upload, context, generation, automation, export, orchestrator lifecycle,
   and report-evidence workflows.
 - Laptop, desktop, wide-desktop, and mobile CSS smoke surfaces for center width,
@@ -67,11 +65,11 @@ Final result: passed.
 | Surface | Coverage |
 |---------|----------|
 | Left workflow navigation | `frontend/e2e/workflow-navigation.spec.js` |
-| Right rail status, blockers, timeline, evidence, and last run | `frontend/e2e/orchestrator-cockpit.spec.js` |
+| Absent project-information rail and contextual task guidance | `frontend/e2e/orchestrator-cockpit.spec.js` |
 | Reload, impact update, execution, review, and report lifecycle | `frontend/e2e/orchestrator-lifecycle.spec.js` |
 | Named automation execution history | `frontend/e2e/multi-environment-execution.spec.js` |
 | Latest report evidence after reload | `frontend/e2e/report-evidence.spec.js` |
-| Responsive shell width, placement, collapse gain, and overflow smoke | `frontend/e2e/frontend-css-smoke.spec.js` |
+| Responsive shell width, absent rail, and overflow smoke | `frontend/e2e/responsive-reflow.spec.js` |
 | Authenticated parse, generate, and export path | `frontend/e2e/workflow.spec.js` |
 
 ## Manual Visual QA
@@ -81,12 +79,10 @@ Manual screenshots from issue #122 were inspected after the brighter token pass:
 - `/tmp/issue-122-desktop.png`
 - `/tmp/issue-122-mobile.png`
 
-Observed result: brighter command banner, selected left navigation state, right
-rail readability, and mobile stacking showed no clipped text or incoherent
-overlap.
+Observed result: brighter command banner, selected left navigation state, and
+mobile stacking showed no clipped text or incoherent overlap. Issue #225 then
+removed the right rail after a further usefulness review.
 
-Issue #186 manual visual checks passed at 1280px expanded, 1440px expanded,
-1920px expanded and fully collapsed, and 390px mobile. The measured center
-widths were 964px, 795px, 1,146px, and 1,630px respectively, with no browser
-console warnings or errors. Screenshots remain local test evidence and are not
-committed.
+Issue #186 manual visual checks passed at 1280px, 1440px, 1920px, and 390px
+mobile before the follow-up rail removal. Screenshots remain local test evidence
+and are not committed.

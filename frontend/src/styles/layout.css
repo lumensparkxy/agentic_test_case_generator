@@ -822,20 +822,15 @@
 /* Workflow Navigation */
 .workflow-shell {
 	--workflow-nav-column: clamp(240px, 18vw, 300px);
-	--project-rail-column: clamp(280px, 20vw, 360px);
 
 	display: grid;
-	grid-template-columns: var(--workflow-nav-column) minmax(760px, 1fr) var(--project-rail-column);
+	grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr);
 	gap: clamp(0.875rem, 1vw, 1.15rem);
 	align-items: start;
 }
 
 .workflow-shell.nav-collapsed {
 	--workflow-nav-column: 72px;
-}
-
-.workflow-shell.rail-collapsed {
-	--project-rail-column: 104px;
 }
 
 .workflow-main {

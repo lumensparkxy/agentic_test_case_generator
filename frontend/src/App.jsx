@@ -23,7 +23,6 @@ import RequirementAnalysisPanel from "./components/generation/RequirementAnalysi
 import ScenarioCoveragePanel from "./components/generation/ScenarioCoveragePanel";
 import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
-import ProjectInformationRail from "./components/projects/ProjectInformationRail";
 import OrchestratorCockpitPanel from "./components/projects/OrchestratorCockpitPanel";
 import { selectContextualTask } from "./components/projects/contextualTask";
 import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
@@ -102,8 +101,6 @@ const PROJECT_API_PATHS = Object.freeze({
 	project: (projectId) => `/projects/${encodeURIComponent(projectId)}`,
 	orchestratorStatus: (projectId) =>
 		API_CONTRACT_ENDPOINTS.projectOrchestratorStatus.path.replace("{project_id}", encodeURIComponent(projectId)),
-	orchestratorRuns: (projectId) =>
-		API_CONTRACT_ENDPOINTS.projectOrchestratorRuns.path.replace("{project_id}", encodeURIComponent(projectId)),
 	impactAnalysis: (projectId) => `/projects/${projectId}/impact-analysis`,
 	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
@@ -241,14 +238,8 @@ export default function App() {
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
 	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
-	const {
-		isWorkflowNavCollapsed,
-		isCompactWorkflowNavigation,
-		isProjectRailCollapsed,
-		toggleWorkflowNavCollapsed,
-		closeCompactWorkflowNavigation,
-		toggleProjectRailCollapsed,
-	} = useWorkflowShellLayoutState();
+	const { isWorkflowNavCollapsed, isCompactWorkflowNavigation, toggleWorkflowNavCollapsed, closeCompactWorkflowNavigation } =
+		useWorkflowShellLayoutState();
 	const {
 		file,
 		setFile,
@@ -389,8 +380,6 @@ export default function App() {
 		setIsOpeningProject,
 		orchestratorStatus,
 		setOrchestratorStatus,
-		orchestratorRuns,
-		setOrchestratorRuns,
 		isLoadingOrchestrator,
 		setIsLoadingOrchestrator,
 		orchestratorError,
@@ -986,7 +975,6 @@ export default function App() {
 		setProjects([]);
 		setCurrentProject(null);
 		setOrchestratorStatus(null);
-		setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 		setOrchestratorError("");
 		setIsLoadingOrchestrator(false);
 		setIsCreatingProject(false);
@@ -1498,7 +1486,6 @@ export default function App() {
 	const clearProjectWorkspace = ({ removeStoredProject = false } = {}) => {
 		setCurrentProject(null);
 		setOrchestratorStatus(null);
-		setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 		setOrchestratorError("");
 		setIsLoadingOrchestrator(false);
 		setIsParsing(false);
@@ -1525,7 +1512,6 @@ export default function App() {
 	const loadProjectOrchestrator = async (projectId, { silent = false, routeRequestId = null, operationScope = null } = {}) => {
 		if (!projectId || !isAuthenticated) {
 			setOrchestratorStatus(null);
-			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 			setOrchestratorError("");
 			return null;
 		}
@@ -1533,32 +1519,23 @@ export default function App() {
 			setIsLoadingOrchestrator(true);
 		}
 		try {
-			const [statusRes, runsRes] = await Promise.all([
-				apiRequest(PROJECT_API_PATHS.orchestratorStatus(projectId), { method: "GET" }),
-				apiRequest(PROJECT_API_PATHS.orchestratorRuns(projectId), { method: "GET" }),
-			]);
+			const statusRes = await apiRequest(PROJECT_API_PATHS.orchestratorStatus(projectId), { method: "GET" });
 			if (!statusRes.ok) {
 				const errorMessage = await parseApiError(statusRes, "Failed to load orchestrator status");
 				throw new Error(errorMessage);
 			}
-			if (!runsRes.ok) {
-				const errorMessage = await parseApiError(runsRes, "Failed to load orchestrator runs");
-				throw new Error(errorMessage);
-			}
-			const [statusPayload, runsPayload] = await Promise.all([statusRes.json(), runsRes.json()]);
+			const statusPayload = await statusRes.json();
 			if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
 				return null;
 			}
 			setOrchestratorStatus(statusPayload || null);
-			setOrchestratorRuns(runsPayload || { runs: [], events: [], checkpoints: [] });
 			setOrchestratorError("");
-			return { status: statusPayload || null, runs: runsPayload || null };
+			return { status: statusPayload || null };
 		} catch (error) {
 			if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
 				return null;
 			}
 			setOrchestratorStatus(null);
-			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 			setOrchestratorError(error.message);
 			if (!silent) {
 				setStatus(`Orchestrator load failed: ${error.message}`);
@@ -1583,7 +1560,6 @@ export default function App() {
 			setProjects([]);
 			setCurrentProject(null);
 			setOrchestratorStatus(null);
-			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 			setOrchestratorError("");
 			return [];
 		}
@@ -1850,7 +1826,6 @@ export default function App() {
 			setProjects([]);
 			setCurrentProject(null);
 			setOrchestratorStatus(null);
-			setOrchestratorRuns({ runs: [], events: [], checkpoints: [] });
 			setOrchestratorError("");
 			return;
 		}
@@ -3879,13 +3854,7 @@ export default function App() {
 	const hasOrchestratorRecommendations = Boolean(Array.isArray(orchestratorStatus?.next_actions) && orchestratorStatus.next_actions.length);
 	const allowLegacyTestCaseMutations = !hasOrchestratorRecommendations;
 	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
-	const workflowShellClassName = [
-		"workflow-shell",
-		isWorkflowNavCollapsed ? "nav-collapsed" : "",
-		isProjectRailCollapsed ? "rail-collapsed" : "",
-	]
-		.filter(Boolean)
-		.join(" ");
+	const workflowShellClassName = ["workflow-shell", isWorkflowNavCollapsed ? "nav-collapsed" : ""].filter(Boolean).join(" ");
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
 	const jiraSettings = {
 		jiraConnected,
@@ -5069,23 +5038,6 @@ export default function App() {
 								</div>
 							</main>
 						)}
-						<ProjectInformationRail
-							currentProject={currentProject}
-							status={orchestratorStatus}
-							runsPayload={orchestratorRuns}
-							isLoading={isLoadingOrchestrator}
-							error={orchestratorError}
-							authActionDisabled={authActionDisabled}
-							onRefresh={() => {
-								const operationScope = captureProjectOperationScope();
-								if (!operationScope || operationScope.projectId !== currentProjectId) {
-									return null;
-								}
-								return loadProjectOrchestrator(currentProjectId, { operationScope });
-							}}
-							isCollapsed={isProjectRailCollapsed}
-							onToggleCollapsed={toggleProjectRailCollapsed}
-						/>
 					</div>
 				)}
 			</GlobalAppShell>

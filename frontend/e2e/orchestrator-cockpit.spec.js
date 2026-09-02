@@ -388,70 +388,6 @@ function statusForStaleImpact({ withAnalysis = false } = {}) {
 	};
 }
 
-function runsForStaleImpact({ withAnalysis = false } = {}) {
-	return {
-		runs: [
-			{
-				run_id: "orchestrator-run-1",
-				project_id: "project-1",
-				action: withAnalysis ? "analyze_impact" : "generate",
-				status: withAnalysis ? "running" : "completed",
-				current_stage: withAnalysis ? "impact_analysis" : "test_cases",
-				current_action: withAnalysis ? "analyze_impact" : "generate",
-				project_revision: withAnalysis ? 6 : 5,
-				request_id: "req-run",
-				actor_user_id: "playwright-e2e-user",
-				idempotency_key: "generate:req-run",
-				current_checkpoint_id: withAnalysis ? "checkpoint-impact" : "checkpoint-tests",
-				produced_snapshot_ids: withAnalysis ? { impact_analysis: "snap-impact-v1" } : { test_cases: "snap-test-v1" },
-				execution_run_ids: [],
-				blockers: [],
-				metadata: {},
-				started_at: "2026-06-12T00:00:00Z",
-				updated_at: withAnalysis ? "2026-06-12T00:04:00Z" : "2026-06-12T00:02:00Z",
-				completed_at: withAnalysis ? null : "2026-06-12T00:02:00Z",
-			},
-		],
-		events: [
-			{
-				event_id: withAnalysis ? "event-impact" : "event-tests",
-				run_id: "orchestrator-run-1",
-				project_id: "project-1",
-				event_type: withAnalysis ? "agent_invoked" : "action_completed",
-				summary: withAnalysis ? "Impact agent identified 2 changed items." : "Test case agent produced baseline suite.",
-				action: withAnalysis ? "analyze_impact" : "generate",
-				stage: withAnalysis ? "impact_analysis" : "test_cases",
-				project_revision: withAnalysis ? 6 : 5,
-				checkpoint_id: withAnalysis ? "checkpoint-impact" : "checkpoint-tests",
-				actor_user_id: "playwright-e2e-user",
-				request_id: "req-run",
-				metadata: {},
-				occurred_at: withAnalysis ? "2026-06-12T00:04:00Z" : "2026-06-12T00:02:00Z",
-			},
-		],
-		checkpoints: [
-			{
-				checkpoint_id: withAnalysis ? "checkpoint-impact" : "checkpoint-tests",
-				run_id: "orchestrator-run-1",
-				project_id: "project-1",
-				action: withAnalysis ? "analyze_impact" : "generate",
-				stage: withAnalysis ? "impact_analysis" : "test_cases",
-				project_revision: withAnalysis ? 6 : 5,
-				request_id: "req-run",
-				actor_user_id: "playwright-e2e-user",
-				source_snapshot_ids: { requirements: "snap-req-v2", test_cases: "snap-test-v1" },
-				output_snapshot_ids: withAnalysis ? { impact_analysis: "snap-impact-v1" } : { test_cases: "snap-test-v1" },
-				agent_output_refs: [],
-				execution_run_ids: [],
-				blockers: [],
-				next_action: withAnalysis ? "apply_update" : "analyze_impact",
-				metadata: {},
-				updated_at: withAnalysis ? "2026-06-12T00:04:00Z" : "2026-06-12T00:02:00Z",
-			},
-		],
-	};
-}
-
 async function mockShell(page, projects) {
 	await page.route("**/auth/me", async (route) =>
 		jsonResponse(route, {
@@ -498,26 +434,23 @@ test.describe("Contextual task and project evidence", () => {
 		await expect(page).toHaveURL(projectPath);
 
 		const task = page.getByLabel("Contextual task");
-		const rail = page.getByLabel("Project information rail");
 		await expect(task).toBeVisible({ timeout: 30_000 });
-		await expect(rail.getByText(/Baseline suite/i)).toBeVisible();
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
+		await expect(page.getByText(/^Operational status$/i)).toHaveCount(0);
 		await expect(task.getByRole("heading", { name: /^Generate Test Cases$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Start generation$/i })).toBeVisible();
 		await expect(task.getByText(/Analyze Impact/i)).toHaveCount(0);
 	});
 
-	test("reopened stale projects show impact as primary path with durable timeline", async ({ page }) => {
+	test("reopened stale projects keep impact guidance without a duplicate status rail", async ({ page }) => {
 		let currentProject = staleImpactProject();
 		let currentStatus = statusForStaleImpact();
-		let currentRuns = runsForStaleImpact();
 
 		await mockShell(page, [currentProject]);
 		await page.route("**/projects/project-1/orchestrator/status", async (route) => apiJsonResponse(route, currentStatus));
-		await page.route("**/projects/project-1/orchestrator/runs", async (route) => apiJsonResponse(route, currentRuns));
 		await page.route("**/projects/project-1/impact-analysis", async (route) => {
 			currentProject = staleImpactProject({ withAnalysis: true });
 			currentStatus = statusForStaleImpact({ withAnalysis: true });
-			currentRuns = runsForStaleImpact({ withAnalysis: true });
 			return apiJsonResponse(route, currentProject);
 		});
 		await page.route("**/projects/project-1", async (route) => apiJsonResponse(route, currentProject));
@@ -528,45 +461,22 @@ test.describe("Contextual task and project evidence", () => {
 		await expect(page).toHaveURL(projectPath);
 
 		const task = page.getByLabel("Contextual task");
-		const rail = page.getByLabel("Project information rail");
 		await expect(task).toBeVisible({ timeout: 30_000 });
-		await expect(rail.getByText(/Impact QA · revision 5/i)).toBeVisible();
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
+		await expect(page.getByRole("button", { name: /^Refresh status$/i })).toHaveCount(0);
 		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toHaveCount(0);
 		await task.getByText(/^Details$/i).click();
 		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
-		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
-		await expect(rail.getByLabel("Stage progress")).toContainText("Impact Analysis");
-		await expect(rail.getByLabel("Blockers")).toContainText("1");
-		await expect(rail.getByText("Test cases are stale because requirements changed.")).toBeVisible();
-		await expect(rail.getByLabel("Agent Timeline")).toContainText("Generate completed");
-		await expect(rail.getByText("Test case agent produced baseline suite.")).toBeVisible();
-		await expect(rail.getByLabel("Last run")).toContainText("Generate");
-		await expect(rail.getByLabel("Project evidence")).toContainText("Pending");
-		await expect(rail.getByText(/Test Cases snap-test-v1/i)).toBeVisible();
-		await expect(rail.getByRole("button", { name: /^Collapse project information$/i }).locator("svg")).toBeVisible();
-
-		await rail.getByRole("button", { name: /^Collapse project information$/i }).click();
-		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
-		await expect(rail.getByRole("button", { name: /^Expand project information$/i }).locator("svg")).toBeVisible();
-		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
-		await expect(rail.getByLabel("Stage progress")).toHaveCount(0);
-
 		await page.reload();
 		await expect(page).toHaveURL(projectPath);
 		await expect(task).toBeVisible({ timeout: 30_000 });
-		await expect(rail.getByRole("button", { name: /^Expand project information$/i })).toBeVisible();
-		await expect(rail.getByLabel("Status overview")).toContainText("Stale");
-		await rail.getByRole("button", { name: /^Expand project information$/i }).click();
-		await expect(rail.getByRole("button", { name: /^Collapse project information$/i })).toBeVisible();
-		await expect(rail.getByText(/Impact QA · revision 5/)).toBeVisible();
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
 
 		await task.getByRole("button", { name: /^Start analysis$/i }).click();
 		await expect(task.getByRole("heading", { name: /^Apply Accepted Updates$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Apply accepted changes$/i })).toBeVisible();
-		await expect(rail.getByText("Impact agent identified 2 changed items.")).toBeVisible();
-		await expect(rail.getByText(/Impact Analysis snap-impact-v1/i)).toBeVisible();
 	});
 });

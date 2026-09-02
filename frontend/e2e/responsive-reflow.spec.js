@@ -24,7 +24,6 @@ const PROJECT_ID = "responsive-shell-project";
 const PROJECT_NAME = "International Quality Assurance Workspace for the Alpine Commerce Platform";
 const REQUIREMENTS_SNAPSHOT_ID = "responsive-requirements-v2";
 const USE_CASES_SNAPSHOT_ID = "responsive-use-cases-v1";
-const LONG_STATUS = "attention_required_awaiting_international_specialist_confirmation";
 const LONG_RAW_TEXT = `Responsive parser evidence ${"UNBROKEN".repeat(80)}`;
 
 const viewports = [
@@ -224,17 +223,13 @@ test.describe("Responsive project shell", () => {
 			const routePage = page.locator(".route-page");
 			const globalNavigation = page.getByRole("navigation", { name: "Global navigation" });
 			const projectNavigation = page.getByRole("navigation", { name: "Project navigation" });
-			const rail = page.getByLabel("Project information rail");
-			const railHeader = rail.locator(".project-rail-header");
-			const statusBadge = railHeader.locator(".status-badge-token");
 
 			await expect(heading).toHaveText(PROJECT_NAME);
 			await expect(page.getByLabel("Contextual task").getByRole("button", { name: /^Open workbench$/i })).toBeVisible();
-			await expect(statusBadge).toContainText("Needs review");
+			await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 			await expectExactlyOneCurrent(globalNavigation);
 			await expectExactlyOneCurrent(projectNavigation);
 			await expectVisuallyContained(heading, routePage);
-			await expectVisuallyContained(statusBadge, railHeader);
 
 			if (viewport.width <= 900) {
 				await expect(page.getByRole("button", { name: /^Open workspace controls$/i })).toHaveAttribute("aria-expanded", "false");
@@ -331,13 +326,10 @@ test.describe("Responsive project shell", () => {
 		await expectNoDocumentOverflow(page, "collapsed desktop workflow states");
 	});
 
-	test("contains long project, status, and localized navigation labels in expanded and collapsed rails", async ({ page }) => {
-		await openResponsiveProject(page, { width: 1920, height: 1080 }, { currentStatus: LONG_STATUS });
+	test("contains long project and localized navigation labels without a status rail", async ({ page }) => {
+		await openResponsiveProject(page, { width: 1920, height: 1080 });
 		const projectNavigation = page.getByRole("navigation", { name: "Project navigation" });
 		const globalNavigation = page.getByRole("navigation", { name: "Global navigation" });
-		const rail = page.getByLabel("Project information rail");
-		const railHeader = rail.locator(".project-rail-header");
-		const statusBadge = railHeader.locator(".status-badge-token");
 		const workflowLabel = projectNavigation.getByRole("link", { name: /^Use Cases,/i }).locator(".workflow-navigation-copy strong");
 		const globalLabel = globalNavigation.locator(".global-navigation-link.active");
 
@@ -348,20 +340,12 @@ test.describe("Responsive project shell", () => {
 			element.textContent = "Internationale Projektarbeitsbereiche";
 		});
 		await settleLayout(page);
-		await expect(statusBadge).toContainText("Attention Required Awaiting International Specialist Confirmation");
-		await expectVisuallyContained(statusBadge, railHeader);
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expectVisuallyContained(workflowLabel, workflowLabel.locator("xpath=.."));
 		await expectVisuallyContained(globalLabel, globalNavigation);
 		expect(await workflowLabel.evaluate((element) => getComputedStyle(element).overflowWrap)).not.toBe("anywhere");
 		expect(await workflowLabel.evaluate((element) => getComputedStyle(element).textOverflow)).toBe("ellipsis");
 		await expectNoDocumentOverflow(page, "long expanded shell labels");
-
-		await rail.getByRole("button", { name: /^Collapse project information$/i }).click();
-		await expect(rail.getByLabel(/Project status: Attention Required Awaiting International Specialist Confirmation/i)).toBeVisible();
-		const railBox = await rail.boundingBox();
-		expect(Math.round(railBox.width)).toBe(104);
-		await expectVisuallyContained(rail.locator(".status-badge-token"), rail.locator(".project-rail-header"));
-		await expectNoDocumentOverflow(page, "long collapsed status");
 
 		await page.setViewportSize({ width: 320, height: 900 });
 		const heading = page.locator(".route-page-header h1");
