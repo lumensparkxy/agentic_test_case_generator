@@ -1246,10 +1246,6 @@
 	text-align: center;
 }
 
-.workflow-navigation-drawer.collapsed:not(.compact) .workflow-navigation-state {
-	justify-self: center;
-}
-
 /* Tab Navigation */
 .tabs {
 	display: flex;

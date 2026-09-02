@@ -108,13 +108,9 @@ export default function WorkflowNavigationDrawer({
 								<strong>{tab.label}</strong>
 								<span>{tab.title}</span>
 							</span>
-							<StatusBadge
-								className="workflow-navigation-state"
-								status={isActive ? "active" : state}
-								label={stateLabel}
-								compact={isCollapsed}
-								accessibleLabel={isCollapsed ? `${tab.label} status: ${stateLabel}` : ""}
-							/>
+							{!isCollapsed && (
+								<StatusBadge className="workflow-navigation-state" status={isActive ? "active" : state} label={stateLabel} />
+							)}
 						</>
 					);
 					const itemClassName = `workflow-navigation-item ${state} ${isActive ? "active" : ""}`;
@@ -134,6 +130,7 @@ export default function WorkflowNavigationDrawer({
 								}}
 								aria-current={isActive ? "page" : undefined}
 								aria-label={`${tab.label}, ${stateLabel}`}
+								title={isCollapsed ? [tab.label, stateLabel].join(" — ") : undefined}
 							>
 								{itemContent}
 							</a>
@@ -148,6 +145,7 @@ export default function WorkflowNavigationDrawer({
 							onClick={() => handleSelection(tab.id)}
 							aria-current={isActive ? "page" : undefined}
 							aria-label={`${tab.label}, ${stateLabel}`}
+							title={isCollapsed ? [tab.label, stateLabel].join(" — ") : undefined}
 						>
 							{itemContent}
 						</button>
