@@ -1,23 +1,7 @@
 /* Responsive */
 @media (max-width: 1727px) {
-	.workflow-shell {
-		grid-template-columns: var(--workflow-nav-column) minmax(0, 1fr);
-	}
-
 	.workflow-shell.nav-collapsed {
 		--workflow-nav-column: 72px;
-	}
-
-	.project-information-rail {
-		position: static;
-		grid-column: 2;
-		max-height: none;
-	}
-
-	.workflow-shell.rail-collapsed .project-information-rail {
-		box-sizing: border-box;
-		width: 104px;
-		justify-self: end;
 	}
 
 	.workflow-navigation-drawer {
@@ -29,15 +13,6 @@
 @media (max-width: 900px) {
 	.workflow-shell {
 		grid-template-columns: minmax(0, 1fr);
-	}
-
-	.project-information-rail {
-		grid-column: auto;
-	}
-
-	.workflow-shell.rail-collapsed .project-information-rail {
-		width: auto;
-		justify-self: stretch;
 	}
 
 	.workflow-navigation-drawer {
@@ -229,19 +204,11 @@
 	.coverage-plan-header,
 	.workflow-settings-header,
 	.workflow-diagnostics-header,
-	.project-rail-header,
-	.project-rail-section-header,
-	.orchestrator-timeline-header,
 	.jira-card-header,
 	.jira-sync-preview-header,
 	.jira-sync-preview-meta {
 		flex-direction: column;
 		align-items: flex-start;
-	}
-
-	.project-rail-header-actions {
-		flex-basis: auto;
-		width: 100%;
 	}
 
 	.requirement-report-flags {
@@ -270,7 +237,6 @@
 		grid-template-columns: 1fr;
 	}
 
-	.orchestrator-summary-grid,
 	.project-history-grid {
 		grid-template-columns: 1fr;
 	}
@@ -301,11 +267,6 @@
 		width: 100%;
 	}
 
-	.orchestrator-summary-grid {
-		grid-template-columns: 1fr;
-		width: 100%;
-	}
-
 	.contextual-task-card {
 		align-items: stretch;
 		flex-direction: column;
@@ -324,19 +285,6 @@
 	.contextual-task-details-body {
 		right: auto;
 		left: 0;
-	}
-
-	.orchestrator-stage-rail {
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		overflow-x: visible;
-	}
-
-	.orchestrator-event-row {
-		display: grid;
-	}
-
-	.orchestrator-event-row > span {
-		flex-basis: auto;
 	}
 
 	.feedback-section {
@@ -377,10 +325,6 @@
 	}
 
 	.workflow-navigation-list {
-		grid-template-columns: 1fr;
-	}
-
-	.project-information-rail .orchestrator-stage-rail {
 		grid-template-columns: 1fr;
 	}
 }

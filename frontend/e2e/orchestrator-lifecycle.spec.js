@@ -491,82 +491,6 @@ function statusForPhase(phase) {
 	return base;
 }
 
-function runsForPhase(phase) {
-	const events = [];
-	if (["suite", "stale", "analysis", "applied", "executed", "reported"].includes(phase)) {
-		events.push({
-			event_id: "event-generate",
-			run_id: "run-generate",
-			project_id: PROJECT_ID,
-			event_type: "action_completed",
-			summary: "Generated v1 baseline suite.",
-			action: "generate",
-			stage: "test_cases",
-			project_revision: 4,
-			checkpoint_id: "checkpoint-generate",
-			occurred_at: "2026-06-13T09:04:00Z",
-		});
-	}
-	if (["analysis", "applied", "executed", "reported"].includes(phase)) {
-		events.push({
-			event_id: "event-impact",
-			run_id: "run-impact",
-			project_id: PROJECT_ID,
-			event_type: "agent_invoked",
-			summary: "Impact agent identified 2 changed items.",
-			action: "analyze_impact",
-			stage: "impact_analysis",
-			project_revision: 6,
-			checkpoint_id: "checkpoint-impact",
-			occurred_at: "2026-06-13T09:06:00Z",
-		});
-	}
-	return {
-		runs: events.length
-			? [
-					{
-						run_id: events.at(-1).run_id,
-						project_id: PROJECT_ID,
-						action: events.at(-1).action,
-						status: "completed",
-						current_stage: events.at(-1).stage,
-						current_action: events.at(-1).action,
-						project_revision: events.at(-1).project_revision,
-						request_id: "req-run",
-						actor_user_id: "playwright-e2e-user",
-						idempotency_key: `${events.at(-1).action}:req-run`,
-						current_checkpoint_id: events.at(-1).checkpoint_id,
-						produced_snapshot_ids: {},
-						execution_run_ids: phase === "executed" || phase === "reported" ? ["run-staging"] : [],
-						blockers: [],
-						metadata: {},
-						started_at: events.at(-1).occurred_at,
-						updated_at: events.at(-1).occurred_at,
-						completed_at: events.at(-1).occurred_at,
-					},
-				]
-			: [],
-		events,
-		checkpoints: events.map((event) => ({
-			checkpoint_id: event.checkpoint_id,
-			run_id: event.run_id,
-			project_id: PROJECT_ID,
-			action: event.action,
-			stage: event.stage,
-			project_revision: event.project_revision,
-			source_snapshot_ids: { requirements: "snap-requirements-v2", test_cases: "snap-test-cases-v1" },
-			output_snapshot_ids:
-				event.stage === "impact_analysis" ? { impact_analysis: "snap-impact-analysis-v1" } : { test_cases: "snap-test-cases-v1" },
-			agent_output_refs: [],
-			execution_run_ids: phase === "executed" || phase === "reported" ? ["run-staging"] : [],
-			blockers: [],
-			next_action: event.stage === "impact_analysis" ? "apply_update" : "analyze_impact",
-			metadata: {},
-			updated_at: event.occurred_at,
-		})),
-	};
-}
-
 async function mockLifecycleApi(page) {
 	let phase = "empty";
 	let parseCount = 0;
@@ -618,9 +542,6 @@ async function mockLifecycleApi(page) {
 		}
 		if (url.pathname === `/projects/${PROJECT_ID}/orchestrator/status`) {
 			return jsonResponse(route, statusForPhase(phase));
-		}
-		if (url.pathname === `/projects/${PROJECT_ID}/orchestrator/runs`) {
-			return jsonResponse(route, runsForPhase(phase));
 		}
 		if (url.pathname === "/requirements/parse") {
 			parseCount += 1;
@@ -729,7 +650,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await projectMenu.getByPlaceholder("New QA project name").fill(PROJECT_NAME);
 		await projectMenu.getByRole("button", { name: /^New Project$/i }).click();
 		await expect(page.getByRole("button", { name: /^Open QA project menu$/i })).toContainText("Lifecycle QA");
-		await expect(page.getByLabel("Project information rail").getByText(/Lifecycle QA · revision 0/)).toBeVisible();
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expect(page.getByRole("heading", { name: /^QA Project$/i })).toHaveCount(0);
 		await expect(page.getByText(/^No project selected$/i)).toHaveCount(0);
 		await page
@@ -756,13 +677,9 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("button", { name: /^Start generation$/i })
 			.click();
 		await expect(page.locator(".generate-results-summary-pill", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
-		await expect(page.getByText(/Generated v1 baseline suite/i)).toBeVisible();
 
 		await page.reload();
-		await expect(page.getByLabel("Project information rail").getByText(/Lifecycle QA · revision 4/)).toBeVisible({ timeout: 30_000 });
-		await expect(
-			page.getByLabel("Project information rail").locator(".orchestrator-summary-grid div", { hasText: "Baseline suite" })
-		).toContainText("Present");
+		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
@@ -800,11 +717,6 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed, 0 failed/i)).toBeVisible();
 
 		await page
-			.getByLabel("Project information rail")
-			.getByRole("button", { name: /^Refresh status$/ })
-			.click();
-		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
-		await page
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Overview,/i })
 			.click();
@@ -823,7 +735,5 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByRole("heading", { name: /^Export Test Cases$/ })).toBeVisible();
 		await page.getByRole("button", { name: /JSON/i }).click();
 		await expect(page.getByText(/Exported to JSON successfully/i)).toBeVisible();
-		await expect(page.locator(".project-history-block", { hasText: "Latest Report" })).toContainText("snap-reports-v1");
-		await expect(page.locator(".project-history-block", { hasText: "Latest Report" })).toContainText("run-staging");
 	});
 });

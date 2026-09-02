@@ -66,8 +66,6 @@ should preserve when changing the application.
   `frontend/src/components/projects/OrchestratorCockpitPanel.jsx`,
   `frontend/src/components/projects/ContextualTaskCard.jsx`, and
   `frontend/src/components/projects/contextualTask.js`.
-- Frontend project information rail:
-  `frontend/src/components/projects/ProjectInformationRail.jsx`.
 - Automation preview normalization, selection guards, and presentation:
   `frontend/src/components/automation/automationPreview.js`,
   `frontend/src/components/automation/AutomationPanel.jsx`, and

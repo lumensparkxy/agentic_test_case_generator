@@ -83,11 +83,10 @@ npm run test:playwright -- --list
 - Workflow shell iconography uses `lucide-react` line icons. Keep icon-only
   controls paired with stable `aria-label` text and avoid custom SVGs where a
   matching lucide icon exists.
-- The workflow page is fluid rather than desktop-capped. Preserve the
-  compact single-column shell through 900px, the left-navigation plus center
-  layout with the project rail below from 901px through 1727px, and the
-  three-column shell from 1728px upward. Expanded rail widths should remain
-  responsive while the existing 72px and 104px collapsed widths stay stable.
+- The workflow page is fluid rather than desktop-capped. Preserve the compact
+  single-column shell through 900px and the left-navigation plus center layout
+  above that breakpoint. The left navigation's 72px collapsed width stays
+  stable on desktop.
 - Router modules expose a module-level `router = APIRouter()`.
 - Service modules mostly expose functions rather than classes; provider-specific
   remote behavior lives in adapter modules.

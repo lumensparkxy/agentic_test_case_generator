@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { STORAGE_PROJECT_RAIL_COLLAPSED, STORAGE_WORKFLOW_NAV_COLLAPSED } from "../constants/workflow";
+import { STORAGE_WORKFLOW_NAV_COLLAPSED } from "../constants/workflow";
 
 const COMPACT_WORKFLOW_NAV_QUERY = "(max-width: 900px)";
 
@@ -34,15 +34,10 @@ export default function useWorkflowShellLayoutState() {
 	);
 	const [isCompactWorkflowNavigation, setIsCompactWorkflowNavigation] = useState(readCompactWorkflowNavigation);
 	const [isCompactWorkflowNavigationOpen, setIsCompactWorkflowNavigationOpen] = useState(false);
-	const [isProjectRailCollapsed, setIsProjectRailCollapsed] = useState(() => readStoredBoolean(STORAGE_PROJECT_RAIL_COLLAPSED));
 
 	useEffect(() => {
 		writeStoredBoolean(STORAGE_WORKFLOW_NAV_COLLAPSED, isDesktopWorkflowNavCollapsed);
 	}, [isDesktopWorkflowNavCollapsed]);
-
-	useEffect(() => {
-		writeStoredBoolean(STORAGE_PROJECT_RAIL_COLLAPSED, isProjectRailCollapsed);
-	}, [isProjectRailCollapsed]);
 
 	useEffect(() => {
 		const mediaQuery = window.matchMedia(COMPACT_WORKFLOW_NAV_QUERY);
@@ -59,7 +54,6 @@ export default function useWorkflowShellLayoutState() {
 	return {
 		isWorkflowNavCollapsed,
 		isCompactWorkflowNavigation,
-		isProjectRailCollapsed,
 		toggleWorkflowNavCollapsed: () => {
 			if (isCompactWorkflowNavigation) {
 				setIsCompactWorkflowNavigationOpen((value) => !value);
@@ -68,6 +62,5 @@ export default function useWorkflowShellLayoutState() {
 			setIsDesktopWorkflowNavCollapsed((value) => !value);
 		},
 		closeCompactWorkflowNavigation: () => setIsCompactWorkflowNavigationOpen(false),
-		toggleProjectRailCollapsed: () => setIsProjectRailCollapsed((value) => !value),
 	};
 }

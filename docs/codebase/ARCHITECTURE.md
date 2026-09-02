@@ -353,7 +353,7 @@ Frontend shell flow:
 
 ```text
 Global navigation + workspace controls -> Home/Projects/Reviews/Runs/Reports/global recovery page
-Global navigation + project navigation -> active project workbench -> project information rail
+Global navigation + project navigation -> active project workbench
 ```
 
 `frontend/src/components/layout/WorkflowNavigationDrawer.jsx` renders the
@@ -385,28 +385,24 @@ parallel numeric-tab mapping.
 Project selection, refresh, and creation live in the global workspace controls;
 opening and creating a project navigates to its stable overview URL, while
 clearing the selection returns to Home and removes project-derived state.
-`frontend/src/components/projects/ProjectInformationRail.jsx` owns the durable
-status presentation in the right rail: status overview, stage progress,
-blockers, agent timeline, project evidence, latest report evidence, and last
-run details. Both components consume the same deterministic status and run
-payloads, so backend status/runs contracts remain unchanged.
+Issue #225 removes the duplicated Project Information Rail. Orchestrator status
+continues to drive contextual next-action guidance in the active workspace,
+while detailed durable runs and report evidence remain available through their
+dedicated global indexes; backend status and run contracts remain unchanged.
 The selected Brighter Executive Cockpit visual target and QA mapping are
 recorded in `docs/brighter-executive-cockpit-design-qa.md`.
-The shell also supports independent local-only collapse preferences for the
-left workflow navigation and right information rail. Directional icon controls
-collapse the left navigation toward the left edge and the right rail toward the
-right edge, preserving the same tab and orchestrator data contracts while
-changing only presentation density.
+The shell supports a local-only collapse preference for the left workflow
+navigation. Its directional icon control preserves the same tab and
+orchestrator data contracts while changing only presentation density.
 
 `frontend/src/components/workflow/StatusBadge.jsx` is the shared visual and
 semantic state primitive for project and workflow status. It normalizes active,
 complete, pending, blocked, attention, running, and failed variants into an icon
-plus text token, so state does not depend on color alone. A collapsed desktop
-rail uses the compact icon treatment while retaining a complete accessible
-name; ordinary status and navigation labels use bounded ellipsis rather than
-arbitrary mid-word breaking. The route-current project destination alone owns
-the active treatment and `aria-current="page"`; completion, blockers, and
-attention remain secondary state metadata.
+plus text token, so state does not depend on color alone. Ordinary status and
+navigation labels use bounded ellipsis rather than arbitrary mid-word breaking.
+The route-current project destination alone owns the active treatment and
+`aria-current="page"`; completion, blockers, and attention remain secondary
+state metadata.
 
 The responsive shell separates durable desktop density preferences from
 temporary compact disclosure state. At 900 CSS pixels and below,
@@ -415,10 +411,8 @@ overwriting the stored desktop collapse preference. `GlobalAppShell.jsx` and
 `WorkflowNavigationDrawer.jsx` expose named native-button disclosures, close on
 route selection or Escape, and restore focus to their trigger after an Escape
 close. This puts the route heading and contextual CTA before a full navigation
-stack at mobile and tablet sizes. The project information rail moves below the
-center workspace through 1727px, with the three-column shell beginning at
-1728px; this transition preserves at least the usable center width established
-at 1280px instead of making the 1440px workspace narrower.
+stack at mobile and tablet sizes. Desktop uses a two-column navigation-plus-main
+layout so the active workbench receives the full remaining width.
 
 The app shell owns cross-route accessibility behavior. A global skip link is
 the first keyboard destination on an initial document load and targets the one

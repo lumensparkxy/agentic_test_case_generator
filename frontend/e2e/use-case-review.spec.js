@@ -74,7 +74,7 @@ async function expectDurableRefresh(api) {
 	await expect.poll(() => api.requests.projectDetail.length).toBeGreaterThanOrEqual(2);
 	await expect.poll(() => api.requests.projectList.length).toBeGreaterThanOrEqual(2);
 	await expect.poll(() => api.requests.orchestratorStatus.length).toBeGreaterThanOrEqual(2);
-	await expect.poll(() => api.requests.orchestratorRuns.length).toBeGreaterThanOrEqual(2);
+	await expect.poll(() => api.requests.orchestratorRuns.length).toBe(0);
 	await expect.poll(() => api.requests.workspaceSummary.length).toBeGreaterThanOrEqual(2);
 }
 
