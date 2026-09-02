@@ -6,9 +6,11 @@
 
 .global-app-shell-header {
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	justify-content: space-between;
 	gap: 1rem;
+	box-sizing: border-box;
+	min-height: 4.5rem;
 	padding: 0.65rem;
 	border: 1px solid var(--border-color);
 	border-radius: var(--radius-xl);
@@ -17,7 +19,8 @@
 }
 
 .global-app-shell-controls {
-	min-width: min(100%, 280px);
+	min-width: 0;
+	margin-left: auto;
 }
 
 .global-app-shell-controls[hidden] {
@@ -45,7 +48,9 @@
 .global-navigation-link {
 	display: inline-flex;
 	align-items: center;
-	min-height: 2.5rem;
+	box-sizing: border-box;
+	height: 2.75rem;
+	min-height: 0;
 	padding: 0.55rem 0.85rem;
 	border: 1px solid transparent;
 	border-radius: var(--radius-md);
@@ -269,6 +274,12 @@
 	border-top: 0;
 }
 
+@media (min-width: 901px) {
+	.global-navigation-list {
+		flex-wrap: nowrap;
+	}
+}
+
 .route-skeleton {
 	background: linear-gradient(90deg, var(--surface-container), #ffffff, var(--surface-container));
 	background-size: 200% 100%;
@@ -312,6 +323,70 @@
 	.global-app-shell-header.compact .global-app-shell-controls {
 		flex-basis: 100%;
 		width: 100%;
+		margin-left: 0;
+	}
+
+	.global-app-shell-header.compact .app-navigation-controls {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.75rem;
+		padding-top: 0.85rem;
+		border-top: 1px solid rgba(148, 163, 184, 0.26);
+	}
+
+	.global-app-shell-header.compact .command-project-control,
+	.global-app-shell-header.compact .command-health,
+	.global-app-shell-header.compact .settings-open-btn,
+	.global-app-shell-header.compact .auth-panel,
+	.global-app-shell-header.compact .auth-login,
+	.global-app-shell-header.compact .auth-account,
+	.global-app-shell-header.compact .auth-account-trigger {
+		width: 100%;
+	}
+
+	.global-app-shell-header.compact .command-project-control {
+		flex-basis: auto;
+	}
+
+	.global-app-shell-header.compact .command-project-menu,
+	.global-app-shell-header.compact .command-health-details,
+	.global-app-shell-header.compact .auth-account-menu {
+		position: static;
+		width: 100%;
+		margin-top: 0.4rem;
+		box-shadow: none;
+	}
+
+	.global-app-shell-header.compact .command-health,
+	.global-app-shell-header.compact .auth-account-trigger {
+		border-radius: var(--radius-md);
+	}
+
+	.global-app-shell-header.compact .settings-open-btn,
+	.global-app-shell-header.compact .auth-account-trigger {
+		justify-content: flex-start;
+		gap: 0.55rem;
+		padding: 0.62rem 0.75rem;
+	}
+
+	.global-app-shell-header.compact .settings-open-label,
+	.global-app-shell-header.compact .auth-account-trigger-name,
+	.global-app-shell-header.compact .auth-account-trigger-chevron {
+		display: block;
+	}
+
+	.global-app-shell-header.compact .auth-account-trigger-name {
+		flex: 1;
+		overflow: hidden;
+		text-align: left;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.global-app-shell-header.compact .auth-message {
+		max-width: none;
+		overflow: visible;
+		white-space: normal;
 	}
 }
 

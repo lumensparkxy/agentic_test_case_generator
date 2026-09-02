@@ -13,7 +13,7 @@ const minimumStructuredCaseRatio = 0.8;
 
 async function openGenerateTab(page) {
 	await page.goto("/");
-	await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 
 	await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 	await page.getByRole("button", { name: /parse requirements/i }).click();

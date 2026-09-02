@@ -385,6 +385,13 @@ parallel numeric-tab mapping.
 Project selection, refresh, and creation live in the global workspace controls;
 opening and creating a project navigates to its stable overview URL, while
 clearing the selection returns to Home and removes project-derived state.
+Above 900 CSS pixels, the global shell presents those controls in a 72-pixel
+single-row app bar: global destinations remain left-aligned, while the compact
+project selector, text-and-color health disclosure, Settings icon, and account
+trigger remain right-aligned. Health details and authenticated profile actions
+open as anchored popovers; profile metadata, Settings, and Sign Out no longer
+consume persistent header rows. Both popovers close on Escape and restore focus
+to their trigger, while account actions support arrow-key navigation.
 Issue #225 removes the duplicated Project Information Rail. Orchestrator status
 continues to drive contextual next-action guidance in the active workspace,
 while detailed durable runs and report evidence remain available through their
@@ -410,9 +417,12 @@ temporary compact disclosure state. At 900 CSS pixels and below,
 overwriting the stored desktop collapse preference. `GlobalAppShell.jsx` and
 `WorkflowNavigationDrawer.jsx` expose named native-button disclosures, close on
 route selection or Escape, and restore focus to their trigger after an Escape
-close. This puts the route heading and contextual CTA before a full navigation
-stack at mobile and tablet sizes. Desktop uses a two-column navigation-plus-main
-layout so the active workbench receives the full remaining width.
+close. The global workspace disclosure expands the app-bar controls into a
+single-column panel with visible Settings and account labels, and nested project,
+health, or account Escape handling does not close the parent panel. This puts the
+route heading and contextual CTA before a full navigation stack at mobile and
+tablet sizes. Desktop uses a two-column navigation-plus-main layout so the active
+workbench receives the full remaining width.
 
 The app shell owns cross-route accessibility behavior. A global skip link is
 the first keyboard destination on an initial document load and targets the one

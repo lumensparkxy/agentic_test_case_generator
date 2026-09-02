@@ -151,6 +151,41 @@ test("keeps compact workspace controls open when Escape closes the project choos
 	await expect(projectDialog).toHaveCount(0);
 	await expect(projectTrigger).toBeFocused();
 	await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toHaveAttribute("aria-expanded", "true");
+
+	const healthTrigger = page.getByRole("button", { name: /^Open system health details$/i });
+	await healthTrigger.focus();
+	await page.keyboard.press("Enter");
+	await expect(page.getByRole("button", { name: /^Close system health details$/i })).toHaveAttribute("aria-expanded", "true");
+	await page.keyboard.press("Escape");
+	await expect(healthTrigger).toBeFocused();
+	await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toHaveAttribute("aria-expanded", "true");
+
+	const accountTrigger = page.getByRole("button", { name: /^Open account menu/i });
+	await accountTrigger.focus();
+	await page.keyboard.press("Enter");
+	const accountMenu = page.getByRole("menu", { name: /^Account menu$/i });
+	await expect(accountMenu.getByRole("menuitem", { name: /^Settings$/i })).toBeFocused();
+	await page.keyboard.press("ArrowDown");
+	await expect(accountMenu.getByRole("menuitem", { name: /^Sign Out$/i })).toBeFocused();
+	await page.keyboard.press("Escape");
+	await expect(accountTrigger).toBeFocused();
+	await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toHaveAttribute("aria-expanded", "true");
+});
+
+test("opens Settings from both compact desktop entry points", async ({ page }) => {
+	await openSurface(page, "project Overview", 1440);
+
+	await page.getByRole("button", { name: /^Open settings$/i }).click();
+	await expect(page.getByRole("dialog", { name: /^Settings$/i })).toBeVisible();
+	await page.getByRole("button", { name: /^Close settings dialog$/i }).click();
+
+	const accountTrigger = page.getByRole("button", { name: /^Open account menu/i });
+	await accountTrigger.click();
+	await page
+		.getByRole("menu", { name: /^Account menu$/i })
+		.getByRole("menuitem", { name: /^Settings$/i })
+		.click();
+	await expect(page.getByRole("dialog", { name: /^Settings$/i })).toBeVisible();
 });
 
 test("publishes async status politely and exposes blocking workspace failures as alerts", async ({ page }) => {

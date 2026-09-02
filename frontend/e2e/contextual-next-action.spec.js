@@ -330,7 +330,7 @@ async function installApi(page, scenario) {
 async function openTestCases(page) {
 	await seedAuthenticatedSession(page);
 	await page.goto(buildProjectPath(PROJECT_ID, "test-cases"));
-	await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe("Contextual next task", () => {

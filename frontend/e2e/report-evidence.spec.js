@@ -250,7 +250,7 @@ test.describe("Report evidence", () => {
 
 		await seedAuthenticatedSession(page);
 		await page.goto("/");
-		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Report Evidence QA");
 
 		const task = page.getByLabel("Contextual task");

@@ -276,7 +276,7 @@ test.describe("JIRA requirements workflow", () => {
 		await seedAuthenticatedSession(page, user);
 
 		await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
-		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 
 		await page.getByTestId("settings-open-button").click();
 		await expect(page.getByRole("dialog", { name: /^settings$/i })).toBeVisible();
