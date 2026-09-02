@@ -255,7 +255,7 @@ test.describe("Multi-environment execution", () => {
 
 		await seedAuthenticatedSession(page);
 		await page.goto("/");
-		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Environment QA");
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Environment QA");
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 4");

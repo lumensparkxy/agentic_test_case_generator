@@ -95,6 +95,7 @@ Status markers below reflect the GitHub issue state as of 2026-07-18.
 - Frontend workflow usability
   - Done: [#186](https://github.com/lumensparkxy/agentic_test_case_generator/issues/186) - Use responsive wide-screen workflow workspace
   - In progress: [#225](https://github.com/lumensparkxy/agentic_test_case_generator/issues/225) - Remove the redundant Project Information Rail from the workspace
+  - In progress: [#227](https://github.com/lumensparkxy/agentic_test_case_generator/issues/227) - Compact workspace controls into a single-row app bar
 - Done Epic [#188](https://github.com/lumensparkxy/agentic_test_case_generator/issues/188) - Build a Home-first production workspace
   - Done: [#189](https://github.com/lumensparkxy/agentic_test_case_generator/issues/189) - Add aggregated workspace summary API
   - Done: [#190](https://github.com/lumensparkxy/agentic_test_case_generator/issues/190) - Add auditable Use Cases review decisions

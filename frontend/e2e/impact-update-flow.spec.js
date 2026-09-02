@@ -473,7 +473,7 @@ test.describe("Impact update flow", () => {
 
 		await seedAuthenticatedSession(page);
 		await page.goto("/");
-		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 		await openQaProjectByName(page, "Impact QA");
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Impact QA");
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 5");
@@ -483,7 +483,7 @@ test.describe("Impact update flow", () => {
 			.click();
 
 		await page.reload();
-		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Impact QA");
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 5");
 

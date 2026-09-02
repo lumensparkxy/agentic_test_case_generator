@@ -263,7 +263,7 @@ test.describe("Export approval gate", () => {
 		const reportsPath = buildProjectPath(PROJECT_ID, "reports");
 		await page.goto(requirementsPath);
 		await expect(page).toHaveURL(requirementsPath);
-		await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /parse requirements/i }).click();

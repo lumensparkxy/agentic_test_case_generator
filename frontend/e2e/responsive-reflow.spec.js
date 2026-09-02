@@ -216,6 +216,31 @@ async function openResponsiveProject(page, viewport, { currentStatus = "attentio
 }
 
 test.describe("Responsive project shell", () => {
+	for (const width of [901, 1280, 1440, 1920]) {
+		test(`keeps the desktop app bar compact at ${width}px`, async ({ page }) => {
+			await openResponsiveProject(page, { width, height: 1000 });
+
+			const appBar = page.locator(".global-app-shell-header");
+			const appBarBox = await appBar.boundingBox();
+			const projectMenuTrigger = page.getByRole("button", { name: /^Open QA project menu$/i });
+			const main = page.getByRole("main");
+			const mainBox = await main.boundingBox();
+
+			expect(appBarBox).not.toBeNull();
+			expect(mainBox).not.toBeNull();
+			expect(appBarBox.height).toBeGreaterThanOrEqual(68);
+			expect(appBarBox.height).toBeLessThanOrEqual(76);
+			expect(Math.round(mainBox.y - (appBarBox.y + appBarBox.height))).toBe(16);
+			await expect(projectMenuTrigger).toContainText(PROJECT_NAME);
+			await expect(projectMenuTrigger).toContainText("revision 12");
+			await expect(page.getByRole("button", { name: /^Open system health details$/i })).toBeVisible();
+			await expect(page.getByRole("button", { name: /^Open settings$/i })).toBeVisible();
+			await expect(page.getByRole("button", { name: /^Open account menu/i })).toBeVisible();
+			await expect(page.getByRole("menuitem", { name: /^Sign Out$/i })).toHaveCount(0);
+			await expectNoDocumentOverflow(page, `${width}px compact desktop app bar`);
+		});
+	}
+
 	for (const viewport of viewports) {
 		test(`contains project content at ${viewport.width}px (${viewport.label})`, async ({ page }) => {
 			await openResponsiveProject(page, viewport);

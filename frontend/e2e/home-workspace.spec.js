@@ -522,7 +522,11 @@ test.describe("Authenticated Home workspace", () => {
 
 		await page.goto("/");
 		await expect(homeRegion(page, "Continue working")).toContainText(REVIEW_PROJECT.name, { timeout: 30_000 });
-		await page.getByRole("button", { name: /^Sign Out$/i }).click();
+		await page.getByRole("button", { name: /^Open account menu/i }).click();
+		await page
+			.getByRole("menu", { name: /^Account menu$/i })
+			.getByRole("menuitem", { name: /^Sign Out$/i })
+			.click();
 
 		await expect(page.locator(".auth-warning-banner")).toBeVisible();
 		await expect(page.getByText(REVIEW_PROJECT.name, { exact: true })).toHaveCount(0);
@@ -543,7 +547,11 @@ test.describe("Authenticated Home workspace", () => {
 		await page.getByRole("button", { name: /^Open QA project menu$/i }).click();
 		const projectDialog = page.getByRole("dialog", { name: /^Projects$/i });
 		await expect(projectDialog).toContainText("No projects yet");
-		await page.getByRole("button", { name: /^Sign Out$/i }).evaluate((button) => button.click());
+		await page.getByRole("button", { name: /^Open account menu/i }).evaluate((button) => button.click());
+		await page
+			.getByRole("menu", { name: /^Account menu$/i })
+			.getByRole("menuitem", { name: /^Sign Out$/i })
+			.evaluate((button) => button.click());
 		await expect(page.locator(".auth-warning-banner")).toBeVisible();
 
 		const projectListResponse = page.waitForResponse(
@@ -760,7 +768,11 @@ test.describe("Authenticated Projects experience", () => {
 		await nameInput.fill(createdProject.name);
 		await form.getByRole("button", { name: /^Create project$/i }).click();
 		await expect.poll(() => api.requests.projectCreate.length).toBe(1);
-		await page.getByRole("button", { name: /^Sign Out$/i }).click();
+		await page.getByRole("button", { name: /^Open account menu/i }).click();
+		await page
+			.getByRole("menu", { name: /^Account menu$/i })
+			.getByRole("menuitem", { name: /^Sign Out$/i })
+			.click();
 		await expect(page.locator(".auth-warning-banner")).toBeVisible();
 
 		const createResponse = page.waitForResponse(
