@@ -97,42 +97,37 @@ export function MyWorkSection({
 						const hiddenCount = group.items.length - MY_WORK_GROUP_PREVIEW_LIMIT;
 						const visibleItems = isExpanded || hiddenCount <= 0 ? group.items : group.items.slice(0, MY_WORK_GROUP_PREVIEW_LIMIT);
 						return (
-						<section className="workspace-work-group" key={group.id} aria-labelledby={`work-group-${group.id}`}>
-							<h3 id={`work-group-${group.id}`}>
-								{group.label}
-								<span className="workspace-work-group-count" aria-hidden="true">
-									{group.items.length}
-								</span>
-							</h3>
-							<ul>
-								{visibleItems.map((item) => (
-									<li key={item.work_item_id}>
-										<div className="workspace-work-item-copy">
-											<div className="workspace-card-meta">
-												<span>{item.project_name || "Project"}</span>
-												<WorkspaceStatus status={item.status} />
+							<section className="workspace-work-group" key={group.id} aria-labelledby={`work-group-${group.id}`}>
+								<h3 id={`work-group-${group.id}`}>
+									{group.label}
+									<span className="workspace-work-group-count" aria-hidden="true">
+										{group.items.length}
+									</span>
+								</h3>
+								<ul>
+									{visibleItems.map((item) => (
+										<li key={item.work_item_id}>
+											<div className="workspace-work-item-copy">
+												<div className="workspace-card-meta">
+													<span>{item.project_name || "Project"}</span>
+													<WorkspaceStatus status={item.status} />
+												</div>
+												<strong>{getWorkItemTitle(item)}</strong>
+												<p>{item.reason}</p>
+												{Number.isInteger(item.count) ? <span className="workspace-count">{item.count} items</span> : null}
 											</div>
-											<strong>{getWorkItemTitle(item)}</strong>
-											<p>{item.reason}</p>
-											{Number.isInteger(item.count) ? <span className="workspace-count">{item.count} items</span> : null}
-										</div>
-										<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
-											Open
-										</ProjectOpenLink>
-									</li>
-								))}
-							</ul>
-							{hiddenCount > 0 ? (
-								<button
-									type="button"
-									className="workspace-show-more"
-									aria-expanded={isExpanded}
-									onClick={() => toggleGroup(group.id)}
-								>
-									{isExpanded ? "Show fewer" : `Show ${hiddenCount} more`}
-								</button>
-							) : null}
-						</section>
+											<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
+												Open
+											</ProjectOpenLink>
+										</li>
+									))}
+								</ul>
+								{hiddenCount > 0 ? (
+									<button type="button" className="workspace-show-more" aria-expanded={isExpanded} onClick={() => toggleGroup(group.id)}>
+										{isExpanded ? "Show fewer" : `Show ${hiddenCount} more`}
+									</button>
+								) : null}
+							</section>
 						);
 					})}
 				</div>

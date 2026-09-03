@@ -552,11 +552,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 
 				{filteredGroups.length > 1 ? (
 					<div className="use-case-group-toolbar">
-						<button
-							type="button"
-							className="use-case-group-toggle-all"
-							onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}
-						>
+						<button type="button" className="use-case-group-toggle-all" onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}>
 							{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
 						</button>
 					</div>
@@ -593,24 +589,24 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 												{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
 											</strong>
 										</summary>
-									{group.scenarios.length ? (
-										<ul
-											className="use-case-scenario-list"
-											aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
-										>
-											{group.scenarios.map((scenario, scenarioIndex) => (
-												<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
-											))}
-										</ul>
-									) : (
-										<p className="use-case-context-empty">No scenarios were generated for this requirement.</p>
-									)}
-									<details className="use-case-coverage-context">
-										<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
-											Coverage context
-										</summary>
-										<CoverageContext analysis={group.analysis} />
-									</details>
+										{group.scenarios.length ? (
+											<ul
+												className="use-case-scenario-list"
+												aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
+											>
+												{group.scenarios.map((scenario, scenarioIndex) => (
+													<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
+												))}
+											</ul>
+										) : (
+											<p className="use-case-context-empty">No scenarios were generated for this requirement.</p>
+										)}
+										<details className="use-case-coverage-context">
+											<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
+												Coverage context
+											</summary>
+											<CoverageContext analysis={group.analysis} />
+										</details>
 									</details>
 								</section>
 							);
