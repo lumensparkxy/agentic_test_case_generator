@@ -2,6 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { formatWorkspaceDate, formatWorkspaceLabel } from "../workspace/workspacePresentation";
 
+const USE_CASE_GROUP_AUTO_EXPAND_LIMIT = 3;
+
 const normalizeList = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const normalizeText = (value) => `${value || ""}`.trim().toLowerCase();
 
@@ -288,7 +290,6 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 					<h2>Complete this review</h2>
 					<p>{humanMeta.label}. Your decision applies only to the current immutable artifact.</p>
 				</div>
-				<span className={`use-case-review-state ${humanMeta.tone}`}>{humanMeta.label}</span>
 			</div>
 
 			{humanReview ? (
@@ -430,6 +431,8 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 	const searchId = useId();
 	const searchRef = useRef(null);
 	const [query, setQuery] = useState("");
+	const [groupsExpandedOverride, setGroupsExpandedOverride] = useState(null);
+	const [groupToggles, setGroupToggles] = useState({});
 	const payload = snapshot.payload || {};
 	const coveragePlan = normalizeList(payload.coverage_plan);
 	const requirementAnalysis = normalizeList(payload.requirement_analysis);
@@ -441,6 +444,20 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 		() => filterGroups(coveragePlan, analysisByRequirement, query),
 		[analysisByRequirement, coveragePlan, query]
 	);
+	// Small plans and search results are shown expanded; larger plans start
+	// collapsed so reviewers can scan requirement headings without scrolling
+	// through every scenario card.
+	const groupsExpandedByDefault =
+		groupsExpandedOverride ?? (query.trim().length > 0 || filteredGroups.length <= USE_CASE_GROUP_AUTO_EXPAND_LIMIT);
+	const setAllGroupsExpanded = (expanded) => {
+		setGroupsExpandedOverride(expanded);
+		setGroupToggles({});
+	};
+	const updateQuery = (nextQuery) => {
+		setQuery(nextQuery);
+		setGroupsExpandedOverride(null);
+		setGroupToggles({});
+	};
 	const scenarioTotal = coveragePlan.reduce((total, group) => total + normalizeList(group.scenarios).length, 0);
 	const visibleScenarioTotal = filteredGroups.reduce((total, group) => total + group.scenarios.length, 0);
 	const mustHaveTotal = coveragePlan.reduce(
@@ -527,31 +544,55 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 							type="search"
 							value={query}
 							ref={searchRef}
-							onChange={(event) => setQuery(event.target.value)}
+							onChange={(event) => updateQuery(event.target.value)}
 							placeholder="Requirement, scenario, risk, or constraint"
 						/>
 					</div>
 				</div>
 
+				{filteredGroups.length > 1 ? (
+					<div className="use-case-group-toolbar">
+						<button
+							type="button"
+							className="use-case-group-toggle-all"
+							onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}
+						>
+							{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
+						</button>
+					</div>
+				) : null}
+
 				{filteredGroups.length ? (
 					<div className="use-case-group-list" aria-label="Use Case groups">
 						{filteredGroups.map((group, groupIndex) => {
+							const groupKey = group.requirement_id || `group-${groupIndex}`;
 							const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+							const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
 							return (
 								<section
 									className="use-case-group"
 									aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
-									key={group.requirement_id || groupIndex}
+									key={groupKey}
 								>
-									<header className="use-case-group-heading">
-										<div>
-											<span>Source requirement {group.requirement_id || "Unidentified"}</span>
-											<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
-										</div>
-										<strong>
-											{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
-										</strong>
-									</header>
+									<details
+										className="use-case-group-details"
+										open={isOpen}
+										onToggle={(event) => {
+											const nextOpen = event.currentTarget.open;
+											if (nextOpen !== isOpen) {
+												setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
+											}
+										}}
+									>
+										<summary className="use-case-group-heading">
+											<div>
+												<span>Source requirement {group.requirement_id || "Unidentified"}</span>
+												<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
+											</div>
+											<strong>
+												{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
+											</strong>
+										</summary>
 									{group.scenarios.length ? (
 										<ul
 											className="use-case-scenario-list"
@@ -570,6 +611,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 										</summary>
 										<CoverageContext analysis={group.analysis} />
 									</details>
+									</details>
 								</section>
 							);
 						})}
@@ -581,7 +623,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 							type="button"
 							className="secondary"
 							onClick={() => {
-								setQuery("");
+								updateQuery("");
 								window.requestAnimationFrame(() => searchRef.current?.focus());
 							}}
 						>
