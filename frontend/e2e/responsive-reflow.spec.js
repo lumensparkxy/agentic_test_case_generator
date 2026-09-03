@@ -306,6 +306,7 @@ test.describe("Responsive project shell", () => {
 			await projectToggle.focus();
 			await page.keyboard.press(width === 760 ? "Space" : "Enter");
 			await expect(projectNavigation.locator(".workflow-navigation-list")).toBeVisible();
+			await expect(projectNavigation.locator(".workflow-navigation-state")).toHaveCount(7);
 			await expect(projectNavigation.getByRole("button", { name: /^Close project navigation$/i })).toHaveAttribute("aria-expanded", "true");
 			await page.keyboard.press("Tab");
 			await expect(projectNavigation.getByRole("link").first()).toBeFocused();
@@ -341,12 +342,11 @@ test.describe("Responsive project shell", () => {
 
 		await projectNavigation.getByRole("button", { name: /^Collapse project navigation$/i }).click();
 		await expectExactlyOneCurrent(projectNavigation);
+		await expect(projectNavigation.locator(".workflow-navigation-state")).toHaveCount(0);
 		for (const expectedState of expectedStates) {
 			const item = projectNavigation.getByRole("link", { name: expectedState.name });
-			const badge = item.locator(".workflow-navigation-state");
-			await expect(badge).toBeVisible();
-			await expect(badge).toHaveClass(/compact/);
-			await expect(badge).toHaveAttribute("data-status-tone", expectedState.tone);
+			await expect(item.locator("svg")).toHaveCount(1);
+			await expect(item).toHaveAttribute("title", expectedState.name.replace(", ", " — "));
 		}
 		await expectNoDocumentOverflow(page, "collapsed desktop workflow states");
 	});

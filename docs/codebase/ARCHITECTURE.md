@@ -400,7 +400,11 @@ The selected Brighter Executive Cockpit visual target and QA mapping are
 recorded in `docs/brighter-executive-cockpit-design-qa.md`.
 The shell supports a local-only collapse preference for the left workflow
 navigation. Its directional icon control preserves the same tab and
-orchestrator data contracts while changing only presentation density.
+orchestrator data contracts while changing only presentation density. In the
+collapsed desktop state, each destination renders only its primary workflow
+icon; the separate status token remains available in the expanded and opened
+compact states. The collapsed link's accessible name and hover text continue to
+include both destination and status.
 
 `frontend/src/components/workflow/StatusBadge.jsx` is the shared visual and
 semantic state primitive for project and workflow status. It normalizes active,
