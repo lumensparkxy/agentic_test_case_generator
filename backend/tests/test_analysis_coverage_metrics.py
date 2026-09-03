@@ -320,6 +320,50 @@ class CoveragePlanNormalizationTests(unittest.TestCase):
         self.assertTrue(scenarios[0]["must_have"])
         self.assertTrue(all(not scenario["must_have"] for scenario in scenarios[1:]))
 
+    def test_backfilled_scenarios_do_not_reuse_existing_ids(self) -> None:
+        requirements = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall display the dashboard summary for the signed-in user.",
+            )
+        ]
+
+        normalized_plan = _normalize_coverage_plan(
+            [
+                {
+                    "requirement_id": "REQ-001",
+                    "requirement_text": requirements[0].text,
+                    "scenarios": [
+                        {
+                            "id": "REQ-001-SCN-01",
+                            "scenario_type": "Happy Path",
+                            "title": "Dashboard summary is displayed",
+                            "objective": "Verify the signed-in user sees the dashboard summary.",
+                            "priority": "High",
+                            "must_have": True,
+                        },
+                        {
+                            "id": "REQ-001-SCN-03",
+                            "scenario_type": "Negative",
+                            "title": "Dashboard summary hidden when signed out",
+                            "objective": "Verify signed-out users cannot see the dashboard summary.",
+                            "priority": "High",
+                            "must_have": True,
+                        },
+                    ],
+                }
+            ],
+            requirements,
+        )
+
+        scenarios = normalized_plan[0]["scenarios"]
+        ids = [scenario["id"] for scenario in scenarios]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(ids[:2], ["REQ-001-SCN-01", "REQ-001-SCN-03"])
+        self.assertGreater(len(scenarios), 2)
+        self.assertNotIn("REQ-001-SCN-03", ids[2:])
+        self.assertTrue(all(scenario_id.startswith("REQ-001-SCN-") for scenario_id in ids))
+
     def test_heuristic_review_ignores_backfilled_optional_scenario_gaps(self) -> None:
         requirements = [
             Requirement(

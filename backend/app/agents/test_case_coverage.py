@@ -520,10 +520,18 @@ def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[
             continue
 
         existing_types = {scenario["scenario_type"] for scenario in existing["scenarios"]}
+        existing_ids = {scenario["id"] for scenario in existing["scenarios"]}
         for default_scenario in _default_scenarios_for_requirement(requirement):
             if default_scenario["scenario_type"] in existing_types or len(existing["scenarios"]) >= 4:
                 continue
-            existing["scenarios"].append({**default_scenario, "must_have": False})
+            # Default IDs are index-based and may collide with model-supplied IDs.
+            sequence = len(existing["scenarios"]) + 1
+            scenario_id = f"{requirement.id}-SCN-{sequence:02d}"
+            while scenario_id in existing_ids:
+                sequence += 1
+                scenario_id = f"{requirement.id}-SCN-{sequence:02d}"
+            existing_ids.add(scenario_id)
+            existing["scenarios"].append({**default_scenario, "id": scenario_id, "must_have": False})
             existing_types.add(default_scenario["scenario_type"])
 
         normalized_plan.append(existing)
