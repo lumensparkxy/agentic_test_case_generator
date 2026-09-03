@@ -953,14 +953,17 @@
 }
 
 .workflow-navigation-header {
-	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 0.2rem;
-	padding: 0.15rem 0.25rem 0.35rem;
+	display: grid;
+	grid-template-columns: 2rem minmax(0, 1fr);
+	align-items: center;
+	gap: 0.65rem;
+	/* Match the item padding + border so the toggle sits on the marker axis. */
+	padding: 0.15rem 0.25rem 0.35rem calc(0.7rem + 1px);
 }
 
 .workflow-navigation-header > div {
+	grid-column: 2;
+	grid-row: 1;
 	display: grid;
 	gap: 0.2rem;
 	min-width: 0;
@@ -980,12 +983,14 @@
 }
 
 .workflow-navigation-toggle {
+	grid-column: 1;
+	grid-row: 1;
 	flex: 0 0 auto;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 2.05rem;
-	height: 2.05rem;
+	width: 2rem;
+	height: 2rem;
 	padding: 0;
 	border: 1px solid var(--border-strong);
 	border-radius: 9999px;
@@ -1026,6 +1031,7 @@
 	grid-template-columns: 2rem minmax(0, 1fr) auto;
 	align-items: center;
 	gap: 0.65rem;
+	box-sizing: border-box;
 	width: 100%;
 	padding: 0.72rem 0.7rem;
 	border: 1px solid transparent;
@@ -1226,7 +1232,9 @@
 
 .workflow-navigation-drawer.collapsed .workflow-navigation-header {
 	display: grid;
+	grid-template-columns: 1fr;
 	justify-items: center;
+	padding: 0.15rem 0 0.35rem;
 	text-align: center;
 }
 

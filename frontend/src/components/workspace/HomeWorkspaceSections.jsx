@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Activity, ClipboardCheck, FileText, FolderKanban, PlayCircle } from "lucide-react";
 
 import { PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
@@ -61,6 +62,8 @@ export function ContinueWorkingSection({
 	);
 }
 
+const MY_WORK_GROUP_PREVIEW_LIMIT = 3;
+
 export function MyWorkSection({
 	items,
 	onOpenProject,
@@ -68,6 +71,17 @@ export function MyWorkSection({
 	emptyMessage = "Reviews, blockers, failed runs, and ready next steps will appear here.",
 }) {
 	const groups = groupWorkspaceItems(items);
+	const [expandedGroupIds, setExpandedGroupIds] = useState(() => new Set());
+	const toggleGroup = (groupId) =>
+		setExpandedGroupIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(groupId)) {
+				next.delete(groupId);
+			} else {
+				next.add(groupId);
+			}
+			return next;
+		});
 	return (
 		<section className="workspace-section workspace-my-work" aria-labelledby="my-work-title">
 			<div className="workspace-section-heading">
@@ -78,29 +92,51 @@ export function MyWorkSection({
 			</div>
 			{groups.length ? (
 				<div className="workspace-work-groups">
-					{groups.map((group) => (
-						<section className="workspace-work-group" key={group.id} aria-labelledby={`work-group-${group.id}`}>
-							<h3 id={`work-group-${group.id}`}>{group.label}</h3>
-							<ul>
-								{group.items.map((item) => (
-									<li key={item.work_item_id}>
-										<div className="workspace-work-item-copy">
-											<div className="workspace-card-meta">
-												<span>{item.project_name || "Project"}</span>
-												<WorkspaceStatus status={item.status} />
+					{groups.map((group) => {
+						const isExpanded = expandedGroupIds.has(group.id);
+						const hiddenCount = group.items.length - MY_WORK_GROUP_PREVIEW_LIMIT;
+						const visibleItems = isExpanded || hiddenCount <= 0 ? group.items : group.items.slice(0, MY_WORK_GROUP_PREVIEW_LIMIT);
+						const workItemListId = `work-group-items-${group.id}`;
+						return (
+							<section className="workspace-work-group" key={group.id} aria-labelledby={`work-group-${group.id}`}>
+								<h3 id={`work-group-${group.id}`}>
+									{group.label}
+									<span className="workspace-work-group-count" aria-hidden="true">
+										{group.items.length}
+									</span>
+								</h3>
+								<ul id={workItemListId}>
+									{visibleItems.map((item) => (
+										<li key={item.work_item_id}>
+											<div className="workspace-work-item-copy">
+												<div className="workspace-card-meta">
+													<span>{item.project_name || "Project"}</span>
+													<WorkspaceStatus status={item.status} />
+												</div>
+												<strong>{getWorkItemTitle(item)}</strong>
+												<p>{item.reason}</p>
+												{Number.isInteger(item.count) ? <span className="workspace-count">{item.count} items</span> : null}
 											</div>
-											<strong>{getWorkItemTitle(item)}</strong>
-											<p>{item.reason}</p>
-											{Number.isInteger(item.count) ? <span className="workspace-count">{item.count} items</span> : null}
-										</div>
-										<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
-											Open
-										</ProjectOpenLink>
-									</li>
-								))}
-							</ul>
-						</section>
-					))}
+											<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
+												Open
+											</ProjectOpenLink>
+										</li>
+									))}
+								</ul>
+								{hiddenCount > 0 ? (
+									<button
+										type="button"
+										className="workspace-show-more"
+										aria-controls={workItemListId}
+										aria-expanded={isExpanded}
+										onClick={() => toggleGroup(group.id)}
+									>
+										{isExpanded ? "Show fewer" : `Show ${hiddenCount} more`}
+									</button>
+								) : null}
+							</section>
+						);
+					})}
 				</div>
 			) : (
 				<div className="workspace-quiet-state">

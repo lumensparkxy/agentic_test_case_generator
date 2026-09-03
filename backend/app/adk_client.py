@@ -20,6 +20,7 @@ from google.genai import types
 
 from .agents.adk_runtime import json_generation_config, text_generation_config, tool_generation_config
 from .agents.prompting import REAL_WORLD_QA_POLICY, REQUIREMENT_PROMPT_GUARDRAILS, human_feedback_section
+from .config import DEFAULT_MODEL_NAME
 from .models import RequirementsOutput, ReviewResult, WorkflowSettings
 from .observability.logging import bind_log_context, get_log_context, reset_log_context
 from .utils.genai_response import extract_response_text
@@ -32,7 +33,7 @@ from .utils.workflow_diagnostics import (
     retry_reason,
 )
 
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = DEFAULT_MODEL_NAME
 DEFAULT_REQUIREMENT_THRESHOLD = 85
 DEFAULT_REQUIREMENT_MAX_ITERATIONS = 3
 DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT = 2

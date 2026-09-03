@@ -310,6 +310,12 @@ test.describe("JIRA requirements workflow", () => {
 
 		const requirementRows = page.locator(".requirement-review-table tbody tr");
 		await expect(requirementRows).toHaveCount(2);
+		const requirementTable = page.locator(".requirement-review-table");
+		await expect(requirementTable.getByRole("columnheader", { name: "Issue" })).toHaveCount(0);
+		await expect(requirementTable.getByRole("columnheader", { name: "ID" })).toBeVisible();
+		await expect(requirementTable.getByRole("columnheader", { name: "ID / Source" })).toHaveCount(0);
+		await expect(requirementTable.getByRole("columnheader", { name: "Epic" })).toBeVisible();
+		await expect(requirementTable.getByRole("columnheader", { name: "Review source" })).toBeVisible();
 		await expect(requirementRows.nth(0)).toContainText("REQ-101");
 		await expect(requirementRows.nth(1)).toContainText("REQ-102");
 		await expect(page.getByRole("heading", { name: /jira sync preview/i })).toBeVisible();

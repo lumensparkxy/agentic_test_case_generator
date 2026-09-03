@@ -375,6 +375,32 @@
 	text-transform: uppercase;
 }
 
+.workspace-work-group-count {
+	margin-left: 0.45rem;
+	padding: 0.05rem 0.45rem;
+	border-radius: 999px;
+	background: var(--surface-container);
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	letter-spacing: 0;
+}
+
+.workspace-show-more {
+	justify-self: start;
+	padding: 0.2rem 0;
+	border: 0;
+	background: none;
+	color: var(--primary);
+	font-size: 0.8rem;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.workspace-show-more:hover,
+.workspace-show-more:focus-visible {
+	text-decoration: underline;
+}
+
 .workspace-work-group ul,
 .workspace-project-grid,
 .workspace-activity-columns ul {
@@ -405,6 +431,27 @@
 	text-overflow: ellipsis;
 	font-size: 0.9rem;
 	white-space: nowrap;
+}
+
+.workspace-work-item-copy > .workspace-card-meta {
+	flex-wrap: nowrap;
+}
+
+.workspace-work-item-copy > .workspace-card-meta > span:first-child {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.workspace-work-item-copy > .workspace-card-meta > .workspace-status {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+.workspace-work-item-copy > p {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
 }
 
 .workspace-count {

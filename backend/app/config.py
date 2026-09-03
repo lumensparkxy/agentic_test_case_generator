@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover - dependency fallback
     load_dotenv = None
 
 
-DEFAULT_MODEL_NAME = "gemini-3.5-flash"
+DEFAULT_MODEL_NAME = "gemini-3.8-flash"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://localhost:5173",
@@ -273,10 +273,10 @@ def _warn_if_dependency_mismatch() -> None:
         logging.warning("Untested google-adk major version detected: %s", adk_version)
     if genai_major != 2:
         logging.warning("Untested google-genai major version detected: %s", genai_version)
-    # Track a known-good floor for current pipelines and model usage.
-    if (adk_major, adk_minor) < (2, 2):
+    # Track the known-good minimums for current pipelines and model usage.
+    if (adk_major, adk_minor) < (2, 8):
         logging.warning("google-adk version may be too old for current workflow patterns: %s", adk_version)
-    if (genai_major, genai_minor) < (2, 8):
+    if (genai_major, genai_minor) < (2, 22):
         logging.warning("google-genai version may be too old for current SDK behavior: %s", genai_version)
 
 

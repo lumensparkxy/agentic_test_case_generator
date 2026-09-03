@@ -25,6 +25,7 @@ from app.config import (
     get_metrics_settings,
     get_settings,
 )
+from app.adk_client import DEFAULT_MODEL
 
 
 class ConfigSettingsTests(unittest.TestCase):
@@ -58,6 +59,10 @@ class ConfigSettingsTests(unittest.TestCase):
             self.assertEqual(settings.gemini_api_key, "gemini-only-key")
             self.assertEqual(os.environ.get("GOOGLE_API_KEY"), "gemini-only-key")
             self.assertNotIn("GEMINI_API_KEY", os.environ)
+
+    def test_default_model_is_latest_stable_flash_model(self) -> None:
+        self.assertEqual(DEFAULT_MODEL_NAME, "gemini-3.8-flash")
+        self.assertEqual(DEFAULT_MODEL, DEFAULT_MODEL_NAME)
 
     def test_get_settings_prefers_gemini_alias_and_removes_it_after_normalization(self) -> None:
         with patch.dict(
@@ -100,7 +105,7 @@ class ConfigSettingsTests(unittest.TestCase):
         self.assertTrue(log_filter.filter(normal_record))
 
     def test_dependency_mismatch_accepts_current_adk_and_genai_versions(self) -> None:
-        versions = {"google-adk": "2.2.0", "google-genai": "2.8.0"}
+        versions = {"google-adk": "2.8.0", "google-genai": "2.22.0"}
 
         with patch("app.config.version", side_effect=lambda package_name: versions[package_name]):
             with patch("app.config.logging.warning") as warning:
@@ -109,7 +114,7 @@ class ConfigSettingsTests(unittest.TestCase):
         warning.assert_not_called()
 
     def test_dependency_mismatch_warns_for_versions_below_current_floor(self) -> None:
-        versions = {"google-adk": "2.1.0", "google-genai": "2.7.0"}
+        versions = {"google-adk": "2.7.1", "google-genai": "2.21.0"}
 
         with patch("app.config.version", side_effect=lambda package_name: versions[package_name]):
             with patch("app.config.logging.warning") as warning:
