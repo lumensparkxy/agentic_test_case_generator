@@ -25,14 +25,20 @@
 	}
 
 	.workflow-navigation-header {
-		align-items: baseline;
-		justify-content: space-between;
+		grid-template-columns: 1.8rem minmax(0, 1fr);
+	}
+
+	.workflow-navigation-toggle {
+		width: 1.8rem;
+		height: 1.8rem;
 	}
 
 	.workflow-navigation-drawer.compact.collapsed .workflow-navigation-header {
 		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
 		width: 100%;
-		padding-bottom: 0;
+		padding: 0.15rem 0.25rem 0;
 	}
 
 	.workflow-navigation-header strong,

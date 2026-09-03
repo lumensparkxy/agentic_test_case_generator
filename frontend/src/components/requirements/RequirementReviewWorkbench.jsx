@@ -2,9 +2,7 @@ import { REQUIREMENT_QUALITY_FLAG_OPTIONS, REQUIREMENT_REVIEW_STATUSES } from ".
 import {
 	formatSourceIssueKey,
 	getRequirementEpicCell,
-	getRequirementIssueCell,
 	getRequirementReviewStatus,
-	getRequirementSourceLabel,
 	groupRequirementsByContext,
 	normalizeStringArray,
 } from "../../utils/requirements";
@@ -60,8 +58,7 @@ export default function RequirementReviewWorkbench({
 									<thead>
 										<tr>
 											<th>Epic</th>
-											<th>Issue</th>
-											<th>ID / Source</th>
+											<th>ID</th>
 											<th>Requirement</th>
 											<th>Review source</th>
 											<th>Review status</th>
@@ -74,8 +71,6 @@ export default function RequirementReviewWorkbench({
 											const qualityFlags = normalizeStringArray(req.quality_flags);
 											const requirementId = req.id || `REQ-${req.__index + 1}`;
 											const epicCell = getRequirementEpicCell(req, group.label);
-											const issueCell = getRequirementIssueCell(req);
-											const sourceLabel = getRequirementSourceLabel(req);
 											const hasSyncTarget = req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key;
 											return (
 												<tr
@@ -86,13 +81,8 @@ export default function RequirementReviewWorkbench({
 														<span className="cell-primary">{epicCell.primary}</span>
 														{epicCell.secondary ? <span className="cell-secondary">{epicCell.secondary}</span> : null}
 													</td>
-													<td className="requirement-issue-cell">
-														<span className="cell-primary">{issueCell.primary}</span>
-														{issueCell.secondary ? <span className="cell-secondary">{issueCell.secondary}</span> : null}
-													</td>
 													<td className="requirement-id-cell">
 														<strong>{requirementId}</strong>
-														<span className="requirement-source-system">{sourceLabel}</span>
 													</td>
 													<td className="requirement-text-cell">
 														<div className="requirement-item-copy">{req.text || req.title || ""}</div>

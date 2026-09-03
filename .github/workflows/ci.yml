@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GEMINI_API_KEY: ci-dummy-gemini-key
-      MODEL_NAME: gemini-3-flash-preview
+      MODEL_NAME: gemini-3.8-flash
       JWT_SECRET_KEY: ci-dummy-jwt-secret-key-with-enough-length
       JWT_ALGORITHM: HS256
       JWT_EXPIRATION_MINUTES: "60"

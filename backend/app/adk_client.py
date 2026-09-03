@@ -32,7 +32,7 @@ from .utils.workflow_diagnostics import (
     retry_reason,
 )
 
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_REQUIREMENT_THRESHOLD = 85
 DEFAULT_REQUIREMENT_MAX_ITERATIONS = 3
 DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT = 2

@@ -433,7 +433,6 @@ button.small {
 .requirement-id-cell strong {
 	display: block;
 	color: #2563eb;
-	margin-bottom: 0.2rem;
 }
 
 .requirement-source-system {
@@ -483,6 +482,8 @@ button.small {
 .requirement-status-cell select {
 	width: 100%;
 	min-width: 0;
+	padding: 0.45rem 0.65rem;
+	font-size: 0.84rem;
 	background: white;
 }
 
