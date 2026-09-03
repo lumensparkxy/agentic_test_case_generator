@@ -450,6 +450,32 @@ test.describe("Authenticated Home workspace", () => {
 		});
 	});
 
+	test("links a My work disclosure control to the list it expands", async ({ page }) => {
+		const overflowWorkItems = [
+			REVIEW_ITEM,
+			SECOND_REVIEW_ITEM,
+			{ ...REVIEW_ITEM, work_item_id: "work-mercury-use-cases-follow-up", reason: "Review the updated checkout coverage." },
+			{ ...SECOND_REVIEW_ITEM, work_item_id: "work-nova-review-follow-up", reason: "Review the updated accounts coverage." },
+		];
+		await installWorkspaceApi(page, { summary: { ...MANY_PROJECT_SUMMARY, work_items: overflowWorkItems } });
+		await seedAuthenticatedSession(page);
+
+		await page.goto("/");
+		const reviewGroup = homeRegion(page, "My work").getByRole("region", { name: /^Needs review$/i });
+		const showMore = reviewGroup.locator(".workspace-show-more");
+		await expect(showMore).toHaveAccessibleName("Show 1 more");
+		await expect(showMore).toHaveAttribute("aria-expanded", "false");
+		const controlledListId = await showMore.getAttribute("aria-controls");
+		expect(controlledListId).toBeTruthy();
+		const controlledList = reviewGroup.locator(`ul#${controlledListId}`);
+		await expect(controlledList.getByRole("listitem")).toHaveCount(3);
+
+		await showMore.click();
+		await expect(showMore).toHaveAccessibleName("Show fewer");
+		await expect(showMore).toHaveAttribute("aria-expanded", "true");
+		await expect(controlledList.getByRole("listitem")).toHaveCount(4);
+	});
+
 	test("removes a missing stored project without hydrating stale project state", async ({ page }) => {
 		const api = await installWorkspaceApi(page, {
 			summary: workspaceSummaryFixture({

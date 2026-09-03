@@ -96,6 +96,7 @@ export function MyWorkSection({
 						const isExpanded = expandedGroupIds.has(group.id);
 						const hiddenCount = group.items.length - MY_WORK_GROUP_PREVIEW_LIMIT;
 						const visibleItems = isExpanded || hiddenCount <= 0 ? group.items : group.items.slice(0, MY_WORK_GROUP_PREVIEW_LIMIT);
+						const workItemListId = `work-group-items-${group.id}`;
 						return (
 							<section className="workspace-work-group" key={group.id} aria-labelledby={`work-group-${group.id}`}>
 								<h3 id={`work-group-${group.id}`}>
@@ -104,7 +105,7 @@ export function MyWorkSection({
 										{group.items.length}
 									</span>
 								</h3>
-								<ul>
+								<ul id={workItemListId}>
 									{visibleItems.map((item) => (
 										<li key={item.work_item_id}>
 											<div className="workspace-work-item-copy">
@@ -123,7 +124,13 @@ export function MyWorkSection({
 									))}
 								</ul>
 								{hiddenCount > 0 ? (
-									<button type="button" className="workspace-show-more" aria-expanded={isExpanded} onClick={() => toggleGroup(group.id)}>
+									<button
+										type="button"
+										className="workspace-show-more"
+										aria-controls={workItemListId}
+										aria-expanded={isExpanded}
+										onClick={() => toggleGroup(group.id)}
+									>
 										{isExpanded ? "Show fewer" : `Show ${hiddenCount} more`}
 									</button>
 								) : null}
