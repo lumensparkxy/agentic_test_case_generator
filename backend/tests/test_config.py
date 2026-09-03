@@ -25,6 +25,7 @@ from app.config import (
     get_metrics_settings,
     get_settings,
 )
+from app.adk_client import DEFAULT_MODEL
 
 
 class ConfigSettingsTests(unittest.TestCase):
@@ -61,6 +62,7 @@ class ConfigSettingsTests(unittest.TestCase):
 
     def test_default_model_is_latest_stable_flash_model(self) -> None:
         self.assertEqual(DEFAULT_MODEL_NAME, "gemini-3.8-flash")
+        self.assertEqual(DEFAULT_MODEL, DEFAULT_MODEL_NAME)
 
     def test_get_settings_prefers_gemini_alias_and_removes_it_after_normalization(self) -> None:
         with patch.dict(

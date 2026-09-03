@@ -561,7 +561,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 				{filteredGroups.length ? (
 					<div className="use-case-group-list" aria-label="Use Case groups">
 						{filteredGroups.map((group, groupIndex) => {
-							const groupKey = group.requirement_id || `group-${groupIndex}`;
+							const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
 							const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 							const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
 							return (
