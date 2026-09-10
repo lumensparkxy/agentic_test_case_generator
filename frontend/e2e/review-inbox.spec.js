@@ -475,9 +475,9 @@ test.describe("Global Review Inbox", () => {
 
 		await expect(page).toHaveURL(buildProjectPath(project.project_id, "use-cases"));
 		await expect(page.getByRole("heading", { name: /^Use Cases$/i, level: 1 })).toBeVisible({ timeout: 30_000 });
-		await page.getByRole("radio", { name: /^Approve/i }).check();
+		await page.getByRole("button", { name: "Approve all", exact: true }).click();
 		await page.getByRole("button", { name: /^Approve Use Cases$/i }).click();
-		await expect(page.getByRole("form", { name: /^Human review decision$/i }).getByRole("status")).toContainText(/approved/i);
+		await expect(page.getByRole("status", { name: "Review outcome", exact: true })).toContainText(/approved/i);
 
 		await page
 			.getByRole("navigation", { name: /^Global navigation$/i })
