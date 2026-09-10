@@ -1,4 +1,4 @@
-import { ResizablePanes } from "../ui/resizable-panes";
+import { Dialog } from "../ui/dialog";
 import { ListItem, CollectionState, List, CollectionToolbar } from "../ui/collections";
 import { Disclosure, Alert } from "../ui/surfaces";
 import { Button, Radio, Textarea, Input } from "../ui/controls";
@@ -252,7 +252,11 @@ function CoverageContext({ analysis }) {
 	);
 }
 
-function ReviewDecisionPanel({ stageState, snapshot, review }) {
+function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, groupTotal }) {
+	const [dialogOpen, setDialogOpen] = useState(false);
+	useEffect(() => {
+		if (review.status === "success") setDialogOpen(false);
+	}, [review.status]);
 	const formRef = useRef(null);
 	const commentRef = useRef(null);
 	const storedHumanReview = getHumanReview(review.response?.use_cases_state || stageState, snapshot.snapshot_id);
@@ -277,171 +281,220 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 		await review.retry();
 		focusDecisionPanel();
 	};
+	const openDecision = (decision) => {
+		review.setDecision(decision);
+		setDialogOpen(true);
+	};
 	return (
-		<form
-			id="use-case-review-decision"
-			ref={formRef}
-			className="use-case-decision-panel"
-			aria-label="Human review decision"
-			aria-busy={isBusy || undefined}
-			tabIndex={-1}
-			noValidate
-			onSubmit={(event) => {
-				event.preventDefault();
-				if (commentRequired && !review.comment.trim()) {
-					void review.submit();
-					commentRef.current?.focus();
-					return;
-				}
-				void review.submit();
-			}}
-		>
-			<div className="use-case-decision-heading">
+		<>
+			<section id="use-case-review-decision" tabIndex={-1} className="use-case-review-bar" aria-label="Use Cases review actions">
 				<div>
-					<span className="use-case-section-kicker">Human decision</span>
-					<h2>Review decision</h2>
-					<p>{humanMeta.label}. Your decision applies only to the current immutable artifact.</p>
-				</div>
-			</div>
-
-			{humanReview ? (
-				<div className="use-case-recorded-decision">
-					<strong>Latest recorded human decision</strong>
+					<strong>{humanMeta.label}</strong>
 					<p>
-						{humanReview.reviewer_name
-							? `Reviewed by ${humanReview.reviewer_name}.`
-							: "Recorded by an authenticated reviewer. Reviewer provenance is available in Details."}
+						One decision for all {scenarioTotal} scenarios · {groupTotal} requirement groups
 					</p>
-					{humanReview.comment ? <blockquote>{humanReview.comment}</blockquote> : null}
+					<div className="use-case-review-announcement" role="status" aria-label="Review outcome" aria-live="polite" aria-atomic="true">
+						{review.announcement}
+					</div>
 				</div>
-			) : null}
-
-			{!snapshotMatches ? (
-				<Alert as="div" tone="warning" className="use-case-review-alert conflict" role="alert">
-					<strong>The loaded artifact is no longer the project’s current Use Cases version.</strong>
-					<p>Reload the latest project state before making a decision.</p>
-					<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
-						Reload latest
-					</Button>
-				</Alert>
-			) : null}
-
-			{stageState?.stale ? (
-				<div className="use-case-review-alert warning" role="note">
-					<strong>This artifact is stale.</strong>
-					<p>
-						{stageState.stale_reason || "Upstream project inputs changed after this artifact was generated."} Approval is unavailable until
-						it is regenerated.
-					</p>
-				</div>
-			) : null}
-
-			<fieldset className="use-case-decision-options" disabled={formDisabled}>
-				<legend>Choose a decision</legend>
-				<label className={review.decision === "approve" ? "selected" : ""}>
-					<Radio
-						type="radio"
-						name="use-case-review-decision"
-						value="approve"
-						checked={review.decision === "approve"}
-						onChange={() => review.setDecision("approve")}
-						disabled={approvalBlocked}
-					/>
-					<span>
-						<strong>Approve</strong>
-						<small>Accept this exact artifact for downstream work.</small>
-					</span>
-				</label>
-				<label className={review.decision === "request_changes" ? "selected" : ""}>
-					<Radio
-						type="radio"
-						name="use-case-review-decision"
-						value="request_changes"
-						checked={review.decision === "request_changes"}
-						onChange={() => review.setDecision("request_changes")}
-					/>
-					<span>
-						<strong>Request changes</strong>
-						<small>Return actionable feedback without modifying the stored artifact.</small>
-					</span>
-				</label>
-			</fieldset>
-
-			<div className="use-case-comment-field">
-				<label htmlFor="use-case-review-comment">Review comment {commentRequired ? <span>Required</span> : <span>Optional</span>}</label>
-				<Textarea
-					id="use-case-review-comment"
-					ref={commentRef}
-					value={review.comment}
-					onChange={(event) => review.setComment(event.target.value)}
-					maxLength={4000}
-					rows={4}
-					disabled={formDisabled}
-					required={commentRequired}
-					aria-required={commentRequired}
-					aria-invalid={commentInvalid || undefined}
-					aria-errormessage={commentInvalid ? "use-case-review-error" : undefined}
-					aria-describedby="use-case-review-comment-help"
-				/>
-				<div id="use-case-review-comment-help" className="use-case-comment-help">
-					<span>
-						{review.decision === "request_changes"
-							? "Explain what must change before approval."
-							: "Add decision context for the audit trail."}
-					</span>
-					<span>{review.comment.length}/4000</span>
-				</div>
-			</div>
-
-			{review.status === "conflict" ? (
-				<Alert as="div" tone="warning" className="use-case-review-alert conflict" role="alert">
-					<strong>Reload required</strong>
-					<p>{review.error}</p>
-					<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
-						{review.isReloading ? "Reloading…" : "Reload latest"}
-					</Button>
-				</Alert>
-			) : review.status === "refresh_error" ? (
-				<Alert as="div" tone="warning" className="use-case-review-alert warning" role="alert">
-					<strong>Decision saved; refresh required</strong>
-					<p>{review.error}</p>
-					<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
-						{review.isReloading ? "Reloading…" : "Reload latest"}
-					</Button>
-				</Alert>
-			) : review.status === "error" ? (
-				<Alert as="div" tone="danger" id="use-case-review-error" className="use-case-review-alert error" role="alert">
-					<strong>{commentInvalid ? "Comment required" : "Decision not saved"}</strong>
-					<p>{review.error}</p>
-					{commentInvalid ? null : (
-						<Button type="button" className="secondary" onClick={() => void handleRetry()} disabled={isBusy || formDisabled}>
-							Retry
+				<div className="use-case-review-bar-actions">
+					{humanReview ? (
+						<Button variant="plain" onClick={() => setDialogOpen(true)}>
+							Review details
 						</Button>
-					)}
-				</Alert>
+					) : null}
+					<Button variant="secondary" onClick={() => openDecision("request_changes")} disabled={isBusy}>
+						Request changes
+					</Button>
+					<Button onClick={() => openDecision("approve")} disabled={isBusy || approvalBlocked}>
+						Approve all
+					</Button>
+				</div>
+				{approvalBlocked ? <p role="note">Stale version — regenerate before approval.</p> : null}
+			</section>
+			{dialogOpen ? (
+				<div className="auth-dialog-overlay">
+					<Dialog
+						manageFocus
+						initialFocusRef={commentRef}
+						onClose={() => {
+							if (!isBusy) setDialogOpen(false);
+						}}
+						className="use-case-review-dialog"
+						aria-labelledby="use-case-review-dialog-title"
+						aria-describedby="use-case-review-scope"
+					>
+						<form
+							ref={formRef}
+							className="use-case-decision-panel"
+							aria-label="Human review decision"
+							aria-busy={isBusy || undefined}
+							tabIndex={-1}
+							noValidate
+							onSubmit={(event) => {
+								event.preventDefault();
+								if (commentRequired && !review.comment.trim()) {
+									void review.submit();
+									commentRef.current?.focus();
+									return;
+								}
+								void review.submit();
+							}}
+						>
+							<div className="use-case-decision-heading">
+								<div>
+									<span className="use-case-section-kicker">Human decision</span>
+									<h2 id="use-case-review-dialog-title">Review all Use Cases</h2>
+									<p id="use-case-review-scope">
+										Your decision applies to all {scenarioTotal} scenarios across {groupTotal} requirement groups in Use Cases v
+										{snapshot.version}, including scenarios hidden by search. It does not apply to a single group.
+									</p>
+								</div>
+							</div>
+
+							{humanReview ? (
+								<div className="use-case-recorded-decision">
+									<strong>Latest recorded human decision</strong>
+									<p>
+										{humanReview.reviewer_name
+											? `Reviewed by ${humanReview.reviewer_name}.`
+											: "Recorded by an authenticated reviewer. Reviewer provenance is available in Details."}
+									</p>
+									{humanReview.comment ? <blockquote>{humanReview.comment}</blockquote> : null}
+								</div>
+							) : null}
+
+							{!snapshotMatches ? (
+								<Alert as="div" tone="warning" className="use-case-review-alert conflict" role="alert">
+									<strong>The loaded artifact is no longer the project’s current Use Cases version.</strong>
+									<p>Reload the latest project state before making a decision.</p>
+									<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
+										Reload latest
+									</Button>
+								</Alert>
+							) : null}
+
+							{stageState?.stale ? (
+								<div className="use-case-review-alert warning" role="note">
+									<strong>This artifact is stale.</strong>
+									<p>
+										{stageState.stale_reason || "Upstream project inputs changed after this artifact was generated."} Approval is
+										unavailable until it is regenerated.
+									</p>
+								</div>
+							) : null}
+
+							<fieldset className="use-case-decision-options" disabled={formDisabled}>
+								<legend>Choose a decision</legend>
+								<label className={review.decision === "approve" ? "selected" : ""}>
+									<Radio
+										type="radio"
+										name="use-case-review-decision"
+										value="approve"
+										checked={review.decision === "approve"}
+										onChange={() => review.setDecision("approve")}
+										disabled={approvalBlocked}
+									/>
+									<span>
+										<strong>Approve</strong>
+										<small>Accept this exact artifact for downstream work.</small>
+									</span>
+								</label>
+								<label className={review.decision === "request_changes" ? "selected" : ""}>
+									<Radio
+										type="radio"
+										name="use-case-review-decision"
+										value="request_changes"
+										checked={review.decision === "request_changes"}
+										onChange={() => review.setDecision("request_changes")}
+									/>
+									<span>
+										<strong>Request changes</strong>
+										<small>Return actionable feedback without modifying the stored artifact.</small>
+									</span>
+								</label>
+							</fieldset>
+
+							<div className="use-case-comment-field">
+								<label htmlFor="use-case-review-comment">
+									Review comment {commentRequired ? <span>Required</span> : <span>Optional</span>}
+								</label>
+								<Textarea
+									id="use-case-review-comment"
+									ref={commentRef}
+									value={review.comment}
+									onChange={(event) => review.setComment(event.target.value)}
+									maxLength={4000}
+									rows={4}
+									disabled={formDisabled}
+									required={commentRequired}
+									aria-required={commentRequired}
+									aria-invalid={commentInvalid || undefined}
+									aria-errormessage={commentInvalid ? "use-case-review-error" : undefined}
+									aria-describedby="use-case-review-comment-help"
+								/>
+								<div id="use-case-review-comment-help" className="use-case-comment-help">
+									<span>
+										{review.decision === "request_changes"
+											? "Explain what must change before approval."
+											: "Add decision context for the audit trail."}
+									</span>
+									<span>{review.comment.length}/4000</span>
+								</div>
+							</div>
+
+							{review.status === "conflict" ? (
+								<Alert as="div" tone="warning" className="use-case-review-alert conflict" role="alert">
+									<strong>Reload required</strong>
+									<p>{review.error}</p>
+									<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
+										{review.isReloading ? "Reloading…" : "Reload latest"}
+									</Button>
+								</Alert>
+							) : review.status === "refresh_error" ? (
+								<Alert as="div" tone="warning" className="use-case-review-alert warning" role="alert">
+									<strong>Decision saved; refresh required</strong>
+									<p>{review.error}</p>
+									<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
+										{review.isReloading ? "Reloading…" : "Reload latest"}
+									</Button>
+								</Alert>
+							) : review.status === "error" ? (
+								<Alert as="div" tone="danger" id="use-case-review-error" className="use-case-review-alert error" role="alert">
+									<strong>{commentInvalid ? "Comment required" : "Decision not saved"}</strong>
+									<p>{review.error}</p>
+									{commentInvalid ? null : (
+										<Button type="button" className="secondary" onClick={() => void handleRetry()} disabled={isBusy || formDisabled}>
+											Retry
+										</Button>
+									)}
+								</Alert>
+							) : null}
+
+							<div className="use-case-decision-actions">
+								<p>
+									{review.decision === "request_changes"
+										? "Your feedback will be recorded with the decision."
+										: "Approval records this version as ready for downstream work."}
+								</p>
+								<Button type="button" variant="secondary" disabled={isBusy} onClick={() => setDialogOpen(false)}>
+									Cancel
+								</Button>
+								<Button type="submit" disabled={!review.decision || formDisabled || (review.decision === "approve" && approvalBlocked)}>
+									{review.isSubmitting
+										? "Saving decision…"
+										: !review.decision
+											? "Choose a decision"
+											: review.decision === "request_changes"
+												? "Request changes"
+												: "Approve Use Cases"}
+								</Button>
+							</div>
+						</form>
+					</Dialog>
+				</div>
 			) : null}
-
-			<div className="use-case-review-announcement" role="status" aria-live="polite" aria-atomic="true">
-				{review.announcement}
-			</div>
-
-			<div className="use-case-decision-actions">
-				<p>
-					{review.decision === "request_changes"
-						? "Your feedback will be recorded with the decision."
-						: "Approval advances the durable project review state."}
-				</p>
-				<Button type="submit" disabled={!review.decision || formDisabled || (review.decision === "approve" && approvalBlocked)}>
-					{review.isSubmitting
-						? "Saving decision…"
-						: !review.decision
-							? "Choose a decision"
-							: review.decision === "request_changes"
-								? "Request changes"
-								: "Approve Use Cases"}
-				</Button>
-			</div>
-		</form>
+		</>
 	);
 }
 
@@ -555,126 +608,114 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					) : null}
 				</Disclosure>
 			</div>
-			<ResizablePanes
-				as="div"
-				className="artifact-review-columns"
-				storageKey="use-cases"
-				label="Resize scenarios and review decision"
-				defaultSize={68}
-				minFirst={360}
-				minSecond={300}
-			>
-				<section className="use-case-collection" aria-labelledby="use-case-collection-title">
-					<CollectionToolbar as="div" className="use-case-collection-heading">
-						<div>
-							<span className="use-case-section-kicker">Review artifact</span>
-							<h2 id="use-case-collection-title">Use case scenarios</h2>
-							<p role="status" aria-live="polite">
-								Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
-								requirement groups.
-							</p>
-						</div>
-						<div className="use-case-search-field">
-							<label htmlFor={searchId}>Search use cases</label>
-							<Input
-								id={searchId}
-								type="search"
-								value={query}
-								ref={searchRef}
-								onChange={(event) => updateQuery(event.target.value)}
-								placeholder="Requirement, scenario, risk, or constraint"
-							/>
-						</div>
-					</CollectionToolbar>
+			<section className="use-case-collection" aria-labelledby="use-case-collection-title">
+				<CollectionToolbar as="div" className="use-case-collection-heading">
+					<div>
+						<span className="use-case-section-kicker">Review artifact</span>
+						<h2 id="use-case-collection-title">Use case scenarios</h2>
+						<p role="status" aria-live="polite">
+							Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
+							requirement groups.
+						</p>
+					</div>
+					<div className="use-case-search-field">
+						<label htmlFor={searchId}>Search use cases</label>
+						<Input
+							id={searchId}
+							type="search"
+							value={query}
+							ref={searchRef}
+							onChange={(event) => updateQuery(event.target.value)}
+							placeholder="Requirement, scenario, risk, or constraint"
+						/>
+					</div>
+				</CollectionToolbar>
 
-					{filteredGroups.length > 1 ? (
-						<div className="use-case-group-toolbar">
-							<Button
-								variant="plain"
-								type="button"
-								className="use-case-group-toggle-all"
-								onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}
-							>
-								{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
-							</Button>
-						</div>
-					) : null}
+				{filteredGroups.length > 1 ? (
+					<div className="use-case-group-toolbar">
+						<Button
+							variant="plain"
+							type="button"
+							className="use-case-group-toggle-all"
+							onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}
+						>
+							{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
+						</Button>
+					</div>
+				) : null}
 
-					{filteredGroups.length ? (
-						<List as="div" variant="grouped" className="use-case-group-list" aria-label="Use Case groups">
-							{filteredGroups.map((group, groupIndex) => {
-								const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
-								const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-								const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
-								return (
-									<section
-										className="use-case-group"
-										aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
-										key={groupKey}
+				{filteredGroups.length ? (
+					<List as="div" variant="grouped" className="use-case-group-list" aria-label="Use Case groups">
+						{filteredGroups.map((group, groupIndex) => {
+							const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
+							const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+							const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
+							return (
+								<section
+									className="use-case-group"
+									aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
+									key={groupKey}
+								>
+									<Disclosure
+										className="use-case-group-details"
+										open={isOpen}
+										onToggle={(event) => {
+											const nextOpen = event.currentTarget.open;
+											if (nextOpen !== isOpen) {
+												setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
+											}
+										}}
 									>
-										<Disclosure
-											className="use-case-group-details"
-											open={isOpen}
-											onToggle={(event) => {
-												const nextOpen = event.currentTarget.open;
-												if (nextOpen !== isOpen) {
-													setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
-												}
-											}}
-										>
-											<summary className="use-case-group-heading">
-												<div>
-													<span>Source requirement {group.requirement_id || "Unidentified"}</span>
-													<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
-												</div>
-												<strong>
-													{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
-												</strong>
+										<summary className="use-case-group-heading">
+											<div>
+												<span>Source requirement {group.requirement_id || "Unidentified"}</span>
+												<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
+											</div>
+											<strong>
+												{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
+											</strong>
+										</summary>
+										{group.scenarios.length ? (
+											<List
+												className="use-case-scenario-list"
+												aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
+											>
+												{group.scenarios.map((scenario, scenarioIndex) => (
+													<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
+												))}
+											</List>
+										) : (
+											<CollectionState as="p" kind="empty" className="use-case-context-empty">
+												No scenarios were generated for this requirement.
+											</CollectionState>
+										)}
+										<Disclosure className="use-case-coverage-context">
+											<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
+												Coverage context
 											</summary>
-											{group.scenarios.length ? (
-												<List
-													className="use-case-scenario-list"
-													aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
-												>
-													{group.scenarios.map((scenario, scenarioIndex) => (
-														<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
-													))}
-												</List>
-											) : (
-												<CollectionState as="p" kind="empty" className="use-case-context-empty">
-													No scenarios were generated for this requirement.
-												</CollectionState>
-											)}
-											<Disclosure className="use-case-coverage-context">
-												<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
-													Coverage context
-												</summary>
-												<CoverageContext analysis={group.analysis} />
-											</Disclosure>
+											<CoverageContext analysis={group.analysis} />
 										</Disclosure>
-									</section>
-								);
-							})}
-						</List>
-					) : (
-						<CollectionState as="div" kind="filtered" className="use-case-search-empty" role="status">
-							<strong>No use cases match “{query}”.</strong>
-							<Button
-								type="button"
-								className="secondary"
-								onClick={() => {
-									updateQuery("");
-									window.requestAnimationFrame(() => searchRef.current?.focus());
-								}}
-							>
-								Clear search
-							</Button>
-						</CollectionState>
-					)}
-				</section>
-
-				<ReviewDecisionPanel stageState={effectiveStageState} snapshot={snapshot} review={review} />
-			</ResizablePanes>
+									</Disclosure>
+								</section>
+							);
+						})}
+					</List>
+				) : (
+					<CollectionState as="div" kind="filtered" className="use-case-search-empty" role="status">
+						<strong>No use cases match “{query}”.</strong>
+						<Button
+							type="button"
+							className="secondary"
+							onClick={() => {
+								updateQuery("");
+								window.requestAnimationFrame(() => searchRef.current?.focus());
+							}}
+						>
+							Clear search
+						</Button>
+					</CollectionState>
+				)}
+			</section>
 
 			<Disclosure className="use-case-provenance">
 				<summary>Details</summary>
@@ -709,6 +750,13 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					) : null}
 				</dl>
 			</Disclosure>
+			<ReviewDecisionPanel
+				stageState={effectiveStageState}
+				snapshot={snapshot}
+				review={review}
+				scenarioTotal={scenarioTotal}
+				groupTotal={coveragePlan.length}
+			/>
 		</div>
 	);
 }

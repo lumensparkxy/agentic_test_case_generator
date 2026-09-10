@@ -59,7 +59,7 @@ function reviewComment(page) {
 }
 
 function reviewAnnouncement(page) {
-	return decisionPanel(page).getByRole("status");
+	return reviewMain(page).getByRole("status", { name: "Review outcome" });
 }
 
 async function openUseCaseReview(page, options = {}) {
@@ -69,9 +69,15 @@ async function openUseCaseReview(page, options = {}) {
 	await expect(page.getByRole("heading", { name: /^Use Cases$/i, level: 1 })).toBeVisible({ timeout: 30_000 });
 	if (await page.getByText("Quality, coverage and review history", { exact: true }).count()) {
 		await page.getByText("Quality, coverage and review history", { exact: true }).click();
-		if (await approveOption(page).isEnabled()) await approveOption(page).check();
 	}
 	return api;
+}
+
+async function openDecision(page) {
+	if (await decisionPanel(page).count()) return;
+	const bar = page.getByRole("region", { name: "Use Cases review actions" });
+	const approve = bar.getByRole("button", { name: "Approve all", exact: true });
+	await ((await approve.isEnabled()) ? approve : bar.getByRole("button", { name: "Request changes", exact: true })).click();
 }
 
 async function expectDurableRefresh(api) {
@@ -219,7 +225,9 @@ test.describe("Use Cases review workbench", () => {
 		page,
 	}) => {
 		const api = await openUseCaseReview(page);
+		await openDecision(page);
 		await reviewComment(page).fill("  Coverage is ready for downstream generation.  ");
+		await openDecision(page);
 		await approveButton(page).click();
 
 		await expect.poll(() => api.requests.review.length).toBe(1);
@@ -252,6 +260,7 @@ test.describe("Use Cases review workbench", () => {
 	test("requires feedback for Request changes and persists the exact decision", async ({ page }) => {
 		const api = await openUseCaseReview(page);
 
+		await openDecision(page);
 		await requestChangesOption(page).check();
 		await requestChangesButton(page).click();
 		await expect(decisionPanel(page).getByRole("alert")).toContainText(/comment describing the requested changes/i);
@@ -262,6 +271,7 @@ test.describe("Use Cases review workbench", () => {
 		await expect(reviewComment(page)).toHaveAttribute("aria-errormessage", "use-case-review-error");
 		expect(api.requests.review).toHaveLength(0);
 
+		await openDecision(page);
 		await reviewComment(page).fill("  Add converted-currency threshold coverage.  ");
 		await requestChangesButton(page).click();
 		await expect.poll(() => api.requests.review.length).toBe(1);
@@ -326,7 +336,9 @@ test.describe("Use Cases review workbench", () => {
 		});
 
 		const comment = "Keep my feedback while the latest artifact loads.";
+		await openDecision(page);
 		await reviewComment(page).fill(comment);
+		await openDecision(page);
 		await requestChangesOption(page).check();
 		await requestChangesButton(page).click();
 
@@ -352,7 +364,9 @@ test.describe("Use Cases review workbench", () => {
 			reviewScenarios: [{ status: 503, payload: { detail: "Use Cases review persistence is unavailable" } }, {}],
 		});
 		const comment = "Approve after persistence recovers.";
+		await openDecision(page);
 		await reviewComment(page).fill(comment);
+		await openDecision(page);
 		await approveButton(page).click();
 
 		const error = decisionPanel(page).getByRole("alert");
@@ -365,8 +379,8 @@ test.describe("Use Cases review workbench", () => {
 		expect(api.requests.review[1].payload).toEqual(api.requests.review[0].payload);
 		expect(api.requests.review[1].headers["x-request-id"]).toBe(api.requests.review[0].headers["x-request-id"]);
 		await expect(reviewAnnouncement(page)).toContainText(/Use Cases approved/i);
-		await expect(reviewComment(page)).toHaveValue(comment);
-		await expect(decisionPanel(page)).toBeFocused();
+		await expect(decisionPanel(page)).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Approve all", exact: true })).toBeFocused();
 	});
 
 	test("distinguishes a saved decision from a failed workspace refresh and recovers without reposting", async ({ page }) => {
@@ -374,7 +388,9 @@ test.describe("Use Cases review workbench", () => {
 			detailScenarios: [{}, { status: 503, payload: { detail: "Project refresh is temporarily unavailable" } }, {}],
 		});
 		const comment = "Keep the durable approval context.";
+		await openDecision(page);
 		await reviewComment(page).fill(comment);
+		await openDecision(page);
 		await approveButton(page).click();
 
 		const refreshError = decisionPanel(page).getByRole("alert");
@@ -420,14 +436,16 @@ test.describe("Use Cases review workbench", () => {
 				},
 			],
 		});
+		await openDecision(page);
 		await reviewComment(page).fill("Approve the reviewed version.");
+		await openDecision(page);
 		await approveButton(page).click();
 
 		await expect(reviewMain(page)).toContainText("Use Cases v4");
 		await expect(reviewMain(page)).not.toHaveAttribute("aria-busy", "true");
 		await expect(reviewAnnouncement(page)).toContainText(/newer Use Cases version is ready for review/i);
-		await expect(approveOption(page)).toBeEnabled();
-		await expect(reviewComment(page)).toHaveValue("Approve the reviewed version.");
+		await expect(decisionPanel(page)).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Approve all", exact: true })).toBeEnabled();
 		await expect(humanReviewRegion(page)).toContainText(/pending human decision/i);
 		expect(api.requests.review).toHaveLength(1);
 	});
@@ -512,15 +530,19 @@ test.describe("Use Cases review workbench", () => {
 			await expect(search).toBeFocused();
 		}
 
+		await openDecision(page);
 		await approveOption(page).focus();
 		await page.keyboard.press("ArrowDown");
 		await expect(requestChangesOption(page)).toBeFocused();
 		await expect(requestChangesOption(page)).toBeChecked();
 		await page.keyboard.press("Tab");
 		await expect(reviewComment(page)).toBeFocused();
+		await openDecision(page);
 		await reviewComment(page).fill("Keyboard review is ready.");
 		await page.keyboard.press("Control+K");
 		await expect(reviewComment(page)).toBeFocused();
+		await page.keyboard.press("Tab");
+		await expect(decisionPanel(page).getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
 		await page.keyboard.press("Tab");
 		await expect(requestChangesButton(page)).toBeFocused();
 		await page.keyboard.press("Enter");
@@ -541,9 +563,11 @@ test.describe("Use Cases review workbench", () => {
 				expect(searchBox.height).toBeGreaterThanOrEqual(40);
 			}
 			if (width >= 1440) {
-				const [collectionBox, decisionBox] = await Promise.all([collection.boundingBox(), decisionPanel(page).boundingBox()]);
-				expect(decisionBox.x).toBeGreaterThan(collectionBox.x + collectionBox.width - 4);
-				expect(Math.abs(collectionBox.y - decisionBox.y)).toBeLessThanOrEqual(4);
+				const [collectionBox, decisionBox] = await Promise.all([
+					collection.boundingBox(),
+					page.getByRole("region", { name: "Use Cases review actions" }).boundingBox(),
+				]);
+				expect(Math.abs(decisionBox.width - collectionBox.width)).toBeLessThanOrEqual(4);
 			}
 		}
 	});
@@ -551,6 +575,7 @@ test.describe("Use Cases review workbench", () => {
 	test("prevents double submission while a review decision is pending", async ({ page }) => {
 		const deferred = createDeferred();
 		const api = await openUseCaseReview(page, { reviewScenarios: [{ gate: deferred.promise }] });
+		await openDecision(page);
 		await reviewComment(page).fill("Submit this approval once.");
 
 		await approveButton(page).evaluate((button) => {
@@ -572,14 +597,16 @@ test.describe("Use Cases review workbench", () => {
 	test("ignores a late review completion after the user returns Home", async ({ page }) => {
 		const deferred = createDeferred();
 		const api = await openUseCaseReview(page, { reviewScenarios: [{ gate: deferred.promise }] });
+		await openDecision(page);
 		await reviewComment(page).fill("Do not reopen this project after I leave.");
+		await openDecision(page);
 		await approveButton(page).click();
 		await expect.poll(() => api.requests.review.length).toBe(1);
 
-		await page
-			.getByRole("navigation", { name: "Global navigation" })
-			.getByRole("link", { name: /^Home$/i })
-			.click();
+		await page.evaluate(() => {
+			window.history.pushState({}, "", "/");
+			window.dispatchEvent(new PopStateEvent("popstate"));
+		});
 		await expect(page).toHaveURL(/\/$/);
 		await expect(page.getByRole("heading", { name: /^Home$/i, level: 1 })).toBeVisible();
 		deferred.resolve();

@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented, awaiting review: #259 — Full-width Use Cases scenarios with a sticky whole-snapshot review bar and confirmation dialog. Parent #241. Preserves explicit decisions, required feedback and snapshot/retry safeguards.
+
 - Implemented, awaiting review: #257 — Inline case summaries and Step/Action/Expected result columns. Builds on PR #256; 50 focused browser checks and build/lint/format pass.
 
 - Implemented, awaiting review: #255 — Compact shared typography and resizable Test Cases/Use Cases panes. Builds on PR #254; 152 frontend regression checks pass.

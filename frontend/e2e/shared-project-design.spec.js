@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { installUseCaseReviewApi, useCaseProjectFixture, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
@@ -83,12 +84,10 @@ test("requires an explicit human decision and keeps navigation status separate",
 	await seedAuthenticatedSession(page);
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/use-cases`);
 	const form = page.getByRole("form", { name: "Human review decision" });
-	await expect(form.getByRole("radio", { name: /^Approve/ })).not.toBeChecked();
-	await expect(form.getByRole("radio", { name: /^Request changes/ })).not.toBeChecked();
-	await expect(form.getByRole("button", { name: "Choose a decision" })).toBeDisabled();
+	await expect(form).toHaveCount(0);
 	const nav = page.getByRole("navigation", { name: "Project navigation", exact: true });
 	await expect(nav.getByRole("link", { name: "Use Cases, Awaiting review" })).toHaveAttribute("aria-current", "page");
-	await form.getByRole("radio", { name: /^Request changes/ }).check();
+	await page.getByRole("button", { name: "Request changes", exact: true }).click();
 	await form.getByRole("button", { name: "Request changes", exact: true }).click();
 	await expect(form.getByRole("alert")).toContainText("Comment required");
 	expect(api.requests.review).toHaveLength(0);
@@ -250,21 +249,29 @@ test("pane divider supports drag, limits, reset and saved widths without changin
 	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
 });
 
-test("Use Cases shares resizing while preserving the explicit review decision", async ({ page }) => {
+test("Use Cases reviews the full snapshot in a cancellable responsive dialog", async ({ page }) => {
 	await page.setViewportSize({ width: 1488, height: 1056 });
 	const api = await installUseCaseReviewApi(page);
 	await seedAuthenticatedSession(page);
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/use-cases`);
-	const divider = page.getByRole("separator", { name: "Resize scenarios and review decision" });
-	await expect(divider).toBeVisible();
-	await divider.focus();
-	await page.keyboard.press("Home");
-	await expect(divider).toHaveAttribute("aria-valuenow", await divider.getAttribute("aria-valuemin"));
-	await expect(page.getByRole("radio", { name: "Approve", exact: true })).not.toBeChecked();
+	await expect(page.getByRole("separator", { name: "Resize scenarios and review decision" })).toHaveCount(0);
+	await page.getByRole("searchbox", { name: "Search use cases" }).fill("no matching scenarios");
+	const approve = page.getByRole("button", { name: "Approve all", exact: true });
+	for (const width of [1488, 390]) {
+		await page.setViewportSize({ width, height: 844 });
+		await approve.click();
+		const dialog = page.getByRole("dialog", { name: "Review all Use Cases" });
+		await expect(dialog).toContainText("including scenarios hidden by search");
+		expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
+		expect(accessibility.violations).toEqual([]);
+		await expect(dialog.getByRole("textbox", { name: /^Review comment/ })).toBeFocused();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+		await page.keyboard.press("Escape");
+		await expect(dialog).toHaveCount(0);
+		await expect(approve).toBeFocused();
+	}
 	expect(api.requests.review).toEqual([]);
-	await page.setViewportSize({ width: 390, height: 844 });
-	await expect(divider).toHaveCount(0);
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("project typography uses the compact shared reading scale", async ({ page }) => {
@@ -302,4 +309,20 @@ test("step table aligns numbers, actions and expected results and shows every st
 	await expect(table.getByRole("row").nth(3).getByRole("cell").first()).toContainText("Step-specific data");
 	await page.setViewportSize({ width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("stale Use Cases cannot be approved from either review entry point", async ({ page }) => {
+	const project = useCaseProjectFixture();
+	project.stage_state.use_cases.stale = true;
+	project.stage_state.use_cases.stale_reason = "Requirements changed.";
+	const api = await installUseCaseReviewApi(page, { initialProject: project });
+	await seedAuthenticatedSession(page);
+	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/use-cases`);
+	await expect(page.getByRole("button", { name: "Approve all", exact: true })).toBeDisabled();
+	await page.getByRole("button", { name: "Request changes", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Review all Use Cases" });
+	await expect(dialog.getByRole("radio", { name: /^Approve/ })).toBeDisabled();
+	await expect(dialog).toContainText("Requirements changed.");
+	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+	expect(api.requests.review).toEqual([]);
 });
