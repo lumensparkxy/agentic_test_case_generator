@@ -1,12 +1,12 @@
 import { Badge } from "../components/ui/surfaces";
-import { Link } from "../components/ui/controls";
+import { Button, Link } from "../components/ui/controls";
 import ProjectPageHeader from "../components/layout/ProjectPageHeader";
 import RouteLink from "../app/RouteLink";
 import { PROJECT_DESTINATIONS, buildProjectPath } from "../app/workflowRoutes";
 import UseCaseReviewWorkbench from "../components/reviews/UseCaseReviewWorkbench";
 import useUseCaseReview from "../hooks/useUseCaseReview";
 
-export default function UseCaseReviewPage({ project, identity, request, navigate, onDecisionCommitted, onReloadLatest }) {
+export default function UseCaseReviewPage({ project, identity, request, navigate, onDecisionCommitted, onReloadLatest, onBack, onNext }) {
 	const projectId = project?.project_id || "";
 	const snapshot = project?.current_snapshots?.use_cases || null;
 	const stageState = project?.stage_state?.use_cases || null;
@@ -95,6 +95,14 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 					</div>
 				</section>
 			)}
+			<nav className="panel-nav" aria-label="Workflow steps">
+				<Button variant="secondary" onClick={onBack} title="Back to Context">
+					Back
+				</Button>
+				<Button onClick={onNext} title="Next to Test Cases">
+					Next
+				</Button>
+			</nav>
 		</main>
 	);
 }

@@ -60,6 +60,7 @@ import {
 	PROJECT_DESTINATIONS,
 	buildProjectPath,
 	getDestinationForLegacyTab,
+	getAdjacentProjectDestination,
 	getLegacyTabForDestination,
 	parseWorkflowRoute,
 	resolveOrchestratorDestination,
@@ -1863,9 +1864,7 @@ export default function App() {
 		}
 
 		const routeTab = getLegacyTabForDestination(route.destination);
-		if (!(route.destination === "test-cases" && activeTab === 2)) {
-			setActiveTab(routeTab);
-		}
+		setActiveTab(routeTab);
 
 		if (isVerifyingSession) {
 			setProjectRouteStatus("loading");
@@ -3851,8 +3850,12 @@ export default function App() {
 			navigate(buildProjectPath(route.projectId, getDestinationForLegacyTab(resolvedTab)));
 		}
 	};
-	const goNext = () => selectWorkflowTab(Math.min(activeTab + 1, 5));
-	const goPrev = () => selectWorkflowTab(Math.max(activeTab - 1, 0));
+	const moveProjectStep = (direction) => {
+		const destination = getAdjacentProjectDestination(route.destination, direction);
+		if (destination) selectWorkflowTab(getLegacyTabForDestination(destination));
+	};
+	const goNext = () => moveProjectStep(1);
+	const goPrev = () => moveProjectStep(-1);
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
 	const activeProjectDestinationLabel = tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
 	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
@@ -4101,6 +4104,8 @@ export default function App() {
 								navigate={navigate}
 								onDecisionCommitted={handleUseCaseReviewCommitted}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
+								onBack={goPrev}
+								onNext={goNext}
 							/>
 						) : (
 							<main
@@ -4808,8 +4813,7 @@ export default function App() {
 											setTemplateName={setTemplateName}
 											templateFormat={templateFormat}
 											setTemplateFormat={setTemplateFormat}
-											goPrev={goPrev}
-											goNext={goNext}
+											onReturn={() => selectWorkflowTab(3)}
 										/>
 									)}
 

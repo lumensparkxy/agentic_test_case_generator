@@ -54,3 +54,11 @@ The default row density is comfortable (12px by 16px table cell padding); compac
 | Account/project menus, diagnostics and usage | Menu, Dialog, Disclosure, List and controls | #245 |
 
 Business-specific content remains composed by its feature. Backend contracts, auth, persistence, export format, sorting and filter rules are not part of this visual library. Removed unused legacy table/card styles and obsolete stepper/tab components; there is no separate component gallery or added dependency.
+
+## Sequential project navigation (#253)
+
+Back/Next follows `PROJECT_NAV_ITEMS`, the same destination order as the sidebar: Requirements → Context → Use Cases → Test Cases → Automation → Reports. It does not increment legacy panel IDs. Use Cases provides navigation in both populated and missing-artifact states. Visiting a destination is separate from approving an artifact or running a workflow; existing mutation and export gates remain authoritative.
+
+Test Cases route entry, including browser history and reload, opens the normal generation/review workbench. Template Setup is an explicit local subview. Its Back to Test Cases action and the header Generate and review action return to that workbench without losing in-session template edits. Template Setup is not a sequential workflow step.
+
+The existing first-generation operation still creates the initial Use Cases artifact from the Test Cases workbench. When no Use Cases snapshot exists, the page retains its explanation and appropriate prerequisite link; navigation itself does not generate or approve an artifact.

@@ -2,7 +2,7 @@ import { Surface } from "../ui/surfaces";
 import { Field, Input, Select, Button } from "../ui/controls";
 import { TEMPLATE_FORMAT_OPTIONS } from "../../constants/workflow";
 
-export default function TemplateSetupPanel({ templateName, setTemplateName, templateFormat, setTemplateFormat, goPrev, goNext }) {
+export default function TemplateSetupPanel({ templateName, setTemplateName, templateFormat, setTemplateFormat, onReturn }) {
 	return (
 		<Surface as="section" className="panel">
 			<h2 className="panel-title">Template Setup</h2>
@@ -33,10 +33,9 @@ export default function TemplateSetupPanel({ templateName, setTemplateName, temp
 				automation status, component, linked requirement IDs, scenario refs, source refs, and tags.
 			</span>
 			<div className="panel-nav">
-				<Button onClick={goPrev} className="secondary">
-					Back
+				<Button onClick={onReturn} className="secondary">
+					Back to Test Cases
 				</Button>
-				<Button onClick={goNext}>Next</Button>
 			</div>
 		</Surface>
 	);

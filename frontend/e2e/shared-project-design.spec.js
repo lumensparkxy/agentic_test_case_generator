@@ -155,3 +155,66 @@ test("shared settings dialog traps focus, labels integration fields and restores
 	await expect(dialog).toHaveCount(0);
 	await expect(trigger).toBeFocused();
 });
+
+test("project Back and Next follow sidebar order without approving or generating", async ({ page }) => {
+	await openCases(page);
+	const writes = [];
+	page.on("request", (request) => {
+		if (request.method() === "POST") writes.push(request.url());
+	});
+	await page
+		.getByRole("navigation", { name: "Project navigation", exact: true })
+		.getByRole("link", { name: /^Requirements,/ })
+		.click();
+	for (const destination of ["context", "use-cases", "test-cases", "automation", "reports"]) {
+		await page.getByRole("button", { name: "Next", exact: true }).click();
+		await expect(page).toHaveURL(`/projects/${USE_CASE_PROJECT_ID}/${destination}`);
+		await expect(page.getByRole("heading", { name: "Template Setup", exact: true })).toHaveCount(0);
+	}
+	for (const destination of ["automation", "test-cases", "use-cases", "context", "requirements"]) {
+		await page.getByRole("button", { name: "Back", exact: true }).click();
+		await expect(page).toHaveURL(`/projects/${USE_CASE_PROJECT_ID}/${destination}`);
+	}
+	expect(writes).toEqual([]);
+});
+
+test("missing Use Cases still provides sequential navigation", async ({ page }) => {
+	const project = useCaseProjectFixture();
+	delete project.current_snapshots.use_cases;
+	delete project.stage_state.use_cases;
+	const api = await installUseCaseReviewApi(page, { initialProject: project });
+	await seedAuthenticatedSession(page);
+	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/context`);
+	await page.getByRole("button", { name: "Next", exact: true }).click();
+	await expect(page.getByRole("heading", { name: "No Use Cases snapshot", exact: true })).toBeVisible();
+	const steps = page.getByRole("navigation", { name: "Workflow steps", exact: true });
+	await steps.getByRole("button", { name: "Back", exact: true }).click();
+	await expect(page).toHaveURL(`/projects/${USE_CASE_PROJECT_ID}/context`);
+	await page.getByRole("button", { name: "Next", exact: true }).click();
+	await steps.getByRole("button", { name: "Next", exact: true }).click();
+	await expect(page).toHaveURL(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
+	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toBeVisible();
+	expect(api.requests.review).toEqual([]);
+});
+
+test("template setup is explicit and returns to the normal workbench across navigation and reload", async ({ page }) => {
+	await openCases(page);
+	const setup = page.getByRole("button", { name: "Template setup", exact: true });
+	await setup.click();
+	await page.getByRole("textbox", { name: "Template name", exact: true }).fill("Navigation regression");
+	await page.getByRole("button", { name: "Back to Test Cases", exact: true }).click();
+	await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toBeVisible();
+	await setup.click();
+	await expect(page.getByRole("textbox", { name: "Template name", exact: true })).toHaveValue("Navigation regression");
+	await page
+		.getByRole("navigation", { name: "Project navigation", exact: true })
+		.getByRole("link", { name: /^Context,/ })
+		.click();
+	await page.goBack();
+	await expect(setup).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Template Setup", exact: true })).toHaveCount(0);
+	await setup.click();
+	await page.reload();
+	await expect(setup).toBeVisible();
+	await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toBeVisible();
+});

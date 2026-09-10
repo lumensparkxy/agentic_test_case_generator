@@ -107,6 +107,13 @@ export const PROJECT_NAV_ITEMS = Object.freeze(
 	].map((item) => Object.freeze({ ...item, legacyTabIds: Object.freeze(item.legacyTabIds) }))
 );
 
+// Sequential navigation shares the sidebar order, not the legacy panel IDs.
+export function getAdjacentProjectDestination(destination, direction) {
+	const index = PROJECT_NAV_ITEMS.findIndex((item) => item.id === destination);
+	if (index < 0 || ![-1, 1].includes(direction)) return null;
+	return PROJECT_NAV_ITEMS[index + direction]?.id || null;
+}
+
 const LEGACY_TAB_DESTINATION = Object.freeze(
 	PROJECT_NAV_ITEMS.reduce((mapping, item) => {
 		for (const tabId of item.legacyTabIds) {
