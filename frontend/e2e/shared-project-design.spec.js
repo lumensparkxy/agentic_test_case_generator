@@ -278,7 +278,8 @@ test("project typography uses the compact shared reading scale", async ({ page }
 
 test("case summaries flow inline and wrap only when the pane narrows", async ({ page }) => {
 	await page.setViewportSize({ width: 1920, height: 1080 });
-	await openCases(page);
+	const title = "Valid checkout with a saved payment method and delivery address";
+	await openCases(page, [caseFixture("TC-001", title)]);
 	const row = page.getByRole("button", { name: /TC-001 Valid checkout/ });
 	const text = row.locator(":scope > span");
 	const wideHeight = await text.evaluate((element) => element.getBoundingClientRect().height);
@@ -289,7 +290,8 @@ test("case summaries flow inline and wrap only when the pane narrows", async ({ 
 	await page.keyboard.press("Home");
 	await expect.poll(() => text.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(wideHeight);
 	await expect(row).toHaveAttribute("aria-pressed", "true");
-	await expect(row).toContainText("High priority");
+	await expect(row).toHaveText(`TC-001 ${title}`);
+	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("High priority · REQ-101");
 });
 
 test("step table aligns numbers, actions and expected results and retains expanded test data", async ({ page }) => {

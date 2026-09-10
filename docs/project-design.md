@@ -75,7 +75,7 @@ Validation: 152 tests in `test:e2e:home-first` pass, including pointer drag, key
 
 ## Test case row and step presentation (#257)
 
-Case list summaries use a single inline flow for ID, title and supporting metadata. Do not force these fields onto separate lines or truncate titles: wrapping follows the resized pane width. Case selection remains a button with its existing accessible name/state.
+Case list summaries use a single inline flow for ID and title only. Priority and linked requirements remain in the selected detail pane, and linked-requirement search remains supported. Do not force these fields onto separate lines or truncate titles: wrapping follows the resized pane width. Case selection remains a button with its existing accessible name/state.
 
 Steps use the shared compact Table inside a named TableScroll region. Columns are Step, Action and Expected result, with column headers and sequential row headers. Step-specific test data stays in the Action cell. Show all/fewer steps and missing expected-result fallback remain available. The table wraps long cell content; at very narrow widths its 320px minimum scrolls inside the named container without widening the document.
 

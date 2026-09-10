@@ -65,10 +65,6 @@ export default function GeneratedTestCasesView({
 							>
 								<span>
 									<small>{tc.id}</small> <strong>{tc.title}</strong>
-									{" · "}
-									<span>
-										{tc.priority || "Medium"} priority · {getTestCaseLinkedRequirementIds(tc).join(", ") || "No linked requirements"}
-									</span>
 								</span>
 								<ChevronRight size={18} aria-hidden="true" />
 							</SelectableItem>
