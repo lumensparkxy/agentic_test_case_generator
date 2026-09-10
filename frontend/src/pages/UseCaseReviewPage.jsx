@@ -1,3 +1,4 @@
+import { Badge } from "../components/ui/surfaces";
 import { Link } from "../components/ui/controls";
 import ProjectPageHeader from "../components/layout/ProjectPageHeader";
 import RouteLink from "../app/RouteLink";
@@ -55,9 +56,14 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 				actions={
 					snapshot ? (
 						<div className="use-case-page-status-actions">
-							<span className={`use-case-page-freshness ${reviewStatus.tone}`} role="status" aria-label="Current human review status">
+							<Badge
+								tone={reviewStatus.tone === "approved" ? "success" : "warning"}
+								className={`use-case-page-freshness ${reviewStatus.tone}`}
+								role="status"
+								aria-label="Current human review status"
+							>
 								{reviewStatus.label}
-							</span>
+							</Badge>
 							<Link className="use-case-skip-review-link" href="#use-case-review-decision">
 								Skip to review decision
 							</Link>

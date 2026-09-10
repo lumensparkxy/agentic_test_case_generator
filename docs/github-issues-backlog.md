@@ -1,6 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
-- In progress: #241 — Shared design system across all application screens. Stories: #242 foundations, #243 artifact collections, #244 workspace, #245 remaining surfaces, #246 consolidation. Builds on #239 / PR #240.
+- Implemented, awaiting review/merge: #241 — Shared design system across all application screens. Stories: #242 foundations (PR #247), #243 artifact collections (PR #248), #244 workspace (PR #249), #245 remaining surfaces (PR #250), #246 consolidation. Builds on #239 / PR #240. Final full-suite acceptance has one known legacy test failure tracked in #251.
+- Ready: #251 — Repair the legacy live-generation E2E for project workbenches; preserve live quality and export assertions. Discovered during #246 (158 other frontend tests pass).
 
 This file contains issue-ready drafts for the implementation plan in `docs/implementation-plan.md`.
 

@@ -1,6 +1,6 @@
 import { ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
 import { Input, Button, Textarea } from "../ui/controls";
-import { Disclosure } from "../ui/surfaces";
+import { Disclosure, Badge } from "../ui/surfaces";
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
@@ -83,7 +83,9 @@ export default function GeneratedTestCasesView({
 				<section className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
 					{selected ? (
 						<>
-							<span className="case-id">{selected.id}</span>
+							<Badge icon={null} tone="info" className="case-id">
+								{selected.id}
+							</Badge>
 							<p className="test-detail-meta">
 								{selected.type || "Functional"} · {selected.priority || "Medium"} priority ·{" "}
 								{getTestCaseLinkedRequirementIds(selected).join(", ")}

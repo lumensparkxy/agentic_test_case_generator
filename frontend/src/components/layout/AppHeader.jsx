@@ -1,9 +1,9 @@
 import { CollectionState } from "../ui/collections";
-import { Button, Input } from "../ui/controls";
+import { Button, Input, IconButton } from "../ui/controls";
 import { Menu } from "../ui/surfaces";
 import { Dialog } from "../ui/dialog";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Check, ChevronDown, FolderOpen, LogOut, Plus, RefreshCw, Settings, UserRound } from "lucide-react";
+import { Check, ChevronDown, FolderOpen, LogOut, Plus, RefreshCw, Settings, UserRound, X } from "lucide-react";
 
 import AuthProviderIcon from "../auth/AuthProviderIcon";
 
@@ -334,7 +334,7 @@ function ProjectMenu({
 	return (
 		<div className="command-project-control" ref={menuRef}>
 			<Button
-				variant="plain"
+				variant="secondary"
 				ref={triggerRef}
 				type="button"
 				className="command-project-trigger"
@@ -468,16 +468,15 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 						<h2 id="auth-dialog-title">Choose a sign-in method</h2>
 						<p>Select one provider to continue into the workspace.</p>
 					</div>
-					<Button
-						variant="plain"
+					<IconButton
 						type="button"
 						className="auth-dialog-close"
 						onClick={onClose}
 						disabled={isAuthenticating}
 						aria-label="Close sign-in dialog"
 					>
-						×
-					</Button>
+						<X size={18} aria-hidden="true" />
+					</IconButton>
 				</div>
 				<div className="auth-provider-list">
 					{providers.map((provider) => (
@@ -552,7 +551,7 @@ export default function AppNavigationControls({
 				isUsageLoading={isUsageLoading}
 				isBillingLoading={isBillingLoading}
 			/>
-			<Button
+			<IconButton
 				type="button"
 				className="settings-open-btn"
 				data-testid="settings-open-button"
@@ -561,7 +560,7 @@ export default function AppNavigationControls({
 			>
 				<Settings aria-hidden="true" size={18} strokeWidth={2.1} />
 				<span className="settings-open-label">Settings</span>
-			</Button>
+			</IconButton>
 			<AuthPanel
 				isVerifyingSession={isVerifyingSession}
 				isAuthenticated={isAuthenticated}

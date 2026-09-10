@@ -1,5 +1,5 @@
 import { CollectionState, TableScroll, Table } from "../ui/collections";
-import { Surface } from "../ui/surfaces";
+import { Surface, Badge } from "../ui/surfaces";
 import { getRequirementContextPath } from "../../utils/requirements";
 
 export default function TraceabilityMatrixPanel({
@@ -56,9 +56,9 @@ export default function TraceabilityMatrixPanel({
 									<td>
 										{linkedTestCases.length ? (
 											linkedTestCases.map((testCase) => (
-												<span key={testCase.id} className="tag traceability-case-tag">
+												<Badge key={testCase.id} icon={null} tone="neutral" className="tag traceability-case-tag">
 													{testCase.id}
-												</span>
+												</Badge>
 											))
 										) : (
 											<span className="traceability-missing-text">No linked tests</span>

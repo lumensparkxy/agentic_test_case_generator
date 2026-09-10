@@ -144,6 +144,7 @@ test("shared settings dialog traps focus, labels integration fields and restores
 	const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
 	const close = dialog.getByRole("button", { name: "Close settings dialog", exact: true });
 	await expect(close).toBeFocused();
+	await expect(dialog.getByRole("spinbutton", { name: "Approval threshold", exact: true })).toHaveCount(2);
 	await page.keyboard.press("Shift+Tab");
 	await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
 	await dialog.getByRole("tab", { name: "Workflow tuning", exact: true }).focus();

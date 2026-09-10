@@ -27,4 +27,27 @@ export default [
 			"no-unused-vars": "off",
 		},
 	},
+
+	{
+		files: ["src/**/*.jsx"],
+		ignores: ["src/components/ui/**"],
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				{
+					selector: "JSXOpeningElement[name.type='JSXIdentifier'][name.name=/^(button|input|select|textarea|table|details|progress|a)$/]",
+					message: "Use the shared UI component so appearance and interaction behavior remain consistent.",
+				},
+			],
+		},
+	},
+	{
+		files: ["src/components/ui/**/*.{js,jsx}"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{ patterns: [{ group: ["../**"], message: "UI components must not depend on feature workflows, routing or API clients." }] },
+			],
+		},
+	},
 ];

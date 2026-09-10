@@ -280,8 +280,8 @@ test.describe("JIRA requirements workflow", () => {
 
 		await page.getByTestId("settings-open-button").click();
 		await expect(page.getByRole("dialog", { name: /^settings$/i })).toBeVisible();
-		await page.getByRole("button", { name: /integrations/i }).click();
-		await expect(page.getByRole("button", { name: /integrations/i })).toHaveClass(/active/);
+		await page.getByRole("tab", { name: /integrations/i }).click();
+		await expect(page.getByRole("tab", { name: /integrations/i })).toHaveClass(/active/);
 		await expect(page.getByRole("heading", { name: /^jira cloud$/i })).toBeVisible();
 
 		await page.getByPlaceholder("https://your-team.atlassian.net").fill("https://acme.atlassian.net");

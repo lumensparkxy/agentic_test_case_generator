@@ -40,6 +40,7 @@ export default function StatusBadge({ status, label, compact = false, accessible
 	};
 	return (
 		<Badge
+			compact={compact}
 			tone={tones[tone]}
 			icon={Icon}
 			className={classes}

@@ -1,3 +1,4 @@
+import { Badge } from "../ui/surfaces";
 import { Button, Link } from "../ui/controls";
 import {
 	BookOpen,
@@ -116,10 +117,17 @@ export default function WorkflowNavigationDrawer({
 							<span className="workflow-navigation-copy">
 								<strong>{tab.label}</strong>
 								{stateLabel && !isCollapsed && (
-									<span className={`nav-workflow-status ${state}`}>
-										<StatusIcon size={10} aria-hidden="true" fill={state === "blocked" ? "none" : "currentColor"} />
+									<Badge
+										variant="inline"
+										tone={
+											{ complete: "success", blocked: "blocked", pending: "pending", attention: "warning", active: "info" }[state] ||
+											"neutral"
+										}
+										icon={StatusIcon}
+										className={`nav-workflow-status ${state}`}
+									>
 										{stateLabel}
-									</span>
+									</Badge>
 								)}
 							</span>
 						</>

@@ -390,3 +390,114 @@
 	font-size: 11px;
 	color: var(--text-muted);
 }
+
+/* Variant styling replaces the formerly separate workspace/review/activity badges. */
+.ui-badge[data-variant="subtle"] {
+	width: fit-content;
+	padding: 3px 8px;
+	border: 1px solid var(--border-color);
+	border-radius: 999px;
+	background: var(--surface-container);
+	font-weight: 600;
+}
+.ui-badge[data-variant="subtle"][data-tone="success"] {
+	background: var(--success-tonal);
+	border-color: #a7f3d0;
+}
+.ui-badge[data-variant="subtle"][data-tone="warning"],
+.ui-badge[data-variant="subtle"][data-tone="blocked"] {
+	background: var(--warning-tonal);
+	border-color: #fde68a;
+}
+.ui-badge[data-variant="subtle"][data-tone="danger"] {
+	background: var(--danger-tonal);
+	border-color: #fecaca;
+}
+.ui-badge[data-variant="subtle"][data-tone="info"],
+.ui-badge[data-variant="subtle"][data-tone="running"] {
+	background: var(--primary-tonal);
+	border-color: #bfdbfe;
+}
+.ui-badge-label {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.ui-badge[data-compact="true"] {
+	width: 32px;
+	height: 32px;
+	justify-content: center;
+	padding: 0;
+}
+.ui-badge[data-compact="true"] > .ui-badge-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+.ui-input[type="file"] {
+	max-width: 100%;
+	color: var(--text-muted);
+	font: inherit;
+}
+.ui-input[type="file"]::file-selector-button {
+	padding: 10px 16px;
+	margin-right: 12px;
+	background: var(--card-bg);
+	color: var(--text-main);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	font: inherit;
+}
+.ui-input[type="file"]::file-selector-button:hover {
+	background: var(--primary-tonal);
+}
+.ui-input::placeholder {
+	color: var(--text-muted);
+}
+.ui-tab[data-variant="tab"] {
+	padding: 12px;
+	border: 0;
+	border-bottom: 3px solid transparent;
+	border-radius: 0;
+	font-size: var(--font-body);
+	color: var(--text-muted);
+	background: transparent;
+}
+.ui-tab[data-variant="tab"][aria-selected="true"] {
+	color: var(--primary);
+	border-bottom-color: var(--primary);
+}
+.ui-tab[data-variant="tab"]:hover:not(:disabled) {
+	color: var(--primary-hover);
+	background: var(--surface-container);
+}
+.ui-button[data-variant="plain"]:disabled {
+	opacity: 0.65;
+}
+
+.ui-button[data-variant="icon"] {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: var(--control-height);
+	height: var(--control-height);
+	padding: 0;
+	border: 1px solid var(--border-strong);
+	background: var(--card-bg);
+	color: var(--text-main);
+	box-shadow: none;
+	transform: none;
+}
+.ui-button[data-variant="icon"]:hover:not(:disabled) {
+	background: var(--primary-tonal);
+	border-color: var(--primary);
+}
+.ui-button[data-variant="icon"] > svg {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+}

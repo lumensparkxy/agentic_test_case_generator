@@ -11,11 +11,18 @@ const icons = {
 	info: Circle,
 };
 
-export function Badge({ tone = "neutral", icon: Icon = icons[tone], children, className, ...props }) {
+export function Badge({ tone = "neutral", icon: Icon = icons[tone], children, variant = "subtle", compact = false, className, ...props }) {
 	return (
-		<span {...props} data-ui="badge" data-tone={tone} className={classes("ui-badge", className)}>
+		<span
+			{...props}
+			data-ui="badge"
+			data-variant={variant}
+			data-compact={compact || undefined}
+			data-tone={tone}
+			className={classes("ui-badge", className)}
+		>
 			{Icon && <Icon size={14} aria-hidden="true" />}
-			{children}
+			<span className="ui-badge-label">{children}</span>
 		</span>
 	);
 }

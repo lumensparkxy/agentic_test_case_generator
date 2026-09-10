@@ -274,13 +274,6 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 0.55rem;
-	padding: 0.65rem 0.85rem;
-	border: 1px solid transparent;
-	border-radius: var(--radius-md);
-	background: transparent;
-	color: var(--text-muted);
-	box-shadow: none;
-	font-size: 0.84rem;
 	white-space: nowrap;
 }
 
@@ -289,13 +282,6 @@
 	background: #eff6ff;
 	border-color: #bfdbfe;
 	color: #1d4ed8;
-}
-
-.generate-result-tab.active {
-	background: white;
-	border-color: #93c5fd;
-	color: #1d4ed8;
-	box-shadow: var(--shadow-sm);
 }
 
 .generate-result-tab-badge {
@@ -652,54 +638,18 @@ button.small {
 	text-decoration: underline;
 }
 
-.traceability-table-wrapper {
-	overflow-x: auto;
-	border: 1px solid var(--border-color);
-	border-radius: var(--radius-md);
-}
-
 .traceability-table {
 	width: 100%;
 	min-width: 960px;
-	border-collapse: collapse;
-	font-size: 0.88rem;
-}
-
-.traceability-table th,
-.traceability-table td {
-	padding: 0.9rem 1rem;
-	text-align: left;
-	vertical-align: top;
-	border-bottom: 1px solid var(--border-color);
 }
 
 .traceability-table th {
-	background: #f1f5f9;
-	color: var(--text-main);
-	font-weight: 700;
 	white-space: nowrap;
-}
-
-.traceability-table tbody tr:last-child td {
-	border-bottom: none;
-}
-
-.traceability-table tr.covered {
-	background: #fbfefc;
-}
-
-.traceability-table tr.missing {
-	background: #fffafa;
 }
 
 .traceability-table td:first-child strong {
 	display: block;
-	color: #2563eb;
 	margin-bottom: 0.35rem;
-}
-
-.traceability-table td:first-child span {
-	color: var(--text-main);
 }
 
 .traceability-case-tag {

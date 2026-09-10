@@ -1,5 +1,6 @@
+import { X } from "lucide-react";
 import { Dialog } from "../ui/dialog";
-import { Button } from "../ui/controls";
+import { IconButton } from "../ui/controls";
 import { TabList, Tab, TabPanel } from "../ui/tabs";
 import AzureDevOpsConnectionSettings from "../integrations/AzureDevOpsConnectionSettings";
 import JiraConnectionSettings from "../integrations/JiraConnectionSettings";
@@ -39,9 +40,9 @@ export default function SettingsDialog({
 						<h2 id="settings-dialog-title">Settings</h2>
 						<p>Manage one-time connections and advanced workflow tuning without crowding the main pipeline.</p>
 					</div>
-					<Button variant="plain" type="button" className="auth-dialog-close" onClick={onClose} aria-label="Close settings dialog">
-						×
-					</Button>
+					<IconButton type="button" className="auth-dialog-close" onClick={onClose} aria-label="Close settings dialog">
+						<X size={18} aria-hidden="true" />
+					</IconButton>
 				</div>
 				<TabList className="settings-dialog-nav" role="tablist" aria-label="Settings sections">
 					<Tab

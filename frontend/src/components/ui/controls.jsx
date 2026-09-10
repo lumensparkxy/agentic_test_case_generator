@@ -101,3 +101,11 @@ export function SearchField({ label, className, shortcut, ...props }) {
 		</label>
 	);
 }
+
+export function IconButton({ children, ...props }) {
+	return (
+		<Button {...props} variant="icon" data-ui="icon-button">
+			{children}
+		</Button>
+	);
+}

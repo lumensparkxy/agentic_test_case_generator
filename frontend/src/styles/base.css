@@ -100,3 +100,22 @@ h3,
 h4 {
 	letter-spacing: -0.02em;
 }
+
+pre {
+	background-color: #1e293b;
+	color: #e2e8f0;
+	padding: 1rem;
+	border-radius: var(--radius-md);
+	overflow-x: auto;
+	font-size: 0.85rem;
+	margin-top: 1rem;
+	border: 1px solid #334155;
+	white-space: pre-wrap;
+	max-height: 300px;
+}
+.helper-text {
+	font-size: 0.875rem;
+	color: var(--text-muted);
+	margin-top: 1rem;
+	display: block;
+}

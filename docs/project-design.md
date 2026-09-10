@@ -19,7 +19,7 @@ Validation: frontend build, lint, formatting, and the `test:e2e:home-first` suit
 
 The internal library lives in `frontend/src/components/ui/`. Import directly from controls, surfaces, collections, tabs or dialog. It uses React and native semantic HTML; features own data, filtering, API calls and mutations.
 
-- `Button`: primary/secondary/danger/plain variants, normal/compact sizes, optional busy state. Default type is button; form submissions must explicitly use type="submit".
+- `Button`: primary/secondary/danger/plain variants (use `IconButton` for labeled icon-only actions), normal/compact sizes, optional busy state. Default type is button; form submissions must explicitly use type="submit".
 - `Input`, `Select`, `Textarea`, `Checkbox`, `Radio`, `SearchField`: controlled native props and refs pass through. `Field` connects its single control to label, hint and error text; children-only mode supports existing compound fields.
 - `Badge`: explicit tone and label with a library icon; domain adapters decide the meaning of status. `Surface`, `Alert`, `Disclosure`, `Progress`, `Menu` share visual treatment while retaining semantic roles and existing handlers.
 - `Table` uses native table children; `TableScroll` provides a labeled keyboard-scrollable region. Density is comfortable by default, compact when specified. Features keep column content, sorting, selection and bulk-action logic.
@@ -27,4 +27,30 @@ The internal library lives in `frontend/src/components/ui/`. Import directly fro
 - `TabList`, `Tab`, `TabPanel` provide arrow/Home/End activation and roving tab stops. Selected values and panel IDs remain controlled by features.
 - `Dialog` supports opt-in focus trapping/restoration and Escape callbacks. Existing specialized popovers retain their feature-owned keyboard behavior; modal consumers use managed focus unless they already own it.
 
-Migration checklist: #242 foundations implemented (PR #247); #243 artifacts implemented; #244 workspace implemented; #245 other surfaces implemented; #246 consolidation and full validation pending. Visual review uses actual application pages, not a separate gallery.
+Migration checklist: #242 foundations (PR #247), #243 artifacts (PR #248), #244 workspace (PR #249), #245 other surfaces (PR #250), and #246 consolidation are implemented on stacked review branches. Full validation: 158 browser tests passed; the unchanged legacy live-generation scenario failed and is tracked in #251. Build, lint and formatting pass. See `design-qa.md` for evidence and the remaining acceptance limitation. Visual review uses actual application pages, not a separate gallery.
+
+
+## Adoption rules
+
+Shared components own controls, table cells, status appearance, focus and density. Feature CSS owns placement, column widths, responsive composition and domain-specific content. Put new shared variants in `ui.css`; do not restore removed global input/button styles or create page-specific copies. ESLint rejects raw interactive controls and tables outside the UI library, and rejects dependencies from the UI library into feature code. Native semantic children such as `thead`, `tr`, `th` and `td` remain valid within Table.
+
+The default row density is comfortable (12px by 16px table cell padding); compact tables use 8px by 12px. Normal controls have a 44px minimum height; compact controls use 36px. Badge supports subtle, inline and compact presentation with semantic text colors tested on tinted backgrounds. Table scroll containers must have a descriptive accessible name. Dialog focus is managed for modal workflows; the project chooser remains a nonmodal popover with its existing focus behavior.
+
+## Screen migration checklist
+
+| Surface | Shared patterns | Story |
+| --- | --- | --- |
+| Home, Projects and recovery screens | SearchField, Badge, List, CollectionState, Button, Link | #244 |
+| Reviews, Runs and Reports indexes | CollectionToolbar, List, Badge, filters and states | #244 |
+| Overview and project navigation | Shared header, Link, Button, Badge and Disclosure | #245 |
+| Requirements and source imports | Table/TableScroll, labeled fields, selection controls, actions | #243 / #245 |
+| Context and template setup | Field, Input, Select, Textarea, Button and Surface | #242 / #245 |
+| Use Cases | List, Disclosure, Radio, Textarea, Badge, Alert and actions | #243 |
+| Test Cases and impact analysis | ListDetail, SelectableItem, Table, TabList/Tab/TabPanel, states | #243 / #245 |
+| Traceability, coverage and analysis | Table, List, Disclosure, Badge and states | #243 |
+| Automation, execution and report evidence | Table, Checkbox, Input, Select, Alert, actions | #243 / #245 |
+| Export and integration forms | Field, Input, Select, Textarea, Checkbox, alerts and actions | #245 |
+| Settings, authentication and confirmation dialogs | Dialog, TabList, labeled controls, shared focus management | #245 |
+| Account/project menus, diagnostics and usage | Menu, Dialog, Disclosure, List and controls | #245 |
+
+Business-specific content remains composed by its feature. Backend contracts, auth, persistence, export format, sorting and filter rules are not part of this visual library. Removed unused legacy table/card styles and obsolete stepper/tab components; there is no separate component gallery or added dependency.
