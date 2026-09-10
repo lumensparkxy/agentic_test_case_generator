@@ -1,9 +1,12 @@
+import { Badge } from "../components/ui/surfaces";
+import { Button, Link } from "../components/ui/controls";
+import ProjectPageHeader from "../components/layout/ProjectPageHeader";
 import RouteLink from "../app/RouteLink";
 import { PROJECT_DESTINATIONS, buildProjectPath } from "../app/workflowRoutes";
 import UseCaseReviewWorkbench from "../components/reviews/UseCaseReviewWorkbench";
 import useUseCaseReview from "../hooks/useUseCaseReview";
 
-export default function UseCaseReviewPage({ project, identity, request, navigate, onDecisionCommitted, onReloadLatest }) {
+export default function UseCaseReviewPage({ project, identity, request, navigate, onDecisionCommitted, onReloadLatest, onBack, onNext }) {
 	const projectId = project?.project_id || "";
 	const snapshot = project?.current_snapshots?.use_cases || null;
 	const stageState = project?.stage_state?.use_cases || null;
@@ -45,23 +48,29 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 			aria-busy={review.isSubmitting || review.isReloading || undefined}
 			tabIndex={-1}
 		>
-			<header className="use-case-review-page-header">
-				<div>
-					<span className="use-case-page-kicker">{project?.name || "Project"}</span>
-					<h1 id="use-case-review-title">Use Cases</h1>
-					<p>Review the current scenario artifact and record a durable human decision.</p>
-				</div>
-				{snapshot ? (
-					<div className="use-case-page-status-actions">
-						<span className={`use-case-page-freshness ${reviewStatus.tone}`} role="status" aria-label="Current human review status">
-							{reviewStatus.label}
-						</span>
-						<a className="use-case-skip-review-link" href="#use-case-review-decision">
-							Skip to review decision
-						</a>
-					</div>
-				) : null}
-			</header>
+			<ProjectPageHeader
+				title="Use Cases"
+				titleId="use-case-review-title"
+				project={project}
+				navigate={navigate}
+				actions={
+					snapshot ? (
+						<div className="use-case-page-status-actions">
+							<Badge
+								tone={reviewStatus.tone === "approved" ? "success" : "warning"}
+								className={`use-case-page-freshness ${reviewStatus.tone}`}
+								role="status"
+								aria-label="Current human review status"
+							>
+								{reviewStatus.label}
+							</Badge>
+							<Link className="use-case-skip-review-link" href="#use-case-review-decision">
+								Skip to review decision
+							</Link>
+						</div>
+					) : null
+				}
+			/>
 
 			{snapshot ? (
 				<UseCaseReviewWorkbench project={project} snapshot={snapshot} stageState={stageState} review={review} />
@@ -86,6 +95,14 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 					</div>
 				</section>
 			)}
+			<nav className="panel-nav" aria-label="Workflow steps">
+				<Button variant="secondary" onClick={onBack} title="Back to Context">
+					Back
+				</Button>
+				<Button onClick={onNext} title="Next to Test Cases">
+					Next
+				</Button>
+			</nav>
 		</main>
 	);
 }

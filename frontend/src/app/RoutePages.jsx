@@ -1,3 +1,8 @@
+import { Alert, Disclosure } from "../components/ui/surfaces";
+import { Button } from "../components/ui/controls";
+import { List, ListItem, CollectionState } from "../components/ui/collections";
+import { CircleAlert, LockKeyhole } from "lucide-react";
+import ProjectPageHeader from "../components/layout/ProjectPageHeader";
 import RouteLink from "./RouteLink";
 import { GLOBAL_DESTINATIONS, PROJECT_DESTINATIONS, PROJECT_NAV_ITEMS, buildGlobalPath, buildProjectPath } from "./workflowRoutes";
 
@@ -70,14 +75,14 @@ export function ProjectsRoutePage({ navigate, projects = [], isLoading = false, 
 				<p>Open a QA project at its stable overview and workflow destinations.</p>
 			</header>
 			{error ? (
-				<div className="route-inline-error" role="alert">
+				<Alert as="div" tone="danger" className="route-inline-error" role="alert">
 					<p>{error}</p>
 					{onRetry ? (
-						<button type="button" className="secondary" onClick={onRetry}>
+						<Button type="button" className="secondary" onClick={onRetry}>
 							Retry
-						</button>
+						</Button>
 					) : null}
-				</div>
+				</Alert>
 			) : null}
 			{isLoading ? (
 				<div className="route-project-list" aria-label="Loading projects">
@@ -85,9 +90,9 @@ export function ProjectsRoutePage({ navigate, projects = [], isLoading = false, 
 					<div className="route-project-card route-skeleton" />
 				</div>
 			) : projects.length ? (
-				<ul className="route-project-list" aria-label="QA projects">
+				<List variant="collection" className="route-project-list" aria-label="QA projects">
 					{projects.map((project) => (
-						<li className="route-project-card" key={project.project_id}>
+						<ListItem className="route-project-card" key={project.project_id}>
 							<div>
 								<strong>{project.name}</strong>
 								<span>Revision {project.current_revision ?? 0}</span>
@@ -95,14 +100,14 @@ export function ProjectsRoutePage({ navigate, projects = [], isLoading = false, 
 							<RouteLink className="route-secondary-link" to={buildProjectPath(project.project_id)} navigate={navigate}>
 								Open project
 							</RouteLink>
-						</li>
+						</ListItem>
 					))}
-				</ul>
+				</List>
 			) : (
-				<section className="route-page-card route-empty-state" aria-labelledby="projects-empty-title">
+				<CollectionState as="section" kind="empty" className="route-page-card route-empty-state" aria-labelledby="projects-empty-title">
 					<h2 id="projects-empty-title">No projects yet</h2>
 					<p>Use the project control to create your first QA project.</p>
-				</section>
+				</CollectionState>
 			)}
 		</main>
 	);
@@ -170,37 +175,86 @@ export function ProjectLoadingPage({ projectId = "" }) {
 				<h1 id="project-loading-title">Opening project…</h1>
 				<p>Loading the current workflow, status, and project evidence.</p>
 			</header>
-			{projectId ? <span className="route-loading-detail">Project {projectId}</span> : null}
+			{projectId ? (
+				<CollectionState as="span" kind="loading" className="route-loading-detail">
+					Project {projectId}
+				</CollectionState>
+			) : null}
 		</main>
 	);
 }
 
-export function ProjectOverviewPage({ project, status = null, navigate, contextualTask = null }) {
+export function ProjectOverviewPage({
+	project,
+	status = null,
+	navigate,
+	contextualTask = null,
+	counts = {},
+	testCaseReview,
+	exportLocked,
+}) {
 	const projectId = project?.project_id || "";
-	const currentStage = status?.current_stage || project?.latest_stage || "requirements";
+	const attention = Boolean(testCaseReview && !testCaseReview.approved);
 
 	return (
-		<main id="main-content" className="route-page" aria-labelledby="project-overview-title" tabIndex={-1}>
-			<header className="route-page-header">
-				<span className="route-page-kicker">Project overview</span>
-				<h1 id="project-overview-title">{project?.name || "Project"}</h1>
-				<p>
-					Revision {status?.project_revision ?? project?.current_revision ?? 0} · Current stage {`${currentStage}`.replaceAll("_", " ")}
-				</p>
-			</header>
+		<main id="main-content" className="route-page project-overview-page" aria-labelledby="project-overview-title" tabIndex={-1}>
+			<ProjectPageHeader
+				title="Overview"
+				titleId="project-overview-title"
+				project={{ ...project, current_revision: status?.project_revision ?? project?.current_revision }}
+				navigate={navigate}
+			/>
 			{projectId ? (
 				<>
 					{contextualTask}
-					<ul className="route-workbench-list" aria-label="Project workbenches">
-						{PROJECT_NAV_ITEMS.filter((item) => item.id !== PROJECT_DESTINATIONS.OVERVIEW).map((item) => (
-							<li key={item.id}>
-								<RouteLink to={buildProjectPath(projectId, item.id)} navigate={navigate}>
-									<strong>{item.label}</strong>
-									<span>{item.title}</span>
-								</RouteLink>
-							</li>
+					<div className="overview-counts" aria-label="Project artifact counts">
+						{[
+							["requirements", counts.requirements],
+							["scenarios", counts.scenarios],
+							["test cases", counts.testCases],
+						].map(([label, count]) => (
+							<div key={label}>
+								<strong>{count ?? "—"}</strong>
+								<span>{label}</span>
+							</div>
 						))}
-					</ul>
+					</div>
+					<section className="overview-attention" aria-labelledby="overview-attention-title">
+						<h2 id="overview-attention-title">Needs your attention</h2>
+						{attention && (
+							<div className="overview-attention-row">
+								<CircleAlert aria-hidden="true" />
+								<strong>Test cases need refinement</strong>
+								<p>{testCaseReview.summary || "Review the quality findings before continuing."}</p>
+								<RouteLink to={buildProjectPath(projectId, "test-cases")} navigate={navigate}>
+									View test cases
+								</RouteLink>
+							</div>
+						)}
+						{exportLocked && (
+							<div className="overview-attention-row">
+								<LockKeyhole aria-hidden="true" />
+								<strong>Export is blocked</strong>
+								<p>Complete the required reviews to unlock exports.</p>
+								<RouteLink to={buildProjectPath(projectId, "reports")} navigate={navigate}>
+									View requirements for export
+								</RouteLink>
+							</div>
+						)}
+						{!attention && !exportLocked && <p>No additional issues need your attention.</p>}
+					</section>
+					<Disclosure className="overview-workbenches">
+						<summary>All project workbenches</summary>
+						<List variant="collection" className="route-workbench-list" aria-label="Project workbenches">
+							{PROJECT_NAV_ITEMS.filter((item) => item.id !== PROJECT_DESTINATIONS.OVERVIEW).map((item) => (
+								<ListItem key={item.id}>
+									<RouteLink to={buildProjectPath(projectId, item.id)} navigate={navigate}>
+										{item.label}
+									</RouteLink>
+								</ListItem>
+							))}
+						</List>
+					</Disclosure>
 				</>
 			) : (
 				<RecoveryLinks navigate={navigate} />

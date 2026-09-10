@@ -1,3 +1,5 @@
+import { CollectionState, List } from "../ui/collections";
+import { Surface, Disclosure } from "../ui/surfaces";
 export default function ScenarioCoveragePanel({
 	coveragePlan,
 	coveredScenarioTotal,
@@ -9,16 +11,16 @@ export default function ScenarioCoveragePanel({
 }) {
 	if (coveragePlan.length === 0) {
 		return (
-			<div className="generate-result-empty">
+			<CollectionState as="div" kind="empty" className="generate-result-empty">
 				<h3>Scenario Coverage Plan</h3>
 				<p>No scenario coverage plan is available for this run.</p>
-			</div>
+			</CollectionState>
 		);
 	}
 
 	return (
-		<div className="result-section">
-			<details className="collapsible-panel" open>
+		<Surface as="div" className="result-section">
+			<Disclosure className="collapsible-panel" open>
 				<summary className="collapsible-panel-summary">
 					<span className="collapsible-panel-copy">
 						<span className="collapsible-panel-title">Scenario Coverage Plan</span>
@@ -43,7 +45,7 @@ export default function ScenarioCoveragePanel({
 					</span>
 				</summary>
 				<div className="collapsible-panel-body">
-					<div className="coverage-plan-list">
+					<List as="div" variant="grouped" className="coverage-plan-list">
 						{coveragePlan.map((plan) => {
 							const summary = getRequirementScenarioSummary(plan.requirement_id);
 							const missingScenarioTypes = new Set(summary?.missing_scenario_types || []);
@@ -77,9 +79,9 @@ export default function ScenarioCoveragePanel({
 								</div>
 							);
 						})}
-					</div>
+					</List>
 				</div>
-			</details>
-		</div>
+			</Disclosure>
+		</Surface>
 	);
 }

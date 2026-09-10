@@ -78,6 +78,8 @@ def _work_item_count(
     snapshot_count = _snapshot_count(snapshot, stage_state.stage)
     if snapshot_count is not None:
         return snapshot_count
+    if stage_state.stage == "use_cases":
+        return None
     return _first_count(
         dict(stage_state.summary or {}),
         (
@@ -91,6 +93,14 @@ def _work_item_count(
             "evidence_count",
         ),
     )
+
+
+def _requirement_group_count(project: QaProjectDetail, stage: OrchestratorStageName) -> Optional[int]:
+    if stage != "use_cases":
+        return None
+    snapshot = project.current_snapshots.get(stage)
+    plan = snapshot.payload.get("coverage_plan") if snapshot else None
+    return len(plan) if isinstance(plan, list) else None
 
 
 def _work_item_kind(action: OrchestratorActionRecommendation) -> str:
@@ -124,6 +134,7 @@ def _work_item_for(
         enabled=action.enabled,
         primary=action.primary,
         count=_work_item_count(project, stage_state),
+        requirement_group_count=_requirement_group_count(project, stage_state.stage),
         reason=reason,
         current_snapshot_id=snapshot_id,
         updated_at=updated_at,
@@ -150,6 +161,7 @@ def _informational_work_item_for(
         enabled=False,
         primary=False,
         count=_work_item_count(project, stage_state),
+        requirement_group_count=_requirement_group_count(project, stage_state.stage),
         reason=reason,
         current_snapshot_id=stage_state.current_snapshot_id,
         updated_at=stage_state.updated_at or project.updated_at,

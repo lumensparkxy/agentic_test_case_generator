@@ -398,6 +398,7 @@ export function useCaseWorkspaceSummaryFixture(project, overrides = {}) {
 				enabled: action.enabled,
 				primary: action.primary,
 				count: action.stage === "use_cases" ? useCaseScenarioTotal(project) : null,
+				requirement_group_count: action.stage === "use_cases" ? (snapshot?.payload?.coverage_plan?.length ?? null) : null,
 				reason: action.reason,
 				current_snapshot_id: snapshot?.snapshot_id || null,
 				updated_at: project.updated_at,

@@ -230,7 +230,7 @@ test.describe("Responsive project shell", () => {
 			expect(mainBox).not.toBeNull();
 			expect(appBarBox.height).toBeGreaterThanOrEqual(68);
 			expect(appBarBox.height).toBeLessThanOrEqual(76);
-			expect(Math.round(mainBox.y - (appBarBox.y + appBarBox.height))).toBe(16);
+			expect(Math.round(mainBox.y - (appBarBox.y + appBarBox.height))).toBe(0);
 			await expect(projectMenuTrigger).toContainText(PROJECT_NAME);
 			await expect(projectMenuTrigger).toContainText("revision 12");
 			await expect(page.getByRole("button", { name: /^Open system health details$/i })).toBeVisible();
@@ -244,12 +244,13 @@ test.describe("Responsive project shell", () => {
 	for (const viewport of viewports) {
 		test(`contains project content at ${viewport.width}px (${viewport.label})`, async ({ page }) => {
 			await openResponsiveProject(page, viewport);
-			const heading = page.locator(".route-page-header h1");
+			const heading = page.locator(".project-page-header h1");
 			const routePage = page.locator(".route-page");
 			const globalNavigation = page.getByRole("navigation", { name: "Global navigation" });
 			const projectNavigation = page.getByRole("navigation", { name: "Project navigation" });
 
-			await expect(heading).toHaveText(PROJECT_NAME);
+			await expect(heading).toHaveText("Overview");
+			await expect(page.locator(".project-page-header")).toContainText(PROJECT_NAME);
 			await expect(page.getByLabel("Contextual task").getByRole("button", { name: /^Open workbench$/i })).toBeVisible();
 			await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 			await expectExactlyOneCurrent(globalNavigation);
@@ -265,7 +266,7 @@ test.describe("Responsive project shell", () => {
 				await expect(projectNavigation.locator(".workflow-navigation-list")).toBeHidden();
 			} else {
 				await expect(page.getByRole("button", { name: /^Open workspace controls$/i })).toHaveCount(0);
-				await expect(projectNavigation.getByRole("link", { name: /^Overview, Current$/i })).toBeVisible();
+				await expect(projectNavigation.getByRole("link", { name: /^Overview$/i })).toBeVisible();
 			}
 
 			if ([390, 760].includes(viewport.width)) {
@@ -306,7 +307,7 @@ test.describe("Responsive project shell", () => {
 			await projectToggle.focus();
 			await page.keyboard.press(width === 760 ? "Space" : "Enter");
 			await expect(projectNavigation.locator(".workflow-navigation-list")).toBeVisible();
-			await expect(projectNavigation.locator(".workflow-navigation-state")).toHaveCount(7);
+			await expect(projectNavigation.locator(".nav-workflow-status")).toHaveCount(6);
 			await expect(projectNavigation.getByRole("button", { name: /^Close project navigation$/i })).toHaveAttribute("aria-expanded", "true");
 			await page.keyboard.press("Tab");
 			await expect(projectNavigation.getByRole("link").first()).toBeFocused();
@@ -326,18 +327,23 @@ test.describe("Responsive project shell", () => {
 		await expect(globalNavigation.locator('[aria-current="page"]')).toContainText("Projects");
 
 		const expectedStates = [
-			{ name: "Overview, Current", tone: "active" },
+			{ name: "Overview", tone: "active" },
 			{ name: "Requirements, Complete", tone: "complete" },
 			{ name: "Context, Pending", tone: "pending" },
-			{ name: "Use Cases, Needs attention", tone: "attention" },
+			{ name: "Use Cases, Awaiting review", tone: "attention" },
 			{ name: "Automation, Blocked", tone: "blocked" },
 		];
 		for (const expectedState of expectedStates) {
 			const item = projectNavigation.getByRole("link", { name: expectedState.name });
-			const badge = item.locator(".workflow-navigation-state");
+			const badge = item.locator(".nav-workflow-status");
 			await expect(item).toBeVisible();
-			await expect(badge).toHaveAttribute("data-status-tone", expectedState.tone);
-			await expect(badge.locator("svg")).toBeVisible();
+			if (expectedState.tone === "active") {
+				await expect(item).toHaveAttribute("aria-current", "page");
+				await expect(badge).toHaveCount(0);
+			} else {
+				await expect(badge).toHaveClass(new RegExp(expectedState.tone));
+				await expect(badge.locator("svg")).toBeVisible();
+			}
 		}
 
 		await projectNavigation.getByRole("button", { name: /^Collapse project navigation$/i }).click();
@@ -368,12 +374,12 @@ test.describe("Responsive project shell", () => {
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expectVisuallyContained(workflowLabel, workflowLabel.locator("xpath=.."));
 		await expectVisuallyContained(globalLabel, globalNavigation);
-		expect(await workflowLabel.evaluate((element) => getComputedStyle(element).overflowWrap)).not.toBe("anywhere");
-		expect(await workflowLabel.evaluate((element) => getComputedStyle(element).textOverflow)).toBe("ellipsis");
+		expect(await workflowLabel.evaluate((element) => getComputedStyle(element).overflowWrap)).toBe("anywhere");
+		expect(await workflowLabel.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("normal");
 		await expectNoDocumentOverflow(page, "long expanded shell labels");
 
 		await page.setViewportSize({ width: 320, height: 900 });
-		const heading = page.locator(".route-page-header h1");
+		const heading = page.locator(".project-page-header h1");
 		await heading.evaluate((element) => {
 			element.textContent = "InternationalizedQualityAssuranceWorkspaceWithoutNaturalBreakpoints";
 		});

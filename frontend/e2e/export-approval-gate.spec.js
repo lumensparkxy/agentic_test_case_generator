@@ -274,9 +274,11 @@ test.describe("Export approval gate", () => {
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page).toHaveURL(testCasesPath);
 		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
+		await page.getByText("View findings", { exact: true }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
 		await page.getByRole("tab", { name: /test cases/i }).click();
-		await expect(page.getByRole("region", { name: "Generated test cases table" })).toHaveAttribute("tabindex", "0");
+		await expect(page.getByRole("region", { name: "Generated test cases", exact: true })).toBeVisible();
+		await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toBeVisible();
 		await page.getByRole("tab", { name: /traceability/i }).click();
 		await expect(page.getByRole("region", { name: "Requirement traceability table" })).toHaveAttribute("tabindex", "0");
 		await page.getByRole("tab", { name: /diagnostics/i }).click();

@@ -1,3 +1,6 @@
+import { Badge } from "../ui/surfaces";
+import { CollectionToolbar, CollectionState } from "../ui/collections";
+import { Select, Button } from "../ui/controls";
 import { CheckCircle2, Circle, CircleAlert, Clock3, FileText, SearchX, XCircle } from "lucide-react";
 
 import { formatWorkspaceStatus, getWorkspaceStatusTone } from "./workspacePresentation";
@@ -31,15 +34,16 @@ export function ActivityStatus({ status, kind }) {
 	const Icon = kind === "report" ? getReportStatusIcon(status) : getRunStatusIcon(status);
 	const label = formatActivityStatus(status, kind);
 	return (
-		<span
+		<Badge
+			tone={getWorkspaceStatusTone(status)}
+			icon={Icon}
 			className={`activity-index-status activity-index-status-${getWorkspaceStatusTone(status)}`}
 			data-status-kind={kind}
 			data-status-value={status || "unknown"}
 		>
-			<Icon aria-hidden="true" size={15} />
 			<span className="sr-only">Status: </span>
 			{label}
-		</span>
+		</Badge>
 	);
 }
 
@@ -60,7 +64,7 @@ export function ActivityIndexFilters({
 	};
 
 	return (
-		<fieldset className="activity-index-controls" aria-label={`Filter ${name.toLocaleLowerCase()}`}>
+		<CollectionToolbar as="fieldset" className="activity-index-controls" aria-label={`Filter ${name.toLocaleLowerCase()}`}>
 			<legend className="sr-only">Filter {name.toLocaleLowerCase()}</legend>
 			<WorkspaceSearch
 				value={query}
@@ -73,23 +77,23 @@ export function ActivityIndexFilters({
 				{filters.map((filter) => (
 					<label key={filter.id}>
 						<span>{filter.label}</span>
-						<select ref={filter.selectRef} value={filter.value} onChange={(event) => filter.onChange(event.target.value)}>
+						<Select ref={filter.selectRef} value={filter.value} onChange={(event) => filter.onChange(event.target.value)}>
 							<option value="all">{filter.allLabel}</option>
 							{filter.options.map((option) => (
 								<option value={option.value} key={option.value}>
 									{option.label}
 								</option>
 							))}
-						</select>
+						</Select>
 					</label>
 				))}
 				{hasActiveFilters ? (
-					<button type="button" className="activity-index-clear-filters" onClick={clearFilters}>
+					<Button type="button" className="activity-index-clear-filters" onClick={clearFilters}>
 						Clear filters
-					</button>
+					</Button>
 				) : null}
 			</div>
-		</fieldset>
+		</CollectionToolbar>
 	);
 }
 
@@ -111,14 +115,14 @@ export function ActivityIndexResultsHeading({ id, eyebrow, title, countLabel, he
 
 export function ActivityIndexEmpty({ title, message }) {
 	return (
-		<section className="activity-index-empty" aria-labelledby="activity-index-empty-title">
-			<span className="activity-index-empty-icon">
+		<CollectionState as="section" kind="empty" className="activity-index-empty" aria-labelledby="activity-index-empty-title">
+			<CollectionState as="span" kind="empty" className="activity-index-empty-icon">
 				<SearchX aria-hidden="true" size={22} />
-			</span>
+			</CollectionState>
 			<div>
 				<h2 id="activity-index-empty-title">{title}</h2>
 				<p>{message}</p>
 			</div>
-		</section>
+		</CollectionState>
 	);
 }

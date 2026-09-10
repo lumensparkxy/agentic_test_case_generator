@@ -111,3 +111,13 @@ export const matchesWorkspaceQuery = (query, ...values) => {
 export function getProjectPath(projectId, destination = PROJECT_DESTINATIONS.OVERVIEW) {
 	return buildProjectPath(projectId, destination);
 }
+
+export const formatWorkItemCount = (item) => {
+	if (item?.stage !== "use_cases") return Number.isInteger(item?.count) ? `${item.count} items` : "";
+	const parts = [];
+	if (Number.isInteger(item.count)) parts.push(`${item.count} scenario${item.count === 1 ? "" : "s"}`);
+	if (Number.isInteger(item.requirement_group_count)) {
+		parts.push(`${item.requirement_group_count} requirement group${item.requirement_group_count === 1 ? "" : "s"}`);
+	}
+	return parts.join(" · ");
+};

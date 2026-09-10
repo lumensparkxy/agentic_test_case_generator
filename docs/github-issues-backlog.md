@@ -1,6 +1,21 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented, awaiting review: #257 — Inline case summaries and Step/Action/Expected result columns. Builds on PR #256; 50 focused browser checks and build/lint/format pass.
+
+- Implemented, awaiting review: #255 — Compact shared typography and resizable Test Cases/Use Cases panes. Builds on PR #254; 152 frontend regression checks pass.
+
+- Implemented, awaiting review: #253 — Align Back/Next with sidebar order, include Use Cases, and make Template Setup an explicit Test Cases subview. Builds on PR #252; 45 focused navigation/review/export browser checks and build/lint/format pass.
+
+- Implemented, awaiting review/merge: #241 — Shared design system across all application screens. Stories: #242 foundations (PR #247), #243 artifact collections (PR #248), #244 workspace (PR #249), #245 remaining surfaces (PR #250), #246 consolidation. Builds on #239 / PR #240. Final full-suite acceptance has one known legacy test failure tracked in #251.
+- Ready: #251 — Repair the legacy live-generation E2E for project workbenches; preserve live quality and export assertions. Discovered during #246 (158 other frontend tests pass).
+
 This file contains issue-ready drafts for the implementation plan in `docs/implementation-plan.md`.
+
+## UI/UX audit follow-up
+
+- In progress: [#239](https://github.com/lumensparkxy/agentic_test_case_generator/issues/239) — Implement the selected shared design across Overview, Use Cases and Test Cases, preserving review gates and responsive access. Builds on #237.
+
+- In progress: [#237](https://github.com/lumensparkxy/agentic_test_case_generator/issues/237) — Correct use-case scenario counts in workspace summaries. Count nested scenarios separately from requirement groups and keep Home, Reviews, and the current artifact consistent.
 
 ## Created GitHub issues
 

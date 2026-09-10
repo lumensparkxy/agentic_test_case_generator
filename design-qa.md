@@ -1,72 +1,44 @@
-# Collapsed Workflow Rail Design QA
+# Follow-up QA — compact typography and resizable panes (#255)
 
-- Source visual truth: `/Users/m1/Documents/Screenshot 2026-09-02 at 23.58.34.png`
-- Implementation screenshot: `/tmp/issue-229-collapsed-after.png`
-- Combined comparison: `/tmp/issue-229-design-qa-comparison.png`
-- Browser and state: Codex in-app browser, authenticated local E2E account, project overview, desktop rail collapsed
-- CSS viewport: 1440 × 900 at `deviceScaleFactor: 1`
-- Source pixels: 234 × 1594 at approximately 2× density
-- Implementation pixels: 1440 × 900 at 1× density
-- Density normalization: source downsampled to 117 × 797; implementation cropped to the same 117 × 797 CSS-pixel rail region before horizontal comparison
+The current follow-up changes body text to 14px, page headings to 28px/26px and section headings to 20px while preserving 13px secondary text and 44px controls. Test Cases and Use Cases now share a visible resizable divider. Actual desktop pages were visually inspected after the changes: long case titles and scenario text wrap, the divider stays between panes, and the explicit review decision remains unchanged. The Test Cases screenshot shows more of the steps at the same 1488 × 1056 viewport.
 
-## Full-view comparison evidence
+All 152 tests in the frontend home-first regression suite pass, including new mouse drag, keyboard limits/reset, saved widths, mobile stacking, selection preservation and font-size checks. Existing responsive and accessibility checks pass. The full live-integration suite was not repeated for this follow-up; its separate known #251 limitation remains as documented below. No additional visual blocker was found in the inspected pages.
 
-The browser-rendered desktop view shows the global app bar, collapsed workflow
-rail, project heading, contextual task, and workbench cards together. The rail
-contains one primary icon for each of the seven destinations, its active state
-remains clear, the workspace gains vertical breathing room, and no content is
-hidden by the change.
+---
 
-## Focused comparison evidence
+# Design QA — shared design system (#241 / #246)
 
-The normalized side-by-side rail comparison was required because the source is
-a narrow 2× crop rather than a full viewport. The source shows a second circular
-status icon below every stage icon. The implementation removes those repeated
-tokens and preserves a single centered stage icon per destination. The active
-Overview tile shrinks to the same one-icon rhythm instead of grouping two
-control-like shapes.
+Visual result: passed for the reviewed actual pages. Migration validation: 158 of 159 browser tests pass; the remaining legacy live-generation test is tracked in #251. The full suite is not green.
 
-## Required fidelity surfaces
+## Visual baseline and evidence
 
-- Fonts and typography: no typography changed; expanded labels and status copy retain the existing family, weights, line heights, truncation, and hierarchy.
-- Spacing and layout rhythm: the collapsed rail keeps its 72-pixel column and existing padding, while each destination now occupies one compact icon row. The intentional reduction in rail height is the selected design change.
-- Colors and visual tokens: existing active blue, success green, warning amber, pending neutral, borders, radii, and shadows remain mapped to the primary stage markers.
-- Image quality and asset fidelity: the reference contains only standard UI icons. The implementation keeps the existing Lucide icon set and does not introduce raster, placeholder, custom SVG, or CSS-drawn assets.
-- Copy and content: no user-facing destination or status copy was removed. Collapsed accessible names and native hover text still expose values such as “Requirements — Complete.”
+The selected Overview, Use Cases and Test Cases direction was implemented in #239 / PR #240. This migration compares against those approved real-page captures rather than replacing their layout with a new design. Baseline captures are `implemented-overview-final.png`, `implemented-use-cases-final.png` and `implemented-test-cases-final.png` under `/Users/m1/.codex/visualizations/2026/09/10/01a08b92-58ae-7fd2-94e0-74fc99835662/overview-design/`.
 
-## Findings
+Final captures are in its `design-system/` subdirectory: `overview.jpg`, `use-cases.jpg`, `test-cases.jpg`, `requirements.jpg`, `home.jpg`, `use-cases-mobile.jpg`, `test-cases-mobile.jpg`, `test-cases-mobile-detail.jpg`, `home-mobile.jpg` and `settings-mobile.jpg`. Screenshots are local review evidence, not committed assets. Desktop CSS viewport: 1488 × 1056; narrow viewport: 390 × 844. Screenshot transport scales desktop output to approximately 1477 × 1048. Captures were inspected at equivalent display size. Mobile Test Cases captures include a scrolled view below its shell.
 
-No actionable P0, P1, or P2 mismatch remains. The visible difference from the
-source—the removal of every circled status token—is the requested design change.
+Each of the three desktop baseline/final pairs was opened in the same visual comparison input. The shared header/sidebar geometry, flat surfaces, page headings, next action, requirement groups and list/detail composition remain consistent. Shared badges now use semantic text colors and icons; radios have a clearer selected treatment; controls use common dimensions and focus appearance. Real long titles, all case metadata, quality findings and the explicit review decision remain intact. The actual project still shows 8 requirements, 28 scenarios and 25 cases, quality 65/100 and blocked export.
 
-## Comparison history
+Requirements uses native editable table cells within a bounded, labeled scroll container. Home uses the same controls and status treatments while retaining its workspace composition. Narrow Home and Use Cases wrap long content; Settings retains its scrollable dialog; Test Cases stacks its collection and detail. No separate gallery was created.
 
-1. First post-change capture showed seven centered workflow icons, zero
-   collapsed status tokens, and no overflow. The normalized focused comparison
-   confirmed that the duplicate icon row was removed without altering the rail's
-   visual language, so no corrective visual iteration was required.
+## Findings resolved
 
-## Interaction and responsive evidence
+- Consolidated duplicate control, badge, table and collection appearance into tokens and `ui.css`; removed unused table/card styles, old workflow tabs/stepper and duplicate Escape hook.
+- Fixed active-sidebar white-text rules leaking into shared status labels. All accessibility scenarios subsequently passed.
+- Restored the shared 44px icon-button treatment for Settings and dialog close controls after removing old global button appearance.
+- Updated stale test selectors for real tab semantics, visible case counts, Overview navigation and machine-quality wording. Approval and export assertions remain covered by dedicated gates and the lifecycle scenario.
+- The long-lived development tab briefly retained old component identities during HMR and showed unassociated workflow labels. Fresh-browser checks verify both Approval threshold controls and integration fields have accessible names. No production-build failure was observed.
 
-- Collapsed desktop: seven destinations, one visible SVG per destination, zero status tokens.
-- Expanded desktop: seven status tokens restored and visible.
-- Compact boundary at 900 pixels: navigation begins closed, opens from its named button, restores seven visible status tokens, and has no horizontal overflow.
-- Accessible names retain destination plus status, and collapsed items expose matching hover text.
-- Selecting the collapsed Requirements icon navigates to its canonical workbench and preserves the one-icon collapsed state; returning to Overview does the same.
-- Browser console showed no runtime errors after authenticated navigation and interaction. The expected local warning about incomplete Firebase web configuration remains and does not affect the stored E2E session or this workflow.
+## Validation
 
-## Implementation checklist
+- Each of the five stages ran build, lint and formatting checks. Foundations: 6 focused browser tests; artifact collections: 40; workspace: 67 unique scenarios after contrast correction; remaining surfaces: 60.
+- Final `npm run lint`, `npm run format:check`, `npm run build`: passed. Existing JavaScript chunk-size warning remains (585.43 kB).
+- Final `npm run test:e2e -- --workers=4 --retries=0 --timeout=45000`: **158 passed, 1 failed**. Covers populated, empty, filtered-empty, loading, error, disabled and selected actual-page fixture states; keyboard/focus, responsive reflow, accessibility, identity, stale responses, approvals, export and workflow actions.
+- Subsequent focused `shared-project-design.spec.js` run: **8 passed**, including an added assertion for both labeled workflow threshold fields.
+- `git diff --check`: passed.
+- No backend API/schema changes, new UI framework, dependencies or live review/generation/export mutations.
 
-- [x] One visible icon per collapsed workflow destination
-- [x] No separate collapsed status token
-- [x] Expanded desktop status tokens preserved
-- [x] Opened compact navigation status tokens preserved
-- [x] Accessible destination and status names preserved
-- [x] Hover status text preserved
-- [x] Desktop and compact overflow checks passed
+## Remaining limitation
 
-## Follow-up polish
+[#251](https://github.com/lumensparkxy/agentic_test_case_generator/issues/251) tracks the unchanged live-generation test in `frontend/e2e/workflow.spec.js:18`: it opens Home and waits for a file input that now lives in a project Requirements workbench. The obsolete helper also exists before this migration. It times out before a generation/export request. Repair requires updating that integration scenario to the current project workflow while preserving its live quality assertions. It was not skipped or weakened to make the suite appear green.
 
-No P3 follow-up is required for this scope.
-
-final result: passed
+The migration is implemented in five stacked PRs and awaits merge. Completion of the full-suite acceptance gate remains dependent on #251.

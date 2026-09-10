@@ -1,202 +1,187 @@
+import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
+import { Input, Button, Textarea } from "../ui/controls";
+import { Disclosure, Badge } from "../ui/surfaces";
+import { useId, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
-
-const getPriorityClass = (priority) => {
-	const map = { Critical: "priority-critical", High: "priority-high", Medium: "priority-medium", Low: "priority-low" };
-	return map[priority] || "";
-};
-
-const getStatusClass = (status) => {
-	const map = { Draft: "status-draft", Ready: "status-ready", "In Review": "status-review", Approved: "status-approved" };
-	return map[status] || "";
-};
 
 export default function GeneratedTestCasesView({
 	testCases,
-	templateFormat,
-	expandedRows,
-	onToggleRowExpansion,
 	feedback,
 	onFeedbackChange,
 	onRefineTestCases,
 	isGenerating,
 	testCaseActionDisabled,
 	allowRefinement = true,
+	qualityIssues = [],
 }) {
+	const [selectedId, setSelectedId] = useState(null);
+	const [query, setQuery] = useState("");
+	const searchId = useId();
+	const feedbackId = useId();
+	const cases = testCases.filter((tc) =>
+		[tc.id, tc.title, ...getTestCaseLinkedRequirementIds(tc)].join(" ").toLowerCase().includes(query.toLowerCase().trim())
+	);
+	const selected = cases.find((tc) => tc.id === selectedId) || cases[0];
+	const steps = selected?.steps || [];
+	const findings = selected
+		? qualityIssues.filter((issue) => new RegExp(`\\b${selected.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(issue))
+		: [];
 	return (
 		<>
-			<div className="result-section generate-result-section">
-				<h3>Generated Test Cases</h3>
-				{testCases.length === 0 ? (
-					<span className="helper-text">No test cases generated yet.</span>
-				) : templateFormat === "table" ? (
-					<div className="test-cases-table-wrapper" role="region" aria-label="Generated test cases table" tabIndex={0}>
-						<table className="test-cases-table">
-							<thead>
-								<tr>
-									<th className="col-id">ID</th>
-									<th className="col-title">Title</th>
-									<th className="col-priority">Priority</th>
-									<th className="col-type">Type</th>
-									<th className="col-status">Status</th>
-									<th className="col-preconditions">Preconditions</th>
-									<th className="col-steps">Steps</th>
-									<th className="col-expected">Expected Result</th>
-									<th className="col-testdata">Test Data</th>
-									<th className="col-time">Est. Time</th>
-									<th className="col-automation">Automation</th>
-									<th className="col-component">Component</th>
-									<th className="col-tags">Linked Reqs</th>
-									<th className="col-tags">Tags</th>
-								</tr>
-							</thead>
-							<tbody>
-								{testCases.map((tc) => (
-									<tr key={tc.id} className={expandedRows[tc.id] ? "expanded" : ""} onClick={() => onToggleRowExpansion(tc.id)}>
-										<td className="tc-id">{tc.id}</td>
-										<td className="tc-title">
-											<div className="title-cell">
-												<span className="expand-icon">{expandedRows[tc.id] ? "▼" : "▶"}</span>
-												{tc.title}
-											</div>
-											{tc.description && <div className="tc-description">{tc.description}</div>}
-										</td>
-										<td className="tc-priority">
-											<span className={`priority-badge ${getPriorityClass(tc.priority)}`}>{tc.priority || "Medium"}</span>
-										</td>
-										<td className="tc-type">{tc.type || "Functional"}</td>
-										<td className="tc-status">
-											<span className={`status-badge ${getStatusClass(tc.status)}`}>{tc.status || "Draft"}</span>
-										</td>
-										<td className="tc-preconditions">{tc.preconditions || "-"}</td>
-										<td className="tc-steps">
-											<ol>
-												{tc.steps?.slice(0, expandedRows[tc.id] ? undefined : 2).map((step, index) => (
-													<li key={`${tc.id}-step-${step.step || index + 1}`}>
-														<strong>{step.action}</strong>
-														<span className="step-expected">→ {step.expected}</span>
-														{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
-													</li>
-												))}
-												{!expandedRows[tc.id] && tc.steps?.length > 2 && (
-													<li className="more-steps">+{tc.steps.length - 2} more steps...</li>
-												)}
-											</ol>
-										</td>
-										<td className="tc-expected-result">{tc.expected_result || "-"}</td>
-										<td className="tc-testdata">{tc.test_data || "-"}</td>
-										<td className="tc-time">{tc.estimated_time || "-"}</td>
-										<td className="tc-automation">
-											<span className={`automation-badge ${tc.automation_status?.replace(/\s/g, "-").toLowerCase() || "manual"}`}>
-												{tc.automation_status || "Manual"}
-											</span>
-										</td>
-										<td className="tc-component">{tc.component || "-"}</td>
-										<td className="tc-tags">
-											{getTestCaseLinkedRequirementIds(tc).map((requirementId) => (
-												<span key={`${tc.id}-${requirementId}`} className="tag traceability-case-tag">
-													{requirementId}
-												</span>
-											))}
-										</td>
-										<td className="tc-tags">
-											{tc.tags?.map((tag) => (
-												<span key={tag} className="tag">
-													{tag}
-												</span>
-											))}
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				) : (
-					<div className="test-cases-grid">
-						{testCases.map((tc) => {
-							const linkedRequirementIds = getTestCaseLinkedRequirementIds(tc);
-							return (
-								<div key={tc.id} className="case-card">
-									<div className="case-header">
-										<span className="case-id">{tc.id}</span>
-										<span className="case-title">{tc.title}</span>
-										<span className={`priority-badge ${getPriorityClass(tc.priority)}`}>{tc.priority}</span>
-									</div>
-									{tc.description && <div className="case-description">{tc.description}</div>}
-									<div className="case-meta">
-										<span className="meta-item">
-											<strong>Type:</strong> {tc.type}
-										</span>
-										<span className={`status-badge ${getStatusClass(tc.status)}`}>{tc.status}</span>
-										<span className="meta-item">
-											<strong>Est:</strong> {tc.estimated_time}
-										</span>
-									</div>
-									{linkedRequirementIds.length > 0 && (
-										<div className="case-tags traceability-links">
-											{linkedRequirementIds.map((requirementId) => (
-												<span key={`${tc.id}-linked-${requirementId}`} className="tag traceability-case-tag">
-													{requirementId}
-												</span>
-											))}
+			<ListDetail
+				storageKey="test-cases"
+				label="Resize test case list and details"
+				className="test-review-workspace"
+				aria-label="Generated test cases"
+			>
+				<div className="test-review-list">
+					<h2>Generated Test Cases</h2>
+					<label htmlFor={searchId} className="sr-only">
+						Search test cases
+					</label>
+					<Input
+						id={searchId}
+						type="search"
+						placeholder="Search test cases"
+						value={query}
+						onChange={(event) => setQuery(event.target.value)}
+					/>
+					<ResultCount as="p" className="test-list-count" role="status">
+						{cases.length} of {testCases.length} test cases
+					</ResultCount>
+					<List as="div" variant="grouped" className="test-review-items">
+						{cases.map((tc) => (
+							<SelectableItem
+								key={tc.id}
+								type="button"
+								className={`test-review-item ${selected?.id === tc.id ? "selected" : ""}`}
+								aria-pressed={selected?.id === tc.id}
+								aria-controls="selected-test-case"
+								onClick={() => setSelectedId(tc.id)}
+							>
+								<span>
+									<small>{tc.id}</small> <strong>{tc.title}</strong>
+								</span>
+								<ChevronRight size={18} aria-hidden="true" />
+							</SelectableItem>
+						))}
+					</List>
+					{!cases.length && (
+						<CollectionState kind={testCases.length ? "filtered" : "empty"}>
+							<p>{testCases.length ? "No test cases match your search." : "No test cases generated yet."}</p>
+							{testCases.length > 0 && (
+								<Button variant="secondary" size="compact" onClick={() => setQuery("")}>
+									Clear search
+								</Button>
+							)}
+						</CollectionState>
+					)}
+				</div>
+				<section className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
+					{selected ? (
+						<>
+							<Badge icon={null} tone="info" className="case-id">
+								{selected.id}
+							</Badge>
+							<p className="test-detail-meta">
+								{selected.type || "Functional"} · {selected.priority || "Medium"} priority ·{" "}
+								{getTestCaseLinkedRequirementIds(selected).join(", ")}
+							</p>
+							<h2>{selected.title}</h2>
+							{selected.description && <p>{selected.description}</p>}
+							{findings.length > 0 && (
+								<Disclosure className="test-inline-findings">
+									<summary>Quality findings for {selected.id}</summary>
+									<List>
+										{findings.map((issue) => (
+											<ListItem key={issue}>{issue}</ListItem>
+										))}
+									</List>
+								</Disclosure>
+							)}
+							<h3>Preconditions</h3>
+							<p>{selected.preconditions || "None specified."}</p>
+							<div className="test-steps-heading">
+								<h3>Steps and expected results</h3>
+								<span>{steps.length} steps</span>
+							</div>
+							<TableScroll aria-label="Test steps and expected results">
+								<Table density="compact" className="test-detail-steps">
+									<colgroup>
+										<col className="test-step-number-column" />
+										<col />
+										<col />
+									</colgroup>
+									<thead>
+										<tr>
+											<th scope="col">Step</th>
+											<th scope="col">Action</th>
+											<th scope="col">Expected result</th>
+										</tr>
+									</thead>
+									<tbody>
+										{steps.map((step, index) => (
+											<tr key={`${selected.id}-${index}`}>
+												<th scope="row">{index + 1}</th>
+												<td>
+													{step.action}
+													{step.test_data && (
+														<p className="test-step-data">
+															<strong>Test data:</strong> {step.test_data}
+														</p>
+													)}
+												</td>
+												<td>{step.expected || "Not specified"}</td>
+											</tr>
+										))}
+									</tbody>
+								</Table>
+							</TableScroll>
+							<h3>Expected result</h3>
+							<p>{selected.expected_result || "Not specified."}</p>
+							<Disclosure className="test-case-metadata">
+								<summary>Test data and metadata</summary>
+								<dl>
+									{Object.entries({
+										"Test data": selected.test_data,
+										"Estimated time": selected.estimated_time,
+										"Case status": selected.status || "Draft",
+										Automation: selected.automation_status || "Manual",
+										Component: selected.component,
+										"Linked requirements": getTestCaseLinkedRequirementIds(selected).join(", "),
+										Tags: selected.tags?.join(", "),
+									}).map(([label, value]) => (
+										<div key={label}>
+											<dt>{label}</dt>
+											<dd>{value || "Not specified"}</dd>
 										</div>
-									)}
-									{tc.preconditions && <div className="case-preconditions">{tc.preconditions}</div>}
-									<div className="case-steps">
-										<strong>Steps</strong>
-										<ol>
-											{tc.steps?.map((step, index) => (
-												<li key={`${tc.id}-card-step-${step.step || index + 1}`}>
-													<span className="step-action">
-														{step.step || index + 1}. {step.action}
-													</span>
-													<span className="step-expected">→ {step.expected}</span>
-													{step.test_data && <span className="step-data">📋 {step.test_data}</span>}
-												</li>
-											))}
-										</ol>
-									</div>
-									{tc.expected_result && (
-										<div className="case-expected">
-											<strong>Expected Result:</strong> {tc.expected_result}
-										</div>
-									)}
-									{tc.tags && tc.tags.length > 0 && (
-										<div className="case-tags">
-											{tc.tags.map((tag) => (
-												<span key={tag} className="tag">
-													{tag}
-												</span>
-											))}
-										</div>
-									)}
-								</div>
-							);
-						})}
-					</div>
-				)}
-			</div>
-
+									))}
+								</dl>
+								<p>Case status and automation intent do not indicate quality approval or execution readiness.</p>
+							</Disclosure>
+						</>
+					) : (
+						<p>Select a test case to review its details.</p>
+					)}
+				</section>
+			</ListDetail>
 			{testCases.length > 0 && allowRefinement && (
-				<div className="feedback-section">
+				<section className="feedback-section">
 					<h3>Human Feedback</h3>
-					<p className="feedback-description">Provide feedback on the generated test cases. The AI will refine them based on your input.</p>
-					<textarea
+					<label htmlFor={feedbackId}>Changes to the test suite</label>
+					<Textarea
+						id={feedbackId}
 						className="feedback-textarea"
-						placeholder="Enter your feedback here... e.g., 'Add more negative test cases for upload feature', 'TC-003 needs more detailed steps', 'Include security test cases', etc."
+						placeholder="Describe the changes needed…"
 						value={feedback}
 						onChange={(event) => onFeedbackChange(event.target.value)}
 						rows={4}
 					/>
-					<div className="feedback-actions">
-						<button
-							onClick={onRefineTestCases}
-							disabled={!feedback.trim() || isGenerating || testCaseActionDisabled}
-							className="feedback-button"
-						>
-							{isGenerating ? "⏳ Updating Test Cases..." : "🔄 Implement Changes"}
-						</button>
-					</div>
-				</div>
+					<Button onClick={onRefineTestCases} disabled={!feedback.trim() || isGenerating || testCaseActionDisabled}>
+						{isGenerating ? "Updating test cases…" : "Implement Changes"}
+					</Button>
+				</section>
 			)}
 		</>
 	);

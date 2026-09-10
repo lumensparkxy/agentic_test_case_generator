@@ -17,7 +17,7 @@ const surfaceRoutes = {
 const surfaceHeadings = {
 	"empty Home": "Home",
 	"populated Home": "Home",
-	"project Overview": "Mercury Checkout",
+	"project Overview": "Overview",
 	"Use Cases": "Use Cases",
 	Automation: "Automation",
 };
@@ -32,7 +32,7 @@ async function openSurface(page, surface, width) {
 	}
 	await seedAuthenticatedSession(page);
 	await page.goto(surfaceRoutes[surface]);
-	await expect(page.getByRole("heading", { name: surfaceHeadings[surface], level: surface === "Automation" ? 2 : 1 })).toBeVisible({
+	await expect(page.getByRole("heading", { name: surfaceHeadings[surface], level: 1 })).toBeVisible({
 		timeout: 30_000,
 	});
 	if (surface === "empty Home") {
@@ -97,7 +97,7 @@ test("moves focus to each SPA destination through links, Back, and Forward", asy
 	await expect(page.locator("#main-content")).toBeFocused();
 
 	const projectNavigation = page.getByRole("navigation", { name: /^Project navigation$/i });
-	await projectNavigation.getByRole("link", { name: /^Overview,/i }).click();
+	await projectNavigation.getByRole("link", { name: /^Overview$/i }).click();
 	await expect(page).toHaveURL(buildProjectPath(USE_CASE_PROJECT_ID));
 	await expect(page.locator("#main-content")).toBeFocused();
 

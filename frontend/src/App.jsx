@@ -1,3 +1,9 @@
+import { Disclosure, Surface } from "./components/ui/surfaces";
+import { Button, Link, Radio, Field, Input, Select, Textarea } from "./components/ui/controls";
+import { TabList, Tab, TabPanel } from "./components/ui/tabs";
+import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
+import ProjectPageHeader from "./components/layout/ProjectPageHeader";
+import TestCaseQualitySummary from "./components/generation/TestCaseQualitySummary";
 import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
@@ -34,7 +40,6 @@ import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
 import useBrowserNavigation from "./hooks/useBrowserNavigation";
 import useContextWorkflowState from "./hooks/useContextWorkflowState";
-import useEscapeToClose from "./hooks/useEscapeToClose";
 import useExecutionWorkflowState from "./hooks/useExecutionWorkflowState";
 import useExportWorkflowState from "./hooks/useExportWorkflowState";
 import useIntegrationWorkflowState from "./hooks/useIntegrationWorkflowState";
@@ -55,6 +60,7 @@ import {
 	PROJECT_DESTINATIONS,
 	buildProjectPath,
 	getDestinationForLegacyTab,
+	getAdjacentProjectDestination,
 	getLegacyTabForDestination,
 	parseWorkflowRoute,
 	resolveOrchestratorDestination,
@@ -308,8 +314,6 @@ export default function App() {
 		setFeedback,
 		testCaseWorkflowSettings,
 		setTestCaseWorkflowSettings,
-		expandedRows,
-		setExpandedRows,
 		activeGenerateResultTab,
 		setActiveGenerateResultTab,
 		isGenerating,
@@ -746,10 +750,6 @@ export default function App() {
 	const requirementBlockingIssues = requirementReview?.approved ? [] : requirementReview?.blocking_issues || [];
 	const requirementReportDetailCount = requirementBlockingIssues.length + requirementWarnings.length + requirementParserFailures.length;
 
-	const toggleRowExpansion = (id) => {
-		setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
-	};
-
 	const chooseGenerateResultTab = (data) => {
 		const diagnostics = data?.workflow_diagnostics || null;
 		const metrics = data?.coverage_metrics || null;
@@ -888,8 +888,13 @@ export default function App() {
 				</div>
 
 				{requirementReportStats.length > 0 && (
-					<div className="requirement-report-table-wrapper" role="region" aria-label="Requirement review summary table" tabIndex={0}>
-						<table className="requirement-report-table">
+					<TableScroll
+						className="requirement-report-table-wrapper"
+						role="region"
+						aria-label="Requirement review summary table"
+						tabIndex={0}
+					>
+						<Table className="requirement-report-table">
 							<thead>
 								<tr>
 									{requirementReportStats.map((stat) => (
@@ -908,12 +913,12 @@ export default function App() {
 									))}
 								</tr>
 							</tbody>
-						</table>
-					</div>
+						</Table>
+					</TableScroll>
 				)}
 
 				{requirementReportDetailCount > 0 && (
-					<details className="requirement-report-details">
+					<Disclosure className="requirement-report-details">
 						<summary>
 							<span>Workflow notes</span>
 							<span className="requirement-report-details-count">
@@ -924,37 +929,37 @@ export default function App() {
 							{requirementBlockingIssues.length > 0 && (
 								<div className="requirement-report-detail-block issue">
 									<strong>Blocking issues</strong>
-									<ul>
+									<List>
 										{requirementBlockingIssues.slice(0, 4).map((issue) => (
-											<li key={issue}>{issue}</li>
+											<ListItem key={issue}>{issue}</ListItem>
 										))}
-									</ul>
+									</List>
 								</div>
 							)}
 
 							{requirementWarnings.length > 0 && (
 								<div className="requirement-report-detail-block warning">
 									<strong>Warnings</strong>
-									<ul>
+									<List>
 										{requirementWarnings.map((warning) => (
-											<li key={warning}>{warning}</li>
+											<ListItem key={warning}>{warning}</ListItem>
 										))}
-									</ul>
+									</List>
 								</div>
 							)}
 
 							{requirementParserFailures.length > 0 && (
 								<div className="requirement-report-detail-block alert">
 									<strong>Parser issues</strong>
-									<ul>
+									<List>
 										{requirementParserFailures.map((failure) => (
-											<li key={failure}>{failure}</li>
+											<ListItem key={failure}>{failure}</ListItem>
 										))}
-									</ul>
+									</List>
 								</div>
 							)}
 						</div>
-					</details>
+					</Disclosure>
 				)}
 			</div>
 		);
@@ -1279,9 +1284,6 @@ export default function App() {
 		}));
 	}, [currentUser?.email, azureDevOpsConnected]);
 
-	useEscapeToClose(isSignInDialogOpen, closeSignInDialog);
-	useEscapeToClose(isSettingsDialogOpen, closeSettingsDialog);
-
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = ensureRequestIdHeader(options.headers || {});
 
@@ -1445,7 +1447,6 @@ export default function App() {
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
 		setImpactUpdateMessage("");
-		setExpandedRows({});
 		setActiveGenerateResultTab(
 			(generationPayload.test_cases || []).length ? chooseGenerateResultTab(hydratedGenerationPayload) : "analysis"
 		);
@@ -1856,9 +1857,7 @@ export default function App() {
 		}
 
 		const routeTab = getLegacyTabForDestination(route.destination);
-		if (!(route.destination === "test-cases" && activeTab === 2)) {
-			setActiveTab(routeTab);
-		}
+		setActiveTab(routeTab);
 
 		if (isVerifyingSession) {
 			setProjectRouteStatus("loading");
@@ -2476,7 +2475,6 @@ export default function App() {
 			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
-			setExpandedRows({});
 			setFeedback("");
 			resetExecutionWorkflowState();
 			setReqFeedback("");
@@ -2559,7 +2557,6 @@ export default function App() {
 			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
-			setExpandedRows({});
 			setFeedback("");
 			resetExecutionWorkflowState();
 			setReqFeedback("");
@@ -2890,7 +2887,6 @@ export default function App() {
 			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
-			setExpandedRows({});
 			setFeedback("");
 			resetExecutionWorkflowState();
 			await refreshCurrentProject({ hydrate: false, operationScope });
@@ -3201,7 +3197,6 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
-			setExpandedRows({});
 			setActiveGenerateResultTab(chooseGenerateResultTab(data));
 			setDraftExportOverrideRequested(false);
 			setDraftExportOverrideReason("");
@@ -3662,14 +3657,14 @@ export default function App() {
 				{changedItems.length > 0 && (
 					<div className="impact-table-block">
 						<h4>Changed Inputs</h4>
-						<div className="selection-table-wrapper" role="region" aria-label="Changed inputs table" tabIndex={0}>
-							<table className="selection-table impact-table">
+						<TableScroll className="selection-table-wrapper" role="region" aria-label="Changed inputs table" tabIndex={0}>
+							<Table className="selection-table impact-table">
 								<thead>
 									<tr>
-										<th>Item</th>
-										<th>Type</th>
-										<th>Change</th>
-										<th>Approval</th>
+										<th scope="col">Item</th>
+										<th scope="col">Type</th>
+										<th scope="col">Change</th>
+										<th scope="col">Approval</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -3685,15 +3680,15 @@ export default function App() {
 										</tr>
 									))}
 								</tbody>
-							</table>
-						</div>
+							</Table>
+						</TableScroll>
 					</div>
 				)}
 
 				{impactedCases.length > 0 && (
 					<div className="impact-table-block">
 						<h4>Impacted Test Cases</h4>
-						<div className="impact-case-list">
+						<List as="div" variant="grouped" className="impact-case-list">
 							{impactedCases.slice(0, 8).map((testCase) => (
 								<div key={`${testCase.impact_source}-${testCase.test_case_id}`} className="impact-case-row">
 									<div>
@@ -3703,13 +3698,13 @@ export default function App() {
 									<span className={`impact-source-badge ${testCase.impact_source}`}>{testCase.impact_source.replace("_", " ")}</span>
 								</div>
 							))}
-						</div>
+						</List>
 					</div>
 				)}
 
 				<div className="impact-table-block">
 					<h4>Recommendations</h4>
-					<div className="impact-recommendation-list">
+					<List as="div" variant="grouped" className="impact-recommendation-list">
 						{recommendations.map((recommendation) => (
 							<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
 								<div>
@@ -3723,7 +3718,7 @@ export default function App() {
 								</div>
 							</div>
 						))}
-					</div>
+					</List>
 				</div>
 
 				{impactApplyBlockedByApproval && (
@@ -3733,11 +3728,11 @@ export default function App() {
 					</div>
 				)}
 				<div className="panel-form button-row impact-actions">
-					<button onClick={applyImpactUpdate} disabled={!canApplyImpactUpdate || testCaseActionDisabled}>
+					<Button onClick={applyImpactUpdate} disabled={!canApplyImpactUpdate || testCaseActionDisabled}>
 						{isApplyingImpactUpdate
 							? "⏳ Applying..."
 							: `Apply ${acceptedImpactRecommendationIds.length} Accepted Recommendation${acceptedImpactRecommendationIds.length === 1 ? "" : "s"}`}
-					</button>
+					</Button>
 				</div>
 				{impactUpdateMessage && (
 					<div className="impact-update-result" role="status">
@@ -3844,8 +3839,12 @@ export default function App() {
 			navigate(buildProjectPath(route.projectId, getDestinationForLegacyTab(resolvedTab)));
 		}
 	};
-	const goNext = () => selectWorkflowTab(Math.min(activeTab + 1, 5));
-	const goPrev = () => selectWorkflowTab(Math.max(activeTab - 1, 0));
+	const moveProjectStep = (direction) => {
+		const destination = getAdjacentProjectDestination(route.destination, direction);
+		if (destination) selectWorkflowTab(getLegacyTabForDestination(destination));
+	};
+	const goNext = () => moveProjectStep(1);
+	const goPrev = () => moveProjectStep(-1);
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
 	const activeProjectDestinationLabel = tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
 	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
@@ -3925,9 +3924,9 @@ export default function App() {
 
 	return (
 		<div className="page">
-			<a className="skip-link" href="#main-content">
+			<Link className="skip-link" href="#main-content">
 				Skip to main content
-			</a>
+			</Link>
 			<div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="application-live-status">
 				{applicationLiveStatus}
 			</div>
@@ -4060,6 +4059,16 @@ export default function App() {
 							<ProjectOverviewPage
 								project={currentProject}
 								status={orchestratorStatus}
+								counts={{
+									requirements: requirements.length,
+									scenarios: (currentProject.current_snapshots?.use_cases?.payload?.coverage_plan || []).reduce(
+										(sum, group) => sum + (group.scenarios?.length || 0),
+										0
+									),
+									testCases: testCases.length,
+								}}
+								testCaseReview={testCaseReview}
+								exportLocked={exportGateLocked}
 								navigate={navigate}
 								contextualTask={
 									<OrchestratorCockpitPanel
@@ -4084,25 +4093,30 @@ export default function App() {
 								navigate={navigate}
 								onDecisionCommitted={handleUseCaseReviewCommitted}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
+								onBack={goPrev}
+								onNext={goNext}
 							/>
 						) : (
 							<main
 								id="main-content"
 								ref={workflowMainRef}
-								className="workflow-main"
+								className={`workflow-main ${route.destination === "test-cases" ? "test-cases-page" : ""}`}
 								aria-label={`Workflow workspace: ${activeProjectDestinationLabel}`}
 								tabIndex={-1}
 							>
-								{route.destination === "test-cases" ? (
-									<div className="test-cases-section-tabs" role="tablist" aria-label="Test Cases sections">
-										<button type="button" role="tab" aria-selected={activeTab === 2} onClick={() => selectWorkflowTab(2)}>
-											Template setup
-										</button>
-										<button type="button" role="tab" aria-selected={activeTab === 3} onClick={() => selectWorkflowTab(3)}>
-											Generate and review
-										</button>
-									</div>
-								) : null}
+								<ProjectPageHeader
+									title={activeProjectDestinationLabel}
+									project={currentProject}
+									navigate={navigate}
+									actions={
+										route.destination === "test-cases" ? (
+											<Button className="secondary" onClick={() => selectWorkflowTab(activeTab === 2 ? 3 : 2)}>
+												{activeTab === 2 ? "Generate and review" : "Template setup"}
+											</Button>
+										) : null
+									}
+								/>
+
 								<OrchestratorCockpitPanel
 									currentProject={currentProject}
 									status={orchestratorStatus}
@@ -4119,7 +4133,7 @@ export default function App() {
 
 								<div className="tab-content">
 									{activeTab === 0 && (
-										<section className="panel">
+										<Surface as="section" className="panel">
 											<h2 className="panel-title">Upload Requirements</h2>
 											<p className="panel-description">
 												Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to
@@ -4128,7 +4142,7 @@ export default function App() {
 											<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
 												{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
 													<label key={option.value} className={`choice-card ${requirementSourceMode === option.value ? "selected" : ""}`}>
-														<input
+														<Radio
 															type="radio"
 															name="requirement-source"
 															value={option.value}
@@ -4144,13 +4158,13 @@ export default function App() {
 
 											{requirementSourceMode === "file" ? (
 												<div className="panel-form">
-													<div className="form-group">
+													<Field className="form-group">
 														<label>Requirements file</label>
-														<input type="file" accept=".md,.docx,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-													</div>
-													<button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
+														<Input type="file" accept=".md,.docx,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+													</Field>
+													<Button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
 														{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
-													</button>
+													</Button>
 												</div>
 											) : requirementSourceMode === "jira" ? (
 												<div className="jira-workflow-panel">
@@ -4164,19 +4178,19 @@ export default function App() {
 															</div>
 														</div>
 														<div className="panel-form two-cols jira-search-grid">
-															<div className="form-group">
+															<Field className="form-group">
 																<label>Project search</label>
-																<input
+																<Input
 																	placeholder="Search JIRA projects"
 																	value={jiraProjectQuery}
 																	onChange={(event) => setJiraProjectQuery(event.target.value)}
 																	disabled={!jiraConnected}
 																/>
-															</div>
+															</Field>
 															<div className="form-group jira-inline-action">
 																<label>Project</label>
 																<div className="jira-inline-controls">
-																	<select
+																	<Select
 																		value={selectedJiraProjectKey}
 																		onChange={(event) => setSelectedJiraProjectKey(event.target.value)}
 																		disabled={!jiraConnected || !jiraProjects.length}
@@ -4187,19 +4201,19 @@ export default function App() {
 																				{project.key} — {project.name}
 																			</option>
 																		))}
-																	</select>
-																	<button
+																	</Select>
+																	<Button
 																		className="secondary"
 																		onClick={() => loadJiraProjects(jiraProjectQuery)}
 																		disabled={!jiraConnected || isLoadingJiraProjects}
 																	>
 																		{isLoadingJiraProjects ? "⏳" : "Load"}
-																	</button>
+																	</Button>
 																</div>
 															</div>
-															<div className="form-group">
+															<Field className="form-group">
 																<label>Issue type</label>
-																<select
+																<Select
 																	value={jiraIssueType}
 																	onChange={(event) => setJiraIssueType(event.target.value)}
 																	disabled={!jiraConnected || isLoadingJiraIssueTypes}
@@ -4210,44 +4224,44 @@ export default function App() {
 																			{issueTypeName}
 																		</option>
 																	))}
-																</select>
-															</div>
+																</Select>
+															</Field>
 															<div className="form-group jira-inline-action">
 																<label>Issue search</label>
 																<div className="jira-inline-controls">
-																	<input
+																	<Input
 																		placeholder={`Search ${(jiraIssueType || "issue").toLowerCase()} summaries`}
 																		value={jiraIssueQuery}
 																		onChange={(event) => setJiraIssueQuery(event.target.value)}
 																		disabled={!jiraConnected}
 																	/>
-																	<button
+																	<Button
 																		className="secondary"
 																		onClick={searchJiraIssues}
 																		disabled={!jiraConnected || !selectedJiraProjectKey || isSearchingJiraIssues}
 																	>
 																		{isSearchingJiraIssues ? "⏳" : "Search"}
-																	</button>
+																	</Button>
 																</div>
 															</div>
 														</div>
 
 														{jiraIssueResults.length > 0 ? (
-															<div
+															<TableScroll
 																className="selection-table-wrapper"
 																role="region"
 																aria-label="Jira issue search results table"
 																tabIndex={0}
 															>
-																<table className="selection-table">
+																<Table className="selection-table">
 																	<thead>
 																		<tr>
-																			<th>Select</th>
-																			<th>Issue</th>
-																			<th>Summary</th>
-																			<th>Type</th>
-																			<th>Status</th>
-																			<th>Parent</th>
+																			<th scope="col">Select</th>
+																			<th scope="col">Issue</th>
+																			<th scope="col">Summary</th>
+																			<th scope="col">Type</th>
+																			<th scope="col">Status</th>
+																			<th scope="col">Parent</th>
 																		</tr>
 																	</thead>
 																	<tbody>
@@ -4260,7 +4274,7 @@ export default function App() {
 																					onClick={() => setSelectedJiraIssueKey(issue.key)}
 																				>
 																					<td>
-																						<input
+																						<Radio
 																							type="radio"
 																							name="jira-issue-selection"
 																							checked={selected}
@@ -4279,19 +4293,19 @@ export default function App() {
 																			);
 																		})}
 																	</tbody>
-																</table>
-															</div>
+																</Table>
+															</TableScroll>
 														) : (
 															<span className="helper-text">Search visible issues in the selected project to choose an import source.</span>
 														)}
 
 														<div className="panel-form button-row jira-import-actions">
-															<button
+															<Button
 																onClick={importRequirementsFromJira}
 																disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}
 															>
 																{isImportingFromJira ? "⏳ Importing..." : `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
-															</button>
+															</Button>
 															{selectedJiraIssue ? (
 																<span className="helper-text">
 																	Selected source: {selectedJiraIssue.key} — {selectedJiraIssue.summary}
@@ -4312,19 +4326,19 @@ export default function App() {
 															</div>
 														</div>
 														<div className="panel-form two-cols jira-search-grid">
-															<div className="form-group">
+															<Field className="form-group">
 																<label>Project search</label>
-																<input
+																<Input
 																	placeholder="Search Azure DevOps projects"
 																	value={azureDevOpsProjectQuery}
 																	onChange={(event) => setAzureDevOpsProjectQuery(event.target.value)}
 																	disabled={!azureDevOpsConnected}
 																/>
-															</div>
+															</Field>
 															<div className="form-group jira-inline-action">
 																<label>Project</label>
 																<div className="jira-inline-controls">
-																	<select
+																	<Select
 																		value={selectedAzureDevOpsProject}
 																		onChange={(event) => setSelectedAzureDevOpsProject(event.target.value)}
 																		disabled={!azureDevOpsConnected || !azureDevOpsProjects.length}
@@ -4335,19 +4349,19 @@ export default function App() {
 																				{project.name}
 																			</option>
 																		))}
-																	</select>
-																	<button
+																	</Select>
+																	<Button
 																		className="secondary"
 																		onClick={() => loadAzureDevOpsProjects(azureDevOpsProjectQuery)}
 																		disabled={!azureDevOpsConnected || isLoadingAzureDevOpsProjects}
 																	>
 																		{isLoadingAzureDevOpsProjects ? "⏳" : "Load"}
-																	</button>
+																	</Button>
 																</div>
 															</div>
-															<div className="form-group">
+															<Field className="form-group">
 																<label>Work item type</label>
-																<select
+																<Select
 																	value={azureDevOpsWorkItemType}
 																	onChange={(event) => setAzureDevOpsWorkItemType(event.target.value)}
 																	disabled={!azureDevOpsConnected || isLoadingAzureDevOpsWorkItemTypes}
@@ -4358,44 +4372,44 @@ export default function App() {
 																			{workItemTypeName}
 																		</option>
 																	))}
-																</select>
-															</div>
+																</Select>
+															</Field>
 															<div className="form-group jira-inline-action">
 																<label>Work item search</label>
 																<div className="jira-inline-controls">
-																	<input
+																	<Input
 																		placeholder={`Search ${(azureDevOpsWorkItemType || "work item").toLowerCase()} titles/descriptions`}
 																		value={azureDevOpsWorkItemQuery}
 																		onChange={(event) => setAzureDevOpsWorkItemQuery(event.target.value)}
 																		disabled={!azureDevOpsConnected}
 																	/>
-																	<button
+																	<Button
 																		className="secondary"
 																		onClick={searchAzureDevOpsWorkItems}
 																		disabled={!azureDevOpsConnected || !selectedAzureDevOpsProject || isSearchingAzureDevOpsWorkItems}
 																	>
 																		{isSearchingAzureDevOpsWorkItems ? "⏳" : "Search"}
-																	</button>
+																	</Button>
 																</div>
 															</div>
 														</div>
 
 														{azureDevOpsWorkItemResults.length > 0 ? (
-															<div
+															<TableScroll
 																className="selection-table-wrapper"
 																role="region"
 																aria-label="Azure DevOps work item search results table"
 																tabIndex={0}
 															>
-																<table className="selection-table">
+																<Table className="selection-table">
 																	<thead>
 																		<tr>
-																			<th>Select</th>
-																			<th>Work item</th>
-																			<th>Title</th>
-																			<th>Type</th>
-																			<th>State</th>
-																			<th>Parent</th>
+																			<th scope="col">Select</th>
+																			<th scope="col">Work item</th>
+																			<th scope="col">Title</th>
+																			<th scope="col">Type</th>
+																			<th scope="col">State</th>
+																			<th scope="col">Parent</th>
 																		</tr>
 																	</thead>
 																	<tbody>
@@ -4408,7 +4422,7 @@ export default function App() {
 																					onClick={() => setSelectedAzureDevOpsWorkItemId(`${workItem.work_item_id}`)}
 																				>
 																					<td>
-																						<input
+																						<Radio
 																							type="radio"
 																							name="azure-devops-work-item-selection"
 																							checked={selected}
@@ -4427,8 +4441,8 @@ export default function App() {
 																			);
 																		})}
 																	</tbody>
-																</table>
-															</div>
+																</Table>
+															</TableScroll>
 														) : (
 															<span className="helper-text">
 																Search visible work items in the selected project to choose an import source.
@@ -4436,14 +4450,14 @@ export default function App() {
 														)}
 
 														<div className="panel-form button-row jira-import-actions">
-															<button
+															<Button
 																onClick={importRequirementsFromAzureDevOps}
 																disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}
 															>
 																{isImportingFromAzureDevOps
 																	? "⏳ Importing..."
 																	: `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
-															</button>
+															</Button>
 															{selectedAzureDevOpsWorkItem ? (
 																<span className="helper-text">
 																	Selected source: #{selectedAzureDevOpsWorkItem.work_item_id} — {selectedAzureDevOpsWorkItem.title}
@@ -4456,7 +4470,7 @@ export default function App() {
 
 											{rawText && (
 												<div className="result-section compact-result-section">
-													<details className="collapsible-panel raw-text-panel">
+													<Disclosure className="collapsible-panel raw-text-panel">
 														<summary className="collapsible-panel-summary">
 															<span className="collapsible-panel-copy">
 																<span className="collapsible-panel-title">Raw extracted text</span>
@@ -4474,7 +4488,7 @@ export default function App() {
 																{rawText}
 															</pre>
 														</div>
-													</details>
+													</Disclosure>
 												</div>
 											)}
 
@@ -4513,28 +4527,28 @@ export default function App() {
 														</div>
 													</div>
 													<div className="panel-form two-cols jira-sync-controls">
-														<div className="form-group">
+														<Field className="form-group">
 															<label>Managed section title</label>
-															<input
+															<Input
 																value={jiraManagedSectionTitle}
 																onChange={(event) => setJiraManagedSectionTitle(event.target.value)}
 																placeholder={DEFAULT_JIRA_SYNC_SECTION_TITLE}
 															/>
-														</div>
+														</Field>
 														<div className="feedback-actions jira-sync-actions">
-															<button
+															<Button
 																className="secondary"
 																onClick={() => previewJiraSync()}
 																disabled={authActionDisabled || isPreviewingJiraSync || isApplyingJiraSync}
 															>
 																{isPreviewingJiraSync ? "⏳ Previewing..." : "Preview JIRA Update"}
-															</button>
-															<button
+															</Button>
+															<Button
 																onClick={applyJiraSync}
 																disabled={authActionDisabled || isApplyingJiraSync || !jiraSyncPreview || !jiraPreviewHasReadyIssue}
 															>
 																{isApplyingJiraSync ? "⏳ Syncing..." : "Push Ready Updates"}
-															</button>
+															</Button>
 														</div>
 													</div>
 
@@ -4547,7 +4561,7 @@ export default function App() {
 																	Skipped {(jiraSyncPreview.skipped_requirement_ids || []).length}
 																</span>
 															</div>
-															<div className="jira-sync-preview-list">
+															<List as="div" variant="grouped" className="jira-sync-preview-list">
 																{jiraSyncPreview.issues?.map((issue) => (
 																	<div key={issue.issue_key} className={`jira-sync-preview-card ${issue.status}`}>
 																		<div className="jira-sync-preview-header">
@@ -4560,9 +4574,9 @@ export default function App() {
 																		<div className="jira-sync-preview-meta">
 																			<span>Requirements: {(issue.requirement_ids || []).join(", ") || "—"}</span>
 																			{issue.issue_url ? (
-																				<a href={issue.issue_url} target="_blank" rel="noreferrer">
+																				<Link href={issue.issue_url} target="_blank" rel="noreferrer">
 																					Open in JIRA ↗
-																				</a>
+																				</Link>
 																			) : null}
 																		</div>
 																		{issue.conflict_reason ? <p className="jira-sync-preview-warning">{issue.conflict_reason}</p> : null}
@@ -4579,13 +4593,13 @@ export default function App() {
 																		</div>
 																	</div>
 																))}
-															</div>
+															</List>
 															{jiraSyncPreview.warnings?.length > 0 && (
-																<ul className="jira-sync-warning-list">
+																<List className="jira-sync-warning-list">
 																	{jiraSyncPreview.warnings.map((warning) => (
-																		<li key={warning}>{warning}</li>
+																		<ListItem key={warning}>{warning}</ListItem>
 																	))}
-																</ul>
+																</List>
 															)}
 														</div>
 													)}
@@ -4593,14 +4607,14 @@ export default function App() {
 													{jiraSyncResults && (
 														<div className="jira-sync-results-summary">
 															<h4>Last sync result</h4>
-															<ul className="jira-sync-apply-list">
+															<List className="jira-sync-apply-list">
 																{jiraSyncResults.results?.map((result) => (
-																	<li key={`${result.issue_key}-${result.status}`}>
+																	<ListItem key={`${result.issue_key}-${result.status}`}>
 																		<strong>{result.issue_key}</strong> — {result.status}
 																		{result.message ? `: ${result.message}` : ""}
-																	</li>
+																	</ListItem>
 																))}
-															</ul>
+															</List>
 														</div>
 													)}
 												</div>
@@ -4624,23 +4638,23 @@ export default function App() {
 														</div>
 													</div>
 													<div className="panel-form two-cols jira-sync-controls">
-														<div className="form-group">
+														<Field className="form-group">
 															<label>Managed section title</label>
-															<input
+															<Input
 																value={azureDevOpsManagedSectionTitle}
 																onChange={(event) => setAzureDevOpsManagedSectionTitle(event.target.value)}
 																placeholder={DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE}
 															/>
-														</div>
+														</Field>
 														<div className="feedback-actions jira-sync-actions">
-															<button
+															<Button
 																className="secondary"
 																onClick={() => previewAzureDevOpsSync()}
 																disabled={authActionDisabled || isPreviewingAzureDevOpsSync || isApplyingAzureDevOpsSync}
 															>
 																{isPreviewingAzureDevOpsSync ? "⏳ Previewing..." : "Preview Azure DevOps Update"}
-															</button>
-															<button
+															</Button>
+															<Button
 																onClick={applyAzureDevOpsSync}
 																disabled={
 																	authActionDisabled ||
@@ -4650,7 +4664,7 @@ export default function App() {
 																}
 															>
 																{isApplyingAzureDevOpsSync ? "⏳ Syncing..." : "Push Ready Updates"}
-															</button>
+															</Button>
 														</div>
 													</div>
 
@@ -4663,7 +4677,7 @@ export default function App() {
 																	Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}
 																</span>
 															</div>
-															<div className="jira-sync-preview-list">
+															<List as="div" variant="grouped" className="jira-sync-preview-list">
 																{azureDevOpsSyncPreview.work_items?.map((workItem) => (
 																	<div key={workItem.work_item_id} className={`jira-sync-preview-card ${workItem.status}`}>
 																		<div className="jira-sync-preview-header">
@@ -4676,9 +4690,9 @@ export default function App() {
 																		<div className="jira-sync-preview-meta">
 																			<span>Requirements: {(workItem.requirement_ids || []).join(", ") || "—"}</span>
 																			{workItem.work_item_url ? (
-																				<a href={workItem.work_item_url} target="_blank" rel="noreferrer">
+																				<Link href={workItem.work_item_url} target="_blank" rel="noreferrer">
 																					Open in Azure DevOps ↗
-																				</a>
+																				</Link>
 																			) : null}
 																		</div>
 																		{workItem.conflict_reason ? (
@@ -4697,13 +4711,13 @@ export default function App() {
 																		</div>
 																	</div>
 																))}
-															</div>
+															</List>
 															{azureDevOpsSyncPreview.warnings?.length > 0 && (
-																<ul className="jira-sync-warning-list">
+																<List className="jira-sync-warning-list">
 																	{azureDevOpsSyncPreview.warnings.map((warning) => (
-																		<li key={warning}>{warning}</li>
+																		<ListItem key={warning}>{warning}</ListItem>
 																	))}
-																</ul>
+																</List>
 															)}
 														</div>
 													)}
@@ -4711,14 +4725,14 @@ export default function App() {
 													{azureDevOpsSyncResults && (
 														<div className="jira-sync-results-summary">
 															<h4>Last sync result</h4>
-															<ul className="jira-sync-apply-list">
+															<List className="jira-sync-apply-list">
 																{azureDevOpsSyncResults.results?.map((result) => (
-																	<li key={`${result.work_item_id}-${result.status}`}>
+																	<ListItem key={`${result.work_item_id}-${result.status}`}>
 																		<strong>#{result.work_item_id}</strong> — {result.status}
 																		{result.message ? `: ${result.message}` : ""}
-																	</li>
+																	</ListItem>
 																))}
-															</ul>
+															</List>
 														</div>
 													)}
 												</div>
@@ -4732,7 +4746,7 @@ export default function App() {
 													<p className="feedback-description">
 														Provide feedback on the extracted requirements. The AI will refine them based on your input.
 													</p>
-													<textarea
+													<Textarea
 														className="feedback-textarea"
 														placeholder="Enter your feedback here... e.g., 'Merge REQ-003 and REQ-004 into one', 'Split REQ-001 into multiple requirements', 'REQ-005 is too vague, make it more specific', 'Add a requirement for error handling', etc."
 														value={reqFeedback}
@@ -4740,23 +4754,23 @@ export default function App() {
 														rows={4}
 													/>
 													<div className="feedback-actions">
-														<button
+														<Button
 															onClick={() => parseRequirements(true)}
 															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
 															className="feedback-button"
 														>
 															{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
-														</button>
+														</Button>
 													</div>
 												</div>
 											)}
 
 											<div className="panel-nav">
-												<button onClick={goNext} className="secondary">
+												<Button onClick={goNext} className="secondary">
 													Next
-												</button>
+												</Button>
 											</div>
-										</section>
+										</Surface>
 									)}
 
 									{activeTab === 1 && (
@@ -4788,88 +4802,71 @@ export default function App() {
 											setTemplateName={setTemplateName}
 											templateFormat={templateFormat}
 											setTemplateFormat={setTemplateFormat}
-											goPrev={goPrev}
-											goNext={goNext}
+											onReturn={() => selectWorkflowTab(3)}
 										/>
 									)}
 
 									{activeTab === 3 && (
-										<section className="panel">
+										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											<h2 className="panel-title">Generate Test Cases</h2>
 											<p className="panel-description">
 												Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
 											</p>
-											{requirements.length > 0 && (
-												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
-													<div>
-														<strong>
-															{upstreamChangedForImpact
-																? "Existing suite needs impact analysis"
-																: canGenerateFromApprovedRequirements
-																	? "Ready for approved-requirement generation"
-																	: "Approval required before generation"}
-														</strong>
-														<p>
-															{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
-															{rejectedRequirementCount} rejected
-															{upstreamChangedForImpact
-																? ". The current suite is preserved while impact analysis reviews changed inputs."
-																: ". Only approved requirements are sent to the test-case agents."}
-														</p>
+											{requirements.length > 0 &&
+												(!testCases.length || !canGenerateFromApprovedRequirements || upstreamChangedForImpact) && (
+													<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
+														<div>
+															<strong>
+																{upstreamChangedForImpact
+																	? "Existing suite needs impact analysis"
+																	: canGenerateFromApprovedRequirements
+																		? "Ready for approved-requirement generation"
+																		: "Approval required before generation"}
+															</strong>
+															<p>
+																{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
+																{rejectedRequirementCount} rejected
+																{upstreamChangedForImpact
+																	? ". The current suite is preserved while impact analysis reviews changed inputs."
+																	: ". Only approved requirements are sent to the test-case agents."}
+															</p>
+														</div>
+														{!canGenerateFromApprovedRequirements && (
+															<Button type="button" className="secondary small" onClick={() => selectWorkflowTab(0)}>
+																Review requirements
+															</Button>
+														)}
 													</div>
-													{!canGenerateFromApprovedRequirements && (
-														<button type="button" className="secondary small" onClick={() => selectWorkflowTab(0)}>
-															Review requirements
-														</button>
-													)}
-												</div>
-											)}
+												)}
 											{!contextualTestCaseTask &&
 											allowLegacyTestCaseMutations &&
 											(!hasExistingTestCaseBaseline || upstreamChangedForImpact) ? (
 												<div className="panel-form button-row">
 													{upstreamChangedForImpact ? (
-														<button onClick={analyzeImpact} disabled={!canAnalyzeImpact || isAnalyzingImpact || testCaseActionDisabled}>
+														<Button onClick={analyzeImpact} disabled={!canAnalyzeImpact || isAnalyzingImpact || testCaseActionDisabled}>
 															{isAnalyzingImpact
 																? "⏳ Analyzing impact..."
 																: impactChangedItemCount
 																	? `Analyze Impact for ${impactChangedItemCount} Changed Item${impactChangedItemCount === 1 ? "" : "s"}`
 																	: "Analyze Impact for Changed Items"}
-														</button>
+														</Button>
 													) : (
-														<button
+														<Button
 															onClick={() => generateTestCases(false)}
 															disabled={!canGenerateFromApprovedRequirements || isGenerating || testCaseActionDisabled}
 														>
 															{isGenerating ? "⏳ Generating..." : `Generate from ${approvedRequirementCount || 0} Approved`}
-														</button>
+														</Button>
 													)}
 												</div>
 											) : null}
 
 											{renderImpactAnalysisPanel()}
 
-											{testCaseReview && (
-												<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
-													<div className="review-banner-header">
-														<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
-														<div className="review-banner-metrics">
-															<span className="review-metric-pill review-metric-pill-strong">{testCaseReviewMeta.scoreLabel}</span>
-															{testCaseReviewMeta.thresholdLabel && (
-																<span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>
-															)}
-														</div>
-													</div>
-													<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
-													{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
-														<ul className="review-issues">
-															{testCaseReview.blocking_issues.slice(0, 3).map((issue) => (
-																<li key={issue}>{issue}</li>
-															))}
-														</ul>
-													)}
-												</div>
-											)}
+											<p className="test-suite-summary">
+												{testCases.length} test cases · {approvedRequirementCount} approved requirements
+											</p>
+											<TestCaseQualitySummary review={testCaseReview} meta={testCaseReviewMeta} exportLocked={exportGateLocked} />
 
 											{hasGenerateResults ? (
 												<div className="generate-results-workspace">
@@ -4885,9 +4882,9 @@ export default function App() {
 															{testCases.length} test case{testCases.length === 1 ? "" : "s"}
 														</span>
 													</div>
-													<div className="generate-results-tabs" role="tablist" aria-label="Generation result sections">
+													<TabList className="generate-results-tabs" role="tablist" aria-label="Generation result sections">
 														{generateResultTabs.map((tab) => (
-															<button
+															<Tab
 																type="button"
 																key={tab.id}
 																className={`generate-result-tab ${activeGenerateResultTab === tab.id ? "active" : ""} ${tab.variant ? `generate-result-tab-${tab.variant}` : ""}`}
@@ -4902,10 +4899,10 @@ export default function App() {
 																>
 																	{tab.badge}
 																</span>
-															</button>
+															</Tab>
 														))}
-													</div>
-													<div
+													</TabList>
+													<TabPanel
 														id="generate-result-panel"
 														className="generate-result-panel"
 														role="tabpanel"
@@ -4918,10 +4915,10 @@ export default function App() {
 																appliedTestCaseWorkflowSettings,
 																testCaseIterationHistory
 															) || (
-																<div className="generate-result-empty">
+																<CollectionState as="div" kind="empty" className="generate-result-empty">
 																	<h3>Diagnostics</h3>
 																	<p>No workflow diagnostics are available for this run.</p>
-																</div>
+																</CollectionState>
 															))}
 
 														{activeGenerateResultTab === "coverage" && (
@@ -4959,9 +4956,7 @@ export default function App() {
 														{activeGenerateResultTab === "test-cases" && (
 															<GeneratedTestCasesView
 																testCases={testCases}
-																templateFormat={templateFormat}
-																expandedRows={expandedRows}
-																onToggleRowExpansion={toggleRowExpansion}
+																qualityIssues={testCaseReview?.blocking_issues || []}
 																feedback={feedback}
 																onFeedbackChange={setFeedback}
 																onRefineTestCases={() => generateTestCases(true)}
@@ -4970,25 +4965,25 @@ export default function App() {
 																allowRefinement={allowLegacyTestCaseMutations}
 															/>
 														)}
-													</div>
+													</TabPanel>
 												</div>
 											) : (
-												<div className="result-section">
+												<Surface as="div" className="result-section">
 													<h3>Generated Test Cases</h3>
 													<span className="helper-text">
 														No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis,
 														and diagnostics.
 													</span>
-												</div>
+												</Surface>
 											)}
 
 											<div className="panel-nav">
-												<button onClick={goPrev} className="secondary">
+												<Button onClick={goPrev} className="secondary">
 													Back
-												</button>
-												<button onClick={goNext} disabled={testCases.length === 0}>
+												</Button>
+												<Button onClick={goNext} disabled={testCases.length === 0}>
 													Next
-												</button>
+												</Button>
 											</div>
 										</section>
 									)}

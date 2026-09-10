@@ -86,55 +86,19 @@
 	color: var(--text-muted);
 }
 
-.requirement-report-table-wrapper {
-	overflow-x: auto;
-	border: 1px solid rgba(148, 163, 184, 0.18);
-	border-radius: var(--radius-md);
-	background: rgba(255, 255, 255, 0.88);
-}
-
 .requirement-report-table {
 	width: 100%;
 	min-width: 820px;
-	border-collapse: collapse;
-}
-
-.requirement-report-table th,
-.requirement-report-table td {
-	padding: 0.9rem 1rem;
-	text-align: left;
-	border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .requirement-report-table th {
-	background: rgba(248, 250, 252, 0.92);
-	color: var(--text-muted);
-	font-size: 0.78rem;
-	font-weight: 800;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
 	white-space: nowrap;
 }
 
 .requirement-report-table td {
-	background: transparent;
-	color: var(--text-main);
-	font-size: 0.98rem;
 	white-space: nowrap;
-}
-
-.requirement-report-table td strong {
-	font-size: 1.05rem;
-	color: inherit;
-}
-
-.requirement-report-table td.emphasis {
-	background: rgba(239, 246, 255, 0.82);
-	color: #0f172a;
-}
-
-.requirement-report-table tbody tr:last-child td {
-	border-bottom: none;
 }
 
 .requirement-report-grid {

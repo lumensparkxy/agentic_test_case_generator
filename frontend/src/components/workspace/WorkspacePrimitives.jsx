@@ -1,3 +1,6 @@
+import { SearchField, Link, Button } from "../ui/controls";
+import { Progress, Badge } from "../ui/surfaces";
+import { CollectionState } from "../ui/collections";
 import { AlertCircle, ArrowRight, RotateCcw, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
 
@@ -30,24 +33,25 @@ export function WorkspaceSearch({
 	}, []);
 
 	return (
-		<label className="workspace-search">
-			<span className="sr-only">{label}</span>
-			<Search aria-hidden="true" size={18} />
-			<input
-				ref={inputRef}
-				type="search"
-				value={value}
-				onChange={(event) => onChange(event.target.value)}
-				placeholder={placeholder}
-				autoComplete="off"
-			/>
-			<kbd aria-hidden="true">Ctrl/⌘ K</kbd>
-		</label>
+		<SearchField
+			className="workspace-search"
+			label={label}
+			ref={inputRef}
+			value={value}
+			onChange={(event) => onChange(event.target.value)}
+			placeholder={placeholder}
+			autoComplete="off"
+			shortcut="Ctrl/⌘ K"
+		/>
 	);
 }
 
 export function WorkspaceStatus({ status }) {
-	return <span className={`workspace-status workspace-status-${getWorkspaceStatusTone(status)}`}>{formatWorkspaceStatus(status)}</span>;
+	return (
+		<Badge tone={getWorkspaceStatusTone(status)} className={`workspace-status workspace-status-${getWorkspaceStatusTone(status)}`}>
+			{formatWorkspaceStatus(status)}
+		</Badge>
+	);
 }
 
 export function ProjectProgress({ completed = 0, total = 0 }) {
@@ -65,13 +69,13 @@ export function ProjectProgress({ completed = 0, total = 0 }) {
 					{Math.min(safeCompleted, safeTotal)} of {safeTotal} stages
 				</strong>
 			</div>
-			<progress
+			<Progress
 				value={Math.min(safeCompleted, safeTotal)}
 				max={safeTotal}
 				aria-label={`Workflow progress: ${Math.min(safeCompleted, safeTotal)} of ${safeTotal} stages complete`}
 			>
 				{Math.round((Math.min(safeCompleted, safeTotal) / safeTotal) * 100)}%
-			</progress>
+			</Progress>
 		</div>
 	);
 }
@@ -86,7 +90,7 @@ export function ProjectOpenLink({ projectId, destination, onOpenProject, childre
 	}
 	const path = getProjectPath(projectId, destination);
 	return (
-		<a
+		<Link
 			href={path}
 			className={className}
 			aria-label={ariaLabel}
@@ -98,31 +102,39 @@ export function ProjectOpenLink({ projectId, destination, onOpenProject, childre
 		>
 			<span>{children}</span>
 			<ArrowRight aria-hidden="true" size={17} />
-		</a>
+		</Link>
 	);
 }
 
 export function WorkspaceErrorState({ message, onRetry }) {
 	return (
-		<section className="workspace-state workspace-error-state" role="alert" aria-labelledby="workspace-error-title">
+		<CollectionState
+			as="section"
+			kind="error"
+			className="workspace-state workspace-error-state"
+			role="alert"
+			aria-labelledby="workspace-error-title"
+		>
 			<AlertCircle aria-hidden="true" size={24} />
 			<div>
 				<h2 id="workspace-error-title">We couldn’t load your workspace</h2>
 				<p>{message || "Workspace summary is unavailable. Please try again."}</p>
 			</div>
 			{onRetry ? (
-				<button type="button" className="secondary workspace-retry-button" onClick={onRetry}>
+				<Button type="button" className="secondary workspace-retry-button" onClick={onRetry}>
 					<RotateCcw aria-hidden="true" size={16} />
 					Retry
-				</button>
+				</Button>
 			) : null}
-		</section>
+		</CollectionState>
 	);
 }
 
 export function WorkspaceLoadingState({ projectsOnly = false }) {
 	return (
-		<div
+		<CollectionState
+			as="div"
+			kind="loading"
 			className={`workspace-loading-grid ${projectsOnly ? "workspace-loading-projects" : ""}`}
 			role="status"
 			aria-live="polite"
@@ -137,6 +149,6 @@ export function WorkspaceLoadingState({ projectsOnly = false }) {
 					<span className="workspace-skeleton-line workspace-skeleton-medium" />
 				</div>
 			))}
-		</div>
+		</CollectionState>
 	);
 }

@@ -1,3 +1,5 @@
+import { ListItem, List } from "../components/ui/collections";
+import { Button } from "../components/ui/controls";
 import { FileText, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,7 +25,7 @@ const formatReportFormat = (value) => (/^[a-z0-9]{1,8}$/i.test(`${value || ""}`)
 function ReportRow({ report, onOpenProject }) {
 	const evidenceIdentity = report.report_id || "Unavailable";
 	return (
-		<li className="activity-index-row activity-index-report-row">
+		<ListItem className="activity-index-row activity-index-report-row">
 			<span className="activity-index-kind-icon">
 				<FileText aria-hidden="true" size={20} />
 			</span>
@@ -63,7 +65,7 @@ function ReportRow({ report, onOpenProject }) {
 			>
 				Open evidence
 			</ProjectOpenLink>
-		</li>
+		</ListItem>
 	);
 }
 
@@ -158,7 +160,7 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 				<div className="activity-index-header-actions">
 					{summary?.generated_at ? <time dateTime={summary.generated_at}>Updated {formatWorkspaceDate(summary.generated_at)}</time> : null}
 					{onRefresh ? (
-						<button
+						<Button
 							ref={refreshButtonRef}
 							type="button"
 							className="secondary activity-index-refresh-button"
@@ -167,7 +169,7 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 						>
 							<RefreshCw aria-hidden="true" size={15} />
 							{isRefreshing ? "Refreshing…" : "Refresh reports"}
-						</button>
+						</Button>
 					) : null}
 				</div>
 			</header>
@@ -220,11 +222,11 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 						countLabel={`${filteredReports.length} report${filteredReports.length === 1 ? "" : "s"}`}
 					/>
 					{filteredReports.length ? (
-						<ul className="activity-index-list" aria-label="Recent reports">
+						<List variant="collection" className="activity-index-list" aria-label="Recent reports">
 							{filteredReports.map((report) => (
 								<ReportRow key={report.report_id} report={report} onOpenProject={onOpenProject} />
 							))}
-						</ul>
+						</List>
 					) : reports.length === 0 ? (
 						<ActivityIndexEmpty
 							title="No recent reports"

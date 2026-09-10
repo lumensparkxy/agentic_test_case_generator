@@ -208,50 +208,6 @@
 	overflow-wrap: anywhere;
 }
 
-.activity-index-status {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 0.3rem;
-	flex: 0 0 auto;
-	max-width: 100%;
-	min-height: 1.65rem;
-	padding: 0.18rem 0.5rem;
-	border: 1px solid var(--border-color);
-	border-radius: 999px;
-	background: var(--surface-container);
-	color: var(--text-muted);
-	font-size: 0.68rem;
-	font-weight: 800;
-	line-height: 1.2;
-	overflow-wrap: anywhere;
-	text-align: center;
-}
-
-.activity-index-status-info {
-	border-color: #bfdbfe;
-	background: var(--primary-tonal);
-	color: var(--primary-hover);
-}
-
-.activity-index-status-success {
-	border-color: #a7f3d0;
-	background: var(--success-tonal);
-	color: #047857;
-}
-
-.activity-index-status-warning {
-	border-color: #fde68a;
-	background: var(--warning-tonal);
-	color: #a15c00;
-}
-
-.activity-index-status-danger {
-	border-color: #fecaca;
-	background: var(--danger-tonal);
-	color: #b91c1c;
-}
-
 .activity-index-row-meta {
 	display: flex;
 	align-items: center;
@@ -395,10 +351,6 @@
 		flex-direction: column;
 	}
 
-	.activity-index-status {
-		align-self: flex-start;
-	}
-
 	.activity-index-open-link {
 		grid-column: 2;
 		justify-self: start;
@@ -443,10 +395,6 @@
 	.activity-index-open-link {
 		grid-column: 1;
 		width: 100%;
-	}
-
-	.activity-index-status {
-		align-self: flex-start;
 	}
 
 	.activity-index-metrics {

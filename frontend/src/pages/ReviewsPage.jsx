@@ -1,3 +1,4 @@
+import { Button } from "../components/ui/controls";
 import { RefreshCw } from "lucide-react";
 import { useRef } from "react";
 
@@ -38,7 +39,7 @@ export default function ReviewsPage({ summary, isLoading = false, isRefreshing =
 				<div className="review-inbox-header-actions">
 					{summary?.generated_at ? <time dateTime={summary.generated_at}>Updated {formatWorkspaceDate(summary.generated_at)}</time> : null}
 					{onRefresh ? (
-						<button
+						<Button
 							ref={refreshButtonRef}
 							type="button"
 							className="secondary review-inbox-refresh-button"
@@ -47,7 +48,7 @@ export default function ReviewsPage({ summary, isLoading = false, isRefreshing =
 						>
 							<RefreshCw aria-hidden="true" size={15} />
 							{isRefreshing ? "Refreshing…" : "Refresh reviews"}
-						</button>
+						</Button>
 					) : null}
 				</div>
 			</header>

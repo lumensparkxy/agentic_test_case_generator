@@ -1,3 +1,7 @@
+import { ResizablePanes } from "../ui/resizable-panes";
+import { ListItem, CollectionState, List, CollectionToolbar } from "../ui/collections";
+import { Disclosure, Alert } from "../ui/surfaces";
+import { Button, Radio, Textarea, Input } from "../ui/controls";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { formatWorkspaceDate, formatWorkspaceLabel } from "../workspace/workspacePresentation";
@@ -168,25 +172,33 @@ function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTo
 
 function ScenarioCard({ scenario }) {
 	return (
-		<li className="use-case-scenario-card">
-			<div className="use-case-scenario-heading">
-				<div>
-					<span className="use-case-scenario-type">{formatWorkspaceLabel(scenario.scenario_type, "Scenario")}</span>
-					<h4>{scenario.title || scenario.objective || "Untitled scenario"}</h4>
+		<ListItem className="use-case-scenario-card">
+			<Disclosure className="scenario-details">
+				<summary>
+					<span className="scenario-summary-copy">
+						<span className="use-case-scenario-type">{scenario.id || formatWorkspaceLabel(scenario.scenario_type, "Scenario")}</span>
+						<strong>{scenario.title || scenario.objective || "Untitled scenario"}</strong>
+					</span>
+				</summary>
+				<div className="scenario-expanded-content">
+					<p>{scenario.objective || "No additional objective provided."}</p>
+					<span>
+						{formatWorkspaceLabel(scenario.scenario_type, "Scenario")} · {formatWorkspaceLabel(scenario.priority, "Unprioritized")} ·{" "}
+						{scenario.must_have ? "Must have" : "Recommended"}
+					</span>
 				</div>
-				<div className="use-case-scenario-badges" aria-label="Scenario priority">
-					<span>{formatWorkspaceLabel(scenario.priority, "Unprioritized")}</span>
-					<span className={scenario.must_have ? "required" : "recommended"}>{scenario.must_have ? "Must have" : "Recommended"}</span>
-				</div>
-			</div>
-			{scenario.objective && scenario.objective !== scenario.title ? <p>{scenario.objective}</p> : null}
-		</li>
+			</Disclosure>
+		</ListItem>
 	);
 }
 
 function CoverageContext({ analysis }) {
 	if (!analysis) {
-		return <p className="use-case-context-empty">No additional constraint or risk analysis is attached to this requirement.</p>;
+		return (
+			<CollectionState as="p" kind="empty" className="use-case-context-empty">
+				No additional constraint or risk analysis is attached to this requirement.
+			</CollectionState>
+		);
 	}
 	const constraints = normalizeList(analysis.field_constraints);
 	const risks = normalizeList(analysis.risk_signals);
@@ -198,13 +210,13 @@ function CoverageContext({ analysis }) {
 			<div>
 				<h4>Constraints</h4>
 				{constraints.length ? (
-					<ul>
+					<List>
 						{constraints.map((constraint, index) => (
-							<li key={constraint.id || `${constraint.field_name}-${index}`}>
+							<ListItem key={constraint.id || `${constraint.field_name}-${index}`}>
 								<strong>{constraint.field_name || "Constraint"}</strong>: {constraint.description}
-							</li>
+							</ListItem>
 						))}
-					</ul>
+					</List>
 				) : (
 					<p>No field constraints identified.</p>
 				)}
@@ -212,26 +224,26 @@ function CoverageContext({ analysis }) {
 			<div>
 				<h4>Risks and gaps</h4>
 				{risks.length || dependencies.length || permissions.length || transitions.length ? (
-					<ul>
+					<List>
 						{risks.map((risk, index) => (
-							<li key={risk.id || `${risk.title}-${index}`}>
+							<ListItem key={risk.id || `${risk.title}-${index}`}>
 								<strong>{formatWorkspaceLabel(risk.severity, "Risk")}</strong>: {risk.title || risk.rationale}
-							</li>
+							</ListItem>
 						))}
 						{dependencies.map((dependency) => (
-							<li key={dependency}>Dependency: {dependency}</li>
+							<ListItem key={dependency}>Dependency: {dependency}</ListItem>
 						))}
 						{permissions.map((permission, index) => (
-							<li key={permission.id || `${permission.role}-${permission.action}-${index}`}>
+							<ListItem key={permission.id || `${permission.role}-${permission.action}-${index}`}>
 								Permission: {permission.role} can {`${permission.action || "act"}`.toLowerCase()}
-							</li>
+							</ListItem>
 						))}
 						{transitions.map((transition, index) => (
-							<li key={transition.id || `${transition.from_state}-${transition.to_state}-${index}`}>
+							<ListItem key={transition.id || `${transition.from_state}-${transition.to_state}-${index}`}>
 								Transition: {transition.from_state} → {transition.to_state}
-							</li>
+							</ListItem>
 						))}
-					</ul>
+					</List>
 				) : (
 					<p>No risks or dependencies identified.</p>
 				)}
@@ -287,7 +299,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 			<div className="use-case-decision-heading">
 				<div>
 					<span className="use-case-section-kicker">Human decision</span>
-					<h2>Complete this review</h2>
+					<h2>Review decision</h2>
 					<p>{humanMeta.label}. Your decision applies only to the current immutable artifact.</p>
 				</div>
 			</div>
@@ -305,13 +317,13 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 			) : null}
 
 			{!snapshotMatches ? (
-				<div className="use-case-review-alert conflict" role="alert">
+				<Alert as="div" tone="warning" className="use-case-review-alert conflict" role="alert">
 					<strong>The loaded artifact is no longer the project’s current Use Cases version.</strong>
 					<p>Reload the latest project state before making a decision.</p>
-					<button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
+					<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
 						Reload latest
-					</button>
-				</div>
+					</Button>
+				</Alert>
 			) : null}
 
 			{stageState?.stale ? (
@@ -327,7 +339,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 			<fieldset className="use-case-decision-options" disabled={formDisabled}>
 				<legend>Choose a decision</legend>
 				<label className={review.decision === "approve" ? "selected" : ""}>
-					<input
+					<Radio
 						type="radio"
 						name="use-case-review-decision"
 						value="approve"
@@ -341,7 +353,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 					</span>
 				</label>
 				<label className={review.decision === "request_changes" ? "selected" : ""}>
-					<input
+					<Radio
 						type="radio"
 						name="use-case-review-decision"
 						value="request_changes"
@@ -357,7 +369,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 
 			<div className="use-case-comment-field">
 				<label htmlFor="use-case-review-comment">Review comment {commentRequired ? <span>Required</span> : <span>Optional</span>}</label>
-				<textarea
+				<Textarea
 					id="use-case-review-comment"
 					ref={commentRef}
 					value={review.comment}
@@ -382,31 +394,31 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 			</div>
 
 			{review.status === "conflict" ? (
-				<div className="use-case-review-alert conflict" role="alert">
+				<Alert as="div" tone="warning" className="use-case-review-alert conflict" role="alert">
 					<strong>Reload required</strong>
 					<p>{review.error}</p>
-					<button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
+					<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
 						{review.isReloading ? "Reloading…" : "Reload latest"}
-					</button>
-				</div>
+					</Button>
+				</Alert>
 			) : review.status === "refresh_error" ? (
-				<div className="use-case-review-alert warning" role="alert">
+				<Alert as="div" tone="warning" className="use-case-review-alert warning" role="alert">
 					<strong>Decision saved; refresh required</strong>
 					<p>{review.error}</p>
-					<button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
+					<Button type="button" className="secondary" onClick={() => void handleReload()} disabled={isBusy}>
 						{review.isReloading ? "Reloading…" : "Reload latest"}
-					</button>
-				</div>
+					</Button>
+				</Alert>
 			) : review.status === "error" ? (
-				<div id="use-case-review-error" className="use-case-review-alert error" role="alert">
+				<Alert as="div" tone="danger" id="use-case-review-error" className="use-case-review-alert error" role="alert">
 					<strong>{commentInvalid ? "Comment required" : "Decision not saved"}</strong>
 					<p>{review.error}</p>
 					{commentInvalid ? null : (
-						<button type="button" className="secondary" onClick={() => void handleRetry()} disabled={isBusy || formDisabled}>
+						<Button type="button" className="secondary" onClick={() => void handleRetry()} disabled={isBusy || formDisabled}>
 							Retry
-						</button>
+						</Button>
 					)}
-				</div>
+				</Alert>
 			) : null}
 
 			<div className="use-case-review-announcement" role="status" aria-live="polite" aria-atomic="true">
@@ -419,9 +431,15 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 						? "Your feedback will be recorded with the decision."
 						: "Approval advances the durable project review state."}
 				</p>
-				<button type="submit" disabled={formDisabled || (review.decision === "approve" && approvalBlocked)}>
-					{review.isSubmitting ? "Saving decision…" : review.decision === "request_changes" ? "Request changes" : "Approve Use Cases"}
-				</button>
+				<Button type="submit" disabled={!review.decision || formDisabled || (review.decision === "approve" && approvalBlocked)}>
+					{review.isSubmitting
+						? "Saving decision…"
+						: !review.decision
+							? "Choose a decision"
+							: review.decision === "request_changes"
+								? "Request changes"
+								: "Approve Use Cases"}
+				</Button>
 			</div>
 		</form>
 	);
@@ -497,141 +515,168 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 
 	return (
 		<div className="use-case-review-workbench">
-			<ArtifactSummary
-				project={project}
-				snapshot={snapshot}
-				stageState={effectiveStageState}
-				scenarioTotal={scenarioTotal}
-				groupTotal={coveragePlan.length}
-				machineReview={machineReview}
-				humanReview={humanReview}
-			/>
-
-			<section className="use-case-coverage-metrics" aria-label="Coverage metrics">
-				{coverageMetrics.map((metric) => (
-					<div key={metric.label}>
-						<span>{metric.label}</span>
-						<strong>{metric.value}</strong>
-					</div>
-				))}
-			</section>
-
-			{machineIssues.length ? (
-				<section className="use-case-machine-issues" aria-labelledby="use-case-machine-issues-title">
-					<h2 id="use-case-machine-issues-title">Machine review findings</h2>
-					<ul>
-						{machineIssues.map((issue) => (
-							<li key={issue}>{issue}</li>
-						))}
-					</ul>
-				</section>
-			) : null}
-
-			<section className="use-case-collection" aria-labelledby="use-case-collection-title">
-				<div className="use-case-collection-heading">
-					<div>
-						<span className="use-case-section-kicker">Review artifact</span>
-						<h2 id="use-case-collection-title">Use case scenarios</h2>
-						<p role="status" aria-live="polite">
-							Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
-							requirement groups.
-						</p>
-					</div>
-					<div className="use-case-search-field">
-						<label htmlFor={searchId}>Search use cases</label>
-						<input
-							id={searchId}
-							type="search"
-							value={query}
-							ref={searchRef}
-							onChange={(event) => updateQuery(event.target.value)}
-							placeholder="Requirement, scenario, risk, or constraint"
-						/>
-					</div>
+			<div className="use-case-meta-row">
+				<div className="use-case-compact-summary">
+					<strong>{scenarioTotal} scenarios</strong>
+					<span>{coveragePlan.length} requirement groups</span>
+					<span>Use Cases v{snapshot.version ?? stageState?.version ?? "—"}</span>
+					<span>{effectiveStageState?.stale ? "Stale artifact" : "Current artifact"}</span>
 				</div>
+				<Disclosure className="use-case-supporting-details">
+					<summary>Quality, coverage and review history</summary>
+					<ArtifactSummary
+						project={project}
+						snapshot={snapshot}
+						stageState={effectiveStageState}
+						scenarioTotal={scenarioTotal}
+						groupTotal={coveragePlan.length}
+						machineReview={machineReview}
+						humanReview={humanReview}
+					/>
 
-				{filteredGroups.length > 1 ? (
-					<div className="use-case-group-toolbar">
-						<button type="button" className="use-case-group-toggle-all" onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}>
-							{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
-						</button>
-					</div>
-				) : null}
+					<section className="use-case-coverage-metrics" aria-label="Coverage metrics">
+						{coverageMetrics.map((metric) => (
+							<div key={metric.label}>
+								<span>{metric.label}</span>
+								<strong>{metric.value}</strong>
+							</div>
+						))}
+					</section>
 
-				{filteredGroups.length ? (
-					<div className="use-case-group-list" aria-label="Use Case groups">
-						{filteredGroups.map((group, groupIndex) => {
-							const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
-							const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-							const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
-							return (
-								<section
-									className="use-case-group"
-									aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
-									key={groupKey}
-								>
-									<details
-										className="use-case-group-details"
-										open={isOpen}
-										onToggle={(event) => {
-											const nextOpen = event.currentTarget.open;
-											if (nextOpen !== isOpen) {
-												setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
-											}
-										}}
+					{machineIssues.length ? (
+						<section className="use-case-machine-issues" aria-labelledby="use-case-machine-issues-title">
+							<h2 id="use-case-machine-issues-title">Machine review findings</h2>
+							<List>
+								{machineIssues.map((issue) => (
+									<ListItem key={issue}>{issue}</ListItem>
+								))}
+							</List>
+						</section>
+					) : null}
+				</Disclosure>
+			</div>
+			<ResizablePanes
+				as="div"
+				className="artifact-review-columns"
+				storageKey="use-cases"
+				label="Resize scenarios and review decision"
+				defaultSize={68}
+				minFirst={360}
+				minSecond={300}
+			>
+				<section className="use-case-collection" aria-labelledby="use-case-collection-title">
+					<CollectionToolbar as="div" className="use-case-collection-heading">
+						<div>
+							<span className="use-case-section-kicker">Review artifact</span>
+							<h2 id="use-case-collection-title">Use case scenarios</h2>
+							<p role="status" aria-live="polite">
+								Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
+								requirement groups.
+							</p>
+						</div>
+						<div className="use-case-search-field">
+							<label htmlFor={searchId}>Search use cases</label>
+							<Input
+								id={searchId}
+								type="search"
+								value={query}
+								ref={searchRef}
+								onChange={(event) => updateQuery(event.target.value)}
+								placeholder="Requirement, scenario, risk, or constraint"
+							/>
+						</div>
+					</CollectionToolbar>
+
+					{filteredGroups.length > 1 ? (
+						<div className="use-case-group-toolbar">
+							<Button
+								variant="plain"
+								type="button"
+								className="use-case-group-toggle-all"
+								onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}
+							>
+								{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
+							</Button>
+						</div>
+					) : null}
+
+					{filteredGroups.length ? (
+						<List as="div" variant="grouped" className="use-case-group-list" aria-label="Use Case groups">
+							{filteredGroups.map((group, groupIndex) => {
+								const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
+								const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+								const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
+								return (
+									<section
+										className="use-case-group"
+										aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
+										key={groupKey}
 									>
-										<summary className="use-case-group-heading">
-											<div>
-												<span>Source requirement {group.requirement_id || "Unidentified"}</span>
-												<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
-											</div>
-											<strong>
-												{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
-											</strong>
-										</summary>
-										{group.scenarios.length ? (
-											<ul
-												className="use-case-scenario-list"
-												aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
-											>
-												{group.scenarios.map((scenario, scenarioIndex) => (
-													<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
-												))}
-											</ul>
-										) : (
-											<p className="use-case-context-empty">No scenarios were generated for this requirement.</p>
-										)}
-										<details className="use-case-coverage-context">
-											<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
-												Coverage context
+										<Disclosure
+											className="use-case-group-details"
+											open={isOpen}
+											onToggle={(event) => {
+												const nextOpen = event.currentTarget.open;
+												if (nextOpen !== isOpen) {
+													setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
+												}
+											}}
+										>
+											<summary className="use-case-group-heading">
+												<div>
+													<span>Source requirement {group.requirement_id || "Unidentified"}</span>
+													<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
+												</div>
+												<strong>
+													{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
+												</strong>
 											</summary>
-											<CoverageContext analysis={group.analysis} />
-										</details>
-									</details>
-								</section>
-							);
-						})}
-					</div>
-				) : (
-					<div className="use-case-search-empty" role="status">
-						<strong>No use cases match “{query}”.</strong>
-						<button
-							type="button"
-							className="secondary"
-							onClick={() => {
-								updateQuery("");
-								window.requestAnimationFrame(() => searchRef.current?.focus());
-							}}
-						>
-							Clear search
-						</button>
-					</div>
-				)}
-			</section>
+											{group.scenarios.length ? (
+												<List
+													className="use-case-scenario-list"
+													aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
+												>
+													{group.scenarios.map((scenario, scenarioIndex) => (
+														<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
+													))}
+												</List>
+											) : (
+												<CollectionState as="p" kind="empty" className="use-case-context-empty">
+													No scenarios were generated for this requirement.
+												</CollectionState>
+											)}
+											<Disclosure className="use-case-coverage-context">
+												<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
+													Coverage context
+												</summary>
+												<CoverageContext analysis={group.analysis} />
+											</Disclosure>
+										</Disclosure>
+									</section>
+								);
+							})}
+						</List>
+					) : (
+						<CollectionState as="div" kind="filtered" className="use-case-search-empty" role="status">
+							<strong>No use cases match “{query}”.</strong>
+							<Button
+								type="button"
+								className="secondary"
+								onClick={() => {
+									updateQuery("");
+									window.requestAnimationFrame(() => searchRef.current?.focus());
+								}}
+							>
+								Clear search
+							</Button>
+						</CollectionState>
+					)}
+				</section>
 
-			<ReviewDecisionPanel stageState={effectiveStageState} snapshot={snapshot} review={review} />
+				<ReviewDecisionPanel stageState={effectiveStageState} snapshot={snapshot} review={review} />
+			</ResizablePanes>
 
-			<details className="use-case-provenance">
+			<Disclosure className="use-case-provenance">
 				<summary>Details</summary>
 				<dl>
 					<div>
@@ -663,7 +708,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 						</div>
 					) : null}
 				</dl>
-			</details>
+			</Disclosure>
 		</div>
 	);
 }

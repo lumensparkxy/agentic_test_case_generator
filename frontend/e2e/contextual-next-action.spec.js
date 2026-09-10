@@ -364,11 +364,11 @@ test.describe("Contextual next task", () => {
 		}
 
 		await page.goto(buildProjectPath(PROJECT_ID, "test-cases"));
-		await page.getByRole("tab", { name: /^Template setup$/i }).click();
+		await page.getByRole("button", { name: /^Template setup$/i }).click();
 		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 
 		scenario.status = statusFixture([]);
-		await page.getByRole("tab", { name: /^Generate and review$/i }).click();
+		await page.getByRole("button", { name: /^Generate and review$/i }).click();
 		await page.reload();
 		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 		await expect(page.getByRole("button", { name: /Analyze Impact for/i })).toBeVisible();
@@ -469,6 +469,7 @@ test.describe("Contextual next task", () => {
 		await openTestCases(page);
 
 		const optionalTask = page.getByLabel("Contextual task");
+		await page.getByText("More actions", { exact: true }).first().click();
 		await expect(optionalTask.getByRole("heading", { name: /^Optional test suite actions$/i })).toBeVisible();
 		await expect(optionalTask.locator(".contextual-task-controls > button")).toHaveCount(0);
 		await optionalTask.getByText(/^Details$/i).click();
@@ -480,7 +481,7 @@ test.describe("Contextual next task", () => {
 		scenario.project.stage_state.use_cases.metadata = {};
 		scenario.status.has_baseline_test_suite = true;
 		await page.reload();
-		await expect(page.getByRole("row", { name: new RegExp(OLD_CASE_TITLE, "i") })).toBeVisible();
+		await expect(page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") })).toBeVisible();
 		await expect(page.getByRole("button", { name: /Implement Changes/i })).toHaveCount(0);
 		expect(requests.generation).toBe(0);
 	});
@@ -503,8 +504,8 @@ test.describe("Contextual next task", () => {
 		const scenario = { project: projectFixture(), status: statusFixture(staleActions()), generationGate, statusAfterGeneration };
 		const requests = await installApi(page, scenario);
 		await openTestCases(page);
-		const oldCaseRow = page.getByRole("row", { name: new RegExp(OLD_CASE_TITLE, "i") });
-		const newCaseRow = page.getByRole("row", { name: new RegExp(NEW_CASE_TITLE, "i") });
+		const oldCaseRow = page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") });
+		const newCaseRow = page.getByRole("button", { name: new RegExp(NEW_CASE_TITLE, "i") });
 		await expect(oldCaseRow).toBeVisible();
 
 		const task = page.getByLabel("Contextual task");
@@ -566,8 +567,8 @@ test.describe("Contextual next task", () => {
 		await expect(dialog.getByRole("alert")).toContainText(/current suite was preserved/i);
 		await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeEnabled();
 		await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeFocused();
-		await expect(page.getByRole("row", { name: new RegExp(OLD_CASE_TITLE, "i") })).toBeVisible();
-		await expect(page.getByRole("row", { name: new RegExp(NEW_CASE_TITLE, "i") })).toHaveCount(0);
+		await expect(page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") })).toBeVisible();
+		await expect(page.getByRole("button", { name: new RegExp(NEW_CASE_TITLE, "i") })).toHaveCount(0);
 		expect(requests.generation).toBe(1);
 	});
 });

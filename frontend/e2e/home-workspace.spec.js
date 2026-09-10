@@ -681,7 +681,8 @@ test.describe("Authenticated Projects experience", () => {
 		await expect.poll(() => api.requests.projectCreate.length).toBe(1);
 		expect(api.requests.projectCreate[0].payload).toEqual({ name: createdProject.name });
 		await expect(page).toHaveURL(buildProjectPath(createdProject.project_id));
-		await expect(page.getByRole("heading", { name: new RegExp(`^${createdProject.name}$`, "i") })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible({ timeout: 30_000 });
+		await expect(page.locator(".project-page-header")).toContainText(createdProject.name);
 		await expect
 			.poll(() => page.evaluate((key) => window.localStorage.getItem(key), STORAGE_CURRENT_PROJECT_ID))
 			.toBe(createdProject.project_id);

@@ -1,3 +1,4 @@
+import { Button } from "../components/ui/controls";
 import { SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -30,7 +31,7 @@ export default function GlobalAppShell({ route, navigate, controls = null, compa
 			>
 				<GlobalNavigation route={route} navigate={navigate} />
 				{controls && compactControls ? (
-					<button
+					<Button
 						ref={controlsToggleRef}
 						type="button"
 						className="global-app-shell-controls-toggle secondary"
@@ -40,7 +41,7 @@ export default function GlobalAppShell({ route, navigate, controls = null, compa
 					>
 						<SlidersHorizontal aria-hidden="true" size={16} strokeWidth={2.2} />
 						{areControlsOpen ? "Close workspace controls" : "Open workspace controls"}
-					</button>
+					</Button>
 				) : null}
 				{controls ? (
 					<div id={controlsId} className="global-app-shell-controls" hidden={compactControls && !areControlsOpen}>

@@ -534,7 +534,7 @@ test.describe("Automation preview consistency", () => {
 		const requests = await installApi(page, scenario);
 		await openAutomation(page);
 
-		const panel = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: /^Automation$/i }) });
+		const panel = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: /^Execution setup$/i }) });
 		const previewButton = page.getByRole("button", { name: /^Preview Execution$/ });
 		await previewButton.click({ noWaitAfter: true });
 		await expect.poll(() => requests.previews).toBe(1);

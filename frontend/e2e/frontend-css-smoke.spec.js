@@ -31,7 +31,7 @@ test.describe("Frontend CSS smoke", () => {
 			await expect(page.getByRole("dialog", { name: /settings/i })).toBeVisible();
 			await expectNoDocumentOverflow(page, `${label} workflow settings`);
 
-			await page.getByRole("button", { name: /integrations/i }).click();
+			await page.getByRole("tab", { name: /integrations/i }).click();
 			await expect(page.getByRole("heading", { name: /integration connections/i })).toBeVisible();
 			await expect(page.getByRole("heading", { name: /jira cloud/i })).toBeVisible();
 			await expect(page.getByRole("heading", { name: /azure devops/i })).toBeVisible();

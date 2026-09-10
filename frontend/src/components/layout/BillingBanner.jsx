@@ -1,3 +1,4 @@
+import { Link } from "../ui/controls";
 export default function BillingBanner({ isAuthenticated, pilotAlert, billingContactEmail }) {
 	if (!isAuthenticated || !pilotAlert) {
 		return null;
@@ -9,9 +10,9 @@ export default function BillingBanner({ isAuthenticated, pilotAlert, billingCont
 				<strong>{pilotAlert.title}</strong>
 				<span>{pilotAlert.message}</span>
 			</div>
-			<a href={`mailto:${billingContactEmail}`} className="billing-banner-link">
+			<Link href={`mailto:${billingContactEmail}`} className="billing-banner-link">
 				Contact {billingContactEmail}
-			</a>
+			</Link>
 		</div>
 	);
 }

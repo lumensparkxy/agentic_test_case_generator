@@ -38,7 +38,7 @@ export default function useUseCaseReview({
 	const projectScopeRef = useRef("");
 	const requestScopeRef = useRef("");
 	const scopeContextRef = useRef(null);
-	const [decision, setDecisionState] = useState("approve");
+	const [decision, setDecisionState] = useState("");
 	const [comment, setCommentState] = useState("");
 	const [outcome, setOutcome] = useState(initialOutcome);
 
@@ -70,7 +70,7 @@ export default function useUseCaseReview({
 		retryIdentityRef.current = null;
 
 		if (projectChanged) {
-			setDecisionState("approve");
+			setDecisionState("");
 			setCommentState("");
 			setOutcome(initialOutcome());
 			return;
@@ -120,7 +120,7 @@ export default function useUseCaseReview({
 	}, []);
 
 	const submit = useCallback(async () => {
-		if (submittingRef.current) {
+		if (submittingRef.current || !["approve", "request_changes"].includes(decision)) {
 			return null;
 		}
 		const normalizedComment = `${comment || ""}`.trim();

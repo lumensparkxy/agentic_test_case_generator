@@ -676,7 +676,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByLabel("Contextual task")
 			.getByRole("button", { name: /^Start generation$/i })
 			.click();
-		await expect(page.locator(".generate-results-summary-pill", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
+		await expect(page.locator(".test-suite-summary", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
 
 		await page.reload();
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
@@ -718,17 +718,17 @@ test.describe("Orchestrator lifecycle validation", () => {
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
-			.getByRole("link", { name: /^Overview,/i })
+			.getByRole("link", { name: /^Overview$/i })
 			.click();
 		let task = page.getByLabel("Contextual task");
 		await expect(task.getByRole("heading", { name: /^Create Evidence Report$/i })).toBeVisible();
 		await task.getByText(/^Details$/i).click();
 		await task.getByRole("button", { name: /^Review Evidence$/i }).click();
-		await expect(page.getByText(/Approved for export/i)).toBeVisible();
+		await expect(page.getByLabel("Test case quality").getByText("Machine quality check passed")).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
-			.getByRole("link", { name: /^Overview,/i })
+			.getByRole("link", { name: /^Overview$/i })
 			.click();
 		task = page.getByLabel("Contextual task");
 		await task.getByRole("button", { name: /^Open workbench$/i }).click();

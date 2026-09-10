@@ -1,3 +1,6 @@
+import { Surface, Disclosure } from "../ui/surfaces";
+import { Button, Link, Select, Checkbox } from "../ui/controls";
+import { TableScroll, Table } from "../ui/collections";
 import { REQUIREMENT_QUALITY_FLAG_OPTIONS, REQUIREMENT_REVIEW_STATUSES } from "../../constants/workflow";
 import {
 	formatSourceIssueKey,
@@ -18,7 +21,7 @@ export default function RequirementReviewWorkbench({
 	onQualityFlagToggle,
 }) {
 	return (
-		<div className="result-section">
+		<Surface as="div" className="result-section">
 			<h3>Requirement Review Workbench</h3>
 			{requirements.length === 0 ? (
 				<span className="helper-text">No requirements extracted yet.</span>
@@ -34,12 +37,12 @@ export default function RequirementReviewWorkbench({
 							</p>
 						</div>
 						<div className="requirement-review-bulk-actions">
-							<button type="button" className="secondary small" onClick={onApproveNonRejected}>
+							<Button type="button" className="secondary small" onClick={onApproveNonRejected}>
 								Approve non-rejected
-							</button>
-							<button type="button" className="secondary small" onClick={onMarkAllNeedsReview}>
+							</Button>
+							<Button type="button" className="secondary small" onClick={onMarkAllNeedsReview}>
 								Mark all needs review
-							</button>
+							</Button>
 						</div>
 					</div>
 					{groupRequirementsByContext(requirements).map((group) => (
@@ -53,16 +56,21 @@ export default function RequirementReviewWorkbench({
 									{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}
 								</span>
 							</div>
-							<div className="requirement-table-wrapper" role="region" aria-label={`${group.label} requirements table`} tabIndex={0}>
-								<table className="requirement-review-table">
+							<TableScroll
+								className="requirement-table-wrapper"
+								role="region"
+								aria-label={`${group.label} requirements table`}
+								tabIndex={0}
+							>
+								<Table className="requirement-review-table">
 									<thead>
 										<tr>
-											<th>Epic</th>
-											<th>ID</th>
-											<th>Requirement</th>
-											<th>Review source</th>
-											<th>Review status</th>
-											<th>Quality flags</th>
+											<th scope="col">Epic</th>
+											<th scope="col">ID</th>
+											<th scope="col">Requirement</th>
+											<th scope="col">Review source</th>
+											<th scope="col">Review status</th>
+											<th scope="col">Quality flags</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -89,19 +97,19 @@ export default function RequirementReviewWorkbench({
 													</td>
 													<td className="requirement-review-source-cell">
 														{req.source_excerpt ? (
-															<details className="requirement-evidence compact">
+															<Disclosure className="requirement-evidence compact">
 																<summary>Source evidence</summary>
 																<p>{req.source_excerpt}</p>
 																{req.source_issue_url ? (
-																	<a href={req.source_issue_url} target="_blank" rel="noreferrer">
+																	<Link href={req.source_issue_url} target="_blank" rel="noreferrer">
 																		Open source ↗
-																	</a>
+																	</Link>
 																) : null}
-															</details>
+															</Disclosure>
 														) : req.source_issue_url ? (
-															<a className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">
+															<Link className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">
 																Open source ↗
-															</a>
+															</Link>
 														) : req.source_path || req.source_section ? (
 															<span className="cell-secondary">{req.source_path || req.source_section}</span>
 														) : (
@@ -116,7 +124,7 @@ export default function RequirementReviewWorkbench({
 														) : null}
 													</td>
 													<td className="requirement-status-cell">
-														<select
+														<Select
 															value={reviewStatus}
 															onChange={(event) => onReviewStatusChange(req.id, event.target.value)}
 															aria-label={`Review status for ${requirementId}`}
@@ -126,17 +134,17 @@ export default function RequirementReviewWorkbench({
 																	{statusOption}
 																</option>
 															))}
-														</select>
+														</Select>
 													</td>
 													<td className="requirement-flags-cell">
-														<details className="requirement-quality-details">
+														<Disclosure className="requirement-quality-details">
 															<summary>
 																{qualityFlags.length ? `${qualityFlags.length} flag${qualityFlags.length === 1 ? "" : "s"}` : "Add flags"}
 															</summary>
 															<div className="quality-flag-checklist">
 																{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
 																	<label key={`${requirementId}-${flag}`}>
-																		<input
+																		<Checkbox
 																			type="checkbox"
 																			checked={qualityFlags.includes(flag)}
 																			onChange={() => onQualityFlagToggle(req.id, flag)}
@@ -145,18 +153,18 @@ export default function RequirementReviewWorkbench({
 																	</label>
 																))}
 															</div>
-														</details>
+														</Disclosure>
 													</td>
 												</tr>
 											);
 										})}
 									</tbody>
-								</table>
-							</div>
+								</Table>
+							</TableScroll>
 						</div>
 					))}
 				</div>
 			)}
-		</div>
+		</Surface>
 	);
 }

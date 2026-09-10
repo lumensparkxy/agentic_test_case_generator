@@ -1,3 +1,4 @@
+import { Badge } from "../ui/surfaces";
 import { CheckCircle2, Circle, CircleAlert, Clock3, LockKeyhole, MapPin, XCircle } from "lucide-react";
 
 const STATUS_ICONS = Object.freeze({
@@ -28,10 +29,26 @@ export default function StatusBadge({ status, label, compact = false, accessible
 	const Icon = STATUS_ICONS[tone] || Circle;
 	const classes = ["status-badge-token", `status-badge-token--${tone}`, compact ? "compact" : "", className].filter(Boolean).join(" ");
 
+	const tones = {
+		complete: "success",
+		attention: "warning",
+		blocked: "blocked",
+		failed: "danger",
+		running: "running",
+		active: "info",
+		pending: "pending",
+	};
 	return (
-		<span className={classes} data-status-tone={tone} aria-label={accessibleLabel || undefined} title={compact ? label : undefined}>
-			<Icon aria-hidden="true" size={14} strokeWidth={2.25} />
+		<Badge
+			compact={compact}
+			tone={tones[tone]}
+			icon={Icon}
+			className={classes}
+			data-status-tone={tone}
+			aria-label={accessibleLabel || undefined}
+			title={compact ? label : undefined}
+		>
 			<span className="status-badge-token-label">{label}</span>
-		</span>
+		</Badge>
 	);
 }

@@ -1,3 +1,7 @@
+import { Dialog } from "../ui/dialog";
+import { Alert, Disclosure } from "../ui/surfaces";
+import { Button } from "../ui/controls";
+import { List, ListItem } from "../ui/collections";
 import { useEffect, useRef, useState } from "react";
 
 import { formatTaskLabel, formatTaskProvenance, getTaskProvenance } from "./contextualTask";
@@ -49,35 +53,13 @@ function RegenerationConfirmation({ isSubmitting, error, onCancel, onConfirm }) 
 			onClick={() => {
 				if (!isSubmitting) onCancel();
 			}}
-			onKeyDown={(event) => {
-				if (event.key === "Escape" && !isSubmitting) {
-					event.preventDefault();
-					onCancel();
-					return;
-				}
-				if (event.key !== "Tab") return;
-				const focusable = Array.from(
-					dialogRef.current?.querySelectorAll(
-						"button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled)"
-					) || []
-				);
-				if (!focusable.length) {
-					event.preventDefault();
-					dialogRef.current?.focus();
-					return;
-				}
-				const first = focusable[0];
-				const last = focusable.at(-1);
-				if (event.shiftKey && document.activeElement === first) {
-					event.preventDefault();
-					last.focus();
-				} else if (!event.shiftKey && document.activeElement === last) {
-					event.preventDefault();
-					first.focus();
-				}
-			}}
 		>
-			<div
+			<Dialog
+				manageFocus
+				initialFocusRef={confirmButtonRef}
+				onClose={() => {
+					if (!isSubmitting) onCancel();
+				}}
 				ref={dialogRef}
 				className="contextual-task-dialog"
 				role="dialog"
@@ -95,19 +77,19 @@ function RegenerationConfirmation({ isSubmitting, error, onCancel, onConfirm }) 
 					and existing cases or coverage may be replaced. If it fails, the current suite remains available.
 				</p>
 				{error ? (
-					<div className="contextual-task-dialog-error" role="alert">
+					<Alert as="div" tone="danger" className="contextual-task-dialog-error" role="alert">
 						{error}
-					</div>
+					</Alert>
 				) : null}
 				<div className="contextual-task-dialog-actions">
-					<button type="button" className="secondary" onClick={onCancel} disabled={isSubmitting}>
+					<Button type="button" className="secondary" onClick={onCancel} disabled={isSubmitting}>
 						Cancel
-					</button>
-					<button ref={confirmButtonRef} type="button" onClick={onConfirm} disabled={isSubmitting}>
+					</Button>
+					<Button ref={confirmButtonRef} type="button" onClick={onConfirm} disabled={isSubmitting}>
 						{isSubmitting ? "Regenerating…" : "Confirm regeneration"}
-					</button>
+					</Button>
 				</div>
-			</div>
+			</Dialog>
 		</div>
 	);
 }
@@ -216,12 +198,12 @@ export default function ContextualTaskCard({
 			</div>
 			<div className="contextual-task-controls">
 				{hasPrimaryAction ? (
-					<button type="button" onClick={handlePrimaryAction} disabled={primaryDisabled}>
+					<Button type="button" onClick={handlePrimaryAction} disabled={primaryDisabled}>
 						{isPrimaryBusy ? "Working…" : actionCtaLabel(action, navigationOnly)}
-					</button>
+					</Button>
 				) : null}
 				{hasDetails ? (
-					<details className="contextual-task-details">
+					<Disclosure className="contextual-task-details">
 						<summary>Details</summary>
 						<div className="contextual-task-details-body">
 							{stage ? (
@@ -235,15 +217,15 @@ export default function ContextualTaskCard({
 										<strong>Sources</strong> {provenanceLabel}
 									</p>
 									{provenance.some((source) => source.snapshotId) ? (
-										<ul className="contextual-task-snapshot-list" aria-label="Source snapshots">
+										<List className="contextual-task-snapshot-list" aria-label="Source snapshots">
 											{provenance
 												.filter((source) => source.snapshotId)
 												.map((source) => (
-													<li key={source.stage}>
+													<ListItem key={source.stage}>
 														{source.label}: {source.snapshotId}
-													</li>
+													</ListItem>
 												))}
-										</ul>
+										</List>
 									) : null}
 								</div>
 							) : null}
@@ -261,7 +243,7 @@ export default function ContextualTaskCard({
 										const secondaryBusy = Boolean(busyMap[secondaryAction.action] || locallyBusyAction === secondaryAction.action);
 										return (
 											<div className="contextual-task-secondary-action" key={`${secondaryAction.action}-${secondaryAction.stage}`}>
-												<button
+												<Button
 													ref={secondaryAction.action === "full_regenerate" ? regenerationTriggerRef : null}
 													type="button"
 													className="secondary small"
@@ -269,7 +251,7 @@ export default function ContextualTaskCard({
 													disabled={disabled || disabledMap[secondaryAction.action] || secondaryBusy || !secondaryAction.enabled}
 												>
 													{secondaryBusy ? "Working…" : actionLabel(secondaryAction)}
-												</button>
+												</Button>
 												<p>{secondaryAction.reason || firstBlocker(secondaryAction) || "Optional workflow action."}</p>
 												{firstBlocker(secondaryAction) && firstBlocker(secondaryAction) !== secondaryAction.reason ? (
 													<span className="contextual-task-blocker">{firstBlocker(secondaryAction)}</span>
@@ -280,7 +262,7 @@ export default function ContextualTaskCard({
 								</div>
 							) : null}
 						</div>
-					</details>
+					</Disclosure>
 				) : null}
 			</div>
 			{confirmationAction ? (

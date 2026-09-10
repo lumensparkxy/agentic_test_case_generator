@@ -1,3 +1,4 @@
+import { Link } from "../components/ui/controls";
 const shouldNavigateInApp = (event, target) =>
 	!event.defaultPrevented &&
 	event.button === 0 &&
@@ -18,8 +19,8 @@ export default function RouteLink({ to, navigate, replace = false, target, onCli
 	};
 
 	return (
-		<a href={to} target={target} onClick={handleClick} {...props}>
+		<Link href={to} target={target} onClick={handleClick} {...props}>
 			{children}
-		</a>
+		</Link>
 	);
 }

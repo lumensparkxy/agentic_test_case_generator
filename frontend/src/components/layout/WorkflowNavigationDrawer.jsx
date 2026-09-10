@@ -1,9 +1,11 @@
+import { Badge } from "../ui/surfaces";
+import { Button, Link } from "../ui/controls";
 import {
 	BookOpen,
 	Bot,
 	ClipboardCheck,
-	CloudUpload,
-	Download,
+	FileText,
+	ChartNoAxesColumnIncreasing,
 	LayoutGrid,
 	PanelLeftClose,
 	PanelLeftOpen,
@@ -11,7 +13,7 @@ import {
 } from "lucide-react";
 import { useRef } from "react";
 
-import StatusBadge from "../workflow/StatusBadge";
+import { Circle, LockKeyhole } from "lucide-react";
 
 const STATE_LABELS = {
 	active: "Current",
@@ -22,12 +24,12 @@ const STATE_LABELS = {
 };
 
 const WORKFLOW_ICONS = {
-	0: CloudUpload,
+	0: FileText,
 	1: BookOpen,
 	2: LayoutGrid,
 	3: WandSparkles,
 	4: Bot,
-	5: Download,
+	5: ChartNoAxesColumnIncreasing,
 	6: ClipboardCheck,
 };
 
@@ -77,10 +79,10 @@ export default function WorkflowNavigationDrawer({
 		>
 			<div className="workflow-navigation-header">
 				<div>
-					<span>Workflow</span>
-					<strong>{tabs.find((tab) => tab.id === activeTab)?.label || "Workspace"}</strong>
+					<span>Project</span>
 				</div>
-				<button
+				<Button
+					variant="plain"
 					ref={toggleRef}
 					type="button"
 					className="workflow-navigation-toggle"
@@ -91,13 +93,21 @@ export default function WorkflowNavigationDrawer({
 					aria-controls={isCompact ? navigationItemsId : undefined}
 				>
 					<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
-				</button>
+				</Button>
 			</div>
 			<div id={navigationItemsId} className="workflow-navigation-list" hidden={itemsHidden}>
 				{tabs.map((tab) => {
 					const isActive = activeTab === tab.id;
 					const state = statusByTabId[tab.id] || "pending";
-					const stateLabel = isActive ? STATE_LABELS.active : STATE_LABELS[state] || STATE_LABELS.pending;
+					const stateLabel =
+						tab.id === 7
+							? ""
+							: state === "attention" && tab.id === 6
+								? "Awaiting review"
+								: state === "attention" && tab.id === 3
+									? "Needs refinement"
+									: STATE_LABELS[state] || STATE_LABELS.pending;
+					const StatusIcon = state === "blocked" ? LockKeyhole : Circle;
 					const WorkflowIcon = WORKFLOW_ICONS[tab.id] || LayoutGrid;
 					const itemContent = (
 						<>
@@ -106,18 +116,27 @@ export default function WorkflowNavigationDrawer({
 							</span>
 							<span className="workflow-navigation-copy">
 								<strong>{tab.label}</strong>
-								<span>{tab.title}</span>
+								{stateLabel && !isCollapsed && (
+									<Badge
+										variant="inline"
+										tone={
+											{ complete: "success", blocked: "blocked", pending: "pending", attention: "warning", active: "info" }[state] ||
+											"neutral"
+										}
+										icon={StatusIcon}
+										className={`nav-workflow-status ${state}`}
+									>
+										{stateLabel}
+									</Badge>
+								)}
 							</span>
-							{!isCollapsed && (
-								<StatusBadge className="workflow-navigation-state" status={isActive ? "active" : state} label={stateLabel} />
-							)}
 						</>
 					);
 					const itemClassName = `workflow-navigation-item ${state} ${isActive ? "active" : ""}`;
 
 					if (tab.href) {
 						return (
-							<a
+							<Link
 								key={tab.id}
 								href={tab.href}
 								className={itemClassName}
@@ -129,26 +148,26 @@ export default function WorkflowNavigationDrawer({
 									handleSelection(tab.id);
 								}}
 								aria-current={isActive ? "page" : undefined}
-								aria-label={`${tab.label}, ${stateLabel}`}
-								title={isCollapsed ? [tab.label, stateLabel].join(" — ") : undefined}
+								aria-label={[tab.label, stateLabel].filter(Boolean).join(", ")}
+								title={isCollapsed ? [tab.label, stateLabel].filter(Boolean).join(" — ") : undefined}
 							>
 								{itemContent}
-							</a>
+							</Link>
 						);
 					}
 
 					return (
-						<button
+						<Button
 							type="button"
 							key={tab.id}
 							className={itemClassName}
 							onClick={() => handleSelection(tab.id)}
 							aria-current={isActive ? "page" : undefined}
-							aria-label={`${tab.label}, ${stateLabel}`}
-							title={isCollapsed ? [tab.label, stateLabel].join(" — ") : undefined}
+							aria-label={[tab.label, stateLabel].filter(Boolean).join(", ")}
+							title={isCollapsed ? [tab.label, stateLabel].filter(Boolean).join(" — ") : undefined}
 						>
 							{itemContent}
-						</button>
+						</Button>
 					);
 				})}
 			</div>
