@@ -1,3 +1,11 @@
+# Follow-up QA — compact typography and resizable panes (#255)
+
+The current follow-up changes body text to 14px, page headings to 28px/26px and section headings to 20px while preserving 13px secondary text and 44px controls. Test Cases and Use Cases now share a visible resizable divider. Actual desktop pages were visually inspected after the changes: long case titles and scenario text wrap, the divider stays between panes, and the explicit review decision remains unchanged. The Test Cases screenshot shows more of the steps at the same 1488 × 1056 viewport.
+
+All 152 tests in the frontend home-first regression suite pass, including new mouse drag, keyboard limits/reset, saved widths, mobile stacking, selection preservation and font-size checks. Existing responsive and accessibility checks pass. The full live-integration suite was not repeated for this follow-up; its separate known #251 limitation remains as documented below. No additional visual blocker was found in the inspected pages.
+
+---
+
 # Design QA — shared design system (#241 / #246)
 
 Visual result: passed for the reviewed actual pages. Migration validation: 158 of 159 browser tests pass; the remaining legacy live-generation test is tracked in #251. The full suite is not green.

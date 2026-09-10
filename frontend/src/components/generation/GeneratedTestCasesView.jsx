@@ -32,7 +32,12 @@ export default function GeneratedTestCasesView({
 		: [];
 	return (
 		<>
-			<ListDetail className="test-review-workspace" aria-label="Generated test cases">
+			<ListDetail
+				storageKey="test-cases"
+				label="Resize test case list and details"
+				className="test-review-workspace"
+				aria-label="Generated test cases"
+			>
 				<div className="test-review-list">
 					<h2>Generated Test Cases</h2>
 					<label htmlFor={searchId} className="sr-only">

@@ -56,10 +56,11 @@
 	--control-height-compact: 36px;
 	--table-cell-padding: 12px 16px;
 	--table-cell-padding-compact: 8px 12px;
-	--font-body: 15px;
+	--font-body: 14px;
 	--font-secondary: 13px;
-	--font-page-title: 36px;
-	--font-page-title-mobile: 30px;
+	--font-section-title: 20px;
+	--font-page-title: 28px;
+	--font-page-title-mobile: 26px;
 	--focus-outline: 2px solid var(--primary);
 
 	/* Typography */

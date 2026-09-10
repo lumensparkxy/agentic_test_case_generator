@@ -1,3 +1,4 @@
+import { ResizablePanes } from "../ui/resizable-panes";
 import { ListItem, CollectionState, List, CollectionToolbar } from "../ui/collections";
 import { Disclosure, Alert } from "../ui/surfaces";
 import { Button, Radio, Textarea, Input } from "../ui/controls";
@@ -554,7 +555,15 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					) : null}
 				</Disclosure>
 			</div>
-			<div className="artifact-review-columns">
+			<ResizablePanes
+				as="div"
+				className="artifact-review-columns"
+				storageKey="use-cases"
+				label="Resize scenarios and review decision"
+				defaultSize={68}
+				minFirst={360}
+				minSecond={300}
+			>
 				<section className="use-case-collection" aria-labelledby="use-case-collection-title">
 					<CollectionToolbar as="div" className="use-case-collection-heading">
 						<div>
@@ -665,7 +674,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 				</section>
 
 				<ReviewDecisionPanel stageState={effectiveStageState} snapshot={snapshot} review={review} />
-			</div>
+			</ResizablePanes>
 
 			<Disclosure className="use-case-provenance">
 				<summary>Details</summary>

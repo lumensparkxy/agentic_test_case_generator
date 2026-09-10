@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented, awaiting review: #255 — Compact shared typography and resizable Test Cases/Use Cases panes. Builds on PR #254; 152 frontend regression checks pass.
+
 - Implemented, awaiting review: #253 — Align Back/Next with sidebar order, include Use Cases, and make Template Setup an explicit Test Cases subview. Builds on PR #252; 45 focused navigation/review/export browser checks and build/lint/format pass.
 
 - Implemented, awaiting review/merge: #241 — Shared design system across all application screens. Stories: #242 foundations (PR #247), #243 artifact collections (PR #248), #244 workspace (PR #249), #245 remaining surfaces (PR #250), #246 consolidation. Builds on #239 / PR #240. Final full-suite acceptance has one known legacy test failure tracked in #251.

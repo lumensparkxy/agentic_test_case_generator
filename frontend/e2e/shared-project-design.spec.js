@@ -218,3 +218,60 @@ test("template setup is explicit and returns to the normal workbench across navi
 	await expect(setup).toBeVisible();
 	await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toBeVisible();
 });
+
+test("pane divider supports drag, limits, reset and saved widths without changing selection", async ({ page }) => {
+	await page.setViewportSize({ width: 1488, height: 1056 });
+	await openCases(page);
+	const divider = page.getByRole("separator", { name: "Resize test case list and details" });
+	await expect(divider).toBeVisible();
+	const start = Number(await divider.getAttribute("aria-valuenow"));
+	const box = await divider.boundingBox();
+	await page.mouse.move(box.x + box.width / 2, box.y + 30);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 110, box.y + 30, { steps: 10 });
+	await page.mouse.up();
+	expect(Number(await divider.getAttribute("aria-valuenow"))).toBeGreaterThan(start);
+	const saved = await divider.getAttribute("aria-valuenow");
+	await page.reload();
+	await expect(divider).toHaveAttribute("aria-valuenow", saved);
+	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("Valid checkout");
+	await divider.focus();
+	await page.keyboard.press("Home");
+	await expect(divider).toHaveAttribute("aria-valuenow", await divider.getAttribute("aria-valuemin"));
+	await page.keyboard.press("End");
+	await expect(divider).toHaveAttribute("aria-valuenow", await divider.getAttribute("aria-valuemax"));
+	await page.keyboard.press("Enter");
+	await expect(divider).toHaveAttribute("aria-valuenow", String(start));
+	await page.keyboard.press("ArrowRight");
+	await expect(divider).toHaveAttribute("aria-valuenow", String(start + 2));
+	await divider.dblclick();
+	await expect(divider).toHaveAttribute("aria-valuenow", String(start));
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(divider).toHaveCount(0);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
+});
+
+test("Use Cases shares resizing while preserving the explicit review decision", async ({ page }) => {
+	await page.setViewportSize({ width: 1488, height: 1056 });
+	const api = await installUseCaseReviewApi(page);
+	await seedAuthenticatedSession(page);
+	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/use-cases`);
+	const divider = page.getByRole("separator", { name: "Resize scenarios and review decision" });
+	await expect(divider).toBeVisible();
+	await divider.focus();
+	await page.keyboard.press("Home");
+	await expect(divider).toHaveAttribute("aria-valuenow", await divider.getAttribute("aria-valuemin"));
+	await expect(page.getByRole("radio", { name: "Approve", exact: true })).not.toBeChecked();
+	expect(api.requests.review).toEqual([]);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(divider).toHaveCount(0);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("project typography uses the compact shared reading scale", async ({ page }) => {
+	await openCases(page);
+	await expect(page.locator("body")).toHaveCSS("font-size", "14px");
+	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toHaveCSS("font-size", "28px");
+	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toHaveCSS("min-height", "44px");
+});

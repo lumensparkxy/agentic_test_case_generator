@@ -1,3 +1,5 @@
+import { ResizablePanes } from "./resizable-panes";
+
 const classes = (...values) => values.filter(Boolean).join(" ");
 
 export function Table({ density = "comfortable", className, ...props }) {
@@ -24,7 +26,7 @@ export function SelectableItem({ selected, className, ...props }) {
 	);
 }
 export function ListDetail({ as: Element = "section", className, ...props }) {
-	return <Element {...props} data-ui="list-detail" className={classes("ui-list-detail", className)} />;
+	return <ResizablePanes as={Element} {...props} data-ui="list-detail" className={classes("ui-list-detail", className)} />;
 }
 export function CollectionToolbar({ as: Element = "div", className, ...props }) {
 	return <Element {...props} data-ui="collection-toolbar" className={classes("ui-collection-toolbar", className)} />;

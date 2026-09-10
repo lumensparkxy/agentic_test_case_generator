@@ -62,3 +62,13 @@ Back/Next follows `PROJECT_NAV_ITEMS`, the same destination order as the sidebar
 Test Cases route entry, including browser history and reload, opens the normal generation/review workbench. Template Setup is an explicit local subview. Its Back to Test Cases action and the header Generate and review action return to that workbench without losing in-session template edits. Template Setup is not a sequential workflow step.
 
 The existing first-generation operation still creates the initial Use Cases artifact from the Test Cases workbench. When no Use Cases snapshot exists, the page retains its explanation and appropriate prerequisite link; navigation itself does not generate or approve an artifact.
+
+## Compact typography and resizable panes (#255)
+
+The shared body token is 14px, secondary text remains 13px, page titles use 28px (26px narrow), and section titles use 20px. Keep 44px normal control targets; reducing reading size must not reduce hit areas. Workspace headings and panel descriptions consume this shared scale rather than independent oversized values.
+
+`ResizablePanes` in `components/ui/resizable-panes.jsx` takes exactly two content children. It owns presentation state only: `defaultSize` is the first pane percentage, `minFirst`/`minSecond` are minimum pixel widths, `label` names the accessible separator, and `storageKey` optionally persists a layout preference under `tcg.panes.*`. Nest splits for additional panes. It observes available container width and stacks the children without a separator when the minimum widths cannot fit. Browser storage failures do not disable interaction. Mount with a new React key when changing the identity of a stored layout.
+
+Test Cases uses it through `ListDetail` (38% initial list width, 260/360px minima); Use Cases uses it for scenarios and the review decision (68%, 360/300px minima). Drag the divider, use Left/Right arrows (Shift for larger steps), Home/End for limits, or Enter/double-click to reset. It preserves child identity while resizing, so selection, filters and review state remain feature-owned. Fixed navigation and ordinary card grids are not converted to resizable content panes.
+
+Validation: 152 tests in `test:e2e:home-first` pass, including pointer drag, keyboard reset/limits, width persistence across reload, compact typography and responsive/accessibility regression checks. Live desktop Test Cases and Use Cases were inspected with actual artifacts.

@@ -501,3 +501,73 @@
 	height: 18px;
 	flex-shrink: 0;
 }
+
+/* Shared reading scale: keep small metadata readable and controls easy to hit. */
+.panel-title {
+	font-size: var(--font-section-title);
+}
+.panel-description,
+.project-page-subtitle,
+.workspace-page-header p {
+	font-size: var(--font-body);
+}
+.workspace-page-header h1,
+.workspace-header h1 {
+	font-size: var(--font-page-title);
+}
+
+.ui-resizable-panes {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 0;
+	min-width: 0;
+	align-items: stretch;
+}
+.ui-resizable-pane {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.ui-resizable-panes[data-expanded="false"] {
+	gap: var(--space-5);
+}
+.ui-pane-divider {
+	position: relative;
+	cursor: col-resize;
+	touch-action: none;
+	user-select: none;
+	align-self: stretch;
+	min-height: 80px;
+	border-radius: 4px;
+}
+.ui-pane-divider::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 9px;
+	width: 2px;
+	background: var(--border-strong);
+}
+.ui-pane-divider:hover::after,
+.ui-pane-divider:focus-visible::after {
+	background: var(--primary);
+	width: 3px;
+}
+.ui-pane-divider:focus-visible {
+	outline: var(--focus-outline);
+	outline-offset: -2px;
+	background: var(--primary-tonal);
+}
+.ui-resizable-pane > .test-review-list {
+	border-right: 0;
+	padding-right: 0;
+}
+.ui-resizable-panes[data-expanded="false"] .test-review-items {
+	max-height: 280px;
+}
+@media (max-width: 640px) {
+	.workspace-page-header h1,
+	.workspace-header h1 {
+		font-size: var(--font-page-title-mobile);
+	}
+}
