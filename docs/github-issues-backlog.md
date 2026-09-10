@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- In progress: #241 — Shared design system across all application screens. Stories: #242 foundations, #243 artifact collections, #244 workspace, #245 remaining surfaces, #246 consolidation. Builds on #239 / PR #240.
+
 This file contains issue-ready drafts for the implementation plan in `docs/implementation-plan.md`.
 
 ## UI/UX audit follow-up

@@ -1,12 +1,8 @@
 /* Shared project design, issue #239. Route content keeps its own workflow. */
-:root {
-	--bg-color: #fff;
-	--radius-md: 10px;
-	--radius-lg: 12px;
-}
+
 body {
 	background: #fff;
-	font-size: 15px;
+	font-size: var(--font-body);
 }
 .page {
 	padding: 0;
@@ -24,7 +20,7 @@ body {
 	box-shadow: none;
 }
 .global-navigation-link {
-	font-size: 15px;
+	font-size: var(--font-body);
 	font-weight: 650;
 	border: 0;
 }
@@ -118,7 +114,7 @@ body {
 	gap: 4px;
 }
 .workflow-navigation-copy strong {
-	font-size: 15px;
+	font-size: var(--font-body);
 	font-weight: 650;
 	white-space: normal;
 	overflow: visible;
@@ -127,7 +123,7 @@ body {
 	display: flex;
 	align-items: center;
 	gap: 7px;
-	font-size: 13px;
+	font-size: var(--font-secondary);
 	line-height: 1.4;
 	white-space: normal;
 	overflow: visible;
@@ -187,7 +183,7 @@ body {
 }
 .project-page-header h1 {
 	margin: 0;
-	font-size: 36px;
+	font-size: var(--font-page-title);
 	line-height: 1.2;
 	letter-spacing: -0.025em;
 	color: var(--text-main);
@@ -279,7 +275,7 @@ select {
 	font-size: 25px;
 }
 .project-overview-page .contextual-task-card p {
-	font-size: 15px;
+	font-size: var(--font-body);
 }
 .use-case-page-status-actions {
 	justify-content: flex-start;
@@ -327,7 +323,7 @@ select {
 	display: none;
 }
 .use-case-collection-heading p {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 }
 .use-case-search-field {
 	width: 100%;
@@ -350,7 +346,7 @@ select {
 	border-radius: 0;
 }
 .use-case-scenario-heading h4 {
-	font-size: 15px;
+	font-size: var(--font-body);
 }
 .use-case-scenario-badges {
 	font-size: 12px;
@@ -389,7 +385,7 @@ select {
 	width: 100%;
 }
 .use-case-decision-actions p {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 }
 .test-cases-section-tabs {
 	background: none;
@@ -416,7 +412,7 @@ select {
 	color: var(--text-muted);
 }
 .test-generation-panel.has-test-cases > .generation-gate-card.ready p {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 }
 .test-quality-summary {
 	display: flex;
@@ -557,12 +553,12 @@ select {
 }
 .test-review-item small,
 .test-review-item span span {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 	font-weight: 400;
 	color: var(--text-muted);
 }
 .test-review-item strong {
-	font-size: 15px;
+	font-size: var(--font-body);
 	line-height: 1.45;
 	overflow-wrap: anywhere;
 }
@@ -588,7 +584,7 @@ select {
 	color: var(--text-muted);
 }
 .test-review-detail .test-detail-meta {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 	margin: 4px 0;
 }
 .test-inline-findings {
@@ -609,7 +605,7 @@ select {
 }
 .test-steps-heading > span {
 	color: var(--text-muted);
-	font-size: 13px;
+	font-size: var(--font-secondary);
 }
 .test-detail-steps {
 	padding-left: 22px;
@@ -622,7 +618,7 @@ select {
 	color: var(--text-main);
 }
 .test-detail-steps strong {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 	margin-right: 10px;
 	font-weight: 500;
 }
@@ -697,7 +693,7 @@ select {
 		flex-wrap: wrap;
 	}
 	.project-page-header h1 {
-		font-size: 30px;
+		font-size: var(--font-page-title-mobile);
 	}
 }
 @media (max-width: 480px) {
@@ -722,7 +718,7 @@ select {
 	}
 	.global-navigation-link {
 		padding: 8px;
-		font-size: 13px;
+		font-size: var(--font-secondary);
 	}
 	.test-case-metadata dl > div {
 		grid-template-columns: 1fr;
@@ -878,7 +874,7 @@ select {
 }
 .scenario-details > summary {
 	cursor: pointer;
-	font-size: 15px;
+	font-size: var(--font-body);
 	display: flex;
 	align-items: baseline;
 	gap: 12px;
@@ -897,7 +893,7 @@ select {
 	color: var(--text-muted);
 }
 .scenario-summary-copy strong {
-	font-size: 15px;
+	font-size: var(--font-body);
 	line-height: 1.5;
 	font-weight: 550;
 }
@@ -906,7 +902,7 @@ select {
 	color: var(--text-muted);
 }
 .scenario-expanded-content > span {
-	font-size: 13px;
+	font-size: var(--font-secondary);
 }
 @media (max-width: 600px) {
 	.scenario-summary-copy {

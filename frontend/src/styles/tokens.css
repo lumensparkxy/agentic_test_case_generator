@@ -18,7 +18,7 @@
 	--info-tonal: #f5f3ff;
 
 	/* Surfaces */
-	--bg-color: #f4f6fb;
+	--bg-color: #fff;
 	--card-bg: #ffffff;
 	--surface-container: #f8fafd;
 	--surface-container-high: #eef2f9;
@@ -38,9 +38,26 @@
 
 	/* Shape */
 	--radius-sm: 0.5rem;
-	--radius-md: 0.75rem;
-	--radius-lg: 1rem;
+	--radius-md: 10px;
+	--radius-lg: 12px;
 	--radius-xl: 1.25rem;
+
+	/* Shared density and rhythm */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 32px;
+	--control-height: 44px;
+	--control-height-compact: 36px;
+	--table-cell-padding: 12px 16px;
+	--table-cell-padding-compact: 8px 12px;
+	--font-body: 15px;
+	--font-secondary: 13px;
+	--font-page-title: 36px;
+	--font-page-title-mobile: 30px;
+	--focus-outline: 2px solid var(--primary);
 
 	/* Typography */
 	--font-sans: "Inter", "InterVariable", system-ui, -apple-system, "Segoe UI", sans-serif;

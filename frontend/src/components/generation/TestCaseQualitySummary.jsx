@@ -1,3 +1,4 @@
+import { Disclosure } from "../ui/surfaces";
 import { CircleAlert, CircleCheck } from "lucide-react";
 
 export default function TestCaseQualitySummary({ review, meta, exportLocked }) {
@@ -14,7 +15,7 @@ export default function TestCaseQualitySummary({ review, meta, exportLocked }) {
 					{meta.thresholdLabel ? ` · ${meta.thresholdLabel}` : ""}
 					{exportLocked ? " · Export is blocked." : ""}
 				</p>
-				<details className="test-quality-findings">
+				<Disclosure className="test-quality-findings">
 					<summary>View findings</summary>
 					<p>{review.summary || "No review summary available."}</p>
 					{findings.length > 0 && (
@@ -24,7 +25,7 @@ export default function TestCaseQualitySummary({ review, meta, exportLocked }) {
 							))}
 						</ul>
 					)}
-				</details>
+				</Disclosure>
 			</div>
 		</section>
 	);

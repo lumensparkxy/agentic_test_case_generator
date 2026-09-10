@@ -107,3 +107,17 @@ for (const width of [390, 901, 1488]) {
 		await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("Declined card");
 	});
 }
+
+test("shared template fields expose labels, help text and controlled values", async ({ page }) => {
+	await openCases(page);
+	await page.getByRole("button", { name: "Template setup", exact: true }).click();
+	const name = page.getByRole("textbox", { name: "Template name", exact: true });
+	await name.fill("Regression suite");
+	await expect(name).toHaveValue("Regression suite");
+	const format = page.getByRole("combobox", { name: "Template format", exact: true });
+	await expect(format).toHaveAttribute("aria-describedby", /hint$/);
+	await format.focus();
+	await expect(format).toBeFocused();
+	await page.getByRole("button", { name: "Generate and review", exact: true }).click();
+	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
+});
