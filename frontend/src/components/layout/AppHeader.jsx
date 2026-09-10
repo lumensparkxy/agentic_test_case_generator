@@ -1,3 +1,7 @@
+import { CollectionState } from "../ui/collections";
+import { Button, Input } from "../ui/controls";
+import { Menu } from "../ui/surfaces";
+import { Dialog } from "../ui/dialog";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, FolderOpen, LogOut, Plus, RefreshCw, Settings, UserRound } from "lucide-react";
 
@@ -22,7 +26,11 @@ function StatusUsagePills({ billingStatusItems, statusUsageItems, isUsageLoading
 						</span>
 					))
 				: null}
-			{isUsageLoading || isBillingLoading ? <span className="status-usage-loading">Loading usage…</span> : null}
+			{isUsageLoading || isBillingLoading ? (
+				<CollectionState as="span" kind="loading" className="status-usage-loading">
+					Loading usage…
+				</CollectionState>
+			) : null}
 		</div>
 	);
 }
@@ -58,7 +66,8 @@ function HealthMenu({ isAuthenticated, billingStatusItems, statusUsageItems, isU
 				closeAndRestoreFocus();
 			}}
 		>
-			<button
+			<Button
+				variant="plain"
 				ref={healthTriggerRef}
 				type="button"
 				className="command-health-trigger"
@@ -69,7 +78,7 @@ function HealthMenu({ isAuthenticated, billingStatusItems, statusUsageItems, isU
 			>
 				<span className="command-health-dot" aria-hidden="true" />
 				<span className="status-message">{healthLabel}</span>
-			</button>
+			</Button>
 			{isOpen ? (
 				<div id={healthDetailsId} className="command-health-details">
 					<p>
@@ -162,7 +171,8 @@ function AuthPanel({
 				<span className="auth-message">Checking session...</span>
 			) : isAuthenticated ? (
 				<div className="auth-account" ref={accountRef}>
-					<button
+					<Button
+						variant="plain"
 						ref={accountTriggerRef}
 						type="button"
 						className="auth-account-trigger"
@@ -181,9 +191,9 @@ function AuthPanel({
 						)}
 						<span className="auth-account-trigger-name">{userName}</span>
 						<ChevronDown className="auth-account-trigger-chevron" aria-hidden="true" size={15} strokeWidth={2.1} />
-					</button>
+					</Button>
 					{isAccountMenuOpen ? (
-						<div
+						<Menu
 							ref={accountMenuRef}
 							id={accountMenuId}
 							className="auth-account-menu"
@@ -205,7 +215,7 @@ function AuthPanel({
 								</div>
 							</div>
 							<div className="auth-account-actions">
-								<button
+								<Button
 									type="button"
 									role="menuitem"
 									onClick={() => {
@@ -215,8 +225,8 @@ function AuthPanel({
 								>
 									<Settings aria-hidden="true" size={17} strokeWidth={2.1} />
 									Settings
-								</button>
-								<button
+								</Button>
+								<Button
 									type="button"
 									role="menuitem"
 									onClick={() => {
@@ -227,20 +237,20 @@ function AuthPanel({
 								>
 									<LogOut aria-hidden="true" size={17} strokeWidth={2.1} />
 									{isAuthenticating ? "Signing out..." : "Sign Out"}
-								</button>
+								</Button>
 							</div>
-						</div>
+						</Menu>
 					) : null}
 				</div>
 			) : hasFirebaseAuthConfig && hasVisibleAuthProviders ? (
 				<div className="auth-login">
-					<button type="button" onClick={openSignInDialog} disabled={isAuthenticating}>
+					<Button type="button" onClick={openSignInDialog} disabled={isAuthenticating}>
 						{isAuthenticating && currentAuthProviderLabel
 							? `Signing in with ${currentAuthProviderLabel}...`
 							: isAuthenticating
 								? "Signing in..."
 								: "Sign In"}
-					</button>
+					</Button>
 				</div>
 			) : hasFirebaseAuthConfig ? (
 				<span className="auth-message auth-config-missing">No Firebase sign-in providers are currently available.</span>
@@ -323,7 +333,8 @@ function ProjectMenu({
 
 	return (
 		<div className="command-project-control" ref={menuRef}>
-			<button
+			<Button
+				variant="plain"
 				ref={triggerRef}
 				type="button"
 				className="command-project-trigger"
@@ -338,10 +349,10 @@ function ProjectMenu({
 					<span>{isLoadingProjects ? "Loading projects" : triggerMeta}</span>
 				</span>
 				<ChevronDown aria-hidden="true" size={18} strokeWidth={2.1} />
-			</button>
+			</Button>
 
 			{isOpen && (
-				<div
+				<Dialog
 					ref={dialogRef}
 					className="command-project-menu"
 					role="dialog"
@@ -358,7 +369,8 @@ function ProjectMenu({
 							<strong>Projects</strong>
 							<span>{projects.length ? `${projects.length} available` : "No projects yet"}</span>
 						</div>
-						<button
+						<Button
+							variant="plain"
 							type="button"
 							className="command-project-menu-action"
 							onClick={onRefreshProjects}
@@ -366,7 +378,7 @@ function ProjectMenu({
 						>
 							<RefreshCw aria-hidden="true" size={16} strokeWidth={2.1} />
 							{isLoadingProjects ? "Refreshing" : "Refresh projects"}
-						</button>
+						</Button>
 					</div>
 
 					<div className="command-project-list" aria-label="Available QA projects">
@@ -374,7 +386,8 @@ function ProjectMenu({
 							projects.map((project) => {
 								const isSelected = selectedProjectId === project.project_id;
 								return (
-									<button
+									<Button
+										variant="plain"
 										type="button"
 										key={project.project_id}
 										className={`command-project-option ${isSelected ? "selected" : ""}`}
@@ -389,29 +402,32 @@ function ProjectMenu({
 											<span>revision {project.current_revision}</span>
 										</span>
 										{isSelected && <Check aria-hidden="true" size={17} strokeWidth={2.4} />}
-									</button>
+									</Button>
 								);
 							})
 						) : (
-							<p className="command-project-empty">Create a QA project to persist workflow progress.</p>
+							<CollectionState as="p" kind="empty" className="command-project-empty">
+								Create a QA project to persist workflow progress.
+							</CollectionState>
 						)}
 					</div>
 
 					{currentProject && (
-						<button
+						<Button
+							variant="plain"
 							type="button"
 							className="command-project-clear"
 							onClick={() => handleOpenProject("")}
 							disabled={authActionDisabled || isOpeningProject}
 						>
 							Clear selection
-						</button>
+						</Button>
 					)}
 
 					<form className="command-project-create" onSubmit={handleCreateProject}>
 						<label htmlFor="command-project-create-name">New project</label>
 						<div className="command-project-create-row">
-							<input
+							<Input
 								id="command-project-create-name"
 								type="text"
 								value={newProjectName}
@@ -419,13 +435,13 @@ function ProjectMenu({
 								placeholder="New QA project name"
 								disabled={authActionDisabled || isCreatingProject}
 							/>
-							<button type="submit" disabled={authActionDisabled || isCreatingProject || !newProjectName.trim()}>
+							<Button type="submit" disabled={authActionDisabled || isCreatingProject || !newProjectName.trim()}>
 								<Plus aria-hidden="true" size={16} strokeWidth={2.2} />
 								{isCreatingProject ? "Creating" : "New Project"}
-							</button>
+							</Button>
 						</div>
 					</form>
-				</div>
+				</Dialog>
 			)}
 		</div>
 	);
@@ -438,7 +454,9 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 
 	return (
 		<div className="auth-dialog-overlay" onClick={onOverlayClick}>
-			<div
+			<Dialog
+				manageFocus
+				onClose={onClose}
 				className="auth-dialog"
 				role="dialog"
 				aria-modal="true"
@@ -450,7 +468,8 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 						<h2 id="auth-dialog-title">Choose a sign-in method</h2>
 						<p>Select one provider to continue into the workspace.</p>
 					</div>
-					<button
+					<Button
+						variant="plain"
 						type="button"
 						className="auth-dialog-close"
 						onClick={onClose}
@@ -458,11 +477,12 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 						aria-label="Close sign-in dialog"
 					>
 						×
-					</button>
+					</Button>
 				</div>
 				<div className="auth-provider-list">
 					{providers.map((provider) => (
-						<button
+						<Button
+							variant="plain"
 							key={provider.id}
 							type="button"
 							className={`auth-provider-option auth-provider-option--${provider.buttonVariant || provider.id}`}
@@ -473,10 +493,10 @@ export function SignInDialog({ isOpen, onOverlayClick, onClose, isAuthenticating
 								<AuthProviderIcon providerId={provider.id} />
 							</span>
 							<span className="auth-provider-option-label">{provider.buttonText || `Sign in with ${provider.label}`}</span>
-						</button>
+						</Button>
 					))}
 				</div>
-			</div>
+			</Dialog>
 		</div>
 	);
 }
@@ -532,7 +552,7 @@ export default function AppNavigationControls({
 				isUsageLoading={isUsageLoading}
 				isBillingLoading={isBillingLoading}
 			/>
-			<button
+			<Button
 				type="button"
 				className="settings-open-btn"
 				data-testid="settings-open-button"
@@ -541,7 +561,7 @@ export default function AppNavigationControls({
 			>
 				<Settings aria-hidden="true" size={18} strokeWidth={2.1} />
 				<span className="settings-open-label">Settings</span>
-			</button>
+			</Button>
 			<AuthPanel
 				isVerifyingSession={isVerifyingSession}
 				isAuthenticated={isAuthenticated}

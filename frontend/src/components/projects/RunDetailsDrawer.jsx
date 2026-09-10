@@ -1,6 +1,7 @@
+import { Disclosure } from "../ui/surfaces";
 export default function RunDetailsDrawer({ title = "Run details", summary, children, defaultOpen = true }) {
 	return (
-		<details className="run-details-drawer" open={defaultOpen}>
+		<Disclosure className="run-details-drawer" open={defaultOpen}>
 			<summary>
 				<span className="run-details-summary-copy">
 					<strong>{title}</strong>
@@ -9,6 +10,6 @@ export default function RunDetailsDrawer({ title = "Run details", summary, child
 				<span className="run-details-toggle">Show details</span>
 			</summary>
 			<div className="run-details-body">{children}</div>
-		</details>
+		</Disclosure>
 	);
 }

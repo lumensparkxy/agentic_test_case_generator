@@ -1,3 +1,4 @@
+import { Field, Input } from "../ui/controls";
 import { WORKFLOW_SETTING_FIELDS } from "../../constants/workflow";
 
 export default function WorkflowSettingsPanel({ title, description, settings, setSettings }) {
@@ -16,9 +17,9 @@ export default function WorkflowSettingsPanel({ title, description, settings, se
 			</div>
 			<div className="workflow-settings-grid">
 				{WORKFLOW_SETTING_FIELDS.map((field) => (
-					<div className="form-group" key={field.key}>
+					<Field className="form-group" key={field.key}>
 						<label>{field.label}</label>
-						<input
+						<Input
 							type="number"
 							min={field.min}
 							max={field.max}
@@ -26,7 +27,7 @@ export default function WorkflowSettingsPanel({ title, description, settings, se
 							value={settings[field.key]}
 							onChange={updateWorkflowSetting(field.key)}
 						/>
-					</div>
+					</Field>
 				))}
 			</div>
 			<p className="workflow-settings-help">Leave any field blank to use the backend default for that workflow.</p>

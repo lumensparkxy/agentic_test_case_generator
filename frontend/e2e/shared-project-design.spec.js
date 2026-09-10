@@ -121,3 +121,36 @@ test("shared template fields expose labels, help text and controlled values", as
 	await page.getByRole("button", { name: "Generate and review", exact: true }).click();
 	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
 });
+
+test("shared result tabs support arrow navigation and a keyboard-scrollable table", async ({ page }) => {
+	await openCases(page);
+	const casesTab = page.getByRole("tab", { name: /^Generated Test Cases/ });
+	await casesTab.focus();
+	await page.keyboard.press("ArrowRight");
+	const traceability = page.getByRole("tab", { name: /^Traceability Matrix/ });
+	await expect(traceability).toBeFocused();
+	await expect(traceability).toHaveAttribute("aria-selected", "true");
+	await expect(casesTab).toHaveAttribute("tabindex", "-1");
+	const table = page.getByRole("region", { name: "Requirement traceability table" });
+	await table.focus();
+	await expect(table).toBeFocused();
+	await expect(table.getByRole("columnheader", { name: "Requirement", exact: true })).toHaveAttribute("scope", "col");
+});
+
+test("shared settings dialog traps focus, labels integration fields and restores its trigger", async ({ page }) => {
+	await openCases(page);
+	const trigger = page.getByRole("button", { name: "Open settings", exact: true });
+	await trigger.click();
+	const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
+	const close = dialog.getByRole("button", { name: "Close settings dialog", exact: true });
+	await expect(close).toBeFocused();
+	await page.keyboard.press("Shift+Tab");
+	await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+	await dialog.getByRole("tab", { name: "Workflow tuning", exact: true }).focus();
+	await page.keyboard.press("ArrowRight");
+	await expect(dialog.getByRole("tab", { name: "Integrations", exact: true })).toHaveAttribute("aria-selected", "true");
+	await expect(dialog.getByRole("textbox", { name: "JIRA base URL", exact: true })).toBeVisible();
+	await page.keyboard.press("Escape");
+	await expect(dialog).toHaveCount(0);
+	await expect(trigger).toBeFocused();
+});

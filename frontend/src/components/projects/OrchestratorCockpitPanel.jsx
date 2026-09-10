@@ -1,3 +1,4 @@
+import { Alert, Disclosure } from "../ui/surfaces";
 import ContextualTaskCard from "./ContextualTaskCard";
 import { selectContextualTask } from "./contextualTask";
 
@@ -31,9 +32,9 @@ export default function OrchestratorCockpitPanel({
 	const content = (
 		<section className="contextual-task-region" aria-label="Contextual task">
 			{error ? (
-				<div className="orchestrator-error" role="alert">
+				<Alert as="div" tone="danger" className="orchestrator-error" role="alert">
 					{error}
-				</div>
+				</Alert>
 			) : null}
 			{primaryAction || secondaryActions.length ? (
 				<ContextualTaskCard
@@ -51,10 +52,10 @@ export default function OrchestratorCockpitPanel({
 		</section>
 	);
 	return !primaryAction && !error ? (
-		<details className="optional-workflow-actions">
+		<Disclosure className="optional-workflow-actions">
 			<summary>More actions</summary>
 			{content}
-		</details>
+		</Disclosure>
 	) : (
 		content
 	);

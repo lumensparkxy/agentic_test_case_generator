@@ -1,9 +1,10 @@
+import { Surface } from "../ui/surfaces";
 import { Field, Input, Select, Button } from "../ui/controls";
 import { TEMPLATE_FORMAT_OPTIONS } from "../../constants/workflow";
 
 export default function TemplateSetupPanel({ templateName, setTemplateName, templateFormat, setTemplateFormat, goPrev, goNext }) {
 	return (
-		<section className="panel">
+		<Surface as="section" className="panel">
 			<h2 className="panel-title">Template Setup</h2>
 			<p className="panel-description">Configure the template name and output format for generated test cases.</p>
 			<div className="panel-form">
@@ -37,6 +38,6 @@ export default function TemplateSetupPanel({ templateName, setTemplateName, temp
 				</Button>
 				<Button onClick={goNext}>Next</Button>
 			</div>
-		</section>
+		</Surface>
 	);
 }

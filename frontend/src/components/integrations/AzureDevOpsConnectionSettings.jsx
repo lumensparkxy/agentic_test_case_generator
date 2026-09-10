@@ -1,3 +1,4 @@
+import { Field, Input, Button } from "../ui/controls";
 export default function AzureDevOpsConnectionSettings({
 	azureDevOpsConnected,
 	azureDevOpsConnection,
@@ -37,26 +38,26 @@ export default function AzureDevOpsConnectionSettings({
 			) : null}
 			{!azureDevOpsConnected ? (
 				<div className="panel-form two-cols jira-connection-form">
-					<div className="form-group">
+					<Field className="form-group">
 						<label>Azure DevOps organization or project URL</label>
-						<input
+						<Input
 							placeholder="https://dev.azure.com/{organization}/{project}"
 							value={azureDevOpsConnectionForm.organizationUrl}
 							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, organizationUrl: event.target.value }))}
 						/>
-					</div>
-					<div className="form-group">
+					</Field>
+					<Field className="form-group">
 						<label>Account email (optional)</label>
-						<input
+						<Input
 							type="email"
 							placeholder="you@company.com or personal@example.com"
 							value={azureDevOpsConnectionForm.accountEmail}
 							onChange={(event) => setAzureDevOpsConnectionForm((prev) => ({ ...prev, accountEmail: event.target.value }))}
 						/>
-					</div>
+					</Field>
 					<div className="form-group jira-connection-token-group">
 						<label>Azure DevOps PAT</label>
-						<input
+						<Input
 							type="password"
 							placeholder="Paste your Azure DevOps Personal Access Token"
 							value={azureDevOpsConnectionForm.personalAccessToken}
@@ -68,31 +69,31 @@ export default function AzureDevOpsConnectionSettings({
 						</span>
 					</div>
 					<div className="panel-form button-row jira-connection-actions">
-						<button
+						<Button
 							onClick={saveAzureDevOpsConnection}
 							disabled={authActionDisabled || isSavingAzureDevOpsConnection || isAzureDevOpsConnectionLoading}
 						>
 							{isSavingAzureDevOpsConnection ? "⏳ Connecting..." : "Connect Azure DevOps"}
-						</button>
+						</Button>
 						{isAzureDevOpsConnectionLoading && <span className="helper-text">Refreshing Azure DevOps connection…</span>}
 					</div>
 				</div>
 			) : (
 				<div className="jira-connected-actions">
-					<button
+					<Button
 						className="secondary"
 						onClick={() => refreshAzureDevOpsConnectionStatus(currentUser)}
 						disabled={authActionDisabled || isAzureDevOpsConnectionLoading}
 					>
 						{isAzureDevOpsConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
-					</button>
-					<button
+					</Button>
+					<Button
 						className="secondary"
 						onClick={deleteStoredAzureDevOpsConnection}
 						disabled={authActionDisabled || isDeletingAzureDevOpsConnection}
 					>
 						{isDeletingAzureDevOpsConnection ? "⏳ Disconnecting..." : "Disconnect"}
-					</button>
+					</Button>
 				</div>
 			)}
 		</div>

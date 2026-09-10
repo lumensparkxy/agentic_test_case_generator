@@ -1,3 +1,4 @@
+import { Field, Input, Button } from "../ui/controls";
 export default function JiraConnectionSettings({
 	jiraConnected,
 	jiraConnection,
@@ -34,26 +35,26 @@ export default function JiraConnectionSettings({
 			) : null}
 			{!jiraConnected ? (
 				<div className="panel-form two-cols jira-connection-form">
-					<div className="form-group">
+					<Field className="form-group">
 						<label>JIRA base URL</label>
-						<input
+						<Input
 							placeholder="https://your-team.atlassian.net"
 							value={jiraConnectionForm.baseUrl}
 							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, baseUrl: event.target.value }))}
 						/>
-					</div>
-					<div className="form-group">
+					</Field>
+					<Field className="form-group">
 						<label>JIRA email</label>
-						<input
+						<Input
 							type="email"
 							placeholder="qa@company.com"
 							value={jiraConnectionForm.email}
 							onChange={(event) => setJiraConnectionForm((prev) => ({ ...prev, email: event.target.value }))}
 						/>
-					</div>
+					</Field>
 					<div className="form-group jira-connection-token-group">
 						<label>JIRA API token</label>
-						<input
+						<Input
 							type="password"
 							placeholder="Paste your Atlassian API token"
 							value={jiraConnectionForm.apiToken}
@@ -61,24 +62,24 @@ export default function JiraConnectionSettings({
 						/>
 					</div>
 					<div className="panel-form button-row jira-connection-actions">
-						<button onClick={saveJiraConnection} disabled={authActionDisabled || isSavingJiraConnection || isJiraConnectionLoading}>
+						<Button onClick={saveJiraConnection} disabled={authActionDisabled || isSavingJiraConnection || isJiraConnectionLoading}>
 							{isSavingJiraConnection ? "⏳ Connecting..." : "Connect JIRA"}
-						</button>
+						</Button>
 						{isJiraConnectionLoading && <span className="helper-text">Refreshing JIRA connection…</span>}
 					</div>
 				</div>
 			) : (
 				<div className="jira-connected-actions">
-					<button
+					<Button
 						className="secondary"
 						onClick={() => refreshJiraConnectionStatus(currentUser)}
 						disabled={authActionDisabled || isJiraConnectionLoading}
 					>
 						{isJiraConnectionLoading ? "⏳ Refreshing status..." : "Refresh Status"}
-					</button>
-					<button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>
+					</Button>
+					<Button className="secondary" onClick={deleteStoredJiraConnection} disabled={authActionDisabled || isDeletingJiraConnection}>
 						{isDeletingJiraConnection ? "⏳ Disconnecting..." : "Disconnect"}
-					</button>
+					</Button>
 				</div>
 			)}
 		</div>

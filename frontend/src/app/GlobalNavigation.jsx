@@ -1,3 +1,4 @@
+import { List, ListItem } from "../components/ui/collections";
 import RouteLink from "./RouteLink";
 import { GLOBAL_DESTINATIONS, GLOBAL_NAV_ITEMS } from "./workflowRoutes";
 
@@ -6,11 +7,11 @@ export default function GlobalNavigation({ route, navigate }) {
 
 	return (
 		<nav className="global-navigation" aria-label="Global navigation">
-			<ul className="global-navigation-list">
+			<List className="global-navigation-list">
 				{GLOBAL_NAV_ITEMS.map((item) => {
 					const isActive = activeDestination === item.id;
 					return (
-						<li key={item.id}>
+						<ListItem key={item.id}>
 							<RouteLink
 								to={item.path}
 								navigate={navigate}
@@ -19,10 +20,10 @@ export default function GlobalNavigation({ route, navigate }) {
 							>
 								{item.label}
 							</RouteLink>
-						</li>
+						</ListItem>
 					);
 				})}
-			</ul>
+			</List>
 		</nav>
 	);
 }

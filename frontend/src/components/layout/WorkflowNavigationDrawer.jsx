@@ -1,3 +1,4 @@
+import { Button, Link } from "../ui/controls";
 import {
 	BookOpen,
 	Bot,
@@ -79,7 +80,8 @@ export default function WorkflowNavigationDrawer({
 				<div>
 					<span>Project</span>
 				</div>
-				<button
+				<Button
+					variant="plain"
 					ref={toggleRef}
 					type="button"
 					className="workflow-navigation-toggle"
@@ -90,7 +92,7 @@ export default function WorkflowNavigationDrawer({
 					aria-controls={isCompact ? navigationItemsId : undefined}
 				>
 					<ToggleIcon aria-hidden="true" size={18} strokeWidth={2.1} />
-				</button>
+				</Button>
 			</div>
 			<div id={navigationItemsId} className="workflow-navigation-list" hidden={itemsHidden}>
 				{tabs.map((tab) => {
@@ -126,7 +128,7 @@ export default function WorkflowNavigationDrawer({
 
 					if (tab.href) {
 						return (
-							<a
+							<Link
 								key={tab.id}
 								href={tab.href}
 								className={itemClassName}
@@ -142,12 +144,12 @@ export default function WorkflowNavigationDrawer({
 								title={isCollapsed ? [tab.label, stateLabel].filter(Boolean).join(" — ") : undefined}
 							>
 								{itemContent}
-							</a>
+							</Link>
 						);
 					}
 
 					return (
-						<button
+						<Button
 							type="button"
 							key={tab.id}
 							className={itemClassName}
@@ -157,7 +159,7 @@ export default function WorkflowNavigationDrawer({
 							title={isCollapsed ? [tab.label, stateLabel].filter(Boolean).join(" — ") : undefined}
 						>
 							{itemContent}
-						</button>
+						</Button>
 					);
 				})}
 			</div>

@@ -1,3 +1,4 @@
+import { List, ListItem } from "../ui/collections";
 const SOURCE_LABELS = {
 	model: "Model-authored",
 	model_recovered: "Recovered model",
@@ -124,31 +125,31 @@ export default function WorkflowDiagnostics({ title, diagnostics, appliedSetting
 			{actionableWarnings.length > 0 && (
 				<div className="workflow-diagnostics-block warning">
 					<strong>Warnings</strong>
-					<ul>
+					<List>
 						{actionableWarnings.map((warning) => (
-							<li key={warning}>{warning}</li>
+							<ListItem key={warning}>{warning}</ListItem>
 						))}
-					</ul>
+					</List>
 				</div>
 			)}
 			{parserRecoveries.length > 0 && (
 				<div className="workflow-diagnostics-block info">
 					<strong>Parser recoveries</strong>
-					<ul>
+					<List>
 						{parserRecoveries.map((recovery) => (
-							<li key={recovery}>{recovery}</li>
+							<ListItem key={recovery}>{recovery}</ListItem>
 						))}
-					</ul>
+					</List>
 				</div>
 			)}
 			{parserFailures.length > 0 && (
 				<div className="workflow-diagnostics-block alert">
 					<strong>Parser issues</strong>
-					<ul>
+					<List>
 						{parserFailures.map((failure) => (
-							<li key={failure}>{failure}</li>
+							<ListItem key={failure}>{failure}</ListItem>
 						))}
-					</ul>
+					</List>
 				</div>
 			)}
 		</div>

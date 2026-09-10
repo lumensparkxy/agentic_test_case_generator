@@ -1,3 +1,6 @@
+import { List, ListItem, CollectionState } from "../ui/collections";
+import { Surface } from "../ui/surfaces";
+import { Checkbox, Textarea, Button } from "../ui/controls";
 const EXPORT_FORMATS = [
 	{ format: "csv", className: "csv", icon: "📄", label: "CSV", description: "Excel compatible" },
 	{ format: "excel", className: "excel", icon: "📊", label: "Excel", description: "Formatted .xlsx" },
@@ -72,13 +75,13 @@ function PlaywrightExecutionReport({ report }) {
 					{visibleReportPaths.length ? (
 						<>
 							<p className="helper-text">Consolidated report path:</p>
-							<ul className="playwright-report-paths">
+							<List className="playwright-report-paths">
 								{visibleReportPaths.map((path) => (
-									<li key={path}>
+									<ListItem key={path}>
 										<code>{path}</code>
-									</li>
+									</ListItem>
 								))}
-							</ul>
+							</List>
 						</>
 					) : (
 						<p className="helper-text">No Playwright report path was returned for this execution run.</p>
@@ -86,9 +89,9 @@ function PlaywrightExecutionReport({ report }) {
 					{hiddenReportPathCount > 0 && <p className="helper-text">+ {hiddenReportPathCount} additional report paths</p>}
 				</div>
 			) : (
-				<div className="playwright-report-card empty">
+				<CollectionState as="div" kind="empty" className="playwright-report-card empty">
 					<p>No Playwright execution report has been recorded yet.</p>
-				</div>
+				</CollectionState>
 			)}
 		</div>
 	);
@@ -116,7 +119,7 @@ export default function ExportPanel({
 	const executionReport = latestExecutionReport(executionRunResult, currentProject);
 
 	return (
-		<section className="panel">
+		<Surface as="section" className="panel">
 			<h2 className="panel-title">Export Test Cases</h2>
 			<p className="panel-description">Download your generated test cases as CSV, Excel, or JSON.</p>
 			{testCases.length > 0 && (
@@ -136,7 +139,7 @@ export default function ExportPanel({
 					{exportRequiresOverride && (
 						<div className="draft-export-override">
 							<label className="draft-export-toggle">
-								<input
+								<Checkbox
 									type="checkbox"
 									checked={draftExportOverrideRequested}
 									onChange={(event) => setDraftExportOverrideRequested(event.target.checked)}
@@ -144,7 +147,7 @@ export default function ExportPanel({
 								<span>Export draft anyway</span>
 							</label>
 							{draftExportOverrideRequested && (
-								<textarea
+								<Textarea
 									className="draft-export-reason"
 									placeholder="Reason for exporting this draft"
 									aria-label="Reason for exporting this draft"
@@ -167,7 +170,7 @@ export default function ExportPanel({
 				)}
 				<div className="export-buttons">
 					{EXPORT_FORMATS.map((item) => (
-						<button
+						<Button
 							key={item.format}
 							className={`export-btn ${item.className}`}
 							onClick={() => exportToFormat(item.format)}
@@ -176,15 +179,15 @@ export default function ExportPanel({
 							<span className="export-icon">{item.icon}</span>
 							<span className="export-label">{item.label}</span>
 							<span className="export-desc">{item.description}</span>
-						</button>
+						</Button>
 					))}
 				</div>
 			</div>
 			<div className="panel-nav">
-				<button onClick={goPrev} className="secondary">
+				<Button onClick={goPrev} className="secondary">
 					Back
-				</button>
+				</Button>
 			</div>
-		</section>
+		</Surface>
 	);
 }

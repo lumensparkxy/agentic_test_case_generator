@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { cloneElement, isValidElement, useId } from "react";
+import { Children, cloneElement, isValidElement, useId } from "react";
 
 const classes = (...values) => values.filter(Boolean).join(" ");
 
@@ -45,16 +45,34 @@ export function Textarea({ className, ...props }) {
 // control, help and error text without owning its value or validation policy.
 export function Field({ id, label, hint, error, children, className, ...props }) {
 	const generatedId = useId();
-	const controlId = id || generatedId;
-	const describedBy = [hint && `${controlId}-hint`, error && `${controlId}-error`].filter(Boolean).join(" ");
+	const parts = Children.toArray(children);
+	const controls = parts.filter((child) => isValidElement(child) && [Input, Select, Textarea, Checkbox, Radio].includes(child.type));
+	const singleControl = controls.length === 1 ? controls[0] : null;
+	const controlId = id || singleControl?.props.id || generatedId;
+	const hints = parts.filter((child) => isValidElement(child) && /(?:hint|helper-text)/.test(child.props.className || ""));
+	const describedBy = [
+		hint && `${controlId}-hint`,
+		error && `${controlId}-error`,
+		...hints.map((child, index) => child.props.id || `${controlId}-hint-${index}`),
+	]
+		.filter(Boolean)
+		.join(" ");
+	const associate = (child) =>
+		cloneElement(child, {
+			id: controlId,
+			"aria-describedby": [child.props["aria-describedby"], describedBy].filter(Boolean).join(" ") || undefined,
+			"aria-invalid": error ? true : child.props["aria-invalid"],
+		});
 	const control =
 		label && isValidElement(children)
-			? cloneElement(children, {
-					id: controlId,
-					"aria-describedby": [children.props["aria-describedby"], describedBy].filter(Boolean).join(" ") || undefined,
-					"aria-invalid": error ? true : children.props["aria-invalid"],
-				})
-			: children;
+			? associate(children)
+			: parts.map((child) => {
+					if (!isValidElement(child) || !singleControl) return child;
+					if (child === singleControl) return associate(child);
+					if (child.type === "label") return cloneElement(child, { htmlFor: child.props.htmlFor || controlId });
+					const hintIndex = hints.indexOf(child);
+					return hintIndex >= 0 ? cloneElement(child, { id: child.props.id || `${controlId}-hint-${hintIndex}` }) : child;
+				});
 	return (
 		<div {...props} data-ui="field" className={classes("ui-field", className)}>
 			{label && <label htmlFor={controlId}>{label}</label>}

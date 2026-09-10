@@ -1,3 +1,4 @@
+import { List, ListItem } from "../ui/collections";
 import { Disclosure } from "../ui/surfaces";
 import { CircleAlert, CircleCheck } from "lucide-react";
 
@@ -19,11 +20,11 @@ export default function TestCaseQualitySummary({ review, meta, exportLocked }) {
 					<summary>View findings</summary>
 					<p>{review.summary || "No review summary available."}</p>
 					{findings.length > 0 && (
-						<ul>
+						<List>
 							{findings.map((issue) => (
-								<li key={issue}>{issue}</li>
+								<ListItem key={issue}>{issue}</ListItem>
 							))}
-						</ul>
+						</List>
 					)}
 				</Disclosure>
 			</div>

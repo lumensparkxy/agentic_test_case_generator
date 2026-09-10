@@ -1,3 +1,4 @@
+import { Link } from "../components/ui/controls";
 import ProjectPageHeader from "../components/layout/ProjectPageHeader";
 import RouteLink from "../app/RouteLink";
 import { PROJECT_DESTINATIONS, buildProjectPath } from "../app/workflowRoutes";
@@ -57,9 +58,9 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 							<span className={`use-case-page-freshness ${reviewStatus.tone}`} role="status" aria-label="Current human review status">
 								{reviewStatus.label}
 							</span>
-							<a className="use-case-skip-review-link" href="#use-case-review-decision">
+							<Link className="use-case-skip-review-link" href="#use-case-review-decision">
 								Skip to review decision
-							</a>
+							</Link>
 						</div>
 					) : null
 				}

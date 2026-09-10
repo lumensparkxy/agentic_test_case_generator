@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-export function Dialog({ as: Element = "div", className = "", onClose, manageFocus = false, ref: externalRef, ...props }) {
+export function Dialog({ as: Element = "div", className = "", onClose, manageFocus = false, initialFocusRef, ref: externalRef, ...props }) {
 	const internalRef = useRef(null);
 	const closeRef = useRef(onClose);
 	useEffect(() => {
@@ -14,7 +14,7 @@ export function Dialog({ as: Element = "div", className = "", onClose, manageFoc
 			[...node.querySelectorAll("button, a[href], input, select, textarea, [tabindex]")].filter(
 				(element) => !element.disabled && element.tabIndex >= 0 && element.getClientRects().length
 			);
-		(targets()[0] || node).focus();
+		(initialFocusRef?.current || targets()[0] || node).focus();
 		const keydown = (event) => {
 			if (event.key === "Escape" && closeRef.current) {
 				event.preventDefault();
@@ -41,11 +41,11 @@ export function Dialog({ as: Element = "div", className = "", onClose, manageFoc
 			node.removeEventListener("keydown", keydown);
 			if (previous?.isConnected) previous.focus();
 		};
-	}, [manageFocus]);
+	}, [manageFocus, initialFocusRef]);
 	return (
 		<Element
 			role="dialog"
-			aria-modal="true"
+			aria-modal={manageFocus || undefined}
 			tabIndex={-1}
 			{...props}
 			ref={(node) => {
