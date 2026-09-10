@@ -1,3 +1,4 @@
+import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import TestCaseQualitySummary from "./components/generation/TestCaseQualitySummary";
 import { useEffect, useRef, useState } from "react";
@@ -890,8 +891,13 @@ export default function App() {
 				</div>
 
 				{requirementReportStats.length > 0 && (
-					<div className="requirement-report-table-wrapper" role="region" aria-label="Requirement review summary table" tabIndex={0}>
-						<table className="requirement-report-table">
+					<TableScroll
+						className="requirement-report-table-wrapper"
+						role="region"
+						aria-label="Requirement review summary table"
+						tabIndex={0}
+					>
+						<Table className="requirement-report-table">
 							<thead>
 								<tr>
 									{requirementReportStats.map((stat) => (
@@ -910,8 +916,8 @@ export default function App() {
 									))}
 								</tr>
 							</tbody>
-						</table>
-					</div>
+						</Table>
+					</TableScroll>
 				)}
 
 				{requirementReportDetailCount > 0 && (
@@ -926,33 +932,33 @@ export default function App() {
 							{requirementBlockingIssues.length > 0 && (
 								<div className="requirement-report-detail-block issue">
 									<strong>Blocking issues</strong>
-									<ul>
+									<List>
 										{requirementBlockingIssues.slice(0, 4).map((issue) => (
-											<li key={issue}>{issue}</li>
+											<ListItem key={issue}>{issue}</ListItem>
 										))}
-									</ul>
+									</List>
 								</div>
 							)}
 
 							{requirementWarnings.length > 0 && (
 								<div className="requirement-report-detail-block warning">
 									<strong>Warnings</strong>
-									<ul>
+									<List>
 										{requirementWarnings.map((warning) => (
-											<li key={warning}>{warning}</li>
+											<ListItem key={warning}>{warning}</ListItem>
 										))}
-									</ul>
+									</List>
 								</div>
 							)}
 
 							{requirementParserFailures.length > 0 && (
 								<div className="requirement-report-detail-block alert">
 									<strong>Parser issues</strong>
-									<ul>
+									<List>
 										{requirementParserFailures.map((failure) => (
-											<li key={failure}>{failure}</li>
+											<ListItem key={failure}>{failure}</ListItem>
 										))}
-									</ul>
+									</List>
 								</div>
 							)}
 						</div>
@@ -3664,14 +3670,14 @@ export default function App() {
 				{changedItems.length > 0 && (
 					<div className="impact-table-block">
 						<h4>Changed Inputs</h4>
-						<div className="selection-table-wrapper" role="region" aria-label="Changed inputs table" tabIndex={0}>
-							<table className="selection-table impact-table">
+						<TableScroll className="selection-table-wrapper" role="region" aria-label="Changed inputs table" tabIndex={0}>
+							<Table className="selection-table impact-table">
 								<thead>
 									<tr>
-										<th>Item</th>
-										<th>Type</th>
-										<th>Change</th>
-										<th>Approval</th>
+										<th scope="col">Item</th>
+										<th scope="col">Type</th>
+										<th scope="col">Change</th>
+										<th scope="col">Approval</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -3687,15 +3693,15 @@ export default function App() {
 										</tr>
 									))}
 								</tbody>
-							</table>
-						</div>
+							</Table>
+						</TableScroll>
 					</div>
 				)}
 
 				{impactedCases.length > 0 && (
 					<div className="impact-table-block">
 						<h4>Impacted Test Cases</h4>
-						<div className="impact-case-list">
+						<List as="div" variant="grouped" className="impact-case-list">
 							{impactedCases.slice(0, 8).map((testCase) => (
 								<div key={`${testCase.impact_source}-${testCase.test_case_id}`} className="impact-case-row">
 									<div>
@@ -3705,13 +3711,13 @@ export default function App() {
 									<span className={`impact-source-badge ${testCase.impact_source}`}>{testCase.impact_source.replace("_", " ")}</span>
 								</div>
 							))}
-						</div>
+						</List>
 					</div>
 				)}
 
 				<div className="impact-table-block">
 					<h4>Recommendations</h4>
-					<div className="impact-recommendation-list">
+					<List as="div" variant="grouped" className="impact-recommendation-list">
 						{recommendations.map((recommendation) => (
 							<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
 								<div>
@@ -3725,7 +3731,7 @@ export default function App() {
 								</div>
 							</div>
 						))}
-					</div>
+					</List>
 				</div>
 
 				{impactApplyBlockedByApproval && (
@@ -4248,21 +4254,21 @@ export default function App() {
 														</div>
 
 														{jiraIssueResults.length > 0 ? (
-															<div
+															<TableScroll
 																className="selection-table-wrapper"
 																role="region"
 																aria-label="Jira issue search results table"
 																tabIndex={0}
 															>
-																<table className="selection-table">
+																<Table className="selection-table">
 																	<thead>
 																		<tr>
-																			<th>Select</th>
-																			<th>Issue</th>
-																			<th>Summary</th>
-																			<th>Type</th>
-																			<th>Status</th>
-																			<th>Parent</th>
+																			<th scope="col">Select</th>
+																			<th scope="col">Issue</th>
+																			<th scope="col">Summary</th>
+																			<th scope="col">Type</th>
+																			<th scope="col">Status</th>
+																			<th scope="col">Parent</th>
 																		</tr>
 																	</thead>
 																	<tbody>
@@ -4294,8 +4300,8 @@ export default function App() {
 																			);
 																		})}
 																	</tbody>
-																</table>
-															</div>
+																</Table>
+															</TableScroll>
 														) : (
 															<span className="helper-text">Search visible issues in the selected project to choose an import source.</span>
 														)}
@@ -4396,21 +4402,21 @@ export default function App() {
 														</div>
 
 														{azureDevOpsWorkItemResults.length > 0 ? (
-															<div
+															<TableScroll
 																className="selection-table-wrapper"
 																role="region"
 																aria-label="Azure DevOps work item search results table"
 																tabIndex={0}
 															>
-																<table className="selection-table">
+																<Table className="selection-table">
 																	<thead>
 																		<tr>
-																			<th>Select</th>
-																			<th>Work item</th>
-																			<th>Title</th>
-																			<th>Type</th>
-																			<th>State</th>
-																			<th>Parent</th>
+																			<th scope="col">Select</th>
+																			<th scope="col">Work item</th>
+																			<th scope="col">Title</th>
+																			<th scope="col">Type</th>
+																			<th scope="col">State</th>
+																			<th scope="col">Parent</th>
 																		</tr>
 																	</thead>
 																	<tbody>
@@ -4442,8 +4448,8 @@ export default function App() {
 																			);
 																		})}
 																	</tbody>
-																</table>
-															</div>
+																</Table>
+															</TableScroll>
 														) : (
 															<span className="helper-text">
 																Search visible work items in the selected project to choose an import source.
@@ -4562,7 +4568,7 @@ export default function App() {
 																	Skipped {(jiraSyncPreview.skipped_requirement_ids || []).length}
 																</span>
 															</div>
-															<div className="jira-sync-preview-list">
+															<List as="div" variant="grouped" className="jira-sync-preview-list">
 																{jiraSyncPreview.issues?.map((issue) => (
 																	<div key={issue.issue_key} className={`jira-sync-preview-card ${issue.status}`}>
 																		<div className="jira-sync-preview-header">
@@ -4594,13 +4600,13 @@ export default function App() {
 																		</div>
 																	</div>
 																))}
-															</div>
+															</List>
 															{jiraSyncPreview.warnings?.length > 0 && (
-																<ul className="jira-sync-warning-list">
+																<List className="jira-sync-warning-list">
 																	{jiraSyncPreview.warnings.map((warning) => (
-																		<li key={warning}>{warning}</li>
+																		<ListItem key={warning}>{warning}</ListItem>
 																	))}
-																</ul>
+																</List>
 															)}
 														</div>
 													)}
@@ -4608,14 +4614,14 @@ export default function App() {
 													{jiraSyncResults && (
 														<div className="jira-sync-results-summary">
 															<h4>Last sync result</h4>
-															<ul className="jira-sync-apply-list">
+															<List className="jira-sync-apply-list">
 																{jiraSyncResults.results?.map((result) => (
-																	<li key={`${result.issue_key}-${result.status}`}>
+																	<ListItem key={`${result.issue_key}-${result.status}`}>
 																		<strong>{result.issue_key}</strong> — {result.status}
 																		{result.message ? `: ${result.message}` : ""}
-																	</li>
+																	</ListItem>
 																))}
-															</ul>
+															</List>
 														</div>
 													)}
 												</div>
@@ -4678,7 +4684,7 @@ export default function App() {
 																	Skipped {(azureDevOpsSyncPreview.skipped_requirement_ids || []).length}
 																</span>
 															</div>
-															<div className="jira-sync-preview-list">
+															<List as="div" variant="grouped" className="jira-sync-preview-list">
 																{azureDevOpsSyncPreview.work_items?.map((workItem) => (
 																	<div key={workItem.work_item_id} className={`jira-sync-preview-card ${workItem.status}`}>
 																		<div className="jira-sync-preview-header">
@@ -4712,13 +4718,13 @@ export default function App() {
 																		</div>
 																	</div>
 																))}
-															</div>
+															</List>
 															{azureDevOpsSyncPreview.warnings?.length > 0 && (
-																<ul className="jira-sync-warning-list">
+																<List className="jira-sync-warning-list">
 																	{azureDevOpsSyncPreview.warnings.map((warning) => (
-																		<li key={warning}>{warning}</li>
+																		<ListItem key={warning}>{warning}</ListItem>
 																	))}
-																</ul>
+																</List>
 															)}
 														</div>
 													)}
@@ -4726,14 +4732,14 @@ export default function App() {
 													{azureDevOpsSyncResults && (
 														<div className="jira-sync-results-summary">
 															<h4>Last sync result</h4>
-															<ul className="jira-sync-apply-list">
+															<List className="jira-sync-apply-list">
 																{azureDevOpsSyncResults.results?.map((result) => (
-																	<li key={`${result.work_item_id}-${result.status}`}>
+																	<ListItem key={`${result.work_item_id}-${result.status}`}>
 																		<strong>#{result.work_item_id}</strong> — {result.status}
 																		{result.message ? `: ${result.message}` : ""}
-																	</li>
+																	</ListItem>
 																))}
-															</ul>
+															</List>
 														</div>
 													)}
 												</div>
@@ -4917,10 +4923,10 @@ export default function App() {
 																appliedTestCaseWorkflowSettings,
 																testCaseIterationHistory
 															) || (
-																<div className="generate-result-empty">
+																<CollectionState as="div" kind="empty" className="generate-result-empty">
 																	<h3>Diagnostics</h3>
 																	<p>No workflow diagnostics are available for this run.</p>
-																</div>
+																</CollectionState>
 															))}
 
 														{activeGenerateResultTab === "coverage" && (

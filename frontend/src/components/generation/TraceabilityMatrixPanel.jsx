@@ -1,3 +1,5 @@
+import { CollectionState, TableScroll, Table } from "../ui/collections";
+import { Surface } from "../ui/surfaces";
 import { getRequirementContextPath } from "../../utils/requirements";
 
 export default function TraceabilityMatrixPanel({
@@ -9,15 +11,15 @@ export default function TraceabilityMatrixPanel({
 }) {
 	if (approvedRequirements.length === 0) {
 		return (
-			<div className="generate-result-empty">
+			<CollectionState as="div" kind="empty" className="generate-result-empty">
 				<h3>Traceability Matrix</h3>
 				<p>No approved requirements are available to trace for this run.</p>
-			</div>
+			</CollectionState>
 		);
 	}
 
 	return (
-		<div className="result-section">
+		<Surface as="div" className="result-section">
 			<h3>Traceability Matrix</h3>
 			<div className="workflow-diagnostics-pills">
 				<span className="workflow-diagnostics-pill">
@@ -30,15 +32,15 @@ export default function TraceabilityMatrixPanel({
 					Scenario coverage {coverageMetrics?.covered_planned_scenarios ?? 0}/{coverageMetrics?.planned_scenarios_total ?? 0}
 				</span>
 			</div>
-			<div className="traceability-table-wrapper" role="region" aria-label="Requirement traceability table" tabIndex={0}>
-				<table className="traceability-table">
+			<TableScroll className="traceability-table-wrapper" role="region" aria-label="Requirement traceability table" tabIndex={0}>
+				<Table className="traceability-table">
 					<thead>
 						<tr>
-							<th>Requirement</th>
-							<th>Story / source path</th>
-							<th>Linked test cases</th>
-							<th>Scenario coverage</th>
-							<th>Status</th>
+							<th scope="col">Requirement</th>
+							<th scope="col">Story / source path</th>
+							<th scope="col">Linked test cases</th>
+							<th scope="col">Scenario coverage</th>
+							<th scope="col">Status</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -79,8 +81,8 @@ export default function TraceabilityMatrixPanel({
 							);
 						})}
 					</tbody>
-				</table>
-			</div>
-		</div>
+				</Table>
+			</TableScroll>
+		</Surface>
 	);
 }

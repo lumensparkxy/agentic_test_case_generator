@@ -286,7 +286,7 @@
 .ui-list-detail > * {
 	min-width: 0;
 }
-.ui-collection-toolbar {
+:where(.ui-collection-toolbar) {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: end;
@@ -340,7 +340,7 @@
 	}
 }
 @media (max-width: 600px) {
-	.ui-collection-toolbar {
+	:where(.ui-collection-toolbar) {
 		align-items: stretch;
 	}
 	.ui-collection-toolbar > * {

@@ -27,4 +27,4 @@ The internal library lives in `frontend/src/components/ui/`. Import directly fro
 - `TabList`, `Tab`, `TabPanel` provide arrow/Home/End activation and roving tab stops. Selected values and panel IDs remain controlled by features.
 - `Dialog` supports opt-in focus trapping/restoration and Escape callbacks. Existing specialized popovers retain their feature-owned keyboard behavior; modal consumers use managed focus unless they already own it.
 
-Migration checklist: #242 foundations in progress; #243 artifacts pending; #244 workspace pending; #245 other surfaces pending; #246 consolidation and full validation pending. Visual review uses actual application pages, not a separate gallery.
+Migration checklist: #242 foundations implemented (PR #247); #243 artifacts implemented; #244 workspace pending; #245 other surfaces pending; #246 consolidation and full validation pending. Visual review uses actual application pages, not a separate gallery.

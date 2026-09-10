@@ -500,7 +500,7 @@ test.describe("Impact update flow", () => {
 
 		await page.getByRole("button", { name: /Apply 3 Accepted Recommendations/i }).click();
 		await expect(page.getByText(/Impact update applied: 1 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
-		await expect(page.getByText(/3 test cases/i)).toBeVisible();
+		await expect(page.locator(".test-suite-summary")).toContainText("3 test cases");
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toHaveCount(0);
 	});
 });

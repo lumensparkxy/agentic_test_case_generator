@@ -1,3 +1,6 @@
+import { ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
+import { Input, Button, Textarea } from "../ui/controls";
+import { Disclosure } from "../ui/surfaces";
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
@@ -29,25 +32,25 @@ export default function GeneratedTestCasesView({
 		: [];
 	return (
 		<>
-			<section className="test-review-workspace" aria-label="Generated test cases">
+			<ListDetail className="test-review-workspace" aria-label="Generated test cases">
 				<div className="test-review-list">
 					<h2>Generated Test Cases</h2>
 					<label htmlFor={searchId} className="sr-only">
 						Search test cases
 					</label>
-					<input
+					<Input
 						id={searchId}
 						type="search"
 						placeholder="Search test cases"
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
 					/>
-					<p className="test-list-count" role="status">
+					<ResultCount as="p" className="test-list-count" role="status">
 						{cases.length} of {testCases.length} test cases
-					</p>
-					<div className="test-review-items">
+					</ResultCount>
+					<List as="div" variant="grouped" className="test-review-items">
 						{cases.map((tc) => (
-							<button
+							<SelectableItem
 								key={tc.id}
 								type="button"
 								className={`test-review-item ${selected?.id === tc.id ? "selected" : ""}`}
@@ -63,10 +66,19 @@ export default function GeneratedTestCasesView({
 									</span>
 								</span>
 								<ChevronRight size={18} aria-hidden="true" />
-							</button>
+							</SelectableItem>
 						))}
-					</div>
-					{!cases.length && <p>{testCases.length ? "No test cases match your search." : "No test cases generated yet."}</p>}
+					</List>
+					{!cases.length && (
+						<CollectionState kind={testCases.length ? "filtered" : "empty"}>
+							<p>{testCases.length ? "No test cases match your search." : "No test cases generated yet."}</p>
+							{testCases.length > 0 && (
+								<Button variant="secondary" size="compact" onClick={() => setQuery("")}>
+									Clear search
+								</Button>
+							)}
+						</CollectionState>
+					)}
 				</div>
 				<section className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
 					{selected ? (
@@ -79,14 +91,14 @@ export default function GeneratedTestCasesView({
 							<h2>{selected.title}</h2>
 							{selected.description && <p>{selected.description}</p>}
 							{findings.length > 0 && (
-								<details className="test-inline-findings">
+								<Disclosure className="test-inline-findings">
 									<summary>Quality findings for {selected.id}</summary>
-									<ul>
+									<List>
 										{findings.map((issue) => (
-											<li key={issue}>{issue}</li>
+											<ListItem key={issue}>{issue}</ListItem>
 										))}
-									</ul>
-								</details>
+									</List>
+								</Disclosure>
 							)}
 							<h3>Preconditions</h3>
 							<p>{selected.preconditions || "None specified."}</p>
@@ -94,9 +106,9 @@ export default function GeneratedTestCasesView({
 								<h3>Steps and expected results</h3>
 								<span>{steps.length} steps</span>
 							</div>
-							<ol className="test-detail-steps">
+							<List as="ol" className="test-detail-steps">
 								{steps.slice(0, expanded ? undefined : 2).map((step, index) => (
-									<li key={`${selected.id}-${index}`}>
+									<ListItem key={`${selected.id}-${index}`}>
 										<p>{step.action}</p>
 										<p>
 											<strong>Expected</strong> {step.expected || "Not specified"}
@@ -106,22 +118,22 @@ export default function GeneratedTestCasesView({
 												<strong>Test data</strong> {step.test_data}
 											</p>
 										)}
-									</li>
+									</ListItem>
 								))}
-							</ol>
+							</List>
 							{steps.length > 2 && (
-								<button
+								<Button
 									className="secondary small"
 									type="button"
 									aria-expanded={expanded}
 									onClick={() => onToggleRowExpansion(selected.id)}
 								>
 									{expanded ? "Show fewer steps" : `Show all ${steps.length} steps`}
-								</button>
+								</Button>
 							)}
 							<h3>Expected result</h3>
 							<p>{selected.expected_result || "Not specified."}</p>
-							<details className="test-case-metadata">
+							<Disclosure className="test-case-metadata">
 								<summary>Test data and metadata</summary>
 								<dl>
 									{Object.entries({
@@ -140,18 +152,18 @@ export default function GeneratedTestCasesView({
 									))}
 								</dl>
 								<p>Case status and automation intent do not indicate quality approval or execution readiness.</p>
-							</details>
+							</Disclosure>
 						</>
 					) : (
 						<p>Select a test case to review its details.</p>
 					)}
 				</section>
-			</section>
+			</ListDetail>
 			{testCases.length > 0 && allowRefinement && (
 				<section className="feedback-section">
 					<h3>Human Feedback</h3>
 					<label htmlFor={feedbackId}>Changes to the test suite</label>
-					<textarea
+					<Textarea
 						id={feedbackId}
 						className="feedback-textarea"
 						placeholder="Describe the changes needed…"
@@ -159,9 +171,9 @@ export default function GeneratedTestCasesView({
 						onChange={(event) => onFeedbackChange(event.target.value)}
 						rows={4}
 					/>
-					<button onClick={onRefineTestCases} disabled={!feedback.trim() || isGenerating || testCaseActionDisabled}>
+					<Button onClick={onRefineTestCases} disabled={!feedback.trim() || isGenerating || testCaseActionDisabled}>
 						{isGenerating ? "Updating test cases…" : "Implement Changes"}
-					</button>
+					</Button>
 				</section>
 			)}
 		</>

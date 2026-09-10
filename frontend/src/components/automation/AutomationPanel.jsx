@@ -1,3 +1,6 @@
+import { TableScroll, Table, List, ListItem } from "../ui/collections";
+import { Checkbox, Field, Input, Button } from "../ui/controls";
+import { Surface, Alert } from "../ui/surfaces";
 const renderBucketCount = (label, value, tone = "") => (
 	<span className={`workflow-diagnostics-pill ${tone}`.trim()}>
 		{label} {value || 0}
@@ -29,12 +32,12 @@ const renderCandidateTable = ({ candidates, selectedCandidateIds, setSelectedCan
 	};
 
 	return (
-		<div className="selection-table-wrapper" role="region" aria-label="Executable automation candidates table" tabIndex={0}>
-			<table className="selection-table">
+		<TableScroll className="selection-table-wrapper" role="region" aria-label="Executable automation candidates table" tabIndex={0}>
+			<Table className="selection-table">
 				<thead>
 					<tr>
-						<th>
-							<input
+						<th scope="col">
+							<Checkbox
 								ref={(input) => {
 									if (input) input.indeterminate = selectionIsMixed;
 								}}
@@ -46,10 +49,10 @@ const renderCandidateTable = ({ candidates, selectedCandidateIds, setSelectedCan
 								onChange={(event) => setSelectedCandidateIds(event.target.checked ? candidates.map((candidate) => candidate.id) : [])}
 							/>
 						</th>
-						<th>Case</th>
-						<th>Title</th>
-						<th>Spec</th>
-						<th>Traceability</th>
+						<th scope="col">Case</th>
+						<th scope="col">Title</th>
+						<th scope="col">Spec</th>
+						<th scope="col">Traceability</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -61,7 +64,7 @@ const renderCandidateTable = ({ candidates, selectedCandidateIds, setSelectedCan
 						return (
 							<tr key={candidate.id}>
 								<td>
-									<input
+									<Checkbox
 										type="checkbox"
 										aria-label={selectionLabel}
 										checked={selectedIds.has(candidate.id)}
@@ -81,8 +84,8 @@ const renderCandidateTable = ({ candidates, selectedCandidateIds, setSelectedCan
 						);
 					})}
 				</tbody>
-			</table>
-		</div>
+			</Table>
+		</TableScroll>
 	);
 };
 
@@ -92,14 +95,14 @@ const renderManualList = (candidates) => {
 	}
 
 	return (
-		<ul className="jira-sync-apply-list">
+		<List className="jira-sync-apply-list">
 			{candidates.map((candidate) => (
-				<li key={candidate.id}>
+				<ListItem key={candidate.id}>
 					<strong>{candidate.source_test_case_id}</strong> - {candidate.title}
 					{candidate.review_reasons?.length ? `: ${candidate.review_reasons[0]}` : ""}
-				</li>
+				</ListItem>
 			))}
-		</ul>
+		</List>
 	);
 };
 
@@ -109,7 +112,7 @@ const renderUnsupportedList = (candidates, emptyMessage = "No unsupported cases 
 	}
 
 	return (
-		<div className="jira-sync-preview-list">
+		<List as="div" variant="grouped" className="jira-sync-preview-list">
 			{candidates.map((candidate) => (
 				<div key={candidate.id} className="jira-sync-preview-card conflict">
 					<div className="jira-sync-preview-header">
@@ -119,16 +122,16 @@ const renderUnsupportedList = (candidates, emptyMessage = "No unsupported cases 
 						</div>
 						<span className="jira-status-badge conflict">{candidate.status}</span>
 					</div>
-					<ul className="jira-sync-warning-list">
+					<List className="jira-sync-warning-list">
 						{candidate.unsupported_steps?.map((step) => (
-							<li key={`${candidate.id}-${step.step}-${step.reason_code}`}>
+							<ListItem key={`${candidate.id}-${step.step}-${step.reason_code}`}>
 								Step {step.step}: {step.reason_code}. {step.suggested_next_action}
-							</li>
+							</ListItem>
 						))}
-					</ul>
+					</List>
 				</div>
 			))}
-		</div>
+		</List>
 	);
 };
 
@@ -145,7 +148,7 @@ const renderRunResults = (runResult) => {
 	const reportPaths = [...new Set([...directReportPaths, ...resultReportPaths])];
 
 	return (
-		<div className="result-section">
+		<Surface as="div" className="result-section">
 			<div className="generate-results-header">
 				<div>
 					<h3>Execution Results</h3>
@@ -176,14 +179,14 @@ const renderRunResults = (runResult) => {
 				</p>
 			)}
 			{runResult.results?.length > 0 && (
-				<div className="selection-table-wrapper" role="region" aria-label="Execution results table" tabIndex={0}>
-					<table className="selection-table">
+				<TableScroll className="selection-table-wrapper" role="region" aria-label="Execution results table" tabIndex={0}>
+					<Table className="selection-table">
 						<thead>
 							<tr>
-								<th>Case</th>
-								<th>Status</th>
-								<th>Generated spec</th>
-								<th>Artifacts</th>
+								<th scope="col">Case</th>
+								<th scope="col">Status</th>
+								<th scope="col">Generated spec</th>
+								<th scope="col">Artifacts</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -198,10 +201,10 @@ const renderRunResults = (runResult) => {
 								</tr>
 							))}
 						</tbody>
-					</table>
-				</div>
+					</Table>
+				</TableScroll>
 			)}
-		</div>
+		</Surface>
 	);
 };
 
@@ -234,43 +237,43 @@ export default function AutomationPanel({
 	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
 
 	return (
-		<section className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
+		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
 			<h2 className="panel-title">Execution setup</h2>
 			<p className="panel-description">Review executable candidates and run approved browser cases through Playwright.</p>
 			<div className="panel-form two-cols">
-				<div className="form-group">
+				<Field className="form-group">
 					<label htmlFor="automation-target-environment">Target environment</label>
-					<input
+					<Input
 						id="automation-target-environment"
 						value={executionTargetEnvironment}
 						onChange={(event) => setExecutionTargetEnvironment(event.target.value)}
 						placeholder="staging, dev, customer-a"
 						disabled={inputsDisabled}
 					/>
-				</div>
-				<div className="form-group">
+				</Field>
+				<Field className="form-group">
 					<label htmlFor="automation-target-base-url">Target base URL</label>
-					<input
+					<Input
 						id="automation-target-base-url"
 						value={executionTargetBaseUrl}
 						onChange={(event) => setExecutionTargetBaseUrl(event.target.value)}
 						placeholder="Use backend default"
 						disabled={inputsDisabled}
 					/>
-				</div>
+				</Field>
 				<div className="feedback-actions">
-					<button className="secondary" onClick={() => previewExecution()} disabled={previewDisabled}>
+					<Button className="secondary" onClick={() => previewExecution()} disabled={previewDisabled}>
 						{isPreviewingExecution ? "Previewing..." : "Preview Execution"}
-					</button>
-					<button onClick={runApprovedExecution} disabled={runDisabled}>
+					</Button>
+					<Button onClick={runApprovedExecution} disabled={runDisabled}>
 						{isRunningExecution ? "Running..." : `Run ${selectedExecutableCount} Candidate${selectedExecutableCount === 1 ? "" : "s"}`}
-					</button>
+					</Button>
 				</div>
 			</div>
 			{executionError ? (
-				<div className="workflow-result-notice warning" role="alert">
+				<Alert as="div" tone="warning" className="workflow-result-notice warning" role="alert">
 					<p>{executionError}</p>
-				</div>
+				</Alert>
 			) : null}
 
 			{executionPreview ? (
@@ -290,12 +293,12 @@ export default function AutomationPanel({
 						{renderBucketCount("Invalid", previewSummary.invalid, "warning")}
 					</div>
 					{!previewIsActionable && (
-						<div className="workflow-result-notice warning" role="alert">
+						<Alert as="div" tone="warning" className="workflow-result-notice warning" role="alert">
 							<p>{executionPreview.consistencyMessage || "This stored preview must be refreshed before execution."}</p>
-						</div>
+						</Alert>
 					)}
 
-					<div className="result-section">
+					<Surface as="div" className="result-section">
 						<h3>Executable</h3>
 						{renderCandidateTable({
 							candidates: executableCandidates,
@@ -303,52 +306,52 @@ export default function AutomationPanel({
 							setSelectedCandidateIds: setSelectedExecutionCandidateIds,
 							selectionDisabled: !previewIsActionable || isPreviewingExecution || isRunningExecution || authActionDisabled,
 						})}
-					</div>
+					</Surface>
 
-					<div className="result-section">
+					<Surface as="div" className="result-section">
 						<h3>Manual</h3>
 						{renderManualList(executionPreview.manual || [])}
-					</div>
+					</Surface>
 
-					<div className="result-section">
+					<Surface as="div" className="result-section">
 						<h3>Unsupported</h3>
 						{renderUnsupportedList(executionPreview.unsupported || [])}
-					</div>
+					</Surface>
 
-					<div className="result-section">
+					<Surface as="div" className="result-section">
 						<h3>Invalid</h3>
 						{renderUnsupportedList(executionPreview.invalid || [], "No invalid cases in the current preview.")}
-					</div>
+					</Surface>
 
 					{executionPreview.warnings?.length > 0 && (
-						<ul className="jira-sync-warning-list">
+						<List className="jira-sync-warning-list">
 							{executionPreview.warnings.map((warning) => (
-								<li key={warning}>{warning}</li>
+								<ListItem key={warning}>{warning}</ListItem>
 							))}
-						</ul>
+						</List>
 					)}
 				</div>
 			) : (
-				<div className="result-section">
+				<Surface as="div" className="result-section">
 					<h3>Execution Preview</h3>
 					<span className="helper-text">
 						{testCases.length
 							? "No preview yet. Preview execution readiness for the current test cases."
 							: "Generate test cases to preview automation readiness."}
 					</span>
-				</div>
+				</Surface>
 			)}
 
 			{renderRunResults(executionRunResult)}
 
 			<div className="panel-nav">
-				<button onClick={goPrev} className="secondary">
+				<Button onClick={goPrev} className="secondary">
 					Back
-				</button>
-				<button onClick={goNext} disabled={testCases.length === 0}>
+				</Button>
+				<Button onClick={goNext} disabled={testCases.length === 0}>
 					Next
-				</button>
+				</Button>
 			</div>
-		</section>
+		</Surface>
 	);
 }

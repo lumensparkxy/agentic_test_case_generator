@@ -1,3 +1,5 @@
+import { CollectionState, List, ListItem } from "../ui/collections";
+import { Surface, Disclosure } from "../ui/surfaces";
 export default function RequirementAnalysisPanel({
 	requirementAnalysis,
 	coverageMetrics,
@@ -7,16 +9,16 @@ export default function RequirementAnalysisPanel({
 }) {
 	if (requirementAnalysis.length === 0) {
 		return (
-			<div className="generate-result-empty">
+			<CollectionState as="div" kind="empty" className="generate-result-empty">
 				<h3>Requirement Analysis</h3>
 				<p>No requirement analysis is available for this run.</p>
-			</div>
+			</CollectionState>
 		);
 	}
 
 	return (
-		<div className="result-section">
-			<details className="collapsible-panel" open>
+		<Surface as="div" className="result-section">
+			<Disclosure className="collapsible-panel" open>
 				<summary className="collapsible-panel-summary">
 					<span className="collapsible-panel-copy">
 						<span className="collapsible-panel-title">Requirement Analysis</span>
@@ -64,7 +66,7 @@ export default function RequirementAnalysisPanel({
 							</span>
 						</div>
 					)}
-					<div className="analysis-card-list">
+					<List as="div" variant="grouped" className="analysis-card-list">
 						{requirementAnalysis.map((analysis) => {
 							const summary = getRequirementAnalysisSummary(analysis.requirement_id);
 							const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
@@ -102,81 +104,81 @@ export default function RequirementAnalysisPanel({
 									<div className="analysis-detail-grid">
 										<div className="analysis-detail-block">
 											<h4>Business rules</h4>
-											<ul className="analysis-detail-list">
+											<List className="analysis-detail-list">
 												{(analysis.business_rules || []).slice(0, 2).map((rule) => (
-													<li key={rule.id}>{rule.title}</li>
+													<ListItem key={rule.id}>{rule.title}</ListItem>
 												))}
-											</ul>
+											</List>
 										</div>
 										<div className="analysis-detail-block">
 											<h4>Constraints</h4>
-											<ul className="analysis-detail-list">
+											<List className="analysis-detail-list">
 												{(analysis.field_constraints || []).slice(0, 2).map((constraint) => (
-													<li key={constraint.id}>
+													<ListItem key={constraint.id}>
 														{constraint.field_name}: {constraint.description}
-													</li>
+													</ListItem>
 												))}
-											</ul>
+											</List>
 										</div>
 										<div className="analysis-detail-block">
 											<h4>Permissions</h4>
-											<ul className="analysis-detail-list">
+											<List className="analysis-detail-list">
 												{(analysis.role_permissions || []).slice(0, 2).map((permission) => (
-													<li key={permission.id}>
+													<ListItem key={permission.id}>
 														{permission.role}: {permission.action}
-													</li>
+													</ListItem>
 												))}
-											</ul>
+											</List>
 										</div>
 										<div className="analysis-detail-block">
 											<h4>Transitions</h4>
-											<ul className="analysis-detail-list">
+											<List className="analysis-detail-list">
 												{(analysis.state_transitions || []).slice(0, 2).map((transition) => (
-													<li key={transition.id}>
+													<ListItem key={transition.id}>
 														{transition.from_state} → {transition.to_state}
-													</li>
+													</ListItem>
 												))}
-											</ul>
+											</List>
 										</div>
 										<div className="analysis-detail-block">
 											<h4>Risks</h4>
-											<ul className="analysis-detail-list">
+											<List className="analysis-detail-list">
 												{(analysis.risk_signals || []).slice(0, 2).map((risk) => (
-													<li key={risk.id}>
+													<ListItem key={risk.id}>
 														{risk.severity}: {risk.title}
-													</li>
+													</ListItem>
 												))}
-											</ul>
+											</List>
 										</div>
 									</div>
 									{hasGaps && (
 										<div className="analysis-gap-block">
 											<strong>Coverage gaps</strong>
-											<ul className="analysis-gap-list">
+											<List className="analysis-gap-list">
 												{gaps.highRisks.slice(0, 2).map((item) => (
-													<li key={item}>{item}</li>
+													<ListItem key={item}>{item}</ListItem>
 												))}
 												{gaps.rules.slice(0, 2).map((item) => (
-													<li key={item}>{item}</li>
+													<ListItem key={item}>{item}</ListItem>
 												))}
 												{gaps.constraints.slice(0, 2).map((item) => (
-													<li key={item}>{item}</li>
+													<ListItem key={item}>{item}</ListItem>
 												))}
 												{gaps.permissions.slice(0, 2).map((item) => (
-													<li key={item}>{item}</li>
+													<ListItem key={item}>{item}</ListItem>
 												))}
 												{gaps.transitions.slice(0, 2).map((item) => (
-													<li key={item}>{item}</li>
+													<ListItem key={item}>{item}</ListItem>
 												))}
-											</ul>
+											</List>
 										</div>
 									)}
 								</div>
 							);
 						})}
-					</div>
+					</List>
 				</div>
-			</details>
-		</div>
+			</Disclosure>
+		</Surface>
 	);
 }
