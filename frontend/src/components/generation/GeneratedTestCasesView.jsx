@@ -7,8 +7,6 @@ import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
 export default function GeneratedTestCasesView({
 	testCases,
-	expandedRows,
-	onToggleRowExpansion,
 	feedback,
 	onFeedbackChange,
 	onRefineTestCases,
@@ -26,7 +24,6 @@ export default function GeneratedTestCasesView({
 	);
 	const selected = cases.find((tc) => tc.id === selectedId) || cases[0];
 	const steps = selected?.steps || [];
-	const expanded = Boolean(expandedRows[selected?.id]);
 	const findings = selected
 		? qualityIssues.filter((issue) => new RegExp(`\\b${selected.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(issue))
 		: [];
@@ -124,7 +121,7 @@ export default function GeneratedTestCasesView({
 										</tr>
 									</thead>
 									<tbody>
-										{steps.slice(0, expanded ? undefined : 2).map((step, index) => (
+										{steps.map((step, index) => (
 											<tr key={`${selected.id}-${index}`}>
 												<th scope="row">{index + 1}</th>
 												<td>
@@ -141,16 +138,6 @@ export default function GeneratedTestCasesView({
 									</tbody>
 								</Table>
 							</TableScroll>
-							{steps.length > 2 && (
-								<Button
-									className="secondary small"
-									type="button"
-									aria-expanded={expanded}
-									onClick={() => onToggleRowExpansion(selected.id)}
-								>
-									{expanded ? "Show fewer steps" : `Show all ${steps.length} steps`}
-								</Button>
-							)}
 							<h3>Expected result</h3>
 							<p>{selected.expected_result || "Not specified."}</p>
 							<Disclosure className="test-case-metadata">

@@ -15,7 +15,6 @@ export default function useTestCaseWorkflowState() {
 	const [testCaseIterationHistory, setTestCaseIterationHistory] = useState([]);
 	const [feedback, setFeedback] = useState("");
 	const [testCaseWorkflowSettings, setTestCaseWorkflowSettings] = useState(EMPTY_WORKFLOW_SETTINGS);
-	const [expandedRows, setExpandedRows] = useState({});
 	const [activeGenerateResultTab, setActiveGenerateResultTab] = useState("test-cases");
 	const [isGenerating, setIsGenerating] = useState(false);
 
@@ -28,7 +27,6 @@ export default function useTestCaseWorkflowState() {
 		setTestCaseWorkflowDiagnostics(null);
 		setAppliedTestCaseWorkflowSettings(null);
 		setTestCaseIterationHistory([]);
-		setExpandedRows({});
 		setActiveGenerateResultTab("test-cases");
 		setFeedback("");
 	};
@@ -58,8 +56,6 @@ export default function useTestCaseWorkflowState() {
 		setFeedback,
 		testCaseWorkflowSettings,
 		setTestCaseWorkflowSettings,
-		expandedRows,
-		setExpandedRows,
 		activeGenerateResultTab,
 		setActiveGenerateResultTab,
 		isGenerating,

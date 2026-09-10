@@ -314,8 +314,6 @@ export default function App() {
 		setFeedback,
 		testCaseWorkflowSettings,
 		setTestCaseWorkflowSettings,
-		expandedRows,
-		setExpandedRows,
 		activeGenerateResultTab,
 		setActiveGenerateResultTab,
 		isGenerating,
@@ -751,10 +749,6 @@ export default function App() {
 	const requirementParserFailures = requirementWorkflowDiagnostics?.parser_failures || [];
 	const requirementBlockingIssues = requirementReview?.approved ? [] : requirementReview?.blocking_issues || [];
 	const requirementReportDetailCount = requirementBlockingIssues.length + requirementWarnings.length + requirementParserFailures.length;
-
-	const toggleRowExpansion = (id) => {
-		setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
-	};
 
 	const chooseGenerateResultTab = (data) => {
 		const diagnostics = data?.workflow_diagnostics || null;
@@ -1453,7 +1447,6 @@ export default function App() {
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
 		setImpactUpdateMessage("");
-		setExpandedRows({});
 		setActiveGenerateResultTab(
 			(generationPayload.test_cases || []).length ? chooseGenerateResultTab(hydratedGenerationPayload) : "analysis"
 		);
@@ -2482,7 +2475,6 @@ export default function App() {
 			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
-			setExpandedRows({});
 			setFeedback("");
 			resetExecutionWorkflowState();
 			setReqFeedback("");
@@ -2565,7 +2557,6 @@ export default function App() {
 			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
-			setExpandedRows({});
 			setFeedback("");
 			resetExecutionWorkflowState();
 			setReqFeedback("");
@@ -2896,7 +2887,6 @@ export default function App() {
 			setImpactAnalysis(null);
 			setActiveGenerateResultTab("test-cases");
 			resetContextAnalysis();
-			setExpandedRows({});
 			setFeedback("");
 			resetExecutionWorkflowState();
 			await refreshCurrentProject({ hydrate: false, operationScope });
@@ -3207,7 +3197,6 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
-			setExpandedRows({});
 			setActiveGenerateResultTab(chooseGenerateResultTab(data));
 			setDraftExportOverrideRequested(false);
 			setDraftExportOverrideReason("");
@@ -4968,8 +4957,6 @@ export default function App() {
 															<GeneratedTestCasesView
 																testCases={testCases}
 																qualityIssues={testCaseReview?.blocking_issues || []}
-																expandedRows={expandedRows}
-																onToggleRowExpansion={toggleRowExpansion}
 																feedback={feedback}
 																onFeedbackChange={setFeedback}
 																onRefineTestCases={() => generateTestCases(true)}

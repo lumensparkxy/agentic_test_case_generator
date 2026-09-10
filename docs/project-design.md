@@ -77,6 +77,6 @@ Validation: 152 tests in `test:e2e:home-first` pass, including pointer drag, key
 
 Case list summaries use a single inline flow for ID and title only. Priority and linked requirements remain in the selected detail pane, and linked-requirement search remains supported. Do not force these fields onto separate lines or truncate titles: wrapping follows the resized pane width. Case selection remains a button with its existing accessible name/state.
 
-Steps use the shared compact Table inside a named TableScroll region. Columns are Step, Action and Expected result, with column headers and sequential row headers. Step-specific test data stays in the Action cell. Show all/fewer steps and missing expected-result fallback remain available. The table wraps long cell content; at very narrow widths its 320px minimum scrolls inside the named container without widening the document.
+Steps use the shared compact Table inside a named TableScroll region. Columns are Step, Action and Expected result, with column headers and sequential row headers. Step-specific test data stays in the Action cell. All steps are always visible; there is no Show all/fewer toggle. The missing expected-result fallback remains available. The table wraps long cell content; at very narrow widths its 320px minimum scrolls inside the named container without widening the document.
 
 Validation: 50 focused shared-design, accessibility and responsive tests pass; build/lint/format pass. Actual local Test Cases was inspected with long case names and step content.

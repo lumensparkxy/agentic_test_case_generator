@@ -51,12 +51,10 @@ async function openCases(page, testCases = [caseFixture("TC-001", "Valid checkou
 	return project;
 }
 
-test("selects cases, expands steps and preserves all case metadata while searching", async ({ page }) => {
+test("selects cases and preserves all steps and metadata while searching", async ({ page }) => {
 	await openCases(page);
 	const detail = page.getByRole("region", { name: "Selected test case" });
 	await expect(detail.getByRole("heading", { name: "Valid checkout" })).toBeVisible();
-	await expect(detail).not.toContainText("TC-001 action 3");
-	await detail.getByRole("button", { name: "Show all 3 steps" }).click();
 	await expect(detail).toContainText("TC-001 action 3");
 	await expect(detail).toContainText("Step-specific data");
 	await detail.getByText("Test data and metadata", { exact: true }).click();
@@ -294,17 +292,14 @@ test("case summaries flow inline and wrap only when the pane narrows", async ({ 
 	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("High priority · REQ-101");
 });
 
-test("step table aligns numbers, actions and expected results and retains expanded test data", async ({ page }) => {
+test("step table aligns numbers, actions and expected results and shows every step and its test data by default", async ({ page }) => {
 	await openCases(page);
 	const table = page.getByRole("region", { name: "Test steps and expected results" }).getByRole("table");
 	await expect(table.getByRole("columnheader")).toHaveText(["Step", "Action", "Expected result"]);
-	await expect(table.getByRole("rowheader")).toHaveText(["1", "2"]);
 	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText(["TC-001 action 1", "TC-001 expectation 1"]);
-	await page.getByRole("button", { name: "Show all 3 steps" }).click();
 	await expect(table.getByRole("rowheader")).toHaveText(["1", "2", "3"]);
+	await expect(page.getByRole("button", { name: /Show (all .*|fewer) steps/ })).toHaveCount(0);
 	await expect(table.getByRole("row").nth(3).getByRole("cell").first()).toContainText("Step-specific data");
-	await page.getByRole("button", { name: "Show fewer steps" }).click();
-	await expect(table.getByRole("rowheader")).toHaveCount(2);
 	await page.setViewportSize({ width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
