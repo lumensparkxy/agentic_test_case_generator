@@ -1,4 +1,4 @@
-import { ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
+import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
 import { Input, Button, Textarea } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
 import { useId, useState } from "react";
@@ -64,8 +64,8 @@ export default function GeneratedTestCasesView({
 								onClick={() => setSelectedId(tc.id)}
 							>
 								<span>
-									<small>{tc.id}</small>
-									<strong>{tc.title}</strong>
+									<small>{tc.id}</small> <strong>{tc.title}</strong>
+									{" · "}
 									<span>
 										{tc.priority || "Medium"} priority · {getTestCaseLinkedRequirementIds(tc).join(", ") || "No linked requirements"}
 									</span>
@@ -113,21 +113,38 @@ export default function GeneratedTestCasesView({
 								<h3>Steps and expected results</h3>
 								<span>{steps.length} steps</span>
 							</div>
-							<List as="ol" className="test-detail-steps">
-								{steps.slice(0, expanded ? undefined : 2).map((step, index) => (
-									<ListItem key={`${selected.id}-${index}`}>
-										<p>{step.action}</p>
-										<p>
-											<strong>Expected</strong> {step.expected || "Not specified"}
-										</p>
-										{step.test_data && (
-											<p>
-												<strong>Test data</strong> {step.test_data}
-											</p>
-										)}
-									</ListItem>
-								))}
-							</List>
+							<TableScroll aria-label="Test steps and expected results">
+								<Table density="compact" className="test-detail-steps">
+									<colgroup>
+										<col className="test-step-number-column" />
+										<col />
+										<col />
+									</colgroup>
+									<thead>
+										<tr>
+											<th scope="col">Step</th>
+											<th scope="col">Action</th>
+											<th scope="col">Expected result</th>
+										</tr>
+									</thead>
+									<tbody>
+										{steps.slice(0, expanded ? undefined : 2).map((step, index) => (
+											<tr key={`${selected.id}-${index}`}>
+												<th scope="row">{index + 1}</th>
+												<td>
+													{step.action}
+													{step.test_data && (
+														<p className="test-step-data">
+															<strong>Test data:</strong> {step.test_data}
+														</p>
+													)}
+												</td>
+												<td>{step.expected || "Not specified"}</td>
+											</tr>
+										))}
+									</tbody>
+								</Table>
+							</TableScroll>
 							{steps.length > 2 && (
 								<Button
 									className="secondary small"

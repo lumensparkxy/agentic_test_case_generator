@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented, awaiting review: #257 — Inline case summaries and Step/Action/Expected result columns. Builds on PR #256; 50 focused browser checks and build/lint/format pass.
+
 - Implemented, awaiting review: #255 — Compact shared typography and resizable Test Cases/Use Cases panes. Builds on PR #254; 152 frontend regression checks pass.
 
 - Implemented, awaiting review: #253 — Align Back/Next with sidebar order, include Use Cases, and make Template Setup an explicit Test Cases subview. Builds on PR #252; 45 focused navigation/review/export browser checks and build/lint/format pass.

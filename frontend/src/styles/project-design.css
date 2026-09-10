@@ -511,8 +511,7 @@ select {
 	overflow-y: auto;
 }
 .test-review-item > span {
-	display: grid;
-	gap: 6px;
+	display: block;
 	min-width: 0;
 }
 .test-review-item small,
@@ -572,19 +571,19 @@ select {
 	font-size: var(--font-secondary);
 }
 .test-detail-steps {
-	padding-left: 22px;
+	table-layout: fixed;
+	min-width: 320px;
 }
-.test-detail-steps li {
-	border-bottom: 1px solid var(--border-color);
-	padding: 12px 0 12px 8px;
+.test-step-number-column {
+	width: 56px;
 }
-.test-detail-steps p:first-child {
-	color: var(--text-main);
+.test-detail-steps th,
+.test-detail-steps td {
+	overflow-wrap: anywhere;
 }
-.test-detail-steps strong {
+.test-review-detail .test-step-data {
+	margin: 8px 0 0;
 	font-size: var(--font-secondary);
-	margin-right: 10px;
-	font-weight: 500;
 }
 .test-case-metadata {
 	border-top: 1px solid var(--border-color);

@@ -72,3 +72,11 @@ The shared body token is 14px, secondary text remains 13px, page titles use 28px
 Test Cases uses it through `ListDetail` (38% initial list width, 260/360px minima); Use Cases uses it for scenarios and the review decision (68%, 360/300px minima). Drag the divider, use Left/Right arrows (Shift for larger steps), Home/End for limits, or Enter/double-click to reset. It preserves child identity while resizing, so selection, filters and review state remain feature-owned. Fixed navigation and ordinary card grids are not converted to resizable content panes.
 
 Validation: 152 tests in `test:e2e:home-first` pass, including pointer drag, keyboard reset/limits, width persistence across reload, compact typography and responsive/accessibility regression checks. Live desktop Test Cases and Use Cases were inspected with actual artifacts.
+
+## Test case row and step presentation (#257)
+
+Case list summaries use a single inline flow for ID, title and supporting metadata. Do not force these fields onto separate lines or truncate titles: wrapping follows the resized pane width. Case selection remains a button with its existing accessible name/state.
+
+Steps use the shared compact Table inside a named TableScroll region. Columns are Step, Action and Expected result, with column headers and sequential row headers. Step-specific test data stays in the Action cell. Show all/fewer steps and missing expected-result fallback remain available. The table wraps long cell content; at very narrow widths its 320px minimum scrolls inside the named container without widening the document.
+
+Validation: 50 focused shared-design, accessibility and responsive tests pass; build/lint/format pass. Actual local Test Cases was inspected with long case names and step content.

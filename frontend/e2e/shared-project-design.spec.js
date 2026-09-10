@@ -275,3 +275,34 @@ test("project typography uses the compact shared reading scale", async ({ page }
 	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toHaveCSS("font-size", "28px");
 	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toHaveCSS("min-height", "44px");
 });
+
+test("case summaries flow inline and wrap only when the pane narrows", async ({ page }) => {
+	await page.setViewportSize({ width: 1920, height: 1080 });
+	await openCases(page);
+	const row = page.getByRole("button", { name: /TC-001 Valid checkout/ });
+	const text = row.locator(":scope > span");
+	const wideHeight = await text.evaluate((element) => element.getBoundingClientRect().height);
+	const lineHeight = await text.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight));
+	expect(wideHeight).toBeLessThanOrEqual(lineHeight + 1);
+	const divider = page.getByRole("separator", { name: "Resize test case list and details" });
+	await divider.focus();
+	await page.keyboard.press("Home");
+	await expect.poll(() => text.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(wideHeight);
+	await expect(row).toHaveAttribute("aria-pressed", "true");
+	await expect(row).toContainText("High priority");
+});
+
+test("step table aligns numbers, actions and expected results and retains expanded test data", async ({ page }) => {
+	await openCases(page);
+	const table = page.getByRole("region", { name: "Test steps and expected results" }).getByRole("table");
+	await expect(table.getByRole("columnheader")).toHaveText(["Step", "Action", "Expected result"]);
+	await expect(table.getByRole("rowheader")).toHaveText(["1", "2"]);
+	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText(["TC-001 action 1", "TC-001 expectation 1"]);
+	await page.getByRole("button", { name: "Show all 3 steps" }).click();
+	await expect(table.getByRole("rowheader")).toHaveText(["1", "2", "3"]);
+	await expect(table.getByRole("row").nth(3).getByRole("cell").first()).toContainText("Step-specific data");
+	await page.getByRole("button", { name: "Show fewer steps" }).click();
+	await expect(table.getByRole("rowheader")).toHaveCount(2);
+	await page.setViewportSize({ width: 390, height: 844 });
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
