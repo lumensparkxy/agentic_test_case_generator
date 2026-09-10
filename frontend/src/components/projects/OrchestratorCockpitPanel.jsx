@@ -28,7 +28,7 @@ export default function OrchestratorCockpitPanel({
 		return null;
 	}
 
-	return (
+	const content = (
 		<section className="contextual-task-region" aria-label="Contextual task">
 			{error ? (
 				<div className="orchestrator-error" role="alert">
@@ -49,5 +49,13 @@ export default function OrchestratorCockpitPanel({
 				/>
 			) : null}
 		</section>
+	);
+	return !primaryAction && !error ? (
+		<details className="optional-workflow-actions">
+			<summary>More actions</summary>
+			{content}
+		</details>
+	) : (
+		content
 	);
 }

@@ -169,17 +169,21 @@ function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTo
 function ScenarioCard({ scenario }) {
 	return (
 		<li className="use-case-scenario-card">
-			<div className="use-case-scenario-heading">
-				<div>
-					<span className="use-case-scenario-type">{formatWorkspaceLabel(scenario.scenario_type, "Scenario")}</span>
-					<h4>{scenario.title || scenario.objective || "Untitled scenario"}</h4>
+			<details className="scenario-details">
+				<summary>
+					<span className="scenario-summary-copy">
+						<span className="use-case-scenario-type">{scenario.id || formatWorkspaceLabel(scenario.scenario_type, "Scenario")}</span>
+						<strong>{scenario.title || scenario.objective || "Untitled scenario"}</strong>
+					</span>
+				</summary>
+				<div className="scenario-expanded-content">
+					<p>{scenario.objective || "No additional objective provided."}</p>
+					<span>
+						{formatWorkspaceLabel(scenario.scenario_type, "Scenario")} · {formatWorkspaceLabel(scenario.priority, "Unprioritized")} ·{" "}
+						{scenario.must_have ? "Must have" : "Recommended"}
+					</span>
 				</div>
-				<div className="use-case-scenario-badges" aria-label="Scenario priority">
-					<span>{formatWorkspaceLabel(scenario.priority, "Unprioritized")}</span>
-					<span className={scenario.must_have ? "required" : "recommended"}>{scenario.must_have ? "Must have" : "Recommended"}</span>
-				</div>
-			</div>
-			{scenario.objective && scenario.objective !== scenario.title ? <p>{scenario.objective}</p> : null}
+			</details>
 		</li>
 	);
 }
@@ -287,7 +291,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 			<div className="use-case-decision-heading">
 				<div>
 					<span className="use-case-section-kicker">Human decision</span>
-					<h2>Complete this review</h2>
+					<h2>Review decision</h2>
 					<p>{humanMeta.label}. Your decision applies only to the current immutable artifact.</p>
 				</div>
 			</div>
@@ -419,8 +423,14 @@ function ReviewDecisionPanel({ stageState, snapshot, review }) {
 						? "Your feedback will be recorded with the decision."
 						: "Approval advances the durable project review state."}
 				</p>
-				<button type="submit" disabled={formDisabled || (review.decision === "approve" && approvalBlocked)}>
-					{review.isSubmitting ? "Saving decision…" : review.decision === "request_changes" ? "Request changes" : "Approve Use Cases"}
+				<button type="submit" disabled={!review.decision || formDisabled || (review.decision === "approve" && approvalBlocked)}>
+					{review.isSubmitting
+						? "Saving decision…"
+						: !review.decision
+							? "Choose a decision"
+							: review.decision === "request_changes"
+								? "Request changes"
+								: "Approve Use Cases"}
 				</button>
 			</div>
 		</form>
@@ -497,139 +507,151 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 
 	return (
 		<div className="use-case-review-workbench">
-			<ArtifactSummary
-				project={project}
-				snapshot={snapshot}
-				stageState={effectiveStageState}
-				scenarioTotal={scenarioTotal}
-				groupTotal={coveragePlan.length}
-				machineReview={machineReview}
-				humanReview={humanReview}
-			/>
-
-			<section className="use-case-coverage-metrics" aria-label="Coverage metrics">
-				{coverageMetrics.map((metric) => (
-					<div key={metric.label}>
-						<span>{metric.label}</span>
-						<strong>{metric.value}</strong>
-					</div>
-				))}
-			</section>
-
-			{machineIssues.length ? (
-				<section className="use-case-machine-issues" aria-labelledby="use-case-machine-issues-title">
-					<h2 id="use-case-machine-issues-title">Machine review findings</h2>
-					<ul>
-						{machineIssues.map((issue) => (
-							<li key={issue}>{issue}</li>
-						))}
-					</ul>
-				</section>
-			) : null}
-
-			<section className="use-case-collection" aria-labelledby="use-case-collection-title">
-				<div className="use-case-collection-heading">
-					<div>
-						<span className="use-case-section-kicker">Review artifact</span>
-						<h2 id="use-case-collection-title">Use case scenarios</h2>
-						<p role="status" aria-live="polite">
-							Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
-							requirement groups.
-						</p>
-					</div>
-					<div className="use-case-search-field">
-						<label htmlFor={searchId}>Search use cases</label>
-						<input
-							id={searchId}
-							type="search"
-							value={query}
-							ref={searchRef}
-							onChange={(event) => updateQuery(event.target.value)}
-							placeholder="Requirement, scenario, risk, or constraint"
-						/>
-					</div>
+			<div className="use-case-meta-row">
+				<div className="use-case-compact-summary">
+					<strong>{scenarioTotal} scenarios</strong>
+					<span>{coveragePlan.length} requirement groups</span>
+					<span>Use Cases v{snapshot.version ?? stageState?.version ?? "—"}</span>
+					<span>{effectiveStageState?.stale ? "Stale artifact" : "Current artifact"}</span>
 				</div>
+				<details className="use-case-supporting-details">
+					<summary>Quality, coverage and review history</summary>
+					<ArtifactSummary
+						project={project}
+						snapshot={snapshot}
+						stageState={effectiveStageState}
+						scenarioTotal={scenarioTotal}
+						groupTotal={coveragePlan.length}
+						machineReview={machineReview}
+						humanReview={humanReview}
+					/>
 
-				{filteredGroups.length > 1 ? (
-					<div className="use-case-group-toolbar">
-						<button type="button" className="use-case-group-toggle-all" onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}>
-							{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
-						</button>
+					<section className="use-case-coverage-metrics" aria-label="Coverage metrics">
+						{coverageMetrics.map((metric) => (
+							<div key={metric.label}>
+								<span>{metric.label}</span>
+								<strong>{metric.value}</strong>
+							</div>
+						))}
+					</section>
+
+					{machineIssues.length ? (
+						<section className="use-case-machine-issues" aria-labelledby="use-case-machine-issues-title">
+							<h2 id="use-case-machine-issues-title">Machine review findings</h2>
+							<ul>
+								{machineIssues.map((issue) => (
+									<li key={issue}>{issue}</li>
+								))}
+							</ul>
+						</section>
+					) : null}
+				</details>
+			</div>
+			<div className="artifact-review-columns">
+				<section className="use-case-collection" aria-labelledby="use-case-collection-title">
+					<div className="use-case-collection-heading">
+						<div>
+							<span className="use-case-section-kicker">Review artifact</span>
+							<h2 id="use-case-collection-title">Use case scenarios</h2>
+							<p role="status" aria-live="polite">
+								Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
+								requirement groups.
+							</p>
+						</div>
+						<div className="use-case-search-field">
+							<label htmlFor={searchId}>Search use cases</label>
+							<input
+								id={searchId}
+								type="search"
+								value={query}
+								ref={searchRef}
+								onChange={(event) => updateQuery(event.target.value)}
+								placeholder="Requirement, scenario, risk, or constraint"
+							/>
+						</div>
 					</div>
-				) : null}
 
-				{filteredGroups.length ? (
-					<div className="use-case-group-list" aria-label="Use Case groups">
-						{filteredGroups.map((group, groupIndex) => {
-							const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
-							const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-							const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
-							return (
-								<section
-									className="use-case-group"
-									aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
-									key={groupKey}
-								>
-									<details
-										className="use-case-group-details"
-										open={isOpen}
-										onToggle={(event) => {
-											const nextOpen = event.currentTarget.open;
-											if (nextOpen !== isOpen) {
-												setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
-											}
-										}}
+					{filteredGroups.length > 1 ? (
+						<div className="use-case-group-toolbar">
+							<button type="button" className="use-case-group-toggle-all" onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}>
+								{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
+							</button>
+						</div>
+					) : null}
+
+					{filteredGroups.length ? (
+						<div className="use-case-group-list" aria-label="Use Case groups">
+							{filteredGroups.map((group, groupIndex) => {
+								const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
+								const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+								const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
+								return (
+									<section
+										className="use-case-group"
+										aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
+										key={groupKey}
 									>
-										<summary className="use-case-group-heading">
-											<div>
-												<span>Source requirement {group.requirement_id || "Unidentified"}</span>
-												<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
-											</div>
-											<strong>
-												{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
-											</strong>
-										</summary>
-										{group.scenarios.length ? (
-											<ul
-												className="use-case-scenario-list"
-												aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
-											>
-												{group.scenarios.map((scenario, scenarioIndex) => (
-													<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
-												))}
-											</ul>
-										) : (
-											<p className="use-case-context-empty">No scenarios were generated for this requirement.</p>
-										)}
-										<details className="use-case-coverage-context">
-											<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
-												Coverage context
+										<details
+											className="use-case-group-details"
+											open={isOpen}
+											onToggle={(event) => {
+												const nextOpen = event.currentTarget.open;
+												if (nextOpen !== isOpen) {
+													setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
+												}
+											}}
+										>
+											<summary className="use-case-group-heading">
+												<div>
+													<span>Source requirement {group.requirement_id || "Unidentified"}</span>
+													<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
+												</div>
+												<strong>
+													{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
+												</strong>
 											</summary>
-											<CoverageContext analysis={group.analysis} />
+											{group.scenarios.length ? (
+												<ul
+													className="use-case-scenario-list"
+													aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
+												>
+													{group.scenarios.map((scenario, scenarioIndex) => (
+														<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
+													))}
+												</ul>
+											) : (
+												<p className="use-case-context-empty">No scenarios were generated for this requirement.</p>
+											)}
+											<details className="use-case-coverage-context">
+												<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
+													Coverage context
+												</summary>
+												<CoverageContext analysis={group.analysis} />
+											</details>
 										</details>
-									</details>
-								</section>
-							);
-						})}
-					</div>
-				) : (
-					<div className="use-case-search-empty" role="status">
-						<strong>No use cases match “{query}”.</strong>
-						<button
-							type="button"
-							className="secondary"
-							onClick={() => {
-								updateQuery("");
-								window.requestAnimationFrame(() => searchRef.current?.focus());
-							}}
-						>
-							Clear search
-						</button>
-					</div>
-				)}
-			</section>
+									</section>
+								);
+							})}
+						</div>
+					) : (
+						<div className="use-case-search-empty" role="status">
+							<strong>No use cases match “{query}”.</strong>
+							<button
+								type="button"
+								className="secondary"
+								onClick={() => {
+									updateQuery("");
+									window.requestAnimationFrame(() => searchRef.current?.focus());
+								}}
+							>
+								Clear search
+							</button>
+						</div>
+					)}
+				</section>
 
-			<ReviewDecisionPanel stageState={effectiveStageState} snapshot={snapshot} review={review} />
+				<ReviewDecisionPanel stageState={effectiveStageState} snapshot={snapshot} review={review} />
+			</div>
 
 			<details className="use-case-provenance">
 				<summary>Details</summary>

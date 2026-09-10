@@ -365,20 +365,20 @@ test.describe("Route-driven application shell", () => {
 		await seedAuthenticatedSession(page);
 
 		const destinations = [
-			{ destination: "overview", heading: PROJECT_A.name, active: "Overview" },
-			{ destination: "requirements", heading: "Upload Requirements", active: "Requirements" },
-			{ destination: "context", heading: "Context Inputs", active: "Context" },
+			{ destination: "overview", heading: "Overview", active: "Overview" },
+			{ destination: "requirements", heading: "Requirements", active: "Requirements" },
+			{ destination: "context", heading: "Context", active: "Context" },
 			{ destination: "use-cases", heading: "Use Cases", active: "Use Cases" },
-			{ destination: "test-cases", heading: "Generate Test Cases", active: "Test Cases" },
+			{ destination: "test-cases", heading: "Test Cases", active: "Test Cases" },
 			{ destination: "automation", heading: "Automation", active: "Automation" },
-			{ destination: "reports", heading: "Export Test Cases", active: "Reports" },
+			{ destination: "reports", heading: "Reports", active: "Reports" },
 		];
 
 		for (const destination of destinations) {
 			const path = buildProjectPath(PROJECT_A.project_id, destination.destination);
 			await page.goto(path);
 			await expect(page).toHaveURL(new RegExp(`${path}/?$`));
-			await expect(page.getByRole("heading", { name: new RegExp(`^${destination.heading}$`, "i") })).toBeVisible({
+			await expect(page.getByRole("heading", { name: new RegExp(`^${destination.heading}$`, "i"), level: 1 })).toBeVisible({
 				timeout: 30_000,
 			});
 			await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_A.name);
@@ -533,7 +533,7 @@ test.describe("Route-driven application shell", () => {
 		await page.getByRole("button", { name: "Open QA project menu" }).click();
 		await page.getByRole("button", { name: `Open QA project ${PROJECT_B.name}` }).click();
 		await expect(page).toHaveURL(buildProjectPath(PROJECT_B.project_id));
-		await expect(page.getByRole("heading", { name: new RegExp(`^${PROJECT_B.name}$`, "i") })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("heading", { name: /^Overview$/i })).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_B.name);
 
 		const parseResponse = page.waitForResponse(
@@ -579,10 +579,10 @@ test.describe("Route-driven application shell", () => {
 
 		await page.getByRole("button", { name: "Open QA project menu" }).click();
 		await page.getByRole("button", { name: `Open QA project ${PROJECT_B.name}` }).click();
-		await expect(page.getByRole("heading", { name: new RegExp(`^${PROJECT_B.name}$`, "i") })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("heading", { name: /^Overview$/i })).toBeVisible({ timeout: 30_000 });
 		await page.getByRole("button", { name: "Open QA project menu" }).click();
 		await page.getByRole("button", { name: `Open QA project ${PROJECT_A.name}` }).click();
-		await expect(page.getByRole("heading", { name: new RegExp(`^${PROJECT_A.name}$`, "i") })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("heading", { name: /^Overview$/i })).toBeVisible({ timeout: 30_000 });
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Requirements(?:,|$)/i })

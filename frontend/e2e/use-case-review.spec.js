@@ -23,11 +23,11 @@ function reviewMain(page) {
 }
 
 function machineReviewRegion(page) {
-	return reviewMain(page).getByRole("region", { name: /^Machine quality review$/i });
+	return reviewMain(page).getByRole("region", { name: /^Machine quality review$/i, includeHidden: true });
 }
 
 function humanReviewRegion(page) {
-	return reviewMain(page).getByRole("region", { name: /^Human review status$/i });
+	return reviewMain(page).getByRole("region", { name: /^Human review status$/i, includeHidden: true });
 }
 
 function decisionPanel(page) {
@@ -67,6 +67,10 @@ async function openUseCaseReview(page, options = {}) {
 	await seedAuthenticatedSession(page);
 	await page.goto(buildProjectPath(USE_CASE_PROJECT_ID, "use-cases"));
 	await expect(page.getByRole("heading", { name: /^Use Cases$/i, level: 1 })).toBeVisible({ timeout: 30_000 });
+	if (await page.getByText("Quality, coverage and review history", { exact: true }).count()) {
+		await page.getByText("Quality, coverage and review history", { exact: true }).click();
+		if (await approveOption(page).isEnabled()) await approveOption(page).check();
+	}
 	return api;
 }
 
@@ -175,6 +179,7 @@ test.describe("Use Cases review workbench", () => {
 
 		await expect(page).toHaveURL(buildProjectPath(USE_CASE_PROJECT_ID, "use-cases"));
 		await expect(reviewMain(page)).toBeVisible();
+		await page.getByText("Quality, coverage and review history", { exact: true }).click();
 		await expect(machineReviewRegion(page)).toBeVisible();
 		await expect(page.getByRole("heading", { name: /^Upload Requirements$/i })).toHaveCount(0);
 	});
@@ -197,10 +202,10 @@ test.describe("Use Cases review workbench", () => {
 		await expect(reviewMain(page).getByRole("status", { name: "Current human review status" })).toContainText(/Awaiting human review/i);
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
-			.getByRole("link", { name: /^Overview,/i })
+			.getByRole("link", { name: /^Overview$/i })
 			.click();
 		await expect(
-			page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", { name: /^Use Cases, Needs attention$/i })
+			page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", { name: /^Use Cases, Awaiting review$/i })
 		).toBeVisible();
 		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Approve Use Cases$/i })).toBeVisible();
 		await page

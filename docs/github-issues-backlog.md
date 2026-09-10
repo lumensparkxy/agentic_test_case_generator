@@ -4,6 +4,8 @@ This file contains issue-ready drafts for the implementation plan in `docs/imple
 
 ## UI/UX audit follow-up
 
+- In progress: [#239](https://github.com/lumensparkxy/agentic_test_case_generator/issues/239) — Implement the selected shared design across Overview, Use Cases and Test Cases, preserving review gates and responsive access. Builds on #237.
+
 - In progress: [#237](https://github.com/lumensparkxy/agentic_test_case_generator/issues/237) — Correct use-case scenario counts in workspace summaries. Count nested scenarios separately from requirement groups and keep Home, Reviews, and the current artifact consistent.
 
 ## Created GitHub issues

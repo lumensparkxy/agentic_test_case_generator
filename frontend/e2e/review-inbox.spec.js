@@ -475,6 +475,7 @@ test.describe("Global Review Inbox", () => {
 
 		await expect(page).toHaveURL(buildProjectPath(project.project_id, "use-cases"));
 		await expect(page.getByRole("heading", { name: /^Use Cases$/i, level: 1 })).toBeVisible({ timeout: 30_000 });
+		await page.getByRole("radio", { name: /^Approve/i }).check();
 		await page.getByRole("button", { name: /^Approve Use Cases$/i }).click();
 		await expect(page.getByRole("form", { name: /^Human review decision$/i }).getByRole("status")).toContainText(/approved/i);
 
@@ -512,6 +513,7 @@ test("scenario counts agree across Home, Reviews, and the current artifact after
 	await page.getByRole("button", { name: "Refresh reviews" }).click();
 	await expect(inboxList(page)).toContainText("28 scenarios · 8 requirement groups");
 	await inboxList(page).getByRole("link").click();
-	await expect(page.getByRole("heading", { name: "28 scenarios", exact: true })).toBeVisible();
+	await expect(page.locator(".use-case-compact-summary")).toContainText("28 scenarios");
+	await page.getByText("Quality, coverage and review history", { exact: true }).click();
 	await expect(page.getByRole("region", { name: "28 scenarios", exact: true })).toContainText("8 requirement groups");
 });

@@ -1,3 +1,5 @@
+import ProjectPageHeader from "./components/layout/ProjectPageHeader";
+import TestCaseQualitySummary from "./components/generation/TestCaseQualitySummary";
 import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
@@ -4060,6 +4062,16 @@ export default function App() {
 							<ProjectOverviewPage
 								project={currentProject}
 								status={orchestratorStatus}
+								counts={{
+									requirements: requirements.length,
+									scenarios: (currentProject.current_snapshots?.use_cases?.payload?.coverage_plan || []).reduce(
+										(sum, group) => sum + (group.scenarios?.length || 0),
+										0
+									),
+									testCases: testCases.length,
+								}}
+								testCaseReview={testCaseReview}
+								exportLocked={exportGateLocked}
 								navigate={navigate}
 								contextualTask={
 									<OrchestratorCockpitPanel
@@ -4089,20 +4101,23 @@ export default function App() {
 							<main
 								id="main-content"
 								ref={workflowMainRef}
-								className="workflow-main"
+								className={`workflow-main ${route.destination === "test-cases" ? "test-cases-page" : ""}`}
 								aria-label={`Workflow workspace: ${activeProjectDestinationLabel}`}
 								tabIndex={-1}
 							>
-								{route.destination === "test-cases" ? (
-									<div className="test-cases-section-tabs" role="tablist" aria-label="Test Cases sections">
-										<button type="button" role="tab" aria-selected={activeTab === 2} onClick={() => selectWorkflowTab(2)}>
-											Template setup
-										</button>
-										<button type="button" role="tab" aria-selected={activeTab === 3} onClick={() => selectWorkflowTab(3)}>
-											Generate and review
-										</button>
-									</div>
-								) : null}
+								<ProjectPageHeader
+									title={activeProjectDestinationLabel}
+									project={currentProject}
+									navigate={navigate}
+									actions={
+										route.destination === "test-cases" ? (
+											<button className="secondary" onClick={() => selectWorkflowTab(activeTab === 2 ? 3 : 2)}>
+												{activeTab === 2 ? "Generate and review" : "Template setup"}
+											</button>
+										) : null
+									}
+								/>
+
 								<OrchestratorCockpitPanel
 									currentProject={currentProject}
 									status={orchestratorStatus}
@@ -4794,36 +4809,37 @@ export default function App() {
 									)}
 
 									{activeTab === 3 && (
-										<section className="panel">
+										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											<h2 className="panel-title">Generate Test Cases</h2>
 											<p className="panel-description">
 												Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
 											</p>
-											{requirements.length > 0 && (
-												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
-													<div>
-														<strong>
-															{upstreamChangedForImpact
-																? "Existing suite needs impact analysis"
-																: canGenerateFromApprovedRequirements
-																	? "Ready for approved-requirement generation"
-																	: "Approval required before generation"}
-														</strong>
-														<p>
-															{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
-															{rejectedRequirementCount} rejected
-															{upstreamChangedForImpact
-																? ". The current suite is preserved while impact analysis reviews changed inputs."
-																: ". Only approved requirements are sent to the test-case agents."}
-														</p>
+											{requirements.length > 0 &&
+												(!testCases.length || !canGenerateFromApprovedRequirements || upstreamChangedForImpact) && (
+													<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
+														<div>
+															<strong>
+																{upstreamChangedForImpact
+																	? "Existing suite needs impact analysis"
+																	: canGenerateFromApprovedRequirements
+																		? "Ready for approved-requirement generation"
+																		: "Approval required before generation"}
+															</strong>
+															<p>
+																{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
+																{rejectedRequirementCount} rejected
+																{upstreamChangedForImpact
+																	? ". The current suite is preserved while impact analysis reviews changed inputs."
+																	: ". Only approved requirements are sent to the test-case agents."}
+															</p>
+														</div>
+														{!canGenerateFromApprovedRequirements && (
+															<button type="button" className="secondary small" onClick={() => selectWorkflowTab(0)}>
+																Review requirements
+															</button>
+														)}
 													</div>
-													{!canGenerateFromApprovedRequirements && (
-														<button type="button" className="secondary small" onClick={() => selectWorkflowTab(0)}>
-															Review requirements
-														</button>
-													)}
-												</div>
-											)}
+												)}
 											{!contextualTestCaseTask &&
 											allowLegacyTestCaseMutations &&
 											(!hasExistingTestCaseBaseline || upstreamChangedForImpact) ? (
@@ -4849,27 +4865,10 @@ export default function App() {
 
 											{renderImpactAnalysisPanel()}
 
-											{testCaseReview && (
-												<div className={`review-banner ${testCaseReview.approved ? "review-approved" : "review-needs-work"}`}>
-													<div className="review-banner-header">
-														<strong>{testCaseReview.approved ? "Approved for export" : "Needs refinement"}</strong>
-														<div className="review-banner-metrics">
-															<span className="review-metric-pill review-metric-pill-strong">{testCaseReviewMeta.scoreLabel}</span>
-															{testCaseReviewMeta.thresholdLabel && (
-																<span className="review-metric-pill">{testCaseReviewMeta.thresholdLabel}</span>
-															)}
-														</div>
-													</div>
-													<p>{testCaseReview.summary || "The review loop completed without a summary."}</p>
-													{!testCaseReview.approved && testCaseReview.blocking_issues?.length > 0 && (
-														<ul className="review-issues">
-															{testCaseReview.blocking_issues.slice(0, 3).map((issue) => (
-																<li key={issue}>{issue}</li>
-															))}
-														</ul>
-													)}
-												</div>
-											)}
+											<p className="test-suite-summary">
+												{testCases.length} test cases · {approvedRequirementCount} approved requirements
+											</p>
+											<TestCaseQualitySummary review={testCaseReview} meta={testCaseReviewMeta} exportLocked={exportGateLocked} />
 
 											{hasGenerateResults ? (
 												<div className="generate-results-workspace">
@@ -4959,7 +4958,7 @@ export default function App() {
 														{activeGenerateResultTab === "test-cases" && (
 															<GeneratedTestCasesView
 																testCases={testCases}
-																templateFormat={templateFormat}
+																qualityIssues={testCaseReview?.blocking_issues || []}
 																expandedRows={expandedRows}
 																onToggleRowExpansion={toggleRowExpansion}
 																feedback={feedback}

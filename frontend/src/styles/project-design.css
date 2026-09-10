@@ -1,0 +1,982 @@
+/* Shared project design, issue #239. Route content keeps its own workflow. */
+:root {
+	--bg-color: #fff;
+	--radius-md: 10px;
+	--radius-lg: 12px;
+}
+body {
+	background: #fff;
+	font-size: 15px;
+}
+.page {
+	padding: 0;
+}
+.global-app-shell {
+	gap: 0;
+}
+.global-app-shell-header {
+	border: 0;
+	border-bottom: 1px solid var(--border-color);
+	border-radius: 0;
+	padding: 12px 28px;
+	min-height: 76px;
+	background: #fff;
+	box-shadow: none;
+}
+.global-navigation-link {
+	font-size: 15px;
+	font-weight: 650;
+	border: 0;
+}
+.global-navigation-link.active {
+	background: var(--primary-tonal);
+}
+.command-project-trigger {
+	box-shadow: none;
+}
+.workflow-shell {
+	--workflow-nav-column: 260px;
+	gap: 0;
+	align-items: stretch;
+}
+.workflow-shell.nav-collapsed {
+	--workflow-nav-column: 72px;
+}
+.workflow-navigation-drawer {
+	border: 0;
+	border-right: 1px solid var(--border-color);
+	border-radius: 0;
+	box-shadow: none;
+	background: #f8fafd;
+	backdrop-filter: none;
+	padding: 20px 16px;
+	gap: 16px;
+	min-height: calc(100vh - 76px);
+	align-content: start;
+	top: 0;
+}
+.workflow-navigation-header {
+	display: flex;
+	justify-content: space-between;
+	padding: 0 10px;
+}
+.workflow-navigation-header > div {
+	display: block;
+}
+.workflow-navigation-header span {
+	font-size: 12px;
+	color: var(--text-muted);
+}
+.workflow-navigation-toggle {
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+}
+.workflow-navigation-list {
+	gap: 12px;
+}
+.workflow-navigation-item {
+	display: grid;
+	grid-template-columns: 24px minmax(0, 1fr);
+	gap: 16px;
+	min-height: 68px;
+	padding: 12px;
+	border: 0;
+	border-radius: 10px;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-main);
+}
+.workflow-navigation-item.active {
+	background: var(--primary-tonal);
+	color: var(--primary);
+	box-shadow: none;
+	border: 0;
+}
+.workflow-navigation-item .workflow-navigation-marker,
+.workflow-navigation-item.active .workflow-navigation-marker {
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	background: none;
+	color: inherit;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+}
+.workflow-navigation-marker svg {
+	width: 22px;
+	height: 22px;
+}
+.workflow-navigation-item:not(.active).complete .workflow-navigation-marker,
+.workflow-navigation-item:not(.active).attention .workflow-navigation-marker,
+.workflow-navigation-item:not(.active).blocked .workflow-navigation-marker {
+	color: var(--text-main);
+	background: none;
+}
+.workflow-navigation-copy {
+	gap: 4px;
+}
+.workflow-navigation-copy strong {
+	font-size: 15px;
+	font-weight: 650;
+	white-space: normal;
+	overflow: visible;
+}
+.workflow-navigation-copy .nav-workflow-status {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 13px;
+	line-height: 1.4;
+	white-space: normal;
+	overflow: visible;
+	color: var(--text-muted);
+}
+.nav-workflow-status svg {
+	flex: 0 0 auto;
+}
+.nav-workflow-status.complete svg {
+	color: var(--success);
+}
+.nav-workflow-status.attention svg {
+	color: var(--warning);
+}
+.workflow-main,
+.use-case-review-page,
+.project-overview-page {
+	padding: 28px 36px 48px;
+	background: #fff;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	min-width: 0;
+}
+.route-page {
+	box-shadow: none;
+	border: 0;
+	border-radius: 0;
+	align-content: start;
+}
+.project-overview-page,
+.use-case-review-page {
+	gap: 24px;
+}
+.project-page-header {
+	display: grid;
+	gap: 12px;
+	margin-bottom: 28px;
+	min-width: 0;
+}
+.project-breadcrumb {
+	display: flex;
+	gap: 14px;
+	font-size: 14px;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+}
+.project-breadcrumb a {
+	text-decoration: none;
+	color: var(--primary);
+}
+.project-page-title-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+}
+.project-page-header h1 {
+	margin: 0;
+	font-size: 36px;
+	line-height: 1.2;
+	letter-spacing: -0.025em;
+	color: var(--text-main);
+	overflow-wrap: anywhere;
+}
+.project-page-header p {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 16px;
+}
+.panel {
+	border: 0;
+	border-radius: 0;
+	background: #fff;
+	box-shadow: none;
+	padding: 0;
+}
+button,
+.route-primary-link {
+	border-radius: 8px;
+	box-shadow: none;
+	font-size: 14px;
+}
+button:hover:not(:disabled) {
+	transform: none;
+	box-shadow: none;
+}
+input,
+textarea,
+select {
+	border-radius: 8px;
+	font: inherit;
+}
+.overview-counts {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	padding: 24px 0;
+	border-bottom: 1px solid var(--border-color);
+}
+.overview-counts > div {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+	border-right: 1px solid var(--border-color);
+}
+.overview-counts > div:last-child {
+	border: 0;
+}
+.overview-counts strong {
+	font-size: 28px;
+	color: var(--primary);
+}
+.overview-attention h2 {
+	font-size: 23px;
+	margin: 12px 0 20px;
+}
+.overview-attention-row {
+	display: grid;
+	grid-template-columns: 24px minmax(160px, 0.8fr) minmax(0, 1.2fr) auto;
+	gap: 20px;
+	align-items: center;
+	padding: 22px 0;
+	border-bottom: 1px solid var(--border-color);
+}
+.overview-attention-row svg {
+	color: var(--warning);
+}
+.overview-attention-row p {
+	margin: 0;
+	color: var(--text-muted);
+}
+.overview-attention-row a {
+	color: var(--primary);
+	text-decoration: none;
+}
+.overview-workbenches {
+	margin-top: 20px;
+	color: var(--text-muted);
+}
+.project-overview-page .contextual-task-card {
+	padding: 28px;
+	background: var(--primary-tonal);
+	border: 0;
+	border-radius: 10px;
+	box-shadow: none;
+}
+.project-overview-page .contextual-task-card h2 {
+	font-size: 25px;
+}
+.project-overview-page .contextual-task-card p {
+	font-size: 15px;
+}
+.use-case-page-status-actions {
+	justify-content: flex-start;
+}
+.use-case-compact-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 20px;
+	color: var(--text-muted);
+	padding-bottom: 18px;
+	border-bottom: 1px solid var(--border-color);
+}
+.use-case-supporting-details {
+	color: var(--text-muted);
+}
+.use-case-supporting-details > summary {
+	cursor: pointer;
+	padding: 8px 0;
+}
+.use-case-supporting-details[open] {
+	padding-bottom: 16px;
+}
+.artifact-review-columns {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 320px;
+	gap: 28px;
+	align-items: start;
+}
+.use-case-review-workbench {
+	gap: 16px;
+}
+.use-case-collection,
+.use-case-decision-panel {
+	min-width: 0;
+}
+.use-case-collection-heading {
+	display: grid;
+	gap: 16px;
+}
+.use-case-collection-heading h2 {
+	font-size: 22px;
+}
+.use-case-collection-heading .use-case-section-kicker,
+.use-case-decision-heading .use-case-section-kicker {
+	display: none;
+}
+.use-case-collection-heading p {
+	font-size: 13px;
+}
+.use-case-search-field {
+	width: 100%;
+	min-width: 0;
+}
+.use-case-group,
+.use-case-scenario-card {
+	box-shadow: none;
+	border-radius: 10px;
+	background: #fff;
+}
+.use-case-group-heading h3 {
+	font-size: 16px;
+	line-height: 1.5;
+}
+.use-case-scenario-card {
+	border: 0;
+	border-bottom: 1px solid var(--border-color);
+	padding: 16px 0;
+	border-radius: 0;
+}
+.use-case-scenario-heading h4 {
+	font-size: 15px;
+}
+.use-case-scenario-badges {
+	font-size: 12px;
+}
+.use-case-decision-panel {
+	background: #f8fafd;
+	border: 1px solid var(--border-color);
+	padding: 24px;
+	border-radius: 10px;
+	box-shadow: none;
+}
+.use-case-decision-heading h2 {
+	font-size: 22px;
+}
+.use-case-decision-options {
+	display: grid;
+	grid-template-columns: 1fr;
+	padding: 0;
+	gap: 14px;
+	border: 0;
+}
+.use-case-decision-options label,
+.use-case-decision-options label.selected {
+	border: 0;
+	background: transparent;
+	padding: 4px 0;
+	box-shadow: none;
+}
+.use-case-decision-options small {
+	display: none;
+}
+.use-case-decision-actions {
+	display: grid;
+}
+.use-case-decision-actions button {
+	width: 100%;
+}
+.use-case-decision-actions p {
+	font-size: 13px;
+}
+.test-cases-section-tabs {
+	background: none;
+	border: 0;
+	padding: 0;
+	margin: -10px 0 20px;
+	box-shadow: none;
+}
+.test-cases-page .contextual-task-region {
+	margin-bottom: 16px;
+}
+.test-generation-panel.has-test-cases > .panel-title,
+.test-generation-panel.has-test-cases > .panel-description {
+	display: none;
+}
+.test-generation-panel.has-test-cases > .generation-gate-card.ready {
+	background: none;
+	border: 0;
+	padding: 0;
+	margin: 0 0 16px;
+}
+.test-generation-panel.has-test-cases > .generation-gate-card.ready strong {
+	font-weight: 500;
+	color: var(--text-muted);
+}
+.test-generation-panel.has-test-cases > .generation-gate-card.ready p {
+	font-size: 13px;
+}
+.test-quality-summary {
+	display: flex;
+	align-items: flex-start;
+	gap: 18px;
+	padding: 18px 22px;
+	border: 1px solid #f5d6a8;
+	background: #fffbf4;
+	border-radius: 10px;
+	margin: 20px 0;
+}
+.test-quality-summary > svg {
+	color: #b86b00;
+	flex-shrink: 0;
+	margin-top: 3px;
+}
+.test-quality-summary.approved {
+	background: var(--success-tonal);
+	border-color: #b6dfd1;
+}
+.test-quality-summary.approved > svg {
+	color: var(--success);
+}
+.test-quality-summary strong {
+	font-size: 18px;
+}
+.test-quality-summary p {
+	margin: 4px 0;
+	color: var(--text-muted);
+}
+.test-quality-findings summary {
+	cursor: pointer;
+	color: var(--primary);
+	margin-top: 8px;
+}
+.test-quality-findings li,
+.test-inline-findings li {
+	overflow-wrap: anywhere;
+}
+.generate-results-workspace {
+	border: 0;
+	border-radius: 0;
+	background: #fff;
+	box-shadow: none;
+}
+.generate-results-header {
+	padding: 0 0 12px;
+	border: 0;
+	background: #fff;
+}
+.generate-results-header h3,
+.generate-results-header p {
+	display: none;
+}
+.generate-results-summary-pill {
+	background: transparent;
+	border: 0;
+	padding: 0;
+	color: var(--text-muted);
+	font-size: 14px;
+}
+.generate-results-tabs {
+	padding: 0;
+	gap: 4px;
+	border-bottom: 1px solid var(--border-color);
+	background: transparent;
+}
+.generate-result-tab {
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	color: var(--text-muted);
+	padding: 14px 12px;
+	font-size: 14px;
+}
+.generate-result-tab.active {
+	color: var(--primary);
+	background: transparent;
+	border-bottom: 3px solid var(--primary);
+	box-shadow: none;
+}
+.generate-result-panel {
+	padding: 22px 0;
+}
+.test-review-workspace {
+	display: grid;
+	grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.35fr);
+	gap: 28px;
+}
+.test-review-list {
+	min-width: 0;
+	border-right: 1px solid var(--border-color);
+	padding-right: 20px;
+}
+.test-review-list h2 {
+	font-size: 18px;
+	margin: 0 0 12px;
+}
+.test-review-list input {
+	box-sizing: border-box;
+	width: 100%;
+}
+.test-list-count {
+	color: var(--text-muted);
+	font-size: 12px;
+	margin: 8px 0;
+}
+.test-review-items {
+	max-height: 70vh;
+	overflow-y: auto;
+}
+.test-review-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	width: 100%;
+	padding: 16px;
+	gap: 12px;
+	text-align: left;
+	border: 0;
+	border-bottom: 1px solid var(--border-color);
+	border-radius: 0;
+	color: var(--text-main);
+	background: transparent;
+}
+.test-review-item.selected {
+	border-radius: 8px;
+	background: var(--primary-tonal);
+}
+.test-review-item:hover:not(:disabled) {
+	background: var(--primary-tonal);
+}
+.test-review-item > span {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+.test-review-item small,
+.test-review-item span span {
+	font-size: 13px;
+	font-weight: 400;
+	color: var(--text-muted);
+}
+.test-review-item strong {
+	font-size: 15px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+.test-review-item svg {
+	flex-shrink: 0;
+	color: var(--text-muted);
+}
+.test-review-detail {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.test-review-detail h2 {
+	margin: 8px 0;
+	font-size: 23px;
+	line-height: 1.3;
+}
+.test-review-detail h3 {
+	margin: 22px 0 8px;
+	font-size: 16px;
+}
+.test-review-detail p {
+	margin: 6px 0 14px;
+	color: var(--text-muted);
+}
+.test-review-detail .test-detail-meta {
+	font-size: 13px;
+	margin: 4px 0;
+}
+.test-inline-findings {
+	margin: 18px 0;
+	background: #fffbf4;
+	border: 1px solid #f5d6a8;
+	border-radius: 8px;
+	padding: 10px 14px;
+}
+.test-inline-findings summary {
+	cursor: pointer;
+}
+.test-steps-heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	border-top: 1px solid var(--border-color);
+}
+.test-steps-heading > span {
+	color: var(--text-muted);
+	font-size: 13px;
+}
+.test-detail-steps {
+	padding-left: 22px;
+}
+.test-detail-steps li {
+	border-bottom: 1px solid var(--border-color);
+	padding: 12px 0 12px 8px;
+}
+.test-detail-steps p:first-child {
+	color: var(--text-main);
+}
+.test-detail-steps strong {
+	font-size: 13px;
+	margin-right: 10px;
+	font-weight: 500;
+}
+.test-case-metadata {
+	border-top: 1px solid var(--border-color);
+	padding: 20px 0;
+	margin-top: 24px;
+}
+.test-case-metadata summary {
+	cursor: pointer;
+}
+.test-case-metadata dl > div {
+	display: grid;
+	grid-template-columns: 140px minmax(0, 1fr);
+	gap: 16px;
+	padding: 8px 0;
+}
+.test-case-metadata dd {
+	margin: 0;
+	color: var(--text-muted);
+}
+@media (max-width: 1200px) {
+	.artifact-review-columns {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.use-case-decision-panel {
+		max-width: none;
+	}
+	.overview-attention-row {
+		grid-template-columns: 24px minmax(0, 1fr);
+	}
+	.overview-attention-row p,
+	.overview-attention-row a {
+		grid-column: 2;
+	}
+	.global-app-shell-header {
+		padding: 12px 16px;
+	}
+}
+@media (max-width: 900px) {
+	.workflow-shell,
+	.workflow-shell.nav-collapsed {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.workflow-navigation-drawer,
+	.workflow-navigation-drawer.compact.collapsed {
+		min-height: 0;
+		border-right: 0;
+		border-bottom: 1px solid var(--border-color);
+		padding: 12px 16px;
+	}
+	.workflow-navigation-list {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.workflow-main,
+	.use-case-review-page,
+	.project-overview-page {
+		padding: 24px;
+	}
+	.test-review-workspace {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.test-review-list {
+		border-right: 0;
+		border-bottom: 1px solid var(--border-color);
+		padding: 0 0 20px;
+	}
+	.test-review-items {
+		max-height: 280px;
+	}
+	.global-app-shell-header {
+		flex-wrap: wrap;
+	}
+	.project-page-header h1 {
+		font-size: 30px;
+	}
+}
+@media (max-width: 480px) {
+	.workflow-main,
+	.use-case-review-page,
+	.project-overview-page {
+		padding: 20px 16px;
+	}
+	.overview-counts > div {
+		flex-direction: column;
+		gap: 4px;
+		font-size: 12px;
+	}
+	.workflow-navigation-list {
+		grid-template-columns: 1fr;
+	}
+	.test-quality-summary {
+		padding: 14px;
+	}
+	.global-navigation-list {
+		gap: 0;
+	}
+	.global-navigation-link {
+		padding: 8px;
+		font-size: 13px;
+	}
+	.test-case-metadata dl > div {
+		grid-template-columns: 1fr;
+		gap: 4px;
+	}
+}
+.workflow-navigation-item.active .workflow-navigation-copy .nav-workflow-status {
+	color: var(--text-muted);
+}
+.tab-content {
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	padding: 0;
+}
+.optional-workflow-actions {
+	margin: 0 0 16px;
+	color: var(--text-muted);
+	font-size: 14px;
+}
+.optional-workflow-actions > summary {
+	cursor: pointer;
+}
+.optional-workflow-actions[open] > .contextual-task-region {
+	margin-top: 12px;
+}
+.test-cases-page .project-page-header {
+	margin-bottom: 20px;
+}
+.test-cases-page .optional-workflow-actions {
+	float: right;
+	margin: 0 0 8px 16px;
+}
+.test-suite-summary {
+	color: var(--text-muted);
+	margin: 0 0 16px;
+}
+.generate-results-header {
+	display: none;
+}
+.test-quality-summary {
+	clear: both;
+}
+.workflow-shell {
+	--workflow-nav-column: 276px;
+}
+@media (max-width: 600px) {
+	.project-page-title-row {
+		flex-wrap: wrap;
+	}
+	.test-cases-page .optional-workflow-actions {
+		float: none;
+		margin: 0 0 12px;
+	}
+}
+.test-quality-summary {
+	position: relative;
+	padding-right: 190px;
+	min-height: 76px;
+	box-sizing: border-box;
+}
+.test-quality-findings > summary {
+	position: absolute;
+	top: 20px;
+	right: 22px;
+	margin: 0;
+	padding: 10px 18px;
+	background: var(--primary);
+	border-radius: 8px;
+	color: white;
+	font-weight: 600;
+	list-style: none;
+}
+.test-quality-findings > summary::-webkit-details-marker {
+	display: none;
+}
+.test-quality-findings[open] {
+	margin-top: 20px;
+}
+@media (max-width: 600px) {
+	.test-quality-summary {
+		padding-right: 14px;
+	}
+	.test-quality-findings > summary {
+		position: static;
+		margin-top: 12px;
+	}
+}
+/* Cancel the former workbench's container-column rules: the inner review grid owns columns. */
+.use-case-review-page .use-case-review-workbench {
+	grid-template-columns: minmax(0, 1fr);
+}
+.artifact-review-columns {
+	grid-column: 1 / -1;
+}
+.artifact-review-columns .use-case-collection {
+	grid-column: 1;
+	border: 0;
+	padding: 0;
+	background: transparent;
+}
+.artifact-review-columns .use-case-decision-panel {
+	grid-column: 2;
+}
+.use-case-collection-heading {
+	grid-template-columns: minmax(0, 1fr);
+}
+.use-case-review-page .project-page-header {
+	margin-bottom: 0;
+}
+.project-overview-page > .contextual-task-region {
+	width: 100%;
+}
+.project-overview-page .contextual-task-card {
+	min-height: 160px;
+	box-sizing: border-box;
+}
+.workflow-navigation-item.active .workflow-navigation-copy strong {
+	color: var(--primary);
+}
+.workflow-navigation-item:not(.active) {
+	background: transparent;
+}
+@media (max-width: 1200px) {
+	.artifact-review-columns .use-case-decision-panel {
+		grid-column: 1;
+		position: static;
+	}
+}
+@media (min-width: 1201px) {
+	.command-project-control {
+		width: 300px;
+		flex-basis: 300px;
+	}
+}
+@media (min-width: 901px) and (max-width: 1100px) {
+	.global-app-shell-header {
+		gap: 8px;
+		padding: 12px;
+	}
+	.global-navigation-link {
+		font-size: 14px;
+		padding: 8px 10px;
+	}
+	.command-project-control {
+		width: 180px;
+		flex-basis: 180px;
+	}
+}
+.artifact-review-columns .use-case-decision-panel {
+	position: static;
+}
+.scenario-details > summary {
+	cursor: pointer;
+	font-size: 15px;
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+}
+.scenario-summary-copy {
+	display: grid;
+	grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+	gap: 16px;
+	align-items: baseline;
+}
+.scenario-summary-copy .use-case-scenario-type {
+	font-size: 12px;
+	text-transform: none;
+	letter-spacing: 0;
+	font-weight: 500;
+	color: var(--text-muted);
+}
+.scenario-summary-copy strong {
+	font-size: 15px;
+	line-height: 1.5;
+	font-weight: 550;
+}
+.scenario-expanded-content {
+	padding: 12px 0;
+	color: var(--text-muted);
+}
+.scenario-expanded-content > span {
+	font-size: 13px;
+}
+@media (max-width: 600px) {
+	.scenario-summary-copy {
+		grid-template-columns: 1fr;
+		gap: 4px;
+	}
+}
+.workflow-navigation-copy strong,
+.workflow-navigation-copy .nav-workflow-status {
+	overflow-wrap: anywhere;
+}
+.use-case-meta-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 12px 24px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--border-color);
+}
+.use-case-compact-summary {
+	flex: 1 1 auto;
+	padding: 0;
+	border: 0;
+}
+.use-case-supporting-details {
+	flex: 0 1 auto;
+}
+.use-case-supporting-details[open] {
+	flex-basis: 100%;
+}
+.use-case-collection-heading {
+	grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+	align-items: end;
+}
+.use-case-group-toggle-all {
+	border: 0;
+	background: transparent;
+	padding: 6px 0;
+	box-shadow: none;
+}
+.project-page-title-row .use-case-page-status-actions {
+	justify-content: flex-end;
+}
+.use-case-page-freshness.pending {
+	background: var(--warning-tonal);
+	color: #8b5500;
+}
+@media (max-width: 1200px) {
+	.project-page-title-row .use-case-page-status-actions {
+		flex-wrap: wrap;
+	}
+}
+@media (max-width: 600px) {
+	.use-case-collection-heading {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.project-page-title-row .use-case-page-status-actions {
+		justify-content: flex-start;
+	}
+}
+
+.use-case-meta-row > * {
+	min-width: 0;
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+	.project-page-title-row .use-case-page-status-actions {
+		flex: 1 1 100%;
+		min-width: 0;
+		max-width: 100%;
+	}
+}

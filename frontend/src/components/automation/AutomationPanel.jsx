@@ -235,7 +235,7 @@ export default function AutomationPanel({
 
 	return (
 		<section className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
-			<h2 className="panel-title">Automation</h2>
+			<h2 className="panel-title">Execution setup</h2>
 			<p className="panel-description">Review executable candidates and run approved browser cases through Playwright.</p>
 			<div className="panel-form two-cols">
 				<div className="form-group">
