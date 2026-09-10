@@ -3,6 +3,7 @@ import { Activity, ClipboardCheck, FileText, FolderKanban, PlayCircle } from "lu
 
 import { PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
 import {
+	formatWorkItemCount,
 	formatWorkspaceDate,
 	formatWorkspaceLabel,
 	getProjectDestination,
@@ -37,7 +38,7 @@ export function ContinueWorkingSection({
 						</div>
 						<h3>{getWorkItemTitle(item)}</h3>
 						<p>{item.reason}</p>
-						{Number.isInteger(item.count) ? <span className="workspace-count">{item.count} items</span> : null}
+						{formatWorkItemCount(item) ? <span className="workspace-count">{formatWorkItemCount(item)}</span> : null}
 						<ProjectProgress completed={project?.completed_stage_count} total={project?.total_stage_count} />
 					</div>
 					<ProjectOpenLink
@@ -115,7 +116,7 @@ export function MyWorkSection({
 												</div>
 												<strong>{getWorkItemTitle(item)}</strong>
 												<p>{item.reason}</p>
-												{Number.isInteger(item.count) ? <span className="workspace-count">{item.count} items</span> : null}
+												{formatWorkItemCount(item) ? <span className="workspace-count">{formatWorkItemCount(item)}</span> : null}
 											</div>
 											<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
 												Open

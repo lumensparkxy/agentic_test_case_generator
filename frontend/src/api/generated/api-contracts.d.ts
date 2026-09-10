@@ -1034,6 +1034,7 @@ export interface WorkspaceWorkItem {
 	project_name: string;
 	project_revision: number;
 	reason: string;
+	requirement_group_count?: number | null;
 	stage: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports";
 	status: "not_started" | "ready" | "blocked" | "completed" | "stale" | "failed" | "attention_required";
 	updated_at: string;

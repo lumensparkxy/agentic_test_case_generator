@@ -40,6 +40,7 @@ class WorkspaceWorkItem(BaseModel):
     enabled: bool = False
     primary: bool = False
     count: Optional[int] = Field(default=None, ge=0)
+    requirement_group_count: Optional[int] = Field(default=None, ge=0)
     reason: str
     current_snapshot_id: Optional[str] = None
     updated_at: datetime

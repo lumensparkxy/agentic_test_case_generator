@@ -2,6 +2,7 @@ import { CircleAlert, CircleCheck, ClipboardCheck, Info, ListChecks, Sparkles, W
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+	formatWorkItemCount,
 	formatWorkspaceDate,
 	formatWorkspaceLabel,
 	formatWorkspaceStatus,
@@ -52,6 +53,7 @@ export const isActionableReviewItem = (item) =>
 	item?.enabled === true && item?.kind !== "information" && !COMPLETED_STATUSES.has(item?.status);
 
 const formatCount = (item) => {
+	if (item?.stage === "use_cases") return formatWorkItemCount(item);
 	if (!Number.isInteger(item?.count)) return "";
 	const unit = COUNT_UNIT_BY_STAGE[item.stage] || "item";
 	return `${item.count} ${unit}${item.count === 1 ? "" : "s"}`;

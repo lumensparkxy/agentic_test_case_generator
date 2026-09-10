@@ -233,3 +233,13 @@ work.
 - `frontend/eslint.config.js`
 - `frontend/.prettierrc.json`
 - `frontend/package.json`
+
+### Workspace use-case counts (#237)
+
+For `use_cases` work items, `count` is the total number of nested scenarios in
+`coverage_plan`; `requirement_group_count` is the number of groups in that plan.
+Home and Reviews show both units. Empty plans yield zero; unavailable plans yield
+null counts rather than falling back to `coverage_plan_count` (a group count).
+Workspace reads project the current use-case coverage plan internally so existing
+snapshots need no migration or regeneration. Raw plans are not returned in the
+workspace summary API. Other stages keep their existing count semantics.

@@ -2,6 +2,10 @@
 
 This file contains issue-ready drafts for the implementation plan in `docs/implementation-plan.md`.
 
+## UI/UX audit follow-up
+
+- In progress: [#237](https://github.com/lumensparkxy/agentic_test_case_generator/issues/237) — Correct use-case scenario counts in workspace summaries. Count nested scenarios separately from requirement groups and keep Home, Reviews, and the current artifact consistent.
+
 ## Created GitHub issues
 
 The original Phase 0 through Phase 2 issues in this section are historical

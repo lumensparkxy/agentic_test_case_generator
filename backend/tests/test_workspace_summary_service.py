@@ -137,8 +137,23 @@ class FakeDocument:
         self.query_log = query_log
 
     def get(self, field_paths: Optional[tuple[str, ...]] = None) -> FakeSnapshot:
-        del field_paths
-        return FakeSnapshot(self.store.get(self.path), self.path.rsplit("/", 1)[-1])
+        payload = self.store.get(self.path)
+        if payload is not None and field_paths is not None:
+            projected = {}
+            for field in field_paths:
+                parts = field.split(".")
+                source = payload
+                for part in parts:
+                    if not isinstance(source, dict) or part not in source:
+                        break
+                    source = source[part]
+                else:
+                    target = projected
+                    for part in parts[:-1]:
+                        target = target.setdefault(part, {})
+                    target[parts[-1]] = source
+            payload = projected
+        return FakeSnapshot(payload, self.path.rsplit("/", 1)[-1])
 
     def collection(self, name: str) -> "FakeCollection":
         return FakeCollection(f"{self.path}/{name}", self.store, self.query_log)
@@ -288,6 +303,55 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
         self.assertIn("approved", review_item.reason.lower())
         self.assertEqual(result.projects[0].current_stage, "use_cases")
         self.assertEqual(result.projects[0].current_status, "attention_required")
+
+    def test_persisted_use_case_counts_follow_current_snapshot_and_refresh(self) -> None:
+        plan = [{"requirement_id": f"REQ-{i}", "scenarios": [{"id": f"SCN-{i}-{j}"} for j in range(4 if i < 4 else 3)]} for i in range(8)]
+        actor = AuthUser(sub="user-1", email="user@example.com", name="User")
+        snapshot = _snapshot(
+            project_id="counts",
+            stage="use_cases",
+            snapshot_id="use-cases-1",
+            created_at=BASE_TIME,
+            payload={"coverage_plan": plan, "private_unneeded_payload": "not projected"},
+            metadata={"coverage_plan_count": 8},
+        )
+        project = _project(
+            "counts",
+            stage_state={
+                "requirements": _stage_state("requirements-1", updated_at=BASE_TIME, approved=True),
+                "use_cases": _stage_state(snapshot.snapshot_id, updated_at=BASE_TIME, metadata={"coverage_plan_count": 8}),
+            },
+        )
+        project_data = project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"})
+        store = {
+            "qa_projects/counts": project_data,
+            "qa_projects/counts/snapshots/use-cases-1": snapshot.model_dump(),
+        }
+        collection = FakeCollection("qa_projects", store, [])
+        with patch("app.services.workflow_project_service.get_required_firestore_collection", return_value=collection):
+            for version, payload, expected_count, expected_groups in [
+                (1, {"coverage_plan": plan}, 28, 8),
+                (2, {"coverage_plan": [{"scenarios": [{"id": "new"}]}]}, 1, 1),
+                (3, {"coverage_plan": []}, 0, 0),
+                (4, {}, None, None),
+            ]:
+                with self.subTest(version=version):
+                    snapshot_id = f"use-cases-{version}"
+                    store[f"qa_projects/counts/snapshots/{snapshot_id}"] = {
+                        **snapshot.model_dump(),
+                        "snapshot_id": snapshot_id,
+                        "payload": {**payload, "private_unneeded_payload": "not projected"},
+                    }
+                    project_data["stage_state"]["use_cases"]["current_snapshot_id"] = snapshot_id
+                    projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=20, execution_run_limit=20)
+                    result = build_workspace_summary(projects, work_items_limit=50, runs_limit=20, reports_limit=20)
+                    item = next(item for item in result.work_items if item.stage == "use_cases")
+                    self.assertEqual(item.current_snapshot_id, snapshot_id)
+                    self.assertEqual(item.count, expected_count)
+                    self.assertEqual(item.requirement_group_count, expected_groups)
+                    self.assertEqual(result.continue_working.count, expected_count)
+                    self.assertNotIn("coverage_plan", item.model_dump())
+                    self.assertNotIn("private_unneeded_payload", projects[0].current_snapshots["use_cases"].payload)
 
     def test_work_items_are_deduplicated_ranked_and_used_for_continue_working(self) -> None:
         enabled_project = _project("project-a", updated_at=BASE_TIME)

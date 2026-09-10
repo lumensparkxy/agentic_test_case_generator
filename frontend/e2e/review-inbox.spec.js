@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
-import { installUseCaseReviewApi, useCaseProjectFixture } from "./support/use-case-review.js";
+import { installUseCaseReviewApi, useCaseProjectFixture, useCaseSnapshotFixture } from "./support/use-case-review.js";
 import {
 	createDeferred,
 	installWorkspaceApi,
@@ -488,4 +488,30 @@ test.describe("Global Review Inbox", () => {
 		await expect.poll(() => api.requests.workspaceSummary.length).toBeGreaterThanOrEqual(3);
 		expect(api.requests.review).toHaveLength(1);
 	});
+});
+
+test("scenario counts agree across Home, Reviews, and the current artifact after refresh", async ({ page }) => {
+	const snapshot = useCaseSnapshotFixture();
+	snapshot.payload.coverage_plan = Array.from({ length: 8 }, (_, i) => ({
+		requirement_id: `REQ-${i}`,
+		requirement_text: `Requirement ${i}`,
+		scenarios: Array.from({ length: i < 4 ? 4 : 3 }, (_, j) => ({
+			id: `SCN-${i}-${j}`,
+			title: `Scenario ${i}-${j}`,
+			objective: "Verify the requirement",
+			priority: "High",
+		})),
+	}));
+	const project = useCaseProjectFixture({ snapshot });
+	await installUseCaseReviewApi(page, { initialProject: project });
+	await seedAuthenticatedSession(page);
+	await page.goto("/");
+	await expect(page.getByRole("region", { name: "Continue working" })).toContainText("28 scenarios · 8 requirement groups");
+	await page.getByRole("navigation", { name: "Global navigation" }).getByRole("link", { name: "Reviews", exact: true }).click();
+	await expect(inboxList(page)).toContainText("28 scenarios · 8 requirement groups");
+	await page.getByRole("button", { name: "Refresh reviews" }).click();
+	await expect(inboxList(page)).toContainText("28 scenarios · 8 requirement groups");
+	await inboxList(page).getByRole("link").click();
+	await expect(page.getByRole("heading", { name: "28 scenarios", exact: true })).toBeVisible();
+	await expect(page.getByRole("region", { name: "28 scenarios", exact: true })).toContainText("8 requirement groups");
 });

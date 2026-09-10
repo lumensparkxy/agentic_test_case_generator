@@ -227,8 +227,11 @@ def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[Qa
     return projects
 
 
-def _workspace_snapshot_for(project_id: str, snapshot_id: str) -> Optional[QaProjectStageSnapshot]:
-    payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get(field_paths=WORKSPACE_SNAPSHOT_FIELDS))
+def _workspace_snapshot_for(project_id: str, snapshot_id: str, stage: ProjectStageName) -> Optional[QaProjectStageSnapshot]:
+    # Coverage plans are arrays, so Firestore cannot project just nested scenario IDs.
+    # Read the current use-case plan to count legacy artifacts without rewriting them.
+    fields = WORKSPACE_SNAPSHOT_FIELDS + (("payload.coverage_plan",) if stage == "use_cases" else ())
+    payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get(field_paths=fields))
     if not payload:
         return None
     snapshot = QaProjectStageSnapshot.model_validate(payload)
@@ -331,7 +334,7 @@ def list_workspace_projects(
         for stage, state in summary.stage_state.items():
             if not state.current_snapshot_id:
                 continue
-            current_snapshot = _workspace_snapshot_for(summary.project_id, state.current_snapshot_id)
+            current_snapshot = _workspace_snapshot_for(summary.project_id, state.current_snapshot_id, stage)
             if current_snapshot is not None and current_snapshot.stage == stage:
                 current_snapshots[stage] = current_snapshot
 
