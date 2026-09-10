@@ -1,3 +1,5 @@
+import { List, ListItem, CollectionState } from "../ui/collections";
+import { Button } from "../ui/controls";
 import { useState } from "react";
 import { Activity, ClipboardCheck, FileText, FolderKanban, PlayCircle } from "lucide-react";
 
@@ -106,9 +108,9 @@ export function MyWorkSection({
 										{group.items.length}
 									</span>
 								</h3>
-								<ul id={workItemListId}>
+								<List id={workItemListId}>
 									{visibleItems.map((item) => (
-										<li key={item.work_item_id}>
+										<ListItem key={item.work_item_id}>
 											<div className="workspace-work-item-copy">
 												<div className="workspace-card-meta">
 													<span>{item.project_name || "Project"}</span>
@@ -121,11 +123,11 @@ export function MyWorkSection({
 											<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
 												Open
 											</ProjectOpenLink>
-										</li>
+										</ListItem>
 									))}
-								</ul>
+								</List>
 								{hiddenCount > 0 ? (
-									<button
+									<Button
 										type="button"
 										className="workspace-show-more"
 										aria-controls={workItemListId}
@@ -133,7 +135,7 @@ export function MyWorkSection({
 										onClick={() => toggleGroup(group.id)}
 									>
 										{isExpanded ? "Show fewer" : `Show ${hiddenCount} more`}
-									</button>
+									</Button>
 								) : null}
 							</section>
 						);
@@ -169,9 +171,9 @@ export function WorkspaceProjectsSection({
 				</div>
 			</div>
 			{projects.length ? (
-				<ul className="workspace-project-grid">
+				<List className="workspace-project-grid">
 					{projects.map((project) => (
-						<li className="workspace-project-card" key={project.project_id}>
+						<ListItem className="workspace-project-card" key={project.project_id}>
 							<div className="workspace-project-card-heading">
 								<FolderKanban aria-hidden="true" size={19} />
 								<div>
@@ -188,13 +190,13 @@ export function WorkspaceProjectsSection({
 									Open
 								</ProjectOpenLink>
 							</div>
-						</li>
+						</ListItem>
 					))}
-				</ul>
+				</List>
 			) : (
-				<p className="workspace-filter-empty" role="status">
+				<CollectionState as="p" kind="filtered" className="workspace-filter-empty" role="status">
 					{emptyMessage}
-				</p>
+				</CollectionState>
 			)}
 		</section>
 	);
@@ -202,7 +204,7 @@ export function WorkspaceProjectsSection({
 
 function RunActivity({ run, onOpenProject }) {
 	return (
-		<li>
+		<ListItem>
 			<PlayCircle aria-hidden="true" size={18} />
 			<div>
 				<div className="workspace-card-meta">
@@ -218,13 +220,13 @@ function RunActivity({ run, onOpenProject }) {
 			<ProjectOpenLink projectId={run.project_id} destination={PROJECT_DESTINATIONS.AUTOMATION} onOpenProject={onOpenProject}>
 				View
 			</ProjectOpenLink>
-		</li>
+		</ListItem>
 	);
 }
 
 function ReportActivity({ report, onOpenProject }) {
 	return (
-		<li>
+		<ListItem>
 			<FileText aria-hidden="true" size={18} />
 			<div>
 				<div className="workspace-card-meta">
@@ -238,7 +240,7 @@ function ReportActivity({ report, onOpenProject }) {
 			<ProjectOpenLink projectId={report.project_id} destination={PROJECT_DESTINATIONS.REPORTS} onOpenProject={onOpenProject}>
 				View
 			</ProjectOpenLink>
-		</li>
+		</ListItem>
 	);
 }
 
@@ -267,21 +269,21 @@ export function RecentActivitySection({
 					{visibleRuns.length ? (
 						<section aria-labelledby="recent-runs-title">
 							<h3 id="recent-runs-title">Runs</h3>
-							<ul>
+							<List>
 								{visibleRuns.map((run) => (
 									<RunActivity key={run.run_record_id} run={run} onOpenProject={onOpenProject} />
 								))}
-							</ul>
+							</List>
 						</section>
 					) : null}
 					{visibleReports.length ? (
 						<section aria-labelledby="recent-reports-title">
 							<h3 id="recent-reports-title">Reports</h3>
-							<ul>
+							<List>
 								{visibleReports.map((report) => (
 									<ReportActivity key={report.report_id} report={report} onOpenProject={onOpenProject} />
 								))}
-							</ul>
+							</List>
 						</section>
 					) : null}
 				</div>

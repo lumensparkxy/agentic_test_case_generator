@@ -1,3 +1,5 @@
+import { ListItem, List } from "../components/ui/collections";
+import { Button } from "../components/ui/controls";
 import { PlayCircle, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -18,7 +20,7 @@ const exactCount = (value) => (Number.isInteger(value) && value >= 0 ? value : "
 function RunRow({ run, onOpenProject }) {
 	const runIdentity = run.run_id || run.run_record_id || "Unavailable";
 	return (
-		<li className="activity-index-row activity-index-run-row">
+		<ListItem className="activity-index-row activity-index-run-row">
 			<span className="activity-index-kind-icon">
 				<PlayCircle aria-hidden="true" size={20} />
 			</span>
@@ -68,7 +70,7 @@ function RunRow({ run, onOpenProject }) {
 			>
 				Open evidence
 			</ProjectOpenLink>
-		</li>
+		</ListItem>
 	);
 }
 
@@ -141,7 +143,7 @@ export default function RunsPage({ summary, isLoading = false, isRefreshing = fa
 				<div className="activity-index-header-actions">
 					{summary?.generated_at ? <time dateTime={summary.generated_at}>Updated {formatWorkspaceDate(summary.generated_at)}</time> : null}
 					{onRefresh ? (
-						<button
+						<Button
 							ref={refreshButtonRef}
 							type="button"
 							className="secondary activity-index-refresh-button"
@@ -150,7 +152,7 @@ export default function RunsPage({ summary, isLoading = false, isRefreshing = fa
 						>
 							<RefreshCw aria-hidden="true" size={15} />
 							{isRefreshing ? "Refreshing…" : "Refresh runs"}
-						</button>
+						</Button>
 					) : null}
 				</div>
 			</header>
@@ -195,11 +197,11 @@ export default function RunsPage({ summary, isLoading = false, isRefreshing = fa
 						countLabel={`${filteredRuns.length} run${filteredRuns.length === 1 ? "" : "s"}`}
 					/>
 					{filteredRuns.length ? (
-						<ul className="activity-index-list" aria-label="Recent runs">
+						<List variant="collection" className="activity-index-list" aria-label="Recent runs">
 							{filteredRuns.map((run) => (
 								<RunRow key={run.run_record_id || run.run_id} run={run} onOpenProject={onOpenProject} />
 							))}
-						</ul>
+						</List>
 					) : runs.length === 0 ? (
 						<ActivityIndexEmpty
 							title="No recent runs"

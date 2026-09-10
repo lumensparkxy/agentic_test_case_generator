@@ -1,3 +1,4 @@
+import { Input, Button } from "../components/ui/controls";
 import { FolderPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -107,7 +108,7 @@ export default function ProjectsPage({
 				<form onSubmit={handleCreateProject} aria-label="Create project" noValidate>
 					<label htmlFor="new-workspace-project-name">Project name</label>
 					<div className="workspace-create-controls">
-						<input
+						<Input
 							id="new-workspace-project-name"
 							type="text"
 							value={projectName}
@@ -123,10 +124,10 @@ export default function ProjectsPage({
 							aria-invalid={Boolean(createError)}
 							aria-describedby={createError ? "create-project-error" : createNotice ? "create-project-notice" : undefined}
 						/>
-						<button type="submit" disabled={createBusy}>
+						<Button type="submit" disabled={createBusy}>
 							<FolderPlus aria-hidden="true" size={17} />
 							{createBusy ? "Creating…" : "Create project"}
-						</button>
+						</Button>
 					</div>
 					{createError ? (
 						<p className="workspace-form-message workspace-form-error" id="create-project-error" role="alert">

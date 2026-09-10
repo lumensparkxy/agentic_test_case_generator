@@ -1,3 +1,6 @@
+import { Badge } from "../ui/surfaces";
+import { ListItem, CollectionState, CollectionToolbar, List } from "../ui/collections";
+import { Button, Select } from "../ui/controls";
 import { CircleAlert, CircleCheck, ClipboardCheck, Info, ListChecks, Sparkles, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -74,11 +77,14 @@ const statusIcon = (status) => {
 function ReviewInboxStatus({ status }) {
 	const Icon = statusIcon(status);
 	return (
-		<span className={`review-inbox-status review-inbox-status-${getWorkspaceStatusTone(status)}`}>
-			<Icon aria-hidden="true" size={14} />
+		<Badge
+			tone={getWorkspaceStatusTone(status)}
+			icon={Icon}
+			className={`review-inbox-status review-inbox-status-${getWorkspaceStatusTone(status)}`}
+		>
 			<span className="sr-only">Status: </span>
 			{formatWorkspaceStatus(status)}
-		</span>
+		</Badge>
 	);
 }
 
@@ -88,7 +94,7 @@ function ReviewInboxRow({ item, onOpenProject }) {
 	const destination = getWorkItemDestination(item);
 	const count = formatCount(item);
 	return (
-		<li className="review-inbox-row">
+		<ListItem className="review-inbox-row">
 			<div className="review-inbox-kind">
 				<span className="review-inbox-kind-icon">
 					<KindIcon aria-hidden="true" size={18} />
@@ -127,13 +133,13 @@ function ReviewInboxRow({ item, onOpenProject }) {
 			>
 				Open workbench
 			</ProjectOpenLink>
-		</li>
+		</ListItem>
 	);
 }
 
 function ReviewInboxEmpty({ title, message, action = null }) {
 	return (
-		<section className="review-inbox-empty" aria-labelledby="review-inbox-empty-title">
+		<CollectionState as="section" kind="empty" className="review-inbox-empty" aria-labelledby="review-inbox-empty-title">
 			<span>
 				<ListChecks aria-hidden="true" size={22} />
 			</span>
@@ -142,7 +148,7 @@ function ReviewInboxEmpty({ title, message, action = null }) {
 				<p>{message}</p>
 			</div>
 			{action}
-		</section>
+		</CollectionState>
 	);
 }
 
@@ -160,56 +166,56 @@ function ReviewInboxFilters({
 }) {
 	const hasFilters = stage !== "all" || status !== "all";
 	return (
-		<fieldset className="review-inbox-controls">
+		<CollectionToolbar as="fieldset" className="review-inbox-controls">
 			<legend className="sr-only">Review filters</legend>
 			<div className="review-inbox-view-switch" role="group" aria-label="Inbox view">
-				<button
+				<Button
 					type="button"
 					className={view === "actionable" ? "active" : ""}
 					aria-pressed={view === "actionable"}
 					onClick={() => onViewChange("actionable")}
 				>
 					Actionable
-				</button>
-				<button
+				</Button>
+				<Button
 					type="button"
 					className={view === "informational" ? "active" : ""}
 					aria-pressed={view === "informational"}
 					onClick={() => onViewChange("informational")}
 				>
 					Informational &amp; completed
-				</button>
+				</Button>
 			</div>
 			<div className="review-inbox-selects">
 				<label>
 					<span>Stage</span>
-					<select ref={stageSelectRef} value={stage} onChange={(event) => onStageChange(event.target.value)}>
+					<Select ref={stageSelectRef} value={stage} onChange={(event) => onStageChange(event.target.value)}>
 						<option value="all">All stages</option>
 						{stageOptions.map((option) => (
 							<option value={option} key={option}>
 								{formatWorkspaceLabel(option)}
 							</option>
 						))}
-					</select>
+					</Select>
 				</label>
 				<label>
 					<span>Status</span>
-					<select value={status} onChange={(event) => onStatusChange(event.target.value)}>
+					<Select value={status} onChange={(event) => onStatusChange(event.target.value)}>
 						<option value="all">All statuses</option>
 						{statusOptions.map((option) => (
 							<option value={option} key={option}>
 								{formatWorkspaceStatus(option)}
 							</option>
 						))}
-					</select>
+					</Select>
 				</label>
 				{hasFilters ? (
-					<button type="button" className="review-inbox-clear-filters" onClick={onClearFilters}>
+					<Button type="button" className="review-inbox-clear-filters" onClick={onClearFilters}>
 						Clear filters
-					</button>
+					</Button>
 				) : null}
 			</div>
-		</fieldset>
+		</CollectionToolbar>
 	);
 }
 
@@ -290,11 +296,11 @@ export default function ReviewInbox({ items, onOpenProject }) {
 			</div>
 
 			{filteredItems.length ? (
-				<ul className="review-inbox-list">
+				<List variant="collection" className="review-inbox-list">
 					{filteredItems.map((item) => (
 						<ReviewInboxRow key={itemIdentity(item)} item={item} onOpenProject={onOpenProject} />
 					))}
-				</ul>
+				</List>
 			) : deduplicatedItems.length === 0 ? (
 				<ReviewInboxEmpty
 					title="Review queue is clear"
@@ -305,9 +311,9 @@ export default function ReviewInbox({ items, onOpenProject }) {
 					title="No items match these filters"
 					message="Choose another stage or status, or clear the filters to restore this queue view."
 					action={
-						<button type="button" className="secondary" onClick={clearFilters}>
+						<Button type="button" className="secondary" onClick={clearFilters}>
 							Clear filters
-						</button>
+						</Button>
 					}
 				/>
 			) : view === "actionable" ? (
@@ -315,9 +321,9 @@ export default function ReviewInbox({ items, onOpenProject }) {
 					title="No actionable reviews"
 					message="You are caught up. Informational and completed project states remain available in the secondary view."
 					action={
-						<button type="button" className="secondary" onClick={showInformationalItems}>
+						<Button type="button" className="secondary" onClick={showInformationalItems}>
 							View informational items
-						</button>
+						</Button>
 					}
 				/>
 			) : (

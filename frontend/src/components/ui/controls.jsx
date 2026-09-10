@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { cloneElement, isValidElement, useId } from "react";
 
 const classes = (...values) => values.filter(Boolean).join(" ");
@@ -69,5 +70,16 @@ export function Field({ id, label, hint, error, children, className, ...props })
 				</p>
 			)}
 		</div>
+	);
+}
+
+export function SearchField({ label, className, shortcut, ...props }) {
+	return (
+		<label className={classes("ui-search", className)}>
+			<span className="sr-only">{label}</span>
+			<Search size={18} aria-hidden="true" />
+			<Input {...props} type="search" />
+			{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
+		</label>
 	);
 }

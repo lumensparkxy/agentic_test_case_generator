@@ -7,7 +7,10 @@
 	--primary-container: #dbe7ff;
 	--primary-glow: rgb(37 99 235 / 0.28);
 
-	/* Semantic */
+	/* Semantic: text tones meet contrast on their tinted surfaces. */
+	--success-text: #047857;
+	--warning-text: #8b5500;
+	--danger-text: #b91c1c;
 	--success: #059669;
 	--success-tonal: #ecfdf5;
 	--warning: #d97706;

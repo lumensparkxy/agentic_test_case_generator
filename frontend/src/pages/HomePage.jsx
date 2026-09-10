@@ -1,3 +1,4 @@
+import { Button } from "../components/ui/controls";
 import { FolderPlus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -64,10 +65,10 @@ export default function HomePage({
 				<div className="workspace-header-actions">
 					<WorkspaceSearch value={query} onChange={setQuery} />
 					{onCreateProject ? (
-						<button type="button" className="workspace-create-button" onClick={onCreateProject}>
+						<Button type="button" className="workspace-create-button" onClick={onCreateProject}>
 							<FolderPlus aria-hidden="true" size={17} />
 							Create project
-						</button>
+						</Button>
 					) : null}
 				</div>
 			</header>
@@ -85,10 +86,10 @@ export default function HomePage({
 						<p>Bring requirements into one place, ground them with product context, and build reviewable test coverage.</p>
 					</div>
 					{onCreateProject ? (
-						<button type="button" onClick={onCreateProject}>
+						<Button type="button" onClick={onCreateProject}>
 							<FolderPlus aria-hidden="true" size={17} />
 							Create project
-						</button>
+						</Button>
 					) : null}
 				</section>
 			) : summary ? (
