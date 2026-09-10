@@ -11,13 +11,14 @@ const initialOutcome = () => ({
 	announcement: "",
 });
 
-const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevision, decision, comment }) =>
+const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevision, decision, comment, scenarioReviews }) =>
 	JSON.stringify({
 		identity,
 		projectId,
 		snapshotId,
 		baseProjectRevision,
 		decision,
+		scenarioReviews,
 		comment: `${comment || ""}`.trim(),
 	});
 
@@ -34,6 +35,7 @@ export default function useUseCaseReview({
 	const callbacksRef = useRef({ onCommitted, onReload });
 	const activeRequestRef = useRef({ sequence: 0, scope: "", phase: "idle" });
 	const retryIdentityRef = useRef(null);
+	const lastSubmissionRef = useRef({});
 	const submittingRef = useRef(false);
 	const projectScopeRef = useRef("");
 	const requestScopeRef = useRef("");
@@ -119,136 +121,146 @@ export default function useUseCaseReview({
 		setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
 	}, []);
 
-	const submit = useCallback(async () => {
-		if (submittingRef.current || !["approve", "request_changes"].includes(decision)) {
-			return null;
-		}
-		const normalizedComment = `${comment || ""}`.trim();
-		if (decision === "request_changes" && !normalizedComment) {
-			setOutcome({
-				status: "error",
-				error: "Add a comment describing the requested changes.",
-				conflict: null,
-				response: null,
-				announcement: "",
-			});
-			return null;
-		}
+	const submit = useCallback(
+		async (options = {}) => {
+			const scenarioReviews = options.scenarioReviews;
+			const submittedDecision = scenarioReviews ? "review_scenarios" : decision;
+			lastSubmissionRef.current = options;
+			if (submittingRef.current || !["approve", "request_changes", "review_scenarios"].includes(submittedDecision)) {
+				return null;
+			}
+			const normalizedComment = scenarioReviews ? "" : `${comment || ""}`.trim();
+			if (submittedDecision === "request_changes" && !normalizedComment) {
+				setOutcome({
+					status: "error",
+					error: "Add a comment describing the requested changes.",
+					conflict: null,
+					response: null,
+					announcement: "",
+				});
+				return null;
+			}
 
-		const scope = requestScope;
-		const sequence = activeRequestRef.current.sequence + 1;
-		activeRequestRef.current = { sequence, scope, phase: "pending" };
-		const fingerprint = reviewFingerprint({
-			identity,
-			projectId,
-			snapshotId,
-			baseProjectRevision,
-			decision,
-			comment: normalizedComment,
-		});
-		if (retryIdentityRef.current?.fingerprint !== fingerprint) {
-			retryIdentityRef.current = { fingerprint, requestId: createRequestId() };
-		}
-		const requestId = retryIdentityRef.current.requestId;
-		const isCurrent = () =>
-			activeRequestRef.current.sequence === sequence &&
-			activeRequestRef.current.scope === scope &&
-			projectScopeRef.current === projectScope &&
-			requestScopeRef.current === scope;
-		const isProjectCurrent = () => activeRequestRef.current.sequence === sequence && projectScopeRef.current === projectScope;
-
-		submittingRef.current = true;
-		setOutcome({ status: "submitting", error: "", conflict: null, response: null, announcement: "Saving review decision…" });
-		try {
-			const response = await submitUseCaseReviewDecision(requestRef.current, {
+			const scope = requestScope;
+			const sequence = activeRequestRef.current.sequence + 1;
+			activeRequestRef.current = { sequence, scope, phase: "pending" };
+			const fingerprint = reviewFingerprint({
+				identity,
 				projectId,
 				snapshotId,
 				baseProjectRevision,
-				decision,
+				decision: submittedDecision,
+				scenarioReviews,
 				comment: normalizedComment,
-				requestId,
 			});
-			if (!isCurrent()) {
-				return null;
+			if (retryIdentityRef.current?.fingerprint !== fingerprint) {
+				retryIdentityRef.current = { fingerprint, requestId: createRequestId() };
 			}
-			retryIdentityRef.current = null;
-			activeRequestRef.current = { ...activeRequestRef.current, phase: "committed" };
-			setOutcome({
-				status: "submitting",
-				error: "",
-				conflict: null,
-				response: null,
-				announcement: "Decision saved. Refreshing project and workspace state…",
-			});
+			const requestId = retryIdentityRef.current.requestId;
+			const isCurrent = () =>
+				activeRequestRef.current.sequence === sequence &&
+				activeRequestRef.current.scope === scope &&
+				projectScopeRef.current === projectScope &&
+				requestScopeRef.current === scope;
+			const isProjectCurrent = () => activeRequestRef.current.sequence === sequence && projectScopeRef.current === projectScope;
+
+			submittingRef.current = true;
+			setOutcome({ status: "submitting", error: "", conflict: null, response: null, announcement: "Saving review decision…" });
 			try {
-				const onCommitted = callbacksRef.current.onCommitted;
-				const refreshedProject = await onCommitted?.(response, {
+				const response = await submitUseCaseReviewDecision(requestRef.current, {
 					projectId,
 					snapshotId,
 					baseProjectRevision,
-					decision,
+					decision: submittedDecision,
+					scenarioReviews,
 					comment: normalizedComment,
+					requestId,
 				});
-				if (!isProjectCurrent()) {
+				if (!isCurrent()) {
 					return null;
 				}
-				if (typeof onCommitted === "function" && !refreshedProject) {
-					throw new Error("The decision was saved, but the latest project and workspace state could not be refreshed.");
-				}
-				const newerArtifactLoaded = scopeContextRef.current?.snapshotId !== snapshotId;
+				retryIdentityRef.current = null;
+				activeRequestRef.current = { ...activeRequestRef.current, phase: "committed" };
 				setOutcome({
-					status: "success",
+					status: "submitting",
 					error: "",
 					conflict: null,
 					response: null,
-					announcement: newerArtifactLoaded
-						? "Decision saved for the reviewed artifact. A newer Use Cases version is ready for review."
-						: decision === "approve"
-							? "Use Cases approved."
-							: "Changes requested for Use Cases.",
+					announcement: "Decision saved. Refreshing project and workspace state…",
 				});
-			} catch (refreshError) {
-				if (!isProjectCurrent()) {
+				try {
+					const onCommitted = callbacksRef.current.onCommitted;
+					const refreshedProject = await onCommitted?.(response, {
+						projectId,
+						snapshotId,
+						baseProjectRevision,
+						decision: submittedDecision,
+						comment: normalizedComment,
+					});
+					if (!isProjectCurrent()) {
+						return null;
+					}
+					if (typeof onCommitted === "function" && !refreshedProject) {
+						throw new Error("The decision was saved, but the latest project and workspace state could not be refreshed.");
+					}
+					const newerArtifactLoaded = scopeContextRef.current?.snapshotId !== snapshotId;
+					setOutcome({
+						status: "success",
+						error: "",
+						conflict: null,
+						response: null,
+						announcement: newerArtifactLoaded
+							? "Decision saved for the reviewed artifact. A newer Use Cases version is ready for review."
+							: submittedDecision === "approve"
+								? "Use Cases approved."
+								: submittedDecision === "review_scenarios"
+									? "Scenario reviews saved."
+									: "Changes requested for Use Cases.",
+					});
+				} catch (refreshError) {
+					if (!isProjectCurrent()) {
+						return null;
+					}
+					setOutcome({
+						status: "refresh_error",
+						error: refreshError?.message || "The decision was saved, but the latest project and workspace state could not be refreshed.",
+						conflict: null,
+						response,
+						announcement: "Decision saved. Reload the latest state before making another decision.",
+					});
+				}
+				return response;
+			} catch (error) {
+				if (!isCurrent()) {
 					return null;
 				}
-				setOutcome({
-					status: "refresh_error",
-					error: refreshError?.message || "The decision was saved, but the latest project and workspace state could not be refreshed.",
-					conflict: null,
-					response,
-					announcement: "Decision saved. Reload the latest state before making another decision.",
-				});
-			}
-			return response;
-		} catch (error) {
-			if (!isCurrent()) {
+				if (error?.status === 409) {
+					setOutcome({
+						status: "conflict",
+						error: error.message,
+						conflict: error.conflict || { reload_required: true },
+						response: null,
+						announcement: "The Use Cases artifact changed. Reload the latest version before submitting again.",
+					});
+				} else {
+					setOutcome({
+						status: "error",
+						error: error?.message || "The Use Cases decision could not be saved.",
+						conflict: null,
+						response: null,
+						announcement: "The review decision was not saved.",
+					});
+				}
 				return null;
+			} finally {
+				if (activeRequestRef.current.sequence === sequence) {
+					submittingRef.current = false;
+					activeRequestRef.current = { ...activeRequestRef.current, phase: "idle" };
+				}
 			}
-			if (error?.status === 409) {
-				setOutcome({
-					status: "conflict",
-					error: error.message,
-					conflict: error.conflict || { reload_required: true },
-					response: null,
-					announcement: "The Use Cases artifact changed. Reload the latest version before submitting again.",
-				});
-			} else {
-				setOutcome({
-					status: "error",
-					error: error?.message || "The Use Cases decision could not be saved.",
-					conflict: null,
-					response: null,
-					announcement: "The review decision was not saved.",
-				});
-			}
-			return null;
-		} finally {
-			if (activeRequestRef.current.sequence === sequence) {
-				submittingRef.current = false;
-				activeRequestRef.current = { ...activeRequestRef.current, phase: "idle" };
-			}
-		}
-	}, [baseProjectRevision, comment, decision, identity, projectId, projectScope, requestScope, snapshotId]);
+		},
+		[baseProjectRevision, comment, decision, identity, projectId, projectScope, requestScope, snapshotId]
+	);
 
 	const reloadLatest = useCallback(async () => {
 		if (submittingRef.current || typeof callbacksRef.current.onReload !== "function") {
@@ -303,7 +315,7 @@ export default function useUseCaseReview({
 		isSubmitting: outcome.status === "submitting",
 		isReloading: outcome.status === "reloading",
 		submit,
-		retry: submit,
+		retry: () => submit(lastSubmissionRef.current),
 		reloadLatest,
 	};
 }

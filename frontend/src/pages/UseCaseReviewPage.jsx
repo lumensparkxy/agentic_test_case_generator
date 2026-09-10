@@ -73,7 +73,13 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 			/>
 
 			{snapshot ? (
-				<UseCaseReviewWorkbench project={project} snapshot={snapshot} stageState={stageState} review={review} />
+				<UseCaseReviewWorkbench
+					key={`${identity}:${projectId}`}
+					project={project}
+					snapshot={snapshot}
+					stageState={stageState}
+					review={review}
+				/>
 			) : (
 				<section className="use-case-no-snapshot" aria-labelledby="use-case-no-snapshot-title">
 					<span className="use-case-section-kicker">Prerequisite</span>

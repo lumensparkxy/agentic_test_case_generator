@@ -412,7 +412,7 @@ export function useCaseWorkspaceSummaryFixture(project, overrides = {}) {
 	});
 }
 
-export function applyUseCaseReviewDecision(project, { decision, comment = null } = {}) {
+export function applyUseCaseReviewDecision(project, { decision, comment = null, scenario_reviews = [] } = {}) {
 	const next = clone(project);
 	const snapshotId = next.current_snapshots.use_cases.snapshot_id;
 	const resultingRevision = next.current_revision + 1;
@@ -425,6 +425,18 @@ export function applyUseCaseReviewDecision(project, { decision, comment = null }
 	state.approved = decision === "approve";
 	state.updated_at = USE_CASE_DECIDED_AT;
 	state.metadata = { ...(state.metadata || {}), latest_human_review: latestHumanReview };
+	const items = { ...(state.metadata.scenario_reviews?.items || {}) };
+	for (const group of next.current_snapshots.use_cases.payload.coverage_plan || []) {
+		for (const scenario of group.scenarios || []) {
+			const key = JSON.stringify([group.requirement_id, scenario.id]);
+			items[key] ||= { requirement_id: group.requirement_id, scenario_id: scenario.id, status: "needs_review", quality_flags: [] };
+			if (decision === "approve" || decision === "request_changes")
+				items[key].status = decision === "approve" ? "approved" : "request_changes";
+		}
+	}
+	for (const update of scenario_reviews) items[JSON.stringify([update.requirement_id, update.scenario_id])] = update;
+	state.metadata.scenario_reviews = { snapshot_id: snapshotId, items };
+
 	next.current_revision = resultingRevision;
 	next.updated_at = USE_CASE_DECIDED_AT;
 	return next;
@@ -567,6 +579,7 @@ export async function installUseCaseReviewApi(page, options = {}) {
 					applyUseCaseReviewDecision(serverProject, {
 						decision: payload.decision,
 						comment: payload.comment,
+						scenario_reviews: payload.scenario_reviews,
 					})
 			);
 			const requestId = headers["x-request-id"] || "review-request-1";

@@ -746,6 +746,13 @@ export interface ScenarioIntent {
 	title: string;
 }
 
+export interface ScenarioReviewUpdate {
+	quality_flags?: Array<"Ambiguous" | "Duplicate" | "Missing coverage" | "Not testable" | "Incorrect requirement mapping">;
+	requirement_id: string;
+	scenario_id: string;
+	status: "needs_review" | "approved" | "request_changes";
+}
+
 export interface StateTransition {
 	entity: string;
 	from_state: string;
@@ -880,7 +887,7 @@ export interface UseCaseReviewRecord {
 	base_project_revision: number;
 	comment?: string | null;
 	decided_at: string;
-	decision: "approve" | "request_changes";
+	decision: "approve" | "request_changes" | "review_scenarios";
 	idempotency_key: string;
 	project_id: string;
 	request_fingerprint: string;
@@ -890,6 +897,7 @@ export interface UseCaseReviewRecord {
 	reviewer_email?: string | null;
 	reviewer_name?: string | null;
 	reviewer_user_id: string;
+	scenario_reviews?: Array<ScenarioReviewUpdate>;
 	snapshot_id: string;
 	stage?: "use_cases";
 	timeline_event_id: string;
@@ -898,7 +906,8 @@ export interface UseCaseReviewRecord {
 export interface UseCaseReviewRequest {
 	base_project_revision: number;
 	comment?: string | null;
-	decision: "approve" | "request_changes";
+	decision: "approve" | "request_changes" | "review_scenarios";
+	scenario_reviews?: Array<ScenarioReviewUpdate>;
 	snapshot_id: string;
 }
 

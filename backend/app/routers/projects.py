@@ -232,6 +232,7 @@ async def review_qa_project_use_cases(
             base_project_revision=payload.base_project_revision,
             decision=payload.decision,
             comment=payload.comment,
+            scenario_reviews=[item.model_dump() for item in payload.scenario_reviews],
             actor=current_user,
             request_id=_get_request_id(request),
         )

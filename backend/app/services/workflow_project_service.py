@@ -17,6 +17,7 @@ from ..models import (
     QaProjectSummary,
     QaProjectTimelineEvent,
 )
+from .scenario_review_state import carry_scenario_reviews
 from .audit_service import build_actor_snapshot
 from .firestore_repository import get_required_firestore_collection
 
@@ -496,6 +497,16 @@ def append_stage_snapshot(
     }
     project_doc.collection("snapshots").document(snapshot_id).set(snapshot_payload)
 
+    stage_metadata = dict(metadata or {})
+    if stage == "use_cases":
+        previous_snapshot = _snapshot_for(project_id, previous_state.get("current_snapshot_id")) if previous_state.get("current_snapshot_id") else None
+        stage_metadata["scenario_reviews"] = carry_scenario_reviews(
+            payload,
+            previous_snapshot.payload if previous_snapshot else {},
+            previous_state.get("metadata") or {},
+            previous_state.get("current_snapshot_id") or "",
+            snapshot_id,
+        )
     stage_state[stage] = {
         "current_snapshot_id": snapshot_id,
         "version": version,
@@ -505,7 +516,7 @@ def append_stage_snapshot(
         "updated_at": now,
         "operation": operation,
         "source_snapshot_id": source_snapshot_id,
-        "metadata": _serialize_value(metadata or {}),
+        "metadata": _serialize_value(stage_metadata),
     }
     for downstream_stage in DOWNSTREAM_STAGES[stage]:
         if downstream_stage not in stage_state:

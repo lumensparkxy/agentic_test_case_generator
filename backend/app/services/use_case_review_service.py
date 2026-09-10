@@ -13,6 +13,7 @@ from ..models import (
     UseCaseReviewRecord,
     UseCaseReviewResponse,
 )
+from .scenario_review_state import current_scenario_reviews, scenario_key
 from .audit_service import build_actor_snapshot
 from .firestore_repository import get_required_firestore_client
 from .orchestrator_service import build_orchestrator_status
@@ -56,6 +57,7 @@ def _request_fingerprint(
     base_project_revision: int,
     decision: str,
     comment: Optional[str],
+    scenario_reviews: Optional[list[dict]] = None,
 ) -> str:
     canonical = json.dumps(
         {
@@ -64,6 +66,7 @@ def _request_fingerprint(
             "base_project_revision": base_project_revision,
             "decision": decision,
             "comment": comment,
+            **({"scenario_reviews": scenario_reviews} if scenario_reviews else {}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -107,6 +110,7 @@ def _apply_review_transaction(
     idempotency_key: str,
     request_fingerprint: str,
     decided_at: datetime,
+    scenario_reviews: Optional[list[dict]] = None,
 ) -> UseCaseReviewRecord:
     project_payload = _document_to_dict(project_doc.get(transaction=transaction))
     if project_payload is None:
@@ -147,7 +151,7 @@ def _apply_review_transaction(
     snapshot_payload = _document_to_dict(
         snapshot_doc.get(
             transaction=transaction,
-            field_paths=("snapshot_id", "project_id", "stage"),
+            field_paths=("snapshot_id", "project_id", "stage", "payload"),
         )
     )
     if (
@@ -165,6 +169,33 @@ def _apply_review_transaction(
     resulting_revision = current_revision + 1
     approved = decision == "approve"
     review_metadata = dict(use_cases_state.get("metadata") or {})
+    try:
+        items = current_scenario_reviews(snapshot_payload.get("payload") or {}, review_metadata, snapshot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not items:
+        raise HTTPException(status_code=422, detail="No scenarios are available for review.")
+    if use_cases_state.get("stale") and (approved or any(item["status"] == "approved" for item in scenario_reviews or [])):
+        raise UseCaseReviewConflictError(
+            "This artifact is stale. Regenerate before approval.", latest_revision=current_revision, current_snapshot_id=current_snapshot_id
+        )
+    updates = scenario_reviews or []
+    if decision in ("approve", "request_changes"):
+        updates = [{**item, "status": "approved" if approved else "request_changes"} for item in items.values()]
+    for update in updates:
+        key = scenario_key(update["requirement_id"], update["scenario_id"])
+        if key not in items:
+            raise HTTPException(status_code=422, detail="Scenario does not belong to the current artifact.")
+        items[key] = {
+            **items[key],
+            "status": update["status"],
+            "quality_flags": update["quality_flags"],
+            "reviewer_user_id": actor.sub,
+            "reviewer_name": actor.name,
+            "reviewed_at": decided_at.isoformat(),
+        }
+    approved = approved and all(item["status"] == "approved" for item in items.values())
+    review_metadata["scenario_reviews"] = {"snapshot_id": snapshot_id, "items": items}
     review_metadata["latest_human_review"] = {
         "review_id": review_id,
         "snapshot_id": snapshot_id,
@@ -195,6 +226,7 @@ def _apply_review_transaction(
         "reviewer_user_id": actor.sub,
         "reviewer_name": actor.name,
         "reviewer_email": actor.email,
+        "scenario_reviews": [{key: item[key] for key in ("requirement_id", "scenario_id", "status", "quality_flags")} for item in updates],
         "reviewer": build_actor_snapshot(actor),
         "request_id": request_id,
         "idempotency_key": idempotency_key,
@@ -207,9 +239,13 @@ def _apply_review_transaction(
     timeline_payload = {
         "event_id": timeline_event_id,
         "project_id": project_payload["project_id"],
-        "event_type": "use_cases.review_approved" if approved else "use_cases.changes_requested",
+        "event_type": "use_cases.scenarios_reviewed"
+        if decision == "review_scenarios"
+        else "use_cases.review_approved"
+        if approved
+        else "use_cases.changes_requested",
         "stage": "use_cases",
-        "summary": "Use Cases approved" if approved else "Changes requested for Use Cases",
+        "summary": "Scenario reviews saved" if decision == "review_scenarios" else "Use Cases approved" if approved else "Changes requested for Use Cases",
         "project_revision": resulting_revision,
         "snapshot_id": snapshot_id,
         "actor_user_id": actor.sub,
@@ -246,6 +282,7 @@ def review_use_case_snapshot(
     comment: Optional[str],
     actor: AuthUser,
     request_id: str,
+    scenario_reviews: Optional[list[dict]] = None,
 ) -> UseCaseReviewResponse:
     client = get_required_firestore_client(
         unavailable_message="Firestore client unavailable for Use Cases review persistence",
@@ -258,6 +295,7 @@ def review_use_case_snapshot(
         base_project_revision=base_project_revision,
         decision=decision,
         comment=comment,
+        scenario_reviews=scenario_reviews,
     )
     review_id = _stable_id("usecasereview", project_id, idempotency_key)
     timeline_event_id = _stable_id("timeline", project_id, idempotency_key)
@@ -282,6 +320,7 @@ def review_use_case_snapshot(
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
             decided_at=decided_at,
+            scenario_reviews=scenario_reviews,
         )
 
     review = transactional(apply)(client.transaction())
@@ -298,6 +337,8 @@ def review_use_case_snapshot(
 
 
 def use_case_review_error_to_http(exc: Exception) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
     if isinstance(exc, ProjectNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     if isinstance(exc, ProjectPermissionError):

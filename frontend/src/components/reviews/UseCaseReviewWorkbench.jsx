@@ -1,12 +1,11 @@
+import ScenarioReviewTable from "./ScenarioReviewTable";
 import { Dialog } from "../ui/dialog";
-import { ListItem, CollectionState, List, CollectionToolbar } from "../ui/collections";
+import { ListItem, List, CollectionState, CollectionToolbar } from "../ui/collections";
 import { Disclosure, Alert } from "../ui/surfaces";
 import { Button, Radio, Textarea, Input } from "../ui/controls";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { formatWorkspaceDate, formatWorkspaceLabel } from "../workspace/workspacePresentation";
-
-const USE_CASE_GROUP_AUTO_EXPAND_LIMIT = 3;
 
 const normalizeList = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const normalizeText = (value) => `${value || ""}`.trim().toLowerCase();
@@ -170,28 +169,6 @@ function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTo
 	);
 }
 
-function ScenarioCard({ scenario }) {
-	return (
-		<ListItem className="use-case-scenario-card">
-			<Disclosure className="scenario-details">
-				<summary>
-					<span className="scenario-summary-copy">
-						<span className="use-case-scenario-type">{scenario.id || formatWorkspaceLabel(scenario.scenario_type, "Scenario")}</span>
-						<strong>{scenario.title || scenario.objective || "Untitled scenario"}</strong>
-					</span>
-				</summary>
-				<div className="scenario-expanded-content">
-					<p>{scenario.objective || "No additional objective provided."}</p>
-					<span>
-						{formatWorkspaceLabel(scenario.scenario_type, "Scenario")} · {formatWorkspaceLabel(scenario.priority, "Unprioritized")} ·{" "}
-						{scenario.must_have ? "Must have" : "Recommended"}
-					</span>
-				</div>
-			</Disclosure>
-		</ListItem>
-	);
-}
-
 function CoverageContext({ analysis }) {
 	if (!analysis) {
 		return (
@@ -252,7 +229,7 @@ function CoverageContext({ analysis }) {
 	);
 }
 
-function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, groupTotal }) {
+function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, groupTotal, hasDrafts }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	useEffect(() => {
 		if (review.status === "success") setDialogOpen(false);
@@ -271,7 +248,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 	const commentInvalid = commentRequired && !review.comment.trim() && review.status === "error";
 	const snapshotMatches = stageState?.current_snapshot_id === snapshot.snapshot_id;
 	const approvalBlocked = Boolean(stageState?.stale);
-	const formDisabled = isBusy || !snapshotMatches || refreshRequired;
+	const formDisabled = isBusy || !snapshotMatches || refreshRequired || hasDrafts;
 	const focusDecisionPanel = () => window.requestAnimationFrame(() => formRef.current?.focus());
 	const handleReload = async () => {
 		await review.reloadLatest();
@@ -303,13 +280,14 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 							Review details
 						</Button>
 					) : null}
-					<Button variant="secondary" onClick={() => openDecision("request_changes")} disabled={isBusy}>
+					<Button variant="secondary" onClick={() => openDecision("request_changes")} disabled={isBusy || hasDrafts || !scenarioTotal}>
 						Request changes
 					</Button>
-					<Button onClick={() => openDecision("approve")} disabled={isBusy || approvalBlocked}>
+					<Button onClick={() => openDecision("approve")} disabled={isBusy || approvalBlocked || hasDrafts || !scenarioTotal}>
 						Approve all
 					</Button>
 				</div>
+				{hasDrafts ? <p role="note">Save or discard row edits before making a whole-version decision.</p> : null}
 				{approvalBlocked ? <p role="note">Stale version — regenerate before approval.</p> : null}
 			</section>
 			{dialogOpen ? (
@@ -348,6 +326,11 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 									<p id="use-case-review-scope">
 										Your decision applies to all {scenarioTotal} scenarios across {groupTotal} requirement groups in Use Cases v
 										{snapshot.version}, including scenarios hidden by search. It does not apply to a single group.
+									</p>
+									<p>
+										{review.decision === "approve"
+											? "Approve all sets every scenario to Approved, including scenarios currently marked Changes requested."
+											: "Request changes marks every scenario as Changes requested."}
 									</p>
 								</div>
 							</div>
@@ -502,8 +485,13 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 	const searchId = useId();
 	const searchRef = useRef(null);
 	const [query, setQuery] = useState("");
-	const [groupsExpandedOverride, setGroupsExpandedOverride] = useState(null);
-	const [groupToggles, setGroupToggles] = useState({});
+	const [draftState, setDraftState] = useState({ snapshotId: snapshot.snapshot_id, items: {} });
+	const drafts = draftState.snapshotId === snapshot.snapshot_id ? draftState.items : {};
+	const setDrafts = (next) =>
+		setDraftState((current) => ({
+			snapshotId: snapshot.snapshot_id,
+			items: typeof next === "function" ? next(current.snapshotId === snapshot.snapshot_id ? current.items : {}) : next,
+		}));
 	const payload = snapshot.payload || {};
 	const coveragePlan = normalizeList(payload.coverage_plan);
 	const requirementAnalysis = normalizeList(payload.requirement_analysis);
@@ -515,22 +503,8 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 		() => filterGroups(coveragePlan, analysisByRequirement, query),
 		[analysisByRequirement, coveragePlan, query]
 	);
-	// Small plans and search results are shown expanded; larger plans start
-	// collapsed so reviewers can scan requirement headings without scrolling
-	// through every scenario card.
-	const groupsExpandedByDefault =
-		groupsExpandedOverride ?? (query.trim().length > 0 || filteredGroups.length <= USE_CASE_GROUP_AUTO_EXPAND_LIMIT);
-	const setAllGroupsExpanded = (expanded) => {
-		setGroupsExpandedOverride(expanded);
-		setGroupToggles({});
-	};
-	const updateQuery = (nextQuery) => {
-		setQuery(nextQuery);
-		setGroupsExpandedOverride(null);
-		setGroupToggles({});
-	};
+	const updateQuery = setQuery;
 	const scenarioTotal = coveragePlan.reduce((total, group) => total + normalizeList(group.scenarios).length, 0);
-	const visibleScenarioTotal = filteredGroups.reduce((total, group) => total + group.scenarios.length, 0);
 	const mustHaveTotal = coveragePlan.reduce(
 		(total, group) => total + normalizeList(group.scenarios).filter((scenario) => scenario.must_have).length,
 		0
@@ -613,10 +587,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					<div>
 						<span className="use-case-section-kicker">Review artifact</span>
 						<h2 id="use-case-collection-title">Use case scenarios</h2>
-						<p role="status" aria-live="polite">
-							Showing {visibleScenarioTotal} of {scenarioTotal} scenarios across {filteredGroups.length} of {coveragePlan.length}{" "}
-							requirement groups.
-						</p>
+						<p>Review individual scenarios, then save your decisions.</p>
 					</div>
 					<div className="use-case-search-field">
 						<label htmlFor={searchId}>Search use cases</label>
@@ -628,97 +599,44 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 							onChange={(event) => updateQuery(event.target.value)}
 							placeholder="Requirement, scenario, risk, or constraint"
 						/>
+						{query ? (
+							<Button
+								variant="plain"
+								onClick={() => {
+									updateQuery("");
+									searchRef.current?.focus();
+								}}
+							>
+								Clear search
+							</Button>
+						) : null}
 					</div>
 				</CollectionToolbar>
 
-				{filteredGroups.length > 1 ? (
-					<div className="use-case-group-toolbar">
-						<Button
-							variant="plain"
-							type="button"
-							className="use-case-group-toggle-all"
-							onClick={() => setAllGroupsExpanded(!groupsExpandedByDefault)}
-						>
-							{groupsExpandedByDefault ? "Collapse all groups" : "Expand all groups"}
-						</Button>
-					</div>
-				) : null}
-
-				{filteredGroups.length ? (
-					<List as="div" variant="grouped" className="use-case-group-list" aria-label="Use Case groups">
-						{filteredGroups.map((group, groupIndex) => {
-							const groupKey = group.requirement_id || normalizeText(group.requirement_text) || `group-${groupIndex}`;
-							const titleId = `use-case-group-${groupIndex}-${`${group.requirement_id || "requirement"}`.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-							const isOpen = groupToggles[groupKey] ?? groupsExpandedByDefault;
-							return (
-								<section
-									className="use-case-group"
-									aria-label={`${group.requirement_id || "Unidentified"} · ${group.requirement_text || "Requirement coverage"}`}
-									key={groupKey}
-								>
-									<Disclosure
-										className="use-case-group-details"
-										open={isOpen}
-										onToggle={(event) => {
-											const nextOpen = event.currentTarget.open;
-											if (nextOpen !== isOpen) {
-												setGroupToggles((previous) => ({ ...previous, [groupKey]: nextOpen }));
-											}
-										}}
-									>
-										<summary className="use-case-group-heading">
-											<div>
-												<span>Source requirement {group.requirement_id || "Unidentified"}</span>
-												<h3 id={titleId}>{group.requirement_text || "Requirement coverage"}</h3>
-											</div>
-											<strong>
-												{group.scenarios.length} scenario{group.scenarios.length === 1 ? "" : "s"}
-											</strong>
-										</summary>
-										{group.scenarios.length ? (
-											<List
-												className="use-case-scenario-list"
-												aria-label={`Scenarios for ${group.requirement_id || "unidentified requirement"}`}
-											>
-												{group.scenarios.map((scenario, scenarioIndex) => (
-													<ScenarioCard key={scenario.id || `${group.requirement_id}-${scenarioIndex}`} scenario={scenario} />
-												))}
-											</List>
-										) : (
-											<CollectionState as="p" kind="empty" className="use-case-context-empty">
-												No scenarios were generated for this requirement.
-											</CollectionState>
-										)}
-										<Disclosure className="use-case-coverage-context">
-											<summary aria-label={`Coverage context for ${group.requirement_id || "unidentified requirement"}`}>
-												Coverage context
-											</summary>
-											<CoverageContext analysis={group.analysis} />
-										</Disclosure>
-									</Disclosure>
-								</section>
-							);
-						})}
-					</List>
-				) : (
-					<CollectionState as="div" kind="filtered" className="use-case-search-empty" role="status">
-						<strong>No use cases match “{query}”.</strong>
-						<Button
-							type="button"
-							className="secondary"
-							onClick={() => {
-								updateQuery("");
-								window.requestAnimationFrame(() => searchRef.current?.focus());
-							}}
-						>
-							Clear search
-						</Button>
-					</CollectionState>
-				)}
+				<ScenarioReviewTable
+					key={snapshot.snapshot_id}
+					groups={filteredGroups}
+					allGroups={coveragePlan}
+					state={effectiveStageState}
+					snapshot={snapshot}
+					revision={project.current_revision}
+					review={review}
+					drafts={drafts}
+					setDrafts={setDrafts}
+					renderDetails={(scenario, group) => (
+						<>
+							<p>
+								{formatWorkspaceLabel(scenario.scenario_type, "Scenario")} · {formatWorkspaceLabel(scenario.priority, "Unprioritized")} ·{" "}
+								{scenario.must_have ? "Must have" : "Recommended"}
+							</p>
+							<CoverageContext analysis={group.analysis} />
+						</>
+					)}
+				/>
 			</section>
 
 			<Disclosure className="use-case-provenance">
-				<summary>Details</summary>
+				<summary aria-label="Artifact details">Details</summary>
 				<dl>
 					<div>
 						<dt>Snapshot ID</dt>
@@ -756,6 +674,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 				review={review}
 				scenarioTotal={scenarioTotal}
 				groupTotal={coveragePlan.length}
+				hasDrafts={Object.keys(drafts).length > 0}
 			/>
 		</div>
 	);
