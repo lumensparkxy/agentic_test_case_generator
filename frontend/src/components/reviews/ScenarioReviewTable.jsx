@@ -1,9 +1,18 @@
+import { MultiSelect } from "../ui/multi-select";
+import { ResizableTable } from "../ui/resizable-table";
 import { useState } from "react";
-import { Button, Checkbox, Select } from "../ui/controls";
-import { Alert, Disclosure } from "../ui/surfaces";
-import { Table, TableScroll, CollectionState } from "../ui/collections";
+import { Button, Select } from "../ui/controls";
+import { Alert } from "../ui/surfaces";
+import { TableScroll, CollectionState } from "../ui/collections";
 
 export const SCENARIO_FLAGS = ["Ambiguous", "Duplicate", "Missing coverage", "Not testable", "Incorrect requirement mapping"];
+const COLUMNS = [
+	{ label: "Source requirement", percent: 20, min: 140, initial: 220 },
+	{ label: "Use Case ID", percent: 13, min: 100, initial: 143 },
+	{ label: "Title / objective", percent: 32, min: 200, initial: 352 },
+	{ label: "Review status", percent: 17, min: 150, initial: 187 },
+	{ label: "Quality flags", percent: 18, min: 150, initial: 198 },
+];
 const STATUSES = { needs_review: "Needs review", approved: "Approved", request_changes: "Changes requested" };
 const keyFor = (group, scenario) => JSON.stringify([group.requirement_id, scenario.id]);
 export function scenarioReview(group, scenario, state, snapshotId) {
@@ -18,7 +27,7 @@ export function scenarioReview(group, scenario, state, snapshotId) {
 	);
 }
 
-export default function ScenarioReviewTable({ groups, allGroups, state, snapshot, revision, review, drafts, setDrafts, renderDetails }) {
+export default function ScenarioReviewTable({ groups, allGroups, state, snapshot, revision, review, drafts, setDrafts }) {
 	const [statusFilter, setStatusFilter] = useState("");
 	const [flagFilters, setFlagFilters] = useState([]);
 	const [draftRevision, setDraftRevision] = useState(revision);
@@ -69,30 +78,19 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 				<p role="status">
 					{approved} of {total} approved · Showing {rows.length} scenarios{dirty ? ` · ${Object.keys(drafts).length} unsaved reviews` : ""}
 				</p>
-				<Select aria-label="Filter by review status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-					<option value="">All review statuses</option>
-					{Object.entries(STATUSES).map(([value, label]) => (
-						<option key={value} value={value}>
-							{label}
-						</option>
-					))}
-				</Select>
-				<Disclosure className="scenario-flags">
-					<summary>Quality flag filters{flagFilters.length ? ` (${flagFilters.length})` : ""}</summary>
-					<div>
-						{SCENARIO_FLAGS.map((flag) => (
-							<label key={flag}>
-								<Checkbox
-									checked={flagFilters.includes(flag)}
-									onChange={() =>
-										setFlagFilters((previous) => (previous.includes(flag) ? previous.filter((item) => item !== flag) : [...previous, flag]))
-									}
-								/>
-								{flag}
-							</label>
+				<div className="scenario-status-filter">
+					<Select aria-label="Filter by review status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+						<option value="">All review statuses</option>
+						{Object.entries(STATUSES).map(([value, label]) => (
+							<option key={value} value={value}>
+								{label}
+							</option>
 						))}
-					</div>
-				</Disclosure>
+					</Select>
+				</div>
+				<div className="scenario-status-filter">
+					<MultiSelect label="Quality flag filters" options={SCENARIO_FLAGS} value={flagFilters} onChange={setFlagFilters} />
+				</div>
 				{statusFilter || flagFilters.length ? (
 					<Button
 						variant="plain"
@@ -137,16 +135,7 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 				</Alert>
 			) : null}
 			<TableScroll label="Use case scenarios table" aria-label="Use case scenarios table" className="scenario-table-scroll">
-				<Table className="scenario-review-table">
-					<thead>
-						<tr>
-							<th scope="col">Source requirement</th>
-							<th scope="col">Use Case ID</th>
-							<th scope="col">Title / objective</th>
-							<th scope="col">Review status</th>
-							<th scope="col">Quality flags</th>
-						</tr>
-					</thead>
+				<ResizableTable columns={COLUMNS} storageKey="use-cases" className="scenario-review-table">
 					<tbody>
 						{rows.map((row) => (
 							<tr key={row.key}>
@@ -158,14 +147,9 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 								<td>
 									<strong>{row.scenario.title || row.scenario.objective}</strong>
 									<p>{row.scenario.objective}</p>
-									<Disclosure>
-										<summary aria-label={`Details for ${row.scenario.id}`}>Details</summary>
-										{renderDetails(row.scenario, row.group)}
-									</Disclosure>
 								</td>
 								<td>
 									<div className="scenario-status-filter">
-										{" "}
 										<Select
 											aria-label={`Review status for ${row.scenario.id}`}
 											value={row.value.status}
@@ -181,34 +165,19 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 									</div>
 								</td>
 								<td>
-									<Disclosure className="scenario-flags">
-										<summary aria-label={`Quality flags for ${row.scenario.id}: ${row.value.quality_flags.length || "None"}`}>
-											{row.value.quality_flags.length ? `${row.value.quality_flags.length} flags` : "Add flags"}
-										</summary>
-										<div>
-											{SCENARIO_FLAGS.map((flag) => (
-												<label key={flag}>
-													<Checkbox
-														disabled={disabled || !row.scenario.id || !row.group.requirement_id}
-														checked={row.value.quality_flags.includes(flag)}
-														onChange={() =>
-															change(row, {
-																quality_flags: row.value.quality_flags.includes(flag)
-																	? row.value.quality_flags.filter((item) => item !== flag)
-																	: [...row.value.quality_flags, flag].sort(),
-															})
-														}
-													/>
-													{flag}
-												</label>
-											))}
-										</div>
-									</Disclosure>
+									<MultiSelect
+										label="Quality flags"
+										accessibleLabel={`Quality flags for ${row.scenario.id}`}
+										options={SCENARIO_FLAGS}
+										value={row.value.quality_flags}
+										disabled={disabled || !row.scenario.id || !row.group.requirement_id}
+										onChange={(quality_flags) => change(row, { quality_flags })}
+									/>
 								</td>
 							</tr>
 						))}
 					</tbody>
-				</Table>
+				</ResizableTable>
 			</TableScroll>
 			{!rows.length ? (
 				<CollectionState kind={total ? "filtered" : "empty"}>

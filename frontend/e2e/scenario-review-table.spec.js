@@ -16,7 +16,7 @@ test("persists scenario status and multiple quality flags, filters rows and pres
 	const api = await open(page);
 	await status(page).selectOption("approved");
 	const row = page.getByRole("row").filter({ has: status(page) });
-	await row.getByLabel(`Quality flags for ${scenarioId}: None`, { exact: true }).click();
+	await row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true }).click();
 	await row.getByRole("checkbox", { name: "Ambiguous", exact: true }).check();
 	await row.getByRole("checkbox", { name: "Not testable", exact: true }).check();
 	await expect(page.getByRole("button", { name: "Approve all", exact: true })).toBeDisabled();
@@ -29,10 +29,10 @@ test("persists scenario status and multiple quality flags, filters rows and pres
 	await expect(page.getByText("1 of 4 approved", { exact: false })).toBeVisible();
 	await page.reload();
 	await expect(status(page)).toHaveValue("approved");
-	await expect(row.getByLabel(`Quality flags for ${scenarioId}: 2`, { exact: true })).toBeVisible();
+	await expect(row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true })).toContainText("(2)");
 	await page.getByRole("combobox", { name: "Filter by review status", exact: true }).selectOption("approved");
 	await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
-	await page.getByText("Quality flag filters", { exact: true }).click();
+	await page.getByRole("button", { name: "Quality flag filters", exact: true }).click();
 	await page.getByRole("checkbox", { name: "Duplicate", exact: true }).check();
 	await expect(page.getByText("No scenarios match these filters.")).toBeVisible();
 	await page.getByRole("button", { name: "Approve all", exact: true }).click();
@@ -89,3 +89,49 @@ for (const width of [390, 1488])
 		const results = await new AxeBuilder({ page }).include(".scenario-table-scroll").analyze();
 		expect(results.violations).toEqual([]);
 	});
+
+test("column dividers support pointer and keyboard resizing without losing drafts", async ({ page }) => {
+	await page.setViewportSize({ width: 1488, height: 900 });
+	const api = await open(page);
+	await status(page).selectOption("approved");
+	const divider = page.getByRole("separator", { name: "Resize Title / objective column", exact: true });
+	const header = page.getByRole("columnheader", { name: /^Title \/ objective/ });
+	const before = (await header.boundingBox()).width;
+	const box = await divider.boundingBox();
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2, { steps: 5 });
+	await page.mouse.up();
+	expect((await header.boundingBox()).width).toBeGreaterThan(before + 80);
+	await divider.focus();
+	await page.keyboard.press("Home");
+	await expect(divider).toHaveAttribute("aria-valuenow", "200");
+	await page.keyboard.press("ArrowRight");
+	await expect(divider).toHaveAttribute("aria-valuenow", "210");
+	await expect(status(page)).toHaveValue("approved");
+	expect(api.requests.review).toHaveLength(0);
+	await page.getByRole("button", { name: "Discard edits", exact: true }).click();
+	await page.reload();
+	await expect(divider).toHaveAttribute("aria-valuenow", "210");
+	await page.setViewportSize({ width: 390, height: 844 });
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("quality dropdown does not expand rows and restores focus on Escape", async ({ page }) => {
+	await open(page);
+	const trigger = page.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true });
+	const row = page.getByRole("row").filter({ has: trigger });
+	const height = (await row.boundingBox()).height;
+	await trigger.click();
+	const group = page.getByRole("group", { name: `Quality flags for ${scenarioId}`, exact: true });
+	await expect(group).toBeVisible();
+	await group.getByRole("checkbox", { name: "Duplicate", exact: true }).check();
+	expect((await row.boundingBox()).height).toBe(height);
+	await page.keyboard.press("Escape");
+	await expect(group).not.toBeVisible();
+	await expect(trigger).toBeFocused();
+	await expect(trigger).toContainText("Quality flags (1)");
+	await trigger.click();
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(group).not.toBeVisible();
+});
