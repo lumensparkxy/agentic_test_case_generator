@@ -1,3 +1,5 @@
+from ..services.knowledge_feedback import finish_generation
+from ..services.guidance_dependency import generation_guidance
 import json
 import logging
 import hashlib
@@ -263,7 +265,7 @@ def _record_billing_consumption_safe(
         logging.warning("Billing consumption recording failed for %s: %s", billing_key, exc)
 
 
-@router.post("/testcases/generate", response_model=GenerateTestCasesResponse)
+@router.post("/testcases/generate", response_model=GenerateTestCasesResponse, dependencies=[Depends(generation_guidance("test_cases"))])
 async def generate_test_cases_endpoint(
     request: Request,
     payload: GenerateTestCasesInput,
@@ -338,7 +340,7 @@ async def generate_test_cases_endpoint(
             source_requirements=payload.requirements,
             source_context=payload.context,
         )
-        return response
+        return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:
         _log_failure(
             current_user=current_user,
@@ -353,7 +355,7 @@ async def generate_test_cases_endpoint(
         raise
 
 
-@router.post("/testcases/refine", response_model=GenerateTestCasesResponse)
+@router.post("/testcases/refine", response_model=GenerateTestCasesResponse, dependencies=[Depends(generation_guidance("test_cases"))])
 async def refine_test_cases_endpoint(
     request: Request,
     payload: RefineTestCasesInput,
@@ -433,7 +435,7 @@ async def refine_test_cases_endpoint(
             source_requirements=payload.requirements,
             source_context=payload.context,
         )
-        return response
+        return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:
         _log_failure(
             current_user=current_user,

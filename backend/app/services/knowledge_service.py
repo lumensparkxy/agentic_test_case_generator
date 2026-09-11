@@ -211,7 +211,7 @@ def resolve_memories(actor, project_id, stage, requirement_ids=None):
         reason = None
         if entry.status != "active" or value is None:
             reason = entry.status
-        elif stage not in value["stages"]:
+        elif not set((stage,) if isinstance(stage, str) else stage).intersection(value["stages"]):
             reason = "different_stage"
         elif value["requirement_ids"] and not requested.intersection(value["requirement_ids"]):
             reason = "different_requirement"
@@ -225,6 +225,7 @@ def resolve_memories(actor, project_id, stage, requirement_ids=None):
                     scope=entry.scope,
                     text=value["text"],
                     source=value["source"],
+                    stages=tuple(value["stages"]),
                     requirement_ids=tuple(value["requirement_ids"]),
                     reason="linked_requirement" if value["requirement_ids"] else "selected_personal" if entry.scope == "personal" else "project_stage",
                 )

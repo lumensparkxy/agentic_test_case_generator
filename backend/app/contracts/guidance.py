@@ -20,6 +20,7 @@ class SkillGuidance(FrozenGuidance):
 
 
 class MemoryGuidance(FrozenGuidance):
+    stages: tuple[GuidanceStage, ...] = ("requirements", "use_cases", "test_cases", "automation")
     id: str
     revision: int
     scope: Literal["project", "personal"]

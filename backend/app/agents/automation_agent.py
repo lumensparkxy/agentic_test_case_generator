@@ -1,3 +1,4 @@
+from ..services.guidance_service import guidance_text, submit_with_guidance
 import json
 import logging
 import re
@@ -450,7 +451,7 @@ def _run_model_automation_fragment_worker(
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
         model=model_name,
-        contents=_build_fragment_prompt(shard, base_url=base_url),
+        contents=_build_fragment_prompt(shard, base_url=base_url) + guidance_text(),
         config=genai.types.GenerateContentConfig(
             temperature=0.15,
             max_output_tokens=12000,
@@ -625,7 +626,8 @@ def _run_automation_coordinator(
     result_by_index: Dict[int, _AutomationFragmentResult] = {}
     with ThreadPoolExecutor(max_workers=max(1, worker_count)) as executor:
         future_by_shard = {
-            executor.submit(
+            submit_with_guidance(
+                executor,
                 _run_automation_shard_with_fallback,
                 shard=shard,
                 base_url=base_url,
@@ -659,7 +661,7 @@ def _generate_small_model_pom(payload: AutomationInput, *, model_settings: Any) 
     client = genai.Client(api_key=model_settings.gemini_api_key)
     response = client.models.generate_content(
         model=model_settings.model_name,
-        contents=_build_pom_prompt(payload),
+        contents=_build_pom_prompt(payload) + guidance_text(),
         config=genai.types.GenerateContentConfig(
             temperature=0.2,
             max_output_tokens=8192,

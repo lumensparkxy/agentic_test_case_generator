@@ -238,6 +238,8 @@ class RequirementCoveragePlanOutput(BaseModel):
 
 
 class RequirementsWorkflowResponse(ParseResponse):
+    guidance: Optional[Dict[str, Any]] = None
+    knowledge_suggestion: Optional[Dict[str, Any]] = None
     source_names: List[str] = Field(default_factory=list)
     approved: bool = False
     review: ReviewResult = Field(default_factory=ReviewResult)

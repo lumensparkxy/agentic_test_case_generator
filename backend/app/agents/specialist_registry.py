@@ -125,7 +125,32 @@ class SpecialistAgentRegistry:
             )
 
         try:
-            raw_output = adapter.handler(task_input, trace)
+            from ..services.guidance_service import STAGES, guidance_scope, public_manifest
+            from ..services.guidance_runtime import prepare_run
+            from ..models import AuthUser
+
+            if agent_kind in STAGES:
+                import hashlib, json
+
+                actor = AuthUser(sub=trace.actor_user_id, email=trace.actor_email or "", name="Project owner")
+                requirement_ids = [r.id for r in getattr(task_input, "requirements", getattr(task_input, "existing_requirements", []))]
+                manifest = prepare_run(
+                    agent_kind,
+                    actor,
+                    trace.project_id,
+                    trace.request_id,
+                    requirement_ids=requirement_ids,
+                    memory_bypass=trace.memory_bypass,
+                    input_fingerprint=hashlib.sha256(json.dumps(task_input.model_dump(mode="json"), sort_keys=True).encode()).hexdigest(),
+                )
+                with guidance_scope(manifest):
+                    raw_output = adapter.handler(task_input, trace)
+                if isinstance(raw_output, BaseModel):
+                    raw_output = raw_output.model_copy(update={"guidance": public_manifest(manifest)})
+                else:
+                    raw_output = {**raw_output, "guidance": public_manifest(manifest)}
+            else:
+                raw_output = adapter.handler(task_input, trace)
             output = raw_output if isinstance(raw_output, adapter.output_model) else adapter.output_model.model_validate(raw_output)
         except TimeoutError as exc:
             return self._failed_result(

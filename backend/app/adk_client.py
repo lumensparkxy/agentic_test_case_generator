@@ -13,6 +13,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
+from .services.guidance_service import apply_agent_guidance, submit_with_guidance, memory_service_for_run, guidance_text
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
@@ -619,9 +620,10 @@ Human feedback:
 
     session_service = InMemorySessionService()
     runner = Runner(
-        agent=root_agent,
+        agent=apply_agent_guidance(root_agent, "requirements"),
         app_name="requirement_extractor",
         session_service=session_service,
+        memory_service=memory_service_for_run(actor_user_id),
     )
 
     user_id = str(actor_user_id or f"user_{uuid.uuid4().hex[:8]}")
@@ -1081,7 +1083,7 @@ def run_adk_prompt(
             response = client.models.generate_content(
                 model=model or DEFAULT_MODEL,
                 contents=prompt,
-                config=text_generation_config(system_instruction=instruction),
+                config=text_generation_config(system_instruction=instruction + guidance_text()),
             )
             return extract_response_text(response)
     except Exception as exc:

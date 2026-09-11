@@ -1,3 +1,5 @@
+import GuidanceUsed from "../components/knowledge/GuidanceUsed";
+import KnowledgeSuggestion from "../components/knowledge/KnowledgeSuggestion";
 import { Badge } from "../components/ui/surfaces";
 import { Button, Link } from "../components/ui/controls";
 import ProjectPageHeader from "../components/layout/ProjectPageHeader";
@@ -72,6 +74,13 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 				}
 			/>
 
+			<GuidanceUsed key={snapshot?.snapshot_id || "none"} manifest={snapshot?.metadata?.guidance} request={request} projectId={projectId} />
+			<KnowledgeSuggestion
+				key={review.response?.review?.review_id || "none"}
+				suggestion={review.response?.knowledge_suggestion}
+				request={request}
+				projectId={projectId}
+			/>
 			{snapshot ? (
 				<UseCaseReviewWorkbench
 					key={`${identity}:${projectId}`}

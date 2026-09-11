@@ -1,3 +1,4 @@
+<!-- #269 delivery: foundations #275; storage #276; management UI #277; workflow integration #273; validation/rollout #274. -->
 # GitHub Issue Backlog for Test Case Engine Improvements
 
 - In progress: epic #269 — ADK skills and approved project/personal knowledge. Dependent stories #270, #271, #272, #273, #274; builds on PR #268. Features default off until evaluated.

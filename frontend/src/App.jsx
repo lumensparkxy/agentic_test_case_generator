@@ -1,3 +1,6 @@
+import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
+import GuidanceUsed from "./components/knowledge/GuidanceUsed";
+import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
 import { Disclosure, Surface } from "./components/ui/surfaces";
 import { Button, Link, Radio, Field, Input, Select, Textarea } from "./components/ui/controls";
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
@@ -1284,6 +1287,36 @@ export default function App() {
 		}));
 	}, [currentUser?.email, azureDevOpsConnected]);
 
+	const navigationProjectId = route.kind === "project" ? route.projectId : "";
+	const knowledgeScope = `${currentUser?.sub || ""}:${navigationProjectId || ""}`;
+	const guidanceRecovery = useGuidanceRecovery(knowledgeScope);
+	const [generationGuidance, setGenerationGuidance] = useState({});
+	const recordedGuidance = (stage) =>
+		projectSnapshots[stage]?.metadata?.guidance ||
+		(generationGuidance.scope === knowledgeScope ? generationGuidance[stage]?.guidance : null);
+	const guidanceSummary = (stage) => (
+		<GuidanceUsed
+			key={`${knowledgeScope}:${recordedGuidance(stage)?.manifest_id || stage}`}
+			manifest={recordedGuidance(stage)}
+			request={apiRequest}
+			projectId={navigationProjectId}
+		/>
+	);
+	const suggestionSummary = (stage) =>
+		generationGuidance.scope === knowledgeScope && (
+			<KnowledgeSuggestion
+				key={`suggestion:${knowledgeScope}:${stage}:${JSON.stringify(generationGuidance[stage]?.knowledge_suggestion)}`}
+				suggestion={generationGuidance[stage]?.knowledge_suggestion}
+				request={apiRequest}
+				projectId={navigationProjectId}
+			/>
+		);
+	const rememberGeneration = (stage, data) =>
+		setGenerationGuidance((current) => ({
+			...(current.scope === knowledgeScope ? current : {}),
+			scope: knowledgeScope,
+			[stage]: { guidance: data.guidance, knowledge_suggestion: data.knowledge_suggestion },
+		}));
 	const apiRequest = async (path, options = {}, authRequired = true) => {
 		const headers = ensureRequestIdHeader(options.headers || {});
 
@@ -1296,18 +1329,38 @@ export default function App() {
 			headers.Authorization = `Bearer ${token}`;
 		}
 
-		const res = await fetch(`${API_BASE}${path}`, {
-			...options,
-			cache: "no-store",
-			headers,
-		});
+		let res;
+		for (;;) {
+			res = await fetch(`${API_BASE}${path}`, {
+				...options,
+				cache: "no-store",
+				headers,
+			});
 
-		if (authRequired && res.status === 401) {
-			clearAuthState("Session expired or unauthorized. Please sign in again.");
-			throw new Error("Session expired or unauthorized. Please sign in again.");
+			if (authRequired && res.status === 401) {
+				clearAuthState("Session expired or unauthorized. Please sign in again.");
+				throw new Error("Session expired or unauthorized. Please sign in again.");
+			}
+
+			const detail =
+				res.status === 503
+					? (
+							await res
+								.clone()
+								.json()
+								.catch(() => ({}))
+						).detail
+					: null;
+			if (detail?.code !== "knowledge_unavailable" || !detail.can_bypass) return res;
+			const choice = await guidanceRecovery.decide(knowledgeScope);
+			if (choice === "cancel") throw new Error("Generation cancelled before model execution.");
+			if (choice === "bypass") headers["X-Knowledge-Bypass"] = "true";
+			if (authRequired) {
+				const token = await getCurrentAccessToken();
+				if (!token) throw new Error(AUTH_REQUIRED_MESSAGE);
+				headers.Authorization = `Bearer ${token}`;
+			}
 		}
-
-		return res;
 	};
 	const {
 		summary: workspaceSummary,
@@ -2443,6 +2496,8 @@ export default function App() {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({
+					project_id: operationScope.projectId,
+					base_project_revision: currentProjectRevision,
 					epic_key: selectedJiraIssueKey,
 					include_children: true,
 					workflow_settings: workflowSettingsPayload,
@@ -2456,6 +2511,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
+			rememberGeneration("requirements", data);
+			await refreshCurrentProject({ hydrate: false, operationScope });
+			if (!isProjectOperationCurrent(operationScope)) return;
 			setRequirementSourceMode("jira");
 			setRawText(data.raw_text || "");
 			setRequirements(data.requirements || []);
@@ -2524,6 +2582,8 @@ export default function App() {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({
+					project_id: operationScope.projectId,
+					base_project_revision: currentProjectRevision,
 					project: selectedAzureDevOpsProject,
 					work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
 					include_children: true,
@@ -2538,6 +2598,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
+			rememberGeneration("requirements", data);
+			await refreshCurrentProject({ hydrate: false, operationScope });
+			if (!isProjectOperationCurrent(operationScope)) return;
 			setRequirementSourceMode("azure_devops");
 			setRawText(data.raw_text || "");
 			setRequirements(data.requirements || []);
@@ -2870,6 +2933,7 @@ export default function App() {
 				setRequirementSourceMode("file");
 			}
 			setRawText(data.raw_text || rawText);
+			rememberGeneration("requirements", data);
 			setRequirements(nextRequirements);
 			setRequirementReview(data.review || null);
 			setRequirementCoverageMetrics(data.coverage_metrics || null);
@@ -3189,6 +3253,7 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return false;
 			}
+			rememberGeneration("test_cases", data);
 			setTestCases(data.test_cases || []);
 			setRequirementAnalysis(data.requirement_analysis || []);
 			setCoveragePlan(data.coverage_plan || []);
@@ -3784,7 +3849,6 @@ export default function App() {
 		}
 	};
 
-	const navigationProjectId = route.kind === "project" ? route.projectId : "";
 	const tabs = navigationProjectId
 		? [
 				{ id: 7, label: "Overview", title: "Project status", href: buildProjectPath(navigationProjectId) },
@@ -3945,6 +4009,7 @@ export default function App() {
 				onProviderSignIn={handleProviderSignIn}
 			/>
 
+			{guidanceRecovery.dialog}
 			<SettingsDialog
 				request={apiRequest}
 				isOpen={isSettingsDialogOpen}
@@ -4741,6 +4806,8 @@ export default function App() {
 
 											{renderRequirementReviewReport()}
 
+											{guidanceSummary("requirements")}
+											{suggestionSummary("requirements")}
 											{requirements.length > 0 && (
 												<div className="feedback-section">
 													<h3>Human Feedback</h3>
@@ -4957,16 +5024,20 @@ export default function App() {
 														)}
 
 														{activeGenerateResultTab === "test-cases" && (
-															<GeneratedTestCasesView
-																testCases={testCases}
-																qualityIssues={testCaseReview?.blocking_issues || []}
-																feedback={feedback}
-																onFeedbackChange={setFeedback}
-																onRefineTestCases={() => generateTestCases(true)}
-																isGenerating={isGenerating}
-																testCaseActionDisabled={testCaseActionDisabled}
-																allowRefinement={allowLegacyTestCaseMutations}
-															/>
+															<>
+																{guidanceSummary("test_cases")}
+																{suggestionSummary("test_cases")}
+																<GeneratedTestCasesView
+																	testCases={testCases}
+																	qualityIssues={testCaseReview?.blocking_issues || []}
+																	feedback={feedback}
+																	onFeedbackChange={setFeedback}
+																	onRefineTestCases={() => generateTestCases(true)}
+																	isGenerating={isGenerating}
+																	testCaseActionDisabled={testCaseActionDisabled}
+																	allowRefinement={allowLegacyTestCaseMutations}
+																/>
+															</>
 														)}
 													</TabPanel>
 												</div>
@@ -4993,6 +5064,8 @@ export default function App() {
 
 									{activeTab === 4 && (
 										<AutomationPanel
+											guidance={guidanceSummary("automation")}
+											sourceGuidance={guidanceSummary("test_cases")}
 											testCases={testCases}
 											executionTargetBaseUrl={executionTargetBaseUrl}
 											setExecutionTargetBaseUrl={changeExecutionTargetBaseUrl}

@@ -79,6 +79,7 @@ class UseCaseReviewRecord(BaseModel):
 
 
 class UseCaseReviewResponse(BaseModel):
+    knowledge_suggestion: Optional[dict] = None
     review: UseCaseReviewRecord
     project_revision: int = Field(ge=0)
     use_cases_state: QaProjectStageState

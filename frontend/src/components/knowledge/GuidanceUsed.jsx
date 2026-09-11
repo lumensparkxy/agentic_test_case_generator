@@ -52,9 +52,11 @@ export default function GuidanceUsed({ manifest, request, projectId }) {
 					? "Run without remembered guidance was explicitly selected."
 					: "Guidance was fixed when this run started."}
 			</p>
-			{details && manifest.knowledge_revision && details.latest.revision !== manifest.knowledge_revision && (
-				<Alert>Newer guidance available. Existing artifact decisions are unchanged; updates apply on the next run.</Alert>
-			)}
+			{details &&
+				((manifest.knowledge_revision && details.latest.revision !== manifest.knowledge_revision) ||
+					manifest.skills?.some((used) =>
+						details.latest.skills?.some((skill) => skill.id === used.id && skill.content_hash !== used.content_hash)
+					)) && <Alert>Newer guidance available. Existing artifact decisions are unchanged; updates apply on the next run.</Alert>}
 			{manifest.skills?.map((s) => (
 				<p key={s.id}>
 					<strong>{s.id}</strong> v{s.version} · {s.content_hash}

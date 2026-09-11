@@ -1,3 +1,6 @@
+from ..services.knowledge_service import project_for
+from ..services.knowledge_feedback import finish_generation
+from ..services.guidance_dependency import generation_guidance
 import sys
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -187,13 +190,15 @@ def _run_project_payload(response: ExecutionRunResponse, *, target_environment: 
     }
 
 
-@router.post("/automation/playwright", response_model=AutomationResponse)
+@router.post("/automation/playwright", response_model=AutomationResponse, dependencies=[Depends(generation_guidance("automation"))])
 async def automation_playwright(
     request: Request,
     payload: AutomationInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> AutomationResponse:
     request_id = _get_request_id(request)
+    if payload.project_id:
+        await run_in_threadpool(project_for, payload.project_id, current_user)
     workflow_run_id = _resolve_main_callable("start_workflow_run", start_workflow_run)(
         operation="automation.playwright.generate",
         actor=current_user,
@@ -213,7 +218,20 @@ async def automation_playwright(
             unit="test_case",
             result_metadata={"file_count": len(response.files), "test_case_count": len(payload.test_cases)},
         )
-        return response
+        if payload.project_id:
+            await run_in_threadpool(
+                append_stage_snapshot,
+                project_id=payload.project_id,
+                stage="automation",
+                payload={"artifact_kind": "generated_code", "files": response.files, "diagnostics": response.diagnostics},
+                operation="automation.playwright.generate",
+                actor=current_user,
+                request_id=request_id,
+                approved=False,
+                title="Generated automation code",
+                metadata={"file_count": len(response.files)},
+            )
+        return finish_generation(response, current_user, payload.project_id, "automation", None, request_id)
     except Exception as exc:
         _log_failure(
             current_user=current_user,
