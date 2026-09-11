@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- In progress: epic #269 — ADK skills and approved project/personal knowledge. Dependent stories #270, #271, #272, #273, #274; builds on PR #268. Features default off until evaluated.
+
 - Implemented, awaiting review: #267 — Fix the outer table edge and resize only internal boundaries by exchanging adjacent column widths. Builds on #265 / PR #266; parent #241.
 
 - Implemented, awaiting review: #265 — Group Use Cases under source requirement headings with synchronized four-column resizing. Builds on #263 / PR #264; parent #241.
