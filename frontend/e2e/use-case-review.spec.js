@@ -117,13 +117,9 @@ test.describe("Use Cases review workbench", () => {
 		const checkoutRow = table.getByRole("row").filter({ hasText: "REQ-101-SCN-01" });
 		await expect(checkoutRow).toContainText("Complete express checkout");
 		await expect(table).toContainText(/declined saved card/i);
-		await checkoutRow.getByLabel("Details for REQ-101-SCN-01", { exact: true }).click();
-		await expect(checkoutRow).toContainText("saved_payment_method");
-		await expect(checkoutRow).toContainText("Duplicate charge after retry");
+		await expect(checkoutRow.locator("details")).toHaveCount(0);
 		const approvalRow = table.getByRole("row").filter({ hasText: "REQ-202-SCN-01" });
 		await expect(approvalRow).toContainText("Require supervisor approval");
-		await approvalRow.getByLabel("Details for REQ-202-SCN-01", { exact: true }).click();
-		await expect(approvalRow).toContainText("Threshold bypass");
 
 		const machineReview = machineReviewRegion(page);
 		await expect(machineReview).toContainText("72");

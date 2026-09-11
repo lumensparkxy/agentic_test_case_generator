@@ -1,11 +1,11 @@
 import ScenarioReviewTable from "./ScenarioReviewTable";
 import { Dialog } from "../ui/dialog";
-import { ListItem, List, CollectionState, CollectionToolbar } from "../ui/collections";
+import { ListItem, List, CollectionToolbar } from "../ui/collections";
 import { Disclosure, Alert } from "../ui/surfaces";
 import { Button, Radio, Textarea, Input } from "../ui/controls";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { formatWorkspaceDate, formatWorkspaceLabel } from "../workspace/workspacePresentation";
+import { formatWorkspaceDate } from "../workspace/workspacePresentation";
 
 const normalizeList = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const normalizeText = (value) => `${value || ""}`.trim().toLowerCase();
@@ -165,66 +165,6 @@ function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTo
 				) : null}
 				{humanReview?.comment ? <blockquote>{humanReview.comment}</blockquote> : null}
 			</section>
-		</div>
-	);
-}
-
-function CoverageContext({ analysis }) {
-	if (!analysis) {
-		return (
-			<CollectionState as="p" kind="empty" className="use-case-context-empty">
-				No additional constraint or risk analysis is attached to this requirement.
-			</CollectionState>
-		);
-	}
-	const constraints = normalizeList(analysis.field_constraints);
-	const risks = normalizeList(analysis.risk_signals);
-	const dependencies = normalizeList(analysis.dependencies);
-	const permissions = normalizeList(analysis.role_permissions);
-	const transitions = normalizeList(analysis.state_transitions);
-	return (
-		<div className="use-case-context-grid">
-			<div>
-				<h4>Constraints</h4>
-				{constraints.length ? (
-					<List>
-						{constraints.map((constraint, index) => (
-							<ListItem key={constraint.id || `${constraint.field_name}-${index}`}>
-								<strong>{constraint.field_name || "Constraint"}</strong>: {constraint.description}
-							</ListItem>
-						))}
-					</List>
-				) : (
-					<p>No field constraints identified.</p>
-				)}
-			</div>
-			<div>
-				<h4>Risks and gaps</h4>
-				{risks.length || dependencies.length || permissions.length || transitions.length ? (
-					<List>
-						{risks.map((risk, index) => (
-							<ListItem key={risk.id || `${risk.title}-${index}`}>
-								<strong>{formatWorkspaceLabel(risk.severity, "Risk")}</strong>: {risk.title || risk.rationale}
-							</ListItem>
-						))}
-						{dependencies.map((dependency) => (
-							<ListItem key={dependency}>Dependency: {dependency}</ListItem>
-						))}
-						{permissions.map((permission, index) => (
-							<ListItem key={permission.id || `${permission.role}-${permission.action}-${index}`}>
-								Permission: {permission.role} can {`${permission.action || "act"}`.toLowerCase()}
-							</ListItem>
-						))}
-						{transitions.map((transition, index) => (
-							<ListItem key={transition.id || `${transition.from_state}-${transition.to_state}-${index}`}>
-								Transition: {transition.from_state} → {transition.to_state}
-							</ListItem>
-						))}
-					</List>
-				) : (
-					<p>No risks or dependencies identified.</p>
-				)}
-			</div>
 		</div>
 	);
 }
@@ -623,15 +563,6 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					review={review}
 					drafts={drafts}
 					setDrafts={setDrafts}
-					renderDetails={(scenario, group) => (
-						<>
-							<p>
-								{formatWorkspaceLabel(scenario.scenario_type, "Scenario")} · {formatWorkspaceLabel(scenario.priority, "Unprioritized")} ·{" "}
-								{scenario.must_have ? "Must have" : "Recommended"}
-							</p>
-							<CoverageContext analysis={group.analysis} />
-						</>
-					)}
 				/>
 			</section>
 
