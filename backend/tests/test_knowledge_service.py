@@ -151,3 +151,18 @@ class MemoryAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PermissionError):
             await adapter.search_memory(app_name="app", user_id="other", query="all")
         self.assertEqual((await adapter.search_memory(app_name="app", user_id="owner", query="all")).memories, [])
+
+
+class OwnershipBoundaryTests(unittest.TestCase):
+    def test_project_lookup_uses_existing_keyword_only_owner_contract(self):
+        actor = AuthUser(sub="owner", name="Owner", email="owner@example.com")
+        with patch.object(service, "get_project", autospec=True, return_value="project") as lookup:
+            self.assertEqual(service.project_for("p1", actor), "project")
+            lookup.assert_called_once_with("p1", actor=actor)
+
+    def test_project_permission_failure_is_preserved(self):
+        actor = AuthUser(sub="owner", name="Owner", email="owner@example.com")
+        with patch.object(service, "get_project", autospec=True, side_effect=HTTPException(404, "Project not found")):
+            with self.assertRaises(HTTPException) as caught:
+                service.project_for("someone-elses-project", actor)
+            self.assertEqual(caught.exception.status_code, 404)

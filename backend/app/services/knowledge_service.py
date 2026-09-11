@@ -19,7 +19,9 @@ def project_for(project_id, actor):
     if not project_id:
         return None
     try:
-        return get_project(project_id, actor)
+        return get_project(project_id, actor=actor)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 

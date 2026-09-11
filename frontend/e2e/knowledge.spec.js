@@ -133,6 +133,7 @@ for (const width of [390, 1488])
 		await page.setViewportSize({ width, height: 900 });
 		await openKnowledge(page);
 		await page.getByRole("button", { name: "Add guidance", exact: true }).click();
+		await page.screenshot({ path: test.info().outputPath(`knowledge-dialog-${width}.png`), fullPage: false });
 		const results = await new AxeBuilder({ page }).include(".knowledge-dialog").analyze();
 		expect(results.violations).toEqual([]);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
