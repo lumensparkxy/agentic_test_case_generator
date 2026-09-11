@@ -1,19 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Table } from "./collections";
 
-export function ResizableTable({ columns, storageKey, children, className }) {
-	const table = useRef(null);
-	const drag = useRef(null);
-	const [measured, setMeasured] = useState(null);
-	useEffect(() => {
-		const observer = new ResizeObserver(() =>
-			setMeasured([...table.current.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width))
-		);
-		observer.observe(table.current);
-		return () => observer.disconnect();
-	}, []);
+export function useTableColumnWidths(columns, storageKey) {
 	const [widths, setWidths] = useState(() => {
 		try {
+			if (!storageKey) return null;
 			const saved = JSON.parse(localStorage.getItem(`tcg.columns.${storageKey}`));
 			return Array.isArray(saved) &&
 				saved.length === columns.length &&
@@ -25,7 +16,7 @@ export function ResizableTable({ columns, storageKey, children, className }) {
 		}
 	});
 	useEffect(() => {
-		if (widths) {
+		if (widths && storageKey) {
 			try {
 				localStorage.setItem(`tcg.columns.${storageKey}`, JSON.stringify(widths));
 			} catch {
@@ -33,11 +24,29 @@ export function ResizableTable({ columns, storageKey, children, className }) {
 			}
 		}
 	}, [widths, storageKey]);
+	return [widths, setWidths];
+}
+
+export function ResizableTable({ columns, storageKey, widths: controlledWidths, onWidthsChange, children, className, ...props }) {
+	const table = useRef(null);
+	const drag = useRef(null);
+	const [measured, setMeasured] = useState(null);
+	useEffect(() => {
+		const observer = new ResizeObserver(() =>
+			setMeasured([...table.current.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width))
+		);
+		observer.observe(table.current);
+		return () => observer.disconnect();
+	}, []);
+	const [localWidths, setLocalWidths] = useTableColumnWidths(columns, controlledWidths === undefined ? storageKey : undefined);
+	const widths = controlledWidths === undefined ? localWidths : controlledWidths;
+	const setWidths = onWidthsChange || setLocalWidths;
 	const actualWidths = () => [...table.current.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width);
 	const resize = (index, width, baseline = widths || actualWidths()) =>
 		setWidths(baseline.map((value, i) => (i === index ? Math.round(Math.max(columns[i].min, Math.min(1200, width))) : value)));
 	return (
 		<Table
+			{...props}
 			ref={table}
 			className={className}
 			style={{

@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented, awaiting review: #265 — Group Use Cases under source requirement headings with synchronized four-column resizing. Builds on #263 / PR #264; parent #241.
+
 - Implemented, awaiting review: #263 — Remove scenario Details, use direct Quality flags dropdowns, and add shared resizable table columns. Builds on #261 / PR #262; parent #241.
 
 - Implemented, awaiting review: #261 — Use Cases scenario table with persisted row decisions, multi-select flags, filters and explicit bulk approval; builds on #259 / PR #260. Parent #241. Validation: 386 backend tests, both offline benchmarks and 161 frontend workflow tests pass.

@@ -633,3 +633,31 @@
 	outline: var(--focus-outline);
 	outline-offset: -2px;
 }
+
+.ui-table-group {
+	min-width: 0;
+	margin-block: var(--space-6);
+}
+.ui-table-group-heading {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	background: var(--surface-container);
+	border: 1px solid var(--border-color);
+	border-bottom: 0;
+	overflow-wrap: anywhere;
+}
+.ui-table-group-heading h3 {
+	margin: 0;
+	font-size: inherit;
+}
+.ui-table-group-heading span {
+	color: var(--text-muted);
+	font-size: var(--font-secondary);
+}
+.ui-table-group-heading p {
+	flex-basis: 100%;
+	margin: 0;
+}

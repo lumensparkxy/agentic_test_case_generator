@@ -83,7 +83,7 @@ for (const width of [390, 1488])
 	test(`scenario controls are accessible and the table scrolls inside the page at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });
 		await open(page);
-		const region = page.getByRole("region", { name: "Use case scenarios table", exact: true });
+		const region = page.getByRole("region", { name: "Use cases for REQ-101", exact: true });
 		await expect(region).toHaveAttribute("tabindex", "0");
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 		const results = await new AxeBuilder({ page }).include(".scenario-table-scroll").analyze();
@@ -94,8 +94,10 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	await page.setViewportSize({ width: 1488, height: 900 });
 	const api = await open(page);
 	await status(page).selectOption("approved");
-	const divider = page.getByRole("separator", { name: "Resize Title / objective column", exact: true });
-	const header = page.getByRole("columnheader", { name: /^Title \/ objective/ });
+	const dividers = page.getByRole("separator", { name: "Resize Title / objective column", exact: true });
+	const divider = dividers.first();
+	const headers = page.getByRole("columnheader", { name: /^Title \/ objective/ });
+	const header = headers.first();
 	const before = (await header.boundingBox()).width;
 	const box = await divider.boundingBox();
 	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -108,11 +110,25 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	await expect(divider).toHaveAttribute("aria-valuenow", "200");
 	await page.keyboard.press("ArrowRight");
 	await expect(divider).toHaveAttribute("aria-valuenow", "210");
+	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "210");
+	expect((await headers.nth(1).boundingBox()).width).toBe((await header.boundingBox()).width);
+	await expect(status(page)).toHaveValue("approved");
+	const search = page.getByRole("searchbox", { name: "Search use cases", exact: true });
+	await search.fill("supervisor");
+	await expect(dividers).toHaveCount(1);
+	await divider.focus();
+	await page.keyboard.press("ArrowRight");
+	await search.fill("");
+	await expect(dividers).toHaveCount(2);
+	await expect(dividers.first()).toHaveAttribute("aria-valuenow", "220");
+	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "220");
 	await expect(status(page)).toHaveValue("approved");
 	expect(api.requests.review).toHaveLength(0);
 	await page.getByRole("button", { name: "Discard edits", exact: true }).click();
 	await page.reload();
-	await expect(divider).toHaveAttribute("aria-valuenow", "210");
+	await expect(divider).toHaveAttribute("aria-valuenow", "220");
+	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "220");
+	expect((await headers.nth(1).boundingBox()).width).toBe((await header.boundingBox()).width);
 	await page.setViewportSize({ width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -134,4 +150,49 @@ test("quality dropdown does not expand rows and restores focus on Escape", async
 	await trigger.click();
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect(group).not.toBeVisible();
+});
+
+test("requirement headings replace repeated cells and filtering preserves cross-group drafts", async ({ page }) => {
+	const api = await open(page);
+	await expect(page.getByRole("table")).toHaveCount(2);
+	await expect(page.getByRole("columnheader", { name: /^Source requirement/ })).toHaveCount(0);
+	await expect(page.getByRole("heading", { name: "REQ-101", exact: true })).toHaveCount(1);
+	await expect(page.getByText("Customers can complete express checkout with a saved payment method.", { exact: true })).toHaveCount(1);
+	await expect(page.getByRole("table", { name: "REQ-101", exact: true }).getByRole("rowheader")).toHaveText([
+		"REQ-101-SCN-01",
+		"REQ-101-SCN-02",
+	]);
+	await status(page).selectOption("approved");
+	const search = page.getByRole("searchbox", { name: "Search use cases", exact: true });
+	await search.fill("supervisor");
+	await expect(page.getByRole("table", { name: "REQ-101", exact: true })).toHaveCount(0);
+	await page.getByRole("combobox", { name: "Review status for REQ-202-SCN-01", exact: true }).selectOption("request_changes");
+	await search.fill("");
+	await expect(status(page)).toHaveValue("approved");
+	await page.getByRole("button", { name: "Save reviews", exact: true }).click();
+	await expect(page.getByRole("status", { name: "Review outcome" })).toHaveText("Scenario reviews saved.");
+	expect(api.requests.review[0].payload.scenario_reviews).toEqual([
+		{ requirement_id: "REQ-101", scenario_id: "REQ-101-SCN-01", status: "approved", quality_flags: [] },
+		{ requirement_id: "REQ-202", scenario_id: "REQ-202-SCN-01", status: "request_changes", quality_flags: [] },
+	]);
+	await page.getByRole("combobox", { name: "Filter by review status", exact: true }).selectOption("approved");
+	await expect(page.getByRole("table")).toHaveCount(1);
+	await expect(page.getByText("1 use case", { exact: true })).toBeVisible();
+	await search.fill("no matching use case");
+	await expect(page.getByRole("table")).toHaveCount(0);
+	await expect(page.getByText("No scenarios match these filters.")).toBeVisible();
+});
+
+test("long requirement headings and single-row groups wrap without page overflow", async ({ page }) => {
+	const project = useCaseProjectFixture();
+	const groups = project.current_snapshots.use_cases.payload.coverage_plan;
+	groups[0].requirement_text = "Long requirement text ".repeat(30);
+	groups[0].scenarios = groups[0].scenarios.slice(0, 1);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.addInitScript(() => localStorage.setItem("tcg.columns.use-cases", JSON.stringify([220, 143, 352, 187, 198])));
+	await open(page, { initialProject: project });
+	await expect(page.getByText(groups[0].requirement_text.trim(), { exact: true })).toBeVisible();
+	await expect(page.getByText("1 use case", { exact: true })).toBeVisible();
+	await expect(page.getByRole("table", { name: "REQ-101", exact: true }).getByRole("columnheader")).toHaveCount(4);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
