@@ -711,3 +711,18 @@
 .guidance-summary {
 	margin-block: var(--space-3);
 }
+
+.knowledge-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3);
+	margin-block: var(--space-4);
+}
+.knowledge-filter {
+	flex: 0 1 13rem;
+	max-width: 100%;
+}
+.knowledge-panel .ui-collection-state {
+	margin-block: var(--space-4);
+}

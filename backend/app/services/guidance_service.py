@@ -52,7 +52,9 @@ def stages_for_run(stage):
 
 
 def run_enabled(kind, stage):
-    return any(enabled(kind, item) for item in stages_for_run(stage))
+    # A held entry point must stay off even if a shared upstream stage is enabled.
+    # An enabled Test Cases run may still select both stages and inject by role.
+    return enabled(kind, stage)
 
 
 def build_manifest(stage: str, model: str, *, project_id=None, memories=(), omitted=(), knowledge_revision="", memory_bypass=False):

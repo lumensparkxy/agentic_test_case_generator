@@ -3,7 +3,7 @@
 Epic #269; stories #270–#274. Curated skills teach methods; approved knowledge stores product guidance. Current sources and explicit review decisions remain authoritative.
 
 ## Rollout
-Both `ADK_SKILLS_ENABLED` and `ADK_MEMORY_ENABLED` default to false. `ADK_GUIDANCE_STAGES` independently limits rollout stages. No historic feedback is imported. Four-arm evaluation is required before enabling a stage in production.
+Both `ADK_SKILLS_ENABLED` and `ADK_MEMORY_ENABLED` default to false. `ADK_GUIDANCE_STAGES` limits enabled entry points. A held Test Cases entry point does not inherit guidance through its internal Use Cases planner. No historic feedback is imported. Four-arm evaluation is required before enabling a stage in production. The current local pilot enables both flags for `requirements,use_cases`; Test Cases and Automation are held on #280 and #281. See the rollout report for measured results and limitations.
 
 ## Run contract
 One immutable manifest records model, skill versions/hashes, selected memory revisions, omissions and explicit bypass. Skill packages are loaded through ADK's loader before generation, without extra model tool calls. Parallel workers inherit the same manifest; JSON schemas and base guardrails are unchanged. Knowledge context is capped at 12 entries / 6000 characters in deterministic order.
@@ -36,4 +36,32 @@ Requirements and Test Cases refinement feedback, and Use Cases review comments, 
 
 Actual pages display Guidance used with original revisions, omissions, deletion notices and newer-guidance notices. Existing approvals are untouched. Automation execution preview is a deterministic specification validator, not an AI call; its interface identifies source test-case guidance separately. AI Playwright code-generation responses and project snapshots record their own automation manifest. Older/unrecorded snapshots remain explicitly unrecorded.
 
-Validation: 405 backend tests, both strict offline quality benchmarks, OpenAPI/type generation, backend lint/format, frontend build/lint/format, and seven focused knowledge browser tests (desktop/mobile, keyboard, historical versions, failure/retry/bypass). Full regression and matched model evaluation are tracked in #274. These offline checks do not establish improved model quality, so flags remain off.
+Validation and live quality comparisons are recorded in `docs/guidance-rollout-report.md`. Offline checks alone do not establish improved model quality. The Context skill catalog displays the backend-reported on/off state of both flags per stage, with an unavailable state when older responses omit that information.
+
+## Evaluation and staged enablement (#274)
+
+Run contract checks without model calls:
+
+```bash
+.venv/bin/python scripts/evaluate_guidance.py --output /tmp/guidance-contracts.json
+```
+
+After the configured Gemini service is accessible, run each stage with three repeats on the two synthetic fixtures. Keep identical source inputs, model, workflow limits and frozen lesson revision in every arm. Rotate arm ordering between repeats. No project data is written, and the harness does not enable flags. Provide verified input/output token rates with `--input-usd-per-million` and `--output-usd-per-million` to estimate cost; missing prices remain null.
+
+```bash
+.venv/bin/python scripts/evaluate_guidance.py --live --stage use_cases --repeats 3 --output /tmp/guidance-use-cases.json
+```
+
+An independent reviewer inspects the saved outputs with the source requirements and approved lesson. Score coverage as the fraction of applicable source behaviors covered; count assertions/business rules with no supporting source as unsupported assumptions; count violations of the explicit reviewer lesson as repeated reviewer corrections. Do not use the generating agent's self-rating as these measurements. Record notes with disputed cases. Review JSON maps each sample ID to `output_hash`, `reviewer`, `coverage` (0–1), `unsupported_assumptions` and `repeated_reviewer_corrections` (nonnegative integers). Missing measurements must remain null.
+
+Attach review to the exact recorded output without generating again:
+
+```bash
+.venv/bin/python scripts/evaluate_guidance.py --review-report /tmp/guidance-use-cases.json --reviews /tmp/guidance-review.json --output /tmp/guidance-use-cases-reviewed.json
+```
+
+The report compares every arm's coverage, assumptions, repeated corrections, latency and estimated cost. Output hashes prevent attaching an old judgment to a newly generated result. Live runs checkpoint each completed sample. Record prompt/completion token totals (including thinking output), API failures and fallback runs. Fallbacks cannot demonstrate model-quality improvement. Delivered Test Cases must agree with final generation counts and requirement coverage; Automation must contain complete, syntactically valid Python test functions. The evaluator parses/compiles code as data and never executes it. Passing these checks does not establish selector grounding. The initial corpus is a smoke benchmark, not evidence for every domain.
+
+Before enabling any stage, require all correctness gates, complete paired measurements, and useful improvement in coverage or repeated corrections without increased unsupported assumptions. Report any latency/cost increase explicitly in the rollout PR and justify acceptance. Expand fixtures for the target domain before a broad release. Enable skills and memory independently for approved stages; rollback by disabling the relevant flag. Do not rewrite approved records or existing artifact decisions during rollout. This release starts with no imported historical lessons or personal selections.
+
+See `docs/guidance-rollout-report.md` for actual measured/blocked status; infrastructure readiness is separate from model-quality evidence. ADK marks [skills experimental](https://adk.dev/skills/), so loader/instruction injection stays behind the adapter. ADK's [memory service](https://adk.dev/sessions/memory/) remains separate from session state; our adapter cannot ingest sessions or approve records.

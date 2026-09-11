@@ -6,6 +6,8 @@ export default function useKnowledge(request, projectId) {
 	const requester = useRef(request);
 	const epoch = useRef(0);
 	const attempt = useRef(null);
+	const scopeVersion = useRef(0);
+	const mutating = useRef(false);
 	const [data, setData] = useState(null);
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(true);
@@ -29,14 +31,22 @@ export default function useKnowledge(request, projectId) {
 		}
 	}, [path]);
 	useEffect(() => {
+		scopeVersion.current++;
+		setData(null);
+		setError("");
+		setBusy(false);
+		mutating.current = false;
+		attempt.current = null;
 		void load();
 		return () => {
 			epoch.current++;
+			scopeVersion.current++;
 		};
 	}, [load]);
 	const mutate = async (payload) => {
-		if (busy) return null;
-		const current = epoch.current;
+		if (mutating.current) return null;
+		mutating.current = true;
+		const current = scopeVersion.current;
 		const fingerprint = JSON.stringify([path, payload]);
 		if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, id: crypto.randomUUID() };
 		setBusy(true);
@@ -47,15 +57,18 @@ export default function useKnowledge(request, projectId) {
 				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.current.id },
 				body: JSON.stringify(payload),
 			});
-			if (current !== epoch.current) return null;
+			if (current !== scopeVersion.current) return null;
 			attempt.current = null;
 			await load();
 			return result;
 		} catch (e) {
-			if (current === epoch.current) setError(e.message);
+			if (current === scopeVersion.current) setError(e.message);
 			return null;
 		} finally {
-			setBusy(false);
+			if (current === scopeVersion.current) {
+				mutating.current = false;
+				setBusy(false);
+			}
 		}
 	};
 	return { data, error, loading, busy, load, mutate };

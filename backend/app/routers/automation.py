@@ -223,7 +223,7 @@ async def automation_playwright(
                 append_stage_snapshot,
                 project_id=payload.project_id,
                 stage="automation",
-                payload={"artifact_kind": "generated_code", "files": response.files, "diagnostics": response.diagnostics},
+                payload={"artifact_kind": "generated_code", "files": response.files, "notes": response.notes, "diagnostics": response.diagnostics},
                 operation="automation.playwright.generate",
                 actor=current_user,
                 request_id=request_id,

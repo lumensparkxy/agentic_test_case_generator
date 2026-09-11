@@ -210,14 +210,16 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 			{!personal && knowledge.data && !Object.values(knowledge.data.features || {}).some((f) => f.memory) && (
 				<p>Memory use is currently disabled. You can prepare guidance before rollout.</p>
 			)}
-			<CollectionToolbar>
-				<Select aria-label="Filter knowledge" value={filter} onChange={(e) => setFilter(e.target.value)}>
-					{["active", "suggested", "needs_confirmation", "all"].map((s) => (
-						<option key={s} value={s}>
-							{s === "all" ? "All guidance" : LABELS[s]}
-						</option>
-					))}
-				</Select>
+			<CollectionToolbar className="knowledge-toolbar">
+				<div className="knowledge-filter">
+					<Select aria-label="Filter knowledge" value={filter} onChange={(e) => setFilter(e.target.value)}>
+						{["active", "suggested", "needs_confirmation", "all"].map((s) => (
+							<option key={s} value={s}>
+								{s === "all" ? "All guidance" : LABELS[s]}
+							</option>
+						))}
+					</Select>
+				</div>
 				<Button disabled={knowledge.busy} onClick={() => setDialog({ mode: "propose" })}>
 					Add guidance
 				</Button>
@@ -351,7 +353,15 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 					<p>Curated methods are selected automatically by stage when skills are enabled.</p>
 					{knowledge.data?.skills.map((s) => (
 						<p key={s.id}>
-							<strong>{STAGES[s.stage]}</strong> · {s.id} v{s.version} — {s.description}
+							<strong>{STAGES[s.stage]}</strong> · {s.id} v{s.version} — {s.description}{" "}
+							{["skills", "memory"].map((kind) => {
+								const value = knowledge.data?.features?.[s.stage]?.[kind];
+								return (
+									<Badge key={kind} tone={value === true ? "success" : "neutral"}>
+										{kind === "skills" ? "Skills" : "Memory"} {value === true ? "on" : value === false ? "off" : "status unavailable"}
+									</Badge>
+								);
+							})}
 						</p>
 					))}
 				</Disclosure>

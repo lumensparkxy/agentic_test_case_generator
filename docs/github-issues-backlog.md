@@ -1,7 +1,6 @@
-<!-- #269 delivery: foundations #275; storage #276; management UI #277; workflow integration #273; validation/rollout #274. -->
 # GitHub Issue Backlog for Test Case Engine Improvements
 
-- In progress: epic #269 — ADK skills and approved project/personal knowledge. Dependent stories #270, #271, #272, #273, #274; builds on PR #268. Features default off until evaluated.
+- Implementation under review, local pilot enabled: epic #269 — ADK skills and approved project/personal knowledge. #270 / PR #275, #271 / PR #276, #272 / PR #277, #273 / PR #278, #274 / PR #279. Builds on PR #268. 96 live samples support local combined guidance for Requirements and Use Cases. Test Cases is held on #280 (silent contract drops); Automation is held on #281 (invalid/ungrounded output and manual diagnostics). See `docs/guidance-rollout-report.md` for all arms, costs, caveats and exact enablement scope.
 
 - Implemented, awaiting review: #267 — Fix the outer table edge and resize only internal boundaries by exchanging adjacent column widths. Builds on #265 / PR #266; parent #241.
 

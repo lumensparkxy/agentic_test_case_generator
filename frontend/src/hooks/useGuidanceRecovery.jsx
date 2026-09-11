@@ -10,6 +10,7 @@ export default function useGuidanceRecovery(scope) {
 	const scopeRef = useRef(scope);
 	useEffect(() => {
 		scopeRef.current = scope;
+		setPending(null);
 	}, [scope]);
 	const [pending, setPending] = useState(null);
 	const advance = useCallback((choice) => {

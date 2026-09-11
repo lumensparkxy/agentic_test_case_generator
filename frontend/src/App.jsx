@@ -4011,6 +4011,7 @@ export default function App() {
 
 			{guidanceRecovery.dialog}
 			<SettingsDialog
+				key={currentUser?.sub || "anonymous"}
 				request={apiRequest}
 				isOpen={isSettingsDialogOpen}
 				onOverlayClick={handleSettingsDialogOverlayClick}

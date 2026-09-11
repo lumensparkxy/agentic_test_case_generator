@@ -110,3 +110,15 @@ Use Cases displays each requirement ID, full text and visible use-case count onc
 Use Cases stores the synchronized layout under `tcg.columns.use-cases-grouped-v1`; the previous five-column preference remains unused. Dragging or keyboard-resizing any group's header updates every visible table and groups restored by clearing filters. Review draft identity and persistence remain owned by the page.
 
 The fixed outer-edge behavior (#267) preserves both neighboring minimum widths during pointer and keyboard resizing. Quality flags can be resized only from its left divider; the table border is not an interactive separator.
+
+## Approved knowledge and generation provenance
+
+`components/knowledge/KnowledgePanel` uses the shared collection toolbar, table, fields, badges and focus-managed dialogs on Context and Settings → Personal knowledge. The project receives controlled scope and an authenticated request callback; API lifecycle and selection remain in `useKnowledge`. Keep project/personal scope in component identity so pending requests and dialogs cannot carry across owners or projects. The compact toolbar wraps on mobile; only the named table region scrolls horizontally.
+
+An active entry with a proposed edit displays both versions. Approve knowledge is separate from artifact review. Personal promotion creates an inactive proposal; selection requires approval and an explicit per-project action. Never style these decisions as the artifact's approval/export gate. Use labeled badges rather than color alone. Loading, failure/retry, empty and filtered-empty states use the shared collection state pattern.
+
+The read-only skill catalog uses shared badges to show Skills on/off and Memory on/off per stage from the backend feature map. An absent value says status unavailable; do not infer that an available skill package is enabled for generation.
+
+`GuidanceUsed` is the compact, expandable provenance view on Requirements, Use Cases, Test Cases and Automation. Its key includes owner/project and manifest identity; historical wording resolves by recorded revision. Missing history says Guidance not recorded. Missing/deleted content says unavailable. Newer guidance is informational and never changes artifact approval. Deterministic execution preview shows the source test-case manifest separately.
+
+The shared recovery dialog pauses a generation that cannot load memory and offers Retry loading guidance, Run without remembered guidance, and Cancel generation. Only an explicit bypass changes that input; failed suggestion retries never repeat generation or artifact review.
