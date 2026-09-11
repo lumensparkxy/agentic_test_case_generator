@@ -4,6 +4,7 @@ Receipts contain identifiers only, so deleting an entry cannot leave its text
 in an idempotency response cache. The owner document is capped below Firestore's
 size limit; future adapters may split records without changing the service.
 """
+
 from copy import deepcopy
 from hashlib import sha256
 import json
@@ -29,6 +30,7 @@ class FirestoreKnowledgeRepository:
     def mutate(self, owner, request_id, fingerprint, apply, project_id=None):
         doc = self.document(owner)
         receipt = doc.collection("requests").document(sha256(request_id.encode()).hexdigest())
+
         @transactional
         def run(transaction):
             # Check project ownership within the same transaction as the write.
@@ -50,4 +52,5 @@ class FirestoreKnowledgeRepository:
             transaction.set(doc, updated)
             transaction.set(receipt, {"fingerprint": fingerprint, "entry_id": entry_id})
             return updated, entry_id
+
         return run(self.client.transaction())

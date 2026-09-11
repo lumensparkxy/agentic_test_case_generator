@@ -1,4 +1,5 @@
 """Knowledge is a separately approved, versioned product input."""
+
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .guidance import GuidanceStage
@@ -15,6 +16,7 @@ class KnowledgeDraft(BaseModel):
     @classmethod
     def clean_text(cls, value):
         import re
+
         value = value.strip()
         if not value:
             raise ValueError("Guidance cannot be blank")
