@@ -28,8 +28,6 @@ import {
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import ExportPanel from "./components/export/ExportPanel";
 import GeneratedTestCasesView from "./components/generation/GeneratedTestCasesView";
-import RequirementAnalysisPanel from "./components/generation/RequirementAnalysisPanel";
-import ScenarioCoveragePanel from "./components/generation/ScenarioCoveragePanel";
 import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
 import OrchestratorCockpitPanel from "./components/projects/OrchestratorCockpitPanel";
@@ -772,7 +770,7 @@ export default function App() {
 			return "traceability";
 		}
 		if ((metrics?.missing_must_have_scenarios || []).length > 0 || (metrics?.missing_scenarios || []).length > 0) {
-			return "coverage";
+			return "traceability";
 		}
 		return "test-cases";
 	};
@@ -1501,7 +1499,7 @@ export default function App() {
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
 		setImpactUpdateMessage("");
 		setActiveGenerateResultTab(
-			(generationPayload.test_cases || []).length ? chooseGenerateResultTab(hydratedGenerationPayload) : "analysis"
+			(generationPayload.test_cases || []).length ? chooseGenerateResultTab(hydratedGenerationPayload) : "test-cases"
 		);
 		resetExportWorkflowState();
 		setExportMessage("");
@@ -3573,50 +3571,6 @@ export default function App() {
 		return coverageMetrics?.requirement_scenario_summary?.[requirementId] || null;
 	};
 
-	const getRequirementAnalysisSummary = (requirementId) => {
-		return coverageMetrics?.requirement_analysis_summary?.[requirementId] || null;
-	};
-
-	const getRequirementAnalysisGaps = (requirementId) => {
-		const analysis = requirementAnalysis.find((a) => a.requirement_id === requirementId);
-		if (!analysis) {
-			return { highRisks: [], rules: [], constraints: [], permissions: [], transitions: [] };
-		}
-		const summary = coverageMetrics?.requirement_analysis_summary?.[requirementId] || {};
-		const coveredRules = new Set(summary.rules_covered || []);
-		const coveredConstraints = new Set(summary.constraints_covered || []);
-		const coveredPermissions = new Set(summary.permissions_covered || []);
-		const coveredTransitions = new Set(summary.transitions_covered || []);
-		const coveredRisks = new Set(summary.risks_covered || []);
-		return {
-			highRisks: (analysis.risk_signals || []).filter((r) => r.severity === "High" && !coveredRisks.has(r.id)).map((r) => r.title),
-			rules: (analysis.business_rules || []).filter((r) => !coveredRules.has(r.id)).map((r) => r.title),
-			constraints: (analysis.field_constraints || []).filter((c) => !coveredConstraints.has(c.id)).map((c) => c.field_name),
-			permissions: (analysis.role_permissions || []).filter((p) => !coveredPermissions.has(p.id)).map((p) => `${p.role}: ${p.action}`),
-			transitions: (analysis.state_transitions || [])
-				.filter((t) => !coveredTransitions.has(t.id))
-				.map((t) => `${t.from_state} → ${t.to_state}`),
-		};
-	};
-
-	const coveredScenarioTotal = coveragePlan.reduce(
-		(sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.covered_scenarios || 0),
-		0
-	);
-	const plannedScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.length || 0), 0);
-	const mustHaveScenarioTotal = coveragePlan.reduce((sum, plan) => sum + (plan.scenarios?.filter((s) => s.must_have).length || 0), 0);
-	const mustHaveCoveredScenarioTotal = coveragePlan.reduce((sum, plan) => {
-		const missing = new Set(getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types || []);
-		return sum + (plan.scenarios?.filter((s) => s.must_have && !missing.has(s.scenario_type)).length || 0);
-	}, 0);
-	const missingScenarioCount = coveragePlan.reduce(
-		(sum, plan) => sum + (getRequirementScenarioSummary(plan.requirement_id)?.missing_scenario_types?.length || 0),
-		0
-	);
-	const requirementAnalysisGapCount = requirementAnalysis.reduce((sum, analysis) => {
-		const gaps = getRequirementAnalysisGaps(analysis.requirement_id);
-		return sum + Object.values(gaps).reduce((s, arr) => s + arr.length, 0);
-	}, 0);
 	const requirementTraceabilityRows = approvedRequirements.map((requirement) => {
 		const linkedTestCases = testCases.filter((testCase) => getTestCaseLinkedRequirementIds(testCase).includes(requirement.id));
 		const scenarioSummary = getRequirementScenarioSummary(requirement.id);
@@ -3666,18 +3620,6 @@ export default function App() {
 			label: "Traceability Matrix",
 			badge: approvedRequirements.length ? `${tracedRequirementCount}/${approvedRequirements.length}` : "—",
 			variant: traceabilityGapCount > 0 ? "warning" : tracedRequirementCount > 0 ? "success" : "muted",
-		},
-		{
-			id: "coverage",
-			label: "Scenario Coverage",
-			badge: plannedScenarioTotal ? `${coveredScenarioTotal}/${plannedScenarioTotal}` : "—",
-			variant: missingScenarioCount > 0 ? "warning" : plannedScenarioTotal ? "success" : "muted",
-		},
-		{
-			id: "analysis",
-			label: "Requirement Analysis",
-			badge: requirementAnalysisGapCount > 0 ? `${requirementAnalysisGapCount} gaps` : requirementAnalysis.length || "—",
-			variant: requirementAnalysisGapCount > 0 ? "warning" : requirementAnalysis.length ? "success" : "muted",
 		},
 		{
 			id: "diagnostics",
@@ -4945,8 +4887,8 @@ export default function App() {
 														<div>
 															<h3>Generation Results</h3>
 															<p>
-																Review the generated cases, traceability, coverage, analysis, and workflow diagnostics without scrolling
-																through a wall of artifacts.
+																Review the generated cases, requirement traceability, and workflow diagnostics without scrolling through a
+																wall of artifacts.
 															</p>
 														</div>
 														<span className="generate-results-summary-pill">
@@ -4992,28 +4934,6 @@ export default function App() {
 																</CollectionState>
 															))}
 
-														{activeGenerateResultTab === "coverage" && (
-															<ScenarioCoveragePanel
-																coveragePlan={coveragePlan}
-																coveredScenarioTotal={coveredScenarioTotal}
-																plannedScenarioTotal={plannedScenarioTotal}
-																mustHaveCoveredScenarioTotal={mustHaveCoveredScenarioTotal}
-																mustHaveScenarioTotal={mustHaveScenarioTotal}
-																missingScenarioCount={missingScenarioCount}
-																getRequirementScenarioSummary={getRequirementScenarioSummary}
-															/>
-														)}
-
-														{activeGenerateResultTab === "analysis" && (
-															<RequirementAnalysisPanel
-																requirementAnalysis={requirementAnalysis}
-																coverageMetrics={coverageMetrics}
-																requirementAnalysisGapCount={requirementAnalysisGapCount}
-																getRequirementAnalysisSummary={getRequirementAnalysisSummary}
-																getRequirementAnalysisGaps={getRequirementAnalysisGaps}
-															/>
-														)}
-
 														{activeGenerateResultTab === "traceability" && (
 															<TraceabilityMatrixPanel
 																approvedRequirements={approvedRequirements}
@@ -5046,8 +4966,7 @@ export default function App() {
 												<Surface as="div" className="result-section">
 													<h3>Generated Test Cases</h3>
 													<span className="helper-text">
-														No generation run yet. Generate from approved requirements to view test cases, traceability, coverage, analysis,
-														and diagnostics.
+														No generation run yet. Generate from approved requirements to view test cases, traceability, and diagnostics.
 													</span>
 												</Surface>
 											)}

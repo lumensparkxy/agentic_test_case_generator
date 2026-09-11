@@ -25,7 +25,11 @@ const caseFixture = (id, title) => ({
 	})),
 });
 
-async function openCases(page, testCases = [caseFixture("TC-001", "Valid checkout"), caseFixture("TC-002", "Declined card")]) {
+async function openCases(
+	page,
+	testCases = [caseFixture("TC-001", "Valid checkout"), caseFixture("TC-002", "Declined card")],
+	payload = {}
+) {
 	const project = useCaseProjectFixture();
 	project.current_snapshots.test_cases = {
 		snapshot_id: "cases-v1",
@@ -42,6 +46,7 @@ async function openCases(page, testCases = [caseFixture("TC-001", "Valid checkou
 				blocking_issues: ["TC-001 requires a grounded button label."],
 				summary: "Grounded UI details required.",
 			},
+			...payload,
 		},
 	};
 	project.stage_state.test_cases = { current_snapshot_id: "cases-v1", approved: false, stale: false, version: 1 };
@@ -325,4 +330,57 @@ test("stale Use Cases cannot be approved from either review entry point", async 
 	await expect(dialog).toContainText("Requirements changed.");
 	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 	expect(api.requests.review).toEqual([]);
+});
+
+test("Test Cases keeps three result tabs and compact traceability rows", async ({ page }) => {
+	const project = await openCases(page);
+	const tabs = page.getByRole("tablist", { name: "Generation result sections" });
+	await expect(tabs.getByRole("tab")).toHaveCount(3);
+	await expect(tabs).not.toContainText("Scenario Coverage");
+	await expect(tabs).not.toContainText("Requirement Analysis");
+	await tabs.getByRole("tab", { name: /^Traceability Matrix/ }).click();
+	const table = page.getByRole("region", { name: "Requirement traceability table" }).getByRole("table");
+	await expect(table.getByRole("columnheader")).toHaveText(["Requirement", "Linked test cases", "Scenario coverage", "Status"]);
+	for (const [index, requirement] of project.current_snapshots.requirements.payload.requirements.entries()) {
+		await expect(
+			table
+				.getByRole("row")
+				.nth(index + 1)
+				.getByRole("cell")
+				.first()
+		).toHaveText(requirement.id);
+		await expect(table).not.toContainText(requirement.text);
+	}
+	await expect(table.getByRole("row").nth(1)).toContainText("TC-001");
+	await expect(table.getByRole("row").nth(1)).toContainText("Covered");
+	await expect(table.getByRole("row").nth(2)).toContainText("No linked tests");
+	await expect(table.getByRole("row").nth(2)).toContainText("Gap");
+	for (const width of [1488, 390]) {
+		await page.setViewportSize({ width, height: 900 });
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	}
+	await tabs.getByRole("tab", { name: /^Traceability Matrix/ }).focus();
+	await page.keyboard.press("ArrowRight");
+	await expect(tabs.getByRole("tab", { name: /^Diagnostics/ })).toHaveAttribute("aria-selected", "true");
+	await expect(page.getByRole("tabpanel", { name: "Diagnostics", exact: true })).toBeVisible();
+	await page.keyboard.press("ArrowRight");
+	await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
+	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
+});
+
+test("coverage gaps select the remaining traceability tab after load and reload", async ({ page }) => {
+	await openCases(page, [caseFixture("TC-001", "Valid checkout")], {
+		coverage_metrics: { missing_must_have_scenarios: ["negative"], missing_scenarios: ["boundary"], requirements_without_tests: [] },
+	});
+	const selected = page.getByRole("tab", { name: /^Traceability Matrix/ });
+	await expect(selected).toHaveAttribute("aria-selected", "true");
+	await expect(page.getByRole("region", { name: "Requirement traceability table" })).toBeVisible();
+	await page.reload();
+	await expect(selected).toHaveAttribute("aria-selected", "true");
+});
+
+test("loaded project without test cases selects a visible results tab", async ({ page }) => {
+	await openCases(page, []);
+	await expect(page.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
+	await expect(page.getByRole("tabpanel", { name: "Generated Test Cases", exact: true })).not.toBeEmpty();
 });

@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented; PR review pending: #286 — Simplify Test Cases to Generated Test Cases, Traceability Matrix, and Diagnostics; show requirement IDs only and remove Story / source path. Parent #241; stacked on PR #285. Validation: 21 focused browser checks, build, lint, and changed-file formatting pass.
+
 - Implemented; PR review pending: #284 — Responsive Use Cases tables after browser/column resizing, inline wrapping requirement ID/title, and removal of per-group counts. Parent #241; frontend-only follow-up. Validation: 14 scenario review E2E tests, frontend build, lint, and focused formatting pass.
 
 - Consolidation #282 (2026-09-11): merged PRs #260, #262, #264, #266, #268, #275, #276, #277, #278 and #279 sequentially into protected `main`. Each PR passed both required checks against its updated base. All ten feature branches were removed locally and remotely after commit ancestry and dependent PR checks. The merged application tree matches the previously validated latest branch. Local configuration and evaluation evidence are preserved. This backlog reconciliation is the final issue-scoped cleanup change; #241/#246, #251, #269/#274 and #280/#281 remain open for their outstanding acceptance criteria.
