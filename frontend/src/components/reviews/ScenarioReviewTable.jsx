@@ -140,16 +140,13 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 			) : null}
 			{visibleGroups.map(({ group, rows: groupRows }, index) => (
 				<section key={group.requirement_id} className="ui-table-group">
-					<header className="ui-table-group-heading">
-						<h3 id={`${headingPrefix}-${index}`}>{group.requirement_id}</h3>
-						<span>
-							{groupRows.length} {groupRows.length === 1 ? "use case" : "use cases"}
-						</span>
-						<p>{group.requirement_text}</p>
+					<header className="ui-table-group-heading scenario-group-heading">
+						<h3 id={`${headingPrefix}-${index}`}>{group.requirement_id}</h3> <p>{group.requirement_text}</p>
 					</header>
 					<TableScroll aria-label={`Use cases for ${group.requirement_id}`} className="scenario-table-scroll">
 						<ResizableTable
 							columns={COLUMNS}
+							responsiveMinWidth={800}
 							widths={widths}
 							onWidthsChange={setWidths}
 							aria-labelledby={`${headingPrefix}-${index}`}

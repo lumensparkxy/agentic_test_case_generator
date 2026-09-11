@@ -1028,3 +1028,14 @@ select {
 .scenario-review-table .use-case-scenario-card {
 	list-style: none;
 }
+
+.ui-table-group-heading.scenario-group-heading {
+	display: block;
+}
+.ui-table-group-heading.scenario-group-heading h3,
+.ui-table-group-heading.scenario-group-heading p {
+	display: inline;
+}
+.ui-table-group-heading.scenario-group-heading h3 {
+	margin-right: var(--space-2);
+}

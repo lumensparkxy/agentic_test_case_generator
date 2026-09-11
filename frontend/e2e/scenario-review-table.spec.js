@@ -184,7 +184,7 @@ test("requirement headings replace repeated cells and filtering preserves cross-
 	]);
 	await page.getByRole("combobox", { name: "Filter by review status", exact: true }).selectOption("approved");
 	await expect(page.getByRole("table")).toHaveCount(1);
-	await expect(page.getByText("1 use case", { exact: true })).toBeVisible();
+	await expect(page.locator(".scenario-group-heading").first()).not.toContainText(/\d+ use cases?/);
 	await search.fill("no matching use case");
 	await expect(page.getByRole("table")).toHaveCount(0);
 	await expect(page.getByText("No scenarios match these filters.")).toBeVisible();
@@ -199,7 +199,7 @@ test("long requirement headings and single-row groups wrap without page overflow
 	await page.addInitScript(() => localStorage.setItem("tcg.columns.use-cases", JSON.stringify([220, 143, 352, 187, 198])));
 	await open(page, { initialProject: project });
 	await expect(page.getByText(groups[0].requirement_text.trim(), { exact: true })).toBeVisible();
-	await expect(page.getByText("1 use case", { exact: true })).toBeVisible();
+	await expect(page.locator(".scenario-group-heading").first()).not.toContainText(/\d+ use cases?/);
 	await expect(page.getByRole("table", { name: "REQ-101", exact: true }).getByRole("columnheader")).toHaveCount(4);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -232,4 +232,74 @@ test("older narrow saved widths still fill the table container", async ({ page }
 	const outer = await region.boundingBox();
 	const bounds = await table.boundingBox();
 	expect(Math.abs(outer.x + outer.width - bounds.x - bounds.width)).toBeLessThanOrEqual(2);
+});
+
+test("tables fit browser resizing before and after persisted column edits", async ({ page }) => {
+	await page.setViewportSize({ width: 1488, height: 900 });
+	await open(page);
+	const tables = page.getByRole("table");
+	const region = page.getByRole("region", { name: "Use cases for REQ-101", exact: true });
+	const checkFit = async () => {
+		for (const table of await tables.all())
+			await expect
+				.poll(async () => {
+					const expected = Math.max(800, await region.evaluate((node) => node.clientWidth));
+					return Math.abs((await table.boundingBox()).width - expected);
+				})
+				.toBeLessThan(1);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	};
+	for (const width of [1150, 1488]) {
+		await page.setViewportSize({ width, height: 900 });
+		await checkFit();
+	}
+	await status(page).selectOption("approved");
+	await tables.first().getByRole("separator", { name: "Resize Title / objective column", exact: true }).press("ArrowRight");
+	const saved = await page.evaluate(() => localStorage.getItem("tcg.columns.use-cases-grouped-v1"));
+	for (const width of [1150, 1800, 390, 1488]) {
+		await page.setViewportSize({ width, height: 900 });
+		await checkFit();
+		await expect(status(page)).toHaveValue("approved");
+		expect(await page.evaluate(() => localStorage.getItem("tcg.columns.use-cases-grouped-v1"))).toBe(saved);
+		const first = await tables
+			.first()
+			.getByRole("columnheader")
+			.evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
+		const second = await tables
+			.nth(1)
+			.getByRole("columnheader")
+			.evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
+		expect(second).toEqual(first);
+		for (const [i, minimum] of [140, 200, 150, 150].entries()) expect(first[i]).toBeGreaterThanOrEqual(minimum - 1);
+	}
+	await page.reload();
+	await expect(status(page)).toBeVisible();
+	await page.setViewportSize({ width: 1150, height: 900 });
+	await checkFit();
+});
+
+test("requirement ID and text start inline and wrap within the group", async ({ page }) => {
+	const project = useCaseProjectFixture();
+	project.current_snapshots.use_cases.payload.coverage_plan[0].requirement_text =
+		"The system shall allow a user to create a task with a title containing between 1 and 100 characters. ".repeat(4).trim();
+	await open(page, { initialProject: project });
+	const heading = page.locator(".scenario-group-heading").first();
+	for (const width of [1488, 390]) {
+		await page.setViewportSize({ width, height: 900 });
+		await expect(heading).not.toContainText(/\d+ use cases?/);
+		const layout = await heading.evaluate((node) => {
+			const id = node.querySelector("h3").getBoundingClientRect();
+			const range = document.createRange();
+			range.selectNodeContents(node.querySelector("p"));
+			const lines = [...range.getClientRects()];
+			const bounds = node.getBoundingClientRect();
+			return {
+				sameLine: Math.abs(id.y - lines[0].y) < 3,
+				inline: lines[0].x > id.right,
+				wraps: lines.length > 1,
+				contained: lines.every((line) => line.left >= bounds.left && line.right <= bounds.right),
+			};
+		});
+		expect(layout).toEqual({ sameLine: true, inline: true, wraps: true, contained: true });
+	}
 });

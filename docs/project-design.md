@@ -103,7 +103,7 @@ Drag an internal divider between column headers; the final column has no outer r
 
 ## Requirement-grouped tables (#265)
 
-Use Cases displays each requirement ID, full text and visible use-case count once in a non-collapsible `.ui-table-group-heading`, followed by a named four-column table. Columns are Use Case ID, Title / objective, Review status and Quality flags. Search, filters, save/discard controls and overall review actions remain page-level; groups without matching rows disappear without discarding draft reviews.
+Use Cases displays each requirement ID and full text inline, wrapping within the group width without a per-group count (#284), in a non-collapsible `.ui-table-group-heading`, followed by a named four-column table. Columns are Use Case ID, Title / objective, Review status and Quality flags. Search, filters, save/discard controls and overall review actions remain page-level; groups without matching rows disappear without discarding draft reviews.
 
 `ResizableTable` supports controlled `widths` (pixel array or `null` for default proportions) and `onWidthsChange(nextWidths)`. A page owning multiple tables should call `useTableColumnWidths(columns, storageKey)` once and pass the returned state/setter to every table. Standalone tables may continue using `storageKey` for internal persistence. Pass `aria-labelledby` to name each table from its requirement heading. Group headings wrap outside each labeled horizontal scroll container.
 
@@ -122,3 +122,5 @@ The read-only skill catalog uses shared badges to show Skills on/off and Memory 
 `GuidanceUsed` is the compact, expandable provenance view on Requirements, Use Cases, Test Cases and Automation. Its key includes owner/project and manifest identity; historical wording resolves by recorded revision. Missing history says Guidance not recorded. Missing/deleted content says unavailable. Newer guidance is informational and never changes artifact approval. Deterministic execution preview shows the source test-case manifest separately.
 
 The shared recovery dialog pauses a generation that cannot load memory and offers Retry loading guidance, Run without remembered guidance, and Cancel generation. Only an explicit bypass changes that input; failed suggestion retries never repeat generation or artifact review.
+
+Use Cases opts into `ResizableTable`'s `responsiveMinWidth={800}` (#284). On container resize, stored widths share the available space above each column's minimum width; groups remain aligned and the table fits the container down to 800px, then scrolls within it. Browser resizing does not overwrite the saved preference. Other table consumers retain their existing sizing behavior.
