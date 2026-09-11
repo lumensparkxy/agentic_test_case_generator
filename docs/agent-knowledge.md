@@ -14,3 +14,10 @@ One immutable manifest records model, skill versions/hashes, selected memory rev
 - #272: shared management and provenance UI
 - #273: generation and successful-feedback integration
 - #274: validation, evaluation and rollout evidence
+
+## Durable lifecycle (#271)
+`GET /skills`, `GET/POST /projects/{id}/knowledge`, and `GET/POST /me/knowledge` expose the approved lifecycle. POST requires `X-Request-ID` and an action, entry ID/base revision where applicable, and draft content. An action accepts propose, revise, approve, dismiss, retire, delete, promote, select or unselect. Personal facts/requirement links are rejected; business facts require current source requirement links. Promotion creates an inactive personal proposal requiring separate approval.
+
+Firestore stores bounded, owner-isolated knowledge state in `agent_knowledge`, accessed only through authenticated backend services. A transaction checks project ownership, optimistic entry revision and a separate idempotency receipt before committing. Reusing an ID with different input is a conflict. Receipts contain identifiers, not guidance text. Deletion purges version text and selections; artifact provenance uses IDs/hashes, and missing historical content is shown as unavailable. Required links are hashed; changed/missing sources cause effective `needs_confirmation` status and retrieval exclusion.
+
+The read-only ADK adapter accepts only the frozen run manifest and owner. Session ingestion is rejected. Selected personal records remain owned by that user and are never automatically included in other projects. Source-based exclusion and retrieval order are deterministic.

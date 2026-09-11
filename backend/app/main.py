@@ -10,6 +10,7 @@ from .observability.logging import bind_log_context, configure_logging, reset_lo
 from .observability.metrics import record_http_request, render_prometheus_metrics
 from .observability.tracing import configure_tracing, resolve_trace_id
 
+from .routers.knowledge import router as knowledge_router
 from .routers.auth import router as auth_router
 from .routers.automation import router as automation_router
 from .routers.billing import router as billing_router
@@ -39,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(knowledge_router)
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(reports_router)
