@@ -53,4 +53,5 @@ async def change_personal_knowledge(payload: KnowledgeMutation, request: Request
 @router.get("/projects/{project_id}/knowledge/{entry_id}/versions/{revision}")
 async def read_knowledge_version(project_id: str, entry_id: str, revision: int, actor: AuthUser = Depends(get_current_user)):
     from ..services.knowledge_service import knowledge_version
+
     return await guarded(knowledge_version, actor, project_id, entry_id, revision)
