@@ -238,7 +238,9 @@ def _seed_store(*, owner_user_id: str = "reviewer-1") -> dict[str, dict[str, Any
             stage="use_cases",
             approved=False,
             payload={
-                "coverage_plan": [{"requirement_id": "REQ-1", "scenarios": []}],
+                "coverage_plan": [
+                    {"requirement_id": "REQ-1", "scenarios": [{"id": "SCN-1", "title": "Checkout success"}, {"id": "SCN-2", "title": "Checkout failure"}]}
+                ],
                 "review": {"approved": False, "blocking_issues": []},
             },
         ),
@@ -323,6 +325,7 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         base_project_revision: int = PROJECT_REVISION,
         actor: AuthUser | None = None,
         request_id: str = "req-review-1",
+        scenario_reviews: list[dict] | None = None,
     ) -> UseCaseReviewResponse:
         return review_use_case_snapshot(
             project_id=PROJECT_ID,
@@ -330,12 +333,51 @@ class UseCaseReviewServiceTests(unittest.TestCase):
             base_project_revision=base_project_revision,
             decision=decision,
             comment=comment,
+            scenario_reviews=scenario_reviews,
             actor=actor or self.actor,
             request_id=request_id,
         )
 
     def _paths_containing(self, segment: str) -> list[str]:
         return sorted(path for path in self.store if segment in path)
+
+    def test_scenario_reviews_persist_without_approving_whole_snapshot(self):
+        update = {"requirement_id": "REQ-1", "scenario_id": "SCN-1", "status": "approved", "quality_flags": ["Ambiguous"]}
+        response = self._review(decision="review_scenarios", scenario_reviews=[update])
+        items = response.use_cases_state.metadata["scenario_reviews"]["items"]
+        self.assertFalse(response.use_cases_state.approved)
+        self.assertEqual(items['["REQ-1","SCN-1"]']["status"], "approved")
+        self.assertEqual(items['["REQ-1","SCN-1"]']["quality_flags"], ["Ambiguous"])
+        self.assertEqual(items['["REQ-1","SCN-2"]']["status"], "needs_review")
+        retry = self._review(decision="review_scenarios", scenario_reviews=[update])
+        self.assertEqual(retry.review.review_id, response.review.review_id)
+        with self.assertRaises(UseCaseReviewConflictError):
+            self._review(decision="review_scenarios", scenario_reviews=[{**update, "quality_flags": []}])
+
+    def test_editing_scenario_invalidates_prior_whole_approval(self):
+        approved = self._review()
+        self.assertTrue(all(item["status"] == "approved" for item in approved.use_cases_state.metadata["scenario_reviews"]["items"].values()))
+        updated = self._review(
+            decision="review_scenarios",
+            request_id="row-edit",
+            base_project_revision=PROJECT_REVISION + 1,
+            scenario_reviews=[{"requirement_id": "REQ-1", "scenario_id": "SCN-1", "status": "needs_review", "quality_flags": []}],
+        )
+        self.assertFalse(updated.use_cases_state.approved)
+        self.assertNotEqual(updated.use_cases_state.metadata["latest_human_review"]["decision"], "approve")
+
+    def test_unknown_scenario_and_stale_approval_write_nothing(self):
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException):
+            self._review(
+                decision="review_scenarios", scenario_reviews=[{"requirement_id": "REQ-1", "scenario_id": "unknown", "status": "approved", "quality_flags": []}]
+            )
+        self.assertEqual(self._paths_containing("/use_case_reviews/"), [])
+        self.project["stage_state"]["use_cases"]["stale"] = True
+        with self.assertRaises(UseCaseReviewConflictError):
+            self._review()
+        self.assertEqual(self._paths_containing("/use_case_reviews/"), [])
 
     def test_approval_commits_review_project_and_timeline_atomically(self) -> None:
         snapshot_path = f"qa_projects/{PROJECT_ID}/snapshots/{SNAPSHOT_ID}"
@@ -601,6 +643,7 @@ class UseCaseReviewEndpointTests(unittest.TestCase):
             comment=None,
             actor=self.actor,
             request_id="req-http-review",
+            scenario_reviews=[],
         )
 
     def test_endpoint_rejects_invalid_review_before_service_call(self) -> None:

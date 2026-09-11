@@ -96,6 +96,28 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         loaded = get_project(project.project_id, actor=self.actor)
         self.assertEqual(loaded.description, "Regression scope")
 
+    def test_use_case_regeneration_carries_only_unchanged_reviewed_rows(self):
+        project = create_project(name="Review carry", description=None, actor=self.actor, request_id="create")
+        payload = {"coverage_plan": [{"requirement_id": "R1", "scenarios": [{"id": "S1", "title": "Original"}]}]}
+        first = append_stage_snapshot(
+            project_id=project.project_id, stage="use_cases", payload=payload, operation="generate", actor=self.actor, request_id="first"
+        )
+        metadata = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]["metadata"]
+        metadata["scenario_reviews"]["items"]['["R1","S1"]'].update(status="approved", reviewer_user_id="user-1")
+        second = append_stage_snapshot(
+            project_id=project.project_id, stage="use_cases", payload=payload, operation="generate", actor=self.actor, request_id="second"
+        )
+        state = get_project(project.project_id, actor=self.actor).stage_state["use_cases"]
+        item = state.metadata["scenario_reviews"]["items"]['["R1","S1"]']
+        self.assertEqual(item["status"], "approved")
+        self.assertEqual(item["carried_from_snapshot_id"], first.snapshot_id)
+        self.assertEqual(state.metadata["scenario_reviews"]["snapshot_id"], second.snapshot_id)
+        self.assertFalse(state.approved)
+        changed = {"coverage_plan": [{"requirement_id": "R1", "scenarios": [{"id": "S1", "title": "Changed"}]}]}
+        append_stage_snapshot(project_id=project.project_id, stage="use_cases", payload=changed, operation="generate", actor=self.actor, request_id="third")
+        state = get_project(project.project_id, actor=self.actor).stage_state["use_cases"]
+        self.assertEqual(state.metadata["scenario_reviews"]["items"]['["R1","S1"]']["status"], "needs_review")
+
     def test_append_stage_snapshot_versions_and_marks_downstream_stale(self) -> None:
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
         append_stage_snapshot(

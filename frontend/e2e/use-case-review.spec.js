@@ -34,10 +34,6 @@ function decisionPanel(page) {
 	return reviewMain(page).getByRole("form", { name: /^Human review decision$/i });
 }
 
-function requirementGroup(page, requirementId) {
-	return reviewMain(page).getByRole("region", { name: new RegExp(`^${requirementId}(?:\\b|\\s|·)`, "i") });
-}
-
 function approveButton(page) {
 	return decisionPanel(page).getByRole("button", { name: /^Approve Use Cases$/i });
 }
@@ -116,23 +112,18 @@ test.describe("Use Cases review workbench", () => {
 		await expect(main).toContainText("2 / 2");
 		await expect(main).toContainText(/current|fresh/i);
 
-		const scenarioLists = main.getByRole("list", { name: /^Scenarios for REQ-/i });
-		await expect(scenarioLists).toHaveCount(2);
-		await expect(scenarioLists.getByRole("listitem")).toHaveCount(4);
-
-		const checkoutGroup = requirementGroup(page, "REQ-101");
-		await expect(checkoutGroup).toContainText("Source requirement REQ-101");
-		await expect(checkoutGroup).toContainText("Complete express checkout");
-		await expect(checkoutGroup).toContainText(/declined saved card/i);
-		await checkoutGroup.getByText(/^Coverage context$/i).click();
-		await expect(checkoutGroup).toContainText("saved_payment_method");
-		await expect(checkoutGroup).toContainText("Duplicate charge after retry");
-
-		const approvalGroup = requirementGroup(page, "REQ-202");
-		await expect(approvalGroup).toContainText("Source requirement REQ-202");
-		await expect(approvalGroup).toContainText("Require supervisor approval");
-		await approvalGroup.getByText(/^Coverage context$/i).click();
-		await expect(approvalGroup).toContainText("Threshold bypass");
+		const table = main.getByRole("table");
+		await expect(table.getByRole("row")).toHaveCount(5);
+		const checkoutRow = table.getByRole("row").filter({ hasText: "REQ-101-SCN-01" });
+		await expect(checkoutRow).toContainText("Complete express checkout");
+		await expect(table).toContainText(/declined saved card/i);
+		await checkoutRow.getByLabel("Details for REQ-101-SCN-01", { exact: true }).click();
+		await expect(checkoutRow).toContainText("saved_payment_method");
+		await expect(checkoutRow).toContainText("Duplicate charge after retry");
+		const approvalRow = table.getByRole("row").filter({ hasText: "REQ-202-SCN-01" });
+		await expect(approvalRow).toContainText("Require supervisor approval");
+		await approvalRow.getByLabel("Details for REQ-202-SCN-01", { exact: true }).click();
+		await expect(approvalRow).toContainText("Threshold bypass");
 
 		const machineReview = machineReviewRegion(page);
 		await expect(machineReview).toContainText("72");
@@ -142,7 +133,7 @@ test.describe("Use Cases review workbench", () => {
 		await expect(humanReviewRegion(page)).toContainText(/pending human decision/i);
 
 		await expect(main.getByText(USE_CASE_SNAPSHOT_ID, { exact: true })).not.toBeVisible();
-		await main.getByText(/^Details$/i).click();
+		await main.getByLabel("Artifact details", { exact: true }).click();
 		await expect(main.getByText(USE_CASE_SNAPSHOT_ID, { exact: true })).toBeVisible();
 		await expect(main.getByText("1.0", { exact: true })).toBeVisible();
 		await expect(main).not.toContainText("This stale Test Cases copy must not render.");
@@ -150,8 +141,8 @@ test.describe("Use Cases review workbench", () => {
 		const search = main.getByRole("searchbox", { name: /^Search use cases$/i });
 		const detailRequestsBeforeSearch = api.requests.projectDetail.length;
 		await search.fill("authorization");
-		await expect(requirementGroup(page, "REQ-202")).toBeVisible();
-		await expect(requirementGroup(page, "REQ-101")).toHaveCount(0);
+		await expect(table.getByRole("row").filter({ hasText: "REQ-202" }).first()).toBeVisible();
+		await expect(table.getByRole("row").filter({ hasText: "REQ-101" })).toHaveCount(0);
 		expect(api.requests.projectDetail).toHaveLength(detailRequestsBeforeSearch);
 	});
 
@@ -483,9 +474,7 @@ test.describe("Use Cases review workbench", () => {
 
 		await expect(humanReviewRegion(page)).toContainText(/authenticated reviewer/i);
 		await expect(humanReviewRegion(page)).not.toContainText(durableReview.reviewer_user_id);
-		await reviewMain(page)
-			.getByText(/^Details$/i)
-			.click();
+		await reviewMain(page).getByLabel("Artifact details", { exact: true }).click();
 		await expect(reviewMain(page).getByText(durableReview.reviewer_user_id, { exact: true })).toBeVisible();
 	});
 

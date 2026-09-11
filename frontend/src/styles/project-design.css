@@ -986,3 +986,60 @@ select {
 .use-case-review-dialog .use-case-decision-actions button {
 	width: auto;
 }
+
+.scenario-table-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin: 16px 0;
+}
+.scenario-table-toolbar p {
+	margin-right: auto;
+}
+.scenario-status-filter {
+	width: 200px;
+	max-width: 100%;
+}
+.scenario-review-table {
+	min-width: 950px;
+	table-layout: fixed;
+	width: 100%;
+}
+.scenario-review-table th:nth-child(1) {
+	width: 20%;
+}
+.scenario-review-table th:nth-child(2) {
+	width: 13%;
+}
+.scenario-review-table th:nth-child(3) {
+	width: 32%;
+}
+.scenario-review-table th:nth-child(4) {
+	width: 17%;
+}
+.scenario-review-table th:nth-child(5) {
+	width: 18%;
+}
+.scenario-review-table td,
+.scenario-review-table th {
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+.scenario-review-table p {
+	margin: 6px 0;
+	color: var(--text-muted);
+}
+.scenario-flags > div {
+	display: grid;
+	gap: 8px;
+	padding-top: 8px;
+}
+.scenario-flags label {
+	display: flex;
+	gap: 8px;
+	align-items: start;
+}
+.scenario-review-table .use-case-scenario-card {
+	list-style: none;
+}

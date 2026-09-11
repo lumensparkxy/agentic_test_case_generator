@@ -43,7 +43,7 @@ export class UseCaseReviewRequestError extends Error {
 
 export async function submitUseCaseReviewDecision(
 	request,
-	{ projectId, snapshotId, baseProjectRevision, decision, comment = "", requestId, signal } = {}
+	{ projectId, snapshotId, baseProjectRevision, decision, comment = "", scenarioReviews, requestId, signal } = {}
 ) {
 	if (typeof request !== "function") {
 		throw new TypeError("An authenticated request function is required to submit a Use Cases review.");
@@ -54,7 +54,7 @@ export async function submitUseCaseReviewDecision(
 	if (!Number.isInteger(baseProjectRevision) || baseProjectRevision < 0) {
 		throw new TypeError("The current project revision is required for review.");
 	}
-	if (!new Set(["approve", "request_changes"]).has(decision)) {
+	if (!new Set(["approve", "request_changes", "review_scenarios"]).has(decision)) {
 		throw new TypeError("Choose Approve or Request changes before submitting.");
 	}
 
@@ -74,6 +74,7 @@ export async function submitUseCaseReviewDecision(
 			snapshot_id: `${snapshotId}`.trim(),
 			base_project_revision: baseProjectRevision,
 			decision,
+			...(scenarioReviews ? { scenario_reviews: scenarioReviews } : {}),
 			comment: normalizedComment || null,
 		}),
 	});

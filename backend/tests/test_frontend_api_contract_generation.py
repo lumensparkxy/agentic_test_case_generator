@@ -33,7 +33,7 @@ class FrontendApiContractGenerationTests(unittest.TestCase):
         self.assertIn("work_items_limit?: number;", declarations)
         self.assertIn("export type ProjectUseCasesReviewRequest = UseCaseReviewRequest;", declarations)
         self.assertIn("export type ProjectUseCasesReviewResponse = UseCaseReviewResponse;", declarations)
-        self.assertIn('decision: "approve" | "request_changes";', declarations)
+        self.assertIn('decision: "approve" | "request_changes" | "review_scenarios";', declarations)
         self.assertIn('workspaceSummary: Object.freeze({ method: "GET", path: "/workspace/summary" })', runtime)
         self.assertIn(
             'projectUseCasesReview: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/reviews" })',
