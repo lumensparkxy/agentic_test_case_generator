@@ -1,33 +1,35 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
-- Implementation under review, local pilot enabled: epic #269 — ADK skills and approved project/personal knowledge. #270 / PR #275, #271 / PR #276, #272 / PR #277, #273 / PR #278, #274 / PR #279. Builds on PR #268. 96 live samples support local combined guidance for Requirements and Use Cases. Test Cases is held on #280 (silent contract drops); Automation is held on #281 (invalid/ungrounded output and manual diagnostics). See `docs/guidance-rollout-report.md` for all arms, costs, caveats and exact enablement scope.
+- Consolidation #282 (2026-09-11): merged PRs #260, #262, #264, #266, #268, #275, #276, #277, #278 and #279 sequentially into protected `main`. Each PR passed both required checks against its updated base. All ten feature branches were removed locally and remotely after commit ancestry and dependent PR checks. The merged application tree matches the previously validated latest branch. Local configuration and evaluation evidence are preserved. This backlog reconciliation is the final issue-scoped cleanup change; #241/#246, #251, #269/#274 and #280/#281 remain open for their outstanding acceptance criteria.
 
-- Implemented, awaiting review: #267 — Fix the outer table edge and resize only internal boundaries by exchanging adjacent column widths. Builds on #265 / PR #266; parent #241.
+- Implementation merged, local pilot enabled; rollout acceptance remains open: epic #269 — ADK skills and approved project/personal knowledge. #270 / PR #275, #271 / PR #276, #272 / PR #277, #273 / PR #278, #274 / PR #279. Merged through PR #279 after prerequisite PR #268. #270–#273 are complete; #274 remains blocked on the held-stage fixes and broader rollout criteria. 96 live samples support local combined guidance for Requirements and Use Cases. Test Cases is held on #280 (silent contract drops); Automation is held on #281 (invalid/ungrounded output and manual diagnostics). See `docs/guidance-rollout-report.md` for all arms, costs, caveats and exact enablement scope.
 
-- Implemented, awaiting review: #265 — Group Use Cases under source requirement headings with synchronized four-column resizing. Builds on #263 / PR #264; parent #241.
+- Merged: #267 — Fix the outer table edge and resize only internal boundaries by exchanging adjacent column widths. Builds on #265 / PR #266; parent #241.
 
-- Implemented, awaiting review: #263 — Remove scenario Details, use direct Quality flags dropdowns, and add shared resizable table columns. Builds on #261 / PR #262; parent #241.
+- Merged: #265 — Group Use Cases under source requirement headings with synchronized four-column resizing. Builds on #263 / PR #264; parent #241.
 
-- Implemented, awaiting review: #261 — Use Cases scenario table with persisted row decisions, multi-select flags, filters and explicit bulk approval; builds on #259 / PR #260. Parent #241. Validation: 386 backend tests, both offline benchmarks and 161 frontend workflow tests pass.
+- Merged: #263 — Remove scenario Details, use direct Quality flags dropdowns, and add shared resizable table columns. Builds on #261 / PR #262; parent #241.
 
-- Implemented, awaiting review: #259 — Full-width Use Cases scenarios with a sticky whole-snapshot review bar and confirmation dialog. Parent #241. Preserves explicit decisions, required feedback and snapshot/retry safeguards.
+- Merged: #261 — Use Cases scenario table with persisted row decisions, multi-select flags, filters and explicit bulk approval; builds on #259 / PR #260. Parent #241. Validation: 386 backend tests, both offline benchmarks and 161 frontend workflow tests pass.
 
-- Implemented, awaiting review: #257 — Inline case summaries and Step/Action/Expected result columns. Builds on PR #256; 50 focused browser checks and build/lint/format pass.
+- Merged: #259 — Full-width Use Cases scenarios with a sticky whole-snapshot review bar and confirmation dialog. Parent #241. Preserves explicit decisions, required feedback and snapshot/retry safeguards.
 
-- Implemented, awaiting review: #255 — Compact shared typography and resizable Test Cases/Use Cases panes. Builds on PR #254; 152 frontend regression checks pass.
+- Merged: #257 — Inline case summaries and Step/Action/Expected result columns. Builds on PR #256; 50 focused browser checks and build/lint/format pass.
 
-- Implemented, awaiting review: #253 — Align Back/Next with sidebar order, include Use Cases, and make Template Setup an explicit Test Cases subview. Builds on PR #252; 45 focused navigation/review/export browser checks and build/lint/format pass.
+- Merged: #255 — Compact shared typography and resizable Test Cases/Use Cases panes. Builds on PR #254; 152 frontend regression checks pass.
 
-- Implemented, awaiting review/merge: #241 — Shared design system across all application screens. Stories: #242 foundations (PR #247), #243 artifact collections (PR #248), #244 workspace (PR #249), #245 remaining surfaces (PR #250), #246 consolidation. Builds on #239 / PR #240. Final full-suite acceptance has one known legacy test failure tracked in #251.
+- Merged: #253 — Align Back/Next with sidebar order, include Use Cases, and make Template Setup an explicit Test Cases subview. Builds on PR #252; 45 focused navigation/review/export browser checks and build/lint/format pass.
+
+- Implementation merged; final acceptance remains open: #241 — Shared design system across all application screens. Stories: #242 foundations (PR #247), #243 artifact collections (PR #248), #244 workspace (PR #249), #245 remaining surfaces (PR #250), #246 consolidation. Builds on #239 / PR #240. Final full-suite acceptance has one known legacy test failure tracked in #251.
 - Ready: #251 — Repair the legacy live-generation E2E for project workbenches; preserve live quality and export assertions. Discovered during #246 (158 other frontend tests pass).
 
 This file contains issue-ready drafts for the implementation plan in `docs/implementation-plan.md`.
 
 ## UI/UX audit follow-up
 
-- In progress: [#239](https://github.com/lumensparkxy/agentic_test_case_generator/issues/239) — Implement the selected shared design across Overview, Use Cases and Test Cases, preserving review gates and responsive access. Builds on #237.
+- Merged: [#239](https://github.com/lumensparkxy/agentic_test_case_generator/issues/239) — Implement the selected shared design across Overview, Use Cases and Test Cases, preserving review gates and responsive access. Builds on #237.
 
-- In progress: [#237](https://github.com/lumensparkxy/agentic_test_case_generator/issues/237) — Correct use-case scenario counts in workspace summaries. Count nested scenarios separately from requirement groups and keep Home, Reviews, and the current artifact consistent.
+- Merged: [#237](https://github.com/lumensparkxy/agentic_test_case_generator/issues/237) — Correct use-case scenario counts in workspace summaries. Count nested scenarios separately from requirement groups and keep Home, Reviews, and the current artifact consistent.
 
 ## Created GitHub issues
 
