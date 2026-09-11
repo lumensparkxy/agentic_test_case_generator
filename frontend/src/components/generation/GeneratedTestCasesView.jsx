@@ -1,24 +1,13 @@
 import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
-import { Input, Button, Textarea } from "../ui/controls";
+import { Input, Button } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
-export default function GeneratedTestCasesView({
-	testCases,
-	feedback,
-	onFeedbackChange,
-	onRefineTestCases,
-	isGenerating,
-	testCaseActionDisabled,
-	allowRefinement = true,
-	qualityIssues = [],
-}) {
-	const [selectedId, setSelectedId] = useState(null);
+export default function GeneratedTestCasesView({ testCases, selectedId, setSelectedId, qualityIssues = [] }) {
 	const [query, setQuery] = useState("");
 	const searchId = useId();
-	const feedbackId = useId();
 	const cases = testCases.filter((tc) =>
 		[tc.id, tc.title, ...getTestCaseLinkedRequirementIds(tc)].join(" ").toLowerCase().includes(query.toLowerCase().trim())
 	);
@@ -166,23 +155,6 @@ export default function GeneratedTestCasesView({
 					)}
 				</section>
 			</ListDetail>
-			{testCases.length > 0 && allowRefinement && (
-				<section className="feedback-section">
-					<h3>Human Feedback</h3>
-					<label htmlFor={feedbackId}>Changes to the test suite</label>
-					<Textarea
-						id={feedbackId}
-						className="feedback-textarea"
-						placeholder="Describe the changes needed…"
-						value={feedback}
-						onChange={(event) => onFeedbackChange(event.target.value)}
-						rows={4}
-					/>
-					<Button onClick={onRefineTestCases} disabled={!feedback.trim() || isGenerating || testCaseActionDisabled}>
-						{isGenerating ? "Updating test cases…" : "Implement Changes"}
-					</Button>
-				</section>
-			)}
 		</>
 	);
 }

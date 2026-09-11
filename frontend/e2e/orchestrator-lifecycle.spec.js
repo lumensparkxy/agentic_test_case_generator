@@ -724,7 +724,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(task.getByRole("heading", { name: /^Create Evidence Report$/i })).toBeVisible();
 		await task.getByText(/^Details$/i).click();
 		await task.getByRole("button", { name: /^Review Evidence$/i }).click();
-		await expect(page.getByLabel("Test case quality").getByText("Machine quality check passed")).toBeVisible();
+		await page.getByRole("tab", { name: /^Improve tests/ }).click();
+		await expect(page.getByLabel("Improve test quality").getByText("Machine quality check passed", { exact: true })).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })

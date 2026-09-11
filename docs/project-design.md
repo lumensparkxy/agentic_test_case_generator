@@ -127,10 +127,16 @@ Use Cases opts into `ResizableTable`'s `responsiveMinWidth={800}` (#284). On con
 
 ## Focused Test Cases results (#286)
 
-Test Cases presents Generated Test Cases and Traceability Matrix (#288). Scenario Coverage and Requirement Analysis tabs are removed from this page. Requirement or scenario coverage gaps open Traceability Matrix; a loaded project without generated cases opens the Generated Test Cases empty state. Stored coverage/analysis artifacts and generation/review/export rules remain unchanged.
+Test Cases presents Generated Test Cases, Traceability Matrix, and Improve tests (#290). Scenario Coverage and Requirement Analysis tabs are removed from this page. When machine quality has not failed, requirement or scenario coverage gaps open Traceability Matrix; otherwise the Generated Test Cases result or empty state opens. Stored coverage/analysis artifacts and generation/review/export rules remain unchanged.
 
 Traceability Matrix shows requirement IDs without repeating their full text or Story / source path. Linked test cases, scenario coverage, and Covered/Gap status remain visible.
 
-## Two-tab Test Cases results (#288)
+## Improve tests (#290)
 
-The Diagnostics / Generation Summary tab is removed entirely. Generation and reload select Generated Test Cases or Traceability Matrix when coverage gaps exist; technical run problems never select a hidden panel. Quality/export notices above the tabs remain available. Diagnostic data remains stored; no backend or review/export policy changes are made. The previously proposed Generation Summary mockup is superseded.
+The third result tab, Improve tests, replaces the large quality information box and the old free-text refinement form. Failed machine quality checks select it on generation and reload; otherwise coverage gaps select Traceability Matrix and other results select Generated Test Cases. Diagnostics and Generation Summary remain removed, with diagnostic data still stored.
+
+Improve tests shows the review summary, secondary quality/required scores, and deduplicated blocking issues and unmet criteria. Findings start unselected; Select all and Clear selection control the checklist. Existing test-case IDs link to that case. Selected findings and optional instructions become explicit feedback to the existing `/testcases/refine` endpoint. With no findings, nonempty instructions are sufficient. The request asks to preserve unrelated cases where possible; refinement still returns a complete suite.
+
+Draft selections survive tab changes and failures, but reset when the project or test-case source snapshot changes. Revision conflicts require reloading current findings before resubmission. Stale suites direct users to impact review. Authentication, billing, busy-state and revision checks remain enforced, including when project recommendations are present. Successful refinement stays on Improve tests, clears submitted drafts and displays the latest review. Passing machine quality never represents human approval. A compact export-status message remains above the tabs and existing export protections remain unchanged.
+
+Validation: `e2e/improve-tests.spec.js` covers checklist feedback, navigation/focus, retry, conflict, stale-suite guards, busy states, snapshot reset and desktop/mobile accessibility. Export and shared-layout regression tests cover the surrounding workflow.
