@@ -183,6 +183,8 @@ class RefineTestCasesInput(BaseModel):
 
 
 class GenerateTestCasesResponse(BaseModel):
+    guidance: Optional[Dict[str, Any]] = None
+    knowledge_suggestion: Optional[Dict[str, Any]] = None
     test_cases: List[TestCase]
     approved: bool = False
     review: ReviewResult = Field(default_factory=ReviewResult)

@@ -1,3 +1,5 @@
+from ..services.knowledge_feedback import finish_generation
+from ..services.guidance_dependency import generation_guidance
 from io import BytesIO
 from typing import Any, List, Optional
 import hashlib
@@ -236,7 +238,7 @@ def _record_billing_consumption_safe(
         logging.exception("Billing consumption recording failed after workflow success")
 
 
-@router.post("/requirements/parse", response_model=RequirementsWorkflowResponse)
+@router.post("/requirements/parse", response_model=RequirementsWorkflowResponse, dependencies=[Depends(generation_guidance("requirements"))])
 async def parse_requirements(
     request: Request,
     current_user: AuthUser = Depends(get_current_user),
@@ -356,7 +358,7 @@ async def parse_requirements(
                     )
                 except Exception as project_exc:
                     raise project_error_to_http(project_exc) from project_exc
-            return response
+            return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
         except HTTPException:
             raise
         except Exception as exc:
@@ -491,7 +493,7 @@ async def parse_requirements(
                 )
             except Exception as project_exc:
                 raise project_error_to_http(project_exc) from project_exc
-        return response
+        return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
     except HTTPException:
         _log_failure(
             current_user=current_user,

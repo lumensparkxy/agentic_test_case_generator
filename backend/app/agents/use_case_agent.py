@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import SequentialAgent
+from ..services.guidance_service import apply_agent_guidance, submit_with_guidance, memory_service_for_run
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -149,9 +150,10 @@ async def _run_single_use_case_shard_workflow_async(
     )
     session_service = InMemorySessionService()
     runner = Runner(
-        agent=root_agent,
+        agent=apply_agent_guidance(root_agent, "use_cases"),
         app_name="use_case_planner",
         session_service=session_service,
+        memory_service=memory_service_for_run(actor_user_id),
     )
     user_id = str(actor_user_id or f"use-case-{shard.shard_id}")
     session = await session_service.create_session(
@@ -539,7 +541,8 @@ def _run_use_case_workflow_sync_inner(
         result_by_index: Dict[int, _UseCaseShardResult] = {}
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_by_shard = {
-                executor.submit(
+                submit_with_guidance(
+                    executor,
                     _run_shard_with_fallback,
                     shard=shard,
                     context=context,

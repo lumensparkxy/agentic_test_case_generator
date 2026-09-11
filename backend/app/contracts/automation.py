@@ -6,6 +6,7 @@ from .test_cases import TestCase
 
 
 class AutomationInput(BaseModel):
+    project_id: Optional[str] = None
     test_cases: List[TestCase]
     target_base_url: Optional[HttpUrl] = None
 
@@ -19,6 +20,8 @@ class AutomationCaseDiagnostic(BaseModel):
 
 
 class AutomationResponse(BaseModel):
+    guidance: Optional[Dict[str, Any]] = None
+    knowledge_suggestion: Optional[Dict[str, Any]] = None
     status: str
     files: List[str]
     notes: Optional[str] = None

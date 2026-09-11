@@ -137,3 +137,73 @@ for (const width of [390, 1488])
 		expect(results.violations).toEqual([]);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	});
+
+test("generation retries the same request and bypasses memory only after an explicit choice", async ({ page }) => {
+	const { sampleRequirementsFile } = await import("./support/auth.js");
+	const { useCaseProjectFixture } = await import("./support/use-case-review.js");
+	await installUseCaseReviewApi(page, {
+		initialProject: useCaseProjectFixture({ snapshot: null, current_snapshots: {}, stage_state: {} }),
+	});
+	await seedAuthenticatedSession(page);
+	const attempts = [];
+	await page.route("**/requirements/parse", async (route) => {
+		attempts.push(route.request().headers());
+		if (!route.request().headers()["x-knowledge-bypass"])
+			return route.fulfill({ status: 503, json: { detail: { code: "knowledge_unavailable", can_bypass: true } } });
+		return route.fulfill({
+			json: {
+				source_name: "fixture",
+				raw_text: "Source",
+				requirements: [{ id: "R1", text: "Remembered guidance was bypassed", review_status: "Pending" }],
+				guidance: { manifest_id: "bypassed", model: "fixture", memory_bypassed: true, memories: [], skills: [] },
+			},
+		});
+	});
+	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/requirements`);
+	await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
+	await page.getByRole("button", { name: /^Parse Requirements$/i }).click();
+	const dialog = page.getByRole("dialog", { name: "Remembered guidance could not be loaded" });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole("button", { name: "Retry loading guidance" })).toBeFocused();
+	await dialog.getByRole("button", { name: "Retry loading guidance" }).click();
+	await expect.poll(() => attempts.length).toBe(2);
+	await expect(dialog).toBeVisible();
+	expect(attempts.every((a) => !a["x-knowledge-bypass"])).toBe(true);
+	await dialog.getByRole("button", { name: "Run without remembered guidance" }).click();
+	await expect.poll(() => attempts.length).toBe(3);
+	expect(new Set(attempts.map((a) => a["x-request-id"])).size).toBe(1);
+	expect(attempts[2]["x-knowledge-bypass"]).toBe("true");
+	await expect(dialog).toHaveCount(0);
+	await page.getByText("Guidance used · 0 skills · 0 knowledge entries", { exact: true }).click();
+	await expect(page.getByText("Run without remembered guidance was explicitly selected.", { exact: false })).toBeVisible();
+});
+
+test("saved artifacts show historical wording, deleted entries, and newer guidance without changing review", async ({ page }) => {
+	const { useCaseProjectFixture } = await import("./support/use-case-review.js");
+	const project = useCaseProjectFixture({ reviewState: "approved" });
+	project.current_snapshots.use_cases.metadata.guidance = {
+		manifest_id: "recorded",
+		model: "fixture-model",
+		knowledge_revision: "v1",
+		skills: [{ id: "scenario-coverage", version: "1.0.0", content_hash: "a".repeat(64) }],
+		memories: [
+			{ id: "old", revision: 1, source: "Review feedback" },
+			{ id: "deleted", revision: 2, source: "Personal library" },
+		],
+	};
+	await installUseCaseReviewApi(page, { initialProject: project });
+	await seedAuthenticatedSession(page);
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/knowledge`, (route) =>
+		route.fulfill({ json: { revision: "v2", entries: [], skills: [] } })
+	);
+	await page.route("**/knowledge/old/versions/1", (route) => route.fulfill({ json: { text: "Exact original wording" } }));
+	await page.route("**/knowledge/deleted/versions/2", (route) => route.fulfill({ json: { unavailable: true } }));
+	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/use-cases`);
+	await page.getByText("Guidance used · 1 skills · 2 knowledge entries", { exact: true }).click();
+	await expect(page.getByText("Exact original wording", { exact: false })).toBeVisible();
+	await expect(page.getByText("This saved guidance was deleted or is unavailable.", { exact: false })).toBeVisible();
+	await expect(page.getByText(/Newer guidance available\. Existing artifact decisions/)).toBeVisible();
+	await expect(page.getByLabel("Current human review status")).toHaveText("Human approved");
+	await page.setViewportSize({ width: 390, height: 844 });
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

@@ -1,6 +1,6 @@
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
 import { Checkbox, Field, Input, Button } from "../ui/controls";
-import { Surface, Alert } from "../ui/surfaces";
+import { Surface, Alert, Disclosure } from "../ui/surfaces";
 const renderBucketCount = (label, value, tone = "") => (
 	<span className={`workflow-diagnostics-pill ${tone}`.trim()}>
 		{label} {value || 0}
@@ -209,6 +209,8 @@ const renderRunResults = (runResult) => {
 };
 
 export default function AutomationPanel({
+	guidance,
+	sourceGuidance,
 	testCases,
 	executionTargetBaseUrl,
 	setExecutionTargetBaseUrl,
@@ -239,6 +241,12 @@ export default function AutomationPanel({
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
 			<h2 className="panel-title">Execution setup</h2>
+			{guidance}
+			<Disclosure className="guidance-summary">
+				<summary>Source test-case guidance</summary>
+				<p>Execution preview uses validated test specifications. It does not run an AI generation skill.</p>
+				{sourceGuidance}
+			</Disclosure>
 			<p className="panel-description">Review executable candidates and run approved browser cases through Playwright.</p>
 			<div className="panel-form two-cols">
 				<Field className="form-group">

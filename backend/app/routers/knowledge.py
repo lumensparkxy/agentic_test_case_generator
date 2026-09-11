@@ -53,4 +53,22 @@ async def change_personal_knowledge(payload: KnowledgeMutation, request: Request
 @router.get("/projects/{project_id}/knowledge/{entry_id}/versions/{revision}")
 async def read_knowledge_version(project_id: str, entry_id: str, revision: int, actor: AuthUser = Depends(get_current_user)):
     from ..services.knowledge_service import knowledge_version
+
     return await guarded(knowledge_version, actor, project_id, entry_id, revision)
+
+
+from pydantic import BaseModel, Field
+from ..contracts.guidance import GuidanceStage
+
+
+class FeedbackRetry(BaseModel):
+    stage: GuidanceStage
+    feedback: str = Field(min_length=1, max_length=1000)
+    source_request_id: str = Field(min_length=1, max_length=160)
+
+
+@router.post("/projects/{project_id}/knowledge/suggestions/retry")
+async def retry_knowledge_feedback(project_id: str, payload: FeedbackRetry, actor: AuthUser = Depends(get_current_user)):
+    from ..services.knowledge_feedback import retry_feedback
+
+    return await guarded(retry_feedback, actor, project_id, payload.stage, payload.feedback, payload.source_request_id)

@@ -328,7 +328,11 @@ def review_use_case_snapshot(
     use_cases_state = project.stage_state.get("use_cases")
     if use_cases_state is None:  # pragma: no cover - transaction guarantees the state
         raise RuntimeError("Use Cases state disappeared after review persistence")
+    from .knowledge_feedback import suggest_feedback
+
+    suggestion = suggest_feedback(actor, project_id, "use_cases", comment, request_id)
     return UseCaseReviewResponse(
+        knowledge_suggestion=suggestion,
         review=review,
         project_revision=project.current_revision,
         use_cases_state=use_cases_state,

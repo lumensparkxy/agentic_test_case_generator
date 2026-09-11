@@ -87,6 +87,7 @@ class SpecialistArtifactRef(StrictContractModel):
 
 
 class SpecialistTaskTrace(StrictContractModel):
+    memory_bypass: bool = False
     request_id: str = Field(min_length=1)
     workflow_run_id: str = Field(min_length=1)
     actor_user_id: str = Field(min_length=1)
@@ -107,6 +108,7 @@ class SpecialistDiagnostic(StrictContractModel):
 
 
 class SpecialistOutputBase(StrictContractModel):
+    guidance: Optional[Dict[str, Any]] = None
     output_artifact_refs: List[SpecialistArtifactRef] = Field(default_factory=list)
 
 

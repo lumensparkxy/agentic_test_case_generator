@@ -88,6 +88,8 @@ class JiraIssueSearchResponse(BaseModel):
 
 
 class JiraImportInput(BaseModel):
+    project_id: Optional[str] = None
+    base_project_revision: Optional[int] = Field(default=None, ge=0)
     epic_key: Optional[str] = None
     issue_keys: List[str] = Field(default_factory=list)
     jql: Optional[str] = None
@@ -248,6 +250,8 @@ class AzureDevOpsWorkItemSearchResponse(BaseModel):
 
 
 class AzureDevOpsImportInput(BaseModel):
+    project_id: Optional[str] = None
+    base_project_revision: Optional[int] = Field(default=None, ge=0)
     project: Optional[str] = None
     work_item_id: Optional[int] = None
     work_item_ids: List[int] = Field(default_factory=list)

@@ -17,6 +17,7 @@ from ..models import (
     QaProjectSummary,
     QaProjectTimelineEvent,
 )
+from .guidance_service import public_manifest
 from .scenario_review_state import carry_scenario_reviews
 from .audit_service import build_actor_snapshot
 from .firestore_repository import get_required_firestore_collection
@@ -476,6 +477,9 @@ def append_stage_snapshot(
     stage_state = _stage_state_from_payload(project_payload)
     previous_state = stage_state.get(stage) or {}
     version = int(previous_state.get("version") or 0) + 1
+    guidance = public_manifest()
+    if guidance is not None:
+        metadata = {**(metadata or {}), "guidance": guidance}
     snapshot_payload = {
         "snapshot_id": snapshot_id,
         "project_id": project_id,

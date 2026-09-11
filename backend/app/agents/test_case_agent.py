@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
+from ..services.guidance_service import apply_agent_guidance, submit_with_guidance, memory_service_for_run
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
@@ -1168,9 +1169,10 @@ Human feedback:
 
     session_service = InMemorySessionService()
     runner = Runner(
-        agent=root_agent,
+        agent=apply_agent_guidance(root_agent, "test_cases"),
         app_name="test_case_generator",
         session_service=session_service,
+        memory_service=memory_service_for_run(actor_user_id),
     )
 
     user_id = str(actor_user_id or f"user_{uuid.uuid4().hex[:8]}")
@@ -1745,9 +1747,10 @@ async def _run_parallel_test_case_shard_workflow_async(
     )
     session_service = InMemorySessionService()
     runner = Runner(
-        agent=root_agent,
+        agent=apply_agent_guidance(root_agent, "test_cases"),
         app_name="parallel_test_case_generator",
         session_service=session_service,
+        memory_service=memory_service_for_run(actor_user_id),
     )
     user_id = str(actor_user_id or f"user_{uuid.uuid4().hex[:8]}")
     session = await session_service.create_session(
@@ -2134,7 +2137,8 @@ def _run_parallel_test_case_generation_sync(
         result_by_index: Dict[int, _ParallelTestCaseShardResult] = {}
         with ThreadPoolExecutor(max_workers=max(1, worker_count)) as executor:
             future_by_shard = {
-                executor.submit(
+                submit_with_guidance(
+                    executor,
                     _run_parallel_test_case_shard_with_fallback,
                     shard=shard,
                     context=context,

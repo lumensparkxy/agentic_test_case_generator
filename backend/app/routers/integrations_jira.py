@@ -1,3 +1,7 @@
+from ..services.workflow_project_service import append_stage_snapshot
+from ..services.knowledge_service import project_for
+from ..services.guidance_dependency import generation_guidance
+from ..services.knowledge_feedback import finish_generation
 from typing import Any, Optional
 import logging
 from uuid import uuid4
@@ -271,13 +275,15 @@ async def jira_issue_search(
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
 
 
-@router.post("/integrations/jira/import", response_model=RequirementsWorkflowResponse)
+@router.post("/integrations/jira/import", response_model=RequirementsWorkflowResponse, dependencies=[Depends(generation_guidance("requirements"))])
 async def jira_import_requirements_endpoint(
     request: Request,
     payload: JiraImportInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> RequirementsWorkflowResponse:
     request_id = _get_request_id(request)
+    if payload.project_id:
+        await run_in_threadpool(project_for, payload.project_id, current_user)
     billing_context = await run_in_threadpool(
         enforce_billing_access,
         current_user=current_user,
@@ -365,7 +371,22 @@ async def jira_import_requirements_endpoint(
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
         )
-        return response
+        if payload.project_id:
+            from .requirements import _requirements_project_payload
+
+            await run_in_threadpool(
+                append_stage_snapshot,
+                project_id=payload.project_id,
+                stage="requirements",
+                payload=_requirements_project_payload(response),
+                operation="requirements.import.jira",
+                actor=current_user,
+                request_id=request_id,
+                approved=response.approved,
+                title="Requirements imported",
+                base_project_revision=payload.base_project_revision,
+            )
+        return finish_generation(response, current_user, payload.project_id, "requirements", None, request_id)
     except LookupError as exc:
         _log_failure(
             current_user=current_user,

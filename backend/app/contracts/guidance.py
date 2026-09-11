@@ -1,4 +1,5 @@
 """Immutable run inputs; knowledge approval is separate from artifact approval."""
+
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,7 @@ class SkillGuidance(FrozenGuidance):
 
 
 class MemoryGuidance(FrozenGuidance):
+    stages: tuple[GuidanceStage, ...] = ("requirements", "use_cases", "test_cases", "automation")
     id: str
     revision: int
     scope: Literal["project", "personal"]

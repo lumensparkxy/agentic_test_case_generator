@@ -49,10 +49,17 @@ def public_entry(entry, state, project_id=None, hashes=None):
     status = entry["status"]
     if status == "active" and needs_confirmation(active, hashes or {}):
         status = "needs_confirmation"
-    return KnowledgeEntry(id=entry["id"], project_id=entry.get("project_id"), scope="project" if entry.get("project_id") else "personal",
-        revision=entry["revision"], status=status, active=active, pending=version(entry, entry.get("pending_revision")),
+    return KnowledgeEntry(
+        id=entry["id"],
+        project_id=entry.get("project_id"),
+        scope="project" if entry.get("project_id") else "personal",
+        revision=entry["revision"],
+        status=status,
+        active=active,
+        pending=version(entry, entry.get("pending_revision")),
         selected=entry["id"] in state["selections"].get(project_id, []),
-        selected_by_projects=[p for p, ids in state["selections"].items() if entry["id"] in ids])
+        selected_by_projects=[p for p, ids in state["selections"].items() if entry["id"] in ids],
+    )
 
 
 def knowledge_signature(entries):
@@ -64,11 +71,18 @@ def list_knowledge(actor, project_id=None):
     project = project_for(project_id, actor)
     state = repository().read(actor.sub)
     selected = state["selections"].get(project_id, [])
-    entries = [public_entry(e, state, project_id, requirement_hashes(project)) for e in state["entries"].values()
-               if (e.get("project_id") == project_id or (project_id and e["id"] in selected and not e.get("project_id"))) and e["status"] != "deleted"]
+    entries = [
+        public_entry(e, state, project_id, requirement_hashes(project))
+        for e in state["entries"].values()
+        if (e.get("project_id") == project_id or (project_id and e["id"] in selected and not e.get("project_id"))) and e["status"] != "deleted"
+    ]
     entries.sort(key=lambda e: e.id)
-    return KnowledgeCollection(entries=entries, revision=knowledge_signature(entries), skills=skill_catalog(),
-        features={s: {"skills": enabled("skills", s), "memory": enabled("memory", s)} for s in STAGES})
+    return KnowledgeCollection(
+        entries=entries,
+        revision=knowledge_signature(entries),
+        skills=skill_catalog(),
+        features={s: {"skills": enabled("skills", s), "memory": enabled("memory", s)} for s in STAGES},
+    )
 
 
 def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id: str, *, source="Manual guidance"):
@@ -92,8 +106,7 @@ def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id:
         missing = set(data["requirement_ids"]) - hashes.keys()
         if missing:
             raise HTTPException(422, "Linked requirements must exist in the current project")
-        return {**data, "revision": revision, "source": source_text, "created_at": now,
-                "requirement_hashes": {r: hashes[r] for r in data["requirement_ids"]}}
+        return {**data, "revision": revision, "source": source_text, "created_at": now, "requirement_hashes": {r: hashes[r] for r in data["requirement_ids"]}}
 
     def apply(state):
         action, entry_id = mutation.action, mutation.entry_id
@@ -101,8 +114,15 @@ def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id:
         if action == "propose":
             if len([e for e in entries.values() if e["status"] != "deleted"]) >= 200:
                 raise HTTPException(422, "Knowledge entry limit reached")
-            entries[generated_id] = {"id": generated_id, "project_id": project_id, "revision": 1, "status": "suggested",
-                "active_revision": None, "pending_revision": 1, "versions": [content(mutation.draft, 1, source)]}
+            entries[generated_id] = {
+                "id": generated_id,
+                "project_id": project_id,
+                "revision": 1,
+                "status": "suggested",
+                "active_revision": None,
+                "pending_revision": 1,
+                "versions": [content(mutation.draft, 1, source)],
+            }
             return generated_id
         entry = entries.get(entry_id)
         if not entry or entry["status"] == "deleted":
@@ -118,15 +138,18 @@ def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id:
             if action == "select" and entry["status"] != "active":
                 raise HTTPException(422, "Approve personal guidance before selecting it")
             ids = set(state["selections"].get(project_id, []))
-            if action == "select": ids.add(entry_id)
-            else: ids.discard(entry_id)
+            if action == "select":
+                ids.add(entry_id)
+            else:
+                ids.discard(entry_id)
             state["selections"][project_id] = sorted(ids)
             return entry_id
         next_revision = entry["revision"] + 1
         if action == "revise":
             entry["versions"].append(content(mutation.draft, next_revision, source))
             entry["pending_revision"] = next_revision
-            if not entry["active_revision"]: entry["status"] = "suggested"
+            if not entry["active_revision"]:
+                entry["status"] = "suggested"
         elif action == "approve":
             pending = version(entry, entry.get("pending_revision"))
             if pending is None:
@@ -148,7 +171,8 @@ def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id:
         elif action == "delete":
             entry.update(status="deleted", active_revision=None, pending_revision=None, versions=[])
             for ids in state["selections"].values():
-                if entry_id in ids: ids.remove(entry_id)
+                if entry_id in ids:
+                    ids.remove(entry_id)
         elif action == "promote":
             original = current_version(entry)
             if not project_id or entry["status"] != "active" or original is None:
@@ -158,8 +182,15 @@ def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id:
             if original["kind"] == "business_fact":
                 raise HTTPException(422, "Business facts must remain project-scoped")
             promoted = content(mutation.draft, 1, f"Promoted from {entry_id}")
-            entries[generated_id] = {"id": generated_id, "project_id": None, "revision": 1, "status": "suggested",
-                "active_revision": None, "pending_revision": 1, "versions": [promoted]}
+            entries[generated_id] = {
+                "id": generated_id,
+                "project_id": None,
+                "revision": 1,
+                "status": "suggested",
+                "active_revision": None,
+                "pending_revision": 1,
+                "versions": [promoted],
+            }
             return generated_id
         entry["revision"] = next_revision
         return entry_id
@@ -176,15 +207,27 @@ def resolve_memories(actor, project_id, stage, requirement_ids=None):
     for entry in collection.entries:
         value = entry.active
         reason = None
-        if entry.status != "active" or value is None: reason = entry.status
-        elif stage not in value["stages"]: reason = "different_stage"
-        elif value["requirement_ids"] and not requested.intersection(value["requirement_ids"]): reason = "different_requirement"
+        if entry.status != "active" or value is None:
+            reason = entry.status
+        elif not set((stage,) if isinstance(stage, str) else stage).intersection(value["stages"]):
+            reason = "different_stage"
+        elif value["requirement_ids"] and not requested.intersection(value["requirement_ids"]):
+            reason = "different_requirement"
         if reason:
             omitted.append(OmittedGuidance(id=entry.id, revision=entry.revision, reason=reason))
         else:
-            selected.append(MemoryGuidance(id=entry.id, revision=value["revision"], scope=entry.scope,
-                text=value["text"], source=value["source"], requirement_ids=tuple(value["requirement_ids"]),
-                reason="linked_requirement" if value["requirement_ids"] else "selected_personal" if entry.scope == "personal" else "project_stage"))
+            selected.append(
+                MemoryGuidance(
+                    id=entry.id,
+                    revision=value["revision"],
+                    scope=entry.scope,
+                    text=value["text"],
+                    source=value["source"],
+                    stages=tuple(value["stages"]),
+                    requirement_ids=tuple(value["requirement_ids"]),
+                    reason="linked_requirement" if value["requirement_ids"] else "selected_personal" if entry.scope == "personal" else "project_stage",
+                )
+            )
     selected.sort(key=lambda e: (e.scope != "project", not bool(e.requirement_ids), e.id))
     return selected, omitted, collection.revision
 

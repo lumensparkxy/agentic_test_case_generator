@@ -1,4 +1,5 @@
 """Read-only ADK adapter, bound to an authenticated owner's frozen run manifest."""
+
 from google.adk.memory.base_memory_service import BaseMemoryService, SearchMemoryResponse
 from google.adk.memory.memory_entry import MemoryEntry
 from google.genai import types
@@ -15,5 +16,9 @@ class ApprovedKnowledgeMemory(BaseMemoryService):
         if user_id != self.owner_id:
             raise PermissionError("Memory owner does not match this run")
         # Retrieval was already scoped and frozen before any worker started.
-        return SearchMemoryResponse(memories=[MemoryEntry(author="approved_knowledge", content=types.Content(
-            role="user", parts=[types.Part(text=item.text)])) for item in self.manifest.memories])
+        return SearchMemoryResponse(
+            memories=[
+                MemoryEntry(author="approved_knowledge", content=types.Content(role="user", parts=[types.Part(text=item.text)]))
+                for item in self.manifest.memories
+            ]
+        )

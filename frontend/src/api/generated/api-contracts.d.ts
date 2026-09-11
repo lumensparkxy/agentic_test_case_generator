@@ -342,7 +342,9 @@ export interface GenerateTestCasesResponse {
 	coverage_metrics?: Record<string, unknown>;
 	coverage_plan?: Array<RequirementCoveragePlan>;
 	generation_evidence?: TestCaseGenerationEvidence;
+	guidance?: Record<string, unknown> | null;
 	iteration_history?: Array<WorkflowIteration>;
+	knowledge_suggestion?: Record<string, unknown> | null;
 	requirement_analysis?: Array<RequirementAnalysis>;
 	review?: ReviewResult;
 	test_cases: Array<TestCase>;
@@ -698,7 +700,9 @@ export interface RequirementCoveragePlan {
 export interface RequirementsWorkflowResponse {
 	approved?: boolean;
 	coverage_metrics?: Record<string, unknown>;
+	guidance?: Record<string, unknown> | null;
 	iteration_history?: Array<WorkflowIteration>;
+	knowledge_suggestion?: Record<string, unknown> | null;
 	raw_text: string;
 	requirements: Array<Requirement>;
 	review?: ReviewResult;
@@ -912,6 +916,7 @@ export interface UseCaseReviewRequest {
 }
 
 export interface UseCaseReviewResponse {
+	knowledge_suggestion?: Record<string, unknown> | null;
 	orchestrator_status: OrchestratorStatusResponse;
 	project_revision: number;
 	review: UseCaseReviewRecord;
