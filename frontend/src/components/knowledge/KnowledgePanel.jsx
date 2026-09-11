@@ -211,13 +211,15 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 				<p>Memory use is currently disabled. You can prepare guidance before rollout.</p>
 			)}
 			<CollectionToolbar className="knowledge-toolbar">
-				<Select aria-label="Filter knowledge" value={filter} onChange={(e) => setFilter(e.target.value)}>
-					{["active", "suggested", "needs_confirmation", "all"].map((s) => (
-						<option key={s} value={s}>
-							{s === "all" ? "All guidance" : LABELS[s]}
-						</option>
-					))}
-				</Select>
+				<div className="knowledge-filter">
+					<Select aria-label="Filter knowledge" value={filter} onChange={(e) => setFilter(e.target.value)}>
+						{["active", "suggested", "needs_confirmation", "all"].map((s) => (
+							<option key={s} value={s}>
+								{s === "all" ? "All guidance" : LABELS[s]}
+							</option>
+						))}
+					</Select>
+				</div>
 				<Button disabled={knowledge.busy} onClick={() => setDialog({ mode: "propose" })}>
 					Add guidance
 				</Button>

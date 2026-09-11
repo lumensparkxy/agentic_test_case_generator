@@ -719,9 +719,9 @@
 	gap: var(--space-3);
 	margin-block: var(--space-4);
 }
-.knowledge-toolbar [data-ui="select"] {
-	width: auto;
-	min-width: min(12rem, 100%);
+.knowledge-filter {
+	flex: 0 1 13rem;
+	max-width: 100%;
 }
 .knowledge-panel .ui-collection-state {
 	margin-block: var(--space-4);
