@@ -1,6 +1,6 @@
 # Guidance rollout report — 2026-09-11
 
-Epic #269; delivery #270–#274; prerequisites PR #268. Implementation is available for review; production enablement is blocked pending live evaluation.
+Epic #269; delivery #270–#274 in stacked PRs #275–#279; prerequisite PR #268. Implementation is available for review; production enablement is blocked pending live evaluation. Merge the prerequisite and then the five implementation PRs in dependency order. Keep #274 and the epic open until the live quality and rollout criteria pass.
 
 ## Results
 

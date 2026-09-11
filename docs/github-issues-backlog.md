@@ -1,6 +1,6 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
-- Implementation under review, rollout blocked: epic #269 — ADK skills and approved project/personal knowledge. #270 / PR #275, #271 / PR #276, #272 / PR #277, #273 / PR #278; #274 adds evaluation and rollout evidence. Builds on PR #268. Skills and memory remain off: Gemini API preflight returned 403 SERVICE_DISABLED; paired model quality and cost evidence is still required. See `docs/guidance-rollout-report.md`.
+- Implementation under review, rollout blocked: epic #269 — ADK skills and approved project/personal knowledge. #270 / PR #275, #271 / PR #276, #272 / PR #277, #273 / PR #278, #274 / PR #279. Builds on PR #268. Skills and memory remain off: Gemini API preflight returned 403 SERVICE_DISABLED; paired model quality and cost evidence is still required. See `docs/guidance-rollout-report.md`.
 
 - Implemented, awaiting review: #267 — Fix the outer table edge and resize only internal boundaries by exchanging adjacent column widths. Builds on #265 / PR #266; parent #241.
 
