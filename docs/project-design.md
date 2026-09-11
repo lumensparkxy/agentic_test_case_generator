@@ -127,6 +127,10 @@ Use Cases opts into `ResizableTable`'s `responsiveMinWidth={800}` (#284). On con
 
 ## Focused Test Cases results (#286)
 
-Test Cases presents Generated Test Cases, Traceability Matrix, and Diagnostics. Scenario Coverage and Requirement Analysis tabs are removed from this page. Requirement or scenario coverage gaps open Traceability Matrix; a loaded project without generated cases opens the Generated Test Cases empty state. Stored coverage/analysis artifacts and generation/review/export rules remain unchanged.
+Test Cases presents Generated Test Cases and Traceability Matrix (#288). Scenario Coverage and Requirement Analysis tabs are removed from this page. Requirement or scenario coverage gaps open Traceability Matrix; a loaded project without generated cases opens the Generated Test Cases empty state. Stored coverage/analysis artifacts and generation/review/export rules remain unchanged.
 
 Traceability Matrix shows requirement IDs without repeating their full text or Story / source path. Linked test cases, scenario coverage, and Covered/Gap status remain visible.
+
+## Two-tab Test Cases results (#288)
+
+The Diagnostics / Generation Summary tab is removed entirely. Generation and reload select Generated Test Cases or Traceability Matrix when coverage gaps exist; technical run problems never select a hidden panel. Quality/export notices above the tabs remain available. Diagnostic data remains stored; no backend or review/export policy changes are made. The previously proposed Generation Summary mockup is superseded.

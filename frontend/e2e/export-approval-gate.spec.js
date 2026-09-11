@@ -281,19 +281,8 @@ test.describe("Export approval gate", () => {
 		await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toBeVisible();
 		await page.getByRole("tab", { name: /traceability/i }).click();
 		await expect(page.getByRole("region", { name: "Requirement traceability table" })).toHaveAttribute("tabindex", "0");
-		await page.getByRole("tab", { name: /diagnostics/i }).click();
-		await expect(page.getByText("Route Direct Parallel")).toBeVisible();
-		await expect(page.getByText("Generation sources")).toBeVisible();
-		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Model-authored" }).getByText("1")).toBeVisible();
-		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Deterministic completion" }).getByText("1")).toBeVisible();
-		await expect(page.getByText("Completion source")).toBeVisible();
-		await expect(page.getByText("Coverage Completion")).toBeVisible();
-		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Must-have gaps" }).getByText("1")).toBeVisible();
-		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Optional/planned gaps" }).getByText("1")).toBeVisible();
-		await expect(page.locator(".workflow-diagnostics-stat", { hasText: "Total additions" }).getByText("2")).toBeVisible();
-		await expect(page.getByText("Parser recoveries")).toBeVisible();
-		await expect(page.getByText(/recovered 1 complete test_cases entry/i)).toBeVisible();
-		await expect(page.locator(".workflow-diagnostics-block.warning")).toHaveCount(0);
+		await expect(page.getByRole("tab", { name: /diagnostics|generation summary/i })).toHaveCount(0);
+
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page).toHaveURL(automationPath);
 		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();

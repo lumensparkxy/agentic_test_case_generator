@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented; PR review pending: #288 — Remove the Test Cases Diagnostics / Generation Summary tab entirely; retain Generated Test Cases and Traceability Matrix. Parent #241; stacked on PR #287. Build, lint, changed-file formatting and 27 focused browser tests passed.
+
 - Implemented; PR review pending: #286 — Simplify Test Cases to Generated Test Cases, Traceability Matrix, and Diagnostics; show requirement IDs only and remove Story / source path. Parent #241; stacked on PR #285. Validation: 21 focused browser checks, build, lint, and changed-file formatting pass.
 
 - Implemented; PR review pending: #284 — Responsive Use Cases tables after browser/column resizing, inline wrapping requirement ID/title, and removal of per-group counts. Parent #241; frontend-only follow-up. Validation: 14 scenario review E2E tests, frontend build, lint, and focused formatting pass.

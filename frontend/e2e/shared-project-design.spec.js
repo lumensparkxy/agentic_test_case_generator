@@ -332,12 +332,13 @@ test("stale Use Cases cannot be approved from either review entry point", async 
 	expect(api.requests.review).toEqual([]);
 });
 
-test("Test Cases keeps three result tabs and compact traceability rows", async ({ page }) => {
+test("Test Cases keeps two result tabs and compact traceability rows", async ({ page }) => {
 	const project = await openCases(page);
 	const tabs = page.getByRole("tablist", { name: "Generation result sections" });
-	await expect(tabs.getByRole("tab")).toHaveCount(3);
+	await expect(tabs.getByRole("tab")).toHaveCount(2);
 	await expect(tabs).not.toContainText("Scenario Coverage");
 	await expect(tabs).not.toContainText("Requirement Analysis");
+	await expect(tabs).not.toContainText(/Diagnostics|Generation Summary/);
 	await tabs.getByRole("tab", { name: /^Traceability Matrix/ }).click();
 	const table = page.getByRole("region", { name: "Requirement traceability table" }).getByRole("table");
 	await expect(table.getByRole("columnheader")).toHaveText(["Requirement", "Linked test cases", "Scenario coverage", "Status"]);
@@ -361,9 +362,6 @@ test("Test Cases keeps three result tabs and compact traceability rows", async (
 	}
 	await tabs.getByRole("tab", { name: /^Traceability Matrix/ }).focus();
 	await page.keyboard.press("ArrowRight");
-	await expect(tabs.getByRole("tab", { name: /^Diagnostics/ })).toHaveAttribute("aria-selected", "true");
-	await expect(page.getByRole("tabpanel", { name: "Diagnostics", exact: true })).toBeVisible();
-	await page.keyboard.press("ArrowRight");
 	await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
 	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
 });
@@ -384,3 +382,27 @@ test("loaded project without test cases selects a visible results tab", async ({
 	await expect(page.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
 	await expect(page.getByRole("tabpanel", { name: "Generated Test Cases", exact: true })).not.toBeEmpty();
 });
+
+for (const state of ["partial", "failed", "completed"]) {
+	for (const count of [0, 1])
+		test(`two-tab results remain usable for ${state} runs with ${count} cases`, async ({ page }) => {
+			await openCases(page, count ? [caseFixture("TC-001", "Checkout")] : [], {
+				workflow_diagnostics: {
+					status: state,
+					timed_out: state === "partial",
+					failure_reason: state === "failed" ? "internal_error" : null,
+					warnings: ["technical warning"],
+					parser_failures: ["internal parser message"],
+				},
+			});
+			const tabs = page.getByRole("tablist", { name: "Generation result sections" });
+			const panel = page.getByRole("tabpanel");
+			await expect(tabs.getByRole("tab")).toHaveCount(2);
+			await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
+			await expect(panel).not.toBeEmpty();
+			await expect(panel).not.toContainText(/technical warning|internal parser message|Generation Summary|Diagnostics/);
+			await page.reload();
+			await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
+			await expect(panel).not.toBeEmpty();
+		});
+}
