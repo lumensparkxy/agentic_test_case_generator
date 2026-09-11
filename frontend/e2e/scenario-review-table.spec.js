@@ -98,13 +98,19 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	const divider = dividers.first();
 	const headers = page.getByRole("columnheader", { name: /^Title \/ objective/ });
 	const header = headers.first();
+	const table = page.getByRole("table", { name: "REQ-101", exact: true });
+	const tableWidth = (await table.boundingBox()).width;
+	await expect(table.getByRole("separator")).toHaveCount(3);
+	await expect(page.getByRole("separator", { name: "Resize Quality flags column", exact: true })).toHaveCount(0);
 	const before = (await header.boundingBox()).width;
+	const neighborWidth = (await table.getByRole("columnheader", { name: /^Review status/ }).boundingBox()).width;
 	const box = await divider.boundingBox();
 	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2, { steps: 5 });
 	await page.mouse.up();
-	expect((await header.boundingBox()).width).toBeGreaterThan(before + 80);
+	expect((await header.boundingBox()).width).toBeCloseTo(before + Math.min(100, neighborWidth - 150), 0);
+	expect((await table.boundingBox()).width).toBeCloseTo(tableWidth, 0);
 	await divider.focus();
 	await page.keyboard.press("Home");
 	await expect(divider).toHaveAttribute("aria-valuenow", "200");
@@ -113,6 +119,7 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "210");
 	expect((await headers.nth(1).boundingBox()).width).toBe((await header.boundingBox()).width);
 	await expect(status(page)).toHaveValue("approved");
+	expect((await table.boundingBox()).width).toBeCloseTo(tableWidth, 0);
 	const search = page.getByRole("searchbox", { name: "Search use cases", exact: true });
 	await search.fill("supervisor");
 	await expect(dividers).toHaveCount(1);
@@ -195,4 +202,34 @@ test("long requirement headings and single-row groups wrap without page overflow
 	await expect(page.getByText("1 use case", { exact: true })).toBeVisible();
 	await expect(page.getByRole("table", { name: "REQ-101", exact: true }).getByRole("columnheader")).toHaveCount(4);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("last internal divider changes Quality flags from the left without moving the outer edge", async ({ page }) => {
+	await page.setViewportSize({ width: 1488, height: 900 });
+	await open(page);
+	const table = page.getByRole("table", { name: "REQ-101", exact: true });
+	const divider = table.getByRole("separator", { name: "Resize Review status column", exact: true });
+	const flags = table.getByRole("columnheader", { name: "Quality flags", exact: true });
+	const original = await table.boundingBox();
+	await divider.focus();
+	await page.keyboard.press("End");
+	expect((await flags.boundingBox()).width).toBeCloseTo(150, 0);
+	const resized = await table.boundingBox();
+	expect(resized.x + resized.width).toBeCloseTo(original.x + original.width, 0);
+	await page.keyboard.press("ArrowRight");
+	expect((await flags.boundingBox()).width).toBeCloseTo(150, 0);
+	await page.keyboard.press("Home");
+	await expect(divider).toHaveAttribute("aria-valuenow", "150");
+	expect((await table.boundingBox()).width).toBeCloseTo(original.width, 0);
+});
+
+test("older narrow saved widths still fill the table container", async ({ page }) => {
+	await page.setViewportSize({ width: 1488, height: 900 });
+	await page.addInitScript(() => localStorage.setItem("tcg.columns.use-cases-grouped-v1", JSON.stringify([144, 336, 160, 160])));
+	await open(page);
+	const table = page.getByRole("table", { name: "REQ-101", exact: true });
+	const region = page.getByRole("region", { name: "Use cases for REQ-101", exact: true });
+	const outer = await region.boundingBox();
+	const bounds = await table.boundingBox();
+	expect(Math.abs(outer.x + outer.width - bounds.x - bounds.width)).toBeLessThanOrEqual(2);
 });

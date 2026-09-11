@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented, awaiting review: #267 — Fix the outer table edge and resize only internal boundaries by exchanging adjacent column widths. Builds on #265 / PR #266; parent #241.
+
 - Implemented, awaiting review: #265 — Group Use Cases under source requirement headings with synchronized four-column resizing. Builds on #263 / PR #264; parent #241.
 
 - Implemented, awaiting review: #263 — Remove scenario Details, use direct Quality flags dropdowns, and add shared resizable table columns. Builds on #261 / PR #262; parent #241.
