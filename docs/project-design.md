@@ -99,7 +99,7 @@ See [scenario review persistence](scenario-review-persistence.md) for the API an
 
 Use Cases uses shared `MultiSelect` and `ResizableTable` components. Quality flags have a uniform visible label and selected count; the accessible label retains scenario context. The checkbox popup uses the native popover top layer to avoid table-scroll clipping, and supports Escape/light dismissal and a Done action. Opening it does not expand the row. Titles/objectives no longer include nested Details.
 
-Drag a divider at the right edge of any column header. Keyboard Left/Right adjusts by 10px (Shift: 40px), Home/End applies limits, and Enter/double-click restores that column's default width. Width preferences persist locally (the current grouped-table key is documented below); unavailable storage does not block resizing. Minimum widths preserve usable controls, and wider tables scroll within their labeled container. Layout changes never submit or clear row reviews.
+Drag an internal divider between column headers; the final column has no outer resize handle. Adjacent columns exchange width while the table width stays fixed. Keyboard Left/Right adjusts by 10px (Shift: 40px), Home/End applies the neighboring columns’ limits, and Enter/double-click restores that column's default width. Width preferences persist locally (the current grouped-table key is documented below); unavailable storage does not block resizing. Minimum widths preserve usable controls, and wider tables scroll within their labeled container. Layout changes never submit or clear row reviews.
 
 ## Requirement-grouped tables (#265)
 
@@ -108,3 +108,5 @@ Use Cases displays each requirement ID, full text and visible use-case count onc
 `ResizableTable` supports controlled `widths` (pixel array or `null` for default proportions) and `onWidthsChange(nextWidths)`. A page owning multiple tables should call `useTableColumnWidths(columns, storageKey)` once and pass the returned state/setter to every table. Standalone tables may continue using `storageKey` for internal persistence. Pass `aria-labelledby` to name each table from its requirement heading. Group headings wrap outside each labeled horizontal scroll container.
 
 Use Cases stores the synchronized layout under `tcg.columns.use-cases-grouped-v1`; the previous five-column preference remains unused. Dragging or keyboard-resizing any group's header updates every visible table and groups restored by clearing filters. Review draft identity and persistence remain owned by the page.
+
+The fixed outer-edge behavior (#267) preserves both neighboring minimum widths during pointer and keyboard resizing. Quality flags can be resized only from its left divider; the table border is not an interactive separator.
