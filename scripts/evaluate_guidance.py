@@ -9,11 +9,13 @@ model self-assessment is not substituted for unsupported-assumption counts.
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import time
@@ -165,7 +167,51 @@ def validate_review(review):
     return review
 
 
-def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, reviews=None, input_rate=None, output_rate=None):
+def contains_fallback(value):
+    """A successful HTTP call can still yield a deterministic workflow fallback."""
+    if isinstance(value, dict):
+        if value.get("used_fallback") or value.get("fallback_shards", 0) or value.get("fallback_shard_count", 0):
+            return True
+        if value.get("status") in {"fallback", "failed", "timeout"}:
+            return True
+        return any(contains_fallback(item) for item in value.values())
+    return isinstance(value, list) and any(contains_fallback(item) for item in value)
+
+
+def validate_artifact(stage, output, rows):
+    """Check delivered contracts; never import or execute model output."""
+    if stage == "test_cases":
+        cases = output.get("test_cases", [])
+        expected_count = output.get("generation_evidence", {}).get("final_test_case_count")
+        errors = []
+        if not cases:
+            errors.append("no_delivered_test_cases")
+        if expected_count is not None and expected_count != len(cases):
+            errors.append("delivered_case_count_differs_from_generation_evidence")
+        covered = {rid for case in cases for rid in case.get("linked_requirement_ids", [])}
+        if {row["id"] for row in rows} - covered:
+            errors.append("missing_delivered_requirement_coverage")
+        return errors
+    if stage != "automation":
+        return []
+    code = output.get("notes", "")
+    sections = re.split(r"(?m)^#\s*=== FILE: [^\n]+===\s*$", code)
+    errors, tests = [], []
+    for index, section in enumerate(sections):
+        if not section.strip():
+            continue
+        try:
+            tree = ast.parse(section)
+            compile(tree, f"generated-section-{index}", "exec")
+            tests.extend(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"))
+        except SyntaxError:
+            errors.append(f"invalid_python_section_{index}")
+    if len(tests) < len(rows):
+        errors.append("missing_test_functions")
+    return errors
+
+
+def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, reviews=None, input_rate=None, output_rate=None, on_result=None):
     results = []
     for repeat in range(repeats):
         # Rotate ordering to avoid assigning the same arm a systematic warm-up advantage.
@@ -197,14 +243,19 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                                 result["output"] = serialize(run_stage(stage, rows))
                                 result["output_hash"] = sha256(json.dumps(result["output"], sort_keys=True).encode()).hexdigest()
                                 result["status"] = "generated"
+                                result["validation_errors"] = validate_artifact(stage, result["output"], rows)
+                                if result["validation_errors"]:
+                                    result["status"] = "invalid_artifact"
                             except Exception as exc:
                                 result.update(status="failed", error_type=type(exc).__name__)
                         result.update(latency_seconds=round(time.monotonic() - start, 3), usage=usage)
-                        if usage["calls"] == 0 or usage["failed_calls"]:
+                        if usage["calls"] == 0 or usage["failed_calls"] or contains_fallback(result.get("output")):
                             result["status"] = "fallback_or_failure"
                         if input_rate is not None and output_rate is not None and not usage["missing_usage"]:
                             result["estimated_cost_usd"] = round((usage["input_tokens"] * input_rate + usage["output_tokens"] * output_rate) / 1_000_000, 6)
                     results.append(result)
+                    if on_result:
+                        on_result(results)
     return {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "mode": "model_backed" if live else "contracts_only",
@@ -300,6 +351,12 @@ def main():
             args.output.write_text(json.dumps(report, indent=2) + "\n")
             print(json.dumps(report))
             return 2
+
+    def checkpoint(results):
+        args.output.write_text(json.dumps({"mode": "in_progress", "model": model, "results": results, "enablement": "disabled"}, indent=2) + "\n")
+        latest = results[-1]
+        print(f"{latest['id']}: {latest['status']} ({latest['latency_seconds']}s)", flush=True)
+
     report = evaluate(
         live=args.live,
         repeats=args.repeats,
@@ -308,6 +365,7 @@ def main():
         reviews=reviews,
         input_rate=args.input_usd_per_million,
         output_rate=args.output_usd_per_million,
+        on_result=checkpoint if args.live else None,
     )
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"{report['mode']}: {len(report['results'])} matched samples. Enablement remains disabled. Report: {args.output}")

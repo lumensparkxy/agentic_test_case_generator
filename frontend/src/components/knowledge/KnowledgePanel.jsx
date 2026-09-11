@@ -353,7 +353,15 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 					<p>Curated methods are selected automatically by stage when skills are enabled.</p>
 					{knowledge.data?.skills.map((s) => (
 						<p key={s.id}>
-							<strong>{STAGES[s.stage]}</strong> · {s.id} v{s.version} — {s.description}
+							<strong>{STAGES[s.stage]}</strong> · {s.id} v{s.version} — {s.description}{" "}
+							{["skills", "memory"].map((kind) => {
+								const value = knowledge.data?.features?.[s.stage]?.[kind];
+								return (
+									<Badge key={kind} tone={value === true ? "success" : "neutral"}>
+										{kind === "skills" ? "Skills" : "Memory"} {value === true ? "on" : value === false ? "off" : "status unavailable"}
+									</Badge>
+								);
+							})}
 						</p>
 					))}
 				</Disclosure>

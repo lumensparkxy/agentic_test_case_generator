@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { installUseCaseReviewApi, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
 const stages = ["requirements", "use_cases", "test_cases", "automation"];
-async function openKnowledge(page, { failFirst = false } = {}) {
+async function openKnowledge(page, { failFirst = false, features = {} } = {}) {
 	await installUseCaseReviewApi(page);
 	await seedAuthenticatedSession(page);
 	let entries = [];
@@ -35,8 +35,11 @@ async function openKnowledge(page, { failFirst = false } = {}) {
 				json: {
 					entries,
 					revision: String(calls.length),
-					skills: [{ id: "scenario-coverage", version: "1.0.0", stage: "use_cases", description: "Source-grounded coverage" }],
-					features: {},
+					skills: [
+						{ id: "scenario-coverage", version: "1.0.0", stage: "use_cases", description: "Source-grounded coverage" },
+						{ id: "execution-ready-tests", version: "1.0.0", stage: "test_cases", description: "Concrete test steps" },
+					],
+					features,
 				},
 			});
 		const payload = route.request().postDataJSON();
@@ -82,6 +85,18 @@ async function openKnowledge(page, { failFirst = false } = {}) {
 	await expect(page.getByRole("region", { name: "Project knowledge" })).toBeVisible();
 	return calls;
 }
+
+test("skill catalog distinguishes enabled and held stages", async ({ page }) => {
+	await openKnowledge(page, { features: { use_cases: { skills: true, memory: true }, test_cases: { skills: false, memory: false } } });
+	const panel = page.getByRole("region", { name: "Project knowledge" });
+	await panel.getByText("Skills used by this project", { exact: true }).click();
+	const useCases = panel.locator("p").filter({ hasText: "scenario-coverage" });
+	const testCases = panel.locator("p").filter({ hasText: "execution-ready-tests" });
+	await expect(useCases).toContainText("Skills on");
+	await expect(useCases).toContainText("Memory on");
+	await expect(testCases).toContainText("Skills off");
+	await expect(testCases).toContainText("Memory off");
+});
 
 test("knowledge requires separate approval and edits preserve the active wording", async ({ page }) => {
 	const calls = await openKnowledge(page);
