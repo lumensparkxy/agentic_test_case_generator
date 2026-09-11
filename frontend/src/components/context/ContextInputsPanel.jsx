@@ -1,7 +1,10 @@
+import KnowledgePanel from "../knowledge/KnowledgePanel";
 import { Surface } from "../ui/surfaces";
 import { Field, Input, Button, Checkbox } from "../ui/controls";
 import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
+	request,
+	projectId,
 	appLink,
 	setAppLink,
 	prototypeLink,
@@ -110,6 +113,7 @@ export default function ContextInputsPanel({
 					</div>
 				</Surface>
 			)}
+			{projectId && request && <KnowledgePanel key={projectId} request={request} projectId={projectId} />}
 			<div className="panel-nav">
 				<Button onClick={goPrev} className="secondary">
 					Back

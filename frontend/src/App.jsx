@@ -3946,6 +3946,7 @@ export default function App() {
 			/>
 
 			<SettingsDialog
+				request={apiRequest}
 				isOpen={isSettingsDialogOpen}
 				onOverlayClick={handleSettingsDialogOverlayClick}
 				onClose={closeSettingsDialog}
@@ -4775,6 +4776,8 @@ export default function App() {
 
 									{activeTab === 1 && (
 										<ContextInputsPanel
+											request={apiRequest}
+											projectId={navigationProjectId}
 											appLink={appLink}
 											setAppLink={setAppLink}
 											prototypeLink={prototypeLink}
