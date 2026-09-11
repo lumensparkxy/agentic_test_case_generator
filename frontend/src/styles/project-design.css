@@ -298,12 +298,7 @@ select {
 .use-case-supporting-details[open] {
 	padding-bottom: 16px;
 }
-.artifact-review-columns {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) 320px;
-	gap: 28px;
-	align-items: start;
-}
+
 .use-case-review-workbench {
 	gap: 16px;
 }
@@ -604,9 +599,6 @@ select {
 	color: var(--text-muted);
 }
 @media (max-width: 1200px) {
-	.artifact-review-columns {
-		grid-template-columns: minmax(0, 1fr);
-	}
 	.use-case-decision-panel {
 		max-width: none;
 	}
@@ -771,22 +763,11 @@ select {
 		margin-top: 12px;
 	}
 }
-/* Cancel the former workbench's container-column rules: the inner review grid owns columns. */
+/* Use Cases keeps scenarios full width; review actions open a dialog. */
 .use-case-review-page .use-case-review-workbench {
 	grid-template-columns: minmax(0, 1fr);
 }
-.artifact-review-columns {
-	grid-column: 1 / -1;
-}
-.artifact-review-columns .use-case-collection {
-	grid-column: 1;
-	border: 0;
-	padding: 0;
-	background: transparent;
-}
-.artifact-review-columns .use-case-decision-panel {
-	grid-column: 2;
-}
+
 .use-case-collection-heading {
 	grid-template-columns: minmax(0, 1fr);
 }
@@ -806,12 +787,7 @@ select {
 .workflow-navigation-item:not(.active) {
 	background: transparent;
 }
-@media (max-width: 1200px) {
-	.artifact-review-columns .use-case-decision-panel {
-		grid-column: 1;
-		position: static;
-	}
-}
+
 @media (min-width: 1201px) {
 	.command-project-control {
 		width: 300px;
@@ -832,9 +808,7 @@ select {
 		flex-basis: 180px;
 	}
 }
-.artifact-review-columns .use-case-decision-panel {
-	position: static;
-}
+
 .scenario-details > summary {
 	cursor: pointer;
 	font-size: var(--font-body);
@@ -938,4 +912,77 @@ select {
 		min-width: 0;
 		max-width: 100%;
 	}
+}
+
+.use-case-review-workbench > .use-case-collection {
+	grid-column: 1 / -1;
+	border: 0;
+	padding: 0;
+	background: transparent;
+}
+.use-case-review-bar {
+	position: sticky;
+	bottom: 0;
+	z-index: 5;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 16px;
+	background: var(--card-bg);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-sm);
+}
+.use-case-review-bar p {
+	margin: 4px 0 0;
+	color: var(--text-muted);
+	font-size: var(--font-secondary);
+}
+.use-case-review-bar-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.use-case-review-dialog {
+	width: min(100%, 640px);
+	max-height: calc(100dvh - 48px);
+	overflow-y: auto;
+}
+.use-case-review-dialog .use-case-decision-panel {
+	position: static;
+	border: 0;
+	background: var(--card-bg);
+}
+@media (max-width: 600px) {
+	.use-case-review-bar {
+		padding: 12px;
+	}
+	.use-case-review-bar-actions {
+		width: 100%;
+	}
+	.use-case-review-bar-actions > button {
+		flex: 1;
+	}
+}
+
+.use-case-review-dialog .use-case-decision-options {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.use-case-review-dialog .use-case-decision-options legend {
+	grid-column: 1 / -1;
+}
+.use-case-review-dialog .use-case-decision-actions {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 12px;
+}
+.use-case-review-dialog .use-case-decision-actions p {
+	flex-basis: 100%;
+}
+.use-case-review-dialog .use-case-decision-actions button {
+	width: auto;
 }
