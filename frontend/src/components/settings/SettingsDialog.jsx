@@ -1,3 +1,4 @@
+import KnowledgePanel from "../knowledge/KnowledgePanel";
 import { X } from "lucide-react";
 import { Dialog } from "../ui/dialog";
 import { IconButton } from "../ui/controls";
@@ -7,6 +8,7 @@ import JiraConnectionSettings from "../integrations/JiraConnectionSettings";
 import WorkflowSettingsPanel from "../workflow/WorkflowSettingsPanel";
 
 export default function SettingsDialog({
+	request,
 	isOpen,
 	onOverlayClick,
 	onClose,
@@ -65,6 +67,14 @@ export default function SettingsDialog({
 					>
 						Integrations
 					</Tab>
+					<Tab
+						id="settings-knowledge-tab"
+						selected={settingsSection === "knowledge"}
+						aria-controls="settings-section-panel"
+						onClick={() => setSettingsSection("knowledge")}
+					>
+						Personal knowledge
+					</Tab>
 				</TabList>
 				<TabPanel id="settings-section-panel" aria-labelledby={`settings-${settingsSection}-tab`} className="settings-dialog-body">
 					{settingsSection === "workflow" ? (
@@ -86,6 +96,12 @@ export default function SettingsDialog({
 								setSettings={setTestCaseWorkflowSettings}
 							/>
 						</>
+					) : settingsSection === "knowledge" ? (
+						isAuthenticated ? (
+							<KnowledgePanel request={request} personal />
+						) : (
+							<p>Sign in to manage personal knowledge.</p>
+						)
 					) : (
 						<>
 							<div className="settings-section-intro">

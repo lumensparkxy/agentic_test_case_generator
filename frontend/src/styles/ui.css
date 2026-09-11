@@ -661,3 +661,53 @@
 	flex-basis: 100%;
 	margin: 0;
 }
+
+.ui-dialog-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 1200;
+	background: rgb(15 28 51 / 0.35);
+	display: grid;
+	place-items: center;
+	padding: var(--space-4);
+}
+.knowledge-dialog {
+	width: min(620px, 100%);
+	max-height: 90dvh;
+	overflow: auto;
+	padding: var(--space-5);
+	background: var(--surface-container-lowest, #fff);
+}
+.knowledge-panel {
+	margin-block: var(--space-5);
+	padding: var(--space-4);
+	min-width: 0;
+}
+.knowledge-panel .ui-table {
+	min-width: 720px;
+}
+.knowledge-panel td,
+.guidance-summary {
+	overflow-wrap: anywhere;
+}
+.knowledge-form {
+	display: grid;
+	gap: var(--space-3);
+}
+.knowledge-form textarea {
+	min-height: 100px;
+}
+.knowledge-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.knowledge-check {
+	display: flex;
+	gap: var(--space-2);
+	align-items: start;
+	margin-block: var(--space-2);
+}
+.guidance-summary {
+	margin-block: var(--space-3);
+}
