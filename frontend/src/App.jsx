@@ -36,7 +36,6 @@ import RequirementReviewWorkbench from "./components/requirements/RequirementRev
 import SettingsDialog from "./components/settings/SettingsDialog";
 import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
 import WorkflowNavigationDrawer from "./components/layout/WorkflowNavigationDrawer";
-import WorkflowDiagnostics from "./components/workflow/WorkflowDiagnostics";
 import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
 import useBrowserNavigation from "./hooks/useBrowserNavigation";
@@ -309,7 +308,6 @@ export default function App() {
 		setTestCaseWorkflowDiagnostics,
 		appliedTestCaseWorkflowSettings,
 		setAppliedTestCaseWorkflowSettings,
-		testCaseIterationHistory,
 		setTestCaseIterationHistory,
 		feedback,
 		setFeedback,
@@ -752,20 +750,7 @@ export default function App() {
 	const requirementReportDetailCount = requirementBlockingIssues.length + requirementWarnings.length + requirementParserFailures.length;
 
 	const chooseGenerateResultTab = (data) => {
-		const diagnostics = data?.workflow_diagnostics || null;
 		const metrics = data?.coverage_metrics || null;
-		const hasDiagnosticAttention = Boolean(
-			diagnostics?.failure_reason ||
-			diagnostics?.timed_out ||
-			diagnostics?.stalled ||
-			(diagnostics?.status && diagnostics.status !== "completed") ||
-			diagnostics?.warnings?.length ||
-			diagnostics?.parser_failures?.length
-		);
-
-		if (hasDiagnosticAttention) {
-			return "diagnostics";
-		}
 		if ((metrics?.requirements_without_tests || []).length > 0) {
 			return "traceability";
 		}
@@ -851,10 +836,6 @@ export default function App() {
 			},
 		};
 	};
-
-	const renderWorkflowDiagnostics = (title, diagnostics, appliedSettings, iterationHistory) => (
-		<WorkflowDiagnostics title={title} diagnostics={diagnostics} appliedSettings={appliedSettings} iterationHistory={iterationHistory} />
-	);
 
 	const renderRequirementReviewReport = () => {
 		if (!requirementReview && !requirementCoverageMetrics && !requirementWorkflowDiagnostics && !appliedRequirementWorkflowSettings) {
@@ -3591,15 +3572,6 @@ export default function App() {
 	});
 	const tracedRequirementCount = requirementTraceabilityRows.filter((row) => row.linkedTestCases.length > 0).length;
 	const traceabilityGapCount = Math.max(0, approvedRequirements.length - tracedRequirementCount);
-	const diagnosticsWarningCount =
-		(testCaseWorkflowDiagnostics?.warnings?.length || 0) + (testCaseWorkflowDiagnostics?.parser_failures?.length || 0);
-	const diagnosticsNeedsAttention = Boolean(
-		testCaseWorkflowDiagnostics?.failure_reason ||
-		testCaseWorkflowDiagnostics?.timed_out ||
-		testCaseWorkflowDiagnostics?.stalled ||
-		(testCaseWorkflowDiagnostics?.status && testCaseWorkflowDiagnostics.status !== "completed") ||
-		diagnosticsWarningCount > 0
-	);
 	const hasGenerateResults = Boolean(
 		testCases.length ||
 		coveragePlan.length ||
@@ -3620,12 +3592,6 @@ export default function App() {
 			label: "Traceability Matrix",
 			badge: approvedRequirements.length ? `${tracedRequirementCount}/${approvedRequirements.length}` : "—",
 			variant: traceabilityGapCount > 0 ? "warning" : tracedRequirementCount > 0 ? "success" : "muted",
-		},
-		{
-			id: "diagnostics",
-			label: "Diagnostics",
-			badge: diagnosticsWarningCount || testCaseWorkflowDiagnostics?.status || (appliedTestCaseWorkflowSettings ? "settings" : "—"),
-			variant: diagnosticsNeedsAttention ? "warning" : testCaseWorkflowDiagnostics || appliedTestCaseWorkflowSettings ? "muted" : "muted",
 		},
 	];
 
@@ -4886,10 +4852,7 @@ export default function App() {
 													<div className="generate-results-header">
 														<div>
 															<h3>Generation Results</h3>
-															<p>
-																Review the generated cases, requirement traceability, and workflow diagnostics without scrolling through a
-																wall of artifacts.
-															</p>
+															<p>Review the generated test cases and their requirement coverage.</p>
 														</div>
 														<span className="generate-results-summary-pill">
 															{testCases.length} test case{testCases.length === 1 ? "" : "s"}
@@ -4921,19 +4884,6 @@ export default function App() {
 														role="tabpanel"
 														aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
 													>
-														{activeGenerateResultTab === "diagnostics" &&
-															(renderWorkflowDiagnostics(
-																"Test-case workflow diagnostics",
-																testCaseWorkflowDiagnostics,
-																appliedTestCaseWorkflowSettings,
-																testCaseIterationHistory
-															) || (
-																<CollectionState as="div" kind="empty" className="generate-result-empty">
-																	<h3>Diagnostics</h3>
-																	<p>No workflow diagnostics are available for this run.</p>
-																</CollectionState>
-															))}
-
 														{activeGenerateResultTab === "traceability" && (
 															<TraceabilityMatrixPanel
 																approvedRequirements={approvedRequirements}
@@ -4966,7 +4916,7 @@ export default function App() {
 												<Surface as="div" className="result-section">
 													<h3>Generated Test Cases</h3>
 													<span className="helper-text">
-														No generation run yet. Generate from approved requirements to view test cases, traceability, and diagnostics.
+														No generation run yet. Generate from approved requirements to view test cases and requirement traceability.
 													</span>
 												</Surface>
 											)}
