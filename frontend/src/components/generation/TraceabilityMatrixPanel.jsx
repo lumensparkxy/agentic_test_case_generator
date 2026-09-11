@@ -1,6 +1,5 @@
 import { CollectionState, TableScroll, Table } from "../ui/collections";
 import { Surface, Badge } from "../ui/surfaces";
-import { getRequirementContextPath } from "../../utils/requirements";
 
 export default function TraceabilityMatrixPanel({
 	approvedRequirements,
@@ -37,7 +36,6 @@ export default function TraceabilityMatrixPanel({
 					<thead>
 						<tr>
 							<th scope="col">Requirement</th>
-							<th scope="col">Story / source path</th>
 							<th scope="col">Linked test cases</th>
 							<th scope="col">Scenario coverage</th>
 							<th scope="col">Status</th>
@@ -50,9 +48,7 @@ export default function TraceabilityMatrixPanel({
 								<tr key={requirement.id} className={isCovered ? "covered" : "missing"}>
 									<td>
 										<strong>{requirement.id}</strong>
-										<span>{requirement.text}</span>
 									</td>
-									<td>{getRequirementContextPath(requirement)}</td>
 									<td>
 										{linkedTestCases.length ? (
 											linkedTestCases.map((testCase) => (

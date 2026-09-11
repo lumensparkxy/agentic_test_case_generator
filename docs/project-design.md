@@ -124,3 +124,9 @@ The read-only skill catalog uses shared badges to show Skills on/off and Memory 
 The shared recovery dialog pauses a generation that cannot load memory and offers Retry loading guidance, Run without remembered guidance, and Cancel generation. Only an explicit bypass changes that input; failed suggestion retries never repeat generation or artifact review.
 
 Use Cases opts into `ResizableTable`'s `responsiveMinWidth={800}` (#284). On container resize, stored widths share the available space above each column's minimum width; groups remain aligned and the table fits the container down to 800px, then scrolls within it. Browser resizing does not overwrite the saved preference. Other table consumers retain their existing sizing behavior.
+
+## Focused Test Cases results (#286)
+
+Test Cases presents Generated Test Cases, Traceability Matrix, and Diagnostics. Scenario Coverage and Requirement Analysis tabs are removed from this page. Requirement or scenario coverage gaps open Traceability Matrix; a loaded project without generated cases opens the Generated Test Cases empty state. Stored coverage/analysis artifacts and generation/review/export rules remain unchanged.
+
+Traceability Matrix shows requirement IDs without repeating their full text or Story / source path. Linked test cases, scenario coverage, and Covered/Gap status remain visible.
