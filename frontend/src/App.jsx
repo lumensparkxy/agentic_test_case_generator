@@ -4852,9 +4852,7 @@ export default function App() {
 													<div className="generate-results-header">
 														<div>
 															<h3>Generation Results</h3>
-															<p>
-																Review the generated test cases and their requirement coverage.
-															</p>
+															<p>Review the generated test cases and their requirement coverage.</p>
 														</div>
 														<span className="generate-results-summary-pill">
 															{testCases.length} test case{testCases.length === 1 ? "" : "s"}
