@@ -27,10 +27,27 @@ export function useTableColumnWidths(columns, storageKey) {
 	return [widths, setWidths];
 }
 
-export function ResizableTable({ columns, storageKey, widths: controlledWidths, onWidthsChange, children, className, ...props }) {
+export function ResizableTable({
+	columns,
+	storageKey,
+	widths: controlledWidths,
+	onWidthsChange,
+	children,
+	className,
+	responsiveMinWidth,
+	...props
+}) {
 	const table = useRef(null);
 	const drag = useRef(null);
 	const [measured, setMeasured] = useState(null);
+	const [containerWidth, setContainerWidth] = useState(0);
+	useEffect(() => {
+		if (!responsiveMinWidth) return;
+		const container = table.current.parentElement;
+		const observer = new ResizeObserver(() => setContainerWidth(container.clientWidth));
+		observer.observe(container);
+		return () => observer.disconnect();
+	}, [responsiveMinWidth]);
 	useEffect(() => {
 		const observer = new ResizeObserver(() =>
 			setMeasured([...table.current.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width))
@@ -41,6 +58,17 @@ export function ResizableTable({ columns, storageKey, widths: controlledWidths, 
 	const [localWidths, setLocalWidths] = useTableColumnWidths(columns, controlledWidths === undefined ? storageKey : undefined);
 	const widths = controlledWidths === undefined ? localWidths : controlledWidths;
 	const setWidths = onWidthsChange || setLocalWidths;
+	const minimumTotal = columns.reduce((sum, column) => sum + column.min, 0);
+	const fittedWidth = Math.max(responsiveMinWidth || 0, minimumTotal, containerWidth);
+	const spareWidths = widths?.map((width, i) => Math.max(0, width - columns[i].min));
+	const spareTotal = spareWidths?.reduce((sum, width) => sum + width, 0);
+	// Share the available space above column minima, retaining the saved layout at its original size.
+	const displayWidths =
+		responsiveMinWidth && widths
+			? columns.map(
+					(column, i) => column.min + (fittedWidth - minimumTotal) * (spareTotal ? spareWidths[i] / spareTotal : column.percent / 100)
+				)
+			: widths;
 	const actualWidths = () => [...table.current.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width);
 	const limits = (index, baseline) => {
 		const combined = baseline[index] + baseline[index + 1];
@@ -58,13 +86,13 @@ export function ResizableTable({ columns, storageKey, widths: controlledWidths, 
 			className={className}
 			style={{
 				tableLayout: "fixed",
-				minWidth: widths ? "100%" : undefined,
-				width: widths ? widths.reduce((sum, value) => sum + value, 0) : "100%",
+				minWidth: responsiveMinWidth || (widths ? "100%" : undefined),
+				width: responsiveMinWidth ? "100%" : widths ? widths.reduce((sum, value) => sum + value, 0) : "100%",
 			}}
 		>
 			<colgroup>
 				{columns.map((column, i) => (
-					<col key={column.label} style={{ width: widths ? widths[i] : column.percent + "%" }} />
+					<col key={column.label} style={{ width: displayWidths ? displayWidths[i] : column.percent + "%" }} />
 				))}
 			</colgroup>
 			<thead>
