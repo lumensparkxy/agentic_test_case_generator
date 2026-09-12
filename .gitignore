@@ -8,7 +8,27 @@ __pycache__/
 venv/
 ENV/
 .env/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/acquire-codebase-knowledge/
+!.agents/skills/add-educational-comments/
+!.agents/skills/agent-governance/
+!.agents/skills/agentic-eval/
+!.agents/skills/cloud-run-basics/
+!.agents/skills/cloud-sql-basics/
+!.agents/skills/documentation-writer/
+!.agents/skills/drawio/
+!.agents/skills/firebase-basics/
+!.agents/skills/gemini-api/
+!.agents/skills/github-issues/
+!.agents/skills/gke-basics/
+!.agents/skills/gtm-ai-gtm/
+!.agents/skills/microsoft-docs/
+!.agents/skills/repository-qa/
+!.agents/skills/review-and-refactor/
+# Dependencies remain ignored inside versioned skills too.
+**/node_modules/
 
 # Distribution / packaging
 build/

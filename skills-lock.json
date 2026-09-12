@@ -2,118 +2,174 @@
   "version": 1,
   "skills": {
     "acquire-codebase-knowledge": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/acquire-codebase-knowledge/SKILL.md",
-      "computedHash": "06b7a3d0bb44b70b470247aacc2ffffe37c8ce64cc3f9178be6f392c81cb6d22"
+      "source": "./.agents/skills/acquire-codebase-knowledge",
+      "sourceType": "local",
+      "computedHash": "28d1fa1c83e4c7eb007d1892d1d08ab278d6dfc8369dd30a7c00351af7aca658",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/acquire-codebase-knowledge/SKILL.md",
+        "computedHash": "06b7a3d0bb44b70b470247aacc2ffffe37c8ce64cc3f9178be6f392c81cb6d22"
+      }
     },
     "add-educational-comments": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/add-educational-comments/SKILL.md",
-      "computedHash": "65f6defd9f7da4af496d3c706839d2f48da6761b5eb1bb21ffc7f7aa35288670"
+      "source": "./.agents/skills/add-educational-comments",
+      "sourceType": "local",
+      "computedHash": "b22aa2073434259a04373faf804f9aff0653cae7b3d8549ff2283dee499005e6",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/add-educational-comments/SKILL.md",
+        "computedHash": "65f6defd9f7da4af496d3c706839d2f48da6761b5eb1bb21ffc7f7aa35288670"
+      }
     },
     "agent-governance": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/agent-governance/SKILL.md",
-      "computedHash": "a91eb8ef638422fa4ec457d81e270f79fe5040b41d7f137dba35016bc20529f5"
+      "source": "./.agents/skills/agent-governance",
+      "sourceType": "local",
+      "computedHash": "ea72b422fcebb1cf80c6e340c55a7d9fbf1ef9f0ce0f7c36502951dfd27b1bed",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/agent-governance/SKILL.md",
+        "computedHash": "a91eb8ef638422fa4ec457d81e270f79fe5040b41d7f137dba35016bc20529f5"
+      }
     },
     "agentic-eval": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/agentic-eval/SKILL.md",
-      "computedHash": "40771d7d389c1542e6cb995d75e516893466f01c3b66bc040b158ceb793d4bed"
+      "source": "./.agents/skills/agentic-eval",
+      "sourceType": "local",
+      "computedHash": "3f41a553fa668d2d28abc4a8c1a69c48911dc1fcc9c1acefbf158b06820dc612",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/agentic-eval/SKILL.md",
+        "computedHash": "40771d7d389c1542e6cb995d75e516893466f01c3b66bc040b158ceb793d4bed"
+      }
     },
     "cloud-run-basics": {
-      "source": "google/skills",
-      "sourceType": "github",
-      "skillPath": "skills/cloud/cloud-run-basics/SKILL.md",
-      "computedHash": "d04d21b683f404fcd6c3b798095c0399d61e5e9d84cb913da46a09e0aa90c708"
+      "source": "./.agents/skills/cloud-run-basics",
+      "sourceType": "local",
+      "computedHash": "7ea40e88f9c3242254536bbb33066a296b8e711d286e27026eea5923ec0430cf",
+      "upstream": {
+        "source": "google/skills",
+        "sourceType": "github",
+        "skillPath": "skills/cloud/cloud-run-basics/SKILL.md",
+        "computedHash": "d04d21b683f404fcd6c3b798095c0399d61e5e9d84cb913da46a09e0aa90c708"
+      }
     },
     "cloud-sql-basics": {
-      "source": "google/skills",
-      "sourceType": "github",
-      "skillPath": "skills/cloud/cloud-sql-basics/SKILL.md",
-      "computedHash": "09cfa905a960ef0c416d57fb7830cafeec554d8093341861abbdf2f9f36c440c"
+      "source": "./.agents/skills/cloud-sql-basics",
+      "sourceType": "local",
+      "computedHash": "d1ab43263a19b0a46b8c181804d1d3d3bf3aad8484f025d496ed53c58146556e",
+      "upstream": {
+        "source": "google/skills",
+        "sourceType": "github",
+        "skillPath": "skills/cloud/cloud-sql-basics/SKILL.md",
+        "computedHash": "09cfa905a960ef0c416d57fb7830cafeec554d8093341861abbdf2f9f36c440c"
+      }
     },
     "documentation-writer": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/documentation-writer/SKILL.md",
-      "computedHash": "ee53d65b163cd7eb953a930c95841cfe398cc2c0bd24c06508bbaa07c432be35"
+      "source": "./.agents/skills/documentation-writer",
+      "sourceType": "local",
+      "computedHash": "6ad7f67a808582b47f3407c78bc950138a2b0e8a23703b6ea2b0000d2fc070f4",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/documentation-writer/SKILL.md",
+        "computedHash": "ee53d65b163cd7eb953a930c95841cfe398cc2c0bd24c06508bbaa07c432be35"
+      }
     },
     "drawio": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/drawio/SKILL.md",
-      "computedHash": "d630545df2f85a8fdbab852aa6781b4f20f275700c2d5a42e4b0bc0fcf3b6dc2"
+      "source": "./.agents/skills/drawio",
+      "sourceType": "local",
+      "computedHash": "6a43a92a54e5011bf164e3802424de831be3b23c7c93b5df5a2af87fefbc6ad6",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/drawio/SKILL.md",
+        "computedHash": "d630545df2f85a8fdbab852aa6781b4f20f275700c2d5a42e4b0bc0fcf3b6dc2"
+      }
     },
     "firebase-basics": {
-      "source": "google/skills",
-      "sourceType": "github",
-      "skillPath": "skills/cloud/firebase-basics/SKILL.md",
-      "computedHash": "cd410eb41f3f0c32aeb2b31ac3f665d54c700d3f40b8ec18f3e571e9687b0f13"
-    },
-    "folder-structure-blueprint-generator": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/folder-structure-blueprint-generator/SKILL.md",
-      "computedHash": "418d532c42d0714986e90466e087f6fd8c975e7dc8afddafd1f37558968b639b"
+      "source": "./.agents/skills/firebase-basics",
+      "sourceType": "local",
+      "computedHash": "28d32ce202020617b8748cc1ff4fe282930f918390be7950b8b941633b1402e7",
+      "upstream": {
+        "source": "google/skills",
+        "sourceType": "github",
+        "skillPath": "skills/cloud/firebase-basics/SKILL.md",
+        "computedHash": "cd410eb41f3f0c32aeb2b31ac3f665d54c700d3f40b8ec18f3e571e9687b0f13"
+      }
     },
     "gemini-api": {
-      "source": "google/skills",
-      "sourceType": "github",
-      "skillPath": "skills/cloud/gemini-api/SKILL.md",
-      "computedHash": "c8cd9e6bd860dcfeb65b6d8a3efaab8b6d93ea7ad666d24d1f4f04c7e34e116b"
+      "source": "./.agents/skills/gemini-api",
+      "sourceType": "local",
+      "computedHash": "8691f79fe88e0753ca0acdf05e80115bcc636068bc0ebcf5f0902528f77eff33",
+      "upstream": {
+        "source": "google/skills",
+        "sourceType": "github",
+        "skillPath": "skills/cloud/gemini-api/SKILL.md",
+        "computedHash": "c8cd9e6bd860dcfeb65b6d8a3efaab8b6d93ea7ad666d24d1f4f04c7e34e116b"
+      }
     },
     "github-issues": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/github-issues/SKILL.md",
-      "computedHash": "efa9746a60c4507ad5a7ad60e1e9a704b4eea06c1229befe3c86b3bbcaea67c9"
+      "source": "./.agents/skills/github-issues",
+      "sourceType": "local",
+      "computedHash": "06a042c864845a48219dcdddae61413ecb00b06a474498623453c63081a84203",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/github-issues/SKILL.md",
+        "computedHash": "efa9746a60c4507ad5a7ad60e1e9a704b4eea06c1229befe3c86b3bbcaea67c9"
+      }
     },
     "gke-basics": {
-      "source": "google/skills",
-      "sourceType": "github",
-      "skillPath": "skills/cloud/gke-basics/SKILL.md",
-      "computedHash": "7173c6f30a0d80414b87eb32c0de219d1f6a1479e40a7775da14febf94b15c46"
+      "source": "./.agents/skills/gke-basics",
+      "sourceType": "local",
+      "computedHash": "82ae14e35b9c252186b8e5acbd7abc2b456b004c5e4fdb60ead04a42fc63775a",
+      "upstream": {
+        "source": "google/skills",
+        "sourceType": "github",
+        "skillPath": "skills/cloud/gke-basics/SKILL.md",
+        "computedHash": "7173c6f30a0d80414b87eb32c0de219d1f6a1479e40a7775da14febf94b15c46"
+      }
     },
     "gtm-ai-gtm": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/gtm-ai-gtm/SKILL.md",
-      "computedHash": "179d38abc1184661ed008435cad0c88a343bb569b42554d943fadf5a4bcfc539"
+      "source": "./.agents/skills/gtm-ai-gtm",
+      "sourceType": "local",
+      "computedHash": "02e1b3aa57f501b57963366bbd7a606685c209924e8915e997b0cb5c749e727b",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/gtm-ai-gtm/SKILL.md",
+        "computedHash": "179d38abc1184661ed008435cad0c88a343bb569b42554d943fadf5a4bcfc539"
+      }
     },
     "microsoft-docs": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/microsoft-docs/SKILL.md",
-      "computedHash": "e49127ff2162330ac79bfde9e7ed1297df15be9ade09164fdebfe697153fcc36"
+      "source": "./.agents/skills/microsoft-docs",
+      "sourceType": "local",
+      "computedHash": "2d603e57519e5024e9b993724072c94fe3982ba41a3332e9f22c20074287d8ee",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/microsoft-docs/SKILL.md",
+        "computedHash": "e49127ff2162330ac79bfde9e7ed1297df15be9ade09164fdebfe697153fcc36"
+      }
     },
-    "playwright-automation-fill-in-form": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/playwright-automation-fill-in-form/SKILL.md",
-      "computedHash": "05c39652cc1ef6a3066221d77d51e208f88f3ac8cbdd7ffe57a99de93776efe7"
-    },
-    "playwright-explore-website": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/playwright-explore-website/SKILL.md",
-      "computedHash": "ac361696198c2db22a0f9d3aa456d2f83c9f0110bf00d6ca529f735395fe3a5c"
-    },
-    "playwright-generate-test": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/playwright-generate-test/SKILL.md",
-      "computedHash": "8f963da3e25f705ff39755b8b990f20da0c0320cb86ac83fcc4d2d4eca91f6e4"
+    "repository-qa": {
+      "source": "./.agents/skills/repository-qa",
+      "sourceType": "local",
+      "computedHash": "7d0f733c169957147acaf212816f2a331ae4dd1fa2d62f8b84f32ef11ba0050a"
     },
     "review-and-refactor": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/review-and-refactor/SKILL.md",
-      "computedHash": "9236d06a1500089ddb46975b866e9a63478e502afe7095b1980c618678a7c7fe"
+      "source": "./.agents/skills/review-and-refactor",
+      "sourceType": "local",
+      "computedHash": "7ffc56a2567dcceeb14fc2d650fe107a523140df80d84c3414e4774181b3bb7b",
+      "upstream": {
+        "source": "github/awesome-copilot",
+        "sourceType": "github",
+        "skillPath": "skills/review-and-refactor/SKILL.md",
+        "computedHash": "9236d06a1500089ddb46975b866e9a63478e502afe7095b1980c618678a7c7fe"
+      }
     }
   }
 }

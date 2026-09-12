@@ -1,6 +1,8 @@
 # Inquiry Checkpoints
 
-Per-template investigation questions for Phase 2 of the acquire-codebase-knowledge workflow. For each template area, look for answers in the scan output first, then read source files to fill gaps.
+Use only the sections relevant to the requested documentation. For full mapping,
+use available scan output and then verify against source. For focused work,
+inspect the relevant source directly; a full scan is not a prerequisite.
 
 ---
 

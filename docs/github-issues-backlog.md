@@ -1,5 +1,14 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+This document holds roadmap context, historical planning snapshots, and unfiled
+proposals. **GitHub issues and pull requests are authoritative for current
+status.** Existing status and validation notes below are historical; routine
+implementation and merges do not require updating them. Record validation in the
+PR and update this document only when roadmap intent or an unfiled proposal changes.
+
+Development workflow policy: [AGENTS.md](../AGENTS.md). Small localized work may
+use a PR without a separate issue; substantial or sensitive changes require one.
+
 - Implemented; PR review pending: #292 — Remove the Next task pane from Test Cases; retain Overview and compact guarded workflow controls. Parent #241.
 
 - Implemented; PR review pending: #290 — Actionable Improve tests tab with selected findings, refinement, case navigation, and revision/impact safeguards. Parent #241; follows merged #284/#286/#288. Validation: build, lint, formatting, and 38 focused refinement, layout, export, and lifecycle browser tests pass.

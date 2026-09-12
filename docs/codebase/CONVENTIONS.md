@@ -39,28 +39,9 @@ invent rules that are not enforced by configuration.
   directories plus local agent skill mirrors before writing
   `docs/codebase/.codebase-scan.txt`.
 
-Current validation commands:
-
-```bash
-python -m pip install -r backend/requirements-dev.txt
-python -m ruff check backend scripts
-python -m ruff format --check backend scripts
-python -m unittest discover -s backend/tests -p 'test_*.py'
-python scripts/evaluate_requirements.py --offline --strict
-python scripts/evaluate_generation.py --offline --strict
-python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
-python scripts/generate_frontend_api_types.py --check
-python scripts/scan_codebase.py
-
-cd frontend
-npm run lint
-npm run format:check
-npm run build
-npm run test:e2e -- e2e/export-approval-gate.spec.js
-
-cd backend/execution_runtime
-npm run test:playwright -- --list
-```
+Select local validation from [Testing Patterns](TESTING.md). It is the canonical
+command guide; setup and full scans are conditional, not per-task prerequisites.
+Follow [AGENTS.md](../../AGENTS.md) for work records and PR delivery.
 
 ## 3) Import and Module Conventions
 
