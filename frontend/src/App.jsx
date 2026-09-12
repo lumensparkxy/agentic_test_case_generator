@@ -4128,6 +4128,7 @@ export default function App() {
 									status={orchestratorStatus}
 									currentDestination={route.destination}
 									hidden={route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2}
+									compact={route.destination === PROJECT_DESTINATIONS.TEST_CASES}
 									isLoading={isLoadingOrchestrator}
 									error={orchestratorError}
 									authActionDisabled={authActionDisabled}

@@ -487,8 +487,7 @@ test.describe("Impact update flow", () => {
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Impact QA");
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("revision 5");
 
-		const task = page.getByLabel("Contextual task");
-		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
+		const task = page.getByLabel("Test suite actions");
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
 		await expect(page.getByRole("button", { name: /Full Regenerate from 10 Approved/i })).toHaveCount(0);
 

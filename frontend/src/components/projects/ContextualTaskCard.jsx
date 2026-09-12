@@ -102,6 +102,7 @@ export default function ContextualTaskCard({
 	disabled = false,
 	disabledMap = {},
 	navigationOnly = false,
+	compact = false,
 	focusFallbackRef,
 	onAction,
 }) {
@@ -185,33 +186,40 @@ export default function ContextualTaskCard({
 	};
 
 	return (
-		<article className="contextual-task-card" aria-labelledby="contextual-task-title" aria-busy={hasPrimaryAction && isPrimaryBusy}>
-			<div className="contextual-task-copy">
-				<span className="contextual-task-kicker">{hasPrimaryAction ? "Next task" : "More actions"}</span>
-				<h2 id="contextual-task-title">{hasPrimaryAction ? actionLabel(action) : "Optional test suite actions"}</h2>
-				<p>{reason}</p>
-				{showSeparateBlocker ? (
-					<div className="contextual-task-blocker" role="note">
-						{blocker}
-					</div>
-				) : null}
-			</div>
+		<article
+			className={compact ? "test-suite-action-controls" : "contextual-task-card"}
+			aria-labelledby={compact ? undefined : "contextual-task-title"}
+			aria-busy={hasPrimaryAction && isPrimaryBusy}
+		>
+			{!compact && (
+				<div className="contextual-task-copy">
+					<span className="contextual-task-kicker">{hasPrimaryAction ? "Next task" : "More actions"}</span>
+					<h2 id="contextual-task-title">{hasPrimaryAction ? actionLabel(action) : "Optional test suite actions"}</h2>
+					<p>{reason}</p>
+					{showSeparateBlocker ? (
+						<div className="contextual-task-blocker" role="note">
+							{blocker}
+						</div>
+					) : null}
+				</div>
+			)}
+			{compact && blocker && <p role="note">{blocker}</p>}
 			<div className="contextual-task-controls">
 				{hasPrimaryAction ? (
 					<Button type="button" onClick={handlePrimaryAction} disabled={primaryDisabled}>
 						{isPrimaryBusy ? "Working…" : actionCtaLabel(action, navigationOnly)}
 					</Button>
 				) : null}
-				{hasDetails ? (
+				{(compact ? secondaryActions.length > 0 : hasDetails) ? (
 					<Disclosure className="contextual-task-details">
-						<summary>Details</summary>
+						<summary>{compact ? "More actions" : "Details"}</summary>
 						<div className="contextual-task-details-body">
-							{stage ? (
+							{!compact && stage ? (
 								<p>
 									<strong>Status</strong> {formatTaskLabel(action.stage)} · {formatTaskLabel(stage.status)}
 								</p>
 							) : null}
-							{provenanceLabel ? (
+							{!compact && provenanceLabel ? (
 								<div>
 									<p>
 										<strong>Sources</strong> {provenanceLabel}
@@ -229,7 +237,7 @@ export default function ContextualTaskCard({
 									) : null}
 								</div>
 							) : null}
-							{hasDiagnostics ? (
+							{!compact && hasDiagnostics ? (
 								<p className="contextual-task-diagnostics">
 									<strong>Diagnostics</strong> {formatTaskLabel(action.agent_kind)}
 									{action.agent_contract_version ? ` · contract ${action.agent_contract_version}` : ""}
