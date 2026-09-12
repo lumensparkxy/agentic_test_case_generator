@@ -1,3 +1,5 @@
+import useRequirementImports from "./hooks/useRequirementImports";
+import RequirementImportReview from "./components/requirements/RequirementImportReview";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
@@ -234,6 +236,9 @@ const estimateChangedRequirementCount = (snapshots) => {
 };
 
 export default function App() {
+	const [isSavingRequirementReview, setIsSavingRequirementReview] = useState(false);
+	const requirementReviewLock = useRef(false);
+	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const { route, navigate } = useBrowserNavigation();
 	const projectRouteRequestRef = useRef(0);
@@ -563,7 +568,7 @@ export default function App() {
 	const testCaseWorkflowLocked = Boolean(
 		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.test_cases?.exhausted
 	);
-	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked;
+	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked || isSavingRequirementReview;
 	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked || isPreviewingExecution || isRunningExecution;
 	const jiraConnection = jiraConnectionStatus?.connection || null;
 	const jiraConnected = Boolean(jiraConnectionStatus?.connected && jiraConnection);
@@ -605,7 +610,9 @@ export default function App() {
 		acc[status] = (acc[status] || 0) + 1;
 		return acc;
 	}, {});
-	const approvedRequirements = requirements.filter((requirement) => getRequirementReviewStatus(requirement) === "Approved");
+	const approvedRequirements = requirements.filter(
+		(requirement) => requirement.lifecycle_status !== "retired" && getRequirementReviewStatus(requirement) === "Approved"
+	);
 	const approvedRequirementCount = approvedRequirements.length;
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
 	const reviewPendingRequirementCount = requirements.length - approvedRequirementCount - rejectedRequirementCount;
@@ -787,37 +794,59 @@ export default function App() {
 		resetExecutionWorkflowState();
 	};
 
-	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
-		setRequirements((prev) =>
-			prev.map((requirement) => (requirement.id === requirementId ? { ...requirement, review_status: reviewStatus } : requirement))
-		);
-		resetGeneratedArtifacts();
-		setStatus(`${requirementId} marked ${reviewStatus.toLowerCase()}.`);
+	const saveRequirementReviews = async (reviews) => {
+		if (requirementReviewLock.current) return;
+		const operationScope = captureProjectOperationScope();
+		if (!operationScope || reviews.length === 0) return;
+		requirementReviewLock.current = operationScope;
+		setIsSavingRequirementReview(true);
+		const changes = reviews.map((r) => ({
+			requirement_uid: r.requirement_uid,
+			review_status: r.review_status,
+			quality_flags: r.quality_flags || [],
+		}));
+		const fingerprint = JSON.stringify([operationScope.projectId, currentProjectRevision, changes]);
+		if (requirementReviewAttempt.current?.fingerprint !== fingerprint)
+			requirementReviewAttempt.current = { fingerprint, key: createRequestId() };
+		try {
+			const res = await apiRequest(`/projects/${operationScope.projectId}/requirements/reviews`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					base_project_revision: currentProjectRevision,
+					idempotency_key: requirementReviewAttempt.current.key,
+					reviews: changes,
+				}),
+			});
+			if (!res.ok) throw new Error(await parseApiError(res, "Could not save requirement reviews"));
+			const project = await res.json();
+			if (!isProjectOperationCurrent(operationScope)) return;
+			requirementReviewAttempt.current = null;
+			setCurrentProject(project);
+			hydrateProjectWorkflow(project);
+			setStatus("Requirement review saved.");
+		} catch (error) {
+			if (isProjectOperationCurrent(operationScope)) setStatus(error.message);
+		} finally {
+			if (requirementReviewLock.current === operationScope) {
+				requirementReviewLock.current = false;
+				setIsSavingRequirementReview(false);
+			}
+		}
 	};
-
-	const bulkUpdateRequirementReviewStatus = (reviewStatus, predicate = () => true) => {
-		const targetIds = new Set(requirements.filter(predicate).map((requirement) => requirement.id));
-		setRequirements((prev) =>
-			prev.map((requirement) => (targetIds.has(requirement.id) ? { ...requirement, review_status: reviewStatus } : requirement))
+	const updateRequirementReviewStatus = (requirementId, reviewStatus) =>
+		saveRequirementReviews(requirements.filter((r) => r.id === requirementId).map((r) => ({ ...r, review_status: reviewStatus })));
+	const bulkUpdateRequirementReviewStatus = (reviewStatus, predicate = () => true) =>
+		saveRequirementReviews(requirements.filter(predicate).map((r) => ({ ...r, review_status: reviewStatus })));
+	const toggleRequirementQualityFlag = (requirementId, flag) =>
+		saveRequirementReviews(
+			requirements
+				.filter((r) => r.id === requirementId)
+				.map((r) => {
+					const flags = normalizeStringArray(r.quality_flags);
+					return { ...r, quality_flags: flags.includes(flag) ? flags.filter((f) => f !== flag) : [...flags, flag] };
+				})
 		);
-		resetGeneratedArtifacts();
-		const updatedCount = targetIds.size;
-		setStatus(`${updatedCount} requirement${updatedCount === 1 ? "" : "s"} marked ${reviewStatus.toLowerCase()}.`);
-	};
-
-	const toggleRequirementQualityFlag = (requirementId, flag) => {
-		setRequirements((prev) =>
-			prev.map((requirement) => {
-				if (requirement.id !== requirementId) {
-					return requirement;
-				}
-				const currentFlags = normalizeStringArray(requirement.quality_flags);
-				const nextFlags = currentFlags.includes(flag) ? currentFlags.filter((item) => item !== flag) : [...currentFlags, flag];
-				return { ...requirement, quality_flags: nextFlags };
-			})
-		);
-		resetGeneratedArtifacts();
-	};
 
 	const buildContextPayload = (requirementsOverride = requirements) => {
 		const baseContext = {
@@ -1454,8 +1483,8 @@ export default function App() {
 		setFile(null);
 		setReqFeedback("");
 		setFeedback("");
-		setRawText("");
-		setRequirements(requirementPayload?.requirements || []);
+		setRawText(requirementPayload?.raw_text || "");
+		setRequirements((requirementPayload?.requirements || []).filter((r) => r.lifecycle_status !== "retired"));
 		setRequirementReview(requirementPayload?.review || null);
 		setRequirementCoverageMetrics(requirementPayload?.coverage_metrics || null);
 		setRequirementWorkflowDiagnostics(requirementPayload?.workflow_diagnostics || null);
@@ -2469,6 +2498,29 @@ export default function App() {
 		}
 	};
 
+	useEffect(() => {
+		requirementReviewLock.current = false;
+		requirementReviewAttempt.current = null;
+		setIsSavingRequirementReview(false);
+	}, [currentProjectId, isAuthenticated]);
+	const imports = useRequirementImports(
+		apiRequest,
+		currentProjectId,
+		isAuthenticated && !isVerifyingSession,
+		async (project, didApply = true) => {
+			if (project.project_id !== currentProjectId) return;
+			setCurrentProject(project);
+			hydrateProjectWorkflow(project);
+			rememberGeneration("requirements", project.current_snapshots?.requirements?.payload || {});
+			setStatus(
+				didApply
+					? "Reviewed requirements applied. Existing downstream artifacts are retained; review their impact before regenerating."
+					: "Comparison refreshed against the current project. Review the new decisions before applying."
+			);
+			await refreshCurrentProject({ hydrate: false });
+		}
+	);
+
 	const importRequirementsFromJira = async () => {
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
@@ -2494,6 +2546,7 @@ export default function App() {
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({
 					project_id: operationScope.projectId,
+					import_mode: "review",
 					base_project_revision: currentProjectRevision,
 					epic_key: selectedJiraIssueKey,
 					include_children: true,
@@ -2508,38 +2561,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			rememberGeneration("requirements", data);
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) return;
-			setRequirementSourceMode("jira");
-			setRawText(data.raw_text || "");
-			setRequirements(data.requirements || []);
-			setRequirementReview(data.review || null);
-			setRequirementCoverageMetrics(data.coverage_metrics || null);
-			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
-			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
-			setRequirementIterationHistory(data.iteration_history || []);
-			setTestCases([]);
-			setRequirementAnalysis([]);
-			setCoveragePlan([]);
-			setCoverageMetrics(null);
-			setTestCaseReview(null);
-			setTestCaseWorkflowDiagnostics(null);
-			setAppliedTestCaseWorkflowSettings(null);
-			setTestCaseIterationHistory([]);
-			setImpactAnalysis(null);
-			setActiveGenerateResultTab("test-cases");
-			resetContextAnalysis();
-			setFeedback("");
-			resetExecutionWorkflowState();
-			setReqFeedback("");
+			imports.accept(data);
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			setStatus(
-				`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || selectedJiraIssueKey}.`
-			);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`JIRA import failed: ${error.message}`);
@@ -2580,6 +2604,7 @@ export default function App() {
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({
 					project_id: operationScope.projectId,
+					import_mode: "review",
 					base_project_revision: currentProjectRevision,
 					project: selectedAzureDevOpsProject,
 					work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
@@ -2595,38 +2620,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			rememberGeneration("requirements", data);
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) return;
-			setRequirementSourceMode("azure_devops");
-			setRawText(data.raw_text || "");
-			setRequirements(data.requirements || []);
-			setRequirementReview(data.review || null);
-			setRequirementCoverageMetrics(data.coverage_metrics || null);
-			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
-			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
-			setRequirementIterationHistory(data.iteration_history || []);
-			setTestCases([]);
-			setRequirementAnalysis([]);
-			setCoveragePlan([]);
-			setCoverageMetrics(null);
-			setTestCaseReview(null);
-			setTestCaseWorkflowDiagnostics(null);
-			setAppliedTestCaseWorkflowSettings(null);
-			setTestCaseIterationHistory([]);
-			setImpactAnalysis(null);
-			setActiveGenerateResultTab("test-cases");
-			resetContextAnalysis();
-			setFeedback("");
-			resetExecutionWorkflowState();
-			setReqFeedback("");
+			imports.accept(data);
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			setStatus(
-				`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || `#${selectedAzureDevOpsWorkItemId}`}.`
-			);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Azure DevOps import failed: ${error.message}`);
@@ -2907,6 +2903,7 @@ export default function App() {
 			if (file) formData.append("file", file);
 			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
 			formData.append("project_id", operationScope.projectId);
+			formData.append("import_mode", "review");
 			if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
 			if (withFeedback && reqFeedback) {
 				formData.append("feedback", reqFeedback);
@@ -2925,41 +2922,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			const nextRequirements = withFeedback ? mergeRequirementMetadata(data.requirements || [], requirements) : data.requirements || [];
-			if (!withFeedback) {
-				setRequirementSourceMode("file");
-			}
-			setRawText(data.raw_text || rawText);
-			rememberGeneration("requirements", data);
-			setRequirements(nextRequirements);
-			setRequirementReview(data.review || null);
-			setRequirementCoverageMetrics(data.coverage_metrics || null);
-			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
-			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
-			setRequirementIterationHistory(data.iteration_history || []);
-			setTestCases([]);
-			setRequirementAnalysis([]);
-			setCoveragePlan([]);
-			setCoverageMetrics(null);
-			setTestCaseReview(null);
-			setTestCaseWorkflowDiagnostics(null);
-			setAppliedTestCaseWorkflowSettings(null);
-			setTestCaseIterationHistory([]);
-			setImpactAnalysis(null);
-			setActiveGenerateResultTab("test-cases");
-			resetContextAnalysis();
-			setFeedback("");
-			resetExecutionWorkflowState();
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
+			imports.accept(data);
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
-			if (withFeedback) setReqFeedback("");
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Parse failed: ${error.message}`);
@@ -4143,8 +4108,8 @@ export default function App() {
 										<Surface as="section" className="panel">
 											<h2 className="panel-title">Upload Requirements</h2>
 											<p className="panel-description">
-												Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to
-												JIRA or Azure DevOps.
+												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
+												until you apply an update.
 											</p>
 											<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
 												{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
@@ -4499,9 +4464,37 @@ export default function App() {
 												</div>
 											)}
 
+											{!imports.preview && imports.error && <p role="alert">{imports.error}</p>}
+											{imports.message && <p role="status">{imports.message}</p>}
+											{!imports.preview && imports.pending.length > 0 && (
+												<div className="import-pending-list" aria-label="Pending imports">
+													{imports.pending.map((item) => (
+														<Button key={item.import_id} className="secondary" onClick={() => imports.accept(item)}>
+															Review import: {item.source_name}
+														</Button>
+													))}
+												</div>
+											)}
+											{imports.preview?.guidance && (
+												<GuidanceUsed manifest={imports.preview.guidance} request={apiRequest} projectId={currentProjectId} />
+											)}
+											{imports.preview && (
+												<RequirementImportReview
+													key={imports.preview.import_id}
+													preview={imports.preview}
+													revision={currentProjectRevision}
+													busy={imports.busy}
+													error={imports.error}
+													onAction={imports.mutate}
+												/>
+											)}
+
 											<RequirementReviewWorkbench
 												requirements={requirements}
 												approvedRequirementCount={approvedRequirementCount}
+												loadHistory={(uid) => imports.read(`/projects/${currentProjectId}/requirements/${uid}/history`)}
+												retiredRequirements={currentProject?.current_snapshots?.requirements?.payload?.retired_requirements || []}
+												busy={isSavingRequirementReview}
 												reviewPendingRequirementCount={reviewPendingRequirementCount}
 												rejectedRequirementCount={rejectedRequirementCount}
 												onApproveNonRejected={() =>
@@ -4745,7 +4738,7 @@ export default function App() {
 												</div>
 											)}
 
-											{renderRequirementReviewReport()}
+											{projectSnapshots.requirements?.payload?.schema_version !== 2 && renderRequirementReviewReport()}
 
 											{guidanceSummary("requirements")}
 											{suggestionSummary("requirements")}

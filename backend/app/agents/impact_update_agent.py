@@ -48,6 +48,7 @@ class _RequirementView:
     id: str
     text: str
     approved: bool
+    requirement_uid: Optional[str] = None
     aliases: set[str] = field(default_factory=set)
 
 
@@ -112,6 +113,7 @@ def _requirements_from_payload(payload: dict[str, Any], *, fallback_coverage_pla
             views.append(
                 _RequirementView(
                     id=req_id,
+                    requirement_uid=item.get("requirement_uid"),
                     text=str(item.get("text") or ""),
                     approved=str(item.get("review_status") or "").lower() == "approved" or bool(item.get("approved")),
                     aliases=aliases | {req_id},
@@ -210,7 +212,12 @@ def _match_requirements(
             (
                 baseline_requirement
                 for baseline_requirement in baseline
-                if baseline_requirement.id not in matched_baseline_ids and current_requirement.aliases.intersection(baseline_requirement.aliases)
+                if baseline_requirement.id not in matched_baseline_ids
+                and (
+                    current_requirement.requirement_uid == baseline_requirement.requirement_uid
+                    if current_requirement.requirement_uid and baseline_requirement.requirement_uid
+                    else current_requirement.id == baseline_requirement.id
+                )
             ),
             None,
         )

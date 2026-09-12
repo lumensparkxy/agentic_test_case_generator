@@ -1,5 +1,7 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+- Implemented; PR review pending: [#294](https://github.com/lumensparkxy/agentic_test_case_generator/issues/294) — Preserve project requirements with source-independent Import → Compare → Apply, stable identities, scoped retirement, atomic persistence, and an explicit recovery preview. Phase 4 - Operational Readiness; P1.
+
 - Implemented; PR review pending: #292 — Remove the Next task pane from Test Cases; retain Overview and compact guarded workflow controls. Parent #241.
 
 - Implemented; PR review pending: #290 — Actionable Improve tests tab with selected findings, refinement, case navigation, and revision/impact safeguards. Parent #241; follows merged #284/#286/#288. Validation: build, lint, formatting, and 38 focused refinement, layout, export, and lifecycle browser tests pass.

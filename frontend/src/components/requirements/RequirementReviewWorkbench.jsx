@@ -1,14 +1,50 @@
+import { useState } from "react";
 import { Surface, Disclosure } from "../ui/surfaces";
 import { Button, Link, Select, Checkbox } from "../ui/controls";
 import { TableScroll, Table } from "../ui/collections";
 import { REQUIREMENT_QUALITY_FLAG_OPTIONS, REQUIREMENT_REVIEW_STATUSES } from "../../constants/workflow";
-import {
-	formatSourceIssueKey,
-	getRequirementEpicCell,
-	getRequirementReviewStatus,
-	groupRequirementsByContext,
-	normalizeStringArray,
-} from "../../utils/requirements";
+import { getRequirementReviewStatus, normalizeStringArray } from "../../utils/requirements";
+
+function RequirementHistory({ requirement, loadHistory }) {
+	const [history, setHistory] = useState(null);
+	const [error, setError] = useState("");
+	const [loading, setLoading] = useState(false);
+	if (!requirement.requirement_uid || !loadHistory) return null;
+	return (
+		<Disclosure>
+			<summary>Version history · v{requirement.content_version || 1}</summary>
+			<Button
+				className="secondary small"
+				disabled={loading}
+				onClick={async () => {
+					setLoading(true);
+					setError("");
+					try {
+						setHistory(await loadHistory(requirement.requirement_uid));
+					} catch (e) {
+						setError(e.message);
+					} finally {
+						setLoading(false);
+					}
+				}}
+			>
+				{loading ? "Loading history…" : "Load version history"}
+			</Button>
+			{error && <p role="alert">{error}</p>}
+			{history?.map((item) => (
+				<div key={item.snapshot_id} className="requirement-history-entry">
+					<strong>
+						v{item.requirement.content_version} · Revision {item.project_revision} · {item.requirement.lifecycle_status}
+					</strong>
+					<p>{item.requirement.text}</p>
+					<span>
+						{item.requirement.review_status} · {new Date(item.created_at).toLocaleString()}
+					</span>
+				</div>
+			))}
+		</Disclosure>
+	);
+}
 
 export default function RequirementReviewWorkbench({
 	requirements,
@@ -19,12 +55,15 @@ export default function RequirementReviewWorkbench({
 	onMarkAllNeedsReview,
 	onReviewStatusChange,
 	onQualityFlagToggle,
+	loadHistory,
+	retiredRequirements = [],
+	busy = false,
 }) {
 	return (
 		<Surface as="div" className="result-section">
 			<h3>Requirement Review Workbench</h3>
 			{requirements.length === 0 ? (
-				<span className="helper-text">No requirements extracted yet.</span>
+				<span className="helper-text">No active requirements yet. Import and apply reviewed changes to begin.</span>
 			) : (
 				<div className="requirement-review-workbench">
 					<div className="requirement-review-summary">
@@ -37,133 +76,120 @@ export default function RequirementReviewWorkbench({
 							</p>
 						</div>
 						<div className="requirement-review-bulk-actions">
-							<Button type="button" className="secondary small" onClick={onApproveNonRejected}>
+							<Button className="secondary small" onClick={onApproveNonRejected} disabled={busy}>
 								Approve non-rejected
 							</Button>
-							<Button type="button" className="secondary small" onClick={onMarkAllNeedsReview}>
+							<Button className="secondary small" onClick={onMarkAllNeedsReview} disabled={busy}>
 								Mark all needs review
 							</Button>
 						</div>
 					</div>
-					{groupRequirementsByContext(requirements).map((group) => (
-						<div key={group.id} className="requirement-context-group">
-							<div className="requirement-context-header">
-								<div>
-									<span className="requirement-source-badge subtle">{group.sourceLabel}</span>
-									<h4>{group.label}</h4>
-								</div>
-								<span className="analysis-summary-pill">
-									{group.requirements.length} requirement{group.requirements.length === 1 ? "" : "s"}
-								</span>
-							</div>
-							<TableScroll
-								className="requirement-table-wrapper"
-								role="region"
-								aria-label={`${group.label} requirements table`}
-								tabIndex={0}
-							>
-								<Table className="requirement-review-table">
-									<thead>
-										<tr>
-											<th scope="col">Epic</th>
-											<th scope="col">ID</th>
-											<th scope="col">Requirement</th>
-											<th scope="col">Review source</th>
-											<th scope="col">Review status</th>
-											<th scope="col">Quality flags</th>
-										</tr>
-									</thead>
-									<tbody>
-										{group.requirements.map((req) => {
-											const reviewStatus = getRequirementReviewStatus(req);
-											const qualityFlags = normalizeStringArray(req.quality_flags);
-											const requirementId = req.id || `REQ-${req.__index + 1}`;
-											const epicCell = getRequirementEpicCell(req, group.label);
-											const hasSyncTarget = req.sync_target_issue_key && req.sync_target_issue_key !== req.source_issue_key;
-											return (
-												<tr
-													key={req.id || req.text || req.__index}
-													className={`requirement-row status-${reviewStatus.toLowerCase().replace(/\s/g, "-")}`}
+					<TableScroll className="requirement-table-wrapper" role="region" aria-label="Project requirements table" tabIndex={0}>
+						<Table className="requirement-review-table canonical-requirements">
+							<thead>
+								<tr>
+									<th scope="col">ID</th>
+									<th scope="col">Requirement</th>
+									<th scope="col">Sources</th>
+									<th scope="col">Review status</th>
+									<th scope="col">Quality flags</th>
+								</tr>
+							</thead>
+							<tbody>
+								{requirements.map((req) => {
+									const status = getRequirementReviewStatus(req);
+									const flags = normalizeStringArray(req.quality_flags);
+									const sources = req.sources?.length
+										? req.sources
+										: [
+												{
+													source_id: "legacy",
+													source_version: "legacy",
+													label: req.source_path || req.source_section || req.source_issue_key || "Imported requirements",
+													excerpt: req.source_excerpt,
+													source_issue_url: req.source_issue_url,
+												},
+											];
+									return (
+										<tr
+											key={req.requirement_uid || req.id}
+											className={`requirement-row status-${status.toLowerCase().replace(/\s/g, "-")}`}
+										>
+											<td>
+												<strong>{req.id}</strong>
+											</td>
+											<td className="requirement-text-cell">
+												<div className="requirement-item-copy">{req.text}</div>
+												<RequirementHistory requirement={req} loadHistory={loadHistory} />
+											</td>
+											<td>
+												<Disclosure>
+													<summary>Source evidence ({new Set(sources.map((source) => source.source_id)).size})</summary>
+													{sources.map((source) => (
+														<div key={`${source.source_id}-${source.source_version}`}>
+															<strong>{source.label}</strong>
+															{source.source_issue_url && (
+																<Link href={source.source_issue_url} target="_blank" rel="noreferrer">
+																	Open source ↗
+																</Link>
+															)}
+															<p>{source.excerpt || req.text}</p>
+														</div>
+													))}
+												</Disclosure>
+											</td>
+											<td>
+												<Select
+													value={status}
+													disabled={busy}
+													onChange={(event) => onReviewStatusChange(req.id, event.target.value)}
+													aria-label={`Review status for ${req.id}`}
 												>
-													<td className="requirement-epic-cell">
-														<span className="cell-primary">{epicCell.primary}</span>
-														{epicCell.secondary ? <span className="cell-secondary">{epicCell.secondary}</span> : null}
-													</td>
-													<td className="requirement-id-cell">
-														<strong>{requirementId}</strong>
-													</td>
-													<td className="requirement-text-cell">
-														<div className="requirement-item-copy">{req.text || req.title || ""}</div>
-													</td>
-													<td className="requirement-review-source-cell">
-														{req.source_excerpt ? (
-															<Disclosure className="requirement-evidence compact">
-																<summary>Source evidence</summary>
-																<p>{req.source_excerpt}</p>
-																{req.source_issue_url ? (
-																	<Link href={req.source_issue_url} target="_blank" rel="noreferrer">
-																		Open source ↗
-																	</Link>
-																) : null}
-															</Disclosure>
-														) : req.source_issue_url ? (
-															<Link className="requirement-source-link" href={req.source_issue_url} target="_blank" rel="noreferrer">
-																Open source ↗
-															</Link>
-														) : req.source_path || req.source_section ? (
-															<span className="cell-secondary">{req.source_path || req.source_section}</span>
-														) : (
-															<span className="cell-muted">—</span>
-														)}
-														{hasSyncTarget ? (
-															<div className="requirement-source-meta compact">
-																<span className="requirement-source-badge warning">
-																	Sync target {formatSourceIssueKey(req, req.sync_target_issue_key)}
-																</span>
-															</div>
-														) : null}
-													</td>
-													<td className="requirement-status-cell">
-														<Select
-															value={reviewStatus}
-															onChange={(event) => onReviewStatusChange(req.id, event.target.value)}
-															aria-label={`Review status for ${requirementId}`}
-														>
-															{REQUIREMENT_REVIEW_STATUSES.map((statusOption) => (
-																<option key={`${requirementId}-${statusOption}`} value={statusOption}>
-																	{statusOption}
-																</option>
-															))}
-														</Select>
-													</td>
-													<td className="requirement-flags-cell">
-														<Disclosure className="requirement-quality-details">
-															<summary>
-																{qualityFlags.length ? `${qualityFlags.length} flag${qualityFlags.length === 1 ? "" : "s"}` : "Add flags"}
-															</summary>
-															<div className="quality-flag-checklist">
-																{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
-																	<label key={`${requirementId}-${flag}`}>
-																		<Checkbox
-																			type="checkbox"
-																			checked={qualityFlags.includes(flag)}
-																			onChange={() => onQualityFlagToggle(req.id, flag)}
-																		/>
-																		<span>{flag}</span>
-																	</label>
-																))}
-															</div>
-														</Disclosure>
-													</td>
-												</tr>
-											);
-										})}
-									</tbody>
-								</Table>
-							</TableScroll>
-						</div>
-					))}
+													{REQUIREMENT_REVIEW_STATUSES.map((option) => (
+														<option key={option} value={option}>
+															{option}
+														</option>
+													))}
+												</Select>
+											</td>
+											<td>
+												<Disclosure className="requirement-quality-details">
+													<summary>{flags.length ? `${flags.length} flag${flags.length === 1 ? "" : "s"}` : "Add flags"}</summary>
+													<div className="quality-flag-checklist">
+														{REQUIREMENT_QUALITY_FLAG_OPTIONS.map((flag) => (
+															<label key={flag}>
+																<Checkbox
+																	type="checkbox"
+																	checked={flags.includes(flag)}
+																	disabled={busy}
+																	onChange={() => onQualityFlagToggle(req.id, flag)}
+																/>
+																<span>{flag}</span>
+															</label>
+														))}
+													</div>
+												</Disclosure>
+											</td>
+										</tr>
+									);
+								})}
+							</tbody>
+						</Table>
+					</TableScroll>
 				</div>
+			)}
+			{retiredRequirements.length > 0 && (
+				<Disclosure>
+					<summary>Retired requirements ({retiredRequirements.length})</summary>
+					<p>Retained for traceability; excluded from new generation.</p>
+					{retiredRequirements.map((req) => (
+						<article key={req.requirement_uid}>
+							<h4>{req.id}</h4>
+							<p>{req.text}</p>
+							<RequirementHistory requirement={req} loadHistory={loadHistory} />
+						</article>
+					))}
+				</Disclosure>
 			)}
 		</Surface>
 	);

@@ -12,7 +12,7 @@ from .guidance_service import guidance_scope, enabled
 
 def generation_guidance(stage):
     async def dependency(request: Request, actor: AuthUser = Depends(get_current_user)):
-        if "multipart/form-data" in request.headers.get("content-type", ""):
+        if any(kind in request.headers.get("content-type", "") for kind in ("multipart/form-data", "application/x-www-form-urlencoded")):
             form = await request.form()
             payload = {k: str(v) for k, v in form.multi_items() if not hasattr(v, "filename")}
             uploads = []
@@ -39,6 +39,10 @@ def generation_guidance(stage):
             if not isinstance(payload, dict):
                 payload = {}
             requirements = payload.get("requirements") or []
+        if stage == "requirements":
+            from .requirement_import_service import require_review_mode
+
+            require_review_mode(payload.get("project_id"), payload.get("import_mode"))
         requirement_ids = [r.get("id") for r in requirements if isinstance(r, dict) and r.get("id")] if isinstance(requirements, list) else []
         if not requirement_ids and isinstance(payload.get("test_cases"), list):
             requirement_ids = sorted(

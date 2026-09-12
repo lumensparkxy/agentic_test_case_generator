@@ -169,8 +169,22 @@ test("generation retries the same request and bypasses memory only after an expl
 		return route.fulfill({
 			json: {
 				source_name: "fixture",
-				raw_text: "Source",
-				requirements: [{ id: "R1", text: "Remembered guidance was bypassed", review_status: "Pending" }],
+				import_id: "guidance-preview",
+				project_id: USE_CASE_PROJECT_ID,
+				base_project_revision: 0,
+				current_requirements: [],
+				recovery_snapshot_ids: [],
+				suggested_update_scope: [],
+				warnings: [],
+				candidates: [
+					{
+						candidate_id: "incoming-1",
+						requirement: { id: "R1", text: "Remembered guidance was bypassed" },
+						classification: "new",
+						suggestions: [],
+						reason: "New",
+					},
+				],
 				guidance: { manifest_id: "bypassed", model: "fixture", memory_bypassed: true, memories: [], skills: [] },
 			},
 		});

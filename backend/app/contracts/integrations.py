@@ -88,6 +88,7 @@ class JiraIssueSearchResponse(BaseModel):
 
 
 class JiraImportInput(BaseModel):
+    import_mode: Optional[Literal["review"]] = None
     project_id: Optional[str] = None
     base_project_revision: Optional[int] = Field(default=None, ge=0)
     epic_key: Optional[str] = None
@@ -250,6 +251,7 @@ class AzureDevOpsWorkItemSearchResponse(BaseModel):
 
 
 class AzureDevOpsImportInput(BaseModel):
+    import_mode: Optional[Literal["review"]] = None
     project_id: Optional[str] = None
     base_project_revision: Optional[int] = Field(default=None, ge=0)
     project: Optional[str] = None

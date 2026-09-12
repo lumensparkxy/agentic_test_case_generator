@@ -67,21 +67,19 @@ function orchestratorStatus(project) {
 
 function requirementsParseFixture(id, text) {
 	return {
+		import_id: id,
+		project_id: PROJECT_A.project_id,
+		base_project_revision: PROJECT_A.project_revision,
 		source_name: `${id.toLowerCase()}.md`,
-		raw_text: text,
-		requirements: [
-			{
-				id,
-				text,
-				priority: "High",
-				review_status: "Approved",
-			},
+		status: "pending",
+		current_requirements: [],
+		candidates: [
+			{ candidate_id: "incoming-1", requirement: { id, text }, classification: "new", suggestions: [], reason: "New requirement" },
 		],
-		review: { approved: true, score: 1, issues: [] },
-		coverage_metrics: null,
-		workflow_diagnostics: null,
-		workflow_settings: null,
-		iteration_history: [],
+		recovery_snapshot_ids: [],
+		suggested_update_scope: [],
+		counts: {},
+		warnings: [],
 	};
 }
 
@@ -610,10 +608,11 @@ test.describe("Route-driven application shell", () => {
 		);
 		releaseNewParse();
 		await newParseResponse;
-		await expect(page.getByText(newRequirementText, { exact: true }).last()).toBeVisible();
+		await expect(page.getByText(newRequirementText, { exact: true }).first()).toBeVisible();
 		await expect(page.getByRole("button", { name: /^Parse Requirements$/i })).toBeVisible();
 		await expect(page.getByText(oldRequirementText, { exact: true })).toHaveCount(0);
-		await expect.poll(() => api.detailProjectIds.length).toBe(4);
+		await expect.poll(() => api.detailProjectIds.length).toBe(3);
+		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
 		expect(api.detailProjectIds.at(-1)).toBe(PROJECT_A.project_id);
 	});
 });
