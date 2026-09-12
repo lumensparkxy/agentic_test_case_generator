@@ -15,7 +15,8 @@ from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.models import AuthUser, OrchestratorStatusResponse
 from app.services.orchestrator_service import build_orchestrator_status, get_project_orchestrator_status
-from app.services.workflow_project_service import append_stage_snapshot, create_project
+from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
+from app.services.workspace_summary_service import build_workspace_summary
 
 
 class FakeSnapshot:
@@ -314,20 +315,57 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertTrue(full_regenerate.secondary)
         self.assertTrue(full_regenerate.enabled)
 
-    def test_unapproved_changed_upstream_can_still_run_impact_analysis(self) -> None:
+    def test_unapproved_changed_upstream_prioritizes_review_and_keeps_optional_analysis(self) -> None:
         project = self._seed_baseline_suite()
         self._append_requirements(project.project_id, approved=False, title="Requirements v2")
 
         status = get_project_orchestrator_status(project.project_id, actor=self.actor)
 
+        review = self._action(status, "approve")
         analyze = self._action(status, "analyze_impact")
-        full_regenerate = self._action(status, "full_regenerate")
         self.assertTrue(status.has_baseline_test_suite)
         self.assertTrue(status.upstream_changed)
-        self.assertEqual(status.current_stage, "impact_analysis")
-        self.assertTrue(analyze.primary)
+        self.assertEqual(status.current_stage, "requirements")
+        self.assertEqual(review.label, "Review Requirements")
+        self.assertTrue(review.primary)
+        self.assertTrue(review.enabled)
+        self.assertFalse(analyze.primary)
+        self.assertTrue(analyze.secondary)
         self.assertTrue(analyze.enabled)
-        self.assertTrue(full_regenerate.secondary)
+        self.assertFalse(self._action(status, "full_regenerate").enabled)
+
+        summary = build_workspace_summary([get_project(project.project_id, actor=self.actor)], work_items_limit=50, runs_limit=20, reports_limit=20)
+        self.assertEqual(summary.continue_working.action, "approve")
+        self.assertEqual(summary.continue_working.stage, "requirements")
+        self.assertEqual(summary.continue_working.reason, review.reason)
+        self.assertEqual(summary.projects[0].current_stage, "requirements")
+
+    def test_current_use_case_review_precedes_analysis_after_requirements_are_approved(self) -> None:
+        project = self._seed_baseline_suite()
+        self._append_use_cases(project.project_id, approved=True, human_reviewed=False)
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.current_stage, "use_cases")
+        self.assertEqual(self._action(status, "approve").label, "Review Use Cases")
+        self.assertTrue(self._action(status, "analyze_impact").secondary)
+
+        self._append_requirements(project.project_id, approved=False, title="Requirements v2")
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.current_stage, "requirements")
+
+        self._append_requirements(project.project_id, approved=True, title="Requirements approved")
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertTrue(status.stages["use_cases"].stale)
+        self.assertEqual(status.current_stage, "impact_analysis")
+        self.assertFalse(any(a.action == "approve" and a.stage == "use_cases" for a in status.next_actions))
+
+    def test_stale_use_cases_without_suite_route_to_refresh_instead_of_disabled_approval(self) -> None:
+        project = self._seed_first_generation_ready()
+        self._append_requirements(project.project_id, title="Requirements v2")
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.current_stage, "test_cases")
+        self.assertEqual(status.next_actions[0].label, "Refresh Use Cases")
+        self.assertFalse(any(a.action == "approve" for a in status.next_actions))
+        self.assertTrue(self._action(status, "full_regenerate").enabled)
 
     def test_current_impact_analysis_recommends_apply_update(self) -> None:
         project = self._seed_baseline_suite()
@@ -363,7 +401,11 @@ class OrchestratorServiceTests(unittest.TestCase):
         status = get_project_orchestrator_status(project.project_id, actor=self.actor)
 
         apply_update = self._action(status, "apply_update")
-        self.assertTrue(apply_update.primary)
+        self.assertFalse(apply_update.primary)
+        self.assertTrue(apply_update.secondary)
+        self.assertEqual(status.current_stage, "requirements")
+        self.assertTrue(self._action(status, "approve").primary)
+        self.assertTrue(self._action(status, "analyze_impact").enabled)
         self.assertFalse(apply_update.enabled)
         self.assertEqual(apply_update.blockers[0].code, "missing_approval")
         self.assertEqual(apply_update.blockers[0].source_stage, "requirements")

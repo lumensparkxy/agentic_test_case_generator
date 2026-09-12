@@ -19,6 +19,8 @@ function requirement(index, changed = false) {
 	const id = `REQ-${String(index).padStart(3, "0")}`;
 	return {
 		id,
+		requirement_uid: `lifecycle-${id}`,
+		quality_flags: [],
 		text: changed
 			? `${id} changed payment retry and approval behavior shall be validated.`
 			: `${id} baseline checkout behavior shall be validated.`,
@@ -494,7 +496,35 @@ function statusForPhase(phase) {
 async function mockLifecycleApi(page) {
 	let phase = "empty";
 	let parseCount = 0;
-	const projects = () => (phase === "none" ? [] : [projectSummary(projectForPhase(phase))]);
+	let pendingImport = null;
+	let reviewPending = false;
+	let reviewRevisions = 0;
+	const currentProject = () => {
+		const project = projectForPhase(phase);
+		project.current_revision += reviewRevisions;
+		if (reviewPending) {
+			project.stage_state.requirements.approved = false;
+			for (const row of project.current_snapshots.requirements.payload.requirements) {
+				if (phase === "requirements" || ["REQ-003", "REQ-010"].includes(row.id)) row.review_status = "Needs Review";
+			}
+		}
+		return project;
+	};
+	const currentStatus = () => {
+		const status = statusForPhase(phase);
+		status.project_revision = currentProject().current_revision;
+		if (reviewPending) {
+			status.current_stage = "requirements";
+			status.stages.requirements.approved = false;
+			status.stages.requirements.status = "attention_required";
+			status.next_actions = [
+				action("approve", "Review Requirements", "requirements", { primary: true }),
+				...(phase === "stale" ? [action("analyze_impact", "Analyze Impact", "impact_analysis", { secondary: true })] : []),
+			];
+		}
+		return status;
+	};
+	const projects = () => (phase === "none" ? [] : [projectSummary(currentProject())]);
 
 	await page.route("**/*", async (route) => {
 		const url = new URL(route.request().url());
@@ -535,27 +565,62 @@ async function mockLifecycleApi(page) {
 		}
 		if (url.pathname === "/projects" && method === "POST") {
 			phase = "empty";
-			return jsonResponse(route, projectForPhase(phase));
+			return jsonResponse(route, currentProject());
 		}
 		if (url.pathname === `/projects/${PROJECT_ID}` && method === "GET") {
-			return jsonResponse(route, projectForPhase(phase));
+			return jsonResponse(route, currentProject());
 		}
 		if (url.pathname === `/projects/${PROJECT_ID}/orchestrator/status`) {
-			return jsonResponse(route, statusForPhase(phase));
+			return jsonResponse(route, currentStatus());
 		}
-		if (url.pathname === "/requirements/parse") {
-			parseCount += 1;
-			phase = parseCount === 1 ? "requirements" : "stale";
-			const changed = parseCount > 1;
+		if (url.pathname === "/workspace/summary") {
 			return jsonResponse(route, {
-				raw_text: "Synthetic lifecycle requirements.",
-				requirements: requirements(changed),
-				review: review(),
-				coverage_metrics: { total_requirements: 10, approved_count: 10, shall_format_ratio: 1.0 },
-				workflow_diagnostics: null,
-				workflow_settings: null,
-				iteration_history: [],
+				projects: [{ ...projectSummary(currentProject()), project_revision: currentProject().current_revision }],
+				work_items: [],
+				recent_runs: [],
+				recent_reports: [],
 			});
+		}
+		if (url.pathname === `/projects/${PROJECT_ID}/requirement-imports`) {
+			return jsonResponse(route, pendingImport ? [pendingImport] : []);
+		}
+		if (url.pathname.endsWith("/requirement-imports/lifecycle-import/apply")) {
+			phase = parseCount === 1 ? "requirements" : "stale";
+			reviewPending = true;
+			pendingImport = null;
+			return jsonResponse(route, currentProject());
+		}
+		if (url.pathname === `/projects/${PROJECT_ID}/requirements/reviews`) {
+			reviewPending = false;
+			reviewRevisions++;
+			return jsonResponse(route, currentProject());
+		}
+		if (url.pathname === "/requirements/parse" || url.pathname === "/requirements/refine") {
+			parseCount++;
+			const changed = parseCount > 1;
+			pendingImport = {
+				import_id: "lifecycle-import",
+				project_id: PROJECT_ID,
+				base_project_revision: currentProject().current_revision,
+				source_name: "Lifecycle requirements",
+				recovery_snapshot_ids: [],
+				operation: "requirements.parse",
+				status: "pending",
+				created_at: "2026-09-12T12:00:00Z",
+				current_requirements: changed ? requirements() : [],
+				suggested_update_scope: [],
+				counts: {},
+				warnings: [],
+				candidates: requirements(changed).map((row) => ({
+					candidate_id: row.id,
+					requirement: row,
+					classification: !changed ? "new" : ["REQ-003", "REQ-010"].includes(row.id) ? "updated" : "unchanged",
+					target_requirement_uid: changed ? row.requirement_uid : null,
+					reason: "Compare lifecycle requirement text.",
+					suggestions: [],
+				})),
+			};
+			return jsonResponse(route, pendingImport);
 		}
 		if (url.pathname === "/testcases/generate") {
 			phase = "suite";
@@ -576,11 +641,11 @@ async function mockLifecycleApi(page) {
 		}
 		if (url.pathname === `/projects/${PROJECT_ID}/impact-analysis`) {
 			phase = "analysis";
-			return jsonResponse(route, projectForPhase(phase));
+			return jsonResponse(route, currentProject());
 		}
 		if (url.pathname === `/projects/${PROJECT_ID}/impact-update/apply`) {
 			phase = "applied";
-			return jsonResponse(route, projectForPhase(phase));
+			return jsonResponse(route, currentProject());
 		}
 		if (url.pathname === "/automation/execution/preview") {
 			return jsonResponse(route, {
@@ -661,11 +726,10 @@ test.describe("Orchestrator lifecycle validation", () => {
 
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /^Parse Requirements$/ }).click();
-		await expect(page.getByLabel("Review status for REQ-001")).toHaveValue("Approved");
-		const approveButton = page.getByRole("button", { name: /approve non-rejected/i });
-		if (await approveButton.isVisible().catch(() => false)) {
-			await approveButton.click();
-		}
+		await page.getByRole("button", { name: "Apply reviewed changes", exact: true }).click();
+		await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Needs Review");
+		await page.getByRole("button", { name: /approve non-rejected/i }).click();
+		await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Approved");
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
@@ -688,6 +752,10 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByPlaceholder(/Enter your feedback here/i)
 			.fill("Change REQ-003 and REQ-010 to include payment retry and approval behavior.");
 		await page.getByRole("button", { name: /Implement Changes/i }).click();
+		await page.getByRole("button", { name: "Apply reviewed changes", exact: true }).click();
+		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: "Review Requirements" })).toBeVisible();
+		await page.getByRole("button", { name: /approve non-rejected/i }).click();
+		await expect(page.getByLabel("Review status for REQ-003", { exact: true })).toHaveValue("Approved");
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
@@ -730,7 +798,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("link", { name: /^Overview$/i })
 			.click();
 		task = page.getByLabel("Contextual task");
-		await task.getByRole("button", { name: /^Open workbench$/i }).click();
+		await task.getByRole("button", { name: /^Open (Requirements|Use Cases|Test Cases|Automation|Reports)$/i }).click();
 		await expect(page.getByRole("heading", { name: /^Export Test Cases$/ })).toBeVisible();
 		await page.getByRole("button", { name: /JSON/i }).click();
 		await expect(page.getByText(/Exported to JSON successfully/i)).toBeVisible();

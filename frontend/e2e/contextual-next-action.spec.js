@@ -593,3 +593,236 @@ test.describe("Contextual next task", () => {
 		expect(requests.generation).toBe(1);
 	});
 });
+
+function reviewScenario() {
+	const project = projectFixture();
+	project.stage_state.requirements.approved = false;
+	project.current_snapshots.requirements.payload.requirements = [1, 2].map((n) => ({
+		id: `REQ-00${n}`,
+		requirement_uid: `requirement-${n}`,
+		text: `Review incoming behavior ${n}.`,
+		review_status: "Needs Review",
+		quality_flags: [],
+	}));
+	const action = recommendation("approve", {
+		stage: "requirements",
+		label: "Review Requirements",
+		primary: true,
+		secondary: false,
+		reason: "Review the two incoming requirements before applying changes.",
+	});
+	const status = statusFixture([
+		action,
+		...staleActions()
+			.slice(0, 2)
+			.map((a) => ({ ...a, primary: false, secondary: true })),
+	]);
+	status.current_stage = "requirements";
+	status.stages.requirements.approved = false;
+	status.stages.requirements.status = "attention_required";
+	return { project, status };
+}
+
+function workspaceForScenario(scenario) {
+	const primary = scenario.status.next_actions.find((a) => a.primary);
+	const item = {
+		...primary,
+		work_item_id: "next-review",
+		project_id: PROJECT_ID,
+		project_name: scenario.project.name,
+		project_revision: scenario.project.current_revision,
+		kind: ["approve", "review"].includes(primary.action) ? "review" : "action",
+		status: "attention_required",
+		current_snapshot_id: "current",
+		updated_at: scenario.project.updated_at,
+	};
+	return {
+		continue_working: item,
+		projects: [{ ...scenario.project, project_revision: scenario.project.current_revision, current_stage: primary.stage }],
+		work_items: [item],
+		recent_runs: [],
+		recent_reports: [],
+	};
+}
+
+for (const entry of ["overview", "home", "reviews"]) {
+	test(`${entry} opens the action's workbench without executing it`, async ({ page }) => {
+		const scenario = reviewScenario();
+		await installApi(page, scenario);
+		await page.route("**/workspace/summary?*", (route) => route.fulfill({ json: workspaceForScenario(scenario) }));
+		await seedAuthenticatedSession(page);
+		const mutations = [];
+		page.on("request", (request) => {
+			if (["POST", "PATCH", "DELETE"].includes(request.method()) && /\/(projects|testcases|automation)\//.test(request.url()))
+				mutations.push(request.url());
+		});
+		for (const [action, stage, destination, label] of [
+			["approve", "requirements", "requirements", "Requirements"],
+			["refine", "requirements", "requirements", "Requirements"],
+			["approve", "use_cases", "use-cases", "Use Cases"],
+			["review", "requirements", "requirements", "Requirements"],
+			["review", "use_cases", "use-cases", "Use Cases"],
+			["analyze_impact", "impact_analysis", "test-cases", "Test Cases"],
+			["apply_update", "test_cases", "test-cases", "Test Cases"],
+			["generate", "test_cases", "test-cases", "Test Cases"],
+			["review", "review", "test-cases", "Test Cases"],
+			["automate", "automation", "automation", "Automation"],
+			["execute", "execution", "automation", "Automation"],
+			["report", "reports", "reports", "Reports"],
+		]) {
+			scenario.status.next_actions = [recommendation(action, { stage, primary: true, secondary: false })];
+			scenario.status.current_stage = stage;
+			await page.goto(entry === "overview" ? buildProjectPath(PROJECT_ID) : entry === "home" ? "/" : "/reviews");
+			const container =
+				entry === "overview"
+					? page.getByLabel("Contextual task")
+					: entry === "home"
+						? page.getByRole("region", { name: "Continue working" })
+						: page.getByRole("main");
+			const link = container.getByRole(entry === "overview" ? "button" : "link", {
+				name: entry === "reviews" ? /^Open .* for / : `Open ${label}`,
+				exact: entry !== "reviews",
+			});
+			await expect(link).toHaveText(`Open ${label}`);
+			await link.focus();
+			await page.keyboard.press("Enter");
+			await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/${destination}$`));
+			await expect(page.locator("#main-content")).toBeFocused();
+		}
+		expect(mutations).toEqual([]);
+	});
+}
+
+test("reviewing requirements advances Overview and Home without reload and keeps optional analysis", async ({ page }) => {
+	const scenario = reviewScenario();
+	await installApi(page, scenario);
+	const summaryRevisions = [];
+	await page.route("**/workspace/summary?*", (route) => {
+		summaryRevisions.push(scenario.project.current_revision);
+		return route.fulfill({ json: workspaceForScenario(scenario) });
+	});
+	await page.route(`**/projects/${PROJECT_ID}/requirements/reviews`, (route) => {
+		const changes = route.request().postDataJSON().reviews;
+		for (const change of changes)
+			Object.assign(
+				scenario.project.current_snapshots.requirements.payload.requirements.find((r) => r.requirement_uid === change.requirement_uid),
+				change
+			);
+		scenario.project.current_revision++;
+		scenario.status.project_revision = scenario.project.current_revision;
+		const approved = scenario.project.current_snapshots.requirements.payload.requirements.every((r) => r.review_status === "Approved");
+		scenario.project.stage_state.requirements.approved = approved;
+		if (approved) {
+			scenario.status.next_actions = staleActions();
+			scenario.status.current_stage = "impact_analysis";
+		}
+		return route.fulfill({ json: scenario.project });
+	});
+	await seedAuthenticatedSession(page);
+	await page.goto(buildProjectPath(PROJECT_ID));
+	const task = page.getByLabel("Contextual task");
+	await expect(task.getByRole("heading", { name: "Review Requirements" })).toBeVisible();
+	await task.locator("summary").click();
+	await expect(task.getByRole("button", { name: "Analyze Impact", exact: true })).toBeEnabled();
+	await task.getByRole("button", { name: "Open Requirements", exact: true }).click();
+	for (const id of ["REQ-001", "REQ-002"]) {
+		await page.getByLabel(`Review status for ${id}`, { exact: true }).selectOption("Approved");
+		await expect(page.getByLabel(`Review status for ${id}`, { exact: true })).toBeEnabled();
+	}
+	await expect.poll(() => summaryRevisions.includes(10)).toBe(true);
+	await page.getByRole("link", { name: "Overview", exact: true }).click();
+	await expect(task.getByRole("heading", { name: "Analyze Impact" })).toBeVisible();
+	await expect(task.getByRole("button", { name: "Open Test Cases" })).toBeEnabled();
+	await page.getByRole("link", { name: "Home", exact: true }).click();
+	await expect(page.getByRole("region", { name: "Continue working" }).getByRole("link", { name: "Open Test Cases" })).toBeVisible();
+	await page.goto(buildProjectPath(PROJECT_ID));
+	await page.reload();
+	await expect(task.getByRole("heading", { name: "Analyze Impact" })).toBeVisible();
+});
+
+function approveScenarioRequirements(scenario) {
+	for (const row of scenario.project.current_snapshots.requirements.payload.requirements) row.review_status = "Approved";
+	scenario.project.stage_state.requirements.approved = true;
+	scenario.project.current_revision = 9;
+	scenario.status = { ...scenario.status, project_revision: 9, current_stage: "impact_analysis", next_actions: staleActions() };
+}
+
+test("late pre-review guidance cannot replace newer recommendations after leaving and reopening the project", async ({ page }) => {
+	const scenario = reviewScenario();
+	const oldStatus = structuredClone(scenario.status);
+	const oldSummary = workspaceForScenario(scenario);
+	await installApi(page, scenario);
+	let releaseStatus;
+	let releaseSummary;
+	const statusGate = new Promise((resolve) => {
+		releaseStatus = resolve;
+	});
+	const summaryGate = new Promise((resolve) => {
+		releaseSummary = resolve;
+	});
+	let heldStatus = false;
+	let heldSummary = false;
+	await page.route(`**/projects/${PROJECT_ID}/orchestrator/status`, async (route) => {
+		if (scenario.project.current_revision === 9 && !heldStatus) {
+			heldStatus = true;
+			await statusGate;
+			return route.fulfill({ json: oldStatus });
+		}
+		return route.fulfill({ json: scenario.status });
+	});
+	await page.route("**/workspace/summary?*", async (route) => {
+		if (scenario.project.current_revision === 9 && !heldSummary) {
+			heldSummary = true;
+			await summaryGate;
+			return route.fulfill({ json: oldSummary }).catch(() => {});
+		}
+		return route.fulfill({ json: workspaceForScenario(scenario) });
+	});
+	await page.route(`**/projects/${PROJECT_ID}/requirements/reviews`, (route) => {
+		expect(route.request().postDataJSON().reviews).toHaveLength(2);
+		approveScenarioRequirements(scenario);
+		return route.fulfill({ json: scenario.project });
+	});
+	await seedAuthenticatedSession(page);
+	await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
+	await page.getByRole("button", { name: "Approve non-rejected", exact: true }).click();
+	await expect.poll(() => heldStatus && heldSummary).toBe(true);
+	await page.getByRole("link", { name: "Home", exact: true }).click();
+	await page.getByRole("region", { name: "Continue working" }).getByRole("link", { name: "Open Test Cases", exact: true }).click();
+	await expect(page.getByRole("button", { name: "Start analysis", exact: true })).toBeVisible();
+	const oldResponse = page.waitForResponse((response) => response.url().endsWith("/orchestrator/status"));
+	releaseStatus();
+	releaseSummary();
+	await oldResponse;
+	await page.getByRole("link", { name: "Overview", exact: true }).click();
+	await expect(page.getByLabel("Contextual task").getByRole("heading", { name: "Analyze Impact" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Review Requirements", exact: true })).toHaveCount(0);
+});
+
+test("older revision responses fail visibly while committed requirement approvals survive", async ({ page }) => {
+	const scenario = reviewScenario();
+	const oldStatus = structuredClone(scenario.status);
+	const oldSummary = workspaceForScenario(scenario);
+	let stale = true;
+	await installApi(page, scenario);
+	await page.route(`**/projects/${PROJECT_ID}/orchestrator/status`, (route) =>
+		route.fulfill({ json: stale ? oldStatus : scenario.status })
+	);
+	await page.route("**/workspace/summary?*", (route) => route.fulfill({ json: stale ? oldSummary : workspaceForScenario(scenario) }));
+	await page.route(`**/projects/${PROJECT_ID}/requirements/reviews`, (route) => {
+		approveScenarioRequirements(scenario);
+		return route.fulfill({ json: scenario.project });
+	});
+	await seedAuthenticatedSession(page);
+	await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
+	await page.getByRole("button", { name: "Approve non-rejected", exact: true }).click();
+	await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Approved");
+	await page.getByRole("link", { name: "Overview", exact: true }).click();
+	await expect(
+		page.getByText("Workflow guidance is out of date. Reload the latest project before continuing.", { exact: true })
+	).toBeVisible();
+	await expect(page.getByLabel("Contextual task").getByRole("button", { name: "Open Requirements" })).toHaveCount(0);
+	stale = false;
+	await page.getByRole("link", { name: "Home", exact: true }).click();
+	await expect(page.getByRole("region", { name: "Continue working" }).getByRole("link", { name: "Open Test Cases" })).toBeVisible();
+});

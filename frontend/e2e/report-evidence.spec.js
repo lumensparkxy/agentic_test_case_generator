@@ -255,7 +255,7 @@ test.describe("Report evidence", () => {
 
 		const task = page.getByLabel("Contextual task");
 		await expect(task.getByRole("heading", { name: /^Regenerate Evidence Report$/ })).toBeVisible();
-		await expect(task.getByRole("button", { name: /^Open workbench$/ })).toBeVisible();
+		await expect(task.getByRole("button", { name: /^Open (Requirements|Use Cases|Test Cases|Automation|Reports)$/ })).toBeVisible();
 
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText("Report Evidence QA");

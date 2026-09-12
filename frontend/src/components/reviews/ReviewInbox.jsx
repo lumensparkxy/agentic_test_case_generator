@@ -15,6 +15,7 @@ import {
 	normalizeWorkspaceList,
 } from "../workspace/workspacePresentation";
 import { ProjectOpenLink } from "../workspace/WorkspacePrimitives";
+import { getWorkbenchNavigationLabel } from "../../app/workflowRoutes";
 
 const COMPLETED_STATUSES = new Set(["approved", "completed", "passed"]);
 const STAGE_ORDER = Object.freeze([
@@ -131,7 +132,7 @@ function ReviewInboxRow({ item, onOpenProject }) {
 				className="workspace-open-link review-inbox-open-link"
 				ariaLabel={`Open ${taskTitle} for ${item.project_name || "project"}`}
 			>
-				Open workbench
+				{getWorkbenchNavigationLabel(item)}
 			</ProjectOpenLink>
 		</ListItem>
 	);

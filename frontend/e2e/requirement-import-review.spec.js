@@ -70,7 +70,37 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 	};
 	let pending = pendingOnLoad ? [preview] : [];
 	const applies = [];
+	const guidanceReads = [];
+	const summaryReads = [];
 	await installWorkspaceApi(page, { summary: workspaceSummaryFixture({ projects: [summary] }), projectDetails: { [ID]: project } });
+	await page.route(`**/projects/${ID}/orchestrator/status`, (route) => {
+		guidanceReads.push(project.current_revision);
+		const pending = project.current_snapshots.requirements.payload.requirements.some((r) => r.review_status !== "Approved");
+		return route.fulfill({
+			json: {
+				project_id: ID,
+				project_revision: project.current_revision,
+				stages: {},
+				next_actions: pending
+					? [
+							{
+								action: "approve",
+								stage: "requirements",
+								label: "Review Requirements",
+								primary: true,
+								enabled: true,
+								reason: "Review incoming requirements before applying changes.",
+							},
+						]
+					: [],
+			},
+		});
+	});
+	await page.route("**/workspace/summary?*", (route) => {
+		summaryReads.push(project.current_revision);
+		return route.fulfill({ json: workspaceSummaryFixture({ projects: [{ ...summary, project_revision: project.current_revision }] }) });
+	});
+
 	await page.route(`**/projects/${ID}`, (route) => route.fulfill({ json: project }));
 	await page.route(`**/projects/${ID}/requirement-imports`, (route) => route.fulfill({ json: pending }));
 	await page.route("**/requirements/parse", (route) => {
@@ -129,7 +159,15 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 		project = {
 			...project,
 			current_revision: 8,
-			stage_state: { ...project.stage_state, test_cases: { ...project.stage_state.test_cases, stale: true } },
+			stage_state: {
+				...project.stage_state,
+				requirements: {
+					...project.stage_state.requirements,
+					current_snapshot_id: "combined",
+					approved: rows.every((r) => r.review_status === "Approved"),
+				},
+				test_cases: { ...project.stage_state.test_cases, stale: true },
+			},
 			current_snapshots: {
 				...project.current_snapshots,
 				requirements: { snapshot_id: "combined", payload: { requirements: rows, retired_requirements: retired, import_changes: counts } },
@@ -140,7 +178,7 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 	});
 	await page.goto(`/projects/${ID}/requirements`);
 	await expect(page.getByRole("heading", { name: "Requirement Review Workbench" })).toBeVisible();
-	return { applies, preview, getProject: () => project };
+	return { applies, preview, guidanceReads, summaryReads, getProject: () => project };
 }
 
 async function stage(page) {
@@ -164,6 +202,11 @@ test("stages eight plus two, applies ten, and retains IDs and approvals after re
 	expect(state.applies[0].update_scope).toEqual([]);
 	expect(state.getProject().stage_state.test_cases.stale).toBeTruthy();
 	expect(state.getProject().current_snapshots.test_cases.payload.test_cases).toHaveLength(1);
+	await expect.poll(() => state.guidanceReads.includes(8) && state.summaryReads.includes(8)).toBe(true);
+	await page.getByRole("link", { name: "Overview", exact: true }).click();
+	await expect(page.getByLabel("Contextual task").getByRole("heading", { name: "Review Requirements" })).toBeVisible();
+	await page.getByRole("button", { name: "Open Requirements", exact: true }).click();
+
 	await page.reload();
 	await expect(workbench(page).getByRole("row")).toHaveCount(11);
 });

@@ -1,6 +1,7 @@
 import { List, ListItem, CollectionState } from "../ui/collections";
 import { Button } from "../ui/controls";
 import { useState } from "react";
+import { getWorkbenchNavigationLabel } from "../../app/workflowRoutes";
 import { Activity, ClipboardCheck, FileText, FolderKanban, PlayCircle } from "lucide-react";
 
 import { PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
@@ -49,7 +50,7 @@ export function ContinueWorkingSection({
 						onOpenProject={onOpenProject}
 						className="workspace-open-link workspace-primary-link"
 					>
-						Continue
+						{getWorkbenchNavigationLabel(item)}
 					</ProjectOpenLink>
 				</div>
 			) : (
@@ -121,7 +122,7 @@ export function MyWorkSection({
 												{formatWorkItemCount(item) ? <span className="workspace-count">{formatWorkItemCount(item)}</span> : null}
 											</div>
 											<ProjectOpenLink projectId={item.project_id} destination={getWorkItemDestination(item)} onOpenProject={onOpenProject}>
-												Open
+												{getWorkbenchNavigationLabel(item)}
 											</ProjectOpenLink>
 										</ListItem>
 									))}

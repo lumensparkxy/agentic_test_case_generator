@@ -168,8 +168,8 @@ test.describe("Use Cases review workbench", () => {
 		await page.goto(buildProjectPath(USE_CASE_PROJECT_ID));
 
 		const task = page.getByLabel("Contextual task");
-		await expect(task.getByRole("heading", { name: /^Approve Use Cases$/i })).toBeVisible({ timeout: 30_000 });
-		await task.getByRole("button", { name: /^Open workbench$/i }).click();
+		await expect(task.getByRole("heading", { name: /^Review Use Cases$/i })).toBeVisible({ timeout: 30_000 });
+		await task.getByRole("button", { name: /^Open Use Cases$/i }).click();
 
 		await expect(page).toHaveURL(buildProjectPath(USE_CASE_PROJECT_ID, "use-cases"));
 		await expect(reviewMain(page)).toBeVisible();
@@ -201,7 +201,7 @@ test.describe("Use Cases review workbench", () => {
 		await expect(
 			page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", { name: /^Use Cases, Awaiting review$/i })
 		).toBeVisible();
-		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Approve Use Cases$/i })).toBeVisible();
+		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Review Use Cases$/i })).toBeVisible();
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Requirements,/i })

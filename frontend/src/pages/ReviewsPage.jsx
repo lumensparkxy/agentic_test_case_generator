@@ -1,6 +1,6 @@
 import { Button } from "../components/ui/controls";
 import { RefreshCw } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import ReviewInbox from "../components/reviews/ReviewInbox";
 import { formatWorkspaceDate } from "../components/workspace/workspacePresentation";
@@ -9,6 +9,13 @@ import { WorkspaceErrorState, WorkspaceLoadingState } from "../components/worksp
 export default function ReviewsPage({ summary, isLoading = false, isRefreshing = false, error = "", onRetry, onRefresh, onOpenProject }) {
 	const headingRef = useRef(null);
 	const refreshButtonRef = useRef(null);
+	const [restoreRefreshFocus, setRestoreRefreshFocus] = useState(false);
+	useEffect(() => {
+		if (restoreRefreshFocus && !isLoading && !isRefreshing) {
+			refreshButtonRef.current?.focus();
+			setRestoreRefreshFocus(false);
+		}
+	}, [restoreRefreshFocus, isLoading, isRefreshing]);
 
 	const retryAndRestoreFocus = async () => {
 		await onRetry?.();
@@ -16,7 +23,7 @@ export default function ReviewsPage({ summary, isLoading = false, isRefreshing =
 	};
 	const refreshAndRestoreFocus = async () => {
 		await onRefresh?.();
-		window.requestAnimationFrame(() => refreshButtonRef.current?.focus());
+		setRestoreRefreshFocus(true);
 	};
 	const errorMessage = error && summary ? `${error} Refresh failed; showing the last available review queue.` : error;
 

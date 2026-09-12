@@ -244,6 +244,8 @@ export default function App() {
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
+	const orchestratorRequestRef = useRef(0);
+	const projectRevisionsRef = useRef({ identity: "", projects: new Map() });
 	const projectOperationScopeRef = useRef({ projectId: "", userId: "", generation: 0 });
 	const projectOperationUserRef = useRef("");
 	const workflowMainRef = useRef(null);
@@ -521,6 +523,16 @@ export default function App() {
 	const currentProjectId = currentProject?.project_id || "";
 	const currentProjectRevision = Number.isInteger(currentProject?.current_revision) ? currentProject.current_revision : null;
 	projectOperationUserRef.current = currentUser?.sub || "";
+	if (projectRevisionsRef.current.identity !== projectOperationUserRef.current) {
+		projectRevisionsRef.current = { identity: projectOperationUserRef.current, projects: new Map() };
+	}
+	const recordProjectRevision = (projectId, revision) => {
+		if (projectId && Number.isInteger(revision)) {
+			projectRevisionsRef.current.projects.set(projectId, Math.max(revision, projectRevisionsRef.current.projects.get(projectId) || 0));
+		}
+	};
+	const isLatestProjectRevision = (projectId, revision) => revision >= (projectRevisionsRef.current.projects.get(projectId) || 0);
+	recordProjectRevision(currentProjectId, currentProjectRevision);
 	const syncProjectOperationScope = () => {
 		const browserRoute = typeof window === "undefined" ? route : parseWorkflowRoute(window.location.pathname);
 		const browserProjectId = browserRoute.kind === "project" ? browserRoute.projectId : "";
@@ -822,9 +834,12 @@ export default function App() {
 			const project = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) return;
 			requirementReviewAttempt.current = null;
+			if (!isLatestProjectRevision(project.project_id, project.current_revision)) return;
+			recordProjectRevision(project.project_id, project.current_revision);
 			setCurrentProject(project);
 			hydrateProjectWorkflow(project);
 			setStatus("Requirement review saved.");
+			await refreshRequirementGuidance(project, operationScope);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) setStatus(error.message);
 		} finally {
@@ -1397,6 +1412,7 @@ export default function App() {
 		isRefreshing: isWorkspaceSummaryRefreshing,
 		refresh: refreshWorkspaceSummary,
 		retry: retryWorkspaceSummary,
+		invalidateProject: invalidateWorkspaceProject,
 	} = useWorkspaceSummary({
 		request: apiRequest,
 		enabled: isAuthenticated && !isVerifyingSession,
@@ -1590,6 +1606,12 @@ export default function App() {
 	};
 
 	const loadProjectOrchestrator = async (projectId, { silent = false, routeRequestId = null, operationScope = null } = {}) => {
+		const requestId = ++orchestratorRequestRef.current;
+		const requestUserId = projectOperationUserRef.current;
+		const requestIsCurrent = () =>
+			requestId === orchestratorRequestRef.current &&
+			requestUserId === projectOperationUserRef.current &&
+			isProjectRequestCurrent(projectId, { routeRequestId, operationScope });
 		if (!projectId || !isAuthenticated) {
 			setOrchestratorStatus(null);
 			setOrchestratorError("");
@@ -1605,14 +1627,18 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			const statusPayload = await statusRes.json();
-			if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
+			if (!requestIsCurrent() || statusPayload?.project_id !== projectId) {
 				return null;
 			}
+			if (!isLatestProjectRevision(projectId, statusPayload.project_revision)) {
+				throw new Error("Workflow guidance is out of date. Reload the latest project before continuing.");
+			}
+			recordProjectRevision(projectId, statusPayload.project_revision);
 			setOrchestratorStatus(statusPayload || null);
 			setOrchestratorError("");
 			return { status: statusPayload || null };
 		} catch (error) {
-			if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
+			if (!requestIsCurrent()) {
 				return null;
 			}
 			setOrchestratorStatus(null);
@@ -1622,9 +1648,18 @@ export default function App() {
 			}
 			return null;
 		} finally {
-			if (!silent && isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
+			if (requestIsCurrent()) {
 				setIsLoadingOrchestrator(false);
 			}
+		}
+	};
+
+	const refreshRequirementGuidance = async (project, operationScope) => {
+		setOrchestratorStatus(null);
+		invalidateWorkspaceProject(project.project_id, project.current_revision);
+		const results = await Promise.all([loadProjectOrchestrator(project.project_id, { operationScope }), refreshWorkspaceSummary()]);
+		if (isProjectOperationCurrent(operationScope) && results.some((result) => !result)) {
+			setStatus("Requirements saved. Workflow guidance could not be refreshed; reload the latest project before continuing.");
 		}
 	};
 
@@ -1702,6 +1737,10 @@ export default function App() {
 			if (!data?.project_id || data.project_id !== projectId) {
 				throw new Error("The project response did not match the requested project.");
 			}
+			if (!isLatestProjectRevision(projectId, data.current_revision)) {
+				throw new Error("The project response is out of date. Reload the latest project before continuing.");
+			}
+			recordProjectRevision(projectId, data.current_revision);
 			setCurrentProject(data || null);
 			if (hydrate && data) {
 				hydrateProjectWorkflow(data);
@@ -1755,7 +1794,10 @@ export default function App() {
 		if (!operationScope || operationScope.projectId !== projectId || !isProjectOperationCurrent(operationScope)) {
 			return null;
 		}
+		if (committedStatus && !isLatestProjectRevision(projectId, committedStatus.project_revision)) committedStatus = null;
 		if (committedStatus) {
+			recordProjectRevision(projectId, committedStatus.project_revision);
+			invalidateWorkspaceProject(projectId, committedStatus.project_revision);
 			setOrchestratorStatus(committedStatus);
 		}
 		const requestIsCurrent = () => isProjectOperationCurrent(operationScope);
@@ -1775,7 +1817,7 @@ export default function App() {
 			!workspaceSummary ? "Home and review inbox" : null,
 		].filter(Boolean);
 		if (failedRefreshes.length) {
-			if (committedStatus) {
+			if (committedStatus && isLatestProjectRevision(projectId, committedStatus.project_revision)) {
 				setOrchestratorStatus(committedStatus);
 			}
 			const prefix = committedStatus ? "Decision saved, but" : "Reload incomplete:";
@@ -2508,7 +2550,14 @@ export default function App() {
 		currentProjectId,
 		isAuthenticated && !isVerifyingSession,
 		async (project, didApply = true) => {
-			if (project.project_id !== currentProjectId) return;
+			const operationScope = captureProjectOperationScope();
+			if (
+				project.project_id !== currentProjectId ||
+				operationScope?.projectId !== project.project_id ||
+				!isLatestProjectRevision(project.project_id, project.current_revision)
+			)
+				return;
+			recordProjectRevision(project.project_id, project.current_revision);
 			setCurrentProject(project);
 			hydrateProjectWorkflow(project);
 			rememberGeneration("requirements", project.current_snapshots?.requirements?.payload || {});
@@ -2517,7 +2566,7 @@ export default function App() {
 					? "Reviewed requirements applied. Existing downstream artifacts are retained; review their impact before regenerating."
 					: "Comparison refreshed against the current project. Review the new decisions before applying."
 			);
-			await refreshCurrentProject({ hydrate: false });
+			await refreshRequirementGuidance(project, operationScope);
 		}
 	);
 

@@ -5,10 +5,9 @@ import { List, ListItem } from "../ui/collections";
 import { useEffect, useRef, useState } from "react";
 
 import { formatTaskLabel, formatTaskProvenance, getTaskProvenance } from "./contextualTask";
+import { getWorkbenchNavigationLabel, getReviewActionTitle } from "../../app/workflowRoutes";
 
 const ACTION_CTA_LABELS = Object.freeze({
-	refine: "Open workbench",
-	approve: "Open workbench",
 	generate: "Start generation",
 	analyze_impact: "Start analysis",
 	apply_update: "Apply accepted changes",
@@ -21,7 +20,7 @@ const ACTION_CTA_LABELS = Object.freeze({
 const normalizeList = (value) => (Array.isArray(value) ? value : []);
 
 function actionLabel(action) {
-	return action?.label || formatTaskLabel(action?.action) || "Continue workflow";
+	return getReviewActionTitle(action) || action?.label || formatTaskLabel(action?.action) || "Continue workflow";
 }
 
 function firstBlocker(action) {
@@ -29,8 +28,8 @@ function firstBlocker(action) {
 }
 
 function actionCtaLabel(action, navigationOnly = false) {
-	if (navigationOnly) {
-		return "Open workbench";
+	if (navigationOnly || ["approve", "refine"].includes(action?.action)) {
+		return getWorkbenchNavigationLabel(action);
 	}
 	return ACTION_CTA_LABELS[action?.action] || "Continue";
 }
