@@ -9,8 +9,8 @@ Applies repository-wide unless a nested `AGENTS.md` adds more specific guidance.
   result, and validation. A separate issue is optional; link an existing one when
   it already owns the outcome.
 - Use an **issue-linked PR** for features, substantial refactors, cross-subsystem
-  changes, dependencies, auth/billing, persistence, API contracts, and changes to
-  generation, review, or development policy. These categories require an issue
+  changes, dependencies, auth/billing, persistence, API contracts, generation/review
+  policy, and development policy. These categories require an issue
   regardless of diff size.
 - Read the selected issue's acceptance criteria and relevant dependencies before
   editing. Issue-linked work must be ready and unblocked. If no issue exists,
