@@ -1,194 +1,100 @@
 # Agent Instructions
 
-These instructions apply to the entire repository unless a more specific
-`AGENTS.md` exists in a nested directory.
+Applies repository-wide unless a nested `AGENTS.md` adds more specific guidance.
 
-## Project Contract
+## Choose the work record
 
-- This is a spec-driven development project.
-- Every requirement, bug, enhancement, refactor, documentation change, or
-  operational change must be tied to a GitHub issue or story before code changes
-  are made.
-- Do not make orphan changes. If no issue exists, create one or draft an
-  issue-ready proposal before implementation.
-- Keep every implementation scoped to the linked issue acceptance criteria.
-- Link commits, pull requests, and follow-up notes back to the issue.
-- Treat `docs/github-issues-backlog.md` and current GitHub issues as planning
-  sources of truth; keep them aligned when plans change.
+- Use a **PR-only path** for small, localized fixes, copy/style adjustments,
+  comments, and documentation corrections. The PR records the problem, intended
+  result, and validation. A separate issue is optional; link an existing one when
+  it already owns the outcome.
+- Use an **issue-linked PR** for features, substantial refactors, cross-subsystem
+  changes, dependencies, auth/billing, persistence, API contracts, generation/review
+  policy, and development policy. These categories require an issue
+  regardless of diff size.
+- Read the selected issue's acceptance criteria and relevant dependencies before
+  editing. Issue-linked work must be ready and unblocked. If no issue exists,
+  create one when authorized or prepare an issue-ready proposal before coding.
+- Issues describe value, observable acceptance criteria, and a test plan. Use
+  the existing type, area, priority, status, and active milestone where applicable;
+  add parent/dependency links only when relevant. Use native types when available,
+  otherwise existing `type:*` labels. Do not create an epic for a small task.
+- Group related edits around one outcome. Do not create issues for individual
+  implementation steps or unrelated speculative follow-ups.
 
-## GitHub Planning Model
+## Sources and scope
 
-Use GitHub issues as the unit of work.
+- GitHub issues and PRs are authoritative for current work status.
+  `docs/github-issues-backlog.md` holds roadmap context and unfiled proposals;
+  historical status notes are snapshots, not a second live queue.
+- Read the files and documentation needed for the requested outcome. Expand the
+  search when evidence requires it; full codebase mapping is a separate task.
+- Preserve unrelated user changes. Keep refactors, documentation, and tests
+  within the requested outcome and any linked acceptance criteria.
+- Record implementation and validation evidence once in the PR. Add issue
+  comments for blockers, decisions, or information absent from the PR; routine
+  work does not require mirrored backlog updates or closing summaries.
 
-- `Epic`: a larger outcome grouping related stories and tasks.
-- `Story`: user-facing or stakeholder-facing behavior with clear acceptance
-  criteria.
-- `Task`: technical work needed to support a story or project operation.
-- `Bug`: incorrect behavior, regression, failed validation, or broken workflow.
-- `Spike`: time-boxed research needed before implementation decisions.
+## Branch and delivery workflow
 
-Use GitHub issue types when enabled. If issue types are unavailable, use labels
-as the fallback taxonomy.
+1. Inspect the working tree, branch, and relevant open work before editing.
+   Use an isolated worktree when needed to preserve unrelated work.
+2. Branch from current `main`: `codex/<short-slug>` for PR-only work, or
+   `codex/issue-<number>-<short-slug>` for issue-linked work. Use another base only
+   for an intentional dependency and identify it in the PR.
+3. Implement the scoped outcome. Add or update tests for changed behavior and
+   documentation for changed interfaces, configuration, or workflows.
+4. Run the local checks selected below and inspect the final diff. Record exact
+   results and any remaining limitations in the PR; include the issue number in
+   commits when applicable. Use `Closes #N` only when acceptance is complete.
+5. Open or update the PR. Merge only when requested or already authorized, the
+   branch is up to date with `main`, conversations are resolved, and required
+   checks pass. Required approvals are zero for this solo-maintained repository.
+6. After an authorized merge, verify merged state and ancestry before deleting
+   branches; preserve branches needed by open PRs or other worktrees.
 
-Required issue fields:
+`main` is protected: no direct pushes, force pushes, or deletion. Admin
+enforcement applies. Required CI checks remain:
 
-- Summary of the intended change and user/business value.
-- Acceptance criteria with observable outcomes.
-- Test plan listing required automated and manual checks.
-- Labels for type, area, priority, and status where applicable.
-- Milestone for the active phase or release.
-- Dependencies, blockers, and parent epic links when applicable.
+- `Backend tests and offline benchmarks`
+- `Frontend build and focused E2E`
 
-Required labels:
+## Local validation and setup
 
-- Type: `type:epic`, `type:story`, `type:task`, `type:bug`, `type:spike`
-- Area: `area:backend`, `area:frontend`, `area:qa`, `area:docs`,
-  `area:devops`
-- Priority: `priority:p0`, `priority:p1`, `priority:p2`, `priority:p3`
-- Status: `status:blocked`, `status:ready`, `status:in-progress`
+- Select checks by changed behavior using [Testing Patterns](docs/codebase/TESTING.md).
+  Documentation needs diff/link/command checks; backend work needs affected tests;
+  UI work needs build and affected browser checks; contracts and shared changes
+  need the broader checks listed there. Local selection does not bypass CI.
+- Use the repository's `.venv` for Python. Reuse working environments; install
+  dependencies only when missing, stale, or changed. Setup is in [README](README.md).
+- Run relevant lint/format checks and `git diff --check`. Rerun passing checks
+  after relevant edits, changed dependencies/base, failures, or new evidence;
+  avoid repeating an unchanged suite merely to restate the result.
+- A build alone does not prove a rendered UI flow. Use scoped browser evidence
+  for the affected interaction; full product audits are for audit requests.
+- Report unavailable checks and their practical risk. Do not claim mocked or
+  offline checks establish live model, integration, or production behavior.
 
-Use phase or release milestones. Existing examples include:
+## Skills and next-task overrides
 
-- `Phase 0 - Evaluation`
-- `Phase 1 - Coverage Intelligence`
-- `Phase 2 - Grounded Context`
+- Use only skills relevant to the task. Repository development skills live in
+  `.agents/skills`; see [maintenance and invocation](docs/developer-skills.md).
+  Application runtime guidance in `backend/app/skills` is a separate subsystem.
+- These repository rules override generic `spec-driven-next-task` defaults:
+  complete one task unless the user requests continuous work; in continuous
+  mode, finish one authorized lifecycle before selecting the next ready issue.
+- Refresh live candidates/dependencies needed for selection and reconcile only
+  the completed issue, its parent, and affected dependents. Do not audit the full
+  backlog, traceability matrix, or meta-process after every merge. Preserve real
+  blockers and capture distinct follow-ups in an existing owner or scoped issue.
+- PR-only work uses the same scoped delivery flow without an issue-readiness
+  requirement. Stop after PR delivery unless the user authorized merging.
 
-For epics, prefer GitHub's native `Epic` issue type where available. Otherwise,
-use the `type:epic` label and link child stories/tasks from the epic body.
+## Repository boundaries
 
-## Development Workflow
-
-1. Read the linked issue, parent epic, acceptance criteria, dependencies, and
-   relevant repository docs before editing.
-2. Confirm the issue is ready and unblocked. If it is not, document the blocker
-   instead of implementing around it.
-3. Create or use a branch named `codex/issue-<number>-<short-slug>` when working
-   from a GitHub issue.
-4. Implement only the issue scope. Avoid unrelated refactors and cleanup.
-5. Add or update focused tests for changed behavior.
-6. Update documentation when API behavior, configuration, setup, workflow, or
-   user-facing behavior changes.
-7. Run the required validation gates and record the commands and results.
-8. Commit with the issue number in the message when an issue number exists.
-9. Open or update a pull request linked to the issue.
-10. Comment on the issue with the implementation summary, validation results,
-    and any follow-up work.
-
-## Branch Protection
-
-The GitHub `main` branch is protected. Do not push directly to `main`.
-
-Required merge path:
-
-- Work on an issue-scoped branch, normally
-  `codex/issue-<number>-<short-slug>`.
-- Open a pull request linked to the issue.
-- Keep the branch up to date with `main` before merge.
-- Resolve all pull request conversations before merge.
-- Required approvals: 0. This repository is currently solo-maintained, so a PR
-  is still required for traceability and CI, but approving reviews are not.
-- Required status checks:
-  - `Backend tests and offline benchmarks`
-  - `Frontend build and focused E2E`
-
-Force pushes and deletion of `main` are blocked. Admin enforcement is enabled,
-so the protected-branch workflow applies to maintainers too.
-
-## Local Environment
-
-Use the repo-local Python virtual environment for backend work. Do not rely on
-globally installed Python packages.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-```
-
-Backend development:
-
-```bash
-source .venv/bin/activate
-uvicorn app.main:app --reload --app-dir backend --reload-dir backend
-```
-
-Frontend development:
-
-```bash
-cd frontend
-npm ci
-npm run dev
-```
-
-Execution runtime setup:
-
-```bash
-cd backend/execution_runtime
-npm ci
-```
-
-## Validation Gates
-
-Run the smallest gate that proves the issue, then broaden checks when the blast
-radius crosses backend, frontend, integrations, or workflow boundaries.
-
-Backend:
-
-```bash
-source .venv/bin/activate
-python -m unittest discover -s backend/tests -p 'test_*.py'
-python scripts/evaluate_requirements.py --offline --strict
-python scripts/evaluate_generation.py --offline --strict
-python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm ci
-npm run build
-```
-
-E2E and browser workflow changes:
-
-```bash
-cd frontend
-npm run test:e2e -- <focused-spec>
-```
-
-Execution runtime changes:
-
-```bash
-cd backend/execution_runtime
-npm ci
-npm run test:playwright -- --list
-```
-
-If a validation gate cannot be run, report the reason and the remaining risk in
-the PR and issue comment.
-
-## Repository Boundaries
-
-- Backend FastAPI code lives in `backend/`.
-- Backend tests live in `backend/tests/`.
-- Frontend React/Vite code lives in `frontend/`.
-- Frontend E2E specs live in `frontend/e2e/`.
-- Generated Playwright execution runtime code lives in
-  `backend/execution_runtime/`.
-- Schemas live in `schemas/`.
-- Planning and architecture docs live in `docs/`.
-- Do not commit `.venv/`, `.env`, generated artifacts, node modules,
-  screenshots, local browser profiles, credentials, API keys, tokens, or secrets.
-
-## Completion Criteria
-
-A change is complete only when:
-
-- The linked issue acceptance criteria are satisfied.
-- The implementation stays within issue scope.
-- Relevant tests and validation gates were run and reported.
-- Documentation is updated for changed workflow, API, configuration, or behavior.
-- The pull request is linked to the issue and clearly summarizes what changed.
-- Follow-up work is captured as linked issues instead of hidden TODOs.
+- Backend/tests: `backend/`, `backend/tests/`; frontend/E2E: `frontend/`,
+  `frontend/e2e/`; generated execution runtime: `backend/execution_runtime/`.
+- Schemas: `schemas/`; architecture and planning references: `docs/`.
+- Do not commit environments, credentials, secrets, node modules, generated
+  artifacts, screenshots, or local browser profiles. Do not modify global skills
+  or shared plugin caches as part of a repository change.

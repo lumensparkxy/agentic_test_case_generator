@@ -9,11 +9,63 @@ Primary backend framework: Python `unittest`.
 
 Primary frontend/E2E framework: Playwright Test.
 
-Primary quality gates:
+### Select local checks by changed behavior
+
+Use this matrix before running commands. The full CI suite remains required on
+PRs; it need not be repeated locally for every small edit. Choose the union of
+checks for affected areas and broaden when shared behavior or uncertainty warrants
+it. Add focused regression tests for changed behavior, not tests of prose or
+implementation details. Record results once in the PR.
+
+| Change | Local verification |
+| --- | --- |
+| Documentation, instructions, or skill metadata | `git diff --check`; check changed local links, referenced commands, policy consistency, and skill metadata/behavior when relevant. No application suite is needed for prose alone. |
+| Local backend behavior | Affected unittest modules; Ruff lint and formatting on changed Python files. |
+| UI behavior or styling | Frontend build, relevant changed-file lint/format checks, and affected browser specs. Inspect the rendered interaction; for layout changes include the affected desktop/mobile sizes. |
+| API contracts | Backend contract tests, OpenAPI export, generated-type freshness, and affected frontend build/browser checks. |
+| Generation or orchestration | Affected backend tests and the corresponding strict offline requirements, generation, or orchestrator benchmark. Add browser checks when workflow behavior changes. |
+| Shared infrastructure or dependencies | Broader affected backend/frontend/runtime suites, relevant offline benchmarks, and contract checks. A shared cross-stack change requires both backend and frontend gates. |
+| Execution runtime | Affected compiler/execution tests and runtime Playwright discovery; execute the affected synthetic scenario when behavior changes. Listing tests alone does not establish execution correctness. |
+
+Reuse working dependencies and servers. Install only when absent, stale, or
+changed by the task. A new backend environment needs both `backend/requirements.txt`
+and `backend/requirements-dev.txt`; use the repo-local `.venv`. For a new frontend
+or runtime environment use `npm ci` in that component. Do not run package upgrades,
+skill installers, Firebase login, or cloud setup as routine local validation.
+Rerun a passing check after relevant edits, dependency/base changes, failures, or
+new evidence; do not rerun it solely to repeat the result.
+
+### Focused command examples
+
+Run Python commands from the repository root after activating `.venv`. Replace
+the example targets with the files/tests affected by the task:
 
 ```bash
 source .venv/bin/activate
-python -m pip install -r backend/requirements-dev.txt
+python -m unittest discover -s backend/tests -p 'test_config.py'
+python -m ruff check backend/app/config.py backend/tests/test_config.py
+python -m ruff format --check backend/app/config.py backend/tests/test_config.py
+```
+
+Run frontend commands from `frontend/` with the existing dependencies:
+
+```bash
+npm exec -- eslint src/app/workflowRoutes.js
+npm exec -- prettier --check src/app/workflowRoutes.js
+npm run build
+E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e -- e2e/workflow-navigation.spec.js
+```
+
+Read `frontend/package.json` and neighboring specs when selecting targets. Use
+mocked API fixtures and synthetic sessions for local UI checks unless the task
+requires a live integration. For a reusable browser workflow, see
+[repository-qa](../../.agents/skills/repository-qa/SKILL.md).
+
+### Broader checks when the change requires them
+
+From the repository root, with `.venv` activated:
+
+```bash
 python -m ruff check backend scripts
 python -m ruff format --check backend scripts
 python -m unittest discover -s backend/tests -p 'test_*.py'
@@ -22,23 +74,26 @@ python scripts/evaluate_generation.py --offline --strict
 python scripts/evaluate_orchestrator.py --offline --strict
 python scripts/export_openapi.py --output /tmp/agentic-tcg-openapi.json --indent 0
 python scripts/generate_frontend_api_types.py --check
-python scripts/scan_codebase.py
+```
 
-cd frontend
-npm ci
+From `frontend/`:
+
+```bash
 npm run lint
 npm run format:check
 npm run build
-npm run test:e2e -- e2e/responsive-reflow.spec.js e2e/frontend-css-smoke.spec.js e2e/workflow-navigation.spec.js
-npm run test:e2e -- e2e/home-workspace.spec.js e2e/workflow-navigation.spec.js
-npm run test:e2e -- e2e/use-case-review.spec.js e2e/orchestrator-lifecycle.spec.js
-npm run test:e2e -- e2e/export-approval-gate.spec.js
-npm run test:e2e:home-first
+E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first
+```
 
-cd backend/execution_runtime
-npm ci
+From `backend/execution_runtime/` when runtime code changes:
+
+```bash
 npm run test:playwright -- --list
 ```
+
+Codebase scans are for explicit mapping/documentation tasks and are not a
+validation prerequisite. Instruction/skill maintenance is described in
+[Developer skills](../developer-skills.md).
 
 The Playwright config expects an existing `E2E_BASE_URL`. For local frontend
 E2E runs, start `npm run dev -- --host 127.0.0.1` in a separate frontend shell
@@ -287,54 +342,28 @@ Recorded validation evidence:
 - Issue #16 evidence records grounded documentation URLs, extracted UI
   elements, executable preview, and 5 selected Playwright report cases passing.
 
-Use this script for release confidence when changes affect requirement parsing,
-grounded context, generation, exports, automation, execution preview, or the
-plain-English framework. It is slower and more environment-sensitive than the
-offline CI gates, so do not replace unit and offline benchmark checks with it.
+Run this live script when the requested integration or release validation needs
+it and the environment/model calls are authorized. It is slower and more
+environment-sensitive than offline checks; it is not a prerequisite for a local
+parsing or UI fix and does not replace unit or offline benchmark evidence.
 
-## 6) Validation Gate Selection
+## 6) Additional affected-test targets
 
-Use the smallest gate that proves the change:
+The selection matrix in section 1 is authoritative for local gate size. These
+are useful targets for particular behavior changes, not additional mandatory
+full-suite gates:
 
-- Backend service/router/model change: backend unittest plus focused tests.
-- Agent, fallback, coverage, or parsing change: backend unittest plus both
-  offline evaluation scripts.
-- Orchestrator decision, impact-routing, project lifecycle, or governance
-  change: backend unittest plus `scripts/evaluate_orchestrator.py --offline
-  --strict`; run `frontend/e2e/orchestrator-lifecycle.spec.js` for stitched
-  browser workflow changes.
-- API contract change: OpenAPI export.
-- Frontend UI or API call change: frontend build and focused E2E if the flow is
-  covered.
-- Execution conversion/runtime change: backend execution tests and
-  `backend/execution_runtime` Playwright list check.
-- Project execution history or orchestrator execution change: workflow project,
-  automation endpoint, orchestrator service, and focused multi-environment
-  E2E tests.
-- Automation preview contract, hydration, selection, or Run-availability change:
-  focused execution-service and automation-endpoint tests, frontend build,
-  `frontend/e2e/automation-preview-consistency.spec.js`, and
-  `frontend/e2e/multi-environment-execution.spec.js`.
-- Home-first routes, task/review workflow, navigation, responsive behavior, or
-  accessibility change: frontend lint, format check, build, and
-  `CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first`. Repeat the
-  manual Home and Use Cases smoke in `docs/home-first-accessibility-smoke.md`
-  when semantics or focus behavior changes.
-- Firestore index or production rollout change: parse `firebase.json` and
-  `firestore.indexes.json`, run
-  `backend.tests.test_firestore_index_manifest`, run the pinned Firebase CLI
-  `firestore:indexes` dry run, execute
-  `scripts/deploy_firestore_indexes.py` without `--apply`, and syntax-check
-  `scripts/deploy_cloud_run.sh`. Production apply and read-only smoke follow
-  `docs/home-workspace-production-rollout.md` only after protected `main` is
-  synchronized.
-- Report/export evidence or stale report decision change: export endpoint,
-  orchestrator service, and focused report evidence E2E tests.
-- End-to-end workflow or release confidence change: run
-  `scripts/e2e_playwright_workflow.py`.
+| Affected behavior | Relevant targets |
+| --- | --- |
+| Orchestrator decisions, impact routing, or governance | Affected orchestrator service tests and the strict orchestrator benchmark; `frontend/e2e/orchestrator-lifecycle.spec.js` when a stitched browser flow changes. |
+| Project execution history | Workflow-project, automation-endpoint, and orchestrator-service tests; `frontend/e2e/multi-environment-execution.spec.js`. |
+| Automation preview, selection, or Run availability | Execution-service/automation-endpoint tests; `frontend/e2e/automation-preview-consistency.spec.js`; multi-environment specs when that behavior is affected. |
+| Home, navigation, reviews, responsive layout, or accessibility | The affected specs from `test:e2e:home-first`; use the full script for shared cross-flow changes. Consult [manual accessibility smoke](../home-first-accessibility-smoke.md) when semantics or focus behavior changes. |
+| Firestore indexes or production rollout | Relevant manifest tests, JSON/config validation, and deployment-script checks. Follow [production rollout](../home-workspace-production-rollout.md) for actual live operations; local validation does not authorize applying them. |
+| Report/export evidence or stale-report decisions | Affected export-endpoint/orchestrator tests and report evidence E2E specs. |
 
-When a gate cannot be run, record the command, blocker, and remaining risk in
-the issue, PR, or handoff note.
+When a check cannot run, record the command, blocker, and remaining risk in the
+PR. Add an issue comment only when it communicates a new blocker or decision.
 
 ## 7) Evidence
 

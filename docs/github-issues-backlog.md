@@ -1,5 +1,14 @@
 # GitHub Issue Backlog for Test Case Engine Improvements
 
+This document holds roadmap context, historical planning snapshots, and unfiled
+proposals. **GitHub issues and pull requests are authoritative for current
+status.** Existing status and validation notes below are historical; routine
+implementation and merges do not require updating them. Record validation in the
+PR and update this document only when roadmap intent or an unfiled proposal changes.
+
+Development workflow policy: [AGENTS.md](../AGENTS.md). Small localized work may
+use a PR without a separate issue; substantial or sensitive changes require one.
+
 - Implemented; PR review pending: [#296](https://github.com/lumensparkxy/agentic_test_case_generator/issues/296) — Prioritize required reviews and route workbench actions consistently across Overview, Home and Reviews; refresh guidance after requirements changes. Follows #294 / PR #295. Phase 4 - Operational Readiness; P2.
 
 - Implemented; PR review pending: [#294](https://github.com/lumensparkxy/agentic_test_case_generator/issues/294) — Preserve project requirements with source-independent Import → Compare → Apply, stable identities, scoped retirement, atomic persistence, and an explicit recovery preview. Phase 4 - Operational Readiness; P1.
