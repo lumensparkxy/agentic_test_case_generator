@@ -433,11 +433,10 @@ test.describe("Contextual task and project evidence", () => {
 		await page.goto(projectPath);
 		await expect(page).toHaveURL(projectPath);
 
-		const task = page.getByLabel("Contextual task");
+		const task = page.getByLabel("Test suite actions");
 		await expect(task).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expect(page.getByText(/^Operational status$/i)).toHaveCount(0);
-		await expect(task.getByRole("heading", { name: /^Generate Test Cases$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Start generation$/i })).toBeVisible();
 		await expect(task.getByText(/Analyze Impact/i)).toHaveCount(0);
 	});
@@ -460,14 +459,16 @@ test.describe("Contextual task and project evidence", () => {
 		await page.goto(projectPath);
 		await expect(page).toHaveURL(projectPath);
 
-		const task = page.getByLabel("Contextual task");
+		const task = page.getByLabel("Test suite actions");
 		await expect(task).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 		await expect(page.getByRole("button", { name: /^Refresh status$/i })).toHaveCount(0);
-		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toHaveCount(0);
-		await task.getByText(/^Details$/i).click();
+		await task
+			.locator("summary")
+			.filter({ hasText: /^More actions$/i })
+			.click();
 		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
 		await page.reload();
 		await expect(page).toHaveURL(projectPath);
@@ -476,7 +477,6 @@ test.describe("Contextual task and project evidence", () => {
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
 
 		await task.getByRole("button", { name: /^Start analysis$/i }).click();
-		await expect(task.getByRole("heading", { name: /^Apply Accepted Updates$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Apply accepted changes$/i })).toBeVisible();
 	});
 });

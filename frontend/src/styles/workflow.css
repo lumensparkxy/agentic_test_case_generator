@@ -652,3 +652,13 @@
 	display: block;
 	margin-top: 0.15rem;
 }
+
+.test-suite-action-controls {
+	margin-bottom: var(--space-4);
+}
+.test-suite-action-controls .contextual-task-controls {
+	justify-content: flex-start;
+}
+.test-suite-action-controls .contextual-task-details-body {
+	box-sizing: border-box;
+}

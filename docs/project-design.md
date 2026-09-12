@@ -140,3 +140,7 @@ Improve tests shows the review summary, secondary quality/required scores, and d
 Draft selections survive tab changes and failures, but reset when the project or test-case source snapshot changes. Revision conflicts require reloading current findings before resubmission. Stale suites direct users to impact review. Authentication, billing, busy-state and revision checks remain enforced, including when project recommendations are present. Successful refinement stays on Improve tests, clears submitted drafts and displays the latest review. Passing machine quality never represents human approval. A compact export-status message remains above the tabs and existing export protections remain unchanged.
 
 Validation: `e2e/improve-tests.spec.js` covers checklist feedback, navigation/focus, retry, conflict, stale-suite guards, busy states, snapshot reset and desktop/mobile accessibility. Export and shared-layout regression tests cover the surrounding workflow.
+
+## Test Cases task controls (#292)
+
+Next task remains on Overview. Test Cases omits the task card, recommendation narrative and technical details. Compact workflow controls retain generation and impact actions, with optional actions under More actions and the existing regeneration confirmation, busy-state and approval safeguards. Template Setup continues to hide these controls.

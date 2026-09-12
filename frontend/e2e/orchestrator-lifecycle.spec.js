@@ -671,9 +671,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Test Cases,/i })
 			.click();
-		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Generate First Test Suite$/i })).toBeVisible();
 		await page
-			.getByLabel("Contextual task")
+			.getByLabel("Test suite actions")
 			.getByRole("button", { name: /^Start generation$/i })
 			.click();
 		await expect(page.locator(".test-suite-summary", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
@@ -694,9 +693,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Test Cases,/i })
 			.click();
-		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
 		await page
-			.getByLabel("Contextual task")
+			.getByLabel("Test suite actions")
 			.getByRole("button", { name: /^Start analysis$/i })
 			.click();
 		await expect(page.getByRole("heading", { name: /^Impact Analysis$/i })).toBeVisible();

@@ -334,43 +334,52 @@ async function openTestCases(page) {
 }
 
 test.describe("Contextual next task", () => {
-	test("shows one scoped primary task, keeps provenance and rare actions in Details, and renders no unrelated or empty billboard", async ({
-		page,
-	}) => {
+	test("shows compact suite controls without the Next task pane or technical details", async ({ page }) => {
 		const scenario = { project: projectFixture(), status: statusFixture(staleActions()) };
 		await installApi(page, scenario);
 		await openTestCases(page);
 
-		const task = page.getByLabel("Contextual task");
+		const task = page.getByLabel("Test suite actions");
 		const reason = "Changed requirements should be compared with the current suite.";
-		await expect(task.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
-		await expect(task.getByText(reason, { exact: true })).toHaveCount(1);
+		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
+		await expect(page.getByText("Next task", { exact: true })).toHaveCount(0);
+		await expect(task.getByText(reason, { exact: true })).toHaveCount(0);
 		await expect(task.locator(".contextual-task-controls > button")).toHaveCount(1);
 		await expect(task.getByText(/contract 1\.0/i)).not.toBeVisible();
 		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toHaveCount(0);
 
-		await task.getByText(/^Details$/i).click();
-		await expect(task.getByText(/Based on Requirements v2 and Use Cases v1/i)).toBeVisible();
-		await expect(task.getByText(/Requirements: snap-req-v2/i)).toBeVisible();
-		await expect(task.getByText(/Use Cases: snap-use-v1/i)).toBeVisible();
-		await expect(task.getByText(/Impact · contract 1\.0 · local/i)).toBeVisible();
+		await task
+			.locator("summary")
+			.filter({ hasText: /^More actions$/i })
+			.click();
+		await expect(task.getByText(/Based on Requirements v2 and Use Cases v1/i)).toHaveCount(0);
+		await expect(task.getByText(/Requirements: snap-req-v2/i)).toHaveCount(0);
+		await expect(task.getByText(/Use Cases: snap-use-v1/i)).toHaveCount(0);
+		await expect(task.getByText(/Impact · contract 1\.0 · local/i)).toHaveCount(0);
 		await expect(task.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Review Existing Evidence$/i })).toBeVisible();
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
+		await page.setViewportSize({ width: 1488, height: 900 });
 		await expect(page.getByRole("button", { name: /Full Regenerate from/i })).toHaveCount(0);
 
+		await page.goto(buildProjectPath(PROJECT_ID, "overview"));
+		await expect(page.getByLabel("Contextual task")).toBeVisible();
+		await expect(page.getByText("Next task", { exact: true })).toBeVisible();
 		for (const destination of ["context", "automation", "reports"]) {
 			await page.goto(buildProjectPath(PROJECT_ID, destination));
-			await expect(page.getByLabel("Contextual task")).toHaveCount(0);
+			await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
 		}
 
 		await page.goto(buildProjectPath(PROJECT_ID, "test-cases"));
 		await page.getByRole("button", { name: /^Template setup$/i }).click();
-		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
+		await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
 
 		scenario.status = statusFixture([]);
 		await page.getByRole("button", { name: /^Generate and review$/i }).click();
 		await page.reload();
-		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
+		await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
 		await expect(page.getByRole("button", { name: /Analyze Impact for/i })).toBeVisible();
 
 		scenario.status = statusFixture([
@@ -384,9 +393,12 @@ test.describe("Contextual next task", () => {
 			}),
 		]);
 		await page.reload();
-		const safeTask = page.getByLabel("Contextual task");
-		await expect(safeTask.getByRole("heading", { name: /^Analyze Impact$/i })).toBeVisible();
-		await safeTask.getByText(/^Details$/i).click();
+		const safeTask = page.getByLabel("Test suite actions");
+		await expect(safeTask.getByRole("button", { name: /^Start analysis$/i })).toBeVisible();
+		await safeTask
+			.locator("summary")
+			.filter({ hasText: /^More actions$/i })
+			.click();
 		await expect(safeTask.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
 
 		scenario.project.stage_state.test_cases.stale = false;
@@ -398,7 +410,7 @@ test.describe("Contextual next task", () => {
 		scenario.status.stages.test_cases.status = "completed";
 		scenario.status.stages.test_cases.stale = false;
 		await page.reload();
-		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
+		await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
 		await expect(page.getByRole("button", { name: /Generate from \d+ Approved/i })).toHaveCount(0);
 	});
 
@@ -416,7 +428,7 @@ test.describe("Contextual next task", () => {
 		const requests = await installApi(page, scenario);
 		await openTestCases(page);
 
-		const task = page.getByLabel("Contextual task");
+		const task = page.getByLabel("Test suite actions");
 		const actionButton = task.getByRole("button", { name: /^Start generation$/i });
 		await expect(actionButton).toBeDisabled();
 		await expect(task.getByText(blocker, { exact: true })).toHaveCount(1);
@@ -468,11 +480,14 @@ test.describe("Contextual next task", () => {
 		const requests = await installApi(page, scenario);
 		await openTestCases(page);
 
-		const optionalTask = page.getByLabel("Contextual task");
+		const optionalTask = page.getByLabel("Test suite actions");
 		await page.getByText("More actions", { exact: true }).first().click();
-		await expect(optionalTask.getByRole("heading", { name: /^Optional test suite actions$/i })).toBeVisible();
+		await expect(optionalTask.getByRole("heading")).toHaveCount(0);
 		await expect(optionalTask.locator(".contextual-task-controls > button")).toHaveCount(0);
-		await optionalTask.getByText(/^Details$/i).click();
+		await optionalTask
+			.locator("summary")
+			.filter({ hasText: /^More actions$/i })
+			.click();
 		await expect(optionalTask.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
 		await expect(page.getByRole("button", { name: /Generate from \d+ Approved/i })).toHaveCount(0);
 		expect(requests.generation).toBe(0);
@@ -508,8 +523,11 @@ test.describe("Contextual next task", () => {
 		const newCaseRow = page.getByRole("button", { name: new RegExp(NEW_CASE_TITLE, "i") });
 		await expect(oldCaseRow).toBeVisible();
 
-		const task = page.getByLabel("Contextual task");
-		await task.getByText(/^Details$/i).click();
+		const task = page.getByLabel("Test suite actions");
+		await task
+			.locator("summary")
+			.filter({ hasText: /^More actions$/i })
+			.click();
 		const regenerate = task.getByRole("button", { name: /^Full Regenerate$/i });
 		await regenerate.click();
 		let dialog = page.getByRole("dialog", { name: /Regenerate the entire test suite/i });
@@ -542,7 +560,7 @@ test.describe("Contextual next task", () => {
 
 		releaseGeneration();
 		await expect(dialog).toHaveCount(0);
-		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
+		await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
 		await expect(page.getByRole("main", { name: "Workflow workspace: Test Cases" })).toBeFocused();
 		await expect(newCaseRow).toBeVisible();
 		await expect(oldCaseRow).toHaveCount(0);
@@ -558,8 +576,11 @@ test.describe("Contextual next task", () => {
 		const requests = await installApi(page, scenario);
 		await openTestCases(page);
 
-		const task = page.getByLabel("Contextual task");
-		await task.getByText(/^Details$/i).click();
+		const task = page.getByLabel("Test suite actions");
+		await task
+			.locator("summary")
+			.filter({ hasText: /^More actions$/i })
+			.click();
 		await task.getByRole("button", { name: /^Full Regenerate$/i }).click();
 		const dialog = page.getByRole("dialog", { name: /Regenerate the entire test suite/i });
 		await dialog.getByRole("button", { name: /^Confirm regeneration$/i }).click();
