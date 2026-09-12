@@ -194,6 +194,7 @@ def _deduplicate_work_items(items: list[WorkspaceWorkItem]) -> list[WorkspaceWor
 def _sort_work_items(items: list[WorkspaceWorkItem]) -> list[WorkspaceWorkItem]:
     items.sort(key=lambda item: (item.project_id, item.stage, item.current_snapshot_id or ""))
     items.sort(key=lambda item: item.updated_at, reverse=True)
+    items.sort(key=lambda item: not item.primary)
     items.sort(key=lambda item: not item.enabled)
     return items
 

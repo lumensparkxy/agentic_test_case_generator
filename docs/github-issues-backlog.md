@@ -9,6 +9,10 @@ PR and update this document only when roadmap intent or an unfiled proposal chan
 Development workflow policy: [AGENTS.md](../AGENTS.md). Small localized work may
 use a PR without a separate issue; substantial or sensitive changes require one.
 
+- Implemented; PR review pending: [#296](https://github.com/lumensparkxy/agentic_test_case_generator/issues/296) — Prioritize required reviews and route workbench actions consistently across Overview, Home and Reviews; refresh guidance after requirements changes. Follows #294 / PR #295. Phase 4 - Operational Readiness; P2.
+
+- Implemented; PR review pending: [#294](https://github.com/lumensparkxy/agentic_test_case_generator/issues/294) — Preserve project requirements with source-independent Import → Compare → Apply, stable identities, scoped retirement, atomic persistence, and an explicit recovery preview. Phase 4 - Operational Readiness; P1.
+
 - Implemented; PR review pending: #292 — Remove the Next task pane from Test Cases; retain Overview and compact guarded workflow controls. Parent #241.
 
 - Implemented; PR review pending: #290 — Actionable Improve tests tab with selected findings, refinement, case navigation, and revision/impact safeguards. Parent #241; follows merged #284/#286/#288. Validation: build, lint, formatting, and 38 focused refinement, layout, export, and lifecycle browser tests pass.

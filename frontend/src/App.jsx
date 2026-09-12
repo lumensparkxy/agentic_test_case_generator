@@ -1,3 +1,5 @@
+import useRequirementImports from "./hooks/useRequirementImports";
+import RequirementImportReview from "./components/requirements/RequirementImportReview";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
@@ -234,11 +236,16 @@ const estimateChangedRequirementCount = (snapshots) => {
 };
 
 export default function App() {
+	const [isSavingRequirementReview, setIsSavingRequirementReview] = useState(false);
+	const requirementReviewLock = useRef(false);
+	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const { route, navigate } = useBrowserNavigation();
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
+	const orchestratorRequestRef = useRef(0);
+	const projectRevisionsRef = useRef({ identity: "", projects: new Map() });
 	const projectOperationScopeRef = useRef({ projectId: "", userId: "", generation: 0 });
 	const projectOperationUserRef = useRef("");
 	const workflowMainRef = useRef(null);
@@ -516,6 +523,16 @@ export default function App() {
 	const currentProjectId = currentProject?.project_id || "";
 	const currentProjectRevision = Number.isInteger(currentProject?.current_revision) ? currentProject.current_revision : null;
 	projectOperationUserRef.current = currentUser?.sub || "";
+	if (projectRevisionsRef.current.identity !== projectOperationUserRef.current) {
+		projectRevisionsRef.current = { identity: projectOperationUserRef.current, projects: new Map() };
+	}
+	const recordProjectRevision = (projectId, revision) => {
+		if (projectId && Number.isInteger(revision)) {
+			projectRevisionsRef.current.projects.set(projectId, Math.max(revision, projectRevisionsRef.current.projects.get(projectId) || 0));
+		}
+	};
+	const isLatestProjectRevision = (projectId, revision) => revision >= (projectRevisionsRef.current.projects.get(projectId) || 0);
+	recordProjectRevision(currentProjectId, currentProjectRevision);
 	const syncProjectOperationScope = () => {
 		const browserRoute = typeof window === "undefined" ? route : parseWorkflowRoute(window.location.pathname);
 		const browserProjectId = browserRoute.kind === "project" ? browserRoute.projectId : "";
@@ -563,7 +580,7 @@ export default function App() {
 	const testCaseWorkflowLocked = Boolean(
 		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.test_cases?.exhausted
 	);
-	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked;
+	const requirementActionDisabled = authActionDisabled || requirementWorkflowLocked || isSavingRequirementReview;
 	const testCaseActionDisabled = authActionDisabled || testCaseWorkflowLocked || isPreviewingExecution || isRunningExecution;
 	const jiraConnection = jiraConnectionStatus?.connection || null;
 	const jiraConnected = Boolean(jiraConnectionStatus?.connected && jiraConnection);
@@ -605,7 +622,9 @@ export default function App() {
 		acc[status] = (acc[status] || 0) + 1;
 		return acc;
 	}, {});
-	const approvedRequirements = requirements.filter((requirement) => getRequirementReviewStatus(requirement) === "Approved");
+	const approvedRequirements = requirements.filter(
+		(requirement) => requirement.lifecycle_status !== "retired" && getRequirementReviewStatus(requirement) === "Approved"
+	);
 	const approvedRequirementCount = approvedRequirements.length;
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
 	const reviewPendingRequirementCount = requirements.length - approvedRequirementCount - rejectedRequirementCount;
@@ -787,37 +806,62 @@ export default function App() {
 		resetExecutionWorkflowState();
 	};
 
-	const updateRequirementReviewStatus = (requirementId, reviewStatus) => {
-		setRequirements((prev) =>
-			prev.map((requirement) => (requirement.id === requirementId ? { ...requirement, review_status: reviewStatus } : requirement))
-		);
-		resetGeneratedArtifacts();
-		setStatus(`${requirementId} marked ${reviewStatus.toLowerCase()}.`);
+	const saveRequirementReviews = async (reviews) => {
+		if (requirementReviewLock.current) return;
+		const operationScope = captureProjectOperationScope();
+		if (!operationScope || reviews.length === 0) return;
+		requirementReviewLock.current = operationScope;
+		setIsSavingRequirementReview(true);
+		const changes = reviews.map((r) => ({
+			requirement_uid: r.requirement_uid,
+			review_status: r.review_status,
+			quality_flags: r.quality_flags || [],
+		}));
+		const fingerprint = JSON.stringify([operationScope.projectId, currentProjectRevision, changes]);
+		if (requirementReviewAttempt.current?.fingerprint !== fingerprint)
+			requirementReviewAttempt.current = { fingerprint, key: createRequestId() };
+		try {
+			const res = await apiRequest(`/projects/${operationScope.projectId}/requirements/reviews`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					base_project_revision: currentProjectRevision,
+					idempotency_key: requirementReviewAttempt.current.key,
+					reviews: changes,
+				}),
+			});
+			if (!res.ok) throw new Error(await parseApiError(res, "Could not save requirement reviews"));
+			const project = await res.json();
+			if (!isProjectOperationCurrent(operationScope)) return;
+			requirementReviewAttempt.current = null;
+			if (!isLatestProjectRevision(project.project_id, project.current_revision)) return;
+			recordProjectRevision(project.project_id, project.current_revision);
+			setCurrentProject(project);
+			hydrateProjectWorkflow(project);
+			setStatus("Requirement review saved.");
+			await refreshRequirementGuidance(project, operationScope);
+		} catch (error) {
+			if (isProjectOperationCurrent(operationScope)) setStatus(error.message);
+		} finally {
+			if (requirementReviewLock.current === operationScope) {
+				requirementReviewLock.current = false;
+				setIsSavingRequirementReview(false);
+			}
+		}
 	};
-
-	const bulkUpdateRequirementReviewStatus = (reviewStatus, predicate = () => true) => {
-		const targetIds = new Set(requirements.filter(predicate).map((requirement) => requirement.id));
-		setRequirements((prev) =>
-			prev.map((requirement) => (targetIds.has(requirement.id) ? { ...requirement, review_status: reviewStatus } : requirement))
+	const updateRequirementReviewStatus = (requirementId, reviewStatus) =>
+		saveRequirementReviews(requirements.filter((r) => r.id === requirementId).map((r) => ({ ...r, review_status: reviewStatus })));
+	const bulkUpdateRequirementReviewStatus = (reviewStatus, predicate = () => true) =>
+		saveRequirementReviews(requirements.filter(predicate).map((r) => ({ ...r, review_status: reviewStatus })));
+	const toggleRequirementQualityFlag = (requirementId, flag) =>
+		saveRequirementReviews(
+			requirements
+				.filter((r) => r.id === requirementId)
+				.map((r) => {
+					const flags = normalizeStringArray(r.quality_flags);
+					return { ...r, quality_flags: flags.includes(flag) ? flags.filter((f) => f !== flag) : [...flags, flag] };
+				})
 		);
-		resetGeneratedArtifacts();
-		const updatedCount = targetIds.size;
-		setStatus(`${updatedCount} requirement${updatedCount === 1 ? "" : "s"} marked ${reviewStatus.toLowerCase()}.`);
-	};
-
-	const toggleRequirementQualityFlag = (requirementId, flag) => {
-		setRequirements((prev) =>
-			prev.map((requirement) => {
-				if (requirement.id !== requirementId) {
-					return requirement;
-				}
-				const currentFlags = normalizeStringArray(requirement.quality_flags);
-				const nextFlags = currentFlags.includes(flag) ? currentFlags.filter((item) => item !== flag) : [...currentFlags, flag];
-				return { ...requirement, quality_flags: nextFlags };
-			})
-		);
-		resetGeneratedArtifacts();
-	};
 
 	const buildContextPayload = (requirementsOverride = requirements) => {
 		const baseContext = {
@@ -1368,6 +1412,7 @@ export default function App() {
 		isRefreshing: isWorkspaceSummaryRefreshing,
 		refresh: refreshWorkspaceSummary,
 		retry: retryWorkspaceSummary,
+		invalidateProject: invalidateWorkspaceProject,
 	} = useWorkspaceSummary({
 		request: apiRequest,
 		enabled: isAuthenticated && !isVerifyingSession,
@@ -1454,8 +1499,8 @@ export default function App() {
 		setFile(null);
 		setReqFeedback("");
 		setFeedback("");
-		setRawText("");
-		setRequirements(requirementPayload?.requirements || []);
+		setRawText(requirementPayload?.raw_text || "");
+		setRequirements((requirementPayload?.requirements || []).filter((r) => r.lifecycle_status !== "retired"));
 		setRequirementReview(requirementPayload?.review || null);
 		setRequirementCoverageMetrics(requirementPayload?.coverage_metrics || null);
 		setRequirementWorkflowDiagnostics(requirementPayload?.workflow_diagnostics || null);
@@ -1561,6 +1606,12 @@ export default function App() {
 	};
 
 	const loadProjectOrchestrator = async (projectId, { silent = false, routeRequestId = null, operationScope = null } = {}) => {
+		const requestId = ++orchestratorRequestRef.current;
+		const requestUserId = projectOperationUserRef.current;
+		const requestIsCurrent = () =>
+			requestId === orchestratorRequestRef.current &&
+			requestUserId === projectOperationUserRef.current &&
+			isProjectRequestCurrent(projectId, { routeRequestId, operationScope });
 		if (!projectId || !isAuthenticated) {
 			setOrchestratorStatus(null);
 			setOrchestratorError("");
@@ -1576,14 +1627,18 @@ export default function App() {
 				throw new Error(errorMessage);
 			}
 			const statusPayload = await statusRes.json();
-			if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
+			if (!requestIsCurrent() || statusPayload?.project_id !== projectId) {
 				return null;
 			}
+			if (!isLatestProjectRevision(projectId, statusPayload.project_revision)) {
+				throw new Error("Workflow guidance is out of date. Reload the latest project before continuing.");
+			}
+			recordProjectRevision(projectId, statusPayload.project_revision);
 			setOrchestratorStatus(statusPayload || null);
 			setOrchestratorError("");
 			return { status: statusPayload || null };
 		} catch (error) {
-			if (!isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
+			if (!requestIsCurrent()) {
 				return null;
 			}
 			setOrchestratorStatus(null);
@@ -1593,9 +1648,18 @@ export default function App() {
 			}
 			return null;
 		} finally {
-			if (!silent && isProjectRequestCurrent(projectId, { routeRequestId, operationScope })) {
+			if (requestIsCurrent()) {
 				setIsLoadingOrchestrator(false);
 			}
+		}
+	};
+
+	const refreshRequirementGuidance = async (project, operationScope) => {
+		setOrchestratorStatus(null);
+		invalidateWorkspaceProject(project.project_id, project.current_revision);
+		const results = await Promise.all([loadProjectOrchestrator(project.project_id, { operationScope }), refreshWorkspaceSummary()]);
+		if (isProjectOperationCurrent(operationScope) && results.some((result) => !result)) {
+			setStatus("Requirements saved. Workflow guidance could not be refreshed; reload the latest project before continuing.");
 		}
 	};
 
@@ -1673,6 +1737,10 @@ export default function App() {
 			if (!data?.project_id || data.project_id !== projectId) {
 				throw new Error("The project response did not match the requested project.");
 			}
+			if (!isLatestProjectRevision(projectId, data.current_revision)) {
+				throw new Error("The project response is out of date. Reload the latest project before continuing.");
+			}
+			recordProjectRevision(projectId, data.current_revision);
 			setCurrentProject(data || null);
 			if (hydrate && data) {
 				hydrateProjectWorkflow(data);
@@ -1726,7 +1794,10 @@ export default function App() {
 		if (!operationScope || operationScope.projectId !== projectId || !isProjectOperationCurrent(operationScope)) {
 			return null;
 		}
+		if (committedStatus && !isLatestProjectRevision(projectId, committedStatus.project_revision)) committedStatus = null;
 		if (committedStatus) {
+			recordProjectRevision(projectId, committedStatus.project_revision);
+			invalidateWorkspaceProject(projectId, committedStatus.project_revision);
 			setOrchestratorStatus(committedStatus);
 		}
 		const requestIsCurrent = () => isProjectOperationCurrent(operationScope);
@@ -1746,7 +1817,7 @@ export default function App() {
 			!workspaceSummary ? "Home and review inbox" : null,
 		].filter(Boolean);
 		if (failedRefreshes.length) {
-			if (committedStatus) {
+			if (committedStatus && isLatestProjectRevision(projectId, committedStatus.project_revision)) {
 				setOrchestratorStatus(committedStatus);
 			}
 			const prefix = committedStatus ? "Decision saved, but" : "Reload incomplete:";
@@ -2469,6 +2540,36 @@ export default function App() {
 		}
 	};
 
+	useEffect(() => {
+		requirementReviewLock.current = false;
+		requirementReviewAttempt.current = null;
+		setIsSavingRequirementReview(false);
+	}, [currentProjectId, isAuthenticated]);
+	const imports = useRequirementImports(
+		apiRequest,
+		currentProjectId,
+		isAuthenticated && !isVerifyingSession,
+		async (project, didApply = true) => {
+			const operationScope = captureProjectOperationScope();
+			if (
+				project.project_id !== currentProjectId ||
+				operationScope?.projectId !== project.project_id ||
+				!isLatestProjectRevision(project.project_id, project.current_revision)
+			)
+				return;
+			recordProjectRevision(project.project_id, project.current_revision);
+			setCurrentProject(project);
+			hydrateProjectWorkflow(project);
+			rememberGeneration("requirements", project.current_snapshots?.requirements?.payload || {});
+			setStatus(
+				didApply
+					? "Reviewed requirements applied. Existing downstream artifacts are retained; review their impact before regenerating."
+					: "Comparison refreshed against the current project. Review the new decisions before applying."
+			);
+			await refreshRequirementGuidance(project, operationScope);
+		}
+	);
+
 	const importRequirementsFromJira = async () => {
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
@@ -2494,6 +2595,7 @@ export default function App() {
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({
 					project_id: operationScope.projectId,
+					import_mode: "review",
 					base_project_revision: currentProjectRevision,
 					epic_key: selectedJiraIssueKey,
 					include_children: true,
@@ -2508,38 +2610,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			rememberGeneration("requirements", data);
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) return;
-			setRequirementSourceMode("jira");
-			setRawText(data.raw_text || "");
-			setRequirements(data.requirements || []);
-			setRequirementReview(data.review || null);
-			setRequirementCoverageMetrics(data.coverage_metrics || null);
-			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
-			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
-			setRequirementIterationHistory(data.iteration_history || []);
-			setTestCases([]);
-			setRequirementAnalysis([]);
-			setCoveragePlan([]);
-			setCoverageMetrics(null);
-			setTestCaseReview(null);
-			setTestCaseWorkflowDiagnostics(null);
-			setAppliedTestCaseWorkflowSettings(null);
-			setTestCaseIterationHistory([]);
-			setImpactAnalysis(null);
-			setActiveGenerateResultTab("test-cases");
-			resetContextAnalysis();
-			setFeedback("");
-			resetExecutionWorkflowState();
-			setReqFeedback("");
+			imports.accept(data);
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			setStatus(
-				`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || selectedJiraIssueKey}.`
-			);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`JIRA import failed: ${error.message}`);
@@ -2580,6 +2653,7 @@ export default function App() {
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({
 					project_id: operationScope.projectId,
+					import_mode: "review",
 					base_project_revision: currentProjectRevision,
 					project: selectedAzureDevOpsProject,
 					work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
@@ -2595,38 +2669,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			rememberGeneration("requirements", data);
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) return;
-			setRequirementSourceMode("azure_devops");
-			setRawText(data.raw_text || "");
-			setRequirements(data.requirements || []);
-			setRequirementReview(data.review || null);
-			setRequirementCoverageMetrics(data.coverage_metrics || null);
-			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
-			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
-			setRequirementIterationHistory(data.iteration_history || []);
-			setTestCases([]);
-			setRequirementAnalysis([]);
-			setCoveragePlan([]);
-			setCoverageMetrics(null);
-			setTestCaseReview(null);
-			setTestCaseWorkflowDiagnostics(null);
-			setAppliedTestCaseWorkflowSettings(null);
-			setTestCaseIterationHistory([]);
-			setImpactAnalysis(null);
-			setActiveGenerateResultTab("test-cases");
-			resetContextAnalysis();
-			setFeedback("");
-			resetExecutionWorkflowState();
-			setReqFeedback("");
+			imports.accept(data);
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			setStatus(
-				`Imported ${data.requirements?.length || 0} requirement${(data.requirements?.length || 0) === 1 ? "" : "s"} from ${data.source_name || `#${selectedAzureDevOpsWorkItemId}`}.`
-			);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Azure DevOps import failed: ${error.message}`);
@@ -2907,6 +2952,7 @@ export default function App() {
 			if (file) formData.append("file", file);
 			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
 			formData.append("project_id", operationScope.projectId);
+			formData.append("import_mode", "review");
 			if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
 			if (withFeedback && reqFeedback) {
 				formData.append("feedback", reqFeedback);
@@ -2925,41 +2971,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			const nextRequirements = withFeedback ? mergeRequirementMetadata(data.requirements || [], requirements) : data.requirements || [];
-			if (!withFeedback) {
-				setRequirementSourceMode("file");
-			}
-			setRawText(data.raw_text || rawText);
-			rememberGeneration("requirements", data);
-			setRequirements(nextRequirements);
-			setRequirementReview(data.review || null);
-			setRequirementCoverageMetrics(data.coverage_metrics || null);
-			setRequirementWorkflowDiagnostics(data.workflow_diagnostics || null);
-			setAppliedRequirementWorkflowSettings(data.workflow_settings || null);
-			setRequirementIterationHistory(data.iteration_history || []);
-			setTestCases([]);
-			setRequirementAnalysis([]);
-			setCoveragePlan([]);
-			setCoverageMetrics(null);
-			setTestCaseReview(null);
-			setTestCaseWorkflowDiagnostics(null);
-			setAppliedTestCaseWorkflowSettings(null);
-			setTestCaseIterationHistory([]);
-			setImpactAnalysis(null);
-			setActiveGenerateResultTab("test-cases");
-			resetContextAnalysis();
-			setFeedback("");
-			resetExecutionWorkflowState();
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
+			imports.accept(data);
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			setStatus(withFeedback ? "Requirements refined." : "Parsed.");
-			if (withFeedback) setReqFeedback("");
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Parse failed: ${error.message}`);
@@ -4143,8 +4157,8 @@ export default function App() {
 										<Surface as="section" className="panel">
 											<h2 className="panel-title">Upload Requirements</h2>
 											<p className="panel-description">
-												Choose a source for requirements, extract them into the review loop, and optionally push approved updates back to
-												JIRA or Azure DevOps.
+												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
+												until you apply an update.
 											</p>
 											<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
 												{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
@@ -4499,9 +4513,37 @@ export default function App() {
 												</div>
 											)}
 
+											{!imports.preview && imports.error && <p role="alert">{imports.error}</p>}
+											{imports.message && <p role="status">{imports.message}</p>}
+											{!imports.preview && imports.pending.length > 0 && (
+												<div className="import-pending-list" aria-label="Pending imports">
+													{imports.pending.map((item) => (
+														<Button key={item.import_id} className="secondary" onClick={() => imports.accept(item)}>
+															Review import: {item.source_name}
+														</Button>
+													))}
+												</div>
+											)}
+											{imports.preview?.guidance && (
+												<GuidanceUsed manifest={imports.preview.guidance} request={apiRequest} projectId={currentProjectId} />
+											)}
+											{imports.preview && (
+												<RequirementImportReview
+													key={imports.preview.import_id}
+													preview={imports.preview}
+													revision={currentProjectRevision}
+													busy={imports.busy}
+													error={imports.error}
+													onAction={imports.mutate}
+												/>
+											)}
+
 											<RequirementReviewWorkbench
 												requirements={requirements}
 												approvedRequirementCount={approvedRequirementCount}
+												loadHistory={(uid) => imports.read(`/projects/${currentProjectId}/requirements/${uid}/history`)}
+												retiredRequirements={currentProject?.current_snapshots?.requirements?.payload?.retired_requirements || []}
+												busy={isSavingRequirementReview}
 												reviewPendingRequirementCount={reviewPendingRequirementCount}
 												rejectedRequirementCount={rejectedRequirementCount}
 												onApproveNonRejected={() =>
@@ -4745,7 +4787,7 @@ export default function App() {
 												</div>
 											)}
 
-											{renderRequirementReviewReport()}
+											{projectSnapshots.requirements?.payload?.schema_version !== 2 && renderRequirementReviewReport()}
 
 											{guidanceSummary("requirements")}
 											{suggestionSummary("requirements")}

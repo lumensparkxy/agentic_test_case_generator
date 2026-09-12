@@ -14,6 +14,8 @@ const isAbortError = (error) => error?.name === "AbortError";
 export default function useWorkspaceSummary({ request, enabled = true, identity = "" } = {}) {
 	const requestRef = useRef(request);
 	const activeRequestRef = useRef({ controller: null, sequence: 0 });
+	const revisionsRef = useRef({ identity, projects: new Map() });
+	if (revisionsRef.current.identity !== identity) revisionsRef.current = { identity, projects: new Map() };
 	const [state, setState] = useState(INITIAL_STATE);
 	requestRef.current = request;
 
@@ -38,6 +40,18 @@ export default function useWorkspaceSummary({ request, enabled = true, identity 
 			if (activeRequestRef.current.sequence !== sequence || controller.signal.aborted) {
 				return null;
 			}
+			const rows = [...summary.projects, ...summary.work_items, ...(summary.continue_working ? [summary.continue_working] : [])];
+			if (rows.some((row) => row.project_revision < (revisionsRef.current.projects.get(row.project_id) || 0))) {
+				throw new Error("Workflow guidance is out of date. Refresh to load the latest project reviews.");
+			}
+			for (const row of rows) {
+				if (Number.isInteger(row.project_revision)) {
+					revisionsRef.current.projects.set(
+						row.project_id,
+						Math.max(row.project_revision, revisionsRef.current.projects.get(row.project_id) || 0)
+					);
+				}
+			}
 			setState({ identity, summary, status: "success", error: "" });
 			return summary;
 		} catch (error) {
@@ -53,6 +67,13 @@ export default function useWorkspaceSummary({ request, enabled = true, identity 
 			return null;
 		}
 	}, [enabled, identity]);
+
+	const invalidateProject = useCallback((projectId, revision) => {
+		revisionsRef.current.projects.set(projectId, Math.max(revision, revisionsRef.current.projects.get(projectId) || 0));
+		activeRequestRef.current.controller?.abort();
+		activeRequestRef.current.sequence++;
+		setState(INITIAL_STATE);
+	}, []);
 
 	const clear = useCallback(() => {
 		activeRequestRef.current.controller?.abort();
@@ -85,5 +106,6 @@ export default function useWorkspaceSummary({ request, enabled = true, identity 
 		refresh,
 		retry: refresh,
 		clear,
+		invalidateProject,
 	};
 }

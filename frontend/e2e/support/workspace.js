@@ -228,6 +228,8 @@ export async function installWorkspaceApi(page, options = {}) {
 		const { pathname } = url;
 		const method = request.method();
 
+		if (/^\/projects\/[^/]+\/requirement-imports$/.test(pathname)) return jsonResponse(route, []);
+
 		if (pathname === "/auth/me") {
 			return jsonResponse(route, {
 				sub: TEST_USER_ID,

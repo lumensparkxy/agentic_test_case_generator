@@ -8,6 +8,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from test_use_case_review_service import FakeFirestoreClient, _run_transaction
+
 from app.models import AuthUser
 from app.services.workflow_project_service import (
     ProjectConflictError,
@@ -73,6 +75,14 @@ class WorkflowProjectServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
         self.collection = FakeCollection("qa_projects", self.store)
+        self.transaction_client = FakeFirestoreClient(self.store)
+        for target, kwargs in [
+            ("app.services.workflow_project_service.get_required_firestore_client", {"return_value": self.transaction_client}),
+            ("app.services.workflow_project_service.transactional", {"side_effect": _run_transaction}),
+        ]:
+            patcher = patch(target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.actor = AuthUser(sub="user-1", email="user@example.com", name="User")
         self.collection_patch = patch(
             "app.services.workflow_project_service.get_required_firestore_collection",

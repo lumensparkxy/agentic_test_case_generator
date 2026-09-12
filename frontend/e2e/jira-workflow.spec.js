@@ -14,12 +14,71 @@ function jsonResponse(route, payload, status = 200) {
 	});
 }
 
-async function mockJiraWorkflow(page, user = buildTestUser()) {
+async function mockJiraWorkflow(page, user, project) {
 	const state = {
 		connected: false,
 		previewPayloads: [],
 		syncPayloads: [],
 	};
+
+	let pending = null;
+	let workflow = null;
+	const stageResponse = (route, extracted) => {
+		workflow = extracted;
+		const current = project.current_snapshots?.requirements?.payload?.requirements || [];
+		pending = {
+			import_id: `import-${project.current_revision}`,
+			project_id: PROJECT_ID,
+			base_project_revision: project.current_revision,
+			source_name: "PROJ-101",
+			status: "pending",
+			current_requirements: current,
+			recovery_snapshot_ids: [],
+			suggested_update_scope: [],
+			warnings: [],
+			counts: {},
+			candidates: extracted.requirements.map((requirement, index) => ({
+				candidate_id: `incoming-${index + 1}`,
+				requirement,
+				classification: current[index] ? "updated" : "new",
+				suggestions: [],
+				target_requirement_uid: current[index]?.requirement_uid,
+				reason: "Compare the proposed requirement.",
+			})),
+		};
+		return jsonResponse(route, pending);
+	};
+	await page.route(`**/projects/${PROJECT_ID}`, (route) => jsonResponse(route, project));
+	await page.route(`**/projects/${PROJECT_ID}/requirement-imports`, (route) => jsonResponse(route, pending ? [pending] : []));
+	await page.route(`**/projects/${PROJECT_ID}/requirement-imports/*/apply`, (route) => {
+		const decisions = route.request().postDataJSON().decisions;
+		const rows = decisions.map((choice, index) => {
+			const candidate = pending.candidates.find((row) => row.candidate_id === choice.candidate_id);
+			const current = pending.current_requirements.find((row) => row.requirement_uid === choice.target_requirement_uid);
+			return {
+				...candidate.requirement,
+				...current,
+				text: candidate.requirement.text,
+				id: current?.id || `REQ-00${index + 1}`,
+				requirement_uid: current?.requirement_uid || `uid-${index + 1}`,
+				review_status: "Needs Review",
+				content_version: (current?.content_version || 0) + 1,
+			};
+		});
+		project.current_revision++;
+		project.current_snapshots = {
+			...project.current_snapshots,
+			requirements: { snapshot_id: pending.import_id, payload: { ...workflow, requirements: rows } },
+		};
+		project.stage_state.requirements = {
+			current_snapshot_id: pending.import_id,
+			approved: false,
+			stale: false,
+			version: project.current_revision,
+		};
+		pending = null;
+		return jsonResponse(route, project);
+	});
 
 	const connectionSummary = {
 		base_url: "https://acme.atlassian.net",
@@ -111,8 +170,9 @@ async function mockJiraWorkflow(page, user = buildTestUser()) {
 		const body = route.request().postDataJSON();
 		expect(body.epic_key).toBe("PROJ-101");
 		expect(body.include_children).toBe(true);
+		expect(body.import_mode).toBe("review");
 
-		return jsonResponse(route, {
+		return stageResponse(route, {
 			source_name: sharedIssue.key,
 			raw_text: "Imported from JIRA: expense approvals epic and child stories.",
 			requirements: [
@@ -166,7 +226,7 @@ async function mockJiraWorkflow(page, user = buildTestUser()) {
 
 	await page.route("**/requirements/parse", async (route) => {
 		expect(route.request().method()).toBe("POST");
-		return jsonResponse(route, {
+		return stageResponse(route, {
 			raw_text: "Refined imported JIRA requirements.",
 			requirements: [
 				{
@@ -268,11 +328,12 @@ test.describe("JIRA requirements workflow", () => {
 			current_stage: "requirements",
 			current_status: "ready",
 		});
+		const project = projectDetailFixture(workspaceProject);
 		await installWorkspaceApi(page, {
 			summary: workspaceSummaryFixture({ projects: [workspaceProject] }),
-			projectDetails: { [PROJECT_ID]: projectDetailFixture(workspaceProject) },
+			projectDetails: { [PROJECT_ID]: project },
 		});
-		const jiraState = await mockJiraWorkflow(page, user);
+		const jiraState = await mockJiraWorkflow(page, user, project);
 		await seedAuthenticatedSession(page, user);
 
 		await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
@@ -308,23 +369,29 @@ test.describe("JIRA requirements workflow", () => {
 		await jiraIssueOption.check();
 		await page.getByRole("button", { name: /Import PROJ-101/i }).click();
 
+		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
+		await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(0);
+		await page.getByRole("button", { name: "Apply reviewed changes" }).click();
+
 		const requirementRows = page.locator(".requirement-review-table tbody tr");
 		await expect(requirementRows).toHaveCount(2);
 		const requirementTable = page.locator(".requirement-review-table");
 		await expect(requirementTable.getByRole("columnheader", { name: "Issue" })).toHaveCount(0);
 		await expect(requirementTable.getByRole("columnheader", { name: "ID" })).toBeVisible();
 		await expect(requirementTable.getByRole("columnheader", { name: "ID / Source" })).toHaveCount(0);
-		await expect(requirementTable.getByRole("columnheader", { name: "Epic" })).toBeVisible();
-		await expect(requirementTable.getByRole("columnheader", { name: "Review source" })).toBeVisible();
-		await expect(requirementRows.nth(0)).toContainText("REQ-101");
-		await expect(requirementRows.nth(1)).toContainText("REQ-102");
+		await expect(requirementTable.getByRole("columnheader", { name: "Sources" })).toBeVisible();
+		await expect(requirementTable.getByRole("columnheader", { name: "Review status" })).toBeVisible();
+		await expect(requirementRows.nth(0)).toContainText("REQ-001");
+		await expect(requirementRows.nth(1)).toContainText("REQ-002");
 		await expect(page.getByRole("heading", { name: /jira sync preview/i })).toBeVisible();
 
 		await page.getByPlaceholder(/Enter your feedback here/i).fill("Make the approval notifications explicit and tighten the language.");
 		await page.getByRole("button", { name: /implement changes/i }).click();
 
-		await expect(page.getByText(/duplicate checks/i)).toBeVisible();
-		await expect(page.getByText(/notification recipients/i)).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
+		await page.getByRole("button", { name: "Apply reviewed changes" }).click();
+		await expect(requirementRows.nth(0).locator(".requirement-item-copy")).toContainText("duplicate checks");
+		await expect(requirementRows.nth(1).locator(".requirement-item-copy")).toContainText("notification recipients");
 		await expect(requirementRows).toHaveCount(2);
 		await expect(requirementRows.nth(0)).toContainText("PROJ-101");
 		await expect(requirementRows.nth(1)).toContainText("PROJ-101");

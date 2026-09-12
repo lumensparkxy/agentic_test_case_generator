@@ -221,15 +221,26 @@ metadata from `backend/app/agents/specialist_registry.py`. The status service
 does not call agents or decide human approvals; those remain explicit gates
 represented as blockers.
 
-Incremental impact updates are first-class orchestrator decisions. When a
-baseline suite exists and downstream test cases are stale because requirements
-or use cases changed, the orchestrator recommends impact analysis as the primary
-path and keeps full regeneration secondary. Impact analysis can run before the
-changed upstream artifact is approved, but apply is blocked until the changed
-requirement/use-case stage and changed items are approved. Once
-`impact.update.apply` writes the new test-case snapshot sourced from the current
-impact snapshot, the suite is no longer treated as needing another incremental
-update.
+Required reviews take precedence over downstream work, including when a baseline
+suite or current impact analysis exists. Pending requirements recommend Review
+Requirements; after approval, current use cases awaiting human review recommend
+Review Use Cases. Stale use cases follow the impact/refresh path rather than an
+approval that cannot be performed. Home, Reviews and Overview use the same
+recommendations and action/stage destinations, with explicit Open Requirements,
+Open Use Cases and other workbench labels. Overview navigation does not execute
+agents or save approvals.
+
+With upstream reviews complete, a changed baseline recommends incremental impact
+analysis (or accepted updates when analysis is current), keeping full regeneration
+secondary. Analysis remains an optional action during upstream review. Apply,
+generation and export approval gates remain in force. Once impact.update.apply
+writes a test-case snapshot sourced from the current impact snapshot, another
+incremental update is no longer recommended.
+
+Saving requirement reviews or applying an import refreshes both project guidance
+and workspace summaries. Request sequences, identity/project scopes and minimum
+observed project revisions reject obsolete responses. Failed refreshes retain
+saved requirements and surface a refresh error instead of showing outdated tasks.
 
 Orchestrator run persistence flow:
 

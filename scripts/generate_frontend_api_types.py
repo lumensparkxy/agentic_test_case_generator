@@ -61,6 +61,39 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "ProjectUseCasesReviewRequest",
         "ProjectUseCasesReviewResponse",
     ),
+    SelectedOperation(
+        "requirementImportsList", "get", "/projects/{project_id}/requirement-imports", "RequirementImportsListRequest", "RequirementImportsListResponse"
+    ),
+    SelectedOperation(
+        "requirementImportGet", "get", "/projects/{project_id}/requirement-imports/{import_id}", "RequirementImportGetRequest", "RequirementImportGetResponse"
+    ),
+    SelectedOperation(
+        "requirementImportApply",
+        "post",
+        "/projects/{project_id}/requirement-imports/{import_id}/apply",
+        "RequirementImportApplyRequest",
+        "RequirementImportApplyResponse",
+    ),
+    SelectedOperation(
+        "requirementImportCompare",
+        "post",
+        "/projects/{project_id}/requirement-imports/{import_id}/compare",
+        "RequirementImportCompareRequest",
+        "RequirementImportCompareResponse",
+    ),
+    SelectedOperation(
+        "requirementImportRecovery",
+        "post",
+        "/projects/{project_id}/requirement-imports/recovery",
+        "RequirementImportRecoveryRequest",
+        "RequirementImportRecoveryResponse",
+    ),
+    SelectedOperation(
+        "requirementHistory", "get", "/projects/{project_id}/requirements/{requirement_uid}/history", "RequirementHistoryRequest", "RequirementHistoryResponse"
+    ),
+    SelectedOperation("requirementReviews", "patch", "/projects/{project_id}/requirements/reviews", "RequirementReviewsRequest", "RequirementReviewsResponse"),
+    SelectedOperation("jiraImport", "post", "/integrations/jira/import", "JiraImportRequest", "JiraImportResponse"),
+    SelectedOperation("azureDevOpsImport", "post", "/integrations/azure-devops/import", "AzureDevOpsImportRequest", "AzureDevOpsImportResponse"),
     SelectedOperation("requirementsParse", "post", "/requirements/parse", "RequirementsParseRequest", "RequirementsParseResponse"),
     SelectedOperation("requirementsEnrich", "post", "/requirements/enrich", "RequirementsEnrichRequest", "RequirementsEnrichResponse"),
     SelectedOperation("testCasesGenerate", "post", "/testcases/generate", "TestCasesGenerateRequest", "TestCasesGenerateResponse"),

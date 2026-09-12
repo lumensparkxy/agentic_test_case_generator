@@ -14,6 +14,7 @@ from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse, RefineTestCasesInput
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
+from ..services.requirement_import_service import validate_generation_baseline
 from ..services.versioning_service import persist_test_case_versions
 from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http
 
@@ -271,6 +272,7 @@ async def generate_test_cases_endpoint(
     payload: GenerateTestCasesInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
+    await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
     request_id = _get_request_id(request)
     billing_context = await run_in_threadpool(
         enforce_billing_access,
@@ -361,6 +363,7 @@ async def refine_test_cases_endpoint(
     payload: RefineTestCasesInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
+    await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
     request_id = _get_request_id(request)
     billing_context = await run_in_threadpool(
         enforce_billing_access,

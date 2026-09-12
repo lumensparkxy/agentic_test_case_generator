@@ -70,6 +70,7 @@ function createResponsiveScenario({ currentStatus = "attention_required" } = {})
 		operation: "requirements.refine",
 		approved: true,
 		payload: {
+			raw_text: LONG_RAW_TEXT,
 			requirements: [
 				{
 					id: "REQ-RESP-001",
@@ -251,7 +252,9 @@ test.describe("Responsive project shell", () => {
 
 			await expect(heading).toHaveText("Overview");
 			await expect(page.locator(".project-page-header")).toContainText(PROJECT_NAME);
-			await expect(page.getByLabel("Contextual task").getByRole("button", { name: /^Open workbench$/i })).toBeVisible();
+			await expect(
+				page.getByLabel("Contextual task").getByRole("button", { name: /^Open (Requirements|Use Cases|Test Cases|Automation|Reports)$/i })
+			).toBeVisible();
 			await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 			await expectExactlyOneCurrent(globalNavigation);
 			await expectExactlyOneCurrent(projectNavigation);
@@ -271,7 +274,12 @@ test.describe("Responsive project shell", () => {
 
 			if ([390, 760].includes(viewport.width)) {
 				await expectWithinInitialViewport(heading, page);
-				await expectWithinInitialViewport(page.getByLabel("Contextual task").getByRole("button", { name: /^Open workbench$/i }), page);
+				await expectWithinInitialViewport(
+					page
+						.getByLabel("Contextual task")
+						.getByRole("button", { name: /^Open (Requirements|Use Cases|Test Cases|Automation|Reports)$/i }),
+					page
+				);
 			}
 
 			await expectNoDocumentOverflow(page, `${viewport.width}px project overview`);
@@ -432,33 +440,6 @@ test.describe("Responsive project shell", () => {
 	test("limits horizontal scrolling to named, focusable intrinsic table regions", async ({ page }) => {
 		await openResponsiveProject(page, { width: 320, height: 900 }, { destination: "requirements" });
 		await expect(page.getByRole("region", { name: /requirements table/i })).toBeVisible();
-		await page.route("**/requirements/parse", async (route) =>
-			route.fulfill({
-				status: 200,
-				contentType: "application/json",
-				body: JSON.stringify({
-					source_name: "responsive-requirements.md",
-					raw_text: LONG_RAW_TEXT,
-					requirements: [
-						{
-							id: "REQ-RESP-001",
-							text: "Customers can complete checkout in every supported market.",
-							review_status: "Approved",
-						},
-					],
-					review: { approved: true, score: 100, threshold: 85, summary: "Requirements approved.", blocking_issues: [] },
-					coverage_metrics: { total_requirements: 1, unique_requirements: 1 },
-					workflow_diagnostics: { status: "completed", warnings: [], parser_failures: [] },
-					iteration_history: [],
-				}),
-			})
-		);
-		await page.locator('input[type="file"]').setInputFiles({
-			name: "responsive-requirements.md",
-			mimeType: "text/markdown",
-			buffer: Buffer.from("Customers can complete checkout in every supported market."),
-		});
-		await page.getByRole("button", { name: /parse requirements/i }).click();
 		await page.getByText("Raw extracted text", { exact: true }).click();
 		const rawTextRegion = page.getByRole("region", { name: "Raw extracted requirements text" });
 		await expect(rawTextRegion).toBeVisible();

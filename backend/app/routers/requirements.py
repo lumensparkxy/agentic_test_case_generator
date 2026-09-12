@@ -23,6 +23,9 @@ from ..services.versioning_service import persist_requirement_versions
 from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http
 from ..utils.excel_parser import parse_excel_to_text
 
+from ..contracts.requirement_imports import RequirementImportPreview
+from ..services.requirement_import_service import require_review_client, stage_import
+
 router = APIRouter()
 
 MAX_UPLOAD_SIZE_BYTES = 16 * 1024 * 1024
@@ -238,7 +241,9 @@ def _record_billing_consumption_safe(
         logging.exception("Billing consumption recording failed after workflow success")
 
 
-@router.post("/requirements/parse", response_model=RequirementsWorkflowResponse, dependencies=[Depends(generation_guidance("requirements"))])
+@router.post(
+    "/requirements/parse", response_model=RequirementsWorkflowResponse | RequirementImportPreview, dependencies=[Depends(generation_guidance("requirements"))]
+)
 async def parse_requirements(
     request: Request,
     current_user: AuthUser = Depends(get_current_user),
@@ -249,10 +254,11 @@ async def parse_requirements(
     workflow_settings: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
     base_project_revision: Optional[str] = Form(None),
-) -> RequirementsWorkflowResponse:
-    _settings = get_settings()
+    import_mode: Optional[str] = Form(None),
+) -> RequirementsWorkflowResponse | RequirementImportPreview:
     parsed_workflow_settings = _parse_workflow_settings_form(workflow_settings)
     parsed_project_revision = _parse_project_revision_form(base_project_revision)
+    await run_in_threadpool(require_review_client, project_id, parsed_project_revision, import_mode, current_user)
     request_id = _get_request_id(request)
     is_refinement_request = bool(feedback and existing_requirements)
     billing_context = await run_in_threadpool(
@@ -327,6 +333,8 @@ async def parse_requirements(
                 unit="requirement",
                 metadata={"approved": response.approved},
             )
+            if project_id:
+                return await run_in_threadpool(stage_import, project_id, current_user, parsed_project_revision, response, "requirements.refine")
             response.requirements = persist_requirement_versions(
                 current_requirements=response.requirements,
                 previous_requirements=existing_reqs,
@@ -337,27 +345,6 @@ async def parse_requirements(
                 operation="requirements.refine",
                 approved=response.approved,
             )
-            if project_id:
-                try:
-                    append_stage_snapshot(
-                        project_id=project_id,
-                        stage="requirements",
-                        payload=_requirements_project_payload(response),
-                        operation="requirements.refine",
-                        actor=current_user,
-                        request_id=request_id,
-                        workflow_run_id=workflow_run_id,
-                        source_event_id=event_id,
-                        approved=response.approved,
-                        title="Requirements refined",
-                        metadata={
-                            "requirements_modified_count": modified_count,
-                            "requirements_total": len(response.requirements),
-                        },
-                        base_project_revision=parsed_project_revision,
-                    )
-                except Exception as project_exc:
-                    raise project_error_to_http(project_exc) from project_exc
             return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
         except HTTPException:
             raise
@@ -460,6 +447,8 @@ async def parse_requirements(
             unit="requirement",
             metadata={"approved": response.approved, "document_count": len(source_names)},
         )
+        if project_id:
+            return await run_in_threadpool(stage_import, project_id, current_user, parsed_project_revision, response, "requirements.parse")
         response.requirements = persist_requirement_versions(
             current_requirements=response.requirements,
             actor=current_user,
@@ -472,27 +461,6 @@ async def parse_requirements(
             raw_text=raw_text,
             approved=response.approved,
         )
-        if project_id:
-            try:
-                append_stage_snapshot(
-                    project_id=project_id,
-                    stage="requirements",
-                    payload=_requirements_project_payload(response),
-                    operation="requirements.parse",
-                    actor=current_user,
-                    request_id=request_id,
-                    workflow_run_id=workflow_run_id,
-                    source_event_id=event_id,
-                    approved=response.approved,
-                    title="Requirements parsed",
-                    metadata={
-                        "requirements_generated_count": len(response.requirements),
-                        "document_count": len(source_names),
-                    },
-                    base_project_revision=parsed_project_revision,
-                )
-            except Exception as project_exc:
-                raise project_error_to_http(project_exc) from project_exc
         return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
     except HTTPException:
         _log_failure(

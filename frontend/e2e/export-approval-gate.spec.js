@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
-import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
+import { seedAuthenticatedSession } from "./support/auth.js";
 
 const PROJECT_ID = "project-export-gate";
 const PROJECT = {
@@ -14,7 +14,22 @@ const PROJECT = {
 	created_at: "2026-07-17T08:00:00Z",
 	updated_at: "2026-07-17T08:00:00Z",
 	stage_state: {},
-	current_snapshots: {},
+	current_snapshots: {
+		requirements: {
+			snapshot_id: "approved",
+			payload: {
+				requirements: [
+					{
+						id: "REQ-001",
+						requirement_uid: "export-requirement",
+						text: "The system shall allow users to export reports.",
+						review_status: "Approved",
+					},
+				],
+				review: { approved: true },
+			},
+		},
+	},
 	timeline: [],
 	execution_runs: [],
 };
@@ -92,23 +107,7 @@ test.describe("Export approval gate", () => {
 			apiJsonResponse(route, { runs: [], events: [], checkpoints: [] })
 		);
 		await page.route(`**/projects/${PROJECT_ID}`, async (route) => apiJsonResponse(route, PROJECT));
-		await page.route("**/requirements/parse", async (route) =>
-			jsonResponse(route, {
-				source_name: "sample-requirements.md",
-				raw_text: "The system shall allow users to export reports.",
-				requirements: [{ id: "REQ-001", text: "The system shall allow users to export reports.", review_status: "Approved" }],
-				review: { approved: true, score: 95, threshold: 85, summary: "Requirements approved.", blocking_issues: [] },
-				coverage_metrics: {
-					total_requirements: 1,
-					unique_requirements: 1,
-					duplicate_requirements: 0,
-					shall_format_count: 1,
-					requirements_per_document: 1,
-				},
-				workflow_diagnostics: { status: "completed", warnings: [], parser_failures: [] },
-				iteration_history: [],
-			})
-		);
+		await page.route(`**/projects/${PROJECT_ID}/requirement-imports`, (route) => jsonResponse(route, []));
 		await page.route("**/testcases/generate", async (route) =>
 			jsonResponse(route, {
 				test_cases: [
@@ -265,8 +264,6 @@ test.describe("Export approval gate", () => {
 		await expect(page).toHaveURL(requirementsPath);
 		await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
 
-		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
-		await page.getByRole("button", { name: /parse requirements/i }).click();
 		await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(1);
 
 		await page.getByRole("button", { name: /^Next$/ }).click();

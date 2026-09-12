@@ -5,7 +5,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-from google.cloud.firestore_v1 import FieldFilter, Query
+from google.cloud.firestore_v1 import FieldFilter, Query, transactional
 
 from ..models import (
     AuthUser,
@@ -20,7 +20,7 @@ from ..models import (
 from .guidance_service import public_manifest
 from .scenario_review_state import carry_scenario_reviews
 from .audit_service import build_actor_snapshot
-from .firestore_repository import get_required_firestore_collection
+from .firestore_repository import get_required_firestore_collection, get_required_firestore_client
 
 QA_PROJECTS_COLLECTION = "qa_projects"
 PROJECT_STAGES: tuple[ProjectStageName, ...] = (
@@ -191,6 +191,15 @@ def get_project(project_id: str, *, actor: AuthUser) -> QaProjectDetail:
         if state.current_snapshot_id:
             snapshot = _snapshot_for(project_id, state.current_snapshot_id)
             if snapshot is not None:
+                if stage == "requirements":
+                    from .requirement_reconciliation import canonical_requirements
+
+                    active, retired = canonical_requirements(project_id, snapshot.model_dump(mode="json"))
+                    snapshot.payload = {
+                        **snapshot.payload,
+                        "requirements": [r.model_dump(mode="json") for r in active],
+                        "retired_requirements": [r.model_dump(mode="json") for r in retired],
+                    }
                 current_snapshots[stage] = snapshot
 
     project_doc = _get_project_doc(project_id)
@@ -400,6 +409,32 @@ def create_project(*, name: str, description: Optional[str], actor: AuthUser, re
     return get_project(project_id, actor=actor)
 
 
+def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None):
+    """Serialize every revision writer with reviewed imports; publish all evidence or none."""
+    client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
+    doc = client.collection(QA_PROJECTS_COLLECTION).document(project_id)
+
+    @transactional
+    def commit(transaction):
+        current = _document_to_dict(doc.get(transaction=transaction))
+        if not current:
+            raise HTTPException(404, "Project not found")
+        _require_owner(current, actor)
+        snapshot_ref = doc.collection("snapshots").document(snapshot["snapshot_id"]) if snapshot else None
+        if snapshot and snapshot.get("idempotency_key"):
+            existing = _document_to_dict(snapshot_ref.get(transaction=transaction))
+            if existing:
+                return existing
+        _check_revision(current, expected_revision)
+        if snapshot:
+            transaction.create(snapshot_ref, snapshot)
+        transaction.update(doc, update)
+        transaction.create(doc.collection("timeline").document(event["event_id"]), event)
+        return snapshot
+
+    return commit(client.transaction())
+
+
 def update_project(
     *,
     project_id: str,
@@ -426,10 +461,11 @@ def update_project(
         update_payload["description"] = description.strip() or None
     if status_value is not None:
         update_payload["status"] = status_value
-    project_doc = _get_project_doc(project_id)
-    project_doc.update(update_payload)
-    _record_timeline_event(
-        project_doc,
+    _commit_project_revision(
+        project_id,
+        actor,
+        int(payload.get("current_revision") or 0),
+        update_payload,
         {
             "event_id": str(uuid4()),
             "project_id": project_id,
@@ -471,7 +507,6 @@ def append_stage_snapshot(
     _check_revision(project_payload, base_project_revision)
 
     now = _utcnow()
-    project_doc = _get_project_doc(project_id)
     current_revision = int(project_payload.get("current_revision") or 0)
     next_revision = current_revision + 1
     stage_state = _stage_state_from_payload(project_payload)
@@ -499,7 +534,6 @@ def append_stage_snapshot(
         "idempotency_key": idempotency_key,
         "created_at": now,
     }
-    project_doc.collection("snapshots").document(snapshot_id).set(snapshot_payload)
 
     stage_metadata = dict(metadata or {})
     if stage == "use_cases":
@@ -530,16 +564,16 @@ def append_stage_snapshot(
         downstream["stale_reason"] = f"{stage} changed in project revision {next_revision}"
         stage_state[downstream_stage] = downstream
 
-    project_doc.update(
+    committed = _commit_project_revision(
+        project_id,
+        actor,
+        current_revision,
         {
             "updated_at": now,
             "current_revision": next_revision,
             "stage_state": stage_state,
             "latest_stage": stage,
-        }
-    )
-    _record_timeline_event(
-        project_doc,
+        },
         {
             "event_id": str(uuid4()),
             "project_id": project_id,
@@ -552,8 +586,9 @@ def append_stage_snapshot(
             "metadata": {"operation": operation, **_serialize_value(metadata or {})},
             "occurred_at": now,
         },
+        snapshot=snapshot_payload,
     )
-    return QaProjectStageSnapshot.model_validate(snapshot_payload)
+    return QaProjectStageSnapshot.model_validate(committed)
 
 
 def record_execution_run(
