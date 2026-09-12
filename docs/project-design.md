@@ -144,3 +144,7 @@ Validation: `e2e/improve-tests.spec.js` covers checklist feedback, navigation/fo
 ## Test Cases task controls (#292)
 
 Next task remains on Overview. Test Cases omits the task card, recommendation narrative and technical details. Compact workflow controls retain generation and impact actions, with optional actions under More actions and the existing regeneration confirmation, busy-state and approval safeguards. Template Setup continues to hide these controls.
+
+### Required-action navigation (#296)
+
+Overview prioritizes Review Requirements, then reviewable current Use Cases, before downstream impact work. Impact analysis remains optional while reviews are pending. Workbench links name their destination and share the action/stage resolver across Overview, Home and Reviews. Navigation moves keyboard focus to the destination and never performs analysis, generation or approval. Review/import commits refresh guidance; stale responses cannot replace a newer project revision.

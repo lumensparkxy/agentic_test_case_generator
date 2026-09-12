@@ -252,7 +252,9 @@ test.describe("Responsive project shell", () => {
 
 			await expect(heading).toHaveText("Overview");
 			await expect(page.locator(".project-page-header")).toContainText(PROJECT_NAME);
-			await expect(page.getByLabel("Contextual task").getByRole("button", { name: /^Open workbench$/i })).toBeVisible();
+			await expect(
+				page.getByLabel("Contextual task").getByRole("button", { name: /^Open (Requirements|Use Cases|Test Cases|Automation|Reports)$/i })
+			).toBeVisible();
 			await expect(page.getByLabel("Project information rail")).toHaveCount(0);
 			await expectExactlyOneCurrent(globalNavigation);
 			await expectExactlyOneCurrent(projectNavigation);
@@ -272,7 +274,12 @@ test.describe("Responsive project shell", () => {
 
 			if ([390, 760].includes(viewport.width)) {
 				await expectWithinInitialViewport(heading, page);
-				await expectWithinInitialViewport(page.getByLabel("Contextual task").getByRole("button", { name: /^Open workbench$/i }), page);
+				await expectWithinInitialViewport(
+					page
+						.getByLabel("Contextual task")
+						.getByRole("button", { name: /^Open (Requirements|Use Cases|Test Cases|Automation|Reports)$/i }),
+					page
+				);
 			}
 
 			await expectNoDocumentOverflow(page, `${viewport.width}px project overview`);

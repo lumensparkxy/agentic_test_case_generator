@@ -476,37 +476,11 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
             )
         ]
 
-    if has_baseline_test_suite and upstream_changed:
-        if impact_state and impact_state.current_snapshot_id and not impact_state.stale:
-            apply_blockers = _impact_apply_blockers(project)
-            actions.append(
-                _action(
-                    "apply_update",
-                    "Apply Accepted Updates",
-                    "test_cases",
-                    reason="Impact analysis is current; apply accepted update/add/deprecate recommendations to produce the next test-case snapshot.",
-                    primary=True,
-                    blockers=apply_blockers,
-                )
-            )
-        else:
-            actions.append(
-                _action(
-                    "analyze_impact",
-                    "Analyze Impact",
-                    "impact_analysis",
-                    reason="Upstream requirements/use cases changed after the baseline suite was generated.",
-                    primary=True,
-                )
-            )
-        actions.append(_full_regenerate_action(full_regenerate_blockers))
-        return actions
-
     if not requirements_state.approved or requirements_state.stale:
         actions.append(
             _action(
                 "approve",
-                "Approve Requirements",
+                "Review Requirements",
                 "requirements",
                 reason="Requirements must be approved before downstream updates are applied or exported.",
                 primary=True,
@@ -521,6 +495,70 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 secondary=True,
             )
         )
+
+    elif use_cases_state and use_cases_state.current_snapshot_id and not use_cases_state.stale and not _use_cases_human_approved(use_cases_state):
+        latest_human_review = _matching_use_case_human_review(use_cases_state)
+        latest_review_comment = (
+            str(latest_human_review.get("comment") or "").strip()
+            if isinstance(latest_human_review, dict) and latest_human_review.get("decision") == "request_changes"
+            else ""
+        )
+        actions.append(
+            _action(
+                "approve",
+                "Review Use Cases",
+                "use_cases",
+                reason=(
+                    f"Changes were requested: {latest_review_comment}"
+                    if latest_review_comment
+                    else "Use cases must be approved before a test-suite update or export."
+                ),
+                primary=True,
+            )
+        )
+
+    if has_baseline_test_suite and upstream_changed:
+        review_pending = bool(actions)
+        if impact_state and impact_state.current_snapshot_id and not impact_state.stale:
+            apply_blockers = _impact_apply_blockers(project)
+            actions.append(
+                _action(
+                    "apply_update",
+                    "Apply Accepted Updates",
+                    "test_cases",
+                    reason="Impact analysis is current; apply accepted update/add/deprecate recommendations to produce the next test-case snapshot.",
+                    primary=not review_pending,
+                    secondary=review_pending,
+                    blockers=apply_blockers,
+                )
+            )
+            if review_pending:
+                actions.append(
+                    _action(
+                        "analyze_impact",
+                        "Analyze Impact",
+                        "impact_analysis",
+                        reason="Impact analysis can be rerun while upstream reviews are pending; applying changes still requires approval.",
+                        secondary=True,
+                    )
+                )
+        else:
+            actions.append(
+                _action(
+                    "analyze_impact",
+                    "Analyze Impact",
+                    "impact_analysis",
+                    reason="Upstream requirements/use cases changed after the baseline suite was generated.",
+                    primary=not review_pending,
+                    secondary=review_pending,
+                )
+            )
+        actions.append(_full_regenerate_action(full_regenerate_blockers))
+        return actions
+
+    if actions:
+        if actions[0].stage == "use_cases":
+            actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
     if not use_cases_state or not use_cases_state.current_snapshot_id:
@@ -536,28 +574,17 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         )
         return actions
 
-    if not _use_cases_human_approved(use_cases_state) or use_cases_state.stale:
-        latest_human_review = _matching_use_case_human_review(use_cases_state)
-        latest_review_comment = (
-            str(latest_human_review.get("comment") or "").strip()
-            if isinstance(latest_human_review, dict) and latest_human_review.get("decision") == "request_changes"
-            else ""
-        )
-        actions.append(
+    if use_cases_state.stale:
+        return [
             _action(
-                "approve",
-                "Approve Use Cases",
-                "use_cases",
-                reason=(
-                    f"Changes were requested: {latest_review_comment}"
-                    if latest_review_comment
-                    else "Use cases must be approved before a test-suite update or export."
-                ),
+                "refine",
+                "Refresh Use Cases",
+                "test_cases",
+                reason="Use cases are stale. Refresh the generated coverage before reviewing a new snapshot.",
                 primary=True,
-            )
-        )
-        actions.append(_full_regenerate_action(full_regenerate_blockers))
-        return actions
+            ),
+            _full_regenerate_action(full_regenerate_blockers),
+        ]
 
     if not has_baseline_test_suite:
         actions.append(

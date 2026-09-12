@@ -1,4 +1,10 @@
-import { PROJECT_DESTINATIONS, buildProjectPath, getDestinationForStage, resolveOrchestratorDestination } from "../../app/workflowRoutes";
+import {
+	PROJECT_DESTINATIONS,
+	buildProjectPath,
+	getDestinationForStage,
+	resolveOrchestratorDestination,
+	getReviewActionTitle,
+} from "../../app/workflowRoutes";
 
 const STATUS_LABELS = Object.freeze({
 	not_started: "Not started",
@@ -82,6 +88,8 @@ export const getWorkItemDestination = (item) =>
 export const getProjectDestination = (project) => getDestinationForStage(project?.current_stage) || PROJECT_DESTINATIONS.OVERVIEW;
 
 export const getWorkItemTitle = (item) => {
+	const reviewTitle = getReviewActionTitle(item);
+	if (reviewTitle) return reviewTitle;
 	if (item?.action && ACTION_LABELS[item.action]) return ACTION_LABELS[item.action];
 	if (item?.kind === "review") return `Review ${formatWorkspaceLabel(item.stage, "project work").toLowerCase()}`;
 	return `${formatWorkspaceLabel(item?.stage, "Project work")} needs attention`;

@@ -266,8 +266,33 @@ export function resolveOrchestratorDestination(recommendation) {
 	}
 
 	const action = normalizeKey(recommendation.action);
-	if (action === "approve" || action === "refine") {
+	if (["approve", "refine", "review"].includes(action)) {
 		return getDestinationForStage(recommendation.stage) || null;
 	}
 	return ACTION_DESTINATION[action] || getDestinationForStage(recommendation.stage) || null;
+}
+
+export function getWorkbenchNavigationLabel(recommendation) {
+	const destination = resolveOrchestratorDestination(recommendation);
+	const label = PROJECT_NAV_ITEMS.find((item) => item.id === destination)?.label;
+	return label ? `Open ${label}` : "Open Overview";
+}
+
+export function getReviewActionTitle(recommendation) {
+	const stage = normalizeKey(recommendation?.stage);
+	const action = normalizeKey(recommendation?.action);
+	if (action === "review" && ["requirements", "use_cases"].includes(stage)) {
+		return stage === "requirements" ? "Review Requirements" : "Review Use Cases";
+	}
+	if (action === "refine") {
+		return { requirements: "Refine Requirements", use_cases: "Refine Use Cases", test_cases: "Refresh Use Cases" }[stage];
+	}
+	if (action === "approve") {
+		return {
+			requirements: "Review Requirements",
+			use_cases: "Review Use Cases",
+			test_cases: "Review and Approve Test Cases",
+		}[stage];
+	}
+	return null;
 }

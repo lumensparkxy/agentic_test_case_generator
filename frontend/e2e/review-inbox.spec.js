@@ -236,7 +236,7 @@ test.describe("Global Review Inbox", () => {
 		await expect(
 			useCaseRow.getByRole("heading", {
 				level: 3,
-				name: new RegExp(`${USE_CASE_PROJECT.name}.*Use Cases.*Review approvals`, "i"),
+				name: new RegExp(`${USE_CASE_PROJECT.name}.*Use Cases.*Review Use Cases`, "i"),
 			})
 		).toBeVisible();
 		await expect(useCaseRow.getByRole("link", { name: new RegExp(`Open .* for ${USE_CASE_PROJECT.name}`, "i") })).toHaveAttribute(
