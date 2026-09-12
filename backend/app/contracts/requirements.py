@@ -4,9 +4,24 @@ from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 
+class RequirementSourceReference(BaseModel):
+    source_id: str
+    source_version: str
+    import_id: str
+    label: str
+    source_system: Optional[str] = None
+    source_issue_key: Optional[str] = None
+    source_issue_url: Optional[HttpUrl] = None
+    excerpt: str = ""
+
+
 class Requirement(BaseModel):
     id: str
     text: str
+    requirement_uid: Optional[str] = None
+    content_version: int = Field(default=1, ge=1)
+    lifecycle_status: Literal["active", "retired"] = "active"
+    sources: List[RequirementSourceReference] = Field(default_factory=list)
     source_system: Optional[Literal["file", "jira", "azure_devops"]] = None
     source_issue_key: Optional[str] = None
     source_issue_type: Optional[str] = None

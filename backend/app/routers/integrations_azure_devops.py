@@ -43,6 +43,9 @@ from ..services.azure_devops_sync_service import apply_azure_devops_requirement_
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.versioning_service import persist_requirement_versions
 
+from ..contracts.requirement_imports import RequirementImportPreview
+from ..services.requirement_import_service import require_review_client, stage_import
+
 router = APIRouter()
 
 
@@ -281,12 +284,17 @@ async def azure_devops_work_item_search(
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
 
 
-@router.post("/integrations/azure-devops/import", response_model=RequirementsWorkflowResponse, dependencies=[Depends(generation_guidance("requirements"))])
+@router.post(
+    "/integrations/azure-devops/import",
+    response_model=RequirementsWorkflowResponse | RequirementImportPreview,
+    dependencies=[Depends(generation_guidance("requirements"))],
+)
 async def azure_devops_import_requirements_endpoint(
     request: Request,
     payload: AzureDevOpsImportInput,
     current_user: AuthUser = Depends(get_current_user),
-) -> RequirementsWorkflowResponse:
+) -> RequirementsWorkflowResponse | RequirementImportPreview:
+    await run_in_threadpool(require_review_client, payload.project_id, payload.base_project_revision, payload.import_mode, current_user)
     request_id = _get_request_id(request)
     if payload.project_id:
         await run_in_threadpool(project_for, payload.project_id, current_user)
@@ -359,6 +367,10 @@ async def azure_devops_import_requirements_endpoint(
                 "source_work_item_count": int(workflow.get("work_item_count") or 0),
             },
         )
+        if payload.project_id:
+            return await run_in_threadpool(
+                stage_import, payload.project_id, current_user, payload.base_project_revision, response, "requirements.import.azure_devops"
+            )
         response.requirements = persist_requirement_versions(
             current_requirements=response.requirements,
             actor=current_user,
@@ -379,22 +391,9 @@ async def azure_devops_import_requirements_endpoint(
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
         )
-        if payload.project_id:
-            from .requirements import _requirements_project_payload
-
-            await run_in_threadpool(
-                append_stage_snapshot,
-                project_id=payload.project_id,
-                stage="requirements",
-                payload=_requirements_project_payload(response),
-                operation="requirements.import.azure_devops",
-                actor=current_user,
-                request_id=request_id,
-                approved=response.approved,
-                title="Requirements imported",
-                base_project_revision=payload.base_project_revision,
-            )
         return finish_generation(response, current_user, payload.project_id, "requirements", None, request_id)
+    except HTTPException:
+        raise
     except LookupError as exc:
         _log_failure(
             current_user=current_user,

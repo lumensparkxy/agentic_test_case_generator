@@ -8,6 +8,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from test_use_case_review_service import FakeFirestoreClient, _run_transaction
+
 from app.models import AuthUser, TestCase, TestStep
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
 from app.services.orchestrator_service import get_project_orchestrator_status
@@ -120,6 +122,14 @@ def _test_case(req_id: str, *, title: str | None = None) -> TestCase:
 class ImpactUpdateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
+        self.transaction_client = FakeFirestoreClient(self.store)
+        for target, kwargs in [
+            ("app.services.workflow_project_service.get_required_firestore_client", {"return_value": self.transaction_client}),
+            ("app.services.workflow_project_service.transactional", {"side_effect": _run_transaction}),
+        ]:
+            patcher = patch(target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.project_collection = FakeCollection("qa_projects", self.store)
         self.test_case_collection = FakeCollection("test_case_sets", self.store)
         self.actor = AuthUser(sub="user-1", email="user@example.com", name="User")

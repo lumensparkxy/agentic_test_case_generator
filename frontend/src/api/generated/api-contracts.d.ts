@@ -21,6 +21,15 @@ export interface ApiContractOperations {
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
+	requirementImportsList: ApiOperation<RequirementImportsListRequest, RequirementImportsListResponse, "GET", "/projects/{project_id}/requirement-imports">;
+	requirementImportGet: ApiOperation<RequirementImportGetRequest, RequirementImportGetResponse, "GET", "/projects/{project_id}/requirement-imports/{import_id}">;
+	requirementImportApply: ApiOperation<RequirementImportApplyRequest, RequirementImportApplyResponse, "POST", "/projects/{project_id}/requirement-imports/{import_id}/apply">;
+	requirementImportCompare: ApiOperation<RequirementImportCompareRequest, RequirementImportCompareResponse, "POST", "/projects/{project_id}/requirement-imports/{import_id}/compare">;
+	requirementImportRecovery: ApiOperation<RequirementImportRecoveryRequest, RequirementImportRecoveryResponse, "POST", "/projects/{project_id}/requirement-imports/recovery">;
+	requirementHistory: ApiOperation<RequirementHistoryRequest, RequirementHistoryResponse, "GET", "/projects/{project_id}/requirements/{requirement_uid}/history">;
+	requirementReviews: ApiOperation<RequirementReviewsRequest, RequirementReviewsResponse, "PATCH", "/projects/{project_id}/requirements/reviews">;
+	jiraImport: ApiOperation<JiraImportRequest, JiraImportResponse, "POST", "/integrations/jira/import">;
+	azureDevOpsImport: ApiOperation<AzureDevOpsImportRequest, AzureDevOpsImportResponse, "POST", "/integrations/azure-devops/import">;
 	requirementsParse: ApiOperation<RequirementsParseRequest, RequirementsParseResponse, "POST", "/requirements/parse">;
 	requirementsEnrich: ApiOperation<RequirementsEnrichRequest, RequirementsEnrichResponse, "POST", "/requirements/enrich">;
 	testCasesGenerate: ApiOperation<TestCasesGenerateRequest, TestCasesGenerateResponse, "POST", "/testcases/generate">;
@@ -66,8 +75,26 @@ export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
 export type ProjectUseCasesSaveResponse = QaProjectDetail;
 export type ProjectUseCasesReviewRequest = UseCaseReviewRequest;
 export type ProjectUseCasesReviewResponse = UseCaseReviewResponse;
+export type RequirementImportsListRequest = undefined;
+export type RequirementImportsListResponse = Array<RequirementImportPreview>;
+export type RequirementImportGetRequest = undefined;
+export type RequirementImportGetResponse = RequirementImportPreview;
+export type RequirementImportApplyRequest = ImportApplyInput;
+export type RequirementImportApplyResponse = QaProjectDetail;
+export type RequirementImportCompareRequest = undefined;
+export type RequirementImportCompareResponse = RequirementImportPreview;
+export type RequirementImportRecoveryRequest = ImportRecoveryInput;
+export type RequirementImportRecoveryResponse = RequirementImportPreview;
+export type RequirementHistoryRequest = undefined;
+export type RequirementHistoryResponse = Array<ImportHistoryEntry>;
+export type RequirementReviewsRequest = RequirementReviewsInput;
+export type RequirementReviewsResponse = QaProjectDetail;
+export type JiraImportRequest = JiraImportInput;
+export type JiraImportResponse = RequirementsWorkflowResponse | RequirementImportPreview;
+export type AzureDevOpsImportRequest = AzureDevOpsImportInput;
+export type AzureDevOpsImportResponse = RequirementsWorkflowResponse | RequirementImportPreview;
 export type RequirementsParseRequest = Body_parse_requirements_requirements_parse_post;
-export type RequirementsParseResponse = RequirementsWorkflowResponse;
+export type RequirementsParseResponse = RequirementsWorkflowResponse | RequirementImportPreview;
 export type RequirementsEnrichRequest = EnrichInput;
 export type RequirementsEnrichResponse = EnrichResponse;
 export type TestCasesGenerateRequest = GenerateTestCasesInput;
@@ -96,6 +123,18 @@ export interface ArtifactSource {
 	source_type?: "app" | "prototype" | "diagram" | "image" | "note";
 	status?: "Provided" | "Analyzed" | "Skipped" | "Unavailable";
 	url?: string | null;
+}
+
+export interface AzureDevOpsImportInput {
+	base_project_revision?: number | null;
+	import_mode?: "review" | null;
+	include_children?: boolean;
+	project?: string | null;
+	project_id?: string | null;
+	wiql?: string | null;
+	work_item_id?: number | null;
+	work_item_ids?: Array<number>;
+	workflow_settings?: WorkflowSettings | null;
 }
 
 export interface BillingAccount {
@@ -171,6 +210,7 @@ export interface Body_parse_requirements_requirements_parse_post {
 	feedback?: string | null;
 	file?: Blob | File | string | null;
 	files?: Array<Blob | File | string> | null;
+	import_mode?: string | null;
 	project_id?: string | null;
 	workflow_settings?: string | null;
 }
@@ -398,6 +438,47 @@ export interface ImpactUpdateApplyInput {
 	base_project_revision?: number | null;
 }
 
+export interface ImportApplyInput {
+	base_project_revision: number;
+	confirm_retirements?: boolean;
+	decisions: Array<ImportDecision>;
+	idempotency_key: string;
+	update_scope?: Array<string>;
+}
+
+export interface ImportCandidate {
+	candidate_id: string;
+	classification: "new" | "updated" | "unchanged" | "needs_decision";
+	reason: string;
+	requirement: Requirement;
+	suggestions?: Array<ImportMatch>;
+	target_requirement_uid?: string | null;
+}
+
+export interface ImportDecision {
+	action: "add" | "update" | "keep" | "skip";
+	candidate_id: string;
+	target_requirement_uid?: string | null;
+}
+
+export interface ImportHistoryEntry {
+	created_at: string;
+	project_revision: number;
+	requirement: Requirement;
+	snapshot_id: string;
+}
+
+export interface ImportMatch {
+	reason: string;
+	requirement_uid: string;
+}
+
+export interface ImportRecoveryInput {
+	base_project_revision: number;
+	baseline_snapshot_id: string;
+	incoming_snapshot_id: string;
+}
+
 export interface JiraExportInput {
 	issue_type: string;
 	project_key: string;
@@ -407,6 +488,17 @@ export interface JiraExportInput {
 export interface JiraExportResponse {
 	message: string;
 	status: string;
+}
+
+export interface JiraImportInput {
+	base_project_revision?: number | null;
+	epic_key?: string | null;
+	import_mode?: "review" | null;
+	include_children?: boolean;
+	issue_keys?: Array<string>;
+	jql?: string | null;
+	project_id?: string | null;
+	workflow_settings?: WorkflowSettings | null;
 }
 
 export interface OrchestratorActionRecommendation {
@@ -660,9 +752,12 @@ export interface Requirement {
 	artifact_set_id?: string | null;
 	artifact_version_id?: string | null;
 	artifact_version_number?: number | null;
+	content_version?: number;
 	id: string;
+	lifecycle_status?: "active" | "retired";
 	parent_requirement_id?: string | null;
 	quality_flags?: Array<string>;
+	requirement_uid?: string | null;
 	review_status?: "Draft" | "Needs Review" | "Approved" | "Rejected";
 	source_excerpt?: string | null;
 	source_hierarchy?: Array<string>;
@@ -675,6 +770,7 @@ export interface Requirement {
 	source_path?: string | null;
 	source_section?: string | null;
 	source_system?: "file" | "jira" | "azure_devops" | null;
+	sources?: Array<RequirementSourceReference>;
 	sync_target_issue_key?: string | null;
 	text: string;
 }
@@ -695,6 +791,46 @@ export interface RequirementCoveragePlan {
 	requirement_id: string;
 	requirement_text: string;
 	scenarios?: Array<ScenarioIntent>;
+}
+
+export interface RequirementImportPreview {
+	base_project_revision: number;
+	candidates: Array<ImportCandidate>;
+	counts?: Record<string, number>;
+	created_at: string;
+	current_requirements: Array<Requirement>;
+	guidance?: Record<string, unknown> | null;
+	import_id: string;
+	operation: string;
+	project_id: string;
+	recovery_snapshot_ids?: Array<string>;
+	source_name: string;
+	status?: "pending" | "applied" | "cancelled";
+	suggested_update_scope?: Array<string>;
+	warnings?: Array<string>;
+}
+
+export interface RequirementReviewChange {
+	quality_flags?: Array<string>;
+	requirement_uid: string;
+	review_status: "Draft" | "Needs Review" | "Approved" | "Rejected";
+}
+
+export interface RequirementReviewsInput {
+	base_project_revision: number;
+	idempotency_key: string;
+	reviews: Array<RequirementReviewChange>;
+}
+
+export interface RequirementSourceReference {
+	excerpt?: string;
+	import_id: string;
+	label: string;
+	source_id: string;
+	source_issue_key?: string | null;
+	source_issue_url?: string | null;
+	source_system?: string | null;
+	source_version: string;
 }
 
 export interface RequirementsWorkflowResponse {

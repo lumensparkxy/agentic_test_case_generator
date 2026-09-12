@@ -23,7 +23,7 @@ class FrontendApiContractGenerationTests(unittest.TestCase):
                 self.assertIn(f"{selected.key}: Object.freeze", runtime)
                 self.assertIn(selected.path, runtime)
 
-        self.assertIn("export type RequirementsParseResponse = RequirementsWorkflowResponse;", declarations)
+        self.assertIn("export type RequirementsParseResponse = RequirementsWorkflowResponse | RequirementImportPreview;", declarations)
         self.assertIn("export type TestCasesGenerateRequest = GenerateTestCasesInput;", declarations)
         self.assertIn("export type ExportCsvResponse = Blob;", declarations)
         self.assertIn("export type BillingEntitlementsMeResponse = BillingEntitlementResponse;", declarations)
