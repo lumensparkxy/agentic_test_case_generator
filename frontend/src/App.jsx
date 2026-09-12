@@ -6,7 +6,8 @@ import { Button, Link, Radio, Field, Input, Select, Textarea } from "./component
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
-import TestCaseQualitySummary from "./components/generation/TestCaseQualitySummary";
+import ImproveTestsPanel from "./components/generation/ImproveTestsPanel";
+import { improvementFindings } from "./components/generation/improvementFindings";
 import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
@@ -657,6 +658,24 @@ export default function App() {
 		!isApplyingImpactUpdate
 	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
+	const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
+	const [improvementReload, setImprovementReload] = useState(0);
+	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
+	const focusResultContent = useRef(false);
+	useEffect(() => {
+		setSelectedTestCaseId(null);
+	}, [sourceCaseSnapshot]);
+	useEffect(() => {
+		if (focusResultContent.current) {
+			document.getElementById("generate-result-panel")?.focus();
+			focusResultContent.current = false;
+		}
+	}, [activeGenerateResultTab]);
+	const openCaseResults = (id = null) => {
+		setSelectedTestCaseId(id);
+		focusResultContent.current = true;
+		setActiveGenerateResultTab("test-cases");
+	};
 	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
 	const requirementSourceMetricMeta = getRequirementSourceMetricMeta(requirementCoverageMetrics);
 	const requirementReportStats = [
@@ -750,6 +769,7 @@ export default function App() {
 	const requirementReportDetailCount = requirementBlockingIssues.length + requirementWarnings.length + requirementParserFailures.length;
 
 	const chooseGenerateResultTab = (data) => {
+		if (data?.review?.approved === false) return "improve";
 		const metrics = data?.coverage_metrics || null;
 		if ((metrics?.requirements_without_tests || []).length > 0) {
 			return "traceability";
@@ -1479,9 +1499,7 @@ export default function App() {
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
 		setImpactUpdateMessage("");
-		setActiveGenerateResultTab(
-			(generationPayload.test_cases || []).length ? chooseGenerateResultTab(hydratedGenerationPayload) : "test-cases"
-		);
+		setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
 		resetExportWorkflowState();
 		setExportMessage("");
 
@@ -3140,7 +3158,8 @@ export default function App() {
 		}
 	};
 
-	const generateTestCases = async (withFeedback = false, { fullRegeneration = false } = {}) => {
+	const generateTestCases = async (withFeedback = false, { fullRegeneration = false, feedbackText = feedback } = {}) => {
+		if (withFeedback && (testCaseActionDisabled || isGenerating || upstreamChangedForImpact || !testCases.length)) return false;
 		if (testCaseWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Test-case workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -3208,7 +3227,7 @@ export default function App() {
 				? {
 						...sharedPayload,
 						test_cases: testCases,
-						feedback: feedback.trim(),
+						feedback: feedbackText.trim(),
 					}
 				: {
 						...sharedPayload,
@@ -3226,12 +3245,14 @@ export default function App() {
 			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to generate test cases");
-				throw new Error(errorMessage);
+				throw Object.assign(new Error(errorMessage), { status: res.status });
 			}
 			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) {
 				return false;
 			}
+			if (withFeedback && (!Array.isArray(data.test_cases) || !data.test_cases.length))
+				throw new Error("No updated test cases were returned. Your current suite has been kept.");
 			rememberGeneration("test_cases", data);
 			setTestCases(data.test_cases || []);
 			setRequirementAnalysis(data.requirement_analysis || []);
@@ -3241,7 +3262,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
-			setActiveGenerateResultTab(chooseGenerateResultTab(data));
+			setActiveGenerateResultTab(withFeedback ? "improve" : chooseGenerateResultTab(data));
 			setDraftExportOverrideRequested(false);
 			setDraftExportOverrideReason("");
 			resetExecutionWorkflowState();
@@ -3264,11 +3285,15 @@ export default function App() {
 			setStatus(
 				`${withFeedback ? "Test cases refined" : fullRegeneration ? "Regenerated" : "Generated"}${generatedCount ? ` ${generatedCount} test case${generatedCount === 1 ? "" : "s"}` : ""} from ${requirementsForGeneration.length} approved requirement${requirementsForGeneration.length === 1 ? "" : "s"}.${reviewStatus}`.trim()
 			);
-			if (withFeedback) setFeedback("");
+			if (withFeedback) {
+				setFeedback("");
+				setActiveGenerateResultTab("improve");
+			}
 			return true;
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Generation failed: ${error.message}`);
+				if (withFeedback) throw error;
 			}
 			return false;
 		} finally {
@@ -3592,6 +3617,12 @@ export default function App() {
 			label: "Traceability Matrix",
 			badge: approvedRequirements.length ? `${tracedRequirementCount}/${approvedRequirements.length}` : "—",
 			variant: traceabilityGapCount > 0 ? "warning" : tracedRequirementCount > 0 ? "success" : "muted",
+		},
+		{
+			id: "improve",
+			label: "Improve tests",
+			badge: improvementFindings(testCaseReview).length,
+			variant: testCaseReview?.approved === false ? "warning" : "muted",
 		},
 	];
 
@@ -4845,7 +4876,11 @@ export default function App() {
 											<p className="test-suite-summary">
 												{testCases.length} test cases · {approvedRequirementCount} approved requirements
 											</p>
-											<TestCaseQualitySummary review={testCaseReview} meta={testCaseReviewMeta} exportLocked={exportGateLocked} />
+											<p className="test-export-status">
+												{exportGateLocked
+													? "Export is blocked until the quality gate is met or an explicit draft override is provided."
+													: "Export remains subject to the review and export controls."}
+											</p>
 
 											{hasGenerateResults ? (
 												<div className="generate-results-workspace">
@@ -4884,6 +4919,51 @@ export default function App() {
 														role="tabpanel"
 														aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
 													>
+														<div hidden={activeGenerateResultTab !== "improve"}>
+															<ImproveTestsPanel
+																key={`${sourceCaseSnapshot}:${improvementReload}`}
+																review={testCaseReview}
+																meta={testCaseReviewMeta}
+																testCases={testCases}
+																busy={isGenerating}
+																disabled={
+																	testCaseActionDisabled ||
+																	upstreamChangedForImpact ||
+																	!canGenerateFromApprovedRequirements ||
+																	!testCases.length
+																}
+																stale={upstreamChangedForImpact}
+																blockedReason={
+																	upstreamChangedForImpact
+																		? "Upstream inputs changed. Review their impact before applying fixes."
+																		: !testCases.length
+																			? "Generate test cases before applying improvements."
+																			: !canGenerateFromApprovedRequirements
+																				? "Approve requirements before applying fixes."
+																				: testCaseActionDisabled
+																					? "Refinement is unavailable while another operation is running or your account is restricted."
+																					: ""
+																}
+																onImpact={() => {
+																	setActiveGenerateResultTab("test-cases");
+																	document.querySelector(".generation-gate-card")?.scrollIntoView({ block: "center" });
+																}}
+																onApply={(feedbackText) => generateTestCases(true, { feedbackText })}
+																onReload={async () => {
+																	const project = await refreshCurrentProject({
+																		hydrate: true,
+																		operationScope: captureProjectOperationScope(),
+																	});
+																	if (project) {
+																		setImprovementReload((value) => value + 1);
+																		setActiveGenerateResultTab("improve");
+																	}
+																	return Boolean(project);
+																}}
+																onViewCase={openCaseResults}
+																onReviewCases={() => openCaseResults()}
+															/>
+														</div>
 														{activeGenerateResultTab === "traceability" && (
 															<TraceabilityMatrixPanel
 																approvedRequirements={approvedRequirements}
@@ -4901,12 +4981,8 @@ export default function App() {
 																<GeneratedTestCasesView
 																	testCases={testCases}
 																	qualityIssues={testCaseReview?.blocking_issues || []}
-																	feedback={feedback}
-																	onFeedbackChange={setFeedback}
-																	onRefineTestCases={() => generateTestCases(true)}
-																	isGenerating={isGenerating}
-																	testCaseActionDisabled={testCaseActionDisabled}
-																	allowRefinement={allowLegacyTestCaseMutations}
+																	selectedId={selectedTestCaseId}
+																	setSelectedId={setSelectedTestCaseId}
 																/>
 															</>
 														)}

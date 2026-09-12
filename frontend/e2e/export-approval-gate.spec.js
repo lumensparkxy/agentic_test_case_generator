@@ -274,7 +274,7 @@ test.describe("Export approval gate", () => {
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page).toHaveURL(testCasesPath);
 		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
-		await page.getByText("View findings", { exact: true }).click();
+		await page.getByRole("tab", { name: /^Improve tests/ }).click();
 		await expect(page.getByText(/Needs additional negative coverage/i)).toBeVisible();
 		await page.getByRole("tab", { name: /test cases/i }).click();
 		await expect(page.getByRole("region", { name: "Generated test cases", exact: true })).toBeVisible();

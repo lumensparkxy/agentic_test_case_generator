@@ -701,3 +701,57 @@ button.small {
 	margin-top: 0;
 	margin-bottom: 0.75rem;
 }
+
+.improve-tests {
+	max-width: 960px;
+	padding-block: var(--space-4);
+}
+.improve-tests h2 {
+	font-size: 24px;
+	margin-top: 0;
+}
+.improve-tests p {
+	max-width: 70ch;
+}
+.improve-tests-findings {
+	border: 0;
+	padding: 0;
+	margin-block: var(--space-5);
+	min-width: 0;
+}
+.improve-tests-findings legend {
+	font-weight: 700;
+	margin-bottom: var(--space-3);
+}
+.improve-tests-finding {
+	padding-block: var(--space-3);
+	border-bottom: 1px solid var(--border-color);
+}
+.improve-tests-finding label {
+	display: flex;
+	gap: var(--space-3);
+	align-items: flex-start;
+	overflow-wrap: anywhere;
+}
+.improve-tests-finding input {
+	flex-shrink: 0;
+}
+.improve-tests-finding button {
+	margin: var(--space-2) var(--space-2) 0 30px;
+}
+.improve-tests textarea {
+	margin-top: var(--space-2);
+}
+.improve-tests-actions {
+	margin-top: var(--space-4);
+	align-items: center;
+}
+.test-export-status {
+	color: var(--text-muted);
+}
+
+.improve-tests .button-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}

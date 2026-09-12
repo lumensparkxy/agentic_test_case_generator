@@ -54,6 +54,7 @@ async function openCases(
 	await seedAuthenticatedSession(page);
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
 	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toBeVisible();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
 	return project;
 }
 
@@ -77,10 +78,11 @@ test("selects cases and preserves all steps and metadata while searching", async
 	await expect(detail).toContainText("Select a test case");
 	await page.getByRole("searchbox", { name: "Search test cases" }).fill("");
 	await expect(detail.getByRole("heading", { name: "Declined card" })).toBeVisible();
-	await page.getByRole("region", { name: "Test case quality" }).getByText("View findings", { exact: true }).click();
-	await expect(page.getByRole("region", { name: "Test case quality" })).toContainText("TC-001 requires a grounded button label.");
+	await page.getByRole("tab", { name: /^Improve tests/ }).click();
+	await expect(page.getByRole("region", { name: "Improve test quality" })).toContainText("TC-001 requires a grounded button label.");
 	await page.getByRole("button", { name: "Template setup", exact: true }).click();
 	await page.getByRole("button", { name: "Generate and review", exact: true }).click();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
 	await expect(page.getByRole("heading", { name: "Generated Test Cases", exact: true })).toBeVisible();
 });
 
@@ -217,6 +219,7 @@ test("template setup is explicit and returns to the normal workbench across navi
 	await expect(page.getByRole("heading", { name: "Template Setup", exact: true })).toHaveCount(0);
 	await setup.click();
 	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
 	await expect(setup).toBeVisible();
 	await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toBeVisible();
 });
@@ -235,6 +238,7 @@ test("pane divider supports drag, limits, reset and saved widths without changin
 	expect(Number(await divider.getAttribute("aria-valuenow"))).toBeGreaterThan(start);
 	const saved = await divider.getAttribute("aria-valuenow");
 	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
 	await expect(divider).toHaveAttribute("aria-valuenow", saved);
 	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("Valid checkout");
 	await divider.focus();
@@ -332,10 +336,10 @@ test("stale Use Cases cannot be approved from either review entry point", async 
 	expect(api.requests.review).toEqual([]);
 });
 
-test("Test Cases keeps two result tabs and compact traceability rows", async ({ page }) => {
+test("Test Cases keeps three result tabs and compact traceability rows", async ({ page }) => {
 	const project = await openCases(page);
 	const tabs = page.getByRole("tablist", { name: "Generation result sections" });
-	await expect(tabs.getByRole("tab")).toHaveCount(2);
+	await expect(tabs.getByRole("tab")).toHaveCount(3);
 	await expect(tabs).not.toContainText("Scenario Coverage");
 	await expect(tabs).not.toContainText("Requirement Analysis");
 	await expect(tabs).not.toContainText(/Diagnostics|Generation Summary/);
@@ -362,15 +366,19 @@ test("Test Cases keeps two result tabs and compact traceability rows", async ({ 
 	}
 	await tabs.getByRole("tab", { name: /^Traceability Matrix/ }).focus();
 	await page.keyboard.press("ArrowRight");
+	await expect(tabs.getByRole("tab", { name: /^Improve tests/ })).toHaveAttribute("aria-selected", "true");
+	await page.keyboard.press("ArrowRight");
 	await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
 	await expect(page.getByRole("region", { name: "Selected test case" })).toBeVisible();
 });
 
 test("coverage gaps select the remaining traceability tab after load and reload", async ({ page }) => {
 	await openCases(page, [caseFixture("TC-001", "Valid checkout")], {
+		review: { approved: true },
 		coverage_metrics: { missing_must_have_scenarios: ["negative"], missing_scenarios: ["boundary"], requirements_without_tests: [] },
 	});
 	const selected = page.getByRole("tab", { name: /^Traceability Matrix/ });
+	await page.reload();
 	await expect(selected).toHaveAttribute("aria-selected", "true");
 	await expect(page.getByRole("region", { name: "Requirement traceability table" })).toBeVisible();
 	await page.reload();
@@ -385,7 +393,7 @@ test("loaded project without test cases selects a visible results tab", async ({
 
 for (const state of ["partial", "failed", "completed"]) {
 	for (const count of [0, 1])
-		test(`two-tab results remain usable for ${state} runs with ${count} cases`, async ({ page }) => {
+		test(`result tabs remain usable for ${state} runs with ${count} cases`, async ({ page }) => {
 			await openCases(page, count ? [caseFixture("TC-001", "Checkout")] : [], {
 				workflow_diagnostics: {
 					status: state,
@@ -397,12 +405,12 @@ for (const state of ["partial", "failed", "completed"]) {
 			});
 			const tabs = page.getByRole("tablist", { name: "Generation result sections" });
 			const panel = page.getByRole("tabpanel");
-			await expect(tabs.getByRole("tab")).toHaveCount(2);
+			await expect(tabs.getByRole("tab")).toHaveCount(3);
 			await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
 			await expect(panel).not.toBeEmpty();
 			await expect(panel).not.toContainText(/technical warning|internal parser message|Generation Summary|Diagnostics/);
 			await page.reload();
-			await expect(tabs.getByRole("tab", { name: /^Generated Test Cases/ })).toHaveAttribute("aria-selected", "true");
+			await expect(tabs.getByRole("tab", { name: /^Improve tests/ })).toHaveAttribute("aria-selected", "true");
 			await expect(panel).not.toBeEmpty();
 		});
 }
