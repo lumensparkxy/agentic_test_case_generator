@@ -190,7 +190,7 @@ async def _run_single_use_case_shard_workflow_async(
             if author == "RequirementAnalysisAgent":
                 parsed_requirement_analysis, parse_error = parse_requirement_analysis_json_detailed(text)
                 if parsed_requirement_analysis:
-                    current_requirement_analysis = normalize_requirement_analysis(parsed_requirement_analysis, shard.requirements)
+                    current_requirement_analysis = parsed_requirement_analysis
                     _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="requirement-analysis")
                 else:
                     _record_parser_failure(diagnostics, author, parse_error, text)
@@ -198,7 +198,7 @@ async def _run_single_use_case_shard_workflow_async(
             if author == "CoveragePlannerAgent":
                 parsed_coverage_plan, parse_error = parse_coverage_plan_json_detailed(text)
                 if parsed_coverage_plan:
-                    current_coverage_plan = _normalize_coverage_plan(parsed_coverage_plan, shard.requirements)
+                    current_coverage_plan = parsed_coverage_plan
                     _record_parser_recovery(diagnostics, author, parse_error, text, artifact_label="coverage-plan")
                 else:
                     _record_parser_failure(diagnostics, author, parse_error, text)
@@ -228,7 +228,7 @@ async def _run_single_use_case_shard_workflow_async(
     state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(state_requirement_analysis_raw)
     had_event_requirement_analysis = bool(current_requirement_analysis)
     if state_requirement_analysis:
-        current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, shard.requirements)
+        current_requirement_analysis = state_requirement_analysis
         if not had_event_requirement_analysis:
             _record_parser_recovery(
                 diagnostics,
@@ -244,7 +244,7 @@ async def _run_single_use_case_shard_workflow_async(
     state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
     had_event_coverage_plan = bool(current_coverage_plan)
     if state_coverage_plan:
-        current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, shard.requirements)
+        current_coverage_plan = state_coverage_plan
         if not had_event_coverage_plan:
             _record_parser_recovery(
                 diagnostics,
@@ -340,6 +340,21 @@ def _run_shard_with_fallback(
         )
 
     diagnostics = dict(workflow.get("workflow_diagnostics") or {})
+    # Inspect model coverage before normalization fills missing groups with defaults.
+    expected_ids = {requirement.id for requirement in shard.requirements}
+    incomplete = False
+    for field in ("requirement_analysis", "coverage_plan"):
+        items = list(workflow.get(field) or [])
+        ids = [item.get("requirement_id") for item in items]
+        if len(ids) != len(set(ids)) or set(ids) != expected_ids:
+            incomplete = True
+        if field == "coverage_plan" and any(not item.get("scenarios") for item in items):
+            incomplete = True
+    if incomplete:
+        diagnostics["used_fallback"] = True
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = "incomplete_model_coverage"
+        _append_unique_message(diagnostics.setdefault("warnings", []), "Incomplete model coverage required default requirement groups or scenarios.")
     requirement_analysis = normalize_requirement_analysis(
         list(workflow.get("requirement_analysis") or fallback_requirement_analysis(shard.requirements)),
         shard.requirements,

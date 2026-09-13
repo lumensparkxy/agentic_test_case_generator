@@ -95,6 +95,27 @@ def _worker_output(shard, **_kwargs):
 
 
 class UseCaseAgentTests(unittest.TestCase):
+    def test_missing_model_groups_are_reported_as_fallback_before_normalization(self) -> None:
+        for field in ("coverage_plan", "requirement_analysis", "empty_scenarios"):
+
+            def incomplete_worker(shard, **kwargs):
+                output = _worker_output(shard, **kwargs)
+                if field == "empty_scenarios":
+                    output["coverage_plan"][0]["scenarios"] = []
+                else:
+                    output[field] = output[field][:1]
+                return output
+
+            with (
+                self.subTest(field=field),
+                patch.object(use_case_agent, "_get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+                patch.object(use_case_agent, "_run_single_use_case_shard_workflow_sync", side_effect=incomplete_worker),
+            ):
+                result = use_case_agent.generate_use_cases(_payload(2))
+                self.assertEqual(len(result["coverage_plan"]), 2)
+                self.assertTrue(result["workflow_diagnostics"]["used_fallback"])
+                self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 1)
+
     def test_parallel_use_case_generation_merges_in_original_requirement_order(self) -> None:
         payload = _payload(5)
 

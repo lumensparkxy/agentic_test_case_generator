@@ -1,8 +1,10 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 
+from ..contracts.projects import QaProjectUseCaseGenerationInput
+from ..services.use_case_generation_service import generate_project_use_cases
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
@@ -238,3 +240,25 @@ async def review_qa_project_use_cases(
         )
     except Exception as exc:
         raise use_case_review_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/use-cases/generate", response_model=QaProjectDetail)
+async def generate_qa_project_use_cases(
+    project_id: str,
+    request: Request,
+    payload: QaProjectUseCaseGenerationInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectDetail:
+    try:
+        return await run_in_threadpool(
+            generate_project_use_cases,
+            project_id=project_id,
+            actor=current_user,
+            request_id=_get_request_id(request),
+            base_project_revision=payload.base_project_revision,
+            memory_bypass=request.headers.get("X-Knowledge-Bypass", "").lower() == "true",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc

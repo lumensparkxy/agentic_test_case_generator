@@ -116,6 +116,11 @@ class QaProjectUpdateInput(BaseModel):
     base_project_revision: Optional[int] = Field(default=None, ge=0)
 
 
+class QaProjectUseCaseGenerationInput(BaseModel):
+    model_config = {"extra": "forbid"}
+    base_project_revision: int = Field(ge=0)
+
+
 class QaProjectUseCaseSnapshotInput(BaseModel):
     requirement_analysis: List[RequirementAnalysis] = Field(default_factory=list)
     coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)
@@ -140,4 +145,5 @@ __all__ = [
     "QaProjectCreateInput",
     "QaProjectUpdateInput",
     "QaProjectUseCaseSnapshotInput",
+    "QaProjectUseCaseGenerationInput",
 ]

@@ -1826,6 +1826,23 @@ export default function App() {
 		return project;
 	};
 
+	const handleUseCasesGenerated = (project, context) => {
+		const operationScope = captureProjectOperationScope();
+		if (
+			!operationScope ||
+			operationScope.projectId !== context.projectId ||
+			currentProjectRevision !== context.baseProjectRevision ||
+			!isLatestProjectRevision(project.project_id, project.current_revision)
+		)
+			return;
+		recordProjectRevision(project.project_id, project.current_revision);
+		invalidateWorkspaceProject(project.project_id, project.current_revision);
+		setCurrentProject(project);
+		hydrateProjectWorkflow(project);
+		void loadProjectOrchestrator(project.project_id, { silent: true, operationScope });
+		void refreshWorkspaceSummary();
+	};
+
 	const handleUseCaseReviewCommitted = async (response, context) =>
 		refreshUseCaseReviewProject({ projectId: context?.projectId, orchestratorStatus: response?.orchestrator_status || null });
 
@@ -4112,6 +4129,8 @@ export default function App() {
 								request={apiRequest}
 								navigate={navigate}
 								onDecisionCommitted={handleUseCaseReviewCommitted}
+								onGenerated={handleUseCasesGenerated}
+								generationDisabled={testCaseActionDisabled || isGenerating}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
 								onBack={goPrev}
 								onNext={goNext}
