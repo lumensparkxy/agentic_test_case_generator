@@ -221,46 +221,16 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
             with patch("app.agents.test_case_agent._run_workflow_sync", return_value=workflow):
                 result = generate_test_cases(payload)
 
-        self.assertTrue(result["approved"])
-        self.assertGreaterEqual(result["review"]["score"], result["review"]["threshold"])
-        self.assertGreater(len(result["test_cases"]), len(partial_model_cases))
-        self.assertEqual(result["coverage_metrics"]["requirements_without_tests"], [])
-        self.assertEqual(result["workflow_diagnostics"]["status"], "partial")
-        self.assertFalse(result["workflow_diagnostics"]["used_fallback"])
-        self.assertIsNone(result["workflow_diagnostics"]["failure_reason"])
-        self.assertEqual(result["workflow_diagnostics"]["recovery_reason"], "coverage_augmentation")
-        self.assertEqual(len(result["workflow_diagnostics"]["parser_recoveries"]), 2)
-        self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"]["model_recovered"], len(partial_model_cases))
-        self.assertGreater(result["workflow_diagnostics"]["generation_source_counts"]["deterministic_coverage_completion"], 0)
-        self.assertFalse(any("recovered usable test-case JSON" in warning for warning in result["workflow_diagnostics"]["warnings"]))
-        self.assertTrue(
-            any(
-                warning.startswith("Recovered partial model output needed deterministic coverage completion")
-                and "must-have scenario" in warning
-                and "total deterministic coverage case" in warning
-                for warning in result["workflow_diagnostics"]["warnings"]
-            )
-        )
-        self.assertEqual(result["workflow_diagnostics"]["completion_source"], "coverage_completion")
-        self.assertEqual(
-            result["workflow_diagnostics"]["deterministic_total_additions"],
-            result["workflow_diagnostics"]["generation_source_counts"]["deterministic_coverage_completion"],
-        )
-        self.assertEqual(result["iteration_history"][-1]["actor"], "FallbackCoverageRecovery")
-        evidence = result["generation_evidence"]
-        self.assertEqual(evidence["final_status"], "partial")
-        self.assertEqual(evidence["parser_recovery_count"], 2)
-        self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["sequential", "deterministic_coverage_completion"])
-        self.assertGreater(evidence["deterministic_additions_total"], 0)
-        self.assertEqual(evidence["deterministic_total_additions"], evidence["deterministic_additions_total"])
-        self.assertEqual(evidence["completion_source"], "coverage_completion")
-        self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
-        self.assertEqual(evidence["passes"][1]["review_status"], "approved")
-        model_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "model_recovered"]
-        completion_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_coverage_completion"]
-        self.assertEqual([test_case.source_case_id for test_case in model_cases], ["TC-MODEL-001"])
-        self.assertTrue(all(test_case.coverage_completion_reason == "coverage_augmentation" for test_case in completion_cases))
-        self.assertTrue(all(test_case.generation_pass_id == evidence["passes"][1]["pass_id"] for test_case in completion_cases))
+        self.assertFalse(result["approved"])
+        self.assertEqual([c.id for c in result["test_cases"]], ["TC-MODEL-001"])
+        self.assertTrue(result["generation_tasks"])
+        self.assertIn("REQ-002", result["coverage_metrics"]["requirements_without_tests"])
+        self.assertEqual(result["generation_evidence"]["final_test_case_count"], 1)
+        self.assertEqual(result["generation_evidence"]["parser_recovery_count"], 2)
+        self.assertEqual([item["pass_type"] for item in result["generation_evidence"]["passes"]], ["sequential"])
+        self.assertFalse(result["generation_evidence"]["passes"][0]["raw_output_summary"]["raw_content_stored"])
+        self.assertEqual(result["test_cases"][0].source_case_id, "TC-MODEL-001")
+        self.assertFalse(any(c.generation_source == "deterministic_coverage_completion" for c in result["test_cases"]))
 
     def test_coverage_completion_adds_exact_missing_scenario_refs(self) -> None:
         requirements = [
@@ -347,7 +317,9 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
 
         completion_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_coverage_completion"]
         completion_refs = {reference for test_case in completion_cases for reference in test_case.scenario_refs}
-        self.assertIn("REQ-001-SCN-01", completion_refs)
+        self.assertEqual(completion_refs, set())
+        self.assertIn("REQ-001-SCN-01", {ref for task in result["generation_tasks"] for ref in task["scenario_refs"]})
+        self.assertFalse(result["approved"])
         self.assertIn("REQ-001-SCN-02", {reference for test_case in result["test_cases"] for reference in test_case.scenario_refs})
         self.assertEqual(result["coverage_metrics"]["scenario_ref_coverage_mode"], "exact")
         self.assertFalse(result["workflow_diagnostics"]["scenario_ref_coverage_degraded"])
@@ -538,24 +510,14 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
                 result = generate_test_cases(payload)
 
         run_workflow.assert_not_called()
-        self.assertTrue(result["test_cases"])
-        self.assertTrue(result["approved"])
+        self.assertEqual(result["test_cases"], [])
+        self.assertFalse(result["approved"])
+        self.assertTrue(result["generation_tasks"])
         self.assertTrue(result["workflow_diagnostics"]["used_fallback"])
         self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "missing_model_credentials")
-        evidence = result["generation_evidence"]
-        self.assertEqual(evidence["final_status"], "fallback")
-        self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["deterministic_full_fallback"])
-        self.assertEqual(evidence["deterministic_additions_total"], len(result["test_cases"]))
-        self.assertEqual(result["workflow_diagnostics"]["completion_source"], "full_fallback")
-        self.assertEqual(result["workflow_diagnostics"]["deterministic_total_additions"], len(result["test_cases"]))
-        self.assertTrue(any("deterministic draft artifacts" in warning for warning in result["workflow_diagnostics"]["warnings"]))
-        self.assertFalse(any("deterministic coverage completion" in warning for warning in result["workflow_diagnostics"]["warnings"]))
-        self.assertEqual(evidence["passes"][0]["raw_output_summary"]["model_case_count"], 0)
-        self.assertEqual(evidence["passes"][0]["raw_output_summary"]["fallback_case_count"], len(result["test_cases"]))
-        self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"], {"deterministic_full_fallback": len(result["test_cases"])})
-        self.assertTrue(all(test_case.generation_source == "deterministic_full_fallback" for test_case in result["test_cases"]))
-        self.assertTrue(all(test_case.generation_pass_id == evidence["passes"][0]["pass_id"] for test_case in result["test_cases"]))
-        self.assertTrue(all(test_case.source_case_id for test_case in result["test_cases"]))
+        self.assertEqual([item["pass_type"] for item in result["generation_evidence"]["passes"]], ["deterministic_full_fallback"])
+        self.assertEqual(result["generation_evidence"]["final_test_case_count"], 0)
+        self.assertEqual(result["coverage_metrics"]["requirements_without_tests"], ["REQ-001"])
 
 
 if __name__ == "__main__":

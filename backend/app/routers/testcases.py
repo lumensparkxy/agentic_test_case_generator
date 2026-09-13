@@ -6,7 +6,7 @@ import hashlib
 from typing import Any, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
 from ..agents.test_case_agent import generate_test_cases, refine_test_cases
@@ -96,6 +96,7 @@ def _use_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, 
 def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, Any]:
     return {
         "test_cases": _model_payload(response.test_cases),
+        "generation_tasks": response.generation_tasks,
         "approved": response.approved,
         "review": _model_payload(response.review),
         "iteration_history": _model_payload(response.iteration_history),
@@ -295,6 +296,12 @@ async def generate_test_cases_endpoint(
             operation="testcases.generate",
         )
         response = GenerateTestCasesResponse(**result)
+        if response.generation_tasks and payload.project_id:
+            existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
+            if existing.current_snapshots.get("test_cases"):
+                raise HTTPException(
+                    422, "Generation is incomplete. The existing suite was preserved. Review unresolved coverage and retry targeted generation."
+                )
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -386,6 +393,12 @@ async def refine_test_cases_endpoint(
             operation="testcases.refine",
         )
         response = GenerateTestCasesResponse(**result)
+        if response.generation_tasks and payload.project_id:
+            existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
+            if existing.current_snapshots.get("test_cases"):
+                raise HTTPException(
+                    422, "Generation is incomplete. The existing suite was preserved. Review unresolved coverage and retry targeted generation."
+                )
         modified_count = _count_snapshot_changes(
             _test_case_snapshot(payload.test_cases),
             _test_case_snapshot(response.test_cases),

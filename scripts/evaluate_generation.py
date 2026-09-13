@@ -248,6 +248,24 @@ def _build_benchmark_result(
         scenario_distribution,
     )
 
+    if execution_mode == "offline-fallback":
+        # These fixtures exercise deterministic failure recovery, not live model quality.
+        # Keep the model-backed quality rubric above unchanged.
+        from app.services.test_case_quality import placeholder_reason
+
+        tasks = generation_result.get("generation_tasks") or []
+        planned = {s.id for p in generation_result["coverage_plan"] for s in p.scenarios}
+        covered = {ref for case in test_cases for ref in case.get("scenario_refs", [])}
+        pending = {ref for task in tasks for ref in task["scenario_refs"]}
+        checks = [
+            {"name": "no_placeholder_deliverables", "met": not any(placeholder_reason(c) for c in test_cases)},
+            {"name": "uncovered_work_reported", "met": planned - covered <= pending},
+            {"name": "incomplete_suite_not_approved", "met": not tasks or (not generation_result["approved"] and not review["approved"])},
+            {"name": "fixture_exercises_withholding", "met": bool(tasks)},
+            {"name": "delivered_count_is_truthful", "met": generation_result["generation_evidence"]["final_test_case_count"] == len(test_cases)},
+        ]
+        expectation_result = {"checks": checks, "all_met": all(check["met"] for check in checks)}
+
     return {
         "name": input_path.stem,
         "input_file": str(input_path.relative_to(REPO_ROOT)),
@@ -323,7 +341,7 @@ def _print_result(result: dict[str, Any]) -> None:
     unmet_checks = [check for check in expectation_result["checks"] if not check["met"]]
     if unmet_checks:
         for check in unmet_checks:
-            print(f"  unmet: {check['name']} expected={check['expected']} actual={check['actual']}")
+            print(f"  unmet: {check['name']} expected={check.get('expected', True)} actual={check.get('actual', check['met'])}")
 
 
 def _parse_args() -> argparse.Namespace:

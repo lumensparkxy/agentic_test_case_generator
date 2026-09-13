@@ -2,6 +2,9 @@ from pathlib import Path
 import sys
 import unittest
 from typing import Any
+from copy import deepcopy
+from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
+from app.services.test_case_quality import placeholder_reason
 from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -11,6 +14,10 @@ if str(BACKEND_DIR) not in sys.path:
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.models import AuthUser, TestCase, TestStep
+from copy import deepcopy
+from fastapi import HTTPException
+from app.services import impact_update_service as service
+from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
 from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
@@ -122,6 +129,13 @@ def _test_case(req_id: str, *, title: str | None = None) -> TestCase:
 class ImpactUpdateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
+        for target in ("enforce_billing_access", "start_workflow_run", "complete_workflow_run", "record_usage_event", "record_billing_consumption"):
+            patcher = patch.object(service, target, return_value="run-test")
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(service, "generate_test_cases", side_effect=self._generate)
+        self.generator = patcher.start()
+        self.addCleanup(patcher.stop)
         self.transaction_client = FakeFirestoreClient(self.store)
         for target, kwargs in [
             ("app.services.workflow_project_service.get_required_firestore_client", {"return_value": self.transaction_client}),
@@ -143,6 +157,24 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         )
         self.required_collection_patch.start()
         self.optional_collection_patch.start()
+
+    def _generate(self, payload, **kwargs):
+        return {
+            "approved": True,
+            "test_cases": [
+                {
+                    "id": f"MODEL-{scenario.id}",
+                    "title": "Verify changed approval",
+                    "description": "Exercise revised approval rules",
+                    "steps": [{"step": 1, "action": "Submit the payment with retry enabled", "expected": "Payment status is Pending approval"}],
+                    "linked_requirement_ids": [plan.requirement_id],
+                    "scenario_refs": [scenario.id],
+                    "generation_source": "model",
+                }
+                for plan in payload.coverage_plan
+                for scenario in plan.scenarios
+            ],
+        }
 
     def tearDown(self) -> None:
         self.optional_collection_patch.stop()
@@ -210,6 +242,18 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             approved=True,
             title="Requirements v2",
         )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="use_cases",
+            payload={"coverage_plan": _coverage_plan(current_requirements)},
+            operation="use_cases.generate",
+            actor=self.actor,
+            request_id="req-6",
+            approved=True,
+        )
+        state = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]
+        for item in state["metadata"]["scenario_reviews"]["items"].values():
+            item["status"] = "approved"
         return get_project(project.project_id, actor=self.actor)
 
     def test_detects_two_changed_requirements_and_maps_direct_impacts_only(self) -> None:
@@ -218,8 +262,8 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         result_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
         analysis = result_project.current_snapshots["impact_analysis"].payload
 
-        self.assertEqual(analysis["summary"]["changed_item_count"], 2)
-        self.assertEqual(analysis["summary"]["modified_count"], 2)
+        self.assertEqual(len([r for r in analysis["changed_items"] if r["kind"] == "requirement"]), 2)
+        self.assertEqual(analysis["summary"]["modified_count"], 4)
         self.assertEqual(analysis["summary"]["unchanged_requirement_count"], 8)
         self.assertEqual(analysis["summary"]["directly_impacted_test_case_count"], 2)
         direct_ids = {item["test_case_id"] for item in analysis["impacted_test_cases"] if item["impact_source"] == "direct"}
@@ -236,6 +280,7 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             project_id=analyzed_project.project_id,
             actor=self.actor,
             request_id="req-apply",
+            base_project_revision=analyzed_project.current_revision,
         )
         test_cases = {item["id"]: item for item in updated_project.current_snapshots["test_cases"].payload["test_cases"]}
 
@@ -253,7 +298,9 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         analyzed_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
         before_status = get_project_orchestrator_status(analyzed_project.project_id, actor=self.actor)
 
-        updated_project = apply_project_impact_update(project_id=analyzed_project.project_id, actor=self.actor, request_id="req-apply")
+        updated_project = apply_project_impact_update(
+            project_id=analyzed_project.project_id, actor=self.actor, request_id="req-apply", base_project_revision=analyzed_project.current_revision
+        )
         after_status = get_project_orchestrator_status(updated_project.project_id, actor=self.actor)
 
         before_actions = {action.action for action in before_status.next_actions}
@@ -268,12 +315,171 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         project = self._seed_project(omit={"REQ-005"})
         analyzed_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
 
-        updated_project = apply_project_impact_update(project_id=analyzed_project.project_id, actor=self.actor, request_id="req-apply")
+        updated_project = apply_project_impact_update(
+            project_id=analyzed_project.project_id, actor=self.actor, request_id="req-apply", base_project_revision=analyzed_project.current_revision
+        )
         test_cases = {item["id"]: item for item in updated_project.current_snapshots["test_cases"].payload["test_cases"]}
 
         self.assertEqual(test_cases["TC-005"]["status"], "Deprecated")
-        self.assertIn("impact:deprecated", test_cases["TC-005"]["tags"])
+        self.assertFalse(updated_project.stage_state["test_cases"].approved)
         self.assertEqual(updated_project.current_snapshots["test_cases"].payload["impact_update_result"]["deprecated_count"], 1)
+
+    def test_legacy_placeholder_is_repair_work_and_replaced_under_same_identity(self):
+        project = self._seed_project()
+        snapshot = project.current_snapshots["test_cases"]
+        path = f"qa_projects/{project.project_id}/snapshots/{snapshot.snapshot_id}"
+        self.store[path]["payload"]["test_cases"][0]["steps"] = [
+            {"step": 1, "action": "Review the implemented behavior for REQ-001.", "expected": "The behavior reflects the approved changed requirement."}
+        ]
+        original = deepcopy(self.store[path])
+        viewed = get_project(project.project_id, actor=self.actor)
+        self.assertEqual(len(viewed.current_snapshots["test_cases"].payload["test_cases"]), 9)
+        self.assertFalse(viewed.stage_state["test_cases"].approved)
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        repairs = [r for r in analyzed.current_snapshots["impact_analysis"].payload["recommendations"] if r["recommendation_id"].startswith("repair-")]
+        self.assertEqual(len(repairs), 1)
+        self.assertFalse(repairs[0]["accepted"])
+        updated = apply_project_impact_update(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="repair",
+            accepted_recommendation_ids=[repairs[0]["recommendation_id"]],
+            base_project_revision=analyzed.current_revision,
+        )
+        rows = updated.current_snapshots["test_cases"].payload["test_cases"]
+        repaired = next(r for r in rows if r["id"] == "TC-001")
+        self.assertEqual(repaired["artifact_item_id"], "tc-item-001")
+        self.assertEqual(repaired["artifact_version_number"], 2)
+        self.assertIsNone(placeholder_reason(repaired))
+        self.assertEqual(self.store[path], original)
+        self.assertFalse(updated.stage_state["test_cases"].approved)
+        self.assertEqual(updated.current_snapshots["test_cases"].payload["generation_tasks"], [])
+
+    def test_generation_failure_preserves_entire_store(self):
+        project = self._seed_project(modified={"REQ-003"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        before = deepcopy(self.store)
+        self.generator.side_effect = RuntimeError("Model unavailable")
+        with self.assertRaises(RuntimeError):
+            apply_project_impact_update(project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision)
+        self.assertEqual(self.store, before)
+
+    def test_placeholder_and_incomplete_results_cannot_publish(self):
+        project = self._seed_project(modified={"REQ-003"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        before = deepcopy(self.store)
+        for kind in ("generic", "missing", "rejected", "foreign"):
+
+            def bad_output(payload, **kwargs):
+                output = self._generate(payload)
+                if kind == "generic":
+                    output["test_cases"][0]["steps"][0]["action"] = "Execute the negative scenario for REQ-003"
+                elif kind == "missing":
+                    output["test_cases"] = []
+                elif kind == "rejected":
+                    output["approved"] = False
+                else:
+                    output["test_cases"][0]["linked_requirement_ids"] = ["REQ-FOREIGN"]
+                return output
+
+            self.generator.side_effect = bad_output
+            with self.subTest(kind=kind), self.assertRaises(service.ImpactWorkflowError):
+                apply_project_impact_update(
+                    project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
+                )
+            self.assertEqual(self.store, before)
+
+    def test_concurrent_edit_and_missing_revision_do_not_replace_suite(self):
+        project = self._seed_project(modified={"REQ-003"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        with self.assertRaises(ProjectConflictError):
+            apply_project_impact_update(project_id=project.project_id, actor=self.actor, request_id="missing")
+        self.generator.assert_not_called()
+
+        def concurrent(payload, **kwargs):
+            update_project(
+                project_id=project.project_id, actor=self.actor, request_id="other", name="Other edit", base_project_revision=analyzed.current_revision
+            )
+            return self._generate(payload)
+
+        self.generator.side_effect = concurrent
+        with self.assertRaises(ProjectConflictError):
+            apply_project_impact_update(project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision)
+        latest = get_project(project.project_id, actor=self.actor)
+        self.assertEqual(latest.current_snapshots["test_cases"], analyzed.current_snapshots["test_cases"])
+        self.assertEqual(latest.name, "Other edit")
+
+    def test_commit_failure_does_not_publish_artifact_versions(self):
+        project = self._seed_project(modified={"REQ-003"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        before = deepcopy(self.store)
+        from test_use_case_review_service import FakeTransaction
+
+        with patch.object(self.transaction_client, "transaction", side_effect=lambda: FakeTransaction(self.store, fail_on_create_segment="snapshots")):
+            with self.assertRaises(RuntimeError):
+                apply_project_impact_update(
+                    project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
+                )
+        self.assertEqual(self.store, before)
+
+    def test_unsaved_withheld_row_is_added_instead_of_updating_missing_identity(self):
+        project = self._seed_project()
+        snapshot = project.current_snapshots["test_cases"]
+        path = f"qa_projects/{project.project_id}/snapshots/{snapshot.snapshot_id}"
+        self.store[path]["payload"]["generation_tasks"] = [
+            {"source_test_case_id": "TC-FB-UNSAVED", "requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-01"], "reason": "Unfinished generation"}
+        ]
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        rec = next(r for r in analyzed.current_snapshots["impact_analysis"].payload["recommendations"] if r["recommendation_id"].startswith("repair-"))
+        self.assertEqual(rec["action"], "add")
+        self.assertIsNone(rec.get("test_case_id"))
+
+    def test_owner_archived_unapproved_and_stale_inputs_stop_before_generation(self):
+        project = self._seed_project(modified={"REQ-003"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        path = f"qa_projects/{project.project_id}"
+        before = deepcopy(self.store)
+        for kind in ("owner", "archived", "unapproved", "human_review", "stale"):
+            self.store.clear()
+            self.store.update(deepcopy(before))
+            if kind == "owner":
+                self.store[path]["owner_user_id"] = "other"
+            elif kind == "archived":
+                self.store[path]["status"] = "archived"
+            elif kind == "unapproved":
+                self.store[path]["stage_state"]["use_cases"]["approved"] = False
+            elif kind == "human_review":
+                for item in self.store[path]["stage_state"]["use_cases"]["metadata"]["scenario_reviews"]["items"].values():
+                    item["status"] = "needs_review"
+            else:
+                self.store[path]["stage_state"]["impact_analysis"]["stale"] = True
+            with self.subTest(kind=kind), self.assertRaises((HTTPException, ProjectPermissionError, service.ImpactWorkflowError)):
+                apply_project_impact_update(
+                    project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
+                )
+        self.generator.assert_not_called()
+
+    def test_added_requirement_gets_model_steps_not_impact_template(self):
+        project = self._seed_project()
+        requirements = _requirements() + [{"id": "REQ-011", "text": "Require payment approval", "review_status": "Approved"}]
+        for stage, payload in [("requirements", {"requirements": requirements}), ("use_cases", {"coverage_plan": _coverage_plan(requirements)})]:
+            append_stage_snapshot(
+                project_id=project.project_id, stage=stage, payload=payload, operation="seed", actor=self.actor, request_id=stage, approved=True
+            )
+        state = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]
+        for item in state["metadata"]["scenario_reviews"]["items"].values():
+            item["status"] = "approved"
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        updated = apply_project_impact_update(
+            project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
+        )
+        added = [r for r in updated.current_snapshots["test_cases"].payload["test_cases"] if "REQ-011" in r["linked_requirement_ids"]]
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0]["steps"][0]["expected"], "Payment status is Pending approval")
+        self.assertFalse(added[0]["id"].startswith("TC-IMPACT"))
+        self.assertEqual(self.generator.call_count, 1)
+        self.assertEqual([r.id for r in self.generator.call_args.args[0].requirements], ["REQ-011"])
+        self.assertFalse(updated.current_snapshots["test_cases"].payload["review"]["approved"])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ export default function useTestCaseWorkflowState() {
 	const [templateName, setTemplateName] = useState("default");
 	const [templateFormat, setTemplateFormat] = useState("table");
 	const [testCases, setTestCases] = useState([]);
+	const [generationTasks, setGenerationTasks] = useState([]);
 	const [requirementAnalysis, setRequirementAnalysis] = useState([]);
 	const [coveragePlan, setCoveragePlan] = useState([]);
 	const [coverageMetrics, setCoverageMetrics] = useState(null);
@@ -20,6 +21,7 @@ export default function useTestCaseWorkflowState() {
 
 	const resetTestCaseWorkflowState = () => {
 		setTestCases([]);
+		setGenerationTasks([]);
 		setRequirementAnalysis([]);
 		setCoveragePlan([]);
 		setCoverageMetrics(null);
@@ -36,6 +38,8 @@ export default function useTestCaseWorkflowState() {
 		setTemplateName,
 		templateFormat,
 		setTemplateFormat,
+		generationTasks,
+		setGenerationTasks,
 		testCases,
 		setTestCases,
 		requirementAnalysis,
