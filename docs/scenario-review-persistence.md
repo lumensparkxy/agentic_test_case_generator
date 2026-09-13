@@ -1,5 +1,8 @@
 # Scenario review persistence (#261)
 
+See [Generate and regenerate Use Cases](use-case-generation.md) for creating a
+fresh version from the current approved requirements directly on the Use Cases page.
+
 The authenticated `POST /projects/{project_id}/use-cases/reviews` endpoint accepts a third decision, `review_scenarios`, alongside `approve` and `request_changes`.
 
 ```json

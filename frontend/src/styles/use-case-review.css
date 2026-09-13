@@ -835,3 +835,10 @@
 		width: 100%;
 	}
 }
+
+.use-case-generation-review {
+	border: 0;
+	margin: 0;
+	padding: 0;
+	min-width: 0;
+}

@@ -475,16 +475,13 @@ test.describe("Use Cases review workbench", () => {
 		await expect(reviewMain(page).getByText(durableReview.reviewer_user_id, { exact: true })).toBeVisible();
 	});
 
-	test("explains the missing snapshot prerequisite and links to the orchestrator generation destination", async ({ page }) => {
+	test("offers dedicated generation for a missing snapshot", async ({ page }) => {
 		await openUseCaseReview(page, { initialProject: useCaseProjectFixture({ snapshot: null }) });
 
 		const main = reviewMain(page);
 		await expect(main.getByRole("heading", { name: /^No Use Cases snapshot$/i })).toBeVisible();
 		await expect(main).toContainText(/approved requirements.*generate|generate.*approved requirements/i);
-		await expect(main.getByRole("link", { name: /Open Test Cases|Generate First Test Suite/i })).toHaveAttribute(
-			"href",
-			buildProjectPath(USE_CASE_PROJECT_ID, "test-cases")
-		);
+		await expect(main.getByRole("button", { name: "Generate Use Cases", exact: true })).toBeEnabled();
 		await expect(decisionPanel(page)).toHaveCount(0);
 	});
 

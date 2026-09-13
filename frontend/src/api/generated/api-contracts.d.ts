@@ -19,6 +19,7 @@ export interface ApiContractOperations {
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
+	projectUseCasesGenerate: ApiOperation<ProjectUseCasesGenerateRequest, ProjectUseCasesGenerateResponse, "POST", "/projects/{project_id}/use-cases/generate">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
 	requirementImportsList: ApiOperation<RequirementImportsListRequest, RequirementImportsListResponse, "GET", "/projects/{project_id}/requirement-imports">;
@@ -71,6 +72,8 @@ export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
 export type ProjectImpactAnalysisResponse = QaProjectDetail;
 export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
 export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
+export type ProjectUseCasesGenerateRequest = QaProjectUseCaseGenerationInput;
+export type ProjectUseCasesGenerateResponse = QaProjectDetail;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
 export type ProjectUseCasesSaveResponse = QaProjectDetail;
 export type ProjectUseCasesReviewRequest = UseCaseReviewRequest;
@@ -722,6 +725,10 @@ export interface QaProjectUpdateInput {
 	description?: string | null;
 	name?: string | null;
 	status?: "active" | "archived" | null;
+}
+
+export interface QaProjectUseCaseGenerationInput {
+	base_project_revision: number;
 }
 
 export interface QaProjectUseCaseSnapshotInput {

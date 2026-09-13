@@ -1,3 +1,4 @@
+import useUseCaseGeneration from "../hooks/useUseCaseGeneration";
 import GuidanceUsed from "../components/knowledge/GuidanceUsed";
 import KnowledgeSuggestion from "../components/knowledge/KnowledgeSuggestion";
 import { Badge } from "../components/ui/surfaces";
@@ -8,8 +9,20 @@ import { PROJECT_DESTINATIONS, buildProjectPath } from "../app/workflowRoutes";
 import UseCaseReviewWorkbench from "../components/reviews/UseCaseReviewWorkbench";
 import useUseCaseReview from "../hooks/useUseCaseReview";
 
-export default function UseCaseReviewPage({ project, identity, request, navigate, onDecisionCommitted, onReloadLatest, onBack, onNext }) {
+export default function UseCaseReviewPage({
+	project,
+	identity,
+	request,
+	navigate,
+	onDecisionCommitted,
+	onReloadLatest,
+	onGenerated,
+	generationDisabled = false,
+	onBack,
+	onNext,
+}) {
 	const projectId = project?.project_id || "";
+	const generation = useUseCaseGeneration({ project, identity, request, onGenerated });
 	const snapshot = project?.current_snapshots?.use_cases || null;
 	const stageState = project?.stage_state?.use_cases || null;
 	const review = useUseCaseReview({
@@ -29,7 +42,7 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 		requirementsState.approved &&
 		!requirementsState.stale
 	);
-	const prerequisiteDestination = requirementsReady ? PROJECT_DESTINATIONS.TEST_CASES : PROJECT_DESTINATIONS.REQUIREMENTS;
+	const generationAllowed = requirementsReady && project?.status === "active" && !generationDisabled;
 	const responseStageState = review.response?.use_cases_state;
 	const effectiveStageState = responseStageState?.current_snapshot_id === snapshot?.snapshot_id ? responseStageState : stageState;
 	const latestHumanReview = effectiveStageState?.metadata?.latest_human_review;
@@ -47,7 +60,7 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 			id="main-content"
 			className="use-case-review-page"
 			aria-labelledby="use-case-review-title"
-			aria-busy={review.isSubmitting || review.isReloading || undefined}
+			aria-busy={generation.isBusy || review.isSubmitting || review.isReloading || undefined}
 			tabIndex={-1}
 		>
 			<ProjectPageHeader
@@ -66,6 +79,12 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 							>
 								{reviewStatus.label}
 							</Badge>
+							<Button
+								onClick={generation.generate}
+								disabled={!generationAllowed || generation.isBusy || review.isSubmitting || review.isReloading}
+							>
+								{generation.isBusy ? "Generating Use Cases…" : "Regenerate Use Cases"}
+							</Button>
 							<Link className="use-case-skip-review-link" href="#use-case-review-decision">
 								Skip to review decision
 							</Link>
@@ -73,6 +92,34 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 					) : null
 				}
 			/>
+
+			<p>
+				Generate fresh scenarios from the current approved requirements. Existing test cases stay available and become stale after
+				generation succeeds.
+			</p>
+			{!requirementsReady && snapshot ? (
+				<p>
+					Approve the current requirements before regenerating.{" "}
+					<RouteLink to={buildProjectPath(projectId, PROJECT_DESTINATIONS.REQUIREMENTS)} navigate={navigate}>
+						Open Requirements
+					</RouteLink>
+				</p>
+			) : null}
+			{requirementsReady && generationDisabled ? (
+				<p>Use Cases generation is unavailable while generation access is locked or another workflow is busy.</p>
+			) : null}
+			{generation.status === "error" ? (
+				<div role="alert">
+					<p>{generation.message}</p>
+					<Button variant="secondary" onClick={onReloadLatest}>
+						Reload latest
+					</Button>
+				</div>
+			) : (
+				<p role="status" aria-live="polite">
+					{generation.message}
+				</p>
+			)}
 
 			<GuidanceUsed key={snapshot?.snapshot_id || "none"} manifest={snapshot?.metadata?.guidance} request={request} projectId={projectId} />
 			<KnowledgeSuggestion
@@ -82,28 +129,40 @@ export default function UseCaseReviewPage({ project, identity, request, navigate
 				projectId={projectId}
 			/>
 			{snapshot ? (
-				<UseCaseReviewWorkbench
-					key={`${identity}:${projectId}`}
-					project={project}
-					snapshot={snapshot}
-					stageState={stageState}
-					review={review}
-				/>
+				<fieldset disabled={generation.isBusy} className="use-case-generation-review">
+					<UseCaseReviewWorkbench
+						key={`${identity}:${projectId}`}
+						project={project}
+						snapshot={snapshot}
+						stageState={stageState}
+						review={review}
+					/>
+				</fieldset>
 			) : (
 				<section className="use-case-no-snapshot" aria-labelledby="use-case-no-snapshot-title">
 					<span className="use-case-section-kicker">Prerequisite</span>
 					<h2 id="use-case-no-snapshot-title">No Use Cases snapshot</h2>
 					<p>
 						{requirementsReady
-							? "Generate the first test suite to create a reviewable Use Cases artifact from the approved requirements."
+							? "Generate Use Cases from the approved requirements, then review the scenarios before updating test cases."
 							: requirementsSnapshot
 								? "Review and approve the current project requirements before generating a Use Cases artifact."
 								: "Add and approve project requirements before generating a Use Cases artifact."}
 					</p>
 					<div className="use-case-no-snapshot-actions">
-						<RouteLink className="route-primary-link" to={buildProjectPath(projectId, prerequisiteDestination)} navigate={navigate}>
-							{requirementsReady ? "Open Test Cases" : "Open Requirements"}
-						</RouteLink>
+						{requirementsReady ? (
+							<Button onClick={generation.generate} disabled={!generationAllowed || generation.isBusy}>
+								{generation.isBusy ? "Generating Use Cases…" : "Generate Use Cases"}
+							</Button>
+						) : (
+							<RouteLink
+								className="route-primary-link"
+								to={buildProjectPath(projectId, PROJECT_DESTINATIONS.REQUIREMENTS)}
+								navigate={navigate}
+							>
+								Open Requirements
+							</RouteLink>
+						)}
 						<RouteLink className="route-secondary-link" to={buildProjectPath(projectId)} navigate={navigate}>
 							Back to project overview
 						</RouteLink>
