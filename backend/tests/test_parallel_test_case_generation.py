@@ -266,73 +266,21 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
             result = generate_test_cases(payload)
 
         sequential_mock.assert_not_called()
-        self.assertEqual(worker_mock.call_count, 11)
-        self.assertTrue(result["approved"])
-        self.assertEqual(len(result["test_cases"]), 121)
-        self.assertEqual(result["workflow_diagnostics"]["generation_route"], "direct_parallel")
-        self.assertEqual(result["workflow_diagnostics"]["shard_count"], 11)
-        self.assertEqual(result["workflow_diagnostics"]["worker_count"], 3)
-        self.assertEqual(result["workflow_diagnostics"]["failed_shard_count"], 0)
-        self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 0)
-
-        coverage_metrics = result["coverage_metrics"]
-        self.assertEqual(coverage_metrics["planned_scenarios_total"], 121)
-        self.assertEqual(coverage_metrics["covered_planned_scenarios"], 121)
-        self.assertEqual(coverage_metrics["scenario_coverage_ratio"], 1.0)
-        self.assertEqual(coverage_metrics["must_have_scenario_coverage_ratio"], 1.0)
-        self.assertEqual(coverage_metrics["missing_scenario_ids"], [])
-        self.assertFalse(coverage_metrics["scenario_ref_coverage_degraded"])
-
-        diagnostics = result["workflow_diagnostics"]
-        self.assertEqual(
-            diagnostics["generation_source_counts"],
-            {"deterministic_coverage_completion": 11, "model": 110},
-        )
-        self.assertEqual(diagnostics["completion_source"], "coverage_completion")
-        self.assertEqual(diagnostics["missing_requirements_count"], 0)
-        self.assertEqual(diagnostics["missing_must_have_scenario_count"], 1)
-        self.assertEqual(diagnostics["missing_optional_scenario_count"], 10)
-        self.assertEqual(diagnostics["deterministic_total_additions"], 11)
-        self.assertEqual(diagnostics["deterministic_must_have_additions"], 1)
-        self.assertEqual(diagnostics["deterministic_optional_additions"], 10)
-        self.assertTrue(
-            any(
-                "1 must-have scenario" in warning
-                and "10 optional/planned scenarios" in warning
-                and "1 must-have deterministic case and 10 optional deterministic cases" in warning
-                and "11 total deterministic coverage cases" in warning
-                for warning in diagnostics["warnings"]
-            )
-        )
-
+        self.assertFalse(result["approved"])
+        self.assertEqual(len(result["test_cases"]), 110)
+        self.assertTrue(result["generation_tasks"])
+        self.assertEqual(result["generation_evidence"]["final_test_case_count"], 110)
         evidence = result["generation_evidence"]
         self.assertEqual(evidence["planned_scenario_count"], 121)
         self.assertEqual(evidence["model_case_count_before_review"], 110)
         self.assertEqual(evidence["model_case_count_after_merge"], 110)
-        self.assertEqual(evidence["final_test_case_count"], 121)
-        self.assertEqual(evidence["deterministic_total_additions"], 11)
-        self.assertEqual(evidence["deterministic_must_have_additions"], 1)
-        self.assertEqual(evidence["deterministic_optional_additions"], 10)
-        self.assertEqual(evidence["completion_source"], "coverage_completion")
-        self.assertEqual([item["pass_type"] for item in evidence["passes"]], ["parallel_direct", "deterministic_coverage_completion"])
-        self.assertEqual(evidence["passes"][0]["review_status"], "rejected")
-        self.assertEqual(evidence["passes"][0]["model_case_count_before_review"], 110)
-        self.assertEqual(evidence["passes"][0]["merged_case_count"], 110)
+        self.assertEqual(evidence["missing_must_have_scenario_count"], 1)
+        self.assertEqual(evidence["missing_optional_scenario_count"], 10)
+        self.assertEqual({ref for task in result["generation_tasks"] for ref in task["scenario_refs"]}, omitted_scenario_ids)
         self.assertEqual(len(evidence["passes"][0]["shards"]), 11)
-        self.assertTrue(all(shard["planned_scenario_count"] == 11 for shard in evidence["passes"][0]["shards"]))
         self.assertTrue(all(shard["raw_output_count"] == 10 for shard in evidence["passes"][0]["shards"]))
-        self.assertEqual(evidence["passes"][1]["review_status"], "approved")
-        self.assertEqual(evidence["passes"][1]["deterministic_total_additions"], 11)
-
-        completion_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_coverage_completion"]
-        model_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "model"]
-        self.assertEqual(len(model_cases), 110)
-        self.assertEqual(len(completion_cases), 11)
-        self.assertEqual({scenario_ref for test_case in completion_cases for scenario_ref in test_case.scenario_refs}, omitted_scenario_ids)
-        self.assertTrue(all(test_case.generation_pass_id for test_case in result["test_cases"]))
-        self.assertTrue(all(test_case.source_case_id for test_case in result["test_cases"]))
-        self.assertTrue(all(test_case.source_shard_id for test_case in model_cases))
-        self.assertTrue(all(test_case.coverage_completion_reason == "coverage_augmentation" for test_case in completion_cases))
+        self.assertTrue(all(case.generation_pass_id for case in result["test_cases"]))
+        self.assertFalse(any(c.generation_source == "deterministic_coverage_completion" for c in result["test_cases"]))
         GenerateTestCasesResponse(**result)
 
     def test_parallel_merge_remaps_duplicate_ids_and_repairs_traceability(self) -> None:
@@ -373,25 +321,18 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
             result = generate_test_cases(payload)
 
         linked_requirement_ids = {requirement_id for test_case in result["test_cases"] for requirement_id in test_case.linked_requirement_ids}
-        self.assertEqual(linked_requirement_ids, {"REQ-001", "REQ-002", "REQ-003"})
-        self.assertTrue(result["approved"])
-        self.assertTrue(result["workflow_diagnostics"]["used_fallback"])
+        self.assertEqual(linked_requirement_ids, {r.id for r in payload.requirements} - {p["requirement_id"] for p in failed_shard_plan})
         self.assertEqual(result["workflow_diagnostics"]["failed_shard_count"], 1)
         self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 1)
         self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "shard_fallback")
         shard_evidence = result["generation_evidence"]["passes"][0]["shards"]
         self.assertEqual(sum(1 for shard in shard_evidence if shard["used_fallback"]), 1)
-        expected_fallback_count = sum(len(item.get("scenarios") or []) for item in failed_shard_plan)
-        self.assertEqual(sum(shard["fallback_case_count"] for shard in shard_evidence), expected_fallback_count)
-        self.assertGreater(result["generation_evidence"]["passes"][0]["model_case_count_before_review"], 0)
-        self.assertEqual(result["generation_evidence"]["passes"][0]["review_status"], "approved")
-        source_counts = result["workflow_diagnostics"]["generation_source_counts"]
-        self.assertGreater(source_counts["model"], 0)
-        self.assertEqual(source_counts["deterministic_full_fallback"], expected_fallback_count)
-        fallback_cases = [test_case for test_case in result["test_cases"] if test_case.generation_source == "deterministic_full_fallback"]
-        self.assertEqual(len(fallback_cases), expected_fallback_count)
-        self.assertTrue(all(test_case.source_shard_id == "test-case-shard-02" for test_case in fallback_cases))
-        self.assertTrue(all(test_case.source_case_id for test_case in fallback_cases))
+        self.assertEqual(sum(shard["fallback_case_count"] for shard in shard_evidence), sum(len(p["scenarios"]) for p in failed_shard_plan))
+        self.assertFalse(result["approved"])
+        self.assertTrue(result["generation_tasks"])
+        self.assertTrue(result["workflow_diagnostics"]["used_fallback"])
+        self.assertTrue(result["test_cases"])
+        self.assertFalse(any(c.generation_source == "deterministic_full_fallback" for c in result["test_cases"]))
         GenerateTestCasesResponse(**result)
 
     def test_lower_count_parallel_retry_records_review_tradeoff_diagnostics(self) -> None:

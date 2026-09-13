@@ -4,7 +4,7 @@ import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
 import { Disclosure, Surface } from "./components/ui/surfaces";
-import { Button, Link, Radio, Field, Input, Select, Textarea } from "./components/ui/controls";
+import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from "./components/ui/controls";
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
@@ -304,6 +304,8 @@ export default function App() {
 		setTemplateFormat,
 		testCases,
 		setTestCases,
+		generationTasks,
+		setGenerationTasks,
 		requirementAnalysis,
 		setRequirementAnalysis,
 		coveragePlan,
@@ -640,7 +642,7 @@ export default function App() {
 	);
 	const projectSnapshots = currentProject?.current_snapshots || {};
 	const persistedTestCaseCount = projectSnapshots.test_cases?.payload?.test_cases?.length || 0;
-	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount);
+	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount || projectSnapshots.test_cases);
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
 	const upstreamChangedForImpact = Boolean(hasExistingTestCaseBaseline && (testCaseStageState.stale || impactStageState.stale));
@@ -668,7 +670,7 @@ export default function App() {
 		impactApplyBlockedByStageApproval ||
 		impactChangedItems.some((item) => ["added", "modified"].includes(item.change_type) && !item.approved)
 	);
-	const canAnalyzeImpact = Boolean(currentProjectId && hasExistingTestCaseBaseline && upstreamChangedForImpact);
+	const canAnalyzeImpact = Boolean(currentProjectId && hasExistingTestCaseBaseline && (upstreamChangedForImpact || generationTasks.length));
 	const canApplyImpactUpdate = Boolean(
 		currentProjectId &&
 		impactAnalysis &&
@@ -1538,6 +1540,7 @@ export default function App() {
 		setCoveragePlan(useCases.coverage_plan || []);
 		setCoverageMetrics(useCases.coverage_metrics || null);
 		setTestCases(generationPayload.test_cases || []);
+		setGenerationTasks(generationPayload.generation_tasks || []);
 		setTestCaseReview(generationPayload.review || useCases.review || null);
 		setTestCaseWorkflowDiagnostics(hydratedTestCaseDiagnostics);
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
@@ -3286,6 +3289,7 @@ export default function App() {
 				throw new Error("No updated test cases were returned. Your current suite has been kept.");
 			rememberGeneration("test_cases", data);
 			setTestCases(data.test_cases || []);
+			setGenerationTasks(data.generation_tasks || []);
 			setRequirementAnalysis(data.requirement_analysis || []);
 			setCoveragePlan(data.coverage_plan || []);
 			setCoverageMetrics(data.coverage_metrics || null);
@@ -3437,14 +3441,15 @@ export default function App() {
 			}
 			const nextTestCases = data?.current_snapshots?.test_cases?.payload?.test_cases || [];
 			const result = data?.current_snapshots?.test_cases?.payload?.impact_update_result || {};
-			const message = `Impact update applied: ${result.preserved_count || 0} preserved, ${result.updated_count || 0} updated, ${result.added_count || 0} added, ${result.deprecated_count || 0} deprecated.`;
+			const message = `Impact update applied: ${result.preserved_count || 0} preserved, ${result.updated_count || 0} updated, ${result.added_count || 0} added, ${result.deprecated_count || 0} deprecated. Review the changed tests before export.`;
 			setImpactUpdateMessage(message);
 			setStatus(message);
-			if (nextTestCases.length > 0) {
+			if (nextTestCases.length > 0 && data?.current_snapshots?.test_cases?.approved) {
 				await previewExecution(nextTestCases, { updateStatus: false, persistProject: false, operationScope });
 			}
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
+				setImpactUpdateMessage(`Impact update failed: ${error.message}`);
 				setStatus(`Impact update failed: ${error.message}`);
 			}
 		} finally {
@@ -3749,7 +3754,23 @@ export default function App() {
 								</div>
 								<div className="impact-recommendation-meta">
 									<span>{Math.round((recommendation.confidence || 0) * 100)}%</span>
-									<span>{recommendation.accepted ? "Accepted" : "Review"}</span>
+									<label>
+										<Checkbox
+											aria-label={`Accept ${recommendation.title}`}
+											checked={Boolean(recommendation.accepted)}
+											disabled={isApplyingImpactUpdate}
+											onChange={(event) => {
+												const accepted = event.target.checked;
+												setImpactAnalysis((current) => ({
+													...current,
+													recommendations: current.recommendations.map((item) =>
+														item.recommendation_id === recommendation.recommendation_id ? { ...item, accepted } : item
+													),
+												}));
+											}}
+										/>
+										{recommendation.accepted ? "Accepted" : "Review"}
+									</label>
 								</div>
 							</div>
 						))}
@@ -4933,6 +4954,26 @@ export default function App() {
 												</div>
 											) : null}
 
+											{generationTasks.length > 0 ? (
+												<section aria-label="Unfinished test generation" role="status">
+													<h3>{generationTasks.length} generation tasks need concrete tests</h3>
+													<p>These gaps are excluded from the test suite and must be generated and reviewed before coverage is complete.</p>
+													<ul>
+														{generationTasks.map((task, index) => (
+															<li key={index}>
+																{(task.requirement_ids || []).join(", ")}: {task.reason}
+															</li>
+														))}
+													</ul>
+													<Button
+														onClick={analyzeImpact}
+														disabled={!canAnalyzeImpact || isAnalyzingImpact || isApplyingImpactUpdate || testCaseActionDisabled}
+													>
+														{isAnalyzingImpact ? "Analyzing repair work…" : "Plan targeted repair"}
+													</Button>
+													<p>Review and accept the resulting Add/Update recommendations, then apply them to generate concrete tests.</p>
+												</section>
+											) : null}
 											{renderImpactAnalysisPanel()}
 
 											<p className="test-suite-summary">

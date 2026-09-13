@@ -385,6 +385,7 @@ export interface GenerateTestCasesResponse {
 	coverage_metrics?: Record<string, unknown>;
 	coverage_plan?: Array<RequirementCoveragePlan>;
 	generation_evidence?: TestCaseGenerationEvidence;
+	generation_tasks?: Array<Record<string, unknown>>;
 	guidance?: Record<string, unknown> | null;
 	iteration_history?: Array<WorkflowIteration>;
 	knowledge_suggestion?: Record<string, unknown> | null;
@@ -438,7 +439,7 @@ export interface ImpactAnalysisInput {
 
 export interface ImpactUpdateApplyInput {
 	accepted_recommendation_ids?: Array<string> | null;
-	base_project_revision?: number | null;
+	base_project_revision: number;
 }
 
 export interface ImportApplyInput {

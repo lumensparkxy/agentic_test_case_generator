@@ -59,7 +59,9 @@ from .test_case_coverage import (
     _normalize_coverage_plan,
     _scenario_tag,
 )
-from .test_case_fallback import _augment_with_fallback_coverage, _fallback_raw_test_cases
+from .test_case_fallback import _fallback_raw_test_cases
+from ..services.test_case_quality import separate_generation_work
+from ..contracts.requirements import RequirementCoveragePlan
 from .test_case_hydration import (
     _hydrate_coverage_plan,
     _hydrate_requirement_analysis,
@@ -855,7 +857,7 @@ def _build_review_loop(
 {feedback_section}
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
-2. Steps are executable and expected results are specific.
+2. Steps are executable and expected results are specific. Reject generation instructions such as "review the implemented behavior", "execute the scenario", or "generate tests" as test steps; each action must exercise the product and each assertion must name an observable result.
 3. Steps are sequential, actor-aware, and contain an action plus an observable expected result.
 4. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
 5. Every must-have scenario from the coverage plan is represented by exact `scenario_refs` on at least one test case.
@@ -978,7 +980,7 @@ def _build_test_case_generator_agent(
 5. Also include those requirement IDs in `tags` for backward compatibility, plus one scenario tag using the format scenario:<kebab-case-scenario-type>.
 6. Set `scenario_refs` to the exact coverage-plan scenario ID(s) implemented by the test case; do not omit it when the coverage plan contains scenario IDs.
 7. When grounded context is provided, include `source_refs` with the relevant artifact IDs used by the test case.
-8. Include detailed steps, expected results, realistic priorities, and execution metadata.
+8. Include detailed steps, expected results, realistic priorities, and execution metadata. Internal LLM/skill work, review tasks, and coverage reminders are not test cases. Do not emit them as test steps or fill missing coverage with generic instructions.
 9. Keep each test case centered on one primary scenario from the coverage plan.
 10. The `steps` field MUST be a JSON array of step objects shaped like {{"step": 1, "action": "...", "expected": "...", "test_data": null}}.
 11. For browser or documentation workflows, assertions MUST prefer exact grounded headings, visible text, accessible link names, and hrefs from the context instead of inferred marketing phrases or synthetic labels.
@@ -2320,17 +2322,18 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
 
 
 def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement], context: Optional[Any]) -> Dict[str, Any]:
-    serialized = _serialize_test_cases(test_cases)
     raw_requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(requirements))
     raw_coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(requirements))
-    normalized_coverage_plan = _normalize_coverage_plan(raw_coverage_plan, requirements)
+    normalized_coverage_plan = raw_coverage_plan if workflow.get("strict_coverage_plan") else _normalize_coverage_plan(raw_coverage_plan, requirements)
+    test_cases, generation_tasks = separate_generation_work(test_cases, normalized_coverage_plan)
+    serialized = _serialize_test_cases(test_cases)
     resolved_settings = dict(workflow.get("workflow_settings") or {})
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
     default_coverage_metrics = _compute_test_case_coverage_metrics(serialized, requirements)
     default_coverage_metrics.update(_compute_planned_scenario_metrics(normalized_coverage_plan, serialized, requirements))
     default_coverage_metrics.update(_compute_requirement_analysis_metrics(raw_requirement_analysis, serialized, requirements))
     default_coverage_metrics.update(_compute_grounded_context_metrics(serialized, context))
-    coverage_metrics = dict(workflow.get("coverage_metrics") or default_coverage_metrics)
+    coverage_metrics = default_coverage_metrics
     review = dict(
         workflow.get("review")
         or _heuristic_test_case_review(
@@ -2343,13 +2346,41 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         )
     )
     approved = bool(workflow.get("approved", False))
-    coverage_plan = _hydrate_coverage_plan(normalized_coverage_plan, requirements)
+    if workflow.get("workflow_diagnostics", {}).get("used_fallback"):
+        approved = False
+        review = {**review, "approved": False, "blocking_issues": list(review.get("blocking_issues") or []) + ["Fallback output requires review."]}
+    if generation_tasks:
+        approved = False
+        review = {
+            **review,
+            "approved": False,
+            "score": 0,
+            "summary": "Generation is incomplete. Concrete tests are retained; unresolved work needs generation.",
+            "blocking_issues": list(review.get("blocking_issues") or []) + [f"{len(generation_tasks)} unresolved generation task(s)."],
+        }
+    evidence = dict(workflow.get("generation_evidence") or {})
+    evidence["final_test_case_count"] = len(test_cases)
+    evidence["missing_requirements_count"] = len(coverage_metrics.get("requirements_without_tests") or [])
+    evidence["missing_must_have_scenario_count"] = len(coverage_metrics.get("missing_must_have_scenarios") or [])
+    evidence["missing_optional_scenario_count"] = max(0, len(coverage_metrics.get("missing_scenarios") or []) - evidence["missing_must_have_scenario_count"])
+    if generation_tasks:
+        evidence["final_status"] = "partial"
+    coverage_plan = (
+        [RequirementCoveragePlan.model_validate(p) for p in normalized_coverage_plan]
+        if workflow.get("strict_coverage_plan")
+        else _hydrate_coverage_plan(normalized_coverage_plan, requirements)
+    )
     requirement_analysis = _hydrate_requirement_analysis(raw_requirement_analysis, requirements)
     workflow_diagnostics = _update_generation_source_counts(dict(workflow.get("workflow_diagnostics") or {}), serialized)
     workflow_diagnostics = _update_scenario_ref_diagnostics(workflow_diagnostics, coverage_metrics)
+    if generation_tasks and workflow_diagnostics.get("status") == "completed":
+        workflow_diagnostics["status"] = "partial"
+    for key in ("missing_requirements_count", "missing_must_have_scenario_count", "missing_optional_scenario_count"):
+        workflow_diagnostics[key] = evidence[key]
 
     return {
         "test_cases": test_cases,
+        "generation_tasks": generation_tasks,
         "approved": approved,
         "review": review,
         "iteration_history": list(workflow.get("iteration_history") or []),
@@ -2358,7 +2389,7 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": public_workflow_diagnostics(workflow_diagnostics),
-        "generation_evidence": dict(workflow.get("generation_evidence") or {}),
+        "generation_evidence": evidence,
     }
 
 
@@ -2488,6 +2519,9 @@ def generate_test_cases(
     )
     generation_settings = get_generation_settings()
 
+    if operation == "impact.update.apply":
+        precomputed_coverage_plan = _serialize_contract_items(payload.coverage_plan)
+        precomputed_requirement_analysis = precomputed_requirement_analysis or fallback_requirement_analysis(payload.requirements)
     if settings is None:
         workflow = {
             "test_cases": [],
@@ -2507,7 +2541,7 @@ def generate_test_cases(
                 "warnings": ["Model credentials are unavailable; deterministic fallback was used."],
             },
         }
-    elif _should_use_parallel_test_case_generation(
+    elif operation == "impact.update.apply" or _should_use_parallel_test_case_generation(
         precomputed_requirement_analysis,
         precomputed_coverage_plan,
         generation_settings,
@@ -2705,126 +2739,9 @@ def generate_test_cases(
         coverage_plan = list(workflow.get("coverage_plan") or coverage_plan)
         resolved_settings = dict(workflow.get("workflow_settings") or resolved_settings)
         threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
-        recovery_test_cases = _augment_with_fallback_coverage(
-            raw_test_cases,
-            payload.requirements,
-            payload.context,
-            coverage_plan,
-        )
-        if len(recovery_test_cases) > len(raw_test_cases):
-            original_test_case_count = len(raw_test_cases)
-            recovery_review = _heuristic_test_case_review(
-                recovery_test_cases,
-                payload.requirements,
-                threshold,
-                coverage_plan=coverage_plan,
-                requirement_analysis=requirement_analysis,
-                context=payload.context,
-            )
-            current_review = dict(workflow.get("review") or {})
-            if _prefer_review(recovery_review, current_review):
-                workflow_diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
-                completion_generation_pass_id = str(uuid.uuid4())
-                source_generation_pass_id = _last_generation_pass_id(
-                    dict(workflow.get("generation_evidence") or {}),
-                    exclude_pass_types={GENERATION_SOURCE_DETERMINISTIC_COVERAGE_COMPLETION},
-                ) or str(uuid.uuid4())
-                recovery_test_cases = _with_test_case_provenance(
-                    recovery_test_cases[:original_test_case_count],
-                    generation_source=_model_generation_source(workflow_diagnostics),
-                    generation_pass_id=source_generation_pass_id,
-                    preserve_existing=True,
-                ) + _with_test_case_provenance(
-                    recovery_test_cases[original_test_case_count:],
-                    generation_source=GENERATION_SOURCE_DETERMINISTIC_COVERAGE_COMPLETION,
-                    generation_pass_id=completion_generation_pass_id,
-                    coverage_completion_reason="coverage_augmentation",
-                )
-                deterministic_counts = _coverage_gap_counts(
-                    original_test_cases=raw_test_cases,
-                    augmented_test_cases=recovery_test_cases,
-                    requirements=payload.requirements,
-                    coverage_plan=coverage_plan,
-                )
-                recovery_warning = _coverage_augmentation_warning(
-                    original_test_cases=raw_test_cases,
-                    augmented_test_cases=recovery_test_cases,
-                    requirements=payload.requirements,
-                    coverage_plan=coverage_plan,
-                    diagnostics=workflow_diagnostics,
-                    deterministic_counts=deterministic_counts,
-                )
-                raw_test_cases = recovery_test_cases
-                workflow_diagnostics["status"] = "partial"
-                workflow_diagnostics["used_fallback"] = False
-                workflow_diagnostics["recovery_reason"] = "coverage_augmentation"
-                if workflow_diagnostics.get("failure_reason") in {None, "quality_rejection"}:
-                    workflow_diagnostics["failure_reason"] = None
-                _append_unique_message(
-                    workflow_diagnostics["warnings"],
-                    recovery_warning,
-                )
-                _update_completion_diagnostics(workflow_diagnostics, deterministic_counts)
-                _update_generation_source_counts(workflow_diagnostics, recovery_test_cases)
-                iteration_history = list(workflow.get("iteration_history") or [])
-                iteration_history.append(
-                    _make_history_entry(
-                        iteration=len(iteration_history) + 1,
-                        actor="FallbackCoverageRecovery",
-                        review=recovery_review,
-                        test_cases=recovery_test_cases,
-                    )
-                )
-                generation_evidence = _append_generation_pass(
-                    dict(
-                        workflow.get("generation_evidence")
-                        or _new_generation_evidence(
-                            requirements=payload.requirements,
-                            coverage_plan=coverage_plan,
-                            model_name=settings.model_name,
-                            operation=operation or "testcases.generate",
-                            request_id=request_id,
-                            workflow_run_id=workflow_run_id,
-                            workflow_settings=resolved_settings,
-                            generation_settings=generation_settings,
-                        )
-                    ),
-                    _generation_pass_evidence(
-                        pass_type="deterministic_coverage_completion",
-                        requirements=payload.requirements,
-                        coverage_plan=coverage_plan,
-                        model_name=settings.model_name,
-                        diagnostics=workflow_diagnostics,
-                        review=recovery_review,
-                        model_case_count=0,
-                        merged_case_count=len(recovery_test_cases),
-                        fallback_case_count=max(0, len(recovery_test_cases) - original_test_case_count),
-                        deterministic_counts=deterministic_counts,
-                        prompt_metadata={
-                            "raw_prompt_stored": False,
-                            "source": "deterministic coverage completion",
-                        },
-                        pass_id=completion_generation_pass_id,
-                    ),
-                )
-                workflow = {
-                    "test_cases": recovery_test_cases,
-                    "requirement_analysis": requirement_analysis,
-                    "coverage_plan": coverage_plan,
-                    "review": recovery_review,
-                    "approved": recovery_review["approved"],
-                    "iteration_history": iteration_history,
-                    "coverage_metrics": {
-                        **_compute_test_case_coverage_metrics(recovery_test_cases, payload.requirements),
-                        **_compute_planned_scenario_metrics(coverage_plan, recovery_test_cases, payload.requirements),
-                        **_compute_requirement_analysis_metrics(requirement_analysis, recovery_test_cases, payload.requirements),
-                        **_compute_grounded_context_metrics(recovery_test_cases, payload.context),
-                    },
-                    "workflow_settings": resolved_settings,
-                    "workflow_diagnostics": workflow_diagnostics,
-                    "generation_evidence": generation_evidence,
-                }
 
+    if operation == "impact.update.apply":
+        workflow["strict_coverage_plan"] = True
     workflow["generation_evidence"] = _finalize_generation_evidence(
         evidence=dict(workflow.get("generation_evidence") or {}),
         workflow=workflow,

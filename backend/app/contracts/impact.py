@@ -78,7 +78,7 @@ class ImpactAnalysisInput(BaseModel):
 
 class ImpactUpdateApplyInput(BaseModel):
     accepted_recommendation_ids: Optional[List[str]] = None
-    base_project_revision: Optional[int] = Field(default=None, ge=0)
+    base_project_revision: int = Field(ge=0)
 
 
 class ImpactUpdateApplyResult(BaseModel):

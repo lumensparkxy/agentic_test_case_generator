@@ -187,11 +187,20 @@ def persist_test_case_versions(
     operation: str,
     approved: Optional[bool] = None,
     reuse_unchanged_versions: bool = False,
+    pending_writes: Optional[list] = None,
 ) -> list[TestCase]:
+    def write(document, payload, *, operation, merge=False):
+        if pending_writes is not None:
+            pending_writes.append((document, payload, merge))
+            return True
+        return _safe_set(document, payload, operation=operation, merge=merge)
+
     test_cases = [test_case if isinstance(test_case, TestCase) else TestCase.model_validate(test_case) for test_case in current_test_cases]
     previous = [_coerce_test_case(test_case) for test_case in (previous_test_cases or [])]
     collection = _get_collection(TEST_CASE_SETS_COLLECTION)
     if collection is None:
+        if pending_writes is not None:
+            raise RuntimeError("Test case version storage is unavailable")
         return test_cases
 
     existing_set_id = next(
@@ -205,7 +214,7 @@ def persist_test_case_versions(
     set_doc = collection.document(set_id)
     actor_snapshot = build_actor_snapshot(actor)
     now = _utcnow()
-    overall_success = _safe_set(
+    overall_success = write(
         set_doc,
         {
             "set_id": set_id,
@@ -264,7 +273,7 @@ def persist_test_case_versions(
         version_number = int(previous_test_case.artifact_version_number or 0) + 1 if previous_test_case else 1
         version_id = str(uuid4())
         item_doc = set_doc.collection("items").document(item_id)
-        item_success = _safe_set(
+        item_success = write(
             item_doc,
             {
                 "item_id": item_id,
@@ -280,7 +289,7 @@ def persist_test_case_versions(
             operation="test_case_item_upsert",
             merge=True,
         )
-        version_success = _safe_set(
+        version_success = write(
             item_doc.collection("versions").document(version_id),
             {
                 "version_id": version_id,

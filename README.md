@@ -90,7 +90,7 @@ hackathon. See the full
 - Import and sync requirements from JIRA Cloud issues
 - Import and sync requirements from Azure DevOps Services work items
 - Analyze context links (app, prototype, diagrams, images) into grounded UI/API/workflow facts
-- Generate test cases from a user template with requirement-analysis, scenario-plan, and coverage diagnostics
+- Generate test cases from a user template with requirement-analysis, scenario-plan, and coverage diagnostics; [repair unfinished generation work](docs/test-case-generation-quality.md) without replacing unaffected tests
 - Preview generated test cases for browser automation readiness and run approved executable candidates with Playwright
 - Raw uploaded documents are processed in memory; durable projects retain derived workflow snapshots, review decisions, runs, and report evidence
 

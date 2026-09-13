@@ -200,6 +200,13 @@ def get_project(project_id: str, *, actor: AuthUser) -> QaProjectDetail:
                         "requirements": [r.model_dump(mode="json") for r in active],
                         "retired_requirements": [r.model_dump(mode="json") for r in retired],
                     }
+                if stage == "test_cases":
+                    from .test_case_quality import project_test_case_view
+
+                    snapshot.payload = project_test_case_view(snapshot.payload)
+                    if snapshot.payload.get("generation_tasks"):
+                        snapshot.approved = False
+                        summary.stage_state[stage].approved = False
                 current_snapshots[stage] = snapshot
 
     project_doc = _get_project_doc(project_id)
@@ -347,6 +354,13 @@ def list_workspace_projects(
                 continue
             current_snapshot = _workspace_snapshot_for(summary.project_id, state.current_snapshot_id, stage)
             if current_snapshot is not None and current_snapshot.stage == stage:
+                if stage == "test_cases":
+                    from .test_case_quality import project_test_case_view
+
+                    current_snapshot.payload = project_test_case_view(current_snapshot.payload)
+                    if current_snapshot.payload.get("generation_tasks"):
+                        current_snapshot.approved = False
+                        summary.stage_state[stage].approved = False
                 current_snapshots[stage] = current_snapshot
 
         project_doc = _get_project_doc(summary.project_id)
@@ -409,7 +423,7 @@ def create_project(*, name: str, description: Optional[str], actor: AuthUser, re
     return get_project(project_id, actor=actor)
 
 
-def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None):
+def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=()):
     """Serialize every revision writer with reviewed imports; publish all evidence or none."""
     client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
     doc = client.collection(QA_PROJECTS_COLLECTION).document(project_id)
@@ -426,6 +440,8 @@ def _commit_project_revision(project_id, actor, expected_revision, update, event
             if existing:
                 return existing
         _check_revision(current, expected_revision)
+        for reference, value, merge in pending_writes:
+            transaction.set(reference, value, merge=merge)
         if snapshot:
             transaction.create(snapshot_ref, snapshot)
         transaction.update(doc, update)
@@ -496,6 +512,7 @@ def append_stage_snapshot(
     metadata: Optional[dict[str, Any]] = None,
     base_project_revision: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    pending_writes: tuple | list = (),
 ) -> QaProjectStageSnapshot:
     project_payload = _get_project_payload(project_id)
     _require_owner(project_payload, actor)
@@ -587,6 +604,7 @@ def append_stage_snapshot(
             "occurred_at": now,
         },
         snapshot=snapshot_payload,
+        pending_writes=pending_writes,
     )
     return QaProjectStageSnapshot.model_validate(committed)
 

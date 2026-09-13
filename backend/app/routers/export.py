@@ -2,10 +2,11 @@ import io
 from typing import Any, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
+from ..services.test_case_quality import placeholder_reason
 from ..agents.export_agent import export_to_csv, export_to_excel, export_to_jira, export_to_json
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, ExportTestCasesInput, JiraExportInput, JiraExportResponse
@@ -29,6 +30,8 @@ def _get_request_id(request: Request) -> str:
 
 
 def _export_audit_metadata(payload: ExportTestCasesInput) -> dict[str, Any]:
+    if any(placeholder_reason(case) for case in payload.test_cases):
+        raise HTTPException(422, "Unfinished generation instructions cannot be exported as test cases. Generate concrete tests first.")
     review = payload.review or None
     override_reason = (payload.draft_override_reason or "").strip()
     metadata: dict[str, Any] = {
@@ -222,6 +225,8 @@ async def export_jira(
     payload: JiraExportInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> JiraExportResponse:
+    if any(placeholder_reason(case) for case in payload.test_cases):
+        raise HTTPException(422, "Generate concrete tests before exporting unfinished generation work.")
     request_id = _get_request_id(request)
     workflow_run_id = start_workflow_run(
         operation="export.jira",
