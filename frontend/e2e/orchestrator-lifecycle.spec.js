@@ -296,6 +296,19 @@ function projectForPhase(phase) {
 		true,
 		{ test_case_count: 10 }
 	);
+	if (afterApply)
+		project.impact_application = {
+			status: "applied",
+			analysis_snapshot_id: project.current_snapshots.impact_analysis.snapshot_id,
+			accepted_recommendation_ids: impactAnalysisPayload().recommendations.map((r) => r.recommendation_id),
+			completed_at: "2026-09-22T10:00:00Z",
+			result_snapshot_id: project.current_snapshots.test_cases.snapshot_id,
+			changed_test_case_ids: ["TC-003", "TC-010"],
+			preserved_count: 8,
+			updated_count: 2,
+			added_count: 0,
+			deprecated_count: 0,
+		};
 	if (["executed", "reported"].includes(phase)) {
 		project.stage_state.execution = {
 			current_snapshot_id: "snap-execution-v1",
@@ -768,8 +781,8 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await expect(page.getByRole("heading", { name: /^Impact Analysis$/i })).toBeVisible();
 		await expect(page.getByText("REQ-003 modified")).toBeVisible();
 		await expect(page.getByText("Update TC-010")).toBeVisible();
-		await page.getByRole("button", { name: /Apply 10 Accepted Recommendations/i }).click();
-		await expect(page.getByText(/Impact update applied: 8 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
+		await page.getByRole("button", { name: /Apply 10 recommendations/i }).click();
+		await expect(page.getByText(/8 preserved · 2 updated · 0 added · 0 deprecated/i)).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })

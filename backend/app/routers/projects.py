@@ -170,6 +170,7 @@ async def apply_qa_project_impact_update(
             project_id=project_id,
             actor=current_user,
             request_id=_get_request_id(request),
+            analysis_snapshot_id=payload.analysis_snapshot_id,
             accepted_recommendation_ids=payload.accepted_recommendation_ids,
             base_project_revision=payload.base_project_revision,
         )

@@ -339,8 +339,11 @@ def record_usage_event(
     status: str,
     metadata: Optional[Dict[str, Any]] = None,
     workspace_id: Optional[str] = None,
+    pending_writes: Optional[list] = None,
+    firestore_client=None,
+    event_id: Optional[str] = None,
 ) -> str:
-    event_id = str(uuid4())
+    event_id = event_id or str(uuid4())
     payload = _attach_trace_id(
         {
             "event_id": event_id,
@@ -360,6 +363,9 @@ def record_usage_event(
             "metadata": _serialize_value(metadata or {}),
         }
     )
-    _record_repository_failure(get_audit_repository().record_usage_event(event_id, payload))
+    if pending_writes is not None:
+        pending_writes.append((firestore_client.collection(USAGE_EVENTS_COLLECTION).document(event_id), payload, False))
+    else:
+        _record_repository_failure(get_audit_repository().record_usage_event(event_id, payload))
 
     return event_id

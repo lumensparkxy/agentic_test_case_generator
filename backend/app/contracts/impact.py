@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
@@ -77,13 +78,31 @@ class ImpactAnalysisInput(BaseModel):
 
 
 class ImpactUpdateApplyInput(BaseModel):
+    analysis_snapshot_id: Optional[str] = Field(default=None, min_length=1)
     accepted_recommendation_ids: Optional[List[str]] = None
     base_project_revision: int = Field(ge=0)
+
+
+class ImpactApplication(BaseModel):
+    analysis_snapshot_id: str
+    status: Literal["applying", "applied", "failed", "verification_required"]
+    accepted_recommendation_ids: List[str] = Field(default_factory=list)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    result_snapshot_id: Optional[str] = None
+    result_project_revision: Optional[int] = None
+    changed_test_case_ids: List[str] = Field(default_factory=list)
+    preserved_count: int = 0
+    updated_count: int = 0
+    added_count: int = 0
+    deprecated_count: int = 0
+    error: Optional[str] = None
 
 
 class ImpactUpdateApplyResult(BaseModel):
     test_cases: List[TestCase] = Field(default_factory=list)
     applied_recommendation_ids: List[str] = Field(default_factory=list)
+    changed_test_case_ids: List[str] = Field(default_factory=list)
     preserved_count: int = 0
     updated_count: int = 0
     added_count: int = 0
@@ -102,5 +121,6 @@ __all__ = [
     "ImpactAnalysisResult",
     "ImpactAnalysisInput",
     "ImpactUpdateApplyInput",
+    "ImpactApplication",
     "ImpactUpdateApplyResult",
 ]

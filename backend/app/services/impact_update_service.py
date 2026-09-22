@@ -23,6 +23,7 @@ from ..models import (
     TestCaseTemplate,
     EnrichInput,
 )
+from .impact_application_state import ApplicationLease
 from .versioning_service import persist_test_case_versions
 from .scenario_review_state import current_scenario_reviews, scenario_key
 from ..agents.test_case_agent import generate_test_cases
@@ -180,10 +181,17 @@ def apply_project_impact_update(
     project_id: str,
     actor: AuthUser,
     request_id: str,
+    analysis_snapshot_id: Optional[str] = None,
     accepted_recommendation_ids: Optional[list[str]] = None,
     base_project_revision: Optional[int] = None,
 ) -> QaProjectDetail:
     project = get_project(project_id, actor=actor)
+    current_analysis = project.current_snapshots.get("impact_analysis")
+    if analysis_snapshot_id and (not current_analysis or analysis_snapshot_id != current_analysis.snapshot_id):
+        # An old tab must never apply its selection to a newly generated analysis.
+        raise ImpactWorkflowError("Impact analysis changed. Reload the project before applying.")
+    if project.impact_application and project.impact_application.status in {"applying", "applied"}:
+        return project
     if base_project_revision is None or base_project_revision != project.current_revision:
         raise ProjectConflictError(project.current_revision)
     if project.status != "active":
@@ -272,166 +280,187 @@ def apply_project_impact_update(
             feedback="Generate concrete user/API actions, necessary input values, and observable assertions. Do not return instructions to review or generate tests.",
         )
         inputs.append((rec, old, payload, available))
-    billing_context = enforce_billing_access(current_user=actor, billing_key="testcases.generate") if pending else None
-    run_id = start_workflow_run(operation="impact.update.apply", actor=actor, request_id=request_id, metadata={"project_id": project_id})
-    replacements = {}
-    additions = []
-    generated_count = 0
-    evidence = []
-    try:
-        for rec, old, payload, refs in inputs:
-            manifest = prepare_run(
-                "test_cases",
-                actor,
-                project_id,
-                f"{request_id}:{rec.recommendation_id}",
-                requirement_ids=[r.id for r in payload.requirements],
-                input_fingerprint=sha256(json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode()).hexdigest(),
-            )
-            with guidance_scope(manifest):
-                response = GenerateTestCasesResponse.model_validate(
-                    generate_test_cases(payload, actor_user_id=actor.sub, request_id=request_id, workflow_run_id=run_id, operation="impact.update.apply")
-                )
-            evidence.append(
-                {
-                    "recommendation_id": rec.recommendation_id,
-                    "generation_evidence": _model_payload(response.generation_evidence),
-                    "guidance": public_manifest(manifest),
-                }
-            )
-            generated = response.test_cases
-            covered = {ref for case in generated for ref in case.scenario_refs}
-            allowed = {r.id for r in payload.requirements}
-            if (
-                not response.approved
-                or not generated
-                or response.generation_tasks
-                or response.workflow_diagnostics.used_fallback
-                or response.workflow_diagnostics.timed_out
-                or response.workflow_diagnostics.failed_shard_count
-                or any(
-                    placeholder_reason(c)
-                    or not c.linked_requirement_ids
-                    or not set(c.linked_requirement_ids) <= allowed
-                    or not c.scenario_refs
-                    or not set(c.scenario_refs) <= refs
-                    for c in generated
-                )
-                or not refs <= covered
-            ):
-                raise ImpactWorkflowError("Targeted generation is incomplete or failed quality checks. The existing suite was preserved.")
-            for index, case in enumerate(generated):
-                change = {
-                    "id": old.id if old and index == 0 else f"TC-{uuid4().hex[:12].upper()}",
-                    "status": "In Review",
-                    "tags": list(dict.fromkeys((case.tags or []) + [f"impact:{rec.action}"])),
-                }
-                if old and index == 0:
-                    change.update({key: getattr(old, key) for key in ("artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number")})
-                    replacements[old.id] = case.model_copy(update=change)
-                else:
-                    additions.append(case.model_copy(update=change))
-                generated_count += 1
-        deprecated = {r.test_case_id for r in accepted if r.action == "deprecate"}
-        next_cases = [replacements.get(c.id, c.model_copy(update={"status": "Deprecated"}) if c.id in deprecated else c) for c in existing]
-        next_cases += additions
-        if get_project(project_id, actor=actor).current_revision != base_project_revision:
-            raise ProjectConflictError(get_project(project_id, actor=actor).current_revision)
-        pending_writes = []
-        versioned = persist_test_case_versions(
-            current_test_cases=next_cases,
-            previous_test_cases=existing,
-            actor=actor,
-            request_id=request_id,
-            workflow_run_id=run_id,
-            source_event_id=None,
-            operation="impact.update.apply",
-            approved=False,
-            reuse_unchanged_versions=True,
-            pending_writes=pending_writes,
-        )
-        concrete_cases, remaining_tasks = separate_generation_work(versioned, plans.payload.get("coverage_plan", []) if plans else [])
-        result = ImpactUpdateApplyResult(
-            test_cases=versioned,
-            applied_recommendation_ids=sorted(selected),
-            preserved_count=len(existing) - len(replacements) - len(deprecated),
-            updated_count=len(replacements),
-            added_count=len(additions),
-            deprecated_count=len(deprecated),
-        )
-        snapshot_payload = {
-            **original_snapshot.payload,
-            "test_cases": _model_payload(versioned),
-            "approved": False,
-            "generation_tasks": remaining_tasks,
-            "impact_analysis": analysis.model_dump(mode="json"),
-            "impact_update_result": result.model_dump(mode="json", exclude={"test_cases"}),
-            "review": {
-                "approved": False,
-                "score": 0,
-                "threshold": 90,
-                "summary": "Targeted changes require suite review.",
-                "blocking_issues": ["Review the changed test suite before export."],
-                "suggestions": [],
-                "unmet_criteria": [],
-            },
-            "coverage_plan": plans.payload.get("coverage_plan", []) if plans else [],
-            "coverage_metrics": delivered_coverage(separate_generation_work(versioned)[0], plans.payload.get("coverage_plan", []) if plans else []),
-            "workflow_diagnostics": {"status": "completed", "used_fallback": False},
-            "generation_evidence": {"operation": "impact.update.apply", "final_test_case_count": len(concrete_cases), "final_status": "needs_review"},
-        }
-        append_stage_snapshot(
-            project_id=project_id,
-            stage="test_cases",
-            payload=snapshot_payload,
-            operation="impact.update.apply",
-            actor=actor,
-            request_id=request_id,
-            workflow_run_id=run_id,
-            approved=False,
-            source_snapshot_id=impact_snapshot.snapshot_id,
-            title="Targeted tests generated for review",
-            base_project_revision=base_project_revision,
-            pending_writes=pending_writes,
-            metadata={
-                "test_case_count": len(concrete_cases),
-                "preserved_count": result.preserved_count,
-                "updated_count": result.updated_count,
-                "added_count": result.added_count,
-                "deprecated_count": result.deprecated_count,
-                "source_snapshot_ids": analysis.current_snapshot_ids,
-                "targeted_generation_runs": evidence,
-            },
-        )
-    except Exception:
-        complete_workflow_run(run_id, status="failed", error_message="Targeted generation or commit failed")
-        raise
-    complete_workflow_run(run_id, status="completed", metadata={"generated_count": generated_count})
-    if generated_count:
-        event_id = record_usage_event(
-            event_type="testcases.generated",
-            billing_key="testcases.generate",
-            quantity=generated_count,
-            unit="test_case",
-            actor=actor,
-            request_id=request_id,
-            workflow_run_id=run_id,
-            status="completed",
-        )
+    lease = ApplicationLease(project_id, impact_snapshot.snapshot_id, actor, base_project_revision, selected)
+    if not lease.reserve():
+        return get_project(project_id, actor=actor)
+    with lease:
         try:
-            record_billing_consumption(
-                current_user=actor,
-                billing_context=billing_context,
-                source_event_id=event_id,
-                request_id=request_id,
-                workflow_run_id=run_id,
-                billing_key="testcases.generate",
-                quantity=generated_count,
-                unit="test_case",
-            )
-        except Exception as exc:
-            logging.warning("Impact generation billing recording failed: %s", exc)
-    return get_project(project_id, actor=actor)
+            billing_context = enforce_billing_access(current_user=actor, billing_key="testcases.generate") if pending else None
+            run_id = start_workflow_run(operation="impact.update.apply", actor=actor, request_id=request_id, metadata={"project_id": project_id})
+            replacements = {}
+            additions = []
+            generated_count = 0
+            evidence = []
+            try:
+                for rec, old, payload, refs in inputs:
+                    manifest = prepare_run(
+                        "test_cases",
+                        actor,
+                        project_id,
+                        f"{request_id}:{rec.recommendation_id}",
+                        requirement_ids=[r.id for r in payload.requirements],
+                        input_fingerprint=sha256(json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode()).hexdigest(),
+                    )
+                    with guidance_scope(manifest):
+                        response = GenerateTestCasesResponse.model_validate(
+                            generate_test_cases(
+                                payload, actor_user_id=actor.sub, request_id=request_id, workflow_run_id=run_id, operation="impact.update.apply"
+                            )
+                        )
+                    evidence.append(
+                        {
+                            "recommendation_id": rec.recommendation_id,
+                            "generation_evidence": _model_payload(response.generation_evidence),
+                            "guidance": public_manifest(manifest),
+                        }
+                    )
+                    generated = response.test_cases
+                    covered = {ref for case in generated for ref in case.scenario_refs}
+                    allowed = {r.id for r in payload.requirements}
+                    if (
+                        not response.approved
+                        or not generated
+                        or response.generation_tasks
+                        or response.workflow_diagnostics.used_fallback
+                        or response.workflow_diagnostics.timed_out
+                        or response.workflow_diagnostics.failed_shard_count
+                        or any(
+                            placeholder_reason(c)
+                            or not c.linked_requirement_ids
+                            or not set(c.linked_requirement_ids) <= allowed
+                            or not c.scenario_refs
+                            or not set(c.scenario_refs) <= refs
+                            for c in generated
+                        )
+                        or not refs <= covered
+                    ):
+                        raise ImpactWorkflowError("Targeted generation is incomplete or failed quality checks. The existing suite was preserved.")
+                    for index, case in enumerate(generated):
+                        change = {
+                            "id": old.id if old and index == 0 else f"TC-{uuid4().hex[:12].upper()}",
+                            "status": "In Review",
+                            "tags": list(dict.fromkeys((case.tags or []) + [f"impact:{rec.action}"])),
+                        }
+                        if old and index == 0:
+                            change.update(
+                                {key: getattr(old, key) for key in ("artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number")}
+                            )
+                            replacements[old.id] = case.model_copy(update=change)
+                        else:
+                            additions.append(case.model_copy(update=change))
+                        generated_count += 1
+                deprecated = {r.test_case_id for r in accepted if r.action == "deprecate"}
+                next_cases = [replacements.get(c.id, c.model_copy(update={"status": "Deprecated"}) if c.id in deprecated else c) for c in existing]
+                next_cases += additions
+                if get_project(project_id, actor=actor).current_revision != base_project_revision:
+                    raise ProjectConflictError(get_project(project_id, actor=actor).current_revision)
+                pending_writes = []
+                versioned = persist_test_case_versions(
+                    current_test_cases=next_cases,
+                    previous_test_cases=existing,
+                    actor=actor,
+                    request_id=request_id,
+                    workflow_run_id=run_id,
+                    source_event_id=None,
+                    operation="impact.update.apply",
+                    approved=False,
+                    reuse_unchanged_versions=True,
+                    pending_writes=pending_writes,
+                )
+                concrete_cases, remaining_tasks = separate_generation_work(versioned, plans.payload.get("coverage_plan", []) if plans else [])
+                result = ImpactUpdateApplyResult(
+                    test_cases=versioned,
+                    applied_recommendation_ids=sorted(selected),
+                    changed_test_case_ids=sorted(set(replacements) | {c.id for c in additions} | deprecated),
+                    preserved_count=len(existing) - len(replacements) - len(deprecated),
+                    updated_count=len(replacements),
+                    added_count=len(additions),
+                    deprecated_count=len(deprecated),
+                )
+                snapshot_payload = {
+                    **original_snapshot.payload,
+                    "test_cases": _model_payload(versioned),
+                    "approved": False,
+                    "generation_tasks": remaining_tasks,
+                    "impact_analysis": analysis.model_dump(mode="json"),
+                    "impact_update_result": result.model_dump(mode="json", exclude={"test_cases"}),
+                    "review": {
+                        "approved": False,
+                        "score": 0,
+                        "threshold": 90,
+                        "summary": "Targeted changes require suite review.",
+                        "blocking_issues": ["Review the changed test suite before export."],
+                        "suggestions": [],
+                        "unmet_criteria": [],
+                    },
+                    "coverage_plan": plans.payload.get("coverage_plan", []) if plans else [],
+                    "coverage_metrics": delivered_coverage(separate_generation_work(versioned)[0], plans.payload.get("coverage_plan", []) if plans else []),
+                    "workflow_diagnostics": {"status": "completed", "used_fallback": False},
+                    "generation_evidence": {"operation": "impact.update.apply", "final_test_case_count": len(concrete_cases), "final_status": "needs_review"},
+                }
+                event_id = None
+                if generated_count:
+                    event_id = record_usage_event(
+                        event_type="testcases.generated",
+                        billing_key="testcases.generate",
+                        quantity=generated_count,
+                        unit="test_case",
+                        actor=actor,
+                        request_id=request_id,
+                        workflow_run_id=run_id,
+                        status="completed",
+                        event_id=f"impact-{project_id}-{impact_snapshot.snapshot_id}",
+                        pending_writes=pending_writes,
+                        firestore_client=lease.client,
+                    )
+                append_stage_snapshot(
+                    transaction_guard=lease.commit,
+                    project_id=project_id,
+                    stage="test_cases",
+                    payload=snapshot_payload,
+                    operation="impact.update.apply",
+                    actor=actor,
+                    request_id=request_id,
+                    workflow_run_id=run_id,
+                    approved=False,
+                    source_snapshot_id=impact_snapshot.snapshot_id,
+                    title="Targeted tests generated for review",
+                    base_project_revision=base_project_revision,
+                    pending_writes=pending_writes,
+                    metadata={
+                        "test_case_count": len(concrete_cases),
+                        "preserved_count": result.preserved_count,
+                        "updated_count": result.updated_count,
+                        "added_count": result.added_count,
+                        "deprecated_count": result.deprecated_count,
+                        "source_snapshot_ids": analysis.current_snapshot_ids,
+                        "targeted_generation_runs": evidence,
+                    },
+                )
+            except Exception:
+                complete_workflow_run(run_id, status="failed", error_message="Targeted generation or commit failed")
+                raise
+            complete_workflow_run(run_id, status="completed", metadata={"generated_count": generated_count})
+            if generated_count:
+                try:
+                    record_billing_consumption(
+                        current_user=actor,
+                        billing_context=billing_context,
+                        source_event_id=event_id,
+                        request_id=request_id,
+                        workflow_run_id=run_id,
+                        billing_key="testcases.generate",
+                        quantity=generated_count,
+                        unit="test_case",
+                    )
+                except Exception as exc:
+                    logging.warning("Impact generation billing recording failed: %s", exc)
+            return get_project(project_id, actor=actor)
+        except Exception:
+            # If commit succeeded but its response was lost, fail() cannot overwrite
+            # the atomic receipt. The client reconciles through a project read.
+            lease.fail()
+            raise
 
 
 def impact_error_to_http(exc: Exception) -> HTTPException:
