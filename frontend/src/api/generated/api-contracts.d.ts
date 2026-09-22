@@ -437,8 +437,25 @@ export interface ImpactAnalysisInput {
 	base_project_revision?: number | null;
 }
 
+export interface ImpactApplication {
+	accepted_recommendation_ids?: Array<string>;
+	added_count?: number;
+	analysis_snapshot_id: string;
+	changed_test_case_ids?: Array<string>;
+	completed_at?: string | null;
+	deprecated_count?: number;
+	error?: string | null;
+	preserved_count?: number;
+	result_project_revision?: number | null;
+	result_snapshot_id?: string | null;
+	started_at?: string | null;
+	status: "applying" | "applied" | "failed" | "verification_required";
+	updated_count?: number;
+}
+
 export interface ImpactUpdateApplyInput {
 	accepted_recommendation_ids?: Array<string> | null;
+	analysis_snapshot_id?: string | null;
 	base_project_revision: number;
 }
 
@@ -629,6 +646,7 @@ export interface QaProjectDetail {
 	current_snapshots?: Record<string, QaProjectStageSnapshot>;
 	description?: string | null;
 	execution_runs?: Array<QaProjectExecutionRun>;
+	impact_application?: ImpactApplication | null;
 	name: string;
 	owner_user_id: string;
 	project_id: string;

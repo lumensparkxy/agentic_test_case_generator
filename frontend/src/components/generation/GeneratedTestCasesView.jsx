@@ -5,11 +5,20 @@ import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
-export default function GeneratedTestCasesView({ testCases, selectedId, setSelectedId, qualityIssues = [] }) {
+export default function GeneratedTestCasesView({
+	testCases,
+	selectedId,
+	setSelectedId,
+	qualityIssues = [],
+	changedIds = null,
+	onClearChanged,
+}) {
 	const [query, setQuery] = useState("");
 	const searchId = useId();
-	const cases = testCases.filter((tc) =>
-		[tc.id, tc.title, ...getTestCaseLinkedRequirementIds(tc)].join(" ").toLowerCase().includes(query.toLowerCase().trim())
+	const cases = testCases.filter(
+		(tc) =>
+			(changedIds === null || changedIds.includes(tc.id)) &&
+			[tc.id, tc.title, ...getTestCaseLinkedRequirementIds(tc)].join(" ").toLowerCase().includes(query.toLowerCase().trim())
 	);
 	const selected = cases.find((tc) => tc.id === selectedId) || cases[0];
 	const steps = selected?.steps || [];
@@ -26,6 +35,14 @@ export default function GeneratedTestCasesView({ testCases, selectedId, setSelec
 			>
 				<div className="test-review-list">
 					<h2>Generated Test Cases</h2>
+					{changedIds !== null && (
+						<div role="status">
+							<p>Showing changed tests</p>
+							<Button variant="secondary" onClick={onClearChanged}>
+								Show all tests
+							</Button>
+						</div>
+					)}
 					<label htmlFor={searchId} className="sr-only">
 						Search test cases
 					</label>
@@ -58,7 +75,13 @@ export default function GeneratedTestCasesView({ testCases, selectedId, setSelec
 					</List>
 					{!cases.length && (
 						<CollectionState kind={testCases.length ? "filtered" : "empty"}>
-							<p>{testCases.length ? "No test cases match your search." : "No test cases generated yet."}</p>
+							<p>
+								{changedIds?.length === 0
+									? "This application preserved all tests. There are no changed tests to review."
+									: testCases.length
+										? "No test cases match your search."
+										: "No test cases generated yet."}
+							</p>
 							{testCases.length > 0 && (
 								<Button variant="secondary" size="compact" onClick={() => setQuery("")}>
 									Clear search

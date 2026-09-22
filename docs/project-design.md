@@ -148,3 +148,43 @@ Next task remains on Overview. Test Cases omits the task card, recommendation na
 ### Required-action navigation (#296)
 
 Overview prioritizes Review Requirements, then reviewable current Use Cases, before downstream impact work. Impact analysis remains optional while reviews are pending. Workbench links name their destination and share the action/stage resolver across Overview, Home and Reviews. Navigation moves keyboard focus to the destination and never performs analysis, generation or approval. Review/import commits refresh guidance; stale responses cannot replace a newer project revision.
+
+## Applying impact recommendations (#304)
+
+The Impact Analysis heading has one sticky action/status bar. It distinguishes
+accepted decisions from applied changes and shows a saved completion time and
+actual result counts. Applying disables selection and repeat submission. Review
+changed tests filters the existing suite; Show all tests clears that filter.
+Failures allow retry only after the saved operation confirms no commit occurred.
+A lost response triggers status reconciliation, and a read outage exposes Check
+status rather than another Apply button. Refresh and other tabs recover the same
+operation. New analysis has a separate identity; partial applications require a
+fresh analysis against the updated suite for remaining work.
+
+`POST /projects/{project_id}/impact-update/apply` accepts `analysis_snapshot_id`
+alongside `accepted_recommendation_ids` and `base_project_revision`. The analysis
+ID is optional for older clients; their project revision still binds the request.
+Project detail reads include `impact_application` (or null). Its status is
+`applying`, `applied`, `failed`, or `verification_required`, with the accepted IDs,
+start/completion times, result snapshot/revision, changed test IDs and counts.
+Legacy completion is shown only when immutable snapshot lineage and applied IDs
+prove it. Unverifiable older suites require fresh impact analysis, not a guessed
+success or automatic data repair.
+
+Firestore stores one `impact_applications/{analysis_snapshot_id}` document under
+the owning project. Reservation is transactional before generation; an active or
+completed reservation is returned without repeating work. A 120-second lease is
+renewed every 30 seconds while the worker runs. An expired worker cannot renew or
+commit; a user retry claims a new token with the original selection. The same
+project-revision transaction fences the token and saves the suite, artifact
+versions, receipt and a stable usage event. Operation reads do not change project
+revision. No indexes or existing-record migrations are needed.
+
+The existing billing-consumption and workflow-audit recording remain after the
+suite commit; the atomic usage event is the durable accounting evidence even if
+the response or post-commit audit/billing recording fails. This change does not
+introduce a billing retry worker or alter billing policy.
+
+Validation covers backend reservation/replay, interrupted leases, lost commits,
+legacy evidence, approval/revision gates, and synthetic browser refresh, keyboard,
+second-tab, retry, connection loss and mobile accessibility flows.

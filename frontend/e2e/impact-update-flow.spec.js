@@ -281,6 +281,20 @@ function projectDetail({ withAnalysis = false, afterApply = false } = {}) {
 				metadata: {},
 			},
 		},
+		impact_application: afterApply
+			? {
+					status: "applied",
+					analysis_snapshot_id: "snap-impact-v1",
+					accepted_recommendation_ids: impactAnalysis.recommendations.map((r) => r.recommendation_id),
+					completed_at: "2026-09-22T10:00:00Z",
+					result_snapshot_id: "snap-test-v2",
+					changed_test_case_ids: ["TC-003", "TC-010"],
+					preserved_count: 1,
+					updated_count: 2,
+					added_count: 0,
+					deprecated_count: 0,
+				}
+			: null,
 		current_snapshots: currentSnapshots,
 		timeline: [],
 		execution_runs: [],
@@ -495,10 +509,10 @@ test.describe("Impact update flow", () => {
 		await expect(page.getByRole("heading", { name: /^Impact Analysis$/i })).toBeVisible();
 		await expect(page.getByText("REQ-003 modified")).toBeVisible();
 		await expect(page.getByText("Update TC-010")).toBeVisible();
-		await expect(page.getByRole("button", { name: /Apply 3 Accepted Recommendations/i })).toBeEnabled();
+		await expect(page.getByRole("button", { name: /Apply 3 recommendations/i })).toBeEnabled();
 
-		await page.getByRole("button", { name: /Apply 3 Accepted Recommendations/i }).click();
-		await expect(page.getByText(/Impact update applied: 1 preserved, 2 updated, 0 added, 0 deprecated/i)).toBeVisible();
+		await page.getByRole("button", { name: /Apply 3 recommendations/i }).click();
+		await expect(page.getByText(/1 preserved · 2 updated · 0 added · 0 deprecated/i)).toBeVisible();
 		await expect(page.locator(".test-suite-summary")).toContainText("3 test cases");
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toHaveCount(0);
 	});

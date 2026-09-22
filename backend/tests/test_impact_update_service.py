@@ -129,7 +129,7 @@ def _test_case(req_id: str, *, title: str | None = None) -> TestCase:
 class ImpactUpdateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
-        for target in ("enforce_billing_access", "start_workflow_run", "complete_workflow_run", "record_usage_event", "record_billing_consumption"):
+        for target in ("enforce_billing_access", "start_workflow_run", "complete_workflow_run", "record_billing_consumption"):
             patcher = patch.object(service, target, return_value="run-test")
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -311,6 +311,149 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(after_status.stages["test_cases"].summary["preserved_count"], 8)
         self.assertEqual(after_status.stages["test_cases"].summary["updated_count"], 2)
 
+    def _analyzed(self):
+        project = self._seed_project(modified={"REQ-003"})
+        return analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+
+    def _apply(self, project, **overrides):
+        return apply_project_impact_update(
+            **{
+                "project_id": project.project_id,
+                "actor": self.actor,
+                "request_id": "apply",
+                "analysis_snapshot_id": project.current_snapshots["impact_analysis"].snapshot_id,
+                "base_project_revision": project.current_revision,
+                **overrides,
+            }
+        )
+
+    def test_replay_returns_durable_receipt_without_versions_generation_or_usage(self):
+        project = self._analyzed()
+        first = self._apply(project)
+        before = deepcopy(self.store)
+        calls = self.generator.call_count
+        second = self._apply(project, request_id="different-tab")
+        self.assertEqual(first.impact_application, second.impact_application)
+        self.assertEqual(first.impact_application.status, "applied")
+        self.assertEqual(first.impact_application.changed_test_case_ids, ["TC-003"])
+        self.assertEqual(first.impact_application.result_snapshot_id, first.current_snapshots["test_cases"].snapshot_id)
+        self.assertEqual(self.generator.call_count, calls)
+        self.assertEqual(self.store, before)
+        self.assertEqual(len([k for k in self.store if k.startswith("usage_events/")]), 1)
+
+    def test_concurrent_request_joins_active_lease(self):
+        project = self._analyzed()
+        joined = []
+
+        def generate(payload, **kwargs):
+            joined.append(self._apply(project, request_id="second-tab"))
+            return self._generate(payload)
+
+        self.generator.side_effect = generate
+        result = self._apply(project)
+        self.assertEqual(joined[0].impact_application.status, "applying")
+        self.assertEqual(result.impact_application.status, "applied")
+        self.assertEqual(self.generator.call_count, 1)
+
+    def test_expired_worker_cannot_commit_after_retry_takes_lease(self):
+        from datetime import timedelta
+        from app.services.impact_application_state import ApplicationLease, now
+
+        project = self._analyzed()
+        aid = project.current_snapshots["impact_analysis"].snapshot_id
+        selected = [r["recommendation_id"] for r in project.current_snapshots["impact_analysis"].payload["recommendations"] if r["accepted"]]
+        old = ApplicationLease(project.project_id, aid, self.actor, project.current_revision, selected)
+        self.assertTrue(old.reserve())
+        path = f"qa_projects/{project.project_id}/impact_applications/{aid}"
+        self.store[path]["lease_expires_at"] = now() - timedelta(seconds=1)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        applied = self._apply(project)
+        before = deepcopy(self.store)
+        with self.assertRaisesRegex(RuntimeError, "superseded"):
+            old.commit(self.transaction_client.transaction(), {})
+        old.fail()
+        self.assertEqual(self.store, before)
+        self.assertEqual(applied.impact_application.status, "applied")
+
+    def test_lost_commit_response_reconciles_as_applied_and_does_not_duplicate_usage(self):
+        project = self._analyzed()
+        real_append = service.append_stage_snapshot
+
+        def lost_response(**kwargs):
+            real_append(**kwargs)
+            raise RuntimeError("Response lost after commit")
+
+        with patch.object(service, "append_stage_snapshot", side_effect=lost_response):
+            with self.assertRaisesRegex(RuntimeError, "Response lost"):
+                self._apply(project)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "applied")
+        replay = self._apply(project)
+        self.assertEqual(replay.impact_application.status, "applied")
+        self.assertEqual(self.generator.call_count, 1)
+        self.assertEqual(len([k for k in self.store if k.startswith("usage_events/")]), 1)
+
+    def test_failed_attempt_retries_original_selection_and_new_analysis_resets_state(self):
+        project = self._analyzed()
+        self.generator.side_effect = RuntimeError("offline")
+        with self.assertRaises(RuntimeError):
+            self._apply(project)
+        self.generator.side_effect = self._generate
+        updated = self._apply(project)
+        self.assertEqual(updated.impact_application.status, "applied")
+        new_analysis = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="new-analysis")
+        self.assertIsNone(new_analysis.impact_application)
+        with self.assertRaisesRegex(service.ImpactWorkflowError, "analysis changed"):
+            self._apply(project)
+
+    def test_historical_completion_requires_lineage_and_valid_applied_ids(self):
+        project = self._analyzed()
+        updated = self._apply(project)
+        aid = project.current_snapshots["impact_analysis"].snapshot_id
+        del self.store[f"qa_projects/{project.project_id}/impact_applications/{aid}"]
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "applied")
+        result_path = f"qa_projects/{project.project_id}/snapshots/{updated.current_snapshots['test_cases'].snapshot_id}"
+        self.store[result_path]["payload"]["impact_update_result"]["applied_recommendation_ids"] = ["unknown"]
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "verification_required")
+
+    def test_project_read_does_not_pair_new_receipt_with_old_suite(self):
+        from app.services import workflow_project_service as projects
+
+        project = self._analyzed()
+        original = deepcopy(self.store[f"qa_projects/{project.project_id}"])
+        applied = self._apply(project)
+        current = deepcopy(self.store[f"qa_projects/{project.project_id}"])
+        with patch.object(projects, "_get_project_payload", side_effect=[original, current]):
+            loaded = get_project(project.project_id, actor=self.actor)
+        self.assertEqual(loaded.current_revision, applied.current_revision)
+        self.assertEqual(loaded.impact_application.result_snapshot_id, loaded.current_snapshots["test_cases"].snapshot_id)
+
+    def test_partial_selection_consumes_analysis_and_keeps_other_cases_unchanged(self):
+        project = self._analyzed()
+        recs = project.current_snapshots["impact_analysis"].payload["recommendations"]
+        selected = [r["recommendation_id"] for r in recs if r["action"] == "update"]
+        first = self._apply(project, accepted_recommendation_ids=selected)
+        second = self._apply(first, accepted_recommendation_ids=[r["recommendation_id"] for r in recs])
+        self.assertEqual(second.impact_application.accepted_recommendation_ids, selected)
+        self.assertEqual(first.current_revision, second.current_revision)
+        self.assertEqual(self.generator.call_count, 1)
+
+    def test_lease_renewal_cannot_resurrect_expired_worker(self):
+        from datetime import timedelta
+        from app.services.impact_application_state import ApplicationLease, now
+
+        project = self._analyzed()
+        aid = project.current_snapshots["impact_analysis"].snapshot_id
+        lease = ApplicationLease(project.project_id, aid, self.actor, project.current_revision, ["selection"])
+        self.assertTrue(lease.reserve())
+        path = f"qa_projects/{project.project_id}/impact_applications/{aid}"
+        short = now() + timedelta(seconds=2)
+        self.store[path]["lease_expires_at"] = short
+        lease.renew()
+        self.assertGreater(self.store[path]["lease_expires_at"], short)
+        self.store[path]["lease_expires_at"] = now() - timedelta(seconds=1)
+        with self.assertRaises(RuntimeError):
+            lease.renew()
+
     def test_removed_requirement_deprecates_linked_test_case(self) -> None:
         project = self._seed_project(omit={"REQ-005"})
         analyzed_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
@@ -362,7 +505,8 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.generator.side_effect = RuntimeError("Model unavailable")
         with self.assertRaises(RuntimeError):
             apply_project_impact_update(project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision)
-        self.assertEqual(self.store, before)
+        self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k}, before)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
 
     def test_placeholder_and_incomplete_results_cannot_publish(self):
         project = self._seed_project(modified={"REQ-003"})
@@ -387,7 +531,8 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 apply_project_impact_update(
                     project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
                 )
-            self.assertEqual(self.store, before)
+            self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k}, before)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
 
     def test_concurrent_edit_and_missing_revision_do_not_replace_suite(self):
         project = self._seed_project(modified={"REQ-003"})
@@ -420,7 +565,8 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 apply_project_impact_update(
                     project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
                 )
-        self.assertEqual(self.store, before)
+        self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k}, before)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
 
     def test_unsaved_withheld_row_is_added_instead_of_updating_missing_identity(self):
         project = self._seed_project()

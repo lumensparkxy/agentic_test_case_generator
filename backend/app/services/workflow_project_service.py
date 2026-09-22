@@ -182,7 +182,7 @@ def _snapshot_for(project_id: str, snapshot_id: str) -> Optional[QaProjectStageS
     return QaProjectStageSnapshot.model_validate(payload)
 
 
-def get_project(project_id: str, *, actor: AuthUser) -> QaProjectDetail:
+def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = False) -> QaProjectDetail:
     payload = _get_project_payload(project_id)
     _require_owner(payload, actor)
     summary = _summary_from_payload(payload)
@@ -216,7 +216,17 @@ def get_project(project_id: str, *, actor: AuthUser) -> QaProjectDetail:
         QaProjectExecutionRun.model_validate(item) for item in _stream_collection(project_doc.collection("execution_runs")) if item.get("run_record_id")
     ]
     execution_runs.sort(key=lambda item: item.created_at, reverse=True)
+    from .impact_application_state import read_current
+
+    application = read_current(project_doc, current_snapshots)
+    # A commit can land between the project header read and the operation read.
+    # Never return a new receipt alongside the old suite and stop client polling.
+    if application and (application.result_project_revision or 0) > summary.current_revision:
+        if _application_retry:
+            raise ProjectConflictError(application.result_project_revision)
+        return get_project(project_id, actor=actor, _application_retry=True)
     return QaProjectDetail(
+        impact_application=application,
         **summary.model_dump(),
         current_snapshots=current_snapshots,
         timeline=timeline[:100],
@@ -423,7 +433,7 @@ def create_project(*, name: str, description: Optional[str], actor: AuthUser, re
     return get_project(project_id, actor=actor)
 
 
-def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=()):
+def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=(), transaction_guard=None):
     """Serialize every revision writer with reviewed imports; publish all evidence or none."""
     client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
     doc = client.collection(QA_PROJECTS_COLLECTION).document(project_id)
@@ -440,6 +450,8 @@ def _commit_project_revision(project_id, actor, expected_revision, update, event
             if existing:
                 return existing
         _check_revision(current, expected_revision)
+        if transaction_guard:
+            transaction_guard(transaction, snapshot)
         for reference, value, merge in pending_writes:
             transaction.set(reference, value, merge=merge)
         if snapshot:
@@ -513,6 +525,7 @@ def append_stage_snapshot(
     base_project_revision: Optional[int] = None,
     idempotency_key: Optional[str] = None,
     pending_writes: tuple | list = (),
+    transaction_guard=None,
 ) -> QaProjectStageSnapshot:
     project_payload = _get_project_payload(project_id)
     _require_owner(project_payload, actor)
@@ -605,6 +618,7 @@ def append_stage_snapshot(
         },
         snapshot=snapshot_payload,
         pending_writes=pending_writes,
+        transaction_guard=transaction_guard,
     )
     return QaProjectStageSnapshot.model_validate(committed)
 

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Literal
 
+from .impact import ImpactApplication
 from pydantic import BaseModel, Field
 
 from .requirements import (
@@ -95,6 +96,7 @@ class QaProjectExecutionRun(BaseModel):
 
 
 class QaProjectDetail(QaProjectSummary):
+    impact_application: Optional[ImpactApplication] = None
     current_snapshots: Dict[ProjectStageName, QaProjectStageSnapshot] = Field(default_factory=dict)
     timeline: List[QaProjectTimelineEvent] = Field(default_factory=list)
     execution_runs: List[QaProjectExecutionRun] = Field(default_factory=list)

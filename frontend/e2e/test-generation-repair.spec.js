@@ -85,6 +85,19 @@ async function setup(page, { failure = false, gate } = {}) {
 			review: { approved: false, score: 0, threshold: 90, summary: "Targeted changes require suite review." },
 			impact_update_result: { preserved_count: 1, updated_count: 1, added_count: 0, deprecated_count: 0 },
 		};
+		project.impact_application = {
+			status: "applied",
+			analysis_snapshot_id: "impact-repair",
+			accepted_recommendation_ids: ["repair-1"],
+			completed_at: "2026-09-22T10:00:00Z",
+			result_snapshot_id: "tests-new",
+			changed_test_case_ids: ["TC-FB-001"],
+			preserved_count: 1,
+			updated_count: 1,
+			added_count: 0,
+			deprecated_count: 0,
+		};
+		project.current_snapshots.test_cases.snapshot_id = "tests-new";
 		api.setProject(project);
 		await route.fulfill({ json: project });
 	});
@@ -99,14 +112,14 @@ test("plans and explicitly accepts repair, then keeps concrete tests and require
 	const { requests } = await setup(page, { gate: deferred.promise });
 	await expect(page.getByRole("button", { name: /TC-FB-001/ })).toHaveCount(0);
 	await page.getByRole("button", { name: "Plan targeted repair" }).click();
-	await expect(page.getByRole("button", { name: "Apply 0 Accepted Recommendations" })).toBeDisabled();
+	await expect(page.getByRole("button", { name: "Apply 0 recommendations" })).toBeDisabled();
 	await page.getByRole("checkbox", { name: "Accept Generate concrete checkout coverage" }).check();
-	await page.getByRole("button", { name: "Apply 1 Accepted Recommendation", exact: true }).click();
+	await page.getByRole("button", { name: "Apply 1 recommendation", exact: true }).click();
 	await expect(page.getByRole("button", { name: /Applying/ })).toBeDisabled();
 	expect(requests).toHaveLength(1);
 	expect(requests[0].accepted_recommendation_ids).toEqual(["repair-1"]);
 	deferred.resolve();
-	await expect(page.getByText(/Impact update applied:/).first()).toBeVisible();
+	await expect(page.getByText(/Recommendations applied/).first()).toBeVisible();
 	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 	await expect(page.getByRole("button", { name: /TC-FB-001 Declined card keeps the cart/ })).toBeVisible();
 	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
@@ -121,7 +134,7 @@ test("failed repair retains concrete tests and unfinished work", async ({ page }
 	await page.screenshot({ path: test.info().outputPath("repair-work-mobile.png"), fullPage: true });
 	await page.getByRole("button", { name: "Plan targeted repair" }).click();
 	await page.getByRole("checkbox", { name: "Accept Generate concrete checkout coverage" }).check();
-	await page.getByRole("button", { name: "Apply 1 Accepted Recommendation", exact: true }).click();
+	await page.getByRole("button", { name: "Apply 1 recommendation", exact: true }).click();
 	await expect(page.getByText(/Impact update failed: Project changed/)).toBeVisible();
 	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 	await expect(page.getByRole("button", { name: /TC-GOOD Preserved concrete test/ })).toBeVisible();
