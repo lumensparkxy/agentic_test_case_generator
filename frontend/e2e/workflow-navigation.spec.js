@@ -358,7 +358,7 @@ test.describe("Route-driven application shell", () => {
 		}
 	});
 
-	test("hydrates every direct project workbench with separate active navigation", async ({ page }) => {
+	test("hydrates every direct project workbench with separate active navigation", { tag: "@p1" }, async ({ page }) => {
 		await installRouteShellApi(page);
 		await seedAuthenticatedSession(page);
 
@@ -421,7 +421,7 @@ test.describe("Route-driven application shell", () => {
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_B.name);
 	});
 
-	test("makes the URL project ID authoritative over a conflicting stored project", async ({ page }) => {
+	test("makes the URL project ID authoritative over a conflicting stored project", { tag: "@p1" }, async ({ page }) => {
 		const api = await installRouteShellApi(page);
 		await seedAuthenticatedSession(page);
 		await seedStoredProject(page, PROJECT_B.project_id);
@@ -473,7 +473,7 @@ test.describe("Route-driven application shell", () => {
 	});
 
 	for (const status of [403, 404]) {
-		test(`renders project recovery instead of stored content when project loading returns ${status}`, async ({ page }) => {
+		test(`renders project recovery instead of stored content when project loading returns ${status}`, { tag: "@p1" }, async ({ page }) => {
 			const unavailableProjectId = `unavailable-${status}`;
 			const api = await installRouteShellApi(page, { projectErrors: { [unavailableProjectId]: status } });
 			await seedAuthenticatedSession(page);
@@ -510,7 +510,7 @@ test.describe("Route-driven application shell", () => {
 		await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(PROJECT_A.name);
 	});
 
-	test("ignores a delayed project action after the user switches projects", async ({ page }) => {
+	test("ignores a delayed project action after the user switches projects", { tag: "@p1" }, async ({ page }) => {
 		let releaseParse;
 		const parseGate = new Promise((resolve) => {
 			releaseParse = resolve;

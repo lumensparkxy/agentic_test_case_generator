@@ -107,7 +107,7 @@ async function setup(page, { failure = false, gate } = {}) {
 	return { requests };
 }
 
-test("plans and explicitly accepts repair, then keeps concrete tests and requires review", async ({ page }) => {
+test("plans and explicitly accepts repair, then keeps concrete tests and requires review", { tag: "@p1" }, async ({ page }) => {
 	const deferred = createDeferred();
 	const { requests } = await setup(page, { gate: deferred.promise });
 	await expect(page.getByRole("button", { name: /TC-FB-001/ })).toHaveCount(0);
@@ -128,7 +128,7 @@ test("plans and explicitly accepts repair, then keeps concrete tests and require
 	await expect(page.getByText(/Review the changed tests before export/).first()).toBeVisible();
 });
 
-test("failed repair retains concrete tests and unfinished work", async ({ page }) => {
+test("failed repair retains concrete tests and unfinished work", { tag: "@p1" }, async ({ page }) => {
 	await setup(page, { failure: true });
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.screenshot({ path: test.info().outputPath("repair-work-mobile.png"), fullPage: true });

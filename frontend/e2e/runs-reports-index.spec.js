@@ -207,72 +207,76 @@ async function expectStatusWithIcon(row, value, label) {
 }
 
 test.describe("Global Runs and Reports indexes", () => {
-	test("renders authoritative run identities, durable states, exact totals, and canonical evidence links", async ({ page }) => {
-		const api = await openActivityPage(page, "/runs", { summary: POPULATED_SUMMARY });
-		await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Runs$/i })).toHaveAttribute(
-			"aria-current",
-			"page"
-		);
-		await expectNoProjectShell(page);
-
-		const rows = activityList(page, "Runs").getByRole("listitem");
-		await expect(rows).toHaveCount(4);
-		await expect(rows.nth(0)).toContainText(ORBIT_PROJECT.name);
-		await expect(rows.nth(1)).toContainText(MERCURY_PROJECT.name);
-		await expect(rows.nth(2)).toContainText(ATLAS_PROJECT.name);
-		await expect(rows.nth(3)).toContainText(NOVA_PROJECT.name);
-
-		const queuedRow = activityRow(page, "Runs", ORBIT_PROJECT.name);
-		await expectStatusWithIcon(queuedRow, "queued", "Queued");
-		await expect(queuedRow).toContainText(QUEUED_RUN.run_id);
-		await expect(queuedRow).toContainText(/QA/i);
-		await expect(queuedRow).toContainText(/Selected\s*7/i);
-		await expect(queuedRow).toContainText(/Executed\s*0/i);
-
-		const runningRow = activityRow(page, "Runs", MERCURY_PROJECT.name);
-		await expectStatusWithIcon(runningRow, "running", "Running");
-		await expect(runningRow).toContainText(RUNNING_RUN.run_id);
-		await expect(runningRow).toContainText(/Production/i);
-		await expect(runningRow).toContainText(/Selected\s*8/i);
-		await expect(runningRow).toContainText(/Executed\s*3/i);
-		await expect(runningRow).toContainText(/Passed\s*1/i);
-		await expect(runningRow).toContainText(/Failed\s*1/i);
-		await expect(runningRow).toContainText(/Invalid\s*1/i);
-
-		const completedRow = activityRow(page, "Runs", ATLAS_PROJECT.name);
-		await expectStatusWithIcon(completedRow, "completed", "Completed");
-		await expect(completedRow).toContainText(COMPLETED_RUN.run_id);
-		await expect(completedRow).toContainText(/Selected\s*9/i);
-		await expect(completedRow).toContainText(/Executed\s*6/i);
-		await expect(completedRow).toContainText(/Passed\s*1/i);
-		await expect(completedRow).toContainText(/Failed\s*1/i);
-		await expect(completedRow).toContainText(/Invalid\s*1/i);
-
-		const failedRow = activityRow(page, "Runs", NOVA_PROJECT.name);
-		await expectStatusWithIcon(failedRow, "failed", "Failed");
-		await expect(failedRow).toContainText(FAILED_RUN.run_id);
-		await expect(failedRow).toContainText(/Selected\s*4/i);
-		await expect(failedRow).toContainText(/Executed\s*2/i);
-		await expect(failedRow).toContainText(/Failed\s*2/i);
-
-		for (const [project, row] of [
-			[ORBIT_PROJECT, queuedRow],
-			[MERCURY_PROJECT, runningRow],
-			[ATLAS_PROJECT, completedRow],
-			[NOVA_PROJECT, failedRow],
-		]) {
-			await expect(row.getByRole("link", { name: `Open automation evidence for ${project.name}` })).toHaveAttribute(
-				"href",
-				buildProjectPath(project.project_id, "automation")
+	test(
+		"renders authoritative run identities, durable states, exact totals, and canonical evidence links",
+		{ tag: "@p1" },
+		async ({ page }) => {
+			const api = await openActivityPage(page, "/runs", { summary: POPULATED_SUMMARY });
+			await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Runs$/i })).toHaveAttribute(
+				"aria-current",
+				"page"
 			);
-		}
-		for (const run of [QUEUED_RUN, RUNNING_RUN, COMPLETED_RUN, FAILED_RUN]) {
-			await expect(activityRow(page, "Runs", run.project_name).getByRole("time")).toHaveAttribute("datetime", run.updated_at);
-		}
+			await expectNoProjectShell(page);
 
-		expect(api.requests.workspaceSummary).toHaveLength(1);
-		expect(api.requests.projectDetail).toHaveLength(0);
-	});
+			const rows = activityList(page, "Runs").getByRole("listitem");
+			await expect(rows).toHaveCount(4);
+			await expect(rows.nth(0)).toContainText(ORBIT_PROJECT.name);
+			await expect(rows.nth(1)).toContainText(MERCURY_PROJECT.name);
+			await expect(rows.nth(2)).toContainText(ATLAS_PROJECT.name);
+			await expect(rows.nth(3)).toContainText(NOVA_PROJECT.name);
+
+			const queuedRow = activityRow(page, "Runs", ORBIT_PROJECT.name);
+			await expectStatusWithIcon(queuedRow, "queued", "Queued");
+			await expect(queuedRow).toContainText(QUEUED_RUN.run_id);
+			await expect(queuedRow).toContainText(/QA/i);
+			await expect(queuedRow).toContainText(/Selected\s*7/i);
+			await expect(queuedRow).toContainText(/Executed\s*0/i);
+
+			const runningRow = activityRow(page, "Runs", MERCURY_PROJECT.name);
+			await expectStatusWithIcon(runningRow, "running", "Running");
+			await expect(runningRow).toContainText(RUNNING_RUN.run_id);
+			await expect(runningRow).toContainText(/Production/i);
+			await expect(runningRow).toContainText(/Selected\s*8/i);
+			await expect(runningRow).toContainText(/Executed\s*3/i);
+			await expect(runningRow).toContainText(/Passed\s*1/i);
+			await expect(runningRow).toContainText(/Failed\s*1/i);
+			await expect(runningRow).toContainText(/Invalid\s*1/i);
+
+			const completedRow = activityRow(page, "Runs", ATLAS_PROJECT.name);
+			await expectStatusWithIcon(completedRow, "completed", "Completed");
+			await expect(completedRow).toContainText(COMPLETED_RUN.run_id);
+			await expect(completedRow).toContainText(/Selected\s*9/i);
+			await expect(completedRow).toContainText(/Executed\s*6/i);
+			await expect(completedRow).toContainText(/Passed\s*1/i);
+			await expect(completedRow).toContainText(/Failed\s*1/i);
+			await expect(completedRow).toContainText(/Invalid\s*1/i);
+
+			const failedRow = activityRow(page, "Runs", NOVA_PROJECT.name);
+			await expectStatusWithIcon(failedRow, "failed", "Failed");
+			await expect(failedRow).toContainText(FAILED_RUN.run_id);
+			await expect(failedRow).toContainText(/Selected\s*4/i);
+			await expect(failedRow).toContainText(/Executed\s*2/i);
+			await expect(failedRow).toContainText(/Failed\s*2/i);
+
+			for (const [project, row] of [
+				[ORBIT_PROJECT, queuedRow],
+				[MERCURY_PROJECT, runningRow],
+				[ATLAS_PROJECT, completedRow],
+				[NOVA_PROJECT, failedRow],
+			]) {
+				await expect(row.getByRole("link", { name: `Open automation evidence for ${project.name}` })).toHaveAttribute(
+					"href",
+					buildProjectPath(project.project_id, "automation")
+				);
+			}
+			for (const run of [QUEUED_RUN, RUNNING_RUN, COMPLETED_RUN, FAILED_RUN]) {
+				await expect(activityRow(page, "Runs", run.project_name).getByRole("time")).toHaveAttribute("datetime", run.updated_at);
+			}
+
+			expect(api.requests.workspaceSummary).toHaveLength(1);
+			expect(api.requests.projectDetail).toHaveLength(0);
+		}
+	);
 
 	test("renders report evidence identity with text-and-icon approval, draft, and stale states", async ({ page }) => {
 		const api = await openActivityPage(page, "/reports", { summary: POPULATED_SUMMARY });

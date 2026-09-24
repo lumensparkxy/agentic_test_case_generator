@@ -407,7 +407,7 @@ function orchestratorStatus(phase = "stale") {
 }
 
 test.describe("Impact update flow", () => {
-	test("stale existing suite uses impact analysis as the primary path", async ({ page }) => {
+	test("stale existing suite uses impact analysis as the primary path", { tag: "@p1" }, async ({ page }) => {
 		const projectBefore = projectDetail();
 		const projectWithAnalysis = projectDetail({ withAnalysis: true });
 		const projectAfterApply = projectDetail({ afterApply: true });

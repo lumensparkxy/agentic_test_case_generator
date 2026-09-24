@@ -45,10 +45,14 @@ async function openSurface(page, surface, width) {
 
 for (const width of [390, 1440]) {
 	for (const surface of Object.keys(surfaceRoutes)) {
-		test(`${surface} has no serious or critical WCAG A/AA violations at ${width}px`, async ({ page }) => {
-			await openSurface(page, surface, width);
-			await expectNoSeriousOrCriticalViolations(page, `${surface} at ${width}px`);
-		});
+		test(
+			`${surface} has no serious or critical WCAG A/AA violations at ${width}px`,
+			{ tag: surface === "Use Cases" ? "@p1" : [] },
+			async ({ page }) => {
+				await openSurface(page, surface, width);
+				await expectNoSeriousOrCriticalViolations(page, `${surface} at ${width}px`);
+			}
+		);
 	}
 }
 

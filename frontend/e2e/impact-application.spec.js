@@ -123,7 +123,7 @@ async function setup(page, { mode = "success", initialStatus, defaultAccepted = 
 }
 const bar = (page) => page.getByRole("region", { name: "Recommendation application" });
 
-test("keyboard and rapid activation submit once, show persistent receipt, and filter changed tests", async ({ page }) => {
+test("keyboard and rapid activation submit once, show persistent receipt, and filter changed tests", { tag: "@p1" }, async ({ page }) => {
 	const errors = [];
 	page.on("pageerror", (error) => errors.push(error.message));
 	await page.setViewportSize({ width: 1440, height: 1000 });
@@ -160,7 +160,7 @@ test("keyboard and rapid activation submit once, show persistent receipt, and fi
 	expect(errors).toEqual([]);
 });
 
-test("refresh and a second tab recover the running operation without submitting again", async ({ page, context }) => {
+test("refresh and a second tab recover the running operation without submitting again", { tag: "@p1" }, async ({ page, context }) => {
 	const flow = await setup(page);
 	await bar(page).getByRole("button", { name: "Apply 27 recommendations" }).click();
 	await expect.poll(flow.requests).toBe(1);
@@ -175,7 +175,7 @@ test("refresh and a second tab recover the running operation without submitting 
 	expect(flow.requests()).toBe(1);
 });
 
-test("lost response reconciles saved success", async ({ page }) => {
+test("lost response reconciles saved success", { tag: "@p1" }, async ({ page }) => {
 	const flow = await setup(page, { mode: "lost" });
 	await bar(page).getByRole("button", { name: "Apply 27 recommendations" }).click();
 	flow.gate.resolve();
@@ -184,7 +184,7 @@ test("lost response reconciles saved success", async ({ page }) => {
 	expect(flow.requests()).toBe(1);
 });
 
-test("confirmed failure permits one guarded retry", async ({ page }) => {
+test("confirmed failure permits one guarded retry", { tag: "@p1" }, async ({ page }) => {
 	const flow = await setup(page, { mode: "failure" });
 	await bar(page).getByRole("button", { name: "Apply 27 recommendations" }).click();
 	flow.gate.resolve();
@@ -232,7 +232,7 @@ test("legacy evidence without proof requires analysis, not retry", async ({ page
 	await expect(bar(page).getByRole("button", { name: "Retry" })).toHaveCount(0);
 });
 
-test("late application response cannot overwrite a different project", async ({ page }) => {
+test("late application response cannot overwrite a different project", { tag: "@p1" }, async ({ page }) => {
 	const flow = await setup(page);
 	await bar(page).getByRole("button", { name: "Apply 27 recommendations" }).click();
 	await expect.poll(flow.requests).toBe(1);

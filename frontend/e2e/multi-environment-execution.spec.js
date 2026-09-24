@@ -162,7 +162,7 @@ function statusPayload() {
 }
 
 test.describe("Multi-environment execution", () => {
-	test("named environment executions report separate results after history rail removal", async ({ page }) => {
+	test("named environment executions report separate results after history rail removal", { tag: "@p1" }, async ({ page }) => {
 		const executionRuns = [];
 		let currentProject = projectDetail(executionRuns);
 
