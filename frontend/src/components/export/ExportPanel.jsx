@@ -162,7 +162,9 @@ export default function ExportPanel({
 			<PlaywrightExecutionReport report={executionReport} />
 			<div className="export-section">
 				<h3 className="section-subtitle">📥 Quick Export</h3>
-				<p className="helper-text">Download test cases directly to your computer.</p>
+				<p className="helper-text">
+					Download test cases directly to your computer. Filenames include the project name and export date/time in UTC.
+				</p>
 				{exportMessage && (
 					<div className="workflow-result-notice success" role="status">
 						<p>{exportMessage}</p>
