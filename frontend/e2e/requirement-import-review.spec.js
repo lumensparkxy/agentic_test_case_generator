@@ -190,7 +190,7 @@ async function stage(page) {
 }
 const workbench = (page) => page.getByRole("region", { name: "Project requirements table", exact: true });
 
-test("stages eight plus two, applies ten, and retains IDs and approvals after reload", async ({ page }) => {
+test("stages eight plus two, applies ten, and retains IDs and approvals after reload", { tag: "@p1" }, async ({ page }) => {
 	const state = await setup(page);
 	await stage(page);
 	await expect(workbench(page).getByRole("row")).toHaveCount(9);
@@ -268,7 +268,7 @@ test("failed apply keeps comparison and reuses retry identity", async ({ page })
 	expect(state.applies[0].idempotency_key).toEqual(state.applies[1].idempotency_key);
 });
 
-test("stale saved previews cannot apply", async ({ page }) => {
+test("stale saved previews cannot apply", { tag: "@p1" }, async ({ page }) => {
 	await setup(page, { revision: 8, pendingOnLoad: true });
 	await page.getByRole("button", { name: "Review import: TX-6" }).click();
 	await expect(page.getByRole("alert")).toContainText("Project changed");

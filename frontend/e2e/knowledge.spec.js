@@ -98,7 +98,7 @@ test("skill catalog distinguishes enabled and held stages", async ({ page }) => 
 	await expect(testCases).toContainText("Memory off");
 });
 
-test("knowledge requires separate approval and edits preserve the active wording", async ({ page }) => {
+test("knowledge requires separate approval and edits preserve the active wording", { tag: "@p1" }, async ({ page }) => {
 	const calls = await openKnowledge(page);
 	await page.getByRole("button", { name: "Add guidance", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Add guidance", exact: true });

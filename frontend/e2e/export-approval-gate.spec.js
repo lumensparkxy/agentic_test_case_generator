@@ -81,7 +81,7 @@ function orchestratorStatus() {
 }
 
 test.describe("Export approval gate", () => {
-	test("draft test cases require an explicit override reason before export", async ({ page }) => {
+	test("draft test cases require an explicit override reason before export", { tag: "@p1" }, async ({ page }) => {
 		let exportPayload = null;
 
 		await page.route("**/auth/me", async (route) =>

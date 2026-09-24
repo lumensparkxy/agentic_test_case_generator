@@ -98,13 +98,16 @@ validation prerequisite. Instruction/skill maintenance is described in
 The Playwright config expects an existing `E2E_BASE_URL`. For local frontend
 E2E runs, start `npm run dev -- --host 127.0.0.1` in a separate frontend shell
 and run the specs with `E2E_BASE_URL=http://127.0.0.1:5173`; CI performs the
-same server startup and readiness check explicitly. The exact protected
-Home-first UX gate is:
+same server startup and readiness check explicitly. The protected frontend
+gate runs only Priority 1 (P1) cases:
 
 ```bash
-CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first
+CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:p1
 ```
 
+The P1 script filters the existing `test:e2e:home-first` file list by `@p1`,
+so it cannot accidentally include the separate live-service workflow specs.
+An empty selection fails through Playwright's default no-tests behavior.
 The script is intentionally synthetic: it uses mocked API fixtures, a seeded
 test session, and local Vite only. It does not call Firebase, a model, a live
 backend, production, or an external integration.
@@ -122,15 +125,67 @@ CI currently runs:
 - Frontend ESLint check.
 - Frontend Prettier format check.
 - Frontend production build.
-- The focused mocked Home-first E2E gate, including Home/routing, contextual
-  actions, Use Cases and Inbox review, Automation preview truth,
-  multi-environment execution, Runs/Reports, responsive reflow, export gating,
-  keyboard/focus semantics, and Axe checks.
+- The P1 mocked E2E gate described below. The full responsive, accessibility,
+  presentation, and edge-case matrices remain available separately.
 - Playwright HTML reports, failure screenshots/videos, and retry traces uploaded
   as `frontend-playwright-<run>-<attempt>` Actions artifacts for 14 days. No
   generated artifact is committed.
 
 Evidence: `.github/workflows/ci.yml`.
+
+### Frontend P1 selection
+
+P1 means failure blocks a core workflow, bypasses approval, performs the wrong
+mutation, loses durable state, or exposes stale state across projects/sessions.
+It also includes representative serious/critical accessibility checks on the
+review path. Browser-test priority is independent of GitHub issue labels and the
+priority field in generated test cases.
+
+The initial selection for [#307](https://github.com/lumensparkxy/agentic_test_case_generator/issues/307)
+is 38 of 231 mocked cases. Explicit Playwright `{ tag: "@p1" }` metadata is placed
+on individual cases; the accessibility matrix tags only the Use Cases surface.
+
+| Area / spec | P1 cases | Required behavior |
+| --- | ---: | --- |
+| `home-workspace` | 3 | Create project, resume work, ignore a prior user's delayed project list after logout |
+| `workflow-navigation` | 5 | Open direct workbenches, honor URL project identity, recover from 403/404 without stale content, ignore cross-project action responses |
+| `requirement-import-review` | 2 | Apply imported requirements durably; reject stale previews |
+| `use-case-generation` | 2 | Generate a new revision requiring review; block unapproved requirements |
+| `use-case-review` | 3 | Save exact snapshot/revision approval, preserve decisions on conflict, prevent double submission |
+| `scenario-review-table` | 2 | Save scenario reviews with full approval scope; revoke approval after edits |
+| `test-generation-repair` | 2 | Apply explicit repair and require review; preserve tests on failure |
+| `improve-tests` | 2 | Apply selected feedback; retain drafts and suite across failed save/retry |
+| `impact-update-flow` | 1 | Route stale suites through impact analysis |
+| `impact-application` | 5 | Submit once with receipt, recover after refresh/second tab, reconcile lost success, retry confirmed failure, ignore cross-project completion |
+| `contextual-next-action` | 1 | Confirm full regeneration, prevent duplicate submission, preserve the suite until success |
+| `automation-preview-consistency` | 2 | Run only selected IDs; block execution for inconsistent empty previews |
+| `export-approval-gate` | 1 | Enforce draft override and download JSON/CSV/Excel with descriptive filenames |
+| `multi-environment-execution` | 1 | Keep named-environment execution results separate |
+| `knowledge` | 1 | Require separate approval and preserve active wording during edits |
+| `jira-workflow` | 1 | Connect, import, refine, preview and sync with mocked JIRA |
+| `review-inbox` | 1 | Deduplicate review work and open canonical workbenches |
+| `runs-reports-index` | 1 | Preserve durable run identity, state, totals and evidence links |
+| `accessibility-navigation` | 2 | No serious/critical Axe violations on Use Cases at 390px and 1440px |
+
+Selection and broader regression commands (from `frontend/`):
+
+```bash
+npm run test:e2e:p1 -- --list
+npm run test:e2e:home-first -- --list
+CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first
+```
+
+The other 193 cases are retained, not skipped or deleted. Required CI no longer
+covers every layout breakpoint, typography/detail view, filter, empty/error
+state, or alternate race/retry path. Run affected specs for changes in those
+areas and the full mocked suite for shared cross-flow or release validation.
+The P1 gate is not evidence of full responsive/accessibility coverage or live
+backend/model behavior. Lint, formatting, build, backend gates, retries, and
+Playwright diagnostic uploads are unchanged.
+
+When adding a P1 tag, identify the critical failure it catches and avoid adding
+an entire matrix for equivalent variants. Use `--list` to review the selection;
+do not remove assertions or hide failures to meet a runtime target.
 
 ## 2) Test Layout
 
@@ -174,7 +229,7 @@ Evidence: `.github/workflows/ci.yml`.
 | Frontend Home and Projects | Yes | Zero/one/many-project Home states, subject-scoped and refreshed server ranking, stable My work groups, stale stored selection cleanup, bounded client search, create/open/clear behavior, delayed-create route/logout races, latest-wins project-list reads, loading/retry semantics, populated reflow at 320/390/640/760/900/1280/1440/1920, status containment, and canonical project links | `frontend/e2e/home-workspace.spec.js` uses deterministic workspace/project fixtures from `frontend/e2e/support/workspace.js`; `frontend/e2e/workflow-navigation.spec.js` preserves URL and browser-history authority |
 | Frontend Review Inbox | Yes | Server-ranked ordering, exact project/stage/snapshot deduplication, distinct-snapshot preservation, actionable versus informational/completed views, stage/status filters without refetch, canonical rendered Use Cases/Requirements/Test Cases destinations, cold and cached loading/error/retry states, invalid-filter normalization, empty and filtered-empty states, route and dynamic-action focus, full keyboard order, long-name containment and reflow at 390/639/640/899/900/1280/1920, and removal after a durable Use Cases decision refreshes the shared summary | `frontend/e2e/review-inbox.spec.js` uses bounded synthetic workspace and Use Cases review fixtures; `frontend/e2e/workflow-navigation.spec.js` preserves global navigation and route authority |
 | Frontend Runs and Reports indexes | Yes | Bounded workspace-summary projections, local search/status/environment/type/format filters without refetch or mutation, exact durable run status/count/timestamp rendering, non-color approved/draft/stale report status and evidence identity, canonical project Automation/Reports links, source-empty and filtered-empty states, cold loading/error/retry behavior, predictable route/filter/retry focus, and long-content containment from 320px through 1920px | `frontend/e2e/runs-reports-index.spec.js` uses deterministic workspace activity fixtures; `frontend/e2e/workflow-navigation.spec.js` preserves global destination, URL, and browser-history authority |
-| Home-first UX and accessibility release gate | Yes | Zero/one/many-project route truth, stale-state isolation, exact action routing, review durability, mixed/empty/inconsistent Automation previews, selected candidate IDs, Home/Overview/Use Cases/contextual task/Automation/Reports reflow at 320/390/640/760/900/1280/1440/1920, global skip link, route and history focus, compact disclosure restoration, persistent polite status, assertive errors, busy states, and WCAG A/AA Axe scans at 390/1440 | `npm run test:e2e:home-first` runs the exact protected suite. `frontend/e2e/accessibility-navigation.spec.js` and `frontend/e2e/support/accessibility.js` scan empty/populated Home, Overview, Use Cases, and Automation with no Axe exclusions and fail on serious/critical violations. Manual VoiceOver + Chrome steps and results live in `docs/home-first-accessibility-smoke.md`; this evidence is not WCAG certification. |
+| Home-first UX and accessibility release gate | Yes | Zero/one/many-project route truth, stale-state isolation, exact action routing, review durability, mixed/empty/inconsistent Automation previews, selected candidate IDs, Home/Overview/Use Cases/contextual task/Automation/Reports reflow at 320/390/640/760/900/1280/1440/1920, global skip link, route and history focus, compact disclosure restoration, persistent polite status, assertive errors, busy states, and WCAG A/AA Axe scans at 390/1440 | `npm run test:e2e:home-first` retains the full mocked regression suite; required CI runs only its `@p1` subset via `npm run test:e2e:p1`. `frontend/e2e/accessibility-navigation.spec.js` and `frontend/e2e/support/accessibility.js` scan empty/populated Home, Overview, Use Cases, and Automation with no Axe exclusions and fail on serious/critical violations. Manual VoiceOver + Chrome steps and results live in `docs/home-first-accessibility-smoke.md`; this evidence is not WCAG certification. |
 | Backend integration-style | Yes | FastAPI endpoints, JIRA/Azure DevOps import/sync routes, audit hooks, billing access | Uses `TestClient` and patched dependencies |
 | Integration observability | Yes | JIRA/Azure DevOps provider metrics, duration summaries, and safe structured logs | `backend/tests/test_integration_observability.py`, adapter tests, and `backend/tests/test_observability_metrics.py` |
 | Backend lint | Yes | Python syntax/import safety baseline | `python -m ruff check backend scripts` |

@@ -97,24 +97,28 @@ test("failed review opens actionable findings; selection and instructions surviv
 	await expect(panel(page).getByRole("button", { name: /^View test case/ })).toHaveCount(1);
 });
 
-test("applies explicit selected feedback with project recommendations, refreshes quality and clears drafts", async ({ page }) => {
-	const { requests } = await open(page);
-	await panel(page).getByRole("checkbox", { name: issue, exact: true }).check();
-	await panel(page).getByRole("textbox").fill("  Use visible outcomes.  ");
-	await apply(page).click();
-	await expect(panel(page).getByRole("heading", { name: "Machine quality check passed" })).toBeVisible();
-	expect(requests).toHaveLength(1);
-	expect(requests[0].feedback).toBe(
-		`Address the requested fixes below. Preserve unrelated test cases and their IDs where possible.\n\nSelected findings:\n- ${issue}\n\nAdditional instructions:\nUse visible outcomes.`
-	);
-	expect(requests[0].base_project_revision).toBe(7);
-	expect(requests[0].test_cases).toHaveLength(2);
-	await expect(panel(page).getByRole("textbox")).toHaveValue("");
-	await expect(panel(page)).toContainText("does not replace your review");
-	await expect(page.getByRole("tab", { name: /^Improve tests/ })).toHaveAttribute("aria-selected", "true");
-});
+test(
+	"applies explicit selected feedback with project recommendations, refreshes quality and clears drafts",
+	{ tag: "@p1" },
+	async ({ page }) => {
+		const { requests } = await open(page);
+		await panel(page).getByRole("checkbox", { name: issue, exact: true }).check();
+		await panel(page).getByRole("textbox").fill("  Use visible outcomes.  ");
+		await apply(page).click();
+		await expect(panel(page).getByRole("heading", { name: "Machine quality check passed" })).toBeVisible();
+		expect(requests).toHaveLength(1);
+		expect(requests[0].feedback).toBe(
+			`Address the requested fixes below. Preserve unrelated test cases and their IDs where possible.\n\nSelected findings:\n- ${issue}\n\nAdditional instructions:\nUse visible outcomes.`
+		);
+		expect(requests[0].base_project_revision).toBe(7);
+		expect(requests[0].test_cases).toHaveLength(2);
+		await expect(panel(page).getByRole("textbox")).toHaveValue("");
+		await expect(panel(page)).toContainText("does not replace your review");
+		await expect(page.getByRole("tab", { name: /^Improve tests/ })).toHaveAttribute("aria-selected", "true");
+	}
+);
 
-test("failed save preserves drafts and suite; retry succeeds with remaining findings", async ({ page }) => {
+test("failed save preserves drafts and suite; retry succeeds with remaining findings", { tag: "@p1" }, async ({ page }) => {
 	const { requests } = await open(page, {
 		failures: [503],
 		resultReview: { approved: false, score: 80, threshold: 90, blocking_issues: [suiteIssue] },

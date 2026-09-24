@@ -329,40 +329,42 @@ test.describe("Authenticated Home workspace", () => {
 		});
 	}
 
-	test("uses the server-ranked Continue item for a one-project returning user and returns Home through browser history", async ({
-		page,
-	}) => {
-		const summary = workspaceSummaryFixture({
-			continue_working: REVIEW_ITEM,
-			projects: [REVIEW_PROJECT],
-			work_items: [REVIEW_ITEM],
-		});
-		await installWorkspaceApi(page, { summary });
-		await seedAuthenticatedSession(page);
-		await seedStoredProject(page, REVIEW_PROJECT.project_id);
+	test(
+		"uses the server-ranked Continue item for a one-project returning user and returns Home through browser history",
+		{ tag: "@p1" },
+		async ({ page }) => {
+			const summary = workspaceSummaryFixture({
+				continue_working: REVIEW_ITEM,
+				projects: [REVIEW_PROJECT],
+				work_items: [REVIEW_ITEM],
+			});
+			await installWorkspaceApi(page, { summary });
+			await seedAuthenticatedSession(page);
+			await seedStoredProject(page, REVIEW_PROJECT.project_id);
 
-		await page.goto("/");
+			await page.goto("/");
 
-		await expect(page).toHaveURL(/\/$/);
-		await expect(page.getByRole("heading", { name: /^Home$/i })).toBeVisible({ timeout: 30_000 });
-		const continueRegion = homeRegion(page, "Continue working");
-		await expect(continueRegion).toContainText(REVIEW_PROJECT.name);
-		await expect(continueRegion).toContainText("3");
-		await expect(continueRegion).toContainText(REVIEW_ITEM.reason);
-		const continueLink = continueRegion.getByRole("link");
-		await expect(continueLink).toHaveCount(1);
-		await expect(continueLink).toHaveAttribute("href", buildProjectPath(REVIEW_PROJECT.project_id, "use-cases"));
-		await expectNoProjectShell(page);
+			await expect(page).toHaveURL(/\/$/);
+			await expect(page.getByRole("heading", { name: /^Home$/i })).toBeVisible({ timeout: 30_000 });
+			const continueRegion = homeRegion(page, "Continue working");
+			await expect(continueRegion).toContainText(REVIEW_PROJECT.name);
+			await expect(continueRegion).toContainText("3");
+			await expect(continueRegion).toContainText(REVIEW_ITEM.reason);
+			const continueLink = continueRegion.getByRole("link");
+			await expect(continueLink).toHaveCount(1);
+			await expect(continueLink).toHaveAttribute("href", buildProjectPath(REVIEW_PROJECT.project_id, "use-cases"));
+			await expectNoProjectShell(page);
 
-		await continueLink.click();
-		await expect(page).toHaveURL(buildProjectPath(REVIEW_PROJECT.project_id, "use-cases"));
-		await expect(page.getByRole("heading", { name: /^Use Cases$/i })).toBeVisible({ timeout: 30_000 });
+			await continueLink.click();
+			await expect(page).toHaveURL(buildProjectPath(REVIEW_PROJECT.project_id, "use-cases"));
+			await expect(page.getByRole("heading", { name: /^Use Cases$/i })).toBeVisible({ timeout: 30_000 });
 
-		await page.goBack();
-		await expect(page).toHaveURL(/\/$/);
-		await expect(page.getByRole("heading", { name: /^Home$/i })).toBeVisible();
-		await expectNoProjectShell(page);
-	});
+			await page.goBack();
+			await expect(page).toHaveURL(/\/$/);
+			await expect(page.getByRole("heading", { name: /^Home$/i })).toBeVisible();
+			await expectNoProjectShell(page);
+		}
+	);
 
 	test("refreshes the authoritative workspace ranking when returning from project work", async ({ page }) => {
 		const updatedSummary = workspaceSummaryFixture({
@@ -559,7 +561,7 @@ test.describe("Authenticated Home workspace", () => {
 		await expect(page.getByText(BLOCKED_PROJECT.name, { exact: true })).toHaveCount(0);
 	});
 
-	test("ignores a delayed prior-user project list after logout", async ({ page }) => {
+	test("ignores a delayed prior-user project list after logout", { tag: "@p1" }, async ({ page }) => {
 		const projectListGate = createDeferred();
 		const api = await installWorkspaceApi(page, {
 			summary: MANY_PROJECT_SUMMARY,
@@ -657,7 +659,7 @@ test.describe("Authenticated Projects experience", () => {
 		await expectNoProjectShell(page);
 	});
 
-	test("creates a project, persists it, and keeps Home as the landing route", async ({ page }) => {
+	test("creates a project, persists it, and keeps Home as the landing route", { tag: "@p1" }, async ({ page }) => {
 		const createdProject = projectDetailFixture(
 			workspaceProjectFixture({
 				project_id: "project-created-home",

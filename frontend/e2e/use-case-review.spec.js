@@ -209,41 +209,43 @@ test.describe("Use Cases review workbench", () => {
 		await expect(page.getByLabel("Contextual task")).toHaveCount(0);
 	});
 
-	test("approves the exact snapshot and revision, then refreshes durable project, orchestrator, Home, and future Inbox state", async ({
-		page,
-	}) => {
-		const api = await openUseCaseReview(page);
-		await openDecision(page);
-		await reviewComment(page).fill("  Coverage is ready for downstream generation.  ");
-		await openDecision(page);
-		await approveButton(page).click();
+	test(
+		"approves the exact snapshot and revision, then refreshes durable project, orchestrator, Home, and future Inbox state",
+		{ tag: "@p1" },
+		async ({ page }) => {
+			const api = await openUseCaseReview(page);
+			await openDecision(page);
+			await reviewComment(page).fill("  Coverage is ready for downstream generation.  ");
+			await openDecision(page);
+			await approveButton(page).click();
 
-		await expect.poll(() => api.requests.review.length).toBe(1);
-		expect(api.requests.review[0].payload).toEqual({
-			snapshot_id: USE_CASE_SNAPSHOT_ID,
-			base_project_revision: USE_CASE_BASE_REVISION,
-			decision: "approve",
-			comment: "Coverage is ready for downstream generation.",
-		});
-		expect(api.requests.review[0].headers["x-request-id"]).toBeTruthy();
-		await expect(reviewAnnouncement(page)).toContainText(/Use Cases approved/i);
-		await expectDurableRefresh(api);
-		await expect(humanReviewRegion(page)).toContainText(/approved/i);
-		await expect(humanReviewRegion(page)).toContainText("Coverage is ready for downstream generation.");
+			await expect.poll(() => api.requests.review.length).toBe(1);
+			expect(api.requests.review[0].payload).toEqual({
+				snapshot_id: USE_CASE_SNAPSHOT_ID,
+				base_project_revision: USE_CASE_BASE_REVISION,
+				decision: "approve",
+				comment: "Coverage is ready for downstream generation.",
+			});
+			expect(api.requests.review[0].headers["x-request-id"]).toBeTruthy();
+			await expect(reviewAnnouncement(page)).toContainText(/Use Cases approved/i);
+			await expectDurableRefresh(api);
+			await expect(humanReviewRegion(page)).toContainText(/approved/i);
+			await expect(humanReviewRegion(page)).toContainText("Coverage is ready for downstream generation.");
 
-		await page.reload();
-		await expect(page.getByRole("heading", { name: /^Use Cases$/i, level: 1 })).toBeVisible({ timeout: 30_000 });
-		await expect(humanReviewRegion(page)).toContainText(/approved/i);
-		await expect(machineReviewRegion(page)).toContainText("requires attention");
+			await page.reload();
+			await expect(page.getByRole("heading", { name: /^Use Cases$/i, level: 1 })).toBeVisible({ timeout: 30_000 });
+			await expect(humanReviewRegion(page)).toContainText(/approved/i);
+			await expect(machineReviewRegion(page)).toContainText("requires attention");
 
-		await page
-			.getByRole("navigation", { name: "Global navigation" })
-			.getByRole("link", { name: /^Home$/i })
-			.click();
-		await expect(page).toHaveURL(/\/$/);
-		await expect(page.getByRole("heading", { name: /^Home$/i, level: 1 })).toBeVisible();
-		await expect(page.getByRole("region", { name: /^My work$/i })).not.toContainText("Approve Use Cases");
-	});
+			await page
+				.getByRole("navigation", { name: "Global navigation" })
+				.getByRole("link", { name: /^Home$/i })
+				.click();
+			await expect(page).toHaveURL(/\/$/);
+			await expect(page.getByRole("heading", { name: /^Home$/i, level: 1 })).toBeVisible();
+			await expect(page.getByRole("region", { name: /^My work$/i })).not.toContainText("Approve Use Cases");
+		}
+	);
 
 	test("requires feedback for Request changes and persists the exact decision", async ({ page }) => {
 		const api = await openUseCaseReview(page);
@@ -280,72 +282,76 @@ test.describe("Use Cases review workbench", () => {
 		await expect(humanReviewRegion(page)).toContainText("Add converted-currency threshold coverage.");
 	});
 
-	test("preserves feedback and the selected decision on 409 until Reload latest replaces the artifact", async ({ page }) => {
-		const latestCoveragePlan = useCaseCoveragePlanFixture();
-		latestCoveragePlan[1].scenarios.push({
-			id: "REQ-202-SCN-03",
-			requirement_id: "REQ-202",
-			scenario_type: "Data Variation",
-			title: "Apply approval after currency conversion",
-			objective: "Compare the converted account-currency amount with the approval threshold.",
-			priority: "High",
-			must_have: true,
-		});
-		const latestSnapshot = useCaseSnapshotFixture({
-			snapshot_id: "snapshot-use-cases-v4",
-			version: 4,
-			project_revision: USE_CASE_BASE_REVISION + 1,
-			created_at: "2026-07-17T12:30:00Z",
-			payload: {
-				...useCaseSnapshotFixture().payload,
-				coverage_plan: latestCoveragePlan,
-				coverage_metrics: {
-					...useCaseSnapshotFixture().payload.coverage_metrics,
-					planned_scenarios_total: 5,
-				},
-			},
-		});
-		const latestProject = useCaseProjectFixture({ snapshot: latestSnapshot, current_revision: USE_CASE_BASE_REVISION + 1 });
-		const api = await openUseCaseReview(page, {
-			reviewScenarios: [
-				{
-					status: 409,
-					serverProject: latestProject,
-					payload: {
-						detail: {
-							message: "The reviewed Use Cases snapshot is no longer current. Reload before submitting a decision.",
-							latest_revision: USE_CASE_BASE_REVISION + 1,
-							current_snapshot_id: latestSnapshot.snapshot_id,
-							reload_required: true,
-						},
+	test(
+		"preserves feedback and the selected decision on 409 until Reload latest replaces the artifact",
+		{ tag: "@p1" },
+		async ({ page }) => {
+			const latestCoveragePlan = useCaseCoveragePlanFixture();
+			latestCoveragePlan[1].scenarios.push({
+				id: "REQ-202-SCN-03",
+				requirement_id: "REQ-202",
+				scenario_type: "Data Variation",
+				title: "Apply approval after currency conversion",
+				objective: "Compare the converted account-currency amount with the approval threshold.",
+				priority: "High",
+				must_have: true,
+			});
+			const latestSnapshot = useCaseSnapshotFixture({
+				snapshot_id: "snapshot-use-cases-v4",
+				version: 4,
+				project_revision: USE_CASE_BASE_REVISION + 1,
+				created_at: "2026-07-17T12:30:00Z",
+				payload: {
+					...useCaseSnapshotFixture().payload,
+					coverage_plan: latestCoveragePlan,
+					coverage_metrics: {
+						...useCaseSnapshotFixture().payload.coverage_metrics,
+						planned_scenarios_total: 5,
 					},
 				},
-			],
-		});
+			});
+			const latestProject = useCaseProjectFixture({ snapshot: latestSnapshot, current_revision: USE_CASE_BASE_REVISION + 1 });
+			const api = await openUseCaseReview(page, {
+				reviewScenarios: [
+					{
+						status: 409,
+						serverProject: latestProject,
+						payload: {
+							detail: {
+								message: "The reviewed Use Cases snapshot is no longer current. Reload before submitting a decision.",
+								latest_revision: USE_CASE_BASE_REVISION + 1,
+								current_snapshot_id: latestSnapshot.snapshot_id,
+								reload_required: true,
+							},
+						},
+					},
+				],
+			});
 
-		const comment = "Keep my feedback while the latest artifact loads.";
-		await openDecision(page);
-		await reviewComment(page).fill(comment);
-		await openDecision(page);
-		await requestChangesOption(page).check();
-		await requestChangesButton(page).click();
+			const comment = "Keep my feedback while the latest artifact loads.";
+			await openDecision(page);
+			await reviewComment(page).fill(comment);
+			await openDecision(page);
+			await requestChangesOption(page).check();
+			await requestChangesButton(page).click();
 
-		const conflict = decisionPanel(page).getByRole("alert");
-		await expect(conflict).toContainText(/no longer current/i);
-		await expect(reviewComment(page)).toHaveValue(comment);
-		await expect(requestChangesOption(page)).toBeChecked();
-		await expect(reviewMain(page)).not.toContainText("Apply approval after currency conversion");
-		expect(api.requests.review).toHaveLength(1);
+			const conflict = decisionPanel(page).getByRole("alert");
+			await expect(conflict).toContainText(/no longer current/i);
+			await expect(reviewComment(page)).toHaveValue(comment);
+			await expect(requestChangesOption(page)).toBeChecked();
+			await expect(reviewMain(page)).not.toContainText("Apply approval after currency conversion");
+			expect(api.requests.review).toHaveLength(1);
 
-		await conflict.getByRole("button", { name: /^Reload latest$/i }).click();
-		await expect(reviewMain(page)).toContainText("Use Cases v4");
-		await expect(reviewMain(page)).toContainText("5 scenarios");
-		await expect(reviewMain(page)).toContainText("Apply approval after currency conversion");
-		await expect(reviewComment(page)).toHaveValue(comment);
-		await expect(requestChangesOption(page)).toBeChecked();
-		await expect(decisionPanel(page)).toBeFocused();
-		expect(api.requests.review).toHaveLength(1);
-	});
+			await conflict.getByRole("button", { name: /^Reload latest$/i }).click();
+			await expect(reviewMain(page)).toContainText("Use Cases v4");
+			await expect(reviewMain(page)).toContainText("5 scenarios");
+			await expect(reviewMain(page)).toContainText("Apply approval after currency conversion");
+			await expect(reviewComment(page)).toHaveValue(comment);
+			await expect(requestChangesOption(page)).toBeChecked();
+			await expect(decisionPanel(page)).toBeFocused();
+			expect(api.requests.review).toHaveLength(1);
+		}
+	);
 
 	test("retains the attempted decision after a 503 and retries the identical idempotent request", async ({ page }) => {
 		const api = await openUseCaseReview(page, {
@@ -555,7 +561,7 @@ test.describe("Use Cases review workbench", () => {
 		}
 	});
 
-	test("prevents double submission while a review decision is pending", async ({ page }) => {
+	test("prevents double submission while a review decision is pending", { tag: "@p1" }, async ({ page }) => {
 		const deferred = createDeferred();
 		const api = await openUseCaseReview(page, { reviewScenarios: [{ gate: deferred.promise }] });
 		await openDecision(page);

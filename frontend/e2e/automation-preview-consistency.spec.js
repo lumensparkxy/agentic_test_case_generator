@@ -318,30 +318,34 @@ test.describe("Automation preview consistency", () => {
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 	});
 
-	test("normalizes an inconsistent summary to rendered zero candidates, distinguishes the empty states, and emits no run request", async ({
-		page,
-	}) => {
-		const inconsistentPreview = previewFixture([], {
-			summary: { executable: 20, manual: 0, unsupported: 0, invalid: 0 },
-		});
-		const scenario = { project: projectFixture(), previews: [inconsistentPreview] };
-		const requests = await installApi(page, scenario);
-		await openAutomation(page);
+	test(
+		"normalizes an inconsistent summary to rendered zero candidates, distinguishes the empty states, and emits no run request",
+		{ tag: "@p1" },
+		async ({ page }) => {
+			const inconsistentPreview = previewFixture([], {
+				summary: { executable: 20, manual: 0, unsupported: 0, invalid: 0 },
+			});
+			const scenario = { project: projectFixture(), previews: [inconsistentPreview] };
+			const requests = await installApi(page, scenario);
+			await openAutomation(page);
 
-		await expect(page.getByText("No preview yet. Preview execution readiness for the current test cases.", { exact: true })).toBeVisible();
-		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+			await expect(
+				page.getByText("No preview yet. Preview execution readiness for the current test cases.", { exact: true })
+			).toBeVisible();
+			await page.getByRole("button", { name: /^Preview Execution$/ }).click();
 
-		await expect(page.getByText("Executable 0", { exact: true })).toBeVisible();
-		await expect(page.getByText("Preview completed with zero executable candidates.", { exact: true })).toBeVisible();
-		await expect(page.getByRole("alert")).toContainText(/preview data was inconsistent/i);
-		await expect(page.getByText(/20 executable/i)).toHaveCount(0);
-		const runButton = page.getByRole("button", { name: /^Run 0 Candidates$/ });
-		await expect(runButton).toBeDisabled();
-		await runButton.evaluate((button) => button.click());
-		expect(requests.runs).toBe(0);
-	});
+			await expect(page.getByText("Executable 0", { exact: true })).toBeVisible();
+			await expect(page.getByText("Preview completed with zero executable candidates.", { exact: true })).toBeVisible();
+			await expect(page.getByRole("alert")).toContainText(/preview data was inconsistent/i);
+			await expect(page.getByText(/20 executable/i)).toHaveCount(0);
+			const runButton = page.getByRole("button", { name: /^Run 0 Candidates$/ });
+			await expect(runButton).toBeDisabled();
+			await runButton.evaluate((button) => button.click());
+			expect(requests.runs).toBe(0);
+		}
+	);
 
-	test("runs only the selected executable subset and sends exact candidate IDs", async ({ page }) => {
+	test("runs only the selected executable subset and sends exact candidate IDs", { tag: "@p1" }, async ({ page }) => {
 		const candidates = [executableCandidate("candidate-checkout", "TC-001"), executableCandidate("candidate-refund", "TC-002")];
 		const livePreview = previewFixture(candidates);
 		const scenario = {

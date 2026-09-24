@@ -501,71 +501,73 @@ test.describe("Contextual next task", () => {
 		expect(requests.generation).toBe(0);
 	});
 
-	test("requires cancel or confirm for full regeneration, prevents double-submit, and preserves the old suite until success", async ({
-		page,
-	}) => {
-		let releaseGeneration;
-		const generationGate = new Promise((resolve) => {
-			releaseGeneration = resolve;
-		});
-		const statusAfterGeneration = statusFixture([
-			recommendation("automate", {
-				label: "Create Automation Preview",
-				stage: "automation",
-				primary: true,
-				secondary: false,
-			}),
-		]);
-		const scenario = { project: projectFixture(), status: statusFixture(staleActions()), generationGate, statusAfterGeneration };
-		const requests = await installApi(page, scenario);
-		await openTestCases(page);
-		const oldCaseRow = page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") });
-		const newCaseRow = page.getByRole("button", { name: new RegExp(NEW_CASE_TITLE, "i") });
-		await expect(oldCaseRow).toBeVisible();
+	test(
+		"requires cancel or confirm for full regeneration, prevents double-submit, and preserves the old suite until success",
+		{ tag: "@p1" },
+		async ({ page }) => {
+			let releaseGeneration;
+			const generationGate = new Promise((resolve) => {
+				releaseGeneration = resolve;
+			});
+			const statusAfterGeneration = statusFixture([
+				recommendation("automate", {
+					label: "Create Automation Preview",
+					stage: "automation",
+					primary: true,
+					secondary: false,
+				}),
+			]);
+			const scenario = { project: projectFixture(), status: statusFixture(staleActions()), generationGate, statusAfterGeneration };
+			const requests = await installApi(page, scenario);
+			await openTestCases(page);
+			const oldCaseRow = page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") });
+			const newCaseRow = page.getByRole("button", { name: new RegExp(NEW_CASE_TITLE, "i") });
+			await expect(oldCaseRow).toBeVisible();
 
-		const task = page.getByLabel("Test suite actions");
-		await task
-			.locator("summary")
-			.filter({ hasText: /^More actions$/i })
-			.click();
-		const regenerate = task.getByRole("button", { name: /^Full Regenerate$/i });
-		await regenerate.click();
-		let dialog = page.getByRole("dialog", { name: /Regenerate the entire test suite/i });
-		await expect(dialog).toContainText(/current suite stays visible and unchanged/i);
-		await expect(dialog).toContainText(/existing cases or coverage may be replaced/i);
-		await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeFocused();
-		await page.keyboard.press("Tab");
-		await expect(dialog.getByRole("button", { name: /^Cancel$/i })).toBeFocused();
-		await page.keyboard.press("Shift+Tab");
-		await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeFocused();
-		await dialog.getByRole("button", { name: /^Cancel$/i }).click();
-		await expect(dialog).toHaveCount(0);
-		await expect(regenerate).toBeFocused();
-		expect(requests.generation).toBe(0);
+			const task = page.getByLabel("Test suite actions");
+			await task
+				.locator("summary")
+				.filter({ hasText: /^More actions$/i })
+				.click();
+			const regenerate = task.getByRole("button", { name: /^Full Regenerate$/i });
+			await regenerate.click();
+			let dialog = page.getByRole("dialog", { name: /Regenerate the entire test suite/i });
+			await expect(dialog).toContainText(/current suite stays visible and unchanged/i);
+			await expect(dialog).toContainText(/existing cases or coverage may be replaced/i);
+			await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeFocused();
+			await page.keyboard.press("Tab");
+			await expect(dialog.getByRole("button", { name: /^Cancel$/i })).toBeFocused();
+			await page.keyboard.press("Shift+Tab");
+			await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeFocused();
+			await dialog.getByRole("button", { name: /^Cancel$/i }).click();
+			await expect(dialog).toHaveCount(0);
+			await expect(regenerate).toBeFocused();
+			expect(requests.generation).toBe(0);
 
-		await regenerate.click();
-		dialog = page.getByRole("dialog", { name: /Regenerate the entire test suite/i });
-		const confirm = dialog.getByRole("button", { name: /^Confirm regeneration$/i });
-		await confirm.evaluate((button) => {
-			button.click();
-			button.click();
-		});
-		await expect.poll(() => requests.generation).toBe(1);
-		await expect(dialog.getByRole("button", { name: /^Regenerating…$/i })).toBeDisabled();
-		await expect(dialog).toBeFocused();
-		await page.keyboard.press("Tab");
-		await expect(dialog).toBeFocused();
-		await expect(oldCaseRow).toBeVisible();
-		await expect(newCaseRow).toHaveCount(0);
+			await regenerate.click();
+			dialog = page.getByRole("dialog", { name: /Regenerate the entire test suite/i });
+			const confirm = dialog.getByRole("button", { name: /^Confirm regeneration$/i });
+			await confirm.evaluate((button) => {
+				button.click();
+				button.click();
+			});
+			await expect.poll(() => requests.generation).toBe(1);
+			await expect(dialog.getByRole("button", { name: /^Regenerating…$/i })).toBeDisabled();
+			await expect(dialog).toBeFocused();
+			await page.keyboard.press("Tab");
+			await expect(dialog).toBeFocused();
+			await expect(oldCaseRow).toBeVisible();
+			await expect(newCaseRow).toHaveCount(0);
 
-		releaseGeneration();
-		await expect(dialog).toHaveCount(0);
-		await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
-		await expect(page.getByRole("main", { name: "Workflow workspace: Test Cases" })).toBeFocused();
-		await expect(newCaseRow).toBeVisible();
-		await expect(oldCaseRow).toHaveCount(0);
-		expect(requests.generation).toBe(1);
-	});
+			releaseGeneration();
+			await expect(dialog).toHaveCount(0);
+			await expect(page.getByLabel("Test suite actions")).toHaveCount(0);
+			await expect(page.getByRole("main", { name: "Workflow workspace: Test Cases" })).toBeFocused();
+			await expect(newCaseRow).toBeVisible();
+			await expect(oldCaseRow).toHaveCount(0);
+			expect(requests.generation).toBe(1);
+		}
+	);
 
 	test("keeps the existing suite and offers retry when full regeneration fails", async ({ page }) => {
 		const scenario = {

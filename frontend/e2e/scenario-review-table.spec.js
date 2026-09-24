@@ -12,38 +12,42 @@ async function open(page, options = {}) {
 	return api;
 }
 
-test("persists scenario status and multiple quality flags, filters rows and preserves full approval scope", async ({ page }) => {
-	const api = await open(page);
-	await status(page).selectOption("approved");
-	const row = page.getByRole("row").filter({ has: status(page) });
-	await row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true }).click();
-	await row.getByRole("checkbox", { name: "Ambiguous", exact: true }).check();
-	await row.getByRole("checkbox", { name: "Not testable", exact: true }).check();
-	await expect(page.getByRole("button", { name: "Approve all", exact: true })).toBeDisabled();
-	expect(api.requests.review).toHaveLength(0);
-	await page.getByRole("button", { name: "Save reviews", exact: true }).click();
-	await expect(page.getByRole("status", { name: "Review outcome" })).toHaveText("Scenario reviews saved.");
-	expect(api.requests.review[0].payload.scenario_reviews).toEqual([
-		{ requirement_id: "REQ-101", scenario_id: scenarioId, status: "approved", quality_flags: ["Ambiguous", "Not testable"] },
-	]);
-	await expect(page.getByText("1 of 4 approved", { exact: false })).toBeVisible();
-	await page.reload();
-	await expect(status(page)).toHaveValue("approved");
-	await expect(row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true })).toContainText("(2)");
-	await page.getByRole("combobox", { name: "Filter by review status", exact: true }).selectOption("approved");
-	await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
-	await page.getByRole("button", { name: "Quality flag filters", exact: true }).click();
-	await page.getByRole("checkbox", { name: "Duplicate", exact: true }).check();
-	await expect(page.getByText("No scenarios match these filters.")).toBeVisible();
-	await page.getByRole("button", { name: "Approve all", exact: true }).click();
-	const dialog = page.getByRole("dialog");
-	await expect(dialog).toContainText("all 4 scenarios");
-	await dialog.getByRole("button", { name: "Approve Use Cases", exact: true }).click();
-	await expect(page.getByRole("status", { name: "Review outcome" })).toHaveText("Use Cases approved.");
-	expect(
-		Object.values(api.getProject().stage_state.use_cases.metadata.scenario_reviews.items).every((item) => item.status === "approved")
-	).toBe(true);
-});
+test(
+	"persists scenario status and multiple quality flags, filters rows and preserves full approval scope",
+	{ tag: "@p1" },
+	async ({ page }) => {
+		const api = await open(page);
+		await status(page).selectOption("approved");
+		const row = page.getByRole("row").filter({ has: status(page) });
+		await row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true }).click();
+		await row.getByRole("checkbox", { name: "Ambiguous", exact: true }).check();
+		await row.getByRole("checkbox", { name: "Not testable", exact: true }).check();
+		await expect(page.getByRole("button", { name: "Approve all", exact: true })).toBeDisabled();
+		expect(api.requests.review).toHaveLength(0);
+		await page.getByRole("button", { name: "Save reviews", exact: true }).click();
+		await expect(page.getByRole("status", { name: "Review outcome" })).toHaveText("Scenario reviews saved.");
+		expect(api.requests.review[0].payload.scenario_reviews).toEqual([
+			{ requirement_id: "REQ-101", scenario_id: scenarioId, status: "approved", quality_flags: ["Ambiguous", "Not testable"] },
+		]);
+		await expect(page.getByText("1 of 4 approved", { exact: false })).toBeVisible();
+		await page.reload();
+		await expect(status(page)).toHaveValue("approved");
+		await expect(row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true })).toContainText("(2)");
+		await page.getByRole("combobox", { name: "Filter by review status", exact: true }).selectOption("approved");
+		await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
+		await page.getByRole("button", { name: "Quality flag filters", exact: true }).click();
+		await page.getByRole("checkbox", { name: "Duplicate", exact: true }).check();
+		await expect(page.getByText("No scenarios match these filters.")).toBeVisible();
+		await page.getByRole("button", { name: "Approve all", exact: true }).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toContainText("all 4 scenarios");
+		await dialog.getByRole("button", { name: "Approve Use Cases", exact: true }).click();
+		await expect(page.getByRole("status", { name: "Review outcome" })).toHaveText("Use Cases approved.");
+		expect(
+			Object.values(api.getProject().stage_state.use_cases.metadata.scenario_reviews.items).every((item) => item.status === "approved")
+		).toBe(true);
+	}
+);
 
 test("retains drafts and retries the identical failed save", async ({ page }) => {
 	const api = await open(page, { reviewScenarios: [{ status: 503 }, {}] });
@@ -70,7 +74,7 @@ test("conflicts require reload and discard instead of silently rebasing draft de
 	expect(api.requests.review).toHaveLength(1);
 });
 
-test("editing a previously approved version revokes its whole-version decision", async ({ page }) => {
+test("editing a previously approved version revokes its whole-version decision", { tag: "@p1" }, async ({ page }) => {
 	const api = await open(page, { initialProject: useCaseProjectFixture({ reviewState: "approved" }) });
 	await expect(status(page)).toHaveValue("approved");
 	await status(page).selectOption("needs_review");

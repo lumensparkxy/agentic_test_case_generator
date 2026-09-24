@@ -84,7 +84,7 @@ async function setup(page, options = {}) {
 	return { api, requests, project };
 }
 
-test("regenerates 8 groups into 10 using one revision-only request and requires review", async ({ page }) => {
+test("regenerates 8 groups into 10 using one revision-only request and requires review", { tag: "@p1" }, async ({ page }) => {
 	const gate = createDeferred();
 	const { requests, project } = await setup(page, { gate: gate.promise });
 	await expect(page.getByText("Regeneration needed", { exact: true })).toBeVisible();
@@ -124,7 +124,7 @@ test("offers generation directly when no snapshot exists", async ({ page }) => {
 	await expect(page.getByRole("heading", { name: "No Use Cases snapshot" })).toHaveCount(0);
 });
 
-test("unapproved requirements disable regeneration with a recovery destination", async ({ page }) => {
+test("unapproved requirements disable regeneration with a recovery destination", { tag: "@p1" }, async ({ page }) => {
 	const project = staleProject();
 	project.stage_state.requirements.approved = false;
 	const { requests } = await setup(page, { project });
