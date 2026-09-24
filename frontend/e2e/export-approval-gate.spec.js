@@ -1,12 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+import { buildTestCaseExportFilename } from "../src/services/exportFilename.js";
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
 
 const PROJECT_ID = "project-export-gate";
 const PROJECT = {
 	project_id: PROJECT_ID,
-	name: "Export Gate QA",
+	name: 'Export / Gate: "Zürich" QA?',
 	description: null,
 	status: "active",
 	owner_user_id: "playwright-e2e-user",
@@ -248,7 +249,7 @@ test.describe("Export approval gate", () => {
 				summary: { passed: 1, failed: 0, invalid: 0, skipped: 0, unsupported: 0, manual: 0 },
 			})
 		);
-		await page.route("**/export/json", async (route) => {
+		await page.route("**/export/{json,csv,excel}", async (route) => {
 			exportPayload = route.request().postDataJSON();
 			return jsonResponse(route, { test_cases: exportPayload.test_cases || [] }, 200, {
 				"content-disposition": "attachment; filename=test_cases.json",
@@ -304,11 +305,33 @@ test.describe("Export approval gate", () => {
 		await page.getByPlaceholder(/Reason for exporting this draft/i).fill("Stakeholder review requested before final QA approval.");
 		await expect(jsonButton).toBeEnabled();
 
-		const download = await Promise.all([page.waitForEvent("download"), jsonButton.click()]).then(([item]) => item);
-
-		expect(download.suggestedFilename()).toBe("test_cases.json");
+		await page.clock.setFixedTime(new Date("2026-09-24T14:30:52.123Z"));
+		for (const [label, extension] of [
+			["JSON", "json"],
+			["CSV", "csv"],
+			["Excel Formatted", "xlsx"],
+		]) {
+			const button = page.getByRole("button", { name: new RegExp(label, "i") }).first();
+			const download = await Promise.all([page.waitForEvent("download"), button.click()]).then(([item]) => item);
+			expect(download.suggestedFilename()).toBe(`export-gate-zürich-qa_test-cases_2026-09-24T14-30-52-123Z.${extension}`);
+			await expect(button).toBeEnabled();
+		}
 		expect(exportPayload.draft_override_requested).toBe(true);
 		expect(exportPayload.draft_override_reason).toContain("Stakeholder review requested");
 		expect(exportPayload.approved).toBe(false);
 	});
+});
+
+test("export filenames handle missing and long international project names", () => {
+	const exportedAt = new Date("2026-09-24T14:30:52.123Z");
+	expect(buildTestCaseExportFilename({ name: " /:*? ", project_id: "project-123" }, "excel", exportedAt)).toBe(
+		"project-123_test-cases_2026-09-24T14-30-52-123Z.xlsx"
+	);
+	expect(buildTestCaseExportFilename(null, "csv", exportedAt)).toBe("project_test-cases_2026-09-24T14-30-52-123Z.csv");
+	const filename = buildTestCaseExportFilename({ name: "測試專案".repeat(100) }, "json", exportedAt);
+	expect(filename).toMatch(/^測試專案.*_test-cases_2026-09-24T14-30-52-123Z\.json$/);
+	expect(Buffer.byteLength(filename, "utf8")).toBeLessThan(255);
+	expect(buildTestCaseExportFilename({ name: "QA" }, "json", new Date("2026-09-24T14:30:52.124Z"))).not.toBe(
+		buildTestCaseExportFilename({ name: "QA" }, "json", exportedAt)
+	);
 });

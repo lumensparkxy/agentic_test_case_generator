@@ -85,6 +85,7 @@ import {
 	STORAGE_AUTH_USER,
 	STORAGE_CURRENT_PROJECT_ID,
 } from "./constants/workflow";
+import { buildTestCaseExportFilename } from "./services/exportFilename";
 import { API_BASE, createRequestId, downloadResponseBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
 import { API_CONTRACT_ENDPOINTS } from "./api/generated/api-contracts";
 import {
@@ -3550,8 +3551,8 @@ export default function App() {
 				return;
 			}
 
-			const extensions = { csv: "csv", excel: "xlsx", json: "json" };
-			await downloadResponseBlob(res, `test_cases.${extensions[format] || format}`);
+			const filename = buildTestCaseExportFilename(currentProject, format);
+			await downloadResponseBlob(res, filename);
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
