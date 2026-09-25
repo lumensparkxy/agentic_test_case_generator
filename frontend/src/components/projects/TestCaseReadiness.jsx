@@ -28,7 +28,7 @@ export default function TestCaseReadiness({ project, status, unavailable, caseCo
 		actionLabel = "Review Use Cases";
 	} else if (taskCount) {
 		title = "Draft incomplete";
-	} else if (statusCurrent && generateAction?.enabled && !caseCount) {
+	} else if (statusCurrent && !caseCount && (generateAction?.enabled || status.next_actions?.length === 0)) {
 		title = "Ready to generate test cases";
 	} else if (statusCurrent && caseCount) {
 		title = "Review the delivered suite";

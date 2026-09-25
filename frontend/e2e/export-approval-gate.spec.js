@@ -14,7 +14,7 @@ const PROJECT = {
 	current_revision: 0,
 	created_at: "2026-07-17T08:00:00Z",
 	updated_at: "2026-07-17T08:00:00Z",
-	stage_state: {},
+	stage_state: { requirements: { current_snapshot_id: "approved", approved: true, stale: false, metadata: {} } },
 	current_snapshots: {
 		requirements: {
 			snapshot_id: "approved",
