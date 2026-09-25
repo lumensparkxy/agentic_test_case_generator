@@ -287,7 +287,7 @@ class BrowserAssertionReviewTests(unittest.TestCase):
 
 
 class CoveragePlanNormalizationTests(unittest.TestCase):
-    def test_backfilled_scenarios_do_not_become_must_have(self) -> None:
+    def test_nonempty_model_plan_is_not_padded_with_generic_categories(self) -> None:
         requirements = [
             Requirement(
                 id="REQ-001",
@@ -316,11 +316,12 @@ class CoveragePlanNormalizationTests(unittest.TestCase):
         )
 
         scenarios = normalized_plan[0]["scenarios"]
+        self.assertEqual(len(scenarios), 1)
         self.assertEqual(scenarios[0]["scenario_type"], "Happy Path")
         self.assertTrue(scenarios[0]["must_have"])
-        self.assertTrue(all(not scenario["must_have"] for scenario in scenarios[1:]))
+        self.assertEqual(_normalize_coverage_plan(normalized_plan, requirements), normalized_plan)
 
-    def test_backfilled_scenarios_do_not_reuse_existing_ids(self) -> None:
+    def test_normalization_preserves_model_scenario_content_and_ids(self) -> None:
         requirements = [
             Requirement(
                 id="REQ-001",
@@ -360,11 +361,52 @@ class CoveragePlanNormalizationTests(unittest.TestCase):
         ids = [scenario["id"] for scenario in scenarios]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(ids[:2], ["REQ-001-SCN-01", "REQ-001-SCN-03"])
-        self.assertGreater(len(scenarios), 2)
-        self.assertNotIn("REQ-001-SCN-03", ids[2:])
+        self.assertEqual(len(scenarios), 2)
+        self.assertEqual(scenarios[1]["title"], "Dashboard summary hidden when signed out")
+        self.assertEqual(scenarios[1]["objective"], "Verify signed-out users cannot see the dashboard summary.")
+        self.assertEqual(scenarios[1]["priority"], "High")
+        self.assertTrue(scenarios[1]["must_have"])
+        self.assertEqual(_normalize_coverage_plan(normalized_plan, requirements), normalized_plan)
         self.assertTrue(all(scenario_id.startswith("REQ-001-SCN-") for scenario_id in ids))
 
-    def test_heuristic_review_ignores_backfilled_optional_scenario_gaps(self) -> None:
+    def test_missing_empty_and_invalid_only_groups_keep_fallback(self) -> None:
+        from app.agents.scenario_assessment import assess_scenarios
+
+        requirements = [Requirement(id="REQ-001", text="Display the signed-in user's dashboard summary.")]
+        for raw_plan in ([], [{"requirement_id": "REQ-001", "scenarios": []}], [{"requirement_id": "REQ-001", "scenarios": [None, "bad"]}]):
+            with self.subTest(raw_plan=raw_plan):
+                normalized = _normalize_coverage_plan(raw_plan, requirements)
+                self.assertEqual([group["requirement_id"] for group in normalized], ["REQ-001"])
+                self.assertGreater(len(normalized[0]["scenarios"]), 0)
+                assessment = assess_scenarios(normalized, requirements, "")
+                self.assertEqual(assessment["status"], "needs_review")
+                self.assertEqual(assessment["flagged_count"], assessment["scenario_count"])
+
+    def test_duplicate_ids_are_repaired_without_padding_or_cross_requirement_ownership(self) -> None:
+        requirements = [Requirement(id="REQ-001", text="Show a summary.")]
+        scenario = {
+            "id": "REQ-001-SCN-01",
+            "requirement_id": "OTHER",
+            "scenario_type": "Happy Path",
+            "title": "Show summary",
+            "objective": "Summary is visible",
+            "must_have": False,
+        }
+        normalized = _normalize_coverage_plan(
+            [
+                {"requirement_id": "OTHER", "scenarios": [scenario]},
+                {"requirement_id": "REQ-001", "scenarios": [scenario, {**scenario, "title": "Refresh summary"}]},
+            ],
+            requirements,
+        )
+        self.assertEqual(len(normalized), 1)
+        scenarios = normalized[0]["scenarios"]
+        self.assertEqual(len(scenarios), 2)
+        self.assertEqual(len({s["id"] for s in scenarios}), 2)
+        self.assertTrue(all(s["requirement_id"] == "REQ-001" and not s["must_have"] for s in scenarios))
+        self.assertEqual(_normalize_coverage_plan(normalized, requirements), normalized)
+
+    def test_heuristic_review_does_not_invent_category_gaps(self) -> None:
         requirements = [
             Requirement(
                 id="REQ-001",

@@ -404,6 +404,14 @@ parsing or UI fix and does not replace unit or offline benchmark evidence.
 
 ### Live Room Booking business journey
 
+Coverage normalization preserves nonempty model scenario groups without adding
+generic scenarios for absent categories. Missing or empty groups still receive
+fallback scaffolding, which is not semantic approval. Regression coverage in
+`test_analysis_coverage_metrics.py` and `test_use_case_agent.py` checks repeated
+normalization, identifiers, ownership, sequential/parallel preservation, and
+fallback review behavior. The structural and semantic quality gates remain in
+force; removing server-added padding does not prove the model output is adequate.
+
 `frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
 scenario is opt-in; the default full suite reports it as skipped. Its anonymous
 sign-in check remains offline. Start frontend and backend from the same checkout
