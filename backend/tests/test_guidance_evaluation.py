@@ -36,6 +36,19 @@ class GuidanceEvaluationTests(unittest.TestCase):
         self.assertIn("invalid_python_section_0", evaluation.validate_artifact("automation", {"notes": "def test_example("}, [{}]))
         self.assertEqual(evaluation.validate_artifact("automation", {"notes": "def test_example():\n    raise RuntimeError('never execute')"}, [{}]), [])
 
+    def test_manual_resolution_is_not_missing_code_or_model_success(self):
+        output = {
+            "status": "skipped",
+            "files": [],
+            "notes": "No executable artifact.",
+            "diagnostics": {"generated_case_count": 0, "artifact_validation": "not_applicable"},
+            "case_diagnostics": [{"test_case_id": "TC-1", "status": "manual", "reason": "Missing target evidence"}],
+        }
+        self.assertTrue(evaluation.manual_resolution(output, [{}]))
+        self.assertEqual(evaluation.validate_artifact("automation", output, [{}]), [])
+        output["diagnostics"]["fallback_shard_count"] = 1
+        self.assertFalse(evaluation.manual_resolution(output, [{}]))
+
     def test_workflow_fallback_cannot_be_counted_as_model_quality(self):
         self.assertTrue(evaluation.contains_fallback({"workflow_diagnostics": {"used_fallback": True}}))
         self.assertTrue(evaluation.contains_fallback({"case_diagnostics": [{"status": "fallback"}]}))
