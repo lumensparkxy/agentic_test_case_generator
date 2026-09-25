@@ -712,6 +712,39 @@
 	margin-block: var(--space-3);
 }
 
+.generation-guidance {
+	margin-block: var(--space-3);
+	padding: var(--space-4);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	background: var(--surface-container);
+	min-width: 0;
+}
+.generation-guidance h2 {
+	font-size: 1rem;
+	margin: 0 0 var(--space-2);
+}
+.guidance-availability {
+	margin-block: var(--space-3);
+}
+.guidance-availability-values {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+	margin-block: var(--space-2);
+}
+.guidance-availability-values > span {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-1);
+}
+.generation-guidance p,
+.guidance-availability p {
+	font-size: 0.875rem;
+	margin-block: var(--space-2);
+}
+
 .knowledge-toolbar {
 	display: flex;
 	flex-wrap: wrap;

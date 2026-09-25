@@ -38,6 +38,25 @@ Actual pages display Guidance used with original revisions, omissions, deletion 
 
 Validation and live quality comparisons are recorded in `docs/guidance-rollout-report.md`. Offline checks alone do not establish improved model quality. The Context skill catalog displays the backend-reported on/off state of both flags per stage, with an unavailable state when older responses omit that information.
 
+Before generation, Requirements, Use Cases, Test Cases and Automation display
+Skills and Approved context availability independently. Context also displays
+all four stages without a disclosure. Disabled configuration, unavailable data
+and an enabled stage with no eligible entries are distinct states. An enabled
+Test Cases entry point can include enabled Use Cases guidance for its internal
+planner; a held entry point never inherits upstream enablement. Counts describe
+approved, active stage candidates before matching the run's requirement inputs
+and applying context limits, not a promise of injection. Changed source facts
+needing confirmation, proposed-only entries and unselected personal entries are
+excluded. Entry details separate approved wording/stages from proposed edits.
+
+The generation summary reloads on stage/project/revision changes, window focus
+and explicit refresh. While loading or after a failed refresh, cached flags are
+not presented as current. This display does not gate generation or change
+rollout settings; the backend remains authoritative at run start. Guidance used
+continues to display the saved manifest's versions, omissions and disabled or
+explicit-bypass state independently of current configuration. Preview validation
+is still distinct from AI Automation generation and actual execution.
+
 ## Evaluation and staged enablement (#274)
 
 Run contract checks without model calls:
