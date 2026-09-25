@@ -25,6 +25,8 @@ import {
 	visibleFirebaseAuthProviders,
 } from "./firebase";
 import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
+import TestCaseReadiness from "./components/projects/TestCaseReadiness";
+import { getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
 import AutomationPanel from "./components/automation/AutomationPanel";
 import {
 	getDefaultSelectedCandidateIds,
@@ -660,6 +662,12 @@ export default function App() {
 		!useCasesStageState.stale &&
 		latestUseCasesHumanReview?.snapshot_id === useCasesStageState.current_snapshot_id &&
 		latestUseCasesHumanReview?.decision === "approve"
+	);
+	const normalGenerationReady = Boolean(
+		projectStageState.requirements?.current_snapshot_id &&
+		projectStageState.requirements.approved &&
+		!projectStageState.requirements.stale &&
+		(!useCasesStageState.current_snapshot_id || useCasesHumanApproved)
 	);
 	const projectSnapshots = currentProject?.current_snapshots || {};
 	const persistedTestCaseCount = projectSnapshots.test_cases?.payload?.test_cases?.length || 0;
@@ -3215,6 +3223,10 @@ export default function App() {
 
 	const generateTestCases = async (withFeedback = false, { fullRegeneration = false, feedbackText = feedback } = {}) => {
 		if (withFeedback && (testCaseActionDisabled || isGenerating || upstreamChangedForImpact || !testCases.length)) return false;
+		if (!withFeedback && !fullRegeneration && !normalGenerationReady) {
+			setStatus("Review current requirements and Use Cases before normal generation. Use the explicit draft action when available.");
+			return false;
+		}
 		if (testCaseWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Test-case workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -3501,7 +3513,7 @@ export default function App() {
 		execute: isPreviewingExecution || isRunningExecution,
 	};
 	const orchestratorActionDisabled = {
-		generate: testCaseActionDisabled,
+		generate: testCaseActionDisabled || !normalGenerationReady,
 		full_regenerate: testCaseActionDisabled,
 		analyze_impact: testCaseActionDisabled,
 		apply_update: testCaseActionDisabled,
@@ -3851,15 +3863,7 @@ export default function App() {
 			: canGenerateFromApprovedRequirements
 				? "pending"
 				: "blocked",
-		4: executionRunResult
-			? "complete"
-			: executionPreview
-				? executionPreview.isConsistent && !executionPreview.requiresRefresh
-					? "complete"
-					: "attention"
-				: testCases.length
-					? "pending"
-					: "blocked",
+		4: getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: projectStageState.execution?.stale }).status,
 		5: projectStageState.reports?.stale
 			? "attention"
 			: exportMessage
@@ -3888,7 +3892,15 @@ export default function App() {
 		destination: PROJECT_DESTINATIONS.TEST_CASES,
 	}).primaryAction;
 	const hasOrchestratorRecommendations = Boolean(Array.isArray(orchestratorStatus?.next_actions) && orchestratorStatus.next_actions.length);
-	const allowLegacyTestCaseMutations = !hasOrchestratorRecommendations;
+	const allowLegacyTestCaseMutations =
+		(upstreamChangedForImpact ||
+			((!useCasesStageState.current_snapshot_id || useCasesHumanApproved) &&
+				projectStageState.requirements?.approved &&
+				!projectStageState.requirements?.stale)) &&
+		!hasOrchestratorRecommendations &&
+		!orchestratorError &&
+		!isLoadingOrchestrator &&
+		orchestratorStatus?.project_revision === currentProjectRevision;
 	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
 	const workflowShellClassName = ["workflow-shell", isWorkflowNavCollapsed ? "nav-collapsed" : ""].filter(Boolean).join(" ");
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
@@ -4172,6 +4184,7 @@ export default function App() {
 									currentProject={currentProject}
 									status={orchestratorStatus}
 									currentDestination={route.destination}
+									hasTestCases={hasExistingTestCaseBaseline}
 									hidden={route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2}
 									compact={route.destination === PROJECT_DESTINATIONS.TEST_CASES}
 									isLoading={isLoadingOrchestrator}
@@ -4896,38 +4909,32 @@ export default function App() {
 											<p className="panel-description">
 												Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
 											</p>
-											{requirements.length > 0 &&
-												(!testCases.length || !canGenerateFromApprovedRequirements || upstreamChangedForImpact) && (
-													<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
-														<div>
-															<strong>
-																{impactApplication.state === "applied" && !upstreamChangedForImpact
-																	? "Changes applied — review changed tests"
-																	: isApplyingImpactUpdate
-																		? "Applying accepted recommendations"
-																		: impactAnalysis && !impactStageState.stale
-																			? "Recommendations ready to apply"
-																			: upstreamChangedForImpact
-																				? "Existing suite needs impact analysis"
-																				: canGenerateFromApprovedRequirements
-																					? "Ready for approved-requirement generation"
-																					: "Approval required before generation"}
-															</strong>
-															<p>
-																{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
-																{rejectedRequirementCount} rejected
-																{upstreamChangedForImpact
-																	? ". The current suite is preserved while impact analysis reviews changed inputs."
-																	: ". Only approved requirements are sent to the test-case agents."}
-															</p>
-														</div>
-														{!canGenerateFromApprovedRequirements && (
-															<Button type="button" className="secondary small" onClick={() => selectWorkflowTab(0)}>
-																Review requirements
-															</Button>
-														)}
+											<TestCaseReadiness
+												project={currentProject}
+												status={orchestratorStatus}
+												unavailable={Boolean(orchestratorError) || isLoadingOrchestrator}
+												caseCount={testCases.length}
+												taskCount={generationTasks.length}
+												onReview={selectWorkflowTab}
+											/>
+											{upstreamChangedForImpact && (
+												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
+													<div>
+														<strong>
+															{isApplyingImpactUpdate
+																? "Applying accepted recommendations"
+																: impactAnalysis && !impactStageState.stale
+																	? "Review impact recommendations"
+																	: "Existing suite needs impact analysis"}
+														</strong>
+														<p>
+															{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
+															{rejectedRequirementCount} rejected . The current suite is preserved while impact analysis reviews changed
+															inputs.
+														</p>
 													</div>
-												)}
+												</div>
+											)}
 											{!contextualTestCaseTask &&
 											allowLegacyTestCaseMutations &&
 											(!hasExistingTestCaseBaseline || upstreamChangedForImpact) ? (
@@ -5125,6 +5132,8 @@ export default function App() {
 											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
 											executionError={executionError}
+											effectiveTarget={executionTargetBaseUrl.trim() || appLink}
+											executionStale={projectStageState.execution?.stale}
 											isPreviewingExecution={isPreviewingExecution}
 											isRunningExecution={isRunningExecution}
 											authActionDisabled={authActionDisabled}
