@@ -21,6 +21,12 @@ const STATE_LABELS = {
 	blocked: "Blocked",
 	pending: "Pending",
 	attention: "Needs attention",
+	preview_ready: "Preview ready",
+	preview_refresh: "Preview needs refresh",
+	execution_passed: "Execution passed",
+	execution_failed: "Run failed",
+	execution_disabled: "Execution disabled",
+	unavailable: "Evidence unavailable",
 };
 
 const WORKFLOW_ICONS = {
@@ -120,8 +126,19 @@ export default function WorkflowNavigationDrawer({
 									<Badge
 										variant="inline"
 										tone={
-											{ complete: "success", blocked: "blocked", pending: "pending", attention: "warning", active: "info" }[state] ||
-											"neutral"
+											{
+												complete: "success",
+												blocked: "blocked",
+												pending: "pending",
+												attention: "warning",
+												active: "info",
+												preview_ready: "info",
+												preview_refresh: "warning",
+												execution_passed: "success",
+												execution_failed: "danger",
+												execution_disabled: "blocked",
+												unavailable: "warning",
+											}[state] || "neutral"
 										}
 										icon={StatusIcon}
 										className={`nav-workflow-status ${state}`}
