@@ -25,6 +25,7 @@ from ..utils.excel_parser import parse_excel_to_text
 
 from ..contracts.requirement_imports import RequirementImportPreview
 from ..services.requirement_import_service import require_review_client, stage_import
+from ..services.requirement_source_evidence import bind_document_evidence
 
 router = APIRouter()
 
@@ -373,6 +374,7 @@ async def parse_requirements(
     try:
         raw_sections: List[str] = []
         source_names: List[str] = []
+        documents: List[tuple[str, str]] = []
 
         for upload in uploads:
             filename = upload.filename or "uploaded"
@@ -393,6 +395,7 @@ async def parse_requirements(
                 raise HTTPException(status_code=400, detail="Unsupported file type. Supported: .md, .docx, .xlsx")
 
             source_names.append(filename)
+            documents.append((filename, parsed_text))
             raw_sections.append(f"--- SOURCE: {filename} ---\n{parsed_text}")
 
         raw_text = "\n\n".join(raw_sections)
@@ -420,6 +423,7 @@ async def parse_requirements(
             workflow_diagnostics=workflow.get("workflow_diagnostics", {}),
         )
         response.requirements = _apply_file_source_metadata(response.requirements, source_name, source_names)
+        response.requirements = bind_document_evidence(response.requirements, documents)
         event_id = _log_success(
             current_user=current_user,
             request=request,

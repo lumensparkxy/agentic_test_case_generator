@@ -119,8 +119,8 @@ def normalize_requirement_text(text: Any) -> str:
     return value
 
 
-def normalize_requirement_payloads(items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    normalized: List[Dict[str, str]] = []
+def normalize_requirement_payloads(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
     for item in items:
@@ -139,9 +139,27 @@ def normalize_requirement_payloads(items: List[Dict[str, Any]]) -> List[Dict[str
         if not requirement_id.startswith("REQ-"):
             requirement_id = f"REQ-{len(normalized) + 1:03d}"
 
-        normalized.append({"id": requirement_id, "text": text})
+        # Normalize requirement prose only. Quotations and source identifiers
+        # must survive intact so the upload boundary can verify them.
+        metadata = {
+            field: item[field]
+            for field in (
+                "original_requirement_ids",
+                "source_path",
+                "source_section",
+                "source_excerpt",
+                "source_hierarchy",
+                "parent_requirement_id",
+                "quality_flags",
+            )
+            if field in item
+        }
+        normalized.append({"id": requirement_id, "text": text, **metadata})
 
+    id_mapping = {item["id"]: f"REQ-{index:03d}" for index, item in enumerate(normalized, start=1)}
     for index, item in enumerate(normalized, start=1):
         item["id"] = f"REQ-{index:03d}"
+        if item.get("parent_requirement_id"):
+            item["parent_requirement_id"] = id_mapping.get(item["parent_requirement_id"])
 
     return normalized

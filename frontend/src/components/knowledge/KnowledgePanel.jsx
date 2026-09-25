@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useKnowledge from "../../hooks/useKnowledge";
 import { Button, Checkbox, Field, Select, Textarea, Input, Link } from "../ui/controls";
@@ -29,9 +29,15 @@ function Modal({ title, onClose, children }) {
 	);
 }
 
-function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose, availability }) {
+function EntryDialog({ entry, mode, personal, busy, error, fieldErrors, onSubmit, onClose, availability }) {
 	const value = entry?.pending || entry?.active;
 	const [text, setText] = useState(value?.text || "");
+	const textRef = useRef(null);
+	const submittedText = useRef(null);
+	// Match Python/Pydantic code-point length, including non-BMP characters.
+	const characterCount = Array.from(text).length;
+	const textError =
+		characterCount > 1000 ? "Guidance must contain no more than 1000 characters." : submittedText.current === text ? fieldErrors?.text : "";
 	const [kind, setKind] = useState(value?.kind || "convention");
 	const [stages, setStages] = useState(value?.stages || Object.keys(STAGES));
 	const [links, setLinks] = useState(mode === "promote" ? "" : (value?.requirement_ids || []).join(", "));
@@ -47,6 +53,11 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose, av
 	}[mode];
 	const submit = (event) => {
 		event.preventDefault();
+		if (!readOnly && characterCount > 1000) {
+			textRef.current?.focus();
+			return;
+		}
+		submittedText.current = text;
 		void onSubmit({
 			action: mode,
 			entry_id: entry?.id,
@@ -75,16 +86,9 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose, av
 						Delete the wording and its saved revisions. Future runs cannot use it; historical artifacts keep only its reference.
 					</Alert>
 				)}
-				<Field>
+				<Field error={!readOnly ? textError : ""} hint={`Maximum 1000 characters · ${characterCount} / 1000`}>
 					<label htmlFor="knowledge-text">Guidance</label>
-					<Textarea
-						id="knowledge-text"
-						required
-						maxLength={1000}
-						value={text}
-						readOnly={readOnly}
-						onChange={(e) => setText(e.target.value)}
-					/>
+					<Textarea id="knowledge-text" required ref={textRef} value={text} readOnly={readOnly} onChange={(e) => setText(e.target.value)} />
 				</Field>
 				<Field>
 					<label htmlFor="knowledge-kind">Kind</label>
@@ -132,7 +136,7 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose, av
 					</div>
 				)}
 				{mode === "approve" && <p>This approves knowledge for future runs. It does not approve generated artifacts.</p>}
-				{error && (
+				{error && !fieldErrors?.text && (
 					<Alert tone="danger" role="alert">
 						{error}
 					</Alert>
@@ -157,6 +161,20 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose, av
 				</div>
 			</form>
 		</Modal>
+	);
+}
+
+function GuidanceText({ text }) {
+	const points = Array.from(text);
+	if (points.length <= 180) return <p className="knowledge-wording">{text}</p>;
+	return (
+		<div className="knowledge-wording">
+			<p>{points.slice(0, 180).join("")}…</p>
+			<Disclosure>
+				<summary>Read full guidance</summary>
+				<p>{text}</p>
+			</Disclosure>
+		</div>
 	);
 }
 
@@ -264,7 +282,14 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 				<CollectionState kind="loading">Loading knowledge…</CollectionState>
 			) : filtered.length ? (
 				<TableScroll aria-label="Knowledge entries">
-					<Table>
+					<Table className="knowledge-table">
+						<colgroup>
+							<col className="knowledge-wording-column" />
+							<col className="knowledge-stages-column" />
+							<col className="knowledge-source-column" />
+							<col className="knowledge-status-column" />
+							<col className="knowledge-actions-column" />
+						</colgroup>
 						<thead>
 							<tr>
 								<th scope="col">Guidance</th>
@@ -281,8 +306,8 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 								return (
 									<tr key={entry.id}>
 										<td>
-											{value?.text || "Retired guidance"}
-											{entry.pending && entry.active && <p>Active version: {entry.active.text}</p>}
+											<GuidanceText text={value?.text || "Retired guidance"} />
+											{entry.pending && entry.active && <GuidanceText text={`Active version: ${entry.active.text}`} />}
 										</td>
 										<td>
 											{entry.pending ? "Proposed: " : "Approved: "}
@@ -400,6 +425,7 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 					availability={knowledge.error || knowledge.loading ? null : knowledge.data}
 					busy={knowledge.busy}
 					error={knowledge.error}
+					fieldErrors={knowledge.fieldErrors}
 					onClose={() => setDialog(null)}
 					onSubmit={change}
 				/>
