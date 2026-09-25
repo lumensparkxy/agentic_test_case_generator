@@ -30,7 +30,7 @@ from .test_case_agent import (
     _record_parser_failure,
     _record_parser_recovery,
 )
-from .test_case_coverage import _dedupe_preserve, _fallback_coverage_plan, _normalize_coverage_plan
+from .test_case_coverage import ALLOWED_SCENARIO_TYPES, _dedupe_preserve, _fallback_coverage_plan, _normalize_coverage_plan
 from .test_case_hydration import _hydrate_coverage_plan, _hydrate_requirement_analysis
 from .test_case_review import DEFAULT_TEST_CASE_THRESHOLD, _resolve_test_case_workflow_settings
 from ..models import GenerateTestCasesInput, Requirement, WorkflowSettings
@@ -518,10 +518,12 @@ def _heuristic_use_case_review(
         scenarios = list((plan_item or {}).get("scenarios") or [])
         scenario_types = {str(scenario.get("scenario_type") or "").strip() for scenario in scenarios}
         scenario_ids.extend(str(scenario.get("id") or "").strip() for scenario in scenarios)
-        if "Happy Path" not in scenario_types:
-            blocking_issues.append(f"{requirement_id} is missing a Happy Path scenario.")
-        if not any(scenario_type and scenario_type != "Happy Path" for scenario_type in scenario_types):
-            blocking_issues.append(f"{requirement_id} is missing a non-happy-path scenario.")
+        if not scenarios:
+            blocking_issues.append(f"{requirement_id} has no planned scenario.")
+        if scenario_types - ALLOWED_SCENARIO_TYPES:
+            blocking_issues.append(f"{requirement_id} contains an unsupported or empty scenario category.")
+        if any(not str(scenario.get("id") or "").strip() or scenario.get("requirement_id") != requirement_id for scenario in scenarios):
+            blocking_issues.append(f"{requirement_id} contains an invalid scenario identifier or requirement link.")
         if not any(bool(scenario.get("must_have", True)) for scenario in scenarios):
             blocking_issues.append(f"{requirement_id} has no must-have scenario.")
 

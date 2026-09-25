@@ -5,6 +5,10 @@ Use Cases retain three separate decisions:
 - **Structural checks** inspect requirement groups, scenario categories and
   identifiers. The existing `score` and coverage ratios describe this structure
   and linked counts; they are not a percentage of behavior verified.
+  Every requirement needs a nonempty group and at least one must-have scenario;
+  categories must be allowed, and identifiers/requirement links valid. There is
+  no mandatory Happy Path/non-happy-path pair or scenario-count quota. A single
+  source behavior may be represented by one scenario in its appropriate category.
 - **Semantic assessment** reviews the full title and objective for a concrete
   trigger, observable outcome, distinct behavior within the requirement, and
   grounding in supplied requirements/context. Results are advisory findings,
@@ -22,6 +26,14 @@ wall-clock timeout and provider retry budget. It has no tools or repair loop.
 The critic receives the shard's source requirements and supplied context, not
 model-generated requirement analysis as a source of new facts. A business rule
 available only in a different shard can therefore require human reconciliation.
+
+The planner covers distinct source behaviors and applicable input partitions,
+checks generated analysis against source facts, and avoids repeating the same
+trigger/outcome under different categories. It must not invent states or
+implementation mechanisms to fill a plan. These instructions and structural
+checks do not prove source coverage or semantic correctness: the independent
+critic and explicit reviewer decision remain necessary, and no model-authored
+scenario is silently deleted after generation to force a passing verdict.
 
 Known local checks flag category scaffolding, identical scenario content, and
 unsupplied route/debouncing prescriptions. They do not award a semantic pass or

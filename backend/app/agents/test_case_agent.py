@@ -791,14 +791,14 @@ def _build_coverage_planner_agent(
 ```
 {feedback_section}
 **Rules:**
-1. Produce 2-4 scenarios per requirement.
-2. Always include a 'Happy Path' scenario for every requirement.
-3. Include at least one non-happy-path scenario per requirement.
-4. Use the requirement analysis to cover business rules, constraints, permissions, risks, and transitions when present.
-5. Add Authorization scenarios when role permissions are present, Boundary/Validation scenarios when field constraints are present, State Transition scenarios when workflow states are present, and Integration/Error Handling scenarios when external systems are present.
+1. Cover every distinct behavior explicitly stated in each requirement, including its applicable input partitions. Produce one or more scenarios per requirement, with no fixed count or category quota. One scenario is sufficient for one atomic trigger/outcome; do not invent companions merely to reach a number.
+2. Each scenario must add a distinct source-backed trigger, input partition, or observable outcome. Merge equivalent behavior into one scenario instead of repeating it under Happy Path, State Transition, or another category. Category names do not establish distinct coverage.
+3. Choose the category that describes the actual behavior. A rejection-only or permission-denial requirement need not contain a Happy Path, and a single positive rule need not contain an invented negative path.
+4. Use requirement analysis as a checklist of hypotheses, not a source of new facts. Verify its rules, constraints, permissions, risks, and transitions against the requirements and supplied factual context before using them.
+5. Cover authorization, boundaries, validation, transitions and external failures only where their behavior is supported by the sources. Do not prescribe unstated implementation mechanisms (such as debouncing, button disabling or submission identifiers), routes, states, timing, permissions, or error messages. Test the specified observable result instead. A missing record is not an invented named status.
 6. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
-7. Mark essential scenarios with must_have=true, especially scenarios that cover Critical/High risks, authorization, data integrity, or required validations.
-8. Make every scenario objective specific enough that a tester can derive expected data, action, and assertion.
+7. Mark every scenario needed to cover explicit source behavior with must_have=true; each requirement needs at least one essential scenario. Optional exploratory assumptions must be explicit and must_have=false; they cannot substitute for required coverage.
+8. Make every title and objective together name a concrete trigger/input and observable source-backed outcome. Before returning the plan, check every requirement for omitted behaviors and every pair of its scenarios for duplicate triggers/outcomes. Remove duplicates, not source behaviors. Never return category scaffolding such as 'validate this requirement under negative conditions'.
 9. Output ONLY a JSON object shaped like:
 {{
     "coverage_plan": [

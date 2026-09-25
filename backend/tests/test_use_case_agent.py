@@ -9,6 +9,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents import use_case_agent
+from app.agents.scenario_assessment import assessment_input, CRITERIA
 from app.models import GenerateTestCasesInput, Requirement, TestCaseTemplate
 
 
@@ -95,6 +96,61 @@ def _worker_output(shard, **_kwargs):
 
 
 class UseCaseAgentTests(unittest.TestCase):
+    def test_single_distinct_behavior_can_pass_without_category_companions(self) -> None:
+        req = Requirement(id="REQ-001", text="Non-creators cannot cancel a booking; its status remains Confirmed.")
+        for category in ("Happy Path", "Negative", "Authorization", "Boundary"):
+            with self.subTest(category=category):
+                output = _worker_output(use_case_agent._UseCaseShard(1, [req]))
+                output["coverage_plan"][0]["scenarios"] = [
+                    {
+                        "id": "REQ-001-SCN-01",
+                        "requirement_id": req.id,
+                        "scenario_type": category,
+                        "title": "Non-creator cannot cancel",
+                        "objective": "A non-creator attempts cancellation; the booking remains Confirmed.",
+                        "must_have": True,
+                        "priority": "High",
+                    }
+                ]
+                entry = assessment_input(output["coverage_plan"], [req], "")[0]
+                output["semantic_rows"] = [
+                    {
+                        "requirement_id": req.id,
+                        "scenario_id": "REQ-001-SCN-01",
+                        "content_hash": entry["content_hash"],
+                        **{criterion: {"passed": True, "reason": "Explicit trigger and outcome in the source."} for criterion in CRITERIA},
+                    }
+                ]
+                result = use_case_agent._build_use_case_response(output, [req])
+                self.assertTrue(result["review"]["structural_checks"]["approved"])
+                self.assertTrue(result["approved"])
+                self.assertEqual(len(result["coverage_plan"][0].scenarios), 1)
+                output["semantic_rows"][0]["distinct_behavior"] = {"passed": False, "reason": "Duplicate behavior."}
+                self.assertFalse(use_case_agent._build_use_case_response(output, [req])["approved"])
+                output["semantic_rows"] = []
+                self.assertFalse(use_case_agent._build_use_case_response(output, [req])["approved"])
+
+    def test_structural_review_still_rejects_missing_or_invalid_scenarios(self) -> None:
+        req = _requirement(1)
+        output = _worker_output(use_case_agent._UseCaseShard(1, [req]))
+        base = output["coverage_plan"][0]["scenarios"][0]
+        base = {**base, "id": "REQ-001-SCN-01", "requirement_id": req.id}
+        for scenarios in (
+            [],
+            [{**base, "must_have": False}],
+            [{**base, "scenario_type": "Invented"}],
+            [{**base, "scenario_type": ""}],
+            [{**base, "id": " "}],
+            [{**base, "requirement_id": "OTHER"}],
+            [base, base],
+        ):
+            with self.subTest(scenarios=scenarios):
+                review = use_case_agent._heuristic_use_case_review(
+                    output["requirement_analysis"], [{"requirement_id": req.id, "scenarios": scenarios}], [req], 90
+                )
+                self.assertFalse(review["approved"])
+                self.assertTrue(review["blocking_issues"])
+
     def test_missing_model_groups_are_reported_as_fallback_before_normalization(self) -> None:
         for field in ("coverage_plan", "requirement_analysis", "empty_scenarios"):
 
