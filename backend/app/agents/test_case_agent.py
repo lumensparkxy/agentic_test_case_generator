@@ -31,7 +31,6 @@ from ..models import (
     GenerateTestCasesInput,
     RefineTestCasesInput,
     Requirement,
-    ReviewResult,
     TestCase,
     WorkflowSettings,
 )
@@ -63,7 +62,7 @@ from .test_case_coverage import (
 )
 from .test_case_fallback import _fallback_raw_test_cases
 from ..services.test_case_quality import separate_generation_work
-from ..contracts.requirements import RequirementCoveragePlan
+from ..contracts.requirements import RequirementCoveragePlan, StructuralChecks
 from .test_case_hydration import (
     _hydrate_coverage_plan,
     _hydrate_requirement_analysis,
@@ -839,7 +838,7 @@ def _build_review_loop(
         model=model,
         include_contents="none",
         generate_content_config=json_generation_config(max_output_tokens=4096),
-        output_schema=ReviewResult,
+        output_schema=StructuralChecks,
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}

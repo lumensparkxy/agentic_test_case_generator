@@ -918,7 +918,7 @@ export default function App() {
 						.map((x) => x.trim())
 						.filter(Boolean)
 				: null,
-			notes: "Generated via UI",
+			notes: enrichedContext?.notes ?? null,
 			project_id: currentProjectId || null,
 			base_project_revision: currentProjectRevision,
 		};
@@ -1549,17 +1549,17 @@ export default function App() {
 		setPrototypeLink(contextPayload?.prototype_link || "");
 		setDiagramLinks((contextPayload?.diagram_links || []).join("; "));
 		setImageLinks((contextPayload?.image_links || []).join("; "));
-		if (contextPayload?.grounded_context) {
+		if (contextPayload) {
 			setEnrichedContext({
 				requirements: contextPayload.requirements || requirementPayload?.requirements || [],
 				app_link: contextPayload.app_link || null,
 				prototype_link: contextPayload.prototype_link || null,
 				diagram_links: contextPayload.diagram_links || [],
 				image_links: contextPayload.image_links || [],
-				notes: contextPayload.notes || null,
-				grounded_context: contextPayload.grounded_context,
+				notes: contextPayload.notes ?? null,
+				grounded_context: contextPayload.grounded_context ?? null,
 			});
-			setSelectedArtifactSourceIds((contextPayload.grounded_context.artifact_sources || []).map((source) => source.id));
+			setSelectedArtifactSourceIds((contextPayload.grounded_context?.artifact_sources || []).map((source) => source.id));
 		} else {
 			resetContextAnalysis();
 		}

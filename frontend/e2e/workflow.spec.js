@@ -1,144 +1,182 @@
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-
 import { expect, test } from "@playwright/test";
+import {
+	liveFixture,
+	roomSource,
+	roomContext,
+	uiResponse,
+	importSource,
+	applyImport,
+	approveRequirements,
+	approveScenarios,
+	assertSourceMapping,
+	caseQuality,
+} from "./support/live-workflow.js";
 
-import { sampleRequirementsFile, seedAuthenticatedSession } from "./support/auth.js";
+test.use({ trace: "off", video: "off" });
 
-const allowedPriorities = new Set(["Critical", "High", "Medium", "Low"]);
-const allowedTypes = new Set(["Functional", "Integration", "E2E", "Regression", "Smoke", "Security", "Performance", "Usability", "UAT"]);
-
-const minimumStructuredCaseRatio = 0.8;
-
-async function openGenerateTab(page) {
+test("anonymous portal opens provider chooser from sign-in", async ({ page }) => {
 	await page.goto("/");
-	await expect(page.getByRole("button", { name: /open account menu/i })).toBeVisible({ timeout: 30_000 });
+	await page.getByRole("button", { name: /^sign in$/i }).click();
+	await expect(page.getByRole("dialog", { name: /choose a sign-in method/i })).toBeVisible();
+	for (const provider of ["google", "microsoft", "apple"])
+		await expect(page.getByRole("button", { name: new RegExp(provider, "i") })).toBeVisible();
+});
 
-	await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
-	await page.getByRole("button", { name: /parse requirements/i }).click();
+test.describe("Live project workbench acceptance", () => {
+	test.describe.configure({ retries: 0, timeout: 12 * 60 * 1000 });
+	test.skip(
+		process.env.E2E_LIVE !== "1",
+		"Live model/Firestore checks require E2E_LIVE=1; mocked UI tests do not establish business acceptance."
+	);
 
-	await expect
-		.poll(async () => page.locator(".requirement-review-table tbody tr").count(), {
-			timeout: 120_000,
-			message: "Expected parsed requirements to appear after uploading the sample file.",
-		})
-		.toBeGreaterThan(0);
-	await page.getByRole("button", { name: /approve non-rejected/i }).click();
+	test("isolated Room Booking project preserves source, review, generation and inspected export gates", async ({ page }, testInfo) => {
+		const fixture = await liveFixture(page, testInfo);
+		try {
+			await test.step("Import and explicitly review source in the project workbench", async () => {
+				const preview = await importSource(page, fixture);
+				await fixture.save("source-import", preview);
+				const applied = await applyImport(page, fixture, preview);
+				assertSourceMapping(applied.current_snapshots.requirements.payload.requirements);
+				await approveRequirements(page, fixture);
+				await page.reload();
+				assertSourceMapping((await fixture.read()).current_snapshots.requirements.payload.requirements);
+			});
 
-	await expect(page.getByText(/approved for test generation/i)).toBeVisible();
+			await test.step("Compare and cancel the controlled 8 to 6 source change without replacing baseline", async () => {
+				const before = await fixture.read();
+				const v2 = (await fs.readFile(roomSource, "utf8"))
+					.replace("1 to 8 inclusive", "1 to 6 inclusive")
+					.replace("0, 9, or 1.5", "0, 7, or 1.5");
+				expect(v2).not.toBe(await fs.readFile(roomSource, "utf8"));
+				const preview = await importSource(page, fixture, {
+					name: "room-booking-v2.md",
+					mimeType: "text/markdown",
+					buffer: Buffer.from(v2),
+				});
+				await fixture.save("cancelled-comparison", preview);
+				await uiResponse(
+					page,
+					`/requirement-imports/${preview.import_id}`,
+					() => page.getByRole("button", { name: "Cancel import", exact: true }).click(),
+					{ status: 204 }
+				);
+				const after = await fixture.read();
+				expect(after.current_revision).toBe(before.current_revision);
+				expect(after.current_snapshots.requirements.snapshot_id).toBe(before.current_snapshots.requirements.snapshot_id);
+			});
 
-	await page.getByRole("button", { name: /^Next$/ }).click();
-	await page.locator('input[placeholder="https://your-app"]').fill("https://example.com/app");
-	await page.getByRole("button", { name: /analyze context/i }).click();
+			await test.step("Save controlled context without inventing an application URL", async () => {
+				const current = await fixture.read();
+				const context = (await fs.readFile(roomContext, "utf8")).trim();
+				await fixture.checked("POST", "/requirements/enrich", {
+					requirements: current.current_snapshots.requirements.payload.requirements,
+					notes: context,
+					project_id: fixture.project.project_id,
+					base_project_revision: current.current_revision,
+				});
+				await page.goto(`${fixture.prefix}/context`);
+				const saved = await fixture.read();
+				expect(saved.current_snapshots.context.payload.notes).toBe(context);
+				expect(saved.stage_state.context.approved).toBe(true);
+			});
 
-	await expect(page.getByRole("heading", { name: /grounded context/i })).toBeVisible({ timeout: 120_000 });
-	await expect
-		.poll(async () => page.locator(".artifact-source-item").count(), {
-			timeout: 30_000,
-			message: "Expected analyzed context artifacts to appear in the Context tab.",
-		})
-		.toBeGreaterThan(0);
+			await test.step("Generate Use Cases and stop on failed quality before synthetic reviewer approval", async () => {
+				await page.goto(`${fixture.prefix}/use-cases`);
+				const response = await uiResponse(
+					page,
+					"/use-cases/generate",
+					() => page.getByRole("button", { name: "Generate Use Cases", exact: true }).click(),
+					{ timeout: 240_000 }
+				);
+				const result = await response.json();
+				await fixture.save("use-case-generation", result);
+				expect(result.current_snapshots.use_cases.metadata.guidance).toBeTruthy();
+				expect(result.stage_state.use_cases.approved).toBe(false);
+				await approveScenarios(page, fixture);
+				await page.reload();
+				expect((await fixture.read()).stage_state.use_cases.approved).toBe(true);
+			});
 
-	await page.getByRole("button", { name: /^Next$/ }).click();
-	await page.getByRole("button", { name: /^Next$/ }).click();
-}
+			let generated;
+			await test.step("Generate real cases and retain exact source, guidance and quality evidence", async () => {
+				await page.goto(`${fixture.prefix}/test-cases`);
+				const response = await uiResponse(
+					page,
+					"/testcases/generate",
+					() => page.getByRole("button", { name: /Generate from \d+ Approved/ }).click(),
+					{ timeout: 360_000 }
+				);
+				generated = await response.json();
+				await fixture.save("generation", generated);
+				const input = response.request().postDataJSON();
+				expect(input.context.notes, "Saved source context must be sent unchanged to generation").toBe(
+					(await fs.readFile(roomContext, "utf8")).trim()
+				);
+				expect(generated.guidance).toBeTruthy();
+				const quality = caseQuality(generated.test_cases || []);
+				await fixture.save("quality", quality);
+				expect(quality.total, "Live generation returned no concrete cases; inspect generation diagnostics").toBeGreaterThan(0);
+				expect(quality.withDescriptions).toBe(quality.total);
+				expect(quality.withExpectedResults).toBe(quality.total);
+				expect(quality.withRequirementLinks).toBe(quality.total);
+				expect(quality.withTwoOrMoreSteps).toBeGreaterThanOrEqual(Math.ceil(quality.total * 0.8));
+				for (const key of ["charFragmentCases", "invalidPriorities", "invalidTypes", "untitledCases"])
+					expect(quality[key], key).toEqual([]);
+				const current = await fixture.read();
+				expect(current.current_snapshots.test_cases.payload.test_cases.map((c) => c.id)).toEqual(generated.test_cases.map((c) => c.id));
+				await page.reload();
+				await expect(page.getByRole("tab", { name: /Generated Test Cases/ })).toBeVisible();
+			});
 
-test.describe("Agentic Test Case Generator E2E", () => {
-	test("anonymous portal opens provider chooser from sign-in", async ({ page }) => {
-		await page.goto("/");
-		await expect(page.getByRole("button", { name: /^sign in$/i })).toBeVisible();
-
-		await page.getByRole("button", { name: /^sign in$/i }).click();
-		await expect(page.getByRole("dialog", { name: /choose a sign-in method/i })).toBeVisible();
-		await expect(page.getByRole("button", { name: /google/i })).toBeVisible();
-		await expect(page.getByRole("button", { name: /microsoft/i })).toBeVisible();
-		await expect(page.getByRole("button", { name: /apple/i })).toBeVisible();
-	});
-
-	test("authenticated user can parse, generate, and export high-quality test cases", async ({ page }) => {
-		await seedAuthenticatedSession(page);
-		await openGenerateTab(page);
-
-		await page.getByRole("button", { name: /generate from \d+ approved/i }).click();
-		const generatedTestCasesTab = page.getByRole("tab", { name: /generated test cases/i });
-		await expect(generatedTestCasesTab).toBeVisible({ timeout: 360_000 });
-		await generatedTestCasesTab.click();
-
-		await expect
-			.poll(
-				async () => {
-					const tableRows = await page.locator(".test-cases-table tbody tr").count();
-					const cards = await page.locator(".case-card").count();
-					return tableRows + cards;
-				},
-				{
-					timeout: 360_000,
-					message: "Expected generated test cases to appear in the UI.",
+			await test.step("Inspect the real export, keeping draft and approved claims distinct", async () => {
+				const current = await fixture.read();
+				const snapshot = current.current_snapshots.test_cases;
+				if (!generated.approved) {
+					const ordinary = await fixture.api("POST", "/export/json", {
+						test_cases: snapshot.payload.test_cases,
+						project_id: current.project_id,
+						base_project_revision: current.current_revision,
+						source_snapshot_id: snapshot.snapshot_id,
+					});
+					expect(ordinary.status(), "Unapproved output must not export without an explicit draft reason").toBe(422);
 				}
-			)
-			.toBeGreaterThan(0);
+				await page.goto(`${fixture.prefix}/reports`);
+				const toggle = page.getByLabel(/Export draft anyway/i);
+				if (!generated.approved) {
+					await expect(toggle).toBeVisible();
+					await toggle.check();
+					await page
+						.getByLabel(/Reason for exporting this draft/i)
+						.fill("Synthetic live QA evidence. Incomplete or unapproved output is retained as a draft, not accepted for release.");
+				}
+				const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^JSON$/i }).click()]);
+				const destination = testInfo.outputPath("inspected-export.json");
+				await download.saveAs(destination);
+				const exported = JSON.parse(await fs.readFile(destination, "utf8"));
+				expect(exported.test_cases.map((c) => c.id)).toEqual(snapshot.payload.test_cases.map((c) => c.id));
+				expect(exported.audit_metadata.snapshot_id).toBe(snapshot.snapshot_id);
+				expect(exported.audit_metadata.project_revision).toBe(current.current_revision);
+				await fixture.save("export-inspection", exported);
+			});
 
-		await page.getByRole("tab", { name: /requirement analysis/i }).click();
-		await expect(page.locator(".collapsible-panel-title", { hasText: /requirement analysis/i })).toBeVisible();
-		await page.getByRole("tab", { name: /diagnostics/i }).click();
-		await expect(page.getByRole("heading", { name: /test-case workflow diagnostics/i })).toBeVisible();
-		await generatedTestCasesTab.click();
-
-		await page.getByRole("button", { name: /^Next$/ }).click();
-		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
-		await page.getByRole("button", { name: /^Next$/ }).click();
-		const draftExportToggle = page.getByLabel(/export draft anyway/i);
-		if (await draftExportToggle.isVisible().catch(() => false)) {
-			await draftExportToggle.check();
-			await page
-				.getByLabel(/reason for exporting this draft/i)
-				.fill("E2E quality validation export after reviewing generated draft output.");
+			await test.step("Business acceptance stays blocked until substantive coverage and outstanding work pass", async () => {
+				expect(generated.generation_tasks, "Unresolved source or planned-scenario work remains; draft export is not acceptance").toEqual(
+					[]
+				);
+				expect(generated.substantive_assessment?.status, "Business coverage is incomplete or unverified").toBe("assessed_complete");
+				expect(generated.approved, "The delivered suite has not passed review").toBe(true);
+				testInfo.annotations.push({
+					type: "business-review-limit",
+					description: "Automated synthetic design gates passed; independent human review and real target execution are still separate.",
+				});
+			});
+		} catch (error) {
+			fixture.evidence.blocking_gates.push(error.message);
+			await page.screenshot({ path: testInfo.outputPath("blocked-live-journey.png"), fullPage: true });
+			throw error;
+		} finally {
+			await fixture.close();
 		}
-
-		const jsonButton = page.getByRole("button", { name: /json/i }).first();
-		await expect(jsonButton).toBeEnabled({ timeout: 30_000 });
-		const download = await Promise.all([page.waitForEvent("download"), jsonButton.click()]).then(([item]) => item);
-
-		const downloadPath = path.join(os.tmpdir(), `tcg-e2e-${Date.now()}.json`);
-		await download.saveAs(downloadPath);
-		const exported = JSON.parse(await fs.readFile(downloadPath, "utf8"));
-		const testCases = exported.test_cases || [];
-
-		const quality = {
-			total: testCases.length,
-			withDescriptions: testCases.filter((tc) => tc.description?.trim()).length,
-			withExpectedResults: testCases.filter((tc) => tc.expected_result?.trim()).length,
-			withRequirementTags: testCases.filter((tc) => Array.isArray(tc.tags) && tc.tags.some((tag) => /^REQ-\d+/i.test(tag))).length,
-			withTwoOrMoreSteps: testCases.filter((tc) => Array.isArray(tc.steps) && tc.steps.length >= 2).length,
-			charFragmentCases: testCases
-				.filter((tc) => {
-					if (!Array.isArray(tc.steps) || tc.steps.length <= 10) {
-						return false;
-					}
-					const tinyActions = tc.steps.filter((step) => (step?.action?.trim()?.length || 0) <= 2).length;
-					return tinyActions >= Math.ceil(tc.steps.length * 0.4);
-				})
-				.map((tc) => tc.id),
-			invalidPriorities: testCases.filter((tc) => !allowedPriorities.has(tc.priority)).map((tc) => tc.id),
-			invalidTypes: testCases.filter((tc) => !allowedTypes.has(tc.type)).map((tc) => tc.id),
-			untitledCases: testCases.filter((tc) => !tc.title?.trim() || /untitled/i.test(tc.title)).map((tc) => tc.id),
-		};
-
-		test.info().annotations.push({
-			type: "quality-summary",
-			description: JSON.stringify(quality),
-		});
-		console.log("Generated test case quality summary:", quality);
-
-		expect(quality.total).toBeGreaterThan(0);
-		expect(quality.withDescriptions).toBe(quality.total);
-		expect(quality.withExpectedResults).toBe(quality.total);
-		expect(quality.withRequirementTags).toBe(quality.total);
-		expect(quality.withTwoOrMoreSteps).toBeGreaterThanOrEqual(Math.ceil(quality.total * minimumStructuredCaseRatio));
-		expect(quality.charFragmentCases).toEqual([]);
-		expect(quality.invalidPriorities).toEqual([]);
-		expect(quality.invalidTypes).toEqual([]);
-		expect(quality.untitledCases).toEqual([]);
 	});
 });

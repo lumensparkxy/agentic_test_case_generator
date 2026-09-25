@@ -8,11 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import SequentialAgent
-from ..services.guidance_service import apply_agent_guidance, submit_with_guidance, memory_service_for_run
+from ..services.guidance_service import submit_with_guidance, memory_service_for_run
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from .literal_instructions import literal_source_agent
 from .scenario_assessment import STATE_SCENARIO_ASSESSMENT, assessment_input, assess_scenarios, build_scenario_critic, combine_review, parse_critic_output
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .test_case_agent import (
@@ -121,6 +122,25 @@ def _use_case_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None):
+    # Source braces (routes, JSON, artifact-like strings) are literal data. Only
+    # our own templates may expand ADK session state.
+    source_text = requirements_text + "\n" + context_text
+
+    def builder(model, requirements, context, _template, human_feedback=None):
+        return SequentialAgent(
+            name=f"UseCasePlanningPipeline{shard_index:02d}",
+            sub_agents=[
+                build_requirement_analysis_agent(model, requirements, context, output_key=STATE_REQUIREMENT_ANALYSIS, human_feedback=human_feedback),
+                _build_coverage_planner_agent(model, requirements, context, human_feedback=human_feedback),
+                build_scenario_critic(model, semantic_input, source_text),
+            ],
+            description="Plans requirement analysis and scenario coverage without generating test cases",
+        )
+
+    return literal_source_agent(builder, model, requirements_text, context_text, "", human_feedback=human_feedback, guidance_stage="use_cases")
+
+
 async def _run_single_use_case_shard_workflow_async(
     *,
     shard: _UseCaseShard,
@@ -141,24 +161,10 @@ async def _run_single_use_case_shard_workflow_async(
         plan, _ = _canonicalize_coverage_scenario_ids(_normalize_coverage_plan(raw_plan or [], shard.requirements))
         return assessment_input(plan, shard.requirements, context_text)
 
-    root_agent = SequentialAgent(
-        name=f"UseCasePlanningPipeline{shard.index:02d}",
-        sub_agents=[
-            build_requirement_analysis_agent(
-                model,
-                requirements_text,
-                context_text,
-                output_key=STATE_REQUIREMENT_ANALYSIS,
-                human_feedback=human_feedback,
-            ),
-            _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
-            build_scenario_critic(model, semantic_input, requirements_text + "\n" + context_text),
-        ],
-        description="Plans requirement analysis and scenario coverage without generating test cases",
-    )
+    root_agent = _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard.index, human_feedback)
     session_service = InMemorySessionService()
     runner = Runner(
-        agent=apply_agent_guidance(root_agent, "use_cases"),
+        agent=root_agent,
         app_name="use_case_planner",
         session_service=session_service,
         memory_service=memory_service_for_run(actor_user_id),

@@ -307,6 +307,7 @@ async function installApi(page, scenario) {
 		}
 		if (pathname === "/testcases/generate" && method === "POST") {
 			requests.generation += 1;
+			requests.generationInput = request.postDataJSON();
 			if (scenario.generationGate) await scenario.generationGate;
 			if (scenario.generationFailure) return jsonResponse(route, { detail: "Synthetic regeneration failure" }, 500);
 			if (scenario.statusAfterGeneration) scenario.status = scenario.statusAfterGeneration;
@@ -583,6 +584,32 @@ test.describe("Contextual next task", () => {
 			expect(requests.generation).toBe(1);
 		}
 	);
+
+	for (const grounded_context of [null, { artifact_sources: [], ui_elements: [] }]) {
+		test(`preserves saved context notes ${grounded_context ? "with" : "without"} enrichment after reload @p1`, async ({ page }) => {
+			const scenario = { project: projectFixture(), status: statusFixture(staleActions()) };
+			const notes = "Alice owns /bookings/{bookingId}. Bob must not cancel it. Atlas and Birch are separate rooms.";
+			scenario.project.current_snapshots.context = {
+				snapshot_id: "context-source",
+				payload: { notes, grounded_context },
+			};
+			const requests = await installApi(page, scenario);
+			await openTestCases(page);
+			await page.reload();
+			const task = page.getByLabel("Test suite actions");
+			await task
+				.locator("summary")
+				.filter({ hasText: /^More actions$/i })
+				.click();
+			await task.getByRole("button", { name: /^Full Regenerate$/i }).click();
+			await page
+				.getByRole("dialog", { name: /Regenerate the entire test suite/i })
+				.getByRole("button", { name: /^Confirm regeneration$/i })
+				.click();
+			await expect.poll(() => requests.generation).toBe(1);
+			expect(requests.generationInput.context.notes).toBe(notes);
+		});
+	}
 
 	test("keeps the existing suite and offers retry when full regeneration fails", async ({ page }) => {
 		const scenario = {
