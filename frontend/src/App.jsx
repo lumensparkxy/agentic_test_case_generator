@@ -4,6 +4,7 @@ import useRequirementImports from "./hooks/useRequirementImports";
 import RequirementImportReview from "./components/requirements/RequirementImportReview";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
+import GenerationGuidance from "./components/knowledge/GenerationGuidance";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
 import { Disclosure, Surface } from "./components/ui/surfaces";
 import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from "./components/ui/controls";
@@ -4157,6 +4158,15 @@ export default function App() {
 										) : null
 									}
 								/>
+
+								{["requirements", "test-cases", "automation"].includes(route.destination) && (
+									<GenerationGuidance
+										key={`${knowledgeScope}:${route.destination}:${currentProjectRevision}`}
+										request={apiRequest}
+										projectId={navigationProjectId}
+										stage={route.destination.replaceAll("-", "_")}
+									/>
+								)}
 
 								<OrchestratorCockpitPanel
 									currentProject={currentProject}
