@@ -31,8 +31,8 @@ def placeholder_reason(case, *, strict=True):
     return None
 
 
-def separate_generation_work(cases, coverage_plan=(), *, strict=True):
-    delivered, tasks = [], []
+def separate_generation_work(cases, coverage_plan=(), *, strict=True, pending_tasks=()):
+    delivered, tasks = [], [dict(task) for task in pending_tasks]
     for case in cases:
         row = case.model_dump(mode="json") if hasattr(case, "model_dump") else case
         reason = placeholder_reason(row, strict=strict)

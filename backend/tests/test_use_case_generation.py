@@ -179,6 +179,16 @@ class UseCaseGenerationTests(unittest.TestCase):
                 self.assertEqual(self.store, self.before)
         self.mocks["record_usage_event"].assert_not_called()
 
+    def test_advisory_reviewer_timeout_retains_valid_plan_as_new_unapproved_snapshot(self):
+        valid = generated([service.Requirement.model_validate(r) for r in self.project.current_snapshots["requirements"].payload["requirements"]])
+        valid["workflow_diagnostics"].update(status="partial", timed_out=True, failure_reason="semantic_review_timeout")
+        self.model.side_effect = None
+        self.model.return_value = valid
+        after = self.run_generation()
+        self.assertFalse(after.stage_state["use_cases"].approved)
+        self.assertNotEqual(after.current_snapshots["use_cases"].snapshot_id, self.old_snapshot.snapshot_id)
+        self.assertEqual(len(after.current_snapshots["use_cases"].payload["coverage_plan"]), 10)
+
     def test_model_exception_billing_and_guidance_failures_preserve_snapshot(self):
         for target in ["generate_use_cases", "enforce_billing_access", "prepare_run"]:
             with self.subTest(target=target), patch.object(service, target, side_effect=HTTPException(503, "Unavailable")):
