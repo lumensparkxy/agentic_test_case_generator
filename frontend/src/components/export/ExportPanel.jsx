@@ -113,6 +113,7 @@ export default function ExportPanel({
 	authActionDisabled,
 	exportToFormat,
 	exportMessage,
+	exportError,
 	goPrev,
 }) {
 	const exportDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportGateLocked;
@@ -130,7 +131,9 @@ export default function ExportPanel({
 						</strong>
 						<p>
 							{exportRequiresOverride
-								? testCaseReview?.summary || "The latest generated test cases need review before export."
+								? testCaseReview?.approved
+									? "The suite is incomplete or its saved approval is unavailable. Provide a reason to export this draft."
+									: testCaseReview?.summary || "No review decision is available. Provide a reason to export this draft."
 								: exportReviewApproved
 									? testCaseReview?.summary || "The latest generated test cases passed the review gate."
 									: "No review decision is available for this export."}
@@ -165,6 +168,11 @@ export default function ExportPanel({
 				<p className="helper-text">
 					Download test cases directly to your computer. Filenames include the project name and export date/time in UTC.
 				</p>
+				{exportError && (
+					<div className="workflow-result-notice warning" role="alert">
+						<p>{exportError}</p>
+					</div>
+				)}
 				{exportMessage && (
 					<div className="workflow-result-notice success" role="status">
 						<p>{exportMessage}</p>
