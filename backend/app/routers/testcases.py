@@ -129,25 +129,38 @@ def _append_project_generation_snapshots(
         current_project = get_project(project_id, actor=actor)
         current_requirements_snapshot = current_project.current_snapshots.get("requirements")
         current_context_snapshot = current_project.current_snapshots.get("context")
-        use_case_snapshot = append_stage_snapshot(
-            project_id=project_id,
-            stage="use_cases",
-            payload=_use_case_project_payload(response),
-            operation=f"{operation}.use_cases",
-            actor=actor,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=source_event_id,
-            # Automated quality approval stays in payload.review. Advancing the
-            # durable Use Cases stage requires an explicit human review record.
-            approved=False,
-            title="Use cases updated",
-            metadata={
-                "requirement_analysis_count": len(response.requirement_analysis),
-                "coverage_plan_count": len(response.coverage_plan),
-            },
-            base_project_revision=base_project_revision,
+        use_case_snapshot = current_project.current_snapshots.get("use_cases")
+        use_case_state = getattr(current_project, "stage_state", {}).get("use_cases")
+        reuse_use_cases = bool(
+            use_case_snapshot
+            and use_case_state
+            and not use_case_state.stale
+            and use_case_state.current_snapshot_id == use_case_snapshot.snapshot_id
+            and response.coverage_plan
+            and use_case_snapshot.payload.get("coverage_plan") == _model_payload(response.coverage_plan)
         )
+        # Test Case review/analysis belongs to the downstream artifact. Reusing a
+        # plan must retain its exact source assessment and human review record.
+        if not reuse_use_cases:
+            use_case_snapshot = append_stage_snapshot(
+                project_id=project_id,
+                stage="use_cases",
+                payload=_use_case_project_payload(response),
+                operation=f"{operation}.use_cases",
+                actor=actor,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                source_event_id=source_event_id,
+                # Automated quality approval stays in payload.review. Advancing the
+                # durable Use Cases stage requires an explicit human review record.
+                approved=False,
+                title="Use cases updated",
+                metadata={
+                    "requirement_analysis_count": len(response.requirement_analysis),
+                    "coverage_plan_count": len(response.coverage_plan),
+                },
+                base_project_revision=base_project_revision,
+            )
         source_snapshot_ids = {
             "requirements": current_requirements_snapshot.snapshot_id if current_requirements_snapshot else None,
             "context": current_context_snapshot.snapshot_id if current_context_snapshot else None,
@@ -164,6 +177,7 @@ def _append_project_generation_snapshots(
             source_event_id=source_event_id,
             approved=response.approved,
             source_snapshot_id=use_case_snapshot.snapshot_id,
+            base_project_revision=base_project_revision if reuse_use_cases else None,
             title="Test cases updated",
             metadata={
                 "test_case_count": len(response.test_cases),
