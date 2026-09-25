@@ -3,6 +3,7 @@
 from hashlib import sha256
 import json
 import logging
+import re
 from typing import Literal
 
 from google import genai
@@ -100,6 +101,119 @@ DATA:
 """
 
 
+def known_regression_findings(data):
+    """Conservative guards for measured false positives; not a general semantic oracle."""
+    obligations, prerequisites = [], []
+    cases = data["test_cases"]
+    for requirement in data["requirements"]:
+        source = requirement["text"]
+        if not re.search(r"refresh|reload", source, re.I) or not re.search(r"exactly one|same.*(?:id|identity)|existing|second|duplicat", source, re.I):
+            continue
+        for trigger, pattern in (("Double-click", r"double[ -]?click"), ("Lost-response retry", r"retr(?:y|ies|ying)")):
+            if not re.search(pattern, source, re.I):
+                continue
+            if data["scope"] == "selected_scenarios":
+                selected = " ".join(
+                    sc.get("title", "") + " " + sc.get("objective", "")
+                    for plan in data.get("selected_scenarios") or []
+                    if plan.get("requirement_id") == requirement["id"]
+                    for sc in plan.get("scenarios", [])
+                )
+                if not re.search(pattern, selected, re.I):
+                    continue
+            candidates = [
+                case
+                for case in cases
+                if requirement["id"] in case.get("linked_requirement_ids", [])
+                and re.search(pattern, " ".join(step["action"] for step in case.get("steps", [])), re.I)
+            ]
+            adequate = False
+            for case in candidates:
+                triggered = refreshed = False
+                for step in case.get("steps", []):
+                    triggered = triggered or bool(re.search(pattern, step["action"], re.I))
+                    refreshed = refreshed or (triggered and bool(re.search(r"refresh|reload", step["action"], re.I)))
+                    expected = step["expected"]
+                    identity = re.search(r"\b(?:id|identifier|identity)\b", expected, re.I) and re.search(
+                        r"same|original|unchanged|recorded|identical|existing", expected, re.I
+                    )
+                    count = re.search(r"exactly (?:one|1)|\bonce\b|\bsingle\b|no duplicates?|count.*\b1\b", expected, re.I)
+                    if refreshed and identity and count:
+                        adequate = True
+                if adequate:
+                    break
+            if not adequate:
+                case = candidates[0] if candidates else None
+                obligations.append(
+                    {
+                        "requirement_id": requirement["id"],
+                        "source_quote": source,
+                        "obligation": f"{trigger}: durable count and identity after refresh",
+                        "status": "unmet",
+                        "reason": f"{trigger} needs an explicit check of both one durable record and the same recorded ID after refresh in the triggering case. A separate refresh-only test does not close this gap.",
+                        "evidence": [{"test_case_id": case["id"], **{k: s[k] for k in ("step", "action", "expected")}} for s in case.get("steps", [])]
+                        if case
+                        else [],
+                        "assessment_method": "deterministic_regression_guard",
+                    }
+                )
+    facts = json.dumps({"requirements": data["requirements"], "context": data["context"]}, ensure_ascii=False)
+    # Product memories may supply facts; curated methodological skills cannot.
+    facts += json.dumps((data.get("applied_guidance") or {}).get("memories", []), ensure_ascii=False)
+    for case in cases:
+        text = json.dumps(case, ensure_ascii=False)
+        for name, pattern in (("idempotency key", r"idempotency[ -]key"), ("debouncing", r"debounc(?:e|ing)")):
+            if re.search(pattern, text, re.I) and not re.search(pattern, facts, re.I):
+                prerequisites.append(
+                    {
+                        "test_case_id": case["id"],
+                        "reason": "Known unsupported implementation assumption.",
+                        "prerequisites": [
+                            {
+                                "description": f"Confirm {name} support before requiring it",
+                                "status": "missing_prerequisite",
+                                "required": True,
+                                "reason": "The supplied source, context and product guidance do not establish this mechanism.",
+                            }
+                        ],
+                    }
+                )
+        if re.search(r"simulat.*(?:network|response)|(?:network|response).*interrupt", text, re.I) and not re.search(
+            r"harness|proxy|devtools|fault injection|intercept", facts, re.I
+        ):
+            prerequisites.append(
+                {
+                    "test_case_id": case["id"],
+                    "reason": "Response-loss test setup is not supplied.",
+                    "prerequisites": [
+                        {
+                            "description": "Provide or explicitly assume a controllable response-loss test mechanism",
+                            "status": "missing_prerequisite",
+                            "required": True,
+                            "reason": "The source defines retry behavior but does not supply a way to interrupt only the successful response.",
+                        }
+                    ],
+                }
+            )
+    return obligations, prerequisites
+
+
+def apply_known_regressions(result, data):
+    obligations, prerequisites = known_regression_findings(data)
+    result["model_status"] = result["status"]
+    result["obligations"] = result.get("obligations", []) + obligations
+    groundings = {item["test_case_id"]: item for item in result.get("case_grounding", [])}
+    for item in prerequisites:
+        if item["test_case_id"] in groundings:
+            groundings[item["test_case_id"]]["prerequisites"] += item["prerequisites"]
+        else:
+            groundings[item["test_case_id"]] = item
+    result["case_grounding"] = list(groundings.values())
+    if obligations or prerequisites:
+        result["status"] = "incomplete"
+    return result
+
+
 def validate_assessment(raw, data, input_hash):
     output = CriticOutput.model_validate_json(raw)
     if output.input_hash != input_hash:
@@ -138,20 +252,23 @@ def validate_assessment(raw, data, input_hash):
         execution_status="not_assessed",
         reason="Independent model assessment with verified source and step citations; not execution proof.",
     )
-    return result
+    return apply_known_regressions(result, data)
 
 
 def unknown_assessment(data, input_hash, reason):
-    return {
-        "rubric": RUBRIC,
-        "input_hash": input_hash,
-        "scope": data["scope"],
-        "status": "unknown",
-        "reason": reason,
-        "obligations": [],
-        "case_grounding": [],
-        "execution_status": "not_assessed",
-    }
+    return apply_known_regressions(
+        {
+            "rubric": RUBRIC,
+            "input_hash": input_hash,
+            "scope": data["scope"],
+            "status": "unknown",
+            "reason": reason,
+            "obligations": [],
+            "case_grounding": [],
+            "execution_status": "not_assessed",
+        },
+        data,
+    )
 
 
 def _call_critic(settings, prompt):

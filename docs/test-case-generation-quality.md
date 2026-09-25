@@ -88,6 +88,12 @@ Requirement/scenario reference ratios remain separate from behavioral coverage.
 requirements, context and actual run guidance. It does not establish execution,
 human acceptance or exhaustive correctness. Citation validation binds a judgment
 to its evidence; it cannot prove that a model enumerated every semantic obligation.
+Measured retry false positives also have deterministic guards: duplicate-submission
+requirements with refresh need explicit durable count and same-ID checks in the
+triggering case, and unprovided idempotency/debounce or response-loss mechanisms
+are prerequisites. These guards can reject a model pass and still run when the
+model review is unavailable; `model_status` keeps that distinction inspectable.
+They are conservative checks of explicit wording, not general semantic proof.
 Current requirements outrank conflicting context/memory; curated methods are not
 product facts. Valid boundaries and each stated invalid example must be assessed
 separately. A trigger and its durable result must belong to the same coherent case.

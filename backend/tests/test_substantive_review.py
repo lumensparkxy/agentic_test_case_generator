@@ -13,8 +13,10 @@ from app.agents.substantive_review import (
 from app.models import Requirement, TestCase
 
 
-def fixture():
-    req = Requirement(id="ROOM-440", text="Double-click and lost-response retries must keep one booking with the same identity after refresh.")
+def fixture(*, retry=True):
+    req = Requirement(
+        id="ROOM-440", text="Double-click" + (" and lost-response retries" if retry else "") + " must keep one booking with the same identity after refresh."
+    )
     case = TestCase(
         id="TC-RETRY",
         title="Retry",
@@ -47,6 +49,8 @@ def fixture():
         ],
         "case_grounding": [{"test_case_id": case.id, "reason": "Synthetic booking must exist", "prerequisites": []}],
     }
+    if not retry:
+        output["obligations"] = output["obligations"][:1]
     return req, case, data, digest, output
 
 
@@ -70,7 +74,7 @@ class SubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(result["test_cases"], [case])
 
     def test_complete_assessment_does_not_override_other_rejection(self):
-        _, case, data, digest, output = fixture()
+        _, case, data, digest, output = fixture(retry=False)
         output["obligations"] = output["obligations"][:1]
         assessment = validate_assessment(json.dumps(output), data, digest)
         self.assertEqual(assessment["status"], "assessed_complete")
@@ -112,7 +116,7 @@ class SubstantiveReviewTests(unittest.TestCase):
             validate_assessment(json.dumps(output), data, digest)
 
     def test_required_assumption_or_contradiction_is_gap_optional_exploration_is_not(self):
-        _, case, data, digest, output = fixture()
+        _, case, data, digest, output = fixture(retry=False)
         output["obligations"] = output["obligations"][:1]
         for status in ("unsupported_fact", "explicit_assumption", "missing_prerequisite", "contradiction"):
             item = {"description": "Provision Alice before running", "status": status, "required": True, "reason": "Not supplied by source"}
@@ -124,7 +128,7 @@ class SubstantiveReviewTests(unittest.TestCase):
             self.assertEqual(validate_assessment(json.dumps(output), data, digest)["status"], "assessed_complete")
 
     def test_no_model_timeout_malformed_output_and_size_limit_are_unknown(self):
-        req, case, _, _, _ = fixture()
+        req, case, _, _, _ = fixture(retry=False)
         with patch("app.agents.substantive_review._call_critic") as call:
             self.assertEqual(assess_delivered_suite([case], [req], None)["status"], "unknown")
             call.assert_not_called()
@@ -149,6 +153,42 @@ class SubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(delivered[0].linked_requirement_ids, ["ROOM-440"])
         self.assertEqual(_extract_linked_requirement_ids_from_test_case(raw, {"OTHER"}), [])
         self.assertEqual(_extract_linked_requirement_ids_from_test_case({"tags": raw["tags"]}), [])
+
+    def test_regression_guard_requires_same_case_durable_identity_and_count(self):
+        from app.agents.substantive_review import known_regression_findings
+
+        _, case, data, _, _ = fixture()
+        self.assertEqual(len(known_regression_findings(data)[0]), 1)
+        retry_case = case.model_dump(mode="json")
+        retry_case["id"] = "TC-LOST"
+        retry_case["steps"][0]["action"] = "Retry the pending submission then refresh"
+        data["test_cases"].append(retry_case)
+        self.assertEqual(known_regression_findings(data), ([], []))
+        data["test_cases"][0]["steps"][0]["expected"] = "Exactly one booking remains"
+        missing = known_regression_findings(data)[0]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("Double-click", missing[0]["obligation"])
+        refresh_case = case.model_dump(mode="json")
+        refresh_case["id"] = "REFRESH-ONLY"
+        refresh_case["steps"][0]["action"] = "Refresh My bookings"
+        data["test_cases"].append(refresh_case)
+        self.assertEqual(len(known_regression_findings(data)[0]), 1)
+
+    def test_regression_guard_respects_selected_scope_and_supplied_mechanisms(self):
+        from app.agents.substantive_review import known_regression_findings
+
+        _, _, data, _, _ = fixture()
+        data.update(
+            scope="selected_scenarios",
+            selected_scenarios=[
+                {"requirement_id": "ROOM-440", "scenarios": [{"title": "Double-click", "objective": "Verify durable identity and count after refresh"}]}
+            ],
+        )
+        self.assertEqual(known_regression_findings(data), ([], []))
+        data["test_cases"][0]["steps"][0]["action"] += " using an idempotency key and simulating network response interruption"
+        self.assertEqual(len(known_regression_findings(data)[1]), 2)
+        data["context"] = {"notes": "Synthetic harness supports response interruption and an idempotency key."}
+        self.assertEqual(known_regression_findings(data), ([], []))
 
     def test_saved_payload_keeps_assessment_and_gap_details(self):
         from app.models import GenerateTestCasesResponse
