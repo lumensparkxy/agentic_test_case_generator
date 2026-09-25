@@ -280,6 +280,7 @@ export interface ExecutionPreviewResponse {
 	executable?: Array<ExecutionCandidate>;
 	invalid?: Array<ExecutionCandidate>;
 	manual?: Array<ExecutionCandidate>;
+	readiness?: ExecutionReadiness | null;
 	summary?: ExecutionPreviewSummary;
 	unsupported?: Array<ExecutionCandidate>;
 	warnings?: Array<string>;
@@ -290,6 +291,21 @@ export interface ExecutionPreviewSummary {
 	invalid?: number;
 	manual?: number;
 	unsupported?: number;
+}
+
+export interface ExecutionReadiness {
+	blockers?: Array<ExecutionReadinessBlocker>;
+	project_id?: string | null;
+	project_revision?: number | null;
+	run_allowed?: boolean;
+	source_snapshot_id?: string | null;
+	target_base_url?: string | null;
+	target_source?: "request" | "configured_default" | "unspecified";
+}
+
+export interface ExecutionReadinessBlocker {
+	code: string;
+	message: string;
 }
 
 export interface ExecutionRunInput {
@@ -883,6 +899,8 @@ export interface ReviewResult {
 	approved?: boolean;
 	blocking_issues?: Array<string>;
 	score?: number;
+	semantic_assessment?: SemanticAssessment | null;
+	structural_checks?: StructuralChecks | null;
 	suggestions?: Array<string>;
 	summary?: string;
 	threshold?: number;
@@ -907,6 +925,21 @@ export interface RolePermission {
 	role: string;
 }
 
+export interface ScenarioAssessment {
+	checks?: Record<string, ScenarioCriterion>;
+	content_hash: string;
+	requirement_id: string;
+	review_available?: boolean;
+	scenario_id: string;
+	status: "passed" | "needs_review" | "unavailable";
+	warnings?: Array<string>;
+}
+
+export interface ScenarioCriterion {
+	passed: boolean;
+	reason: string;
+}
+
 export interface ScenarioIntent {
 	id: string;
 	must_have?: boolean;
@@ -924,6 +957,16 @@ export interface ScenarioReviewUpdate {
 	status: "needs_review" | "approved" | "request_changes";
 }
 
+export interface SemanticAssessment {
+	assessed_count?: number;
+	flagged_count?: number;
+	items?: Array<ScenarioAssessment>;
+	rubric_version: string;
+	scenario_count?: number;
+	status: "passed" | "needs_review" | "unavailable";
+	summary?: string;
+}
+
 export interface StateTransition {
 	entity: string;
 	from_state: string;
@@ -932,6 +975,16 @@ export interface StateTransition {
 	requirement_id: string;
 	to_state: string;
 	trigger?: string | null;
+}
+
+export interface StructuralChecks {
+	approved?: boolean;
+	blocking_issues?: Array<string>;
+	score?: number;
+	suggestions?: Array<string>;
+	summary?: string;
+	threshold?: number;
+	unmet_criteria?: Array<string>;
 }
 
 export interface TestCase {

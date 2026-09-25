@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useKnowledge from "../../hooks/useKnowledge";
 import { Button, Checkbox, Field, Select, Textarea, Input, Link } from "../ui/controls";
@@ -6,7 +6,8 @@ import { Table, TableScroll, CollectionState, CollectionToolbar } from "../ui/co
 import { Alert, Badge, Disclosure, Surface } from "../ui/surfaces";
 import { Dialog } from "../ui/dialog";
 
-const STAGES = { requirements: "Requirements", use_cases: "Use Cases", test_cases: "Test Cases", automation: "Automation" };
+import { GuidanceAvailability } from "./GenerationGuidance";
+import { GUIDANCE_STAGES as STAGES, entryStageAvailability } from "./guidanceAvailability";
 const LABELS = {
 	active: "Active",
 	suggested: "Suggested",
@@ -28,9 +29,15 @@ function Modal({ title, onClose, children }) {
 	);
 }
 
-function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose }) {
+function EntryDialog({ entry, mode, personal, busy, error, fieldErrors, onSubmit, onClose, availability }) {
 	const value = entry?.pending || entry?.active;
 	const [text, setText] = useState(value?.text || "");
+	const textRef = useRef(null);
+	const submittedText = useRef(null);
+	// Match Python/Pydantic code-point length, including non-BMP characters.
+	const characterCount = Array.from(text).length;
+	const textError =
+		characterCount > 1000 ? "Guidance must contain no more than 1000 characters." : submittedText.current === text ? fieldErrors?.text : "";
 	const [kind, setKind] = useState(value?.kind || "convention");
 	const [stages, setStages] = useState(value?.stages || Object.keys(STAGES));
 	const [links, setLinks] = useState(mode === "promote" ? "" : (value?.requirement_ids || []).join(", "));
@@ -46,6 +53,11 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose }) 
 	}[mode];
 	const submit = (event) => {
 		event.preventDefault();
+		if (!readOnly && characterCount > 1000) {
+			textRef.current?.focus();
+			return;
+		}
+		submittedText.current = text;
 		void onSubmit({
 			action: mode,
 			entry_id: entry?.id,
@@ -74,16 +86,9 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose }) 
 						Delete the wording and its saved revisions. Future runs cannot use it; historical artifacts keep only its reference.
 					</Alert>
 				)}
-				<Field>
+				<Field error={!readOnly ? textError : ""} hint={`Maximum 1000 characters · ${characterCount} / 1000`}>
 					<label htmlFor="knowledge-text">Guidance</label>
-					<Textarea
-						id="knowledge-text"
-						required
-						maxLength={1000}
-						value={text}
-						readOnly={readOnly}
-						onChange={(e) => setText(e.target.value)}
-					/>
+					<Textarea id="knowledge-text" required ref={textRef} value={text} readOnly={readOnly} onChange={(e) => setText(e.target.value)} />
 				</Field>
 				<Field>
 					<label htmlFor="knowledge-kind">Kind</label>
@@ -94,7 +99,7 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose }) 
 					</Select>
 				</Field>
 				<fieldset>
-					<legend>Applies to</legend>
+					<legend>Configured stages</legend>
 					{Object.entries(STAGES).map(([id, label]) => (
 						<label key={id} className="knowledge-check">
 							<Checkbox
@@ -114,8 +119,24 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose }) 
 					</Field>
 				)}
 				<p>Source: {value?.source || "Manual guidance"}</p>
+				{!personal && entry && (
+					<div className="entry-guidance-availability" role="group" aria-label="Current effective eligibility">
+						<p>Current status: {LABELS[entry.status] || entry.status}. Eligibility uses the approved version, not proposed edits.</p>
+						{entry.active && (
+							<p>
+								Approved version {entry.active.revision}: {entry.active.text}
+							</p>
+						)}
+						{Object.entries(STAGES).map(([stage, label]) => (
+							<p key={stage}>
+								<strong>{label}:</strong> {entryStageAvailability(entry, stage, availability)}
+							</p>
+						))}
+						<p>Run inputs and context limits determine final selection. Facts may also be carried through upstream artifacts.</p>
+					</div>
+				)}
 				{mode === "approve" && <p>This approves knowledge for future runs. It does not approve generated artifacts.</p>}
-				{error && (
+				{error && !fieldErrors?.text && (
 					<Alert tone="danger" role="alert">
 						{error}
 					</Alert>
@@ -140,6 +161,20 @@ function EntryDialog({ entry, mode, personal, busy, error, onSubmit, onClose }) 
 				</div>
 			</form>
 		</Modal>
+	);
+}
+
+function GuidanceText({ text }) {
+	const points = Array.from(text);
+	if (points.length <= 180) return <p className="knowledge-wording">{text}</p>;
+	return (
+		<div className="knowledge-wording">
+			<p>{points.slice(0, 180).join("")}…</p>
+			<Disclosure>
+				<summary>Read full guidance</summary>
+				<p>{text}</p>
+			</Disclosure>
+		</div>
 	);
 }
 
@@ -207,8 +242,14 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 					? "Reusable guidance you explicitly select for each project."
 					: "Approved guidance for future generation. Suggestions stay inactive until approved."}
 			</p>
-			{!personal && knowledge.data && !Object.values(knowledge.data.features || {}).some((f) => f.memory) && (
-				<p>Memory use is currently disabled. You can prepare guidance before rollout.</p>
+			{!personal && (
+				<section aria-label="Current stage guidance">
+					<h3>Current stage guidance</h3>
+					<p>Active means approved knowledge. Configured stages do not guarantee injection; run inputs and context limits also apply.</p>
+					{Object.keys(STAGES).map((stage) => (
+						<GuidanceAvailability key={stage} stage={stage} data={knowledge.error || knowledge.loading ? null : knowledge.data} />
+					))}
+				</section>
 			)}
 			<CollectionToolbar className="knowledge-toolbar">
 				<div className="knowledge-filter">
@@ -241,11 +282,18 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 				<CollectionState kind="loading">Loading knowledge…</CollectionState>
 			) : filtered.length ? (
 				<TableScroll aria-label="Knowledge entries">
-					<Table>
+					<Table className="knowledge-table">
+						<colgroup>
+							<col className="knowledge-wording-column" />
+							<col className="knowledge-stages-column" />
+							<col className="knowledge-source-column" />
+							<col className="knowledge-status-column" />
+							<col className="knowledge-actions-column" />
+						</colgroup>
 						<thead>
 							<tr>
 								<th scope="col">Guidance</th>
-								<th scope="col">Applies to</th>
+								<th scope="col">Configured stages</th>
 								<th scope="col">Source</th>
 								<th scope="col">Status</th>
 								<th scope="col">Actions</th>
@@ -258,10 +306,14 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 								return (
 									<tr key={entry.id}>
 										<td>
-											{value?.text || "Retired guidance"}
-											{entry.pending && entry.active && <p>Active version: {entry.active.text}</p>}
+											<GuidanceText text={value?.text || "Retired guidance"} />
+											{entry.pending && entry.active && <GuidanceText text={`Active version: ${entry.active.text}`} />}
 										</td>
-										<td>{value?.stages.map((s) => STAGES[s]).join(", ")}</td>
+										<td>
+											{entry.pending ? "Proposed: " : "Approved: "}
+											{value?.stages.map((s) => STAGES[s]).join(", ")}
+											{entry.pending && entry.active && <p>Approved: {entry.active.stages.map((s) => STAGES[s]).join(", ")}</p>}
+										</td>
 										<td>
 											{shared ? "Personal library" : value?.source}
 											{personal && entry.selected_by_projects.length > 0 && (
@@ -355,7 +407,7 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 						<p key={s.id}>
 							<strong>{STAGES[s.stage]}</strong> · {s.id} v{s.version} — {s.description}{" "}
 							{["skills", "memory"].map((kind) => {
-								const value = knowledge.data?.features?.[s.stage]?.[kind];
+								const value = knowledge.error || knowledge.loading ? undefined : knowledge.data?.features?.[s.stage]?.[kind];
 								return (
 									<Badge key={kind} tone={value === true ? "success" : "neutral"}>
 										{kind === "skills" ? "Skills" : "Memory"} {value === true ? "on" : value === false ? "off" : "status unavailable"}
@@ -370,8 +422,10 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 				<EntryDialog
 					{...dialog}
 					personal={personal}
+					availability={knowledge.error || knowledge.loading ? null : knowledge.data}
 					busy={knowledge.busy}
 					error={knowledge.error}
+					fieldErrors={knowledge.fieldErrors}
 					onClose={() => setDialog(null)}
 					onSubmit={change}
 				/>

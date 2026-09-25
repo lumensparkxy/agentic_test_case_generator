@@ -1,3 +1,4 @@
+import { getAutomationEvidenceStatus } from "./automationEvidence";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
 import { Checkbox, Field, Input, Button } from "../ui/controls";
 import { Surface, Alert, Disclosure } from "../ui/surfaces";
@@ -221,6 +222,9 @@ export default function AutomationPanel({
 	setSelectedExecutionCandidateIds,
 	executionRunResult,
 	executionError,
+	effectiveTarget,
+	executionStale,
+	executionEligibility,
 	isPreviewingExecution,
 	isRunningExecution,
 	authActionDisabled,
@@ -229,18 +233,31 @@ export default function AutomationPanel({
 	goPrev,
 	goNext,
 }) {
+	const evidence = getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: executionStale });
 	const previewSummary = executionPreview?.summary || {};
 	const executableCandidates = executionPreview?.executable || [];
 	const actualCandidateIds = new Set(executableCandidates.map((candidate) => candidate.id));
 	const selectedExecutableCount = selectedExecutionCandidateIds.filter((candidateId) => actualCandidateIds.has(candidateId)).length;
 	const previewIsActionable = executionPreview?.isConsistent === true && !executionPreview?.requiresRefresh;
 	const previewDisabled = !testCases.length || isPreviewingExecution || isRunningExecution || authActionDisabled;
-	const runDisabled = previewDisabled || !previewIsActionable || selectedExecutableCount === 0;
+	const runDisabled = previewDisabled || !previewIsActionable || !executionEligibility?.ready || selectedExecutableCount === 0;
 	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
 
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
 			<h2 className="panel-title">Execution setup</h2>
+			<div className="workflow-result-notice" role="region" aria-label="Automation evidence">
+				<strong>{evidence.label}</strong>
+				{executionRunResult?.run_id ? (
+					<p>Run {executionRunResult.run_id}. Completion and pass/fail are separate from preview validation.</p>
+				) : (
+					<p>A preview validates candidate specifications; it does not execute the application.</p>
+				)}
+				<p>{executionEligibility?.message || "Execution readiness is unavailable."}</p>
+				{!effectiveTarget && executionPreview?.readiness?.target_source === "configured_default" && (
+					<p>Using the explicitly configured backend target: {executionPreview.readiness.target_base_url}</p>
+				)}
+			</div>
 			{guidance}
 			<Disclosure className="guidance-summary">
 				<summary>Source test-case guidance</summary>

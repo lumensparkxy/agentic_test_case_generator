@@ -162,7 +162,7 @@ export default function ContextualTaskCard({
 	};
 
 	const handleSecondaryAction = (nextAction, event) => {
-		if (nextAction.action === "full_regenerate" && !navigationOnly) {
+		if (nextAction.action === "full_regenerate" && nextAction.requiresReplacement !== false && !navigationOnly) {
 			if (disabled || disabledMap[nextAction.action] || busyMap[nextAction.action] || !nextAction.enabled) return;
 			regenerationTriggerRef.current = event.currentTarget;
 			setConfirmationError("");

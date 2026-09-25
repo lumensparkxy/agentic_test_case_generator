@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import SequentialAgent
@@ -13,6 +13,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from .scenario_assessment import STATE_SCENARIO_ASSESSMENT, assessment_input, assess_scenarios, build_scenario_critic, combine_review, parse_critic_output
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .test_case_agent import (
     STATE_COVERAGE_PLAN,
@@ -58,6 +59,7 @@ class _UseCaseShardResult:
     diagnostics: Dict[str, Any]
     used_fallback: bool = False
     failed: bool = False
+    semantic_rows: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _new_use_case_diagnostics(
@@ -134,6 +136,11 @@ async def _run_single_use_case_shard_workflow_async(
     timeout_seconds = resolved_settings["timeout_seconds"]
     diagnostics = _new_use_case_diagnostics(shard_count=1, worker_count=1)
 
+    def semantic_input(state):
+        raw_plan, _ = parse_coverage_plan_json_detailed(state.get(STATE_COVERAGE_PLAN, "[]"))
+        plan, _ = _canonicalize_coverage_scenario_ids(_normalize_coverage_plan(raw_plan or [], shard.requirements))
+        return assessment_input(plan, shard.requirements, context_text)
+
     root_agent = SequentialAgent(
         name=f"UseCasePlanningPipeline{shard.index:02d}",
         sub_agents=[
@@ -145,6 +152,7 @@ async def _run_single_use_case_shard_workflow_async(
                 human_feedback=human_feedback,
             ),
             _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+            build_scenario_critic(model, semantic_input, requirements_text + "\n" + context_text),
         ],
         description="Plans requirement analysis and scenario coverage without generating test cases",
     )
@@ -162,6 +170,7 @@ async def _run_single_use_case_shard_workflow_async(
         state={
             STATE_COVERAGE_PLAN: "[]",
             STATE_REQUIREMENT_ANALYSIS: "[]",
+            STATE_SCENARIO_ASSESSMENT: "",
         },
     )
 
@@ -211,11 +220,22 @@ async def _run_single_use_case_shard_workflow_async(
     except asyncio.TimeoutError:
         diagnostics["status"] = "partial"
         diagnostics["timed_out"] = True
-        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "timeout"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or (
+            "semantic_review_timeout" if current_coverage_plan and current_requirement_analysis else "timeout"
+        )
         _append_unique_message(
             diagnostics["warnings"],
             f"Use-case shard {shard.shard_id} timed out after {timeout_seconds} second(s).",
         )
+
+    except Exception:
+        # The planning output remains useful when only its advisory critic fails.
+        # Do not expose provider exception content in the delivered review.
+        if not current_coverage_plan:
+            raise
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "semantic_review_error"
+        _append_unique_message(diagnostics["warnings"], "Semantic review did not finish. The generated plan still requires human review.")
 
     updated_session = await session_service.get_session(
         app_name="use_case_planner",
@@ -274,6 +294,7 @@ async def _run_single_use_case_shard_workflow_async(
         "requirement_analysis": current_requirement_analysis,
         "coverage_plan": current_coverage_plan,
         "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
+        "semantic_rows": parse_critic_output(session_state.get(STATE_SCENARIO_ASSESSMENT, "")),
     }
 
 
@@ -368,6 +389,7 @@ def _run_shard_with_fallback(
         diagnostics=diagnostics,
         used_fallback=used_fallback,
         failed=False,
+        semantic_rows=list(workflow.get("semantic_rows") or []) if not used_fallback else [],
     )
 
 
@@ -389,6 +411,12 @@ def _merge_shard_diagnostics(diagnostics: Dict[str, Any], shard_results: List[_U
             diagnostics["stalled"] = True
         if shard_diagnostics.get("max_iterations_reached"):
             diagnostics["max_iterations_reached"] = True
+
+    review_failures = {"semantic_review_error", "semantic_review_timeout"}
+    reasons = {result.diagnostics.get("failure_reason") for result in shard_results}
+    if not fallback_shards and reasons & review_failures and reasons <= review_failures | {None}:
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = "semantic_review_timeout" if "semantic_review_timeout" in reasons else "semantic_review_error"
 
     if failed_shards:
         diagnostics["status"] = "partial"
@@ -501,7 +529,7 @@ def _heuristic_use_case_review(
     score = max(0, 100 - (len(blocking_issues) * 20) - min(len(suggestions), 10))
     approved = score >= threshold and not blocking_issues
     summary = (
-        "Use-case planning passed deterministic coverage review."
+        "Structural checks passed for requirement groups, scenario categories and identifiers."
         if approved
         else "Use-case planning requires attention before downstream test-case generation."
     )
@@ -594,6 +622,9 @@ def _run_use_case_workflow_sync_inner(
         threshold,
         merge_warnings=merge_warnings,
     )
+    semantic_rows = [row for result in shard_results for row in result.semantic_rows]
+    _, context_text, _ = _prepare_workflow_inputs(requirements, context, type("_Template", (), {"name": "Use Cases", "format": "json", "fields": []})())
+    review = combine_review(review, assess_scenarios(coverage_plan, requirements, context_text, semantic_rows))
     coverage_metrics = _compute_use_case_metrics(requirement_analysis, coverage_plan, requirements, merge_warnings)
 
     _log_test_case_workflow(
@@ -612,6 +643,8 @@ def _run_use_case_workflow_sync_inner(
         "coverage_plan": coverage_plan,
         "approved": review["approved"],
         "review": review,
+        "semantic_rows": semantic_rows,
+        "context_text": context_text,
         "coverage_metrics": coverage_metrics,
         "workflow_settings": resolved_settings,
         "workflow_diagnostics": public_workflow_diagnostics(diagnostics),
@@ -671,20 +704,26 @@ def _build_use_case_response(workflow: Dict[str, Any], requirements: List[Requir
     for warning in merge_warnings:
         _append_unique_message(diagnostics.setdefault("warnings", []), warning)
     threshold = int((workflow.get("workflow_settings") or {}).get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
-    review = dict(
-        workflow.get("review")
-        or _heuristic_use_case_review(
-            raw_requirement_analysis,
+    structural = _heuristic_use_case_review(
+        raw_requirement_analysis,
+        raw_coverage_plan,
+        requirements,
+        threshold,
+        merge_warnings=diagnostics["merge_warnings"],
+    )
+    review = combine_review(
+        structural,
+        assess_scenarios(
             raw_coverage_plan,
             requirements,
-            threshold,
-            merge_warnings=diagnostics["merge_warnings"],
-        )
+            workflow.get("context_text", ""),
+            workflow.get("semantic_rows"),
+        ),
     )
     return {
         "requirement_analysis": _hydrate_requirement_analysis(raw_requirement_analysis, requirements),
         "coverage_plan": _hydrate_coverage_plan(raw_coverage_plan, requirements),
-        "approved": bool(workflow.get("approved", review.get("approved", False))),
+        "approved": review["approved"],
         "review": review,
         "coverage_metrics": dict(
             workflow.get("coverage_metrics")

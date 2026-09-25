@@ -22,6 +22,7 @@ from app.config import (
     get_billing_settings,
     get_jira_settings,
     get_generation_settings,
+    get_execution_settings,
     get_metrics_settings,
     get_settings,
 )
@@ -37,6 +38,16 @@ class ConfigSettingsTests(unittest.TestCase):
         get_azure_devops_settings.cache_clear()
         get_metrics_settings.cache_clear()
         get_generation_settings.cache_clear()
+        get_execution_settings.cache_clear()
+
+    def test_execution_target_distinguishes_explicit_configuration_from_fallback(self):
+        with patch.dict(os.environ, {"EXECUTION_DEFAULT_BASE_URL": ""}):
+            get_execution_settings.cache_clear()
+            self.assertFalse(get_execution_settings().default_base_url_configured)
+        with patch.dict(os.environ, {"EXECUTION_DEFAULT_BASE_URL": "https://qa.example.test"}):
+            get_execution_settings.cache_clear()
+            self.assertTrue(get_execution_settings().default_base_url_configured)
+            self.assertEqual(get_execution_settings().default_base_url, "https://qa.example.test")
 
     def test_load_environment_file_prefers_project_env_over_existing_process_value(self) -> None:
         with TemporaryDirectory() as tmpdir:
