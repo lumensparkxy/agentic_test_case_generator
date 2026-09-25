@@ -781,6 +781,7 @@ export interface Requirement {
 	content_version?: number;
 	id: string;
 	lifecycle_status?: "active" | "retired";
+	original_requirement_ids?: Array<string>;
 	parent_requirement_id?: string | null;
 	quality_flags?: Array<string>;
 	requirement_uid?: string | null;
@@ -850,11 +851,14 @@ export interface RequirementReviewsInput {
 
 export interface RequirementSourceReference {
 	excerpt?: string;
+	excerpt_verified?: boolean;
 	import_id: string;
 	label: string;
+	original_requirement_ids?: Array<string>;
 	source_id: string;
 	source_issue_key?: string | null;
 	source_issue_url?: string | null;
+	source_section?: string | null;
 	source_system?: string | null;
 	source_version: string;
 }

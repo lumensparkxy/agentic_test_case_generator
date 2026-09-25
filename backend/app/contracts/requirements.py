@@ -13,11 +13,15 @@ class RequirementSourceReference(BaseModel):
     source_issue_key: Optional[str] = None
     source_issue_url: Optional[HttpUrl] = None
     excerpt: str = ""
+    excerpt_verified: bool = False
+    source_section: Optional[str] = None
+    original_requirement_ids: List[str] = Field(default_factory=list)
 
 
 class Requirement(BaseModel):
     id: str
     text: str
+    original_requirement_ids: List[str] = Field(default_factory=list)
     requirement_uid: Optional[str] = None
     content_version: int = Field(default=1, ge=1)
     lifecycle_status: Literal["active", "retired"] = "active"
@@ -46,6 +50,7 @@ class Requirement(BaseModel):
 class RequirementExtractionItem(BaseModel):
     id: str
     text: str
+    original_requirement_ids: List[str] = Field(default_factory=list)
     source_path: Optional[str] = None
     source_section: Optional[str] = None
     source_excerpt: Optional[str] = None
