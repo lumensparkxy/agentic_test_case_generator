@@ -30,6 +30,7 @@ import { getAutomationEvidenceStatus } from "./components/automation/automationE
 import AutomationPanel from "./components/automation/AutomationPanel";
 import {
 	getDefaultSelectedCandidateIds,
+	getExecutionEligibility,
 	normalizeAutomationPreview,
 	resolveSelectedExecutableCandidates,
 } from "./components/automation/automationPreview";
@@ -3132,6 +3133,12 @@ export default function App() {
 		}
 	};
 
+	const executionEligibility = getExecutionEligibility(executionPreview, {
+		projectId: currentProjectId,
+		projectRevision: currentProjectRevision,
+		sourceSnapshotId: projectSnapshots.test_cases?.snapshot_id,
+	});
+
 	const runApprovedExecution = async () => {
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
@@ -3147,6 +3154,10 @@ export default function App() {
 		}
 		if (!preview?.isConsistent || preview.requiresRefresh) {
 			setStatus("Preview execution again before running candidates.");
+			return;
+		}
+		if (!executionEligibility.ready) {
+			setExecutionError(executionEligibility.message);
 			return;
 		}
 		const executableCandidates = resolveSelectedExecutableCandidates(preview, selectedExecutionCandidateIds);
@@ -3468,7 +3479,7 @@ export default function App() {
 			return true;
 		}
 		if (action === "execute") {
-			if (!executionPreview || !executionPreview.isConsistent || executionPreview.requiresRefresh) {
+			if (!executionPreview || !executionPreview.isConsistent || executionPreview.requiresRefresh || !executionEligibility.ready) {
 				await previewExecution();
 				return true;
 			}
@@ -5134,6 +5145,7 @@ export default function App() {
 											executionError={executionError}
 											effectiveTarget={executionTargetBaseUrl.trim() || appLink}
 											executionStale={projectStageState.execution?.stale}
+											executionEligibility={executionEligibility}
 											isPreviewingExecution={isPreviewingExecution}
 											isRunningExecution={isRunningExecution}
 											authActionDisabled={authActionDisabled}

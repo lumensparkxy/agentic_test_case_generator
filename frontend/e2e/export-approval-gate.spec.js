@@ -83,6 +83,7 @@ function orchestratorStatus() {
 test.describe("Export approval gate", () => {
 	test("draft test cases require an explicit override reason before export", { tag: "@p1" }, async ({ page }) => {
 		let exportPayload = null;
+		let runRequests = 0;
 
 		await page.route("**/auth/me", async (route) =>
 			jsonResponse(route, {
@@ -215,40 +216,11 @@ test.describe("Export approval gate", () => {
 				summary: { executable: 1, manual: 0, unsupported: 0, invalid: 0 },
 			})
 		);
-		await page.route("**/automation/execution/run", async (route) =>
-			jsonResponse(route, {
-				status: "passed",
-				run_id: "exec_export_report",
-				artifacts_root: "/tmp/agentic-tcg/exec_export_report",
-				playwright_report_paths: ["/tmp/agentic-tcg/exec_export_report/artifacts/playwright/tc_001/html-report"],
-				results: [
-					{
-						id: "tc_001",
-						source_test_case_id: "TC-001",
-						title: "Draft export report test",
-						status: "passed",
-						generated_spec_path: "/tmp/agentic-tcg/exec_export_report/generated/playwright/tc_001.spec.ts",
-						artifacts_dir: "/tmp/agentic-tcg/exec_export_report/artifacts/playwright/tc_001",
-						report_json_path: "/tmp/agentic-tcg/exec_export_report/artifacts/playwright/tc_001/results.json",
-						playwright_report_path: "/tmp/agentic-tcg/exec_export_report/artifacts/playwright/tc_001/html-report",
-						returncode: 0,
-						stdout: "1 passed",
-						stderr: "",
-						issues: [],
-					},
-				],
-				preview: {
-					executable: [],
-					manual: [],
-					unsupported: [],
-					invalid: [],
-					warnings: [],
-					summary: { executable: 1, manual: 0, unsupported: 0, invalid: 0 },
-				},
-				warnings: [],
-				summary: { passed: 1, failed: 0, invalid: 0, skipped: 0, unsupported: 0, manual: 0 },
-			})
-		);
+		await page.route("**/automation/execution/run", (route) => {
+			runRequests += 1;
+			return jsonResponse(route, { detail: "Unapproved suite must not execute" }, 409);
+		});
+
 		await page.route("**/export/{json,csv,excel}", async (route) => {
 			exportPayload = route.request().postDataJSON();
 			return jsonResponse(route, { test_cases: exportPayload.test_cases || [] }, 200, {
@@ -285,16 +257,11 @@ test.describe("Export approval gate", () => {
 		await expect(page).toHaveURL(automationPath);
 		await expect(page.getByRole("heading", { name: /^Automation$/i })).toBeVisible();
 		await page.getByRole("button", { name: /preview execution/i }).click();
-		await expect(page.getByRole("button", { name: /run 1 candidate/i })).toBeVisible();
-		await page.getByRole("button", { name: /run 1 candidate/i }).click();
-		await expect(page.locator("#main-content").getByText(/Execution passed: 1 passed/i)).toBeVisible();
+		await expect(page.getByRole("button", { name: /run 1 candidate/i })).toBeDisabled();
+		expect(runRequests).toBe(0);
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page).toHaveURL(reportsPath);
-		await expect(page.getByRole("heading", { name: /^Playwright Execution Report$/i })).toBeVisible();
-		const reportCard = page.locator(".playwright-report-card").first();
-		await expect(reportCard.getByText("Run exec_export_report")).toBeVisible();
-		await expect(reportCard.getByText(/Artifacts root/i)).toBeVisible();
-		await expect(reportCard.getByText("/tmp/agentic-tcg/exec_export_report/artifacts/playwright/tc_001/html-report")).toBeVisible();
+		await expect(page.getByText("No Playwright execution report has been recorded yet.", { exact: true })).toBeVisible();
 
 		const jsonButton = page.getByRole("button", { name: /json/i }).first();
 		await expect(page.getByText(/Export locked by review gate/i)).toBeVisible();

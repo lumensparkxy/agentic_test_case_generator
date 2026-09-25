@@ -224,6 +224,7 @@ export default function AutomationPanel({
 	executionError,
 	effectiveTarget,
 	executionStale,
+	executionEligibility,
 	isPreviewingExecution,
 	isRunningExecution,
 	authActionDisabled,
@@ -239,7 +240,7 @@ export default function AutomationPanel({
 	const selectedExecutableCount = selectedExecutionCandidateIds.filter((candidateId) => actualCandidateIds.has(candidateId)).length;
 	const previewIsActionable = executionPreview?.isConsistent === true && !executionPreview?.requiresRefresh;
 	const previewDisabled = !testCases.length || isPreviewingExecution || isRunningExecution || authActionDisabled;
-	const runDisabled = previewDisabled || !previewIsActionable || selectedExecutableCount === 0;
+	const runDisabled = previewDisabled || !previewIsActionable || !executionEligibility?.ready || selectedExecutableCount === 0;
 	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
 
 	return (
@@ -252,7 +253,10 @@ export default function AutomationPanel({
 				) : (
 					<p>A preview validates candidate specifications; it does not execute the application.</p>
 				)}
-				{!effectiveTarget && <p>No project target supplied. A backend default may be used; confirm the target before running.</p>}
+				<p>{executionEligibility?.message || "Execution readiness is unavailable."}</p>
+				{!effectiveTarget && executionPreview?.readiness?.target_source === "configured_default" && (
+					<p>Using the explicitly configured backend target: {executionPreview.readiness.target_base_url}</p>
+				)}
 			</div>
 			{guidance}
 			<Disclosure className="guidance-summary">

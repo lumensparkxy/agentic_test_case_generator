@@ -280,6 +280,7 @@ export interface ExecutionPreviewResponse {
 	executable?: Array<ExecutionCandidate>;
 	invalid?: Array<ExecutionCandidate>;
 	manual?: Array<ExecutionCandidate>;
+	readiness?: ExecutionReadiness | null;
 	summary?: ExecutionPreviewSummary;
 	unsupported?: Array<ExecutionCandidate>;
 	warnings?: Array<string>;
@@ -290,6 +291,21 @@ export interface ExecutionPreviewSummary {
 	invalid?: number;
 	manual?: number;
 	unsupported?: number;
+}
+
+export interface ExecutionReadiness {
+	blockers?: Array<ExecutionReadinessBlocker>;
+	project_id?: string | null;
+	project_revision?: number | null;
+	run_allowed?: boolean;
+	source_snapshot_id?: string | null;
+	target_base_url?: string | null;
+	target_source?: "request" | "configured_default" | "unspecified";
+}
+
+export interface ExecutionReadinessBlocker {
+	code: string;
+	message: string;
 }
 
 export interface ExecutionRunInput {
