@@ -99,7 +99,7 @@ test("failed review opens actionable findings; selection and instructions surviv
 
 test(
 	"applies explicit selected feedback with project recommendations, refreshes quality and clears drafts",
-	{ tag: "@p1" },
+	{ tag: [] },
 	async ({ page }) => {
 		const { requests } = await open(page);
 		await panel(page).getByRole("checkbox", { name: issue, exact: true }).check();
@@ -210,7 +210,7 @@ test("a changed source snapshot resets selections and instructions", async ({ pa
 });
 
 for (const width of [390, 1488]) {
-	test(`source obligations distinguish design coverage and prerequisites at ${width}px`, { tag: "@p1" }, async ({ page }) => {
+	test(`source obligations distinguish design coverage and prerequisites at ${width}px`, { tag: [] }, async ({ page }) => {
 		await page.setViewportSize({ width, height: 1000 });
 		await open(page, {
 			payload: {

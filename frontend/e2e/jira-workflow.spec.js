@@ -319,7 +319,7 @@ async function mockJiraWorkflow(page, user, project) {
 }
 
 test.describe("JIRA requirements workflow", () => {
-	test("authenticated user can connect, import, refine, preview, and sync JIRA requirements", { tag: "@p1" }, async ({ page }) => {
+	test("authenticated user can connect, import, refine, preview, and sync JIRA requirements", { tag: [] }, async ({ page }) => {
 		const user = buildTestUser();
 		const workspaceProject = workspaceProjectFixture({
 			project_id: PROJECT_ID,

@@ -213,49 +213,46 @@ async function expectNoProjectShell(page) {
 }
 
 test.describe("Global Review Inbox", () => {
-	test(
-		"preserves server order, deduplicates snapshot work, and opens every canonical review workbench",
-		{ tag: "@p1" },
-		async ({ page }) => {
-			const api = await openInbox(page, { summary: POPULATED_SUMMARY });
-			await expect(
-				page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Reviews$/i })
-			).toHaveAttribute("aria-current", "page");
-			await expectNoProjectShell(page);
+	test("preserves server order, deduplicates snapshot work, and opens every canonical review workbench", { tag: [] }, async ({ page }) => {
+		const api = await openInbox(page, { summary: POPULATED_SUMMARY });
+		await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Reviews$/i })).toHaveAttribute(
+			"aria-current",
+			"page"
+		);
+		await expectNoProjectShell(page);
 
-			const rows = inboxList(page).getByRole("listitem");
-			await expect(rows).toHaveCount(3);
-			await expect(rows.nth(0)).toContainText(USE_CASE_PROJECT.name);
-			await expect(rows.nth(1)).toContainText(REQUIREMENTS_PROJECT.name);
-			await expect(rows.nth(2)).toContainText(TEST_CASE_PROJECT.name);
-			await expect(inbox(page)).not.toContainText("Duplicate backend row must not render");
-			await expect(inbox(page)).not.toContainText(INFO_PROJECT.name);
+		const rows = inboxList(page).getByRole("listitem");
+		await expect(rows).toHaveCount(3);
+		await expect(rows.nth(0)).toContainText(USE_CASE_PROJECT.name);
+		await expect(rows.nth(1)).toContainText(REQUIREMENTS_PROJECT.name);
+		await expect(rows.nth(2)).toContainText(TEST_CASE_PROJECT.name);
+		await expect(inbox(page)).not.toContainText("Duplicate backend row must not render");
+		await expect(inbox(page)).not.toContainText(INFO_PROJECT.name);
 
-			const useCaseRow = inboxRow(page, USE_CASE_PROJECT.name);
-			await expect(useCaseRow).toContainText("3 scenarios");
-			await expect(useCaseRow.locator(".review-inbox-kind .sr-only")).toHaveText("Task type:");
-			await expect(useCaseRow).toContainText("Needs attention");
-			await expect(
-				useCaseRow.getByRole("heading", {
-					level: 3,
-					name: new RegExp(`${USE_CASE_PROJECT.name}.*Use Cases.*Review Use Cases`, "i"),
-				})
-			).toBeVisible();
-			await expect(useCaseRow.getByRole("link", { name: new RegExp(`Open .* for ${USE_CASE_PROJECT.name}`, "i") })).toHaveAttribute(
-				"href",
-				buildProjectPath(USE_CASE_PROJECT.project_id, "use-cases")
-			);
-			await expect(inboxRow(page, REQUIREMENTS_PROJECT.name).getByRole("link")).toHaveAttribute(
-				"href",
-				buildProjectPath(REQUIREMENTS_PROJECT.project_id, "requirements")
-			);
-			await expect(inboxRow(page, TEST_CASE_PROJECT.name).getByRole("link")).toHaveAttribute(
-				"href",
-				buildProjectPath(TEST_CASE_PROJECT.project_id, "test-cases")
-			);
-			expect(api.requests.workspaceSummary).toHaveLength(1);
-		}
-	);
+		const useCaseRow = inboxRow(page, USE_CASE_PROJECT.name);
+		await expect(useCaseRow).toContainText("3 scenarios");
+		await expect(useCaseRow.locator(".review-inbox-kind .sr-only")).toHaveText("Task type:");
+		await expect(useCaseRow).toContainText("Needs attention");
+		await expect(
+			useCaseRow.getByRole("heading", {
+				level: 3,
+				name: new RegExp(`${USE_CASE_PROJECT.name}.*Use Cases.*Review Use Cases`, "i"),
+			})
+		).toBeVisible();
+		await expect(useCaseRow.getByRole("link", { name: new RegExp(`Open .* for ${USE_CASE_PROJECT.name}`, "i") })).toHaveAttribute(
+			"href",
+			buildProjectPath(USE_CASE_PROJECT.project_id, "use-cases")
+		);
+		await expect(inboxRow(page, REQUIREMENTS_PROJECT.name).getByRole("link")).toHaveAttribute(
+			"href",
+			buildProjectPath(REQUIREMENTS_PROJECT.project_id, "requirements")
+		);
+		await expect(inboxRow(page, TEST_CASE_PROJECT.name).getByRole("link")).toHaveAttribute(
+			"href",
+			buildProjectPath(TEST_CASE_PROJECT.project_id, "test-cases")
+		);
+		expect(api.requests.workspaceSummary).toHaveLength(1);
+	});
 
 	test("filters locally by stage and durable status while keeping secondary states out of the default queue", async ({ page }) => {
 		const api = await openInbox(page, { summary: POPULATED_SUMMARY });

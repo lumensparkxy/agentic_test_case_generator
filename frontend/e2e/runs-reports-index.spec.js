@@ -209,7 +209,7 @@ async function expectStatusWithIcon(row, value, label) {
 test.describe("Global Runs and Reports indexes", () => {
 	test(
 		"renders authoritative run identities, durable states, exact totals, and canonical evidence links",
-		{ tag: "@p1" },
+		{ tag: [] },
 		async ({ page }) => {
 			const api = await openActivityPage(page, "/runs", { summary: POPULATED_SUMMARY });
 			await expect(page.getByRole("navigation", { name: /^Global navigation$/i }).getByRole("link", { name: /^Runs$/i })).toHaveAttribute(

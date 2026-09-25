@@ -586,7 +586,9 @@ test.describe("Contextual next task", () => {
 	);
 
 	for (const grounded_context of [null, { artifact_sources: [], ui_elements: [] }]) {
-		test(`preserves saved context notes ${grounded_context ? "with" : "without"} enrichment after reload @p1`, async ({ page }) => {
+		test(`preserves saved context notes ${grounded_context ? "with" : "without"} enrichment after reload${grounded_context ? " @p1" : ""}`, async ({
+			page,
+		}) => {
 			const scenario = { project: projectFixture(), status: statusFixture(staleActions()) };
 			const notes = "Alice owns /bookings/{bookingId}. Bob must not cancel it. Atlas and Birch are separate rooms.";
 			scenario.project.current_snapshots.context = {
