@@ -17,7 +17,7 @@ Use Cases retain three separate decisions:
 
 One semantic critic follows the existing analysis and coverage planner in each
 Use Cases shard (at most three concurrent shards). It assesses the normalized
-plan, including any server-added scenarios, within the existing shared shard
+plan, including fallback when model output is missing, within the existing shared shard
 wall-clock timeout and provider retry budget. It has no tools or repair loop.
 The critic receives the shard's source requirements and supplied context, not
 model-generated requirement analysis as a source of new facts. A business rule
@@ -28,14 +28,26 @@ unsupplied route/debouncing prescriptions. They do not award a semantic pass or
 reject a scenario solely because its title is short or names a category. The
 model reviewer handles semantic distinctions beyond these bounded patterns.
 
+The local route check compares case-sensitive complete paths. A supplied route
+template with whole-segment `{parameter}` placeholders also supports concrete
+paths when fixed segments and path length match and every substituted value is
+present as a complete token in source facts outside route strings. This avoids
+flagging `/bookings/B-EXISTING` when both `/bookings/{bookingId}` and fixture
+`B-EXISTING` are supplied. It does not infer new routes, fixture values, parameter
+meaning, actor permissions or expected behavior. The independent critic still
+reviews those semantics; absence of a local warning never grants approval.
+
 `review.structural_checks` retains the structural result.
-`review.semantic_assessment` records rubric version `scenario_semantics_v1`,
+`review.semantic_assessment` records rubric version `scenario_semantics_v2`,
 status (`passed`, `needs_review`, `unavailable`), assessed/total/flagged counts,
 and per-scenario checks, reasons and warnings. A SHA-256 binding covers the
 normalized scenario, requirement text and supplied context. Missing, ambiguous,
 malformed or mismatched critic records cannot pass. Known warnings remain
 visible even when the model assessment is unavailable. No semantic coverage
 percentage is inferred from category counts.
+Version 2 corrects route-template instances and rejects substring/case-only
+route matches. Existing version 1 assessments are retained as recorded; this
+change does not rewrite snapshots or human review decisions.
 
 The legacy top-level score remains structural for compatibility; top-level
 machine `approved` now requires both structural and semantic success. It does

@@ -16,8 +16,37 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from .adk_runtime import json_generation_config
 
 STATE_SCENARIO_ASSESSMENT = "scenario_semantic_assessment"
-RUBRIC_VERSION = "scenario_semantics_v1"
+RUBRIC_VERSION = "scenario_semantics_v2"
 CRITERIA = ("specific_trigger", "observable_outcome", "distinct_behavior", "source_grounding")
+_ROUTE = re.compile(r"(?<![\w/])/(?:[\w{}:.-]+/)*[\w{}:.-]+/?")
+
+
+def _routes(text):
+    return {match.rstrip(".") for match in _ROUTE.findall(text)}
+
+
+def _source_supports_route(route, source_routes, source_values):
+    if route in source_routes:
+        return True
+    segments = route.split("/")
+    for template in source_routes:
+        parts = template.split("/")
+        if len(parts) != len(segments):
+            continue
+        supported = True
+        for part, value in zip(parts, segments):
+            if re.fullmatch(r"\{[A-Za-z_]\w*\}", part):
+                # A template is not permission to invent fixture values. The
+                # independent critic still assesses parameter/actor semantics.
+                if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", value) or value not in source_values:
+                    supported = False
+                    break
+            elif part != value:
+                supported = False
+                break
+        if supported:
+            return True
+    return False
 
 
 class Criterion(BaseModel):
@@ -120,6 +149,9 @@ def local_findings(plan, source_text):
     """Known regression warnings only; never used as proof of semantic success."""
     findings = {}
     source = source_text.lower()
+    source_routes = _routes(source_text)
+    source_facts = _ROUTE.sub(" ", source_text)
+    source_values = {token.rstrip(".") for token in re.findall(r"(?<![\w.-])[A-Za-z0-9_][A-Za-z0-9_.-]*", source_facts)}
     for group in plan:
         by_content = {}
         for scenario in group.get("scenarios") or []:
@@ -133,8 +165,8 @@ def local_findings(plan, source_text):
             text = f"{title} {objective}"
             if re.search(r"\bdebounc\w*", text, re.I) and not re.search(r"\bdebounc\w*", source):
                 warnings.append("Debouncing is not specified in the supplied facts. Confirm this assumption or remove the implementation prescription.")
-            for route in set(re.findall(r"(?<!\w)/(?:[\w{}:.-]+/)*[\w{}:.-]+", text)):
-                if route.lower() not in source:
+            for route in sorted(_routes(text)):
+                if not _source_supports_route(route, source_routes, source_values):
                     warnings.append(
                         f"Route {route} is not supplied by the source. Confirm it as an assumption or describe the business action without an invented route."
                     )

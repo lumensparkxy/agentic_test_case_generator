@@ -127,6 +127,55 @@ class ScenarioAssessmentTests(unittest.TestCase):
                 self.assertEqual(result["status"], "unavailable")
                 self.assertEqual(result["assessed_count"], 0)
 
+    def test_route_template_instances_require_source_values_and_matching_path(self):
+        context = "Direct route /bookings/{bookingId}. Alice owns booking B-EXISTING."
+        for route, supported in (
+            ("/bookings/B-EXISTING", True),
+            ("/bookings/{bookingId}", True),
+            ("/bookings/INVENTED", False),
+            ("/bookings/B-EXIST", False),
+            ("/booking/B-EXISTING", False),
+            ("/bookings/B-EXISTING/cancel", False),
+            ("/bookings/B-EXISTING/", False),
+            ("/Bookings/B-EXISTING", False),
+            ("/bookings/b-existing", False),
+            ("/bookings/{otherId}", False),
+        ):
+            with self.subTest(route=route):
+                coverage = plan(("Non-owner cancellation", f"Bob opens {route}; cancellation is denied and the booking remains Confirmed."))
+                result = assess_scenarios(coverage, [REQ], context, passes(coverage, context))
+                self.assertEqual(result["status"], "passed" if supported else "needs_review")
+
+    def test_route_matching_is_exact_and_does_not_treat_source_regex_characters_as_patterns(self):
+        for context, route in (
+            ("Route /bookings/archive", "/bookings"),
+            ("Route /bookings/archive", "/bookings/arch"),
+            ("Route /bookings/{bookingId}; archive-old is a fixture.", "/bookings/archive"),
+            ("Route /v1.0/bookings/{bookingId}; B-EXISTING is a fixture.", "/v1x0/bookings/B-EXISTING"),
+            ("Route /bookings/{bookingId}; another route /other/INVENTED.", "/bookings/INVENTED"),
+            ("Route /bookings/prefix-{bookingId}; B-EXISTING is a fixture.", "/bookings/prefix-B-EXISTING"),
+        ):
+            with self.subTest(context=context, route=route):
+                coverage = plan(("Inspect booking", f"Open {route}; status remains Confirmed."))
+                self.assertEqual(assess_scenarios(coverage, [REQ], context, passes(coverage, context))["status"], "needs_review")
+
+    def test_route_instances_with_multiple_parameters_require_every_source_value(self):
+        coverage = plan(("Inspect booking", "Open /rooms/Atlas/bookings/B-EXISTING; Confirmed is displayed."))
+        template = "Route /rooms/{roomId}/bookings/{bookingId}. Room Atlas."
+        for context, supported in ((template, False), (template + " Booking B-EXISTING.", True)):
+            with self.subTest(context=context):
+                self.assertEqual(assess_scenarios(coverage, [REQ], context, passes(coverage, context))["status"], "passed" if supported else "needs_review")
+
+    def test_supported_route_never_replaces_complete_passing_critic(self):
+        context = "Direct route /bookings/{bookingId}. Booking B-EXISTING."
+        coverage = plan(("Inspect booking", "Open /bookings/B-EXISTING; Confirmed is displayed."))
+        self.assertEqual(assess_scenarios(coverage, [REQ], context)["status"], "unavailable")
+        rows = passes(coverage, context)
+        rows[0]["source_grounding"] = {"passed": False, "reason": "The behavior is not specified for this actor."}
+        result = assess_scenarios(coverage, [REQ], context, rows)
+        self.assertEqual(result["status"], "needs_review")
+        self.assertEqual(result["items"][0]["warnings"], ["The behavior is not specified for this actor."])
+
     def test_string_booleans_blank_reasons_and_omitted_criteria_are_not_reviews(self):
         coverage = plan(("Boundary", "Submit nine attendees; no booking is created."))
         for mutate in (
