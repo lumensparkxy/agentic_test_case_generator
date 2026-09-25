@@ -781,6 +781,7 @@ export interface Requirement {
 	content_version?: number;
 	id: string;
 	lifecycle_status?: "active" | "retired";
+	original_requirement_ids?: Array<string>;
 	parent_requirement_id?: string | null;
 	quality_flags?: Array<string>;
 	requirement_uid?: string | null;
@@ -850,11 +851,14 @@ export interface RequirementReviewsInput {
 
 export interface RequirementSourceReference {
 	excerpt?: string;
+	excerpt_verified?: boolean;
 	import_id: string;
 	label: string;
+	original_requirement_ids?: Array<string>;
 	source_id: string;
 	source_issue_key?: string | null;
 	source_issue_url?: string | null;
+	source_section?: string | null;
 	source_system?: string | null;
 	source_version: string;
 }
@@ -878,6 +882,8 @@ export interface ReviewResult {
 	approved?: boolean;
 	blocking_issues?: Array<string>;
 	score?: number;
+	semantic_assessment?: SemanticAssessment | null;
+	structural_checks?: StructuralChecks | null;
 	suggestions?: Array<string>;
 	summary?: string;
 	threshold?: number;
@@ -902,6 +908,21 @@ export interface RolePermission {
 	role: string;
 }
 
+export interface ScenarioAssessment {
+	checks?: Record<string, ScenarioCriterion>;
+	content_hash: string;
+	requirement_id: string;
+	review_available?: boolean;
+	scenario_id: string;
+	status: "passed" | "needs_review" | "unavailable";
+	warnings?: Array<string>;
+}
+
+export interface ScenarioCriterion {
+	passed: boolean;
+	reason: string;
+}
+
 export interface ScenarioIntent {
 	id: string;
 	must_have?: boolean;
@@ -919,6 +940,16 @@ export interface ScenarioReviewUpdate {
 	status: "needs_review" | "approved" | "request_changes";
 }
 
+export interface SemanticAssessment {
+	assessed_count?: number;
+	flagged_count?: number;
+	items?: Array<ScenarioAssessment>;
+	rubric_version: string;
+	scenario_count?: number;
+	status: "passed" | "needs_review" | "unavailable";
+	summary?: string;
+}
+
 export interface StateTransition {
 	entity: string;
 	from_state: string;
@@ -927,6 +958,16 @@ export interface StateTransition {
 	requirement_id: string;
 	to_state: string;
 	trigger?: string | null;
+}
+
+export interface StructuralChecks {
+	approved?: boolean;
+	blocking_issues?: Array<string>;
+	score?: number;
+	suggestions?: Array<string>;
+	summary?: string;
+	threshold?: number;
+	unmet_criteria?: Array<string>;
 }
 
 export interface TestCase {

@@ -9,6 +9,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.models import AuthUser, Requirement, TestCase, TestStep
+from app.agents.test_case_hydration import _hydrate_test_cases
 from app.services.versioning_service import persist_requirement_versions, persist_test_case_versions
 
 
@@ -106,6 +107,51 @@ class VersioningServiceTests(unittest.TestCase):
         self.assertEqual(result[0].artifact_version_number, 1)
         version_paths = [path for _, path, _, _ in client.calls if "/versions/" in path]
         self.assertTrue(any(path.startswith("test_case_sets/") for path in version_paths))
+
+    def test_refined_model_case_uses_previous_identity_and_new_version(self) -> None:
+        client = FakeFirestoreClient()
+        previous = TestCase(
+            id="TC-1",
+            title="Booking test",
+            steps=[],
+            artifact_set_id="owned-set",
+            artifact_item_id="owned-item",
+            artifact_version_id="previous-version",
+            artifact_version_number=3,
+        )
+        current = _hydrate_test_cases(
+            [
+                {
+                    "id": "TC-1",
+                    "title": "Refined booking test",
+                    "test_data": {"room": "Birch"},
+                    "artifact_set_id": "model-set",
+                    "artifact_item_id": "model-item",
+                    "artifact_version_id": "model-version",
+                    "artifact_version_number": 99,
+                }
+            ]
+        )
+        with patch("app.services.firestore_repository.get_firestore_client", return_value=client):
+            result = persist_test_case_versions(
+                current_test_cases=current,
+                previous_test_cases=[previous],
+                actor=AuthUser(sub="user-1", email="user@example.com", name="User"),
+                request_id="request-1",
+                workflow_run_id="run-1",
+                source_event_id="event-1",
+                operation="testcases.refine",
+                approved=False,
+            )
+        self.assertEqual(result[0].artifact_set_id, "owned-set")
+        self.assertEqual(result[0].artifact_item_id, "owned-item")
+        self.assertEqual(result[0].artifact_version_number, 4)
+        self.assertNotIn(result[0].artifact_version_id, ("previous-version", "model-version"))
+        versions = [(path, payload) for _, path, payload, _ in client.calls if "/versions/" in path]
+        self.assertEqual(len(versions), 1)
+        self.assertTrue(versions[0][0].startswith("test_case_sets/owned-set/items/owned-item/versions/"))
+        self.assertEqual(versions[0][1]["previous_version_id"], "previous-version")
+        self.assertEqual(result[0].test_data, '{"room":"Birch"}')
 
     def test_persist_test_case_versions_reuses_unchanged_metadata_when_requested(self) -> None:
         client = FakeFirestoreClient()

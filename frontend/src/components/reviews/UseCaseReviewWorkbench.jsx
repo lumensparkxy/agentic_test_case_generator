@@ -26,12 +26,12 @@ const getHumanReviewMeta = (review) => {
 };
 
 const getMachineReviewMeta = (review) => {
-	if (!review || typeof review !== "object") {
-		return { label: "Machine review unavailable", tone: "neutral" };
-	}
-	return review.approved
-		? { label: "Machine quality check passed", tone: "approved" }
-		: { label: "Machine review requires attention", tone: "changes" };
+	const structural = review?.structural_checks || review;
+	return structural
+		? structural.approved === true
+			? { label: "Structural checks passed", tone: "approved" }
+			: { label: "Structural review requires attention", tone: "changes" }
+		: { label: "Structural checks unavailable", tone: "neutral" };
 };
 
 const formatRatio = (value) => {
@@ -63,7 +63,7 @@ const getCoverageMetrics = (coverageMetrics, scenarioTotal, groupTotal, mustHave
 	const scenarioCoverage = formatRatio(coverageMetrics?.scenario_coverage_ratio);
 	const mustHaveCoverage = formatRatio(coverageMetrics?.must_have_scenario_coverage_ratio);
 	if (planCoverage) {
-		metrics.push({ label: "Use Case plan coverage", value: planCoverage });
+		metrics.push({ label: "Structural Use Case plan coverage", value: planCoverage });
 	}
 	if (requirementsAnalyzed) {
 		metrics.push({ label: "Requirements analyzed", value: requirementsAnalyzed });
@@ -72,10 +72,10 @@ const getCoverageMetrics = (coverageMetrics, scenarioTotal, groupTotal, mustHave
 		metrics.push({ label: "Requirements planned", value: requirementsPlanned });
 	}
 	if (scenarioCoverage) {
-		metrics.push({ label: "Scenario coverage", value: scenarioCoverage });
+		metrics.push({ label: "Linked scenario coverage", value: scenarioCoverage });
 	}
 	if (mustHaveCoverage) {
-		metrics.push({ label: "Must-have coverage", value: mustHaveCoverage });
+		metrics.push({ label: "Linked must-have coverage", value: mustHaveCoverage });
 	}
 	return metrics;
 };
@@ -116,6 +116,8 @@ const filterGroups = (coveragePlan, analysisByRequirement, query) => {
 
 function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTotal, machineReview, humanReview }) {
 	const machineMeta = getMachineReviewMeta(machineReview);
+	const structural = machineReview?.structural_checks || machineReview;
+	const semantic = machineReview?.semantic_assessment;
 	const humanMeta = getHumanReviewMeta(humanReview);
 	return (
 		<div className="use-case-review-summary-grid">
@@ -139,18 +141,32 @@ function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTo
 			</section>
 
 			<section className="use-case-review-state-card machine" aria-label="Machine quality review">
-				<span className="use-case-section-kicker">Machine quality review</span>
+				<span className="use-case-section-kicker">Structural checks</span>
 				<strong className={`use-case-review-state ${machineMeta.tone}`}>{machineMeta.label}</strong>
 				{machineReview ? (
 					<>
-						<p>{machineReview.summary || "The automated reviewer did not provide a summary."}</p>
+						<p>Checks of requirement groups, scenario categories and identifiers. These do not establish behavioral coverage.</p>
 						<span className="use-case-score">
-							Score {machineReview.score ?? "—"} / threshold {machineReview.threshold ?? "—"}
+							Structural score {structural.score ?? "—"} / threshold {structural.threshold ?? "—"}
 						</span>
 					</>
 				) : (
-					<p>No automated quality decision is stored with this artifact.</p>
+					<p>No structural result is stored with this artifact.</p>
 				)}
+				<span className="use-case-section-kicker">Semantic assessment</span>
+				<strong
+					className={`use-case-review-state ${semantic?.status === "passed" ? "approved" : semantic?.status === "needs_review" ? "changes" : "neutral"}`}
+				>
+					{semantic?.status === "passed"
+						? "Semantic checks passed"
+						: semantic?.status === "needs_review"
+							? "Semantic review requires attention"
+							: "Semantic assessment unavailable"}
+				</strong>
+				<p>
+					{semantic?.summary ||
+						"No semantic assessment is stored for this artifact. Review triggers, observable outcomes, distinct behavior and unsupported assumptions."}
+				</p>
 			</section>
 
 			<section className="use-case-review-state-card human" aria-label="Human review status">
@@ -557,6 +573,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					key={snapshot.snapshot_id}
 					groups={filteredGroups}
 					allGroups={coveragePlan}
+					assessment={machineReview?.semantic_assessment}
 					state={effectiveStageState}
 					snapshot={snapshot}
 					revision={project.current_revision}

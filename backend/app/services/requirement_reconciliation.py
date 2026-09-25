@@ -32,8 +32,22 @@ def source_reference(req, import_id, label):
         source_system=req.source_system,
         source_issue_key=req.source_issue_key,
         source_issue_url=req.source_issue_url,
-        excerpt=req.source_excerpt or req.text,
+        excerpt=req.source_excerpt or "",
     )
+
+
+def source_references(req, import_id, label):
+    # Model conversion does not accept canonical sources. Document parsing binds
+    # these to actual uploaded text before a comparison is created.
+    return [source.model_copy(update={"import_id": import_id}) for source in req.sources] or [source_reference(req, import_id, label)]
+
+
+def reference_key(source):
+    return source.source_id, source.source_version, tuple(source.original_requirement_ids), source.source_section, source.excerpt, source.excerpt_verified
+
+
+def original_ids(sources):
+    return list(dict.fromkeys(identifier for source in sources if source.excerpt_verified for identifier in source.original_requirement_ids))
 
 
 def canonical_requirements(project_id, snapshot):
@@ -50,6 +64,7 @@ def canonical_requirements(project_id, snapshot):
             req.requirement_uid = req.requirement_uid or str(uuid5(NAMESPACE_URL, f"{project_id}:{seed}"))
             if not req.sources:
                 req.sources = [source_reference(req, snapshot["snapshot_id"], payload.get("source_name") or "Imported requirements")]
+            req.original_requirement_ids = original_ids(req.sources)
             req.lifecycle_status = "retired" if field == "retired_requirements" else "active"
             rows.append(req)
         result.append(rows)
@@ -62,8 +77,9 @@ def compare_requirements(current, incoming, semantic_matches=None, semantic_fail
     for index, req in enumerate(incoming):
         cid = f"incoming-{index + 1}"
         exact = [old for old in current if normalized(old.text) == normalized(req.text)]
-        reference = source_reference(req, "comparison", source_name)
-        confirmed = [old for old in current if any((s.source_id, s.source_version) == (reference.source_id, reference.source_version) for s in old.sources)]
+        references = source_references(req, "comparison", source_name)
+        incoming_keys = {reference_key(source) for source in references}
+        confirmed = [old for old in current if any(reference_key(source) in incoming_keys for source in old.sources)]
 
         scores = sorted(((SequenceMatcher(None, normalized(req.text), normalized(old.text)).ratio(), old) for old in current), key=lambda x: -x[0])
         suggestions = [
@@ -100,7 +116,7 @@ def compare_requirements(current, incoming, semantic_matches=None, semantic_fail
                 else ("new", None, "No matching requirement found; add to the project.")
             )
         # Never accept model-extracted identity, approval or version fields as canonical.
-        req = req.model_copy(update={"requirement_uid": None, "sources": [], "content_version": 1, "lifecycle_status": "active"})
+        req = req.model_copy(update={"requirement_uid": None, "content_version": 1, "lifecycle_status": "active"})
         candidates.append(
             ImportCandidate(candidate_id=cid, requirement=req, classification=kind, target_requirement_uid=target, suggestions=suggestions, reason=reason)
         )
@@ -163,7 +179,7 @@ def reconcile(preview: RequirementImportPreview, decision: ImportApplyInput, ret
                 raise HTTPException(422, "Skipped requirements cannot have a match.")
             counts["skipped"] += 1
             continue
-        reference = source_reference(incoming, preview.import_id, preview.source_name)
+        references = source_references(incoming, preview.import_id, preview.source_name)
         if choice.action == "add":
             if choice.target_requirement_uid:
                 raise HTTPException(422, "Independent additions cannot have a match.")
@@ -177,7 +193,8 @@ def reconcile(preview: RequirementImportPreview, decision: ImportApplyInput, ret
                     "content_version": 1,
                     "review_status": "Needs Review",
                     "lifecycle_status": "active",
-                    "sources": [reference],
+                    "sources": references,
+                    "original_requirement_ids": original_ids(references),
                     "artifact_set_id": None,
                     "artifact_item_id": None,
                     "artifact_version_id": None,
@@ -221,8 +238,12 @@ def reconcile(preview: RequirementImportPreview, decision: ImportApplyInput, ret
             ):
                 if getattr(req, field, None) in (None, "", []):
                     setattr(req, field, getattr(incoming, field))
-        if (reference.source_id, reference.source_version) not in {(s.source_id, s.source_version) for s in req.sources}:
-            req.sources.append(reference)
+        existing_keys = {reference_key(source) for source in req.sources}
+        for reference in references:
+            if reference_key(reference) not in existing_keys:
+                req.sources.append(reference)
+                existing_keys.add(reference_key(reference))
+        req.original_requirement_ids = original_ids(req.sources)
         counts["updated" if changed else "unchanged"] += 1
     # Parent links are interpreted within this extracted batch, then translated to stable display IDs.
     # They never establish a cross-import identity match.
