@@ -279,6 +279,7 @@ function projectForPhase(phase) {
 		afterApply ? "impact.update.apply" : "testcases.generate",
 		{
 			test_cases: testCases(afterApply),
+			generation_tasks: [],
 			coverage_plan: coveragePlan(v1Requirements),
 			requirement_analysis: [],
 			impact_analysis: afterApply ? impactAnalysisPayload() : null,
@@ -662,6 +663,15 @@ async function mockLifecycleApi(page) {
 		}
 		if (url.pathname === "/automation/execution/preview") {
 			return jsonResponse(route, {
+				readiness: {
+					run_allowed: true,
+					blockers: [],
+					project_id: PROJECT_ID,
+					project_revision: currentProject().current_revision,
+					source_snapshot_id: currentProject().current_snapshots.test_cases.snapshot_id,
+					target_base_url: "https://staging.example.test/app",
+					target_source: "request",
+				},
 				executable: [
 					{
 						id: "candidate-TC-001",

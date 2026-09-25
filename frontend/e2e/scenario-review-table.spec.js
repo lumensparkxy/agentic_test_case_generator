@@ -103,6 +103,7 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	const headers = page.getByRole("columnheader", { name: /^Title \/ objective/ });
 	const header = headers.first();
 	const table = page.getByRole("table", { name: "REQ-101", exact: true });
+	await divider.scrollIntoViewIfNeeded();
 	const tableWidth = (await table.boundingBox()).width;
 	await expect(table.getByRole("separator")).toHaveCount(3);
 	await expect(page.getByRole("separator", { name: "Resize Quality flags column", exact: true })).toHaveCount(0);

@@ -339,7 +339,8 @@ test.describe("Responsive project shell", () => {
 			{ name: "Requirements, Complete", tone: "complete" },
 			{ name: "Context, Pending", tone: "pending" },
 			{ name: "Use Cases, Awaiting review", tone: "attention" },
-			{ name: "Automation, Blocked", tone: "blocked" },
+			{ name: "Automation, Pending", tone: "pending" },
+			{ name: "Reports, Blocked", tone: "blocked" },
 		];
 		for (const expectedState of expectedStates) {
 			const item = projectNavigation.getByRole("link", { name: expectedState.name });

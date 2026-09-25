@@ -9,7 +9,7 @@ from .prompting import sanitize_human_feedback
 from ..services.guidance_service import apply_agent_guidance
 
 
-def literal_source_agent(builder, model, requirements_text, context_text, template_text, *args, **kwargs):
+def literal_source_agent(builder, model, requirements_text, context_text, template_text, *args, guidance_stage="test_cases", **kwargs):
     values = [requirements_text, context_text, template_text]
     feedback = kwargs.get("human_feedback")
     if feedback:
@@ -18,7 +18,7 @@ def literal_source_agent(builder, model, requirements_text, context_text, templa
     bindings = dict(zip(tokens, values, strict=True))
     if feedback:
         kwargs["human_feedback"] = tokens[3]
-    root = apply_agent_guidance(builder(model, *tokens[:3], *args, **kwargs), "test_cases")
+    root = apply_agent_guidance(builder(model, *tokens[:3], *args, **kwargs), guidance_stage)
     pattern = re.compile("|".join(re.escape(token) for token in tokens))
 
     def bind(agent):

@@ -402,6 +402,53 @@ it and the environment/model calls are authorized. It is slower and more
 environment-sensitive than offline checks; it is not a prerequisite for a local
 parsing or UI fix and does not replace unit or offline benchmark evidence.
 
+### Live Room Booking business journey
+
+`frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
+scenario is opt-in; the default full suite reports it as skipped. Its anonymous
+sign-in check remains offline. Start frontend and backend from the same checkout
+with the README commands and matching `VITE_API_BASE`, API CORS origin and ports.
+The backend needs its existing Gemini and Firestore credentials plus
+`AUTH_TOKEN_MODE=firebase-or-backend-jwt`; frontend and backend must share the
+local JWT secret. Do not use production or enable held guidance stages for this
+check. `E2E_API_BASE` must be loopback.
+
+From `frontend/`, against those running servers:
+
+```bash
+E2E_LIVE=1 E2E_API_BASE=http://127.0.0.1:8000 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e -- e2e/workflow.spec.js
+```
+
+The live scenario creates one uniquely named, test-owned Room Booking project,
+imports the real fixture through Requirements, explicitly reviews it, compares
+and cancels an 8-to-6 change, saves synthetic context, and generates Use Cases.
+It stops before synthetic reviewer approval when semantic or structural review
+fails. If those gates pass, it generates real cases, checks structured quality,
+reloads saved identities and inspects a downloaded JSON export. An incomplete
+suite requires an explicit draft reason and still fails business acceptance.
+There is no booking system to execute against; no test claims target execution
+or real human acceptance. No model retries are configured at the test-runner
+level; backend workflow retry settings remain visible in responses.
+
+Each run saves source/response/manifest/revision evidence, checkout and source
+hashes, timings and any blocking gate under `frontend/test-results/`. Traces and
+videos are disabled for this live spec to avoid recording auth payloads. The
+fixture archives only the exact project whose ID, owner and unique name match
+this run, retaining final evidence even on failure. Keep failed-run evidence
+outside `test-results` before the next run clears it. Actual model names are in
+guidance manifests; correlate captured request IDs with backend logs for
+provider and usage. Unavailable usage or cost is unknown, never zero.
+
+This is a gated live journey, not complete release acceptance. The audit run
+stopped on scenario semantics, so downstream generation, repair and export were
+not exercised in that run. Source apply/re-review/targeted repair, stale/retry,
+and draft/approved export regressions remain in the scoped
+`requirement-import-review`, `use-case-review`, `impact-application`,
+`test-generation-repair` and `export-approval-gate` specs. Those mocked checks do
+not prove the entire source-change path against live generation. Resume that
+live path after the upstream quality gate is resolved; do not bypass the gate
+or substitute mocked output to make this scenario green.
+
 ## 6) Additional affected-test targets
 
 The selection matrix in section 1 is authoritative for local gate size. These

@@ -151,7 +151,7 @@ test("stale suite blocks refinement and exposes impact review", async ({ page })
 	await expect(apply(page)).toBeDisabled();
 	await expect(panel(page)).toContainText("Upstream inputs changed");
 	await panel(page).getByRole("button", { name: "Review impact" }).click();
-	await expect(page.locator(".generation-gate-card")).toContainText("impact analysis");
+	await expect(page.getByText("Existing suite needs impact analysis", { exact: true })).toBeVisible();
 	expect(requests).toHaveLength(0);
 });
 

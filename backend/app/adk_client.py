@@ -22,7 +22,8 @@ from google.genai import types
 from .agents.adk_runtime import json_generation_config, text_generation_config, tool_generation_config
 from .agents.prompting import REAL_WORLD_QA_POLICY, REQUIREMENT_PROMPT_GUARDRAILS, human_feedback_section
 from .config import DEFAULT_MODEL_NAME
-from .models import RequirementsOutput, ReviewResult, WorkflowSettings
+from .models import RequirementsOutput, WorkflowSettings
+from .contracts.requirements import StructuralChecks
 from .observability.logging import bind_log_context, get_log_context, reset_log_context
 from .utils.genai_response import extract_response_text
 from .utils.llm_json import extract_json, parse_requirements_json_detailed, parse_review_json_detailed
@@ -405,7 +406,7 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
         model=model,
         include_contents="none",
         generate_content_config=json_generation_config(max_output_tokens=2048),
-        output_schema=ReviewResult,
+        output_schema=StructuralChecks,
         instruction=f"""You are a Quality Assurance Lead reviewing software requirements for testability.
 
 {REQUIREMENT_PROMPT_GUARDRAILS}
