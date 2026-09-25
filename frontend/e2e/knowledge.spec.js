@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { installUseCaseReviewApi, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
 const stages = ["requirements", "use_cases", "test_cases", "automation"];
-async function openKnowledge(page, { failFirst = false, features = {}, initialEntries = [] } = {}) {
+async function openKnowledge(page, { failFirst = false, features = {}, initialEntries = [], validationError = null } = {}) {
 	await installUseCaseReviewApi(page);
 	await seedAuthenticatedSession(page);
 	let entries = structuredClone(initialEntries);
@@ -44,6 +44,7 @@ async function openKnowledge(page, { failFirst = false, features = {}, initialEn
 			});
 		const payload = route.request().postDataJSON();
 		calls.push({ payload, key: route.request().headers()["x-request-id"] });
+		if (validationError) return route.fulfill({ status: 422, json: { detail: validationError } });
 		if (failFirst && !failed) {
 			failed = true;
 			return route.fulfill({ status: 503, json: { detail: "Temporary knowledge failure" } });
@@ -412,3 +413,88 @@ for (const width of [390, 1488])
 		expect(results.violations).toEqual([]);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	});
+
+for (const character of ["a", "🧪"]) {
+	test(`guidance counts Unicode characters and preserves oversized ${character === "a" ? "ASCII" : "emoji"} input`, async ({ page }) => {
+		const calls = await openKnowledge(page);
+		await page.getByRole("button", { name: "Add guidance", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "Add guidance", exact: true });
+		const input = dialog.getByLabel("Guidance", { exact: true });
+		for (const count of [999, 1000, 1001]) {
+			await input.fill(character.repeat(count));
+			await expect(input).toHaveValue(character.repeat(count));
+			await expect(dialog).toContainText(`Maximum 1000 characters · ${count} / 1000`);
+			if (count > 1000) {
+				await expect(input).toHaveAttribute("aria-invalid", "true");
+				await expect(input).toHaveAccessibleDescription(/Maximum 1000 characters.*Guidance must contain no more than 1000 characters/s);
+				await dialog.getByRole("button", { name: "Save proposal" }).click();
+				await expect(input).toBeFocused();
+				expect(calls).toHaveLength(0);
+			} else {
+				await expect(input).not.toHaveAttribute("aria-invalid", "true");
+			}
+		}
+		await input.fill(character.repeat(1000));
+		await expect(input).not.toHaveAttribute("aria-invalid", "true");
+		await dialog.getByRole("button", { name: "Save proposal" }).click();
+		await expect(dialog).toHaveCount(0);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].payload.draft.text).toBe(character.repeat(1000));
+	});
+}
+
+test("server text validation is associated with Guidance and does not discard input", { tag: "@p1" }, async ({ page }) => {
+	const calls = await openKnowledge(page, {
+		validationError: [{ loc: ["body", "draft", "text"], type: "string_too_long", msg: "String should have at most 1000 characters" }],
+	});
+	await page.getByRole("button", { name: "Add guidance", exact: true }).click();
+	const input = page.getByRole("dialog").getByLabel("Guidance", { exact: true });
+	await input.fill("Guidance retained when a server rejects the field");
+	await page.getByRole("dialog").getByRole("button", { name: "Save proposal" }).click();
+	await expect(input).toHaveAttribute("aria-invalid", "true");
+	await expect(input).toHaveAccessibleDescription(/Guidance must contain no more than 1000 characters/);
+	await expect(input).toHaveValue("Guidance retained when a server rejects the field");
+	expect(calls).toHaveLength(1);
+	await input.fill("Revised guidance");
+	await expect(input).not.toHaveAttribute("aria-invalid", "true");
+});
+
+for (const width of [390, 1488]) {
+	test(`long guidance expands without squeezing status or losing dialog focus at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const entry = activeGuidance({ status: "needs_confirmation" });
+		entry.active.text = "Use concrete outcomes for each behavior. ".repeat(22);
+		await openKnowledge(page, { initialEntries: [entry], features: pilotFeatures });
+		await page.getByLabel("Filter knowledge").selectOption("all");
+		const region = page.getByRole("region", { name: "Knowledge entries", exact: true });
+		await expect(region).toHaveAttribute("tabindex", "0");
+		await expect(region.getByText(entry.active.text, { exact: true })).not.toBeVisible();
+		const disclosure = region.getByText("Read full guidance", { exact: true });
+		await disclosure.focus();
+		await page.keyboard.press("Enter");
+		await expect(region.getByText(entry.active.text, { exact: true })).toBeVisible();
+		const statusCell = region.getByRole("cell", { name: "Needs confirmation", exact: true });
+		expect(await statusCell.evaluate((node) => getComputedStyle(node).overflowWrap)).toBe("normal");
+		expect((await statusCell.boundingBox()).width).toBeGreaterThan(130);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+		await page.getByRole("button", { name: "Add guidance", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "Add guidance", exact: true });
+		const input = dialog.getByLabel("Guidance", { exact: true });
+		await expect(input).toBeFocused();
+		const dialogBox = await dialog.boundingBox();
+		expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+		expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(width);
+		await input.fill("x".repeat(1001));
+		await page.keyboard.press("Shift+Tab");
+		await expect(dialog.getByRole("button", { name: "Save proposal" })).toBeFocused();
+		await page.keyboard.press("Tab");
+		await expect(input).toBeFocused();
+		await expect(input).toHaveAccessibleDescription(/Maximum 1000 characters.*no more than 1000/s);
+		const results = await new AxeBuilder({ page }).include(".knowledge-dialog").analyze();
+		expect(results.violations).toEqual([]);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+		await page.keyboard.press("Escape");
+		await expect(dialog).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Add guidance", exact: true })).toBeFocused();
+	});
+}
