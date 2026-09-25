@@ -155,7 +155,44 @@ class ParseResponse(BaseModel):
     requirements: List[Requirement]
 
 
+class StructuralChecks(BaseModel):
+    approved: bool = False
+    score: int = 0
+    threshold: int = 0
+    summary: str = ""
+    blocking_issues: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
+    unmet_criteria: List[str] = Field(default_factory=list)
+
+
+class ScenarioCriterion(BaseModel):
+    passed: bool
+    reason: str
+
+
+class ScenarioAssessment(BaseModel):
+    requirement_id: str
+    scenario_id: str
+    content_hash: str
+    status: Literal["passed", "needs_review", "unavailable"]
+    review_available: bool = False
+    checks: Dict[str, ScenarioCriterion] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class SemanticAssessment(BaseModel):
+    rubric_version: str
+    status: Literal["passed", "needs_review", "unavailable"]
+    assessed_count: int = 0
+    scenario_count: int = 0
+    flagged_count: int = 0
+    summary: str = ""
+    items: List[ScenarioAssessment] = Field(default_factory=list)
+
+
 class ReviewResult(BaseModel):
+    structural_checks: Optional[StructuralChecks] = None
+    semantic_assessment: Optional[SemanticAssessment] = None
     approved: bool = False
     score: int = 0
     threshold: int = 0
