@@ -127,6 +127,7 @@ class ExecutionSettings(BaseModel):
     enabled: bool = True
     artifact_root: Path = REPO_ROOT / ".execution_artifacts"
     default_base_url: str = "http://127.0.0.1:5173"
+    default_base_url_configured: bool = False
     playwright_config_path: Path = REPO_ROOT / "backend" / "execution_runtime" / "playwright.config.ts"
     runtime_cwd: Path = REPO_ROOT / "backend" / "execution_runtime"
     max_cases_per_request: int = 9999
@@ -426,6 +427,7 @@ def get_execution_settings() -> ExecutionSettings:
         enabled=_parse_bool_env(os.getenv("EXECUTION_ENABLED", "true"), default=True),
         artifact_root=artifact_root,
         default_base_url=default_base_url,
+        default_base_url_configured=bool((os.getenv("EXECUTION_DEFAULT_BASE_URL") or "").strip()),
         playwright_config_path=playwright_config_path,
         runtime_cwd=runtime_cwd,
         max_cases_per_request=_parse_positive_int_env(

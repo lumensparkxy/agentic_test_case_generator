@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
+import { expectNoSeriousOrCriticalViolations } from "./support/accessibility.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
 
 const PROJECT_ID = "contextual-task-project";
@@ -481,16 +482,30 @@ test.describe("Contextual next task", () => {
 		await openTestCases(page);
 
 		const optionalTask = page.getByLabel("Test suite actions");
-		await page.getByText("More actions", { exact: true }).first().click();
+		await expect(page.getByLabel("Test Cases readiness")).toContainText("Awaiting Use Cases review");
 		await expect(optionalTask.getByRole("heading")).toHaveCount(0);
 		await expect(optionalTask.locator(".contextual-task-controls > button")).toHaveCount(0);
 		await optionalTask
 			.locator("summary")
 			.filter({ hasText: /^More actions$/i })
 			.click();
-		await expect(optionalTask.getByRole("button", { name: /^Full Regenerate$/i })).toBeVisible();
+		await expect(optionalTask.getByRole("button", { name: /^Generate draft$/i })).toBeVisible();
+		await expect(optionalTask.locator("details details")).toHaveCount(0);
+		await page.getByRole("button", { name: /^Review Use Cases$/ }).click();
+		await expect(page).toHaveURL(buildProjectPath(PROJECT_ID, "use-cases"));
+		await page.goto(buildProjectPath(PROJECT_ID, "test-cases"));
+		await expect(page.getByLabel("Test Cases readiness")).toContainText("Awaiting Use Cases review");
 		await expect(page.getByRole("button", { name: /Generate from \d+ Approved/i })).toHaveCount(0);
 		expect(requests.generation).toBe(0);
+		await page.getByLabel("Test suite actions").locator("summary").click();
+		await page.getByRole("button", { name: /^Generate draft$/ }).click();
+		await expect.poll(() => requests.generation).toBe(1);
+		await expect(page.getByRole("dialog", { name: /Regenerate the entire/ })).toHaveCount(0);
+		await expect(page.getByRole("button", { name: new RegExp(NEW_CASE_TITLE, "i") })).toBeVisible();
+		await expect(page.getByRole("button", { name: /^Generate draft$/ })).toHaveCount(0);
+		await page.getByRole("button", { name: /^Full Regenerate$/ }).click();
+		await expect(page.getByRole("dialog", { name: /Regenerate the entire test suite/ })).toBeVisible();
+		await page.getByRole("button", { name: /^Cancel$/ }).click();
 
 		scenario.project = projectFixture();
 		scenario.project.stage_state.use_cases.metadata = {};
@@ -498,7 +513,7 @@ test.describe("Contextual next task", () => {
 		await page.reload();
 		await expect(page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") })).toBeVisible();
 		await expect(page.getByRole("button", { name: /Implement Changes/i })).toHaveCount(0);
-		expect(requests.generation).toBe(0);
+		expect(requests.generation).toBe(1);
 	});
 
 	test(
@@ -828,3 +843,58 @@ test("older revision responses fail visibly while committed requirement approval
 	await page.getByRole("link", { name: "Home", exact: true }).click();
 	await expect(page.getByRole("region", { name: "Continue working" }).getByRole("link", { name: "Open Test Cases" })).toBeVisible();
 });
+
+for (const readiness of ["requirements", "use-cases", "ready", "unavailable", "stale-status", "incomplete"]) {
+	test(`generation readiness: ${readiness}`, async ({ page }, testInfo) => {
+		const project = projectFixture();
+		delete project.current_snapshots.test_cases;
+		delete project.stage_state.test_cases;
+		project.stage_state.use_cases.metadata.latest_human_review = { snapshot_id: "snap-use-v1", decision: "approve" };
+		const status = statusFixture([recommendation("generate", { primary: true, secondary: false })]);
+		status.has_baseline_test_suite = false;
+		status.upstream_changed = false;
+		if (readiness === "requirements") project.stage_state.requirements.approved = false;
+		if (readiness === "use-cases") project.stage_state.use_cases.stale = true;
+		if (readiness === "stale-status") status.project_revision = 7;
+		if (readiness === "incomplete") {
+			project.current_snapshots.test_cases = projectFixture().current_snapshots.test_cases;
+			project.stage_state.test_cases = { ...projectFixture().stage_state.test_cases, stale: false };
+			project.current_snapshots.test_cases.payload.generation_tasks = [
+				{ requirement_ids: ["REQ-001"], reason: "Missing cancellation coverage" },
+			];
+		}
+		const scenario = { project, status: readiness === "unavailable" ? null : status };
+		const requests = await installApi(page, scenario);
+		await openTestCases(page);
+		const panel = page.getByLabel("Test Cases readiness");
+		const labels = {
+			requirements: "Requirements review needed",
+			"use-cases": "Use Cases need refresh and review",
+			ready: "Ready to generate test cases",
+			unavailable: "Generation readiness unavailable",
+			"stale-status": "Generation readiness unavailable",
+			incomplete: "Draft incomplete",
+		};
+		await expect(panel).toContainText(labels[readiness]);
+		if (readiness === "requirements") {
+			await panel.getByRole("button", { name: "Review requirements" }).click();
+			await expect(page).toHaveURL(buildProjectPath(PROJECT_ID, "requirements"));
+		} else if (readiness === "incomplete") {
+			await expect(panel).toContainText("1 concrete test cases · 1 unfinished generation tasks");
+			await expect(page.getByRole("button", { name: "Plan targeted repair" })).toBeEnabled();
+		} else if (["unavailable", "stale-status"].includes(readiness)) {
+			await expect(page.getByRole("button", { name: /^Start generation$/ })).toHaveCount(0);
+			expect(requests.generation).toBe(0);
+		}
+		if (readiness === "use-cases") {
+			await expect(page.getByRole("button", { name: /^Start generation$/ })).toBeDisabled();
+			for (const width of [1488, 390]) {
+				await page.setViewportSize({ width, height: 900 });
+				await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+				await expect(panel.getByRole("button", { name: "Review Use Cases" })).toBeVisible();
+				await expectNoSeriousOrCriticalViolations(page, `Test Cases readiness at ${width}px`);
+				await page.screenshot({ path: testInfo.outputPath(`readiness-${width}.png`), fullPage: true });
+			}
+		}
+	});
+}

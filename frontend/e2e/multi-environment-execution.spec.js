@@ -212,6 +212,15 @@ test.describe("Multi-environment execution", () => {
 		await page.route("**/automation/execution/preview", async (route) => {
 			const body = JSON.parse(route.request().postData() || "{}");
 			return jsonResponse(route, {
+				readiness: {
+					run_allowed: true,
+					blockers: [],
+					project_id: "project-1",
+					project_revision: currentProject.current_revision,
+					source_snapshot_id: "snap-test-v1",
+					target_base_url: body.target_base_url,
+					target_source: "request",
+				},
 				executable: [
 					{
 						id: `candidate-${body.target_environment}`,

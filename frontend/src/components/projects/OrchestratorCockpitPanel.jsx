@@ -4,6 +4,7 @@ import { selectContextualTask } from "./contextualTask";
 
 export default function OrchestratorCockpitPanel({
 	currentProject,
+	hasTestCases = false,
 	status,
 	currentDestination,
 	isOverview = false,
@@ -21,11 +22,24 @@ export default function OrchestratorCockpitPanel({
 		return null;
 	}
 
-	const { primaryAction, secondaryActions } = selectContextualTask(status, {
+	const { primaryAction, secondaryActions: originalSecondaryActions } = selectContextualTask(status, {
 		destination: currentDestination,
 		overview: isOverview,
 	});
 
+	const hasBaseline = Boolean(
+		hasTestCases || currentProject.current_snapshots?.test_cases || currentProject.stage_state?.test_cases?.current_snapshot_id
+	);
+	const secondaryActions = originalSecondaryActions.map((action) =>
+		compact && action.action === "full_regenerate" && !hasBaseline
+			? {
+					...action,
+					label: "Generate draft",
+					reason: "Generate a first draft from approved requirements. Use Cases review remains required for the normal generation path.",
+					requiresReplacement: false,
+				}
+			: action
+	);
 	if (!primaryAction && !secondaryActions.length && !error) {
 		return null;
 	}
@@ -43,8 +57,8 @@ export default function OrchestratorCockpitPanel({
 					secondaryActions={secondaryActions}
 					status={status}
 					busyMap={actionBusy || {}}
-					disabled={authActionDisabled || isLoading}
-					disabledMap={actionDisabled || {}}
+					disabled={authActionDisabled || isLoading || Boolean(error) || status?.project_revision !== currentProject.current_revision}
+					disabledMap={isOverview ? {} : actionDisabled || {}}
 					navigationOnly={isOverview}
 					compact={compact}
 					focusFallbackRef={focusFallbackRef}
@@ -53,7 +67,7 @@ export default function OrchestratorCockpitPanel({
 			) : null}
 		</section>
 	);
-	return !primaryAction && !error ? (
+	return !compact && !primaryAction && !error ? (
 		<Disclosure className="optional-workflow-actions">
 			<summary>More actions</summary>
 			{content}
