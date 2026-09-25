@@ -11,6 +11,14 @@ from fastapi import HTTPException
 
 
 class TestCaseQualityTests(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate generation/delivery. Independent review is covered separately.
+        assessment = patch(
+            "app.agents.test_case_agent.assess_delivered_suite", return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []}
+        )
+        assessment.start()
+        self.addCleanup(assessment.stop)
+
     def concrete(self, identifier="TC-FB-001"):
         return TestCase(
             id=identifier,

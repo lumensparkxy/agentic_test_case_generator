@@ -1,9 +1,11 @@
+import BusinessCoverageSummary from "./BusinessCoverageSummary";
 import { useId, useState } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
 import { improvementFindings, findingCaseIds, improvementFeedback } from "./improvementFindings";
 
 export default function ImproveTestsPanel({
 	review,
+	assessment,
 	meta,
 	testCases,
 	busy,
@@ -50,6 +52,7 @@ export default function ImproveTestsPanel({
 		<section className="improve-tests" aria-label="Improve test quality">
 			<h2>{review?.approved ? "Machine quality check passed" : review ? "What needs fixing" : "Review your test cases"}</h2>
 			<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
+			<BusinessCoverageSummary assessment={assessment} />
 			{review && (
 				<p className="helper-text">
 					{meta.scoreLabel}

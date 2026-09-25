@@ -183,6 +183,7 @@ class RefineTestCasesInput(BaseModel):
 
 
 class GenerateTestCasesResponse(BaseModel):
+    substantive_assessment: Optional[Dict[str, Any]] = None
     generation_tasks: List[Dict[str, Any]] = Field(default_factory=list)
     guidance: Optional[Dict[str, Any]] = None
     knowledge_suggestion: Optional[Dict[str, Any]] = None

@@ -119,7 +119,17 @@ def analyze_project_impact(
     saved_ids = {row["id"] for row in original.payload.get("test_cases", [])}
     repair_ids = {task.get("source_test_case_id") for task in tasks if task.get("source_test_case_id")}
     analysis.recommendations = [r for r in analysis.recommendations if r.test_case_id not in repair_ids]
-    for index, task in enumerate(tasks):
+    grouped_tasks = {}
+    for task in tasks:
+        for req_id in task.get("requirement_ids") or []:
+            key = (task.get("source_test_case_id"), req_id)
+            if key not in grouped_tasks:
+                grouped_tasks[key] = {**task, "requirement_ids": [req_id]}
+            else:
+                previous = grouped_tasks[key]
+                previous["reason"] += "\n" + task["reason"]
+                previous["scenario_refs"] = list(dict.fromkeys(previous.get("scenario_refs", []) + task.get("scenario_refs", [])))
+    for index, task in enumerate(grouped_tasks.values()):
         for req_id in task.get("requirement_ids") or []:
             analysis.recommendations.append(
                 ImpactRecommendation(
@@ -277,7 +287,8 @@ def apply_project_impact_update(
             template=TestCaseTemplate(name="Targeted tests", format="json", fields=["id", "title", "steps", "expected_result"]),
             project_id=project_id,
             base_project_revision=base_project_revision,
-            feedback="Generate concrete user/API actions, necessary input values, and observable assertions. Do not return instructions to review or generate tests.",
+            feedback="Generate concrete user/API actions, necessary input values, and observable assertions. Do not return instructions to review or generate tests. Address this selected finding without inventing missing facts: "
+            + rec.reason,
         )
         inputs.append((rec, old, payload, available))
     lease = ApplicationLease(project_id, impact_snapshot.snapshot_id, actor, base_project_revision, selected)
@@ -311,6 +322,7 @@ def apply_project_impact_update(
                         {
                             "recommendation_id": rec.recommendation_id,
                             "generation_evidence": _model_payload(response.generation_evidence),
+                            "substantive_assessment": response.substantive_assessment,
                             "guidance": public_manifest(manifest),
                         }
                     )
@@ -368,6 +380,16 @@ def apply_project_impact_update(
                     pending_writes=pending_writes,
                 )
                 concrete_cases, remaining_tasks = separate_generation_work(versioned, plans.payload.get("coverage_plan", []) if plans else [])
+                # Preserve unselected findings, even when another finding shares a requirement.
+                remaining_tasks += [
+                    task
+                    for task in original_snapshot.payload.get("generation_tasks", [])
+                    if task.get("kind") == "substantive_coverage"
+                    and not all(
+                        any(r.requirement_id == req_id and r.test_case_id == task.get("source_test_case_id") and task["reason"] in r.reason for r in accepted)
+                        for req_id in task.get("requirement_ids", [])
+                    )
+                ]
                 result = ImpactUpdateApplyResult(
                     test_cases=versioned,
                     applied_recommendation_ids=sorted(selected),
@@ -381,6 +403,7 @@ def apply_project_impact_update(
                     **original_snapshot.payload,
                     "test_cases": _model_payload(versioned),
                     "approved": False,
+                    "substantive_assessment": {"status": "unknown", "reason": "Targeted changes require assessment of the combined suite."},
                     "generation_tasks": remaining_tasks,
                     "impact_analysis": analysis.model_dump(mode="json"),
                     "impact_update_result": result.model_dump(mode="json", exclude={"test_cases"}),

@@ -173,6 +173,14 @@ def _large_plan_worker_output(shard, *, omitted_scenario_ids: set[str], **_kwarg
 
 
 class ParallelTestCaseGenerationTests(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate generation/delivery. Independent review is covered separately.
+        assessment = patch(
+            "app.agents.test_case_agent.assess_delivered_suite", return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []}
+        )
+        assessment.start()
+        self.addCleanup(assessment.stop)
+
     def test_plans_121_scenarios_into_bounded_shards_independent_of_workers(self) -> None:
         requirements = _requirements(11)
         coverage_plan = [

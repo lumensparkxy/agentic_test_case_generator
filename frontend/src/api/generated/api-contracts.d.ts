@@ -408,6 +408,7 @@ export interface GenerateTestCasesResponse {
 	knowledge_suggestion?: Record<string, unknown> | null;
 	requirement_analysis?: Array<RequirementAnalysis>;
 	review?: ReviewResult;
+	substantive_assessment?: Record<string, unknown> | null;
 	test_cases: Array<TestCase>;
 	workflow_diagnostics?: WorkflowDiagnostics;
 	workflow_settings?: WorkflowSettings;

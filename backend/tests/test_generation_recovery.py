@@ -27,6 +27,14 @@ from app.utils.llm_json import parse_test_cases_json_detailed
 
 
 class TestCaseGenerationRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate generation/delivery. Independent review is covered separately.
+        assessment = patch(
+            "app.agents.test_case_agent.assess_delivered_suite", return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []}
+        )
+        assessment.start()
+        self.addCleanup(assessment.stop)
+
     def test_coverage_planner_uses_raw_json_output_for_parser_recovery(self) -> None:
         agent = _build_coverage_planner_agent(
             "test-model",

@@ -62,6 +62,14 @@ def workflow(rows):
 
 
 class DeliveredTestCaseContractTests(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate generation/delivery. Independent review is covered separately.
+        assessment = patch(
+            "app.agents.test_case_agent.assess_delivered_suite", return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []}
+        )
+        assessment.start()
+        self.addCleanup(assessment.stop)
+
     def test_string_null_object_and_list_data_round_trip_at_both_levels_without_mutating_input(self):
         for value in (None, "", "Birch · Zürich", {}, [], {"room": "Birch", "attendees": [1, 8], "confirmed": False}, [None, {"room": "Atlas"}]):
             with self.subTest(value=value):

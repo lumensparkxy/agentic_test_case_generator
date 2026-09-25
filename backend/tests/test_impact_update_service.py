@@ -161,6 +161,7 @@ class ImpactUpdateServiceTests(unittest.TestCase):
     def _generate(self, payload, **kwargs):
         return {
             "approved": True,
+            "substantive_assessment": {"status": "assessed_complete", "input_hash": "synthetic-review"},
             "test_cases": [
                 {
                     "id": f"MODEL-{scenario.id}",
@@ -567,6 +568,57 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 )
         self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k}, before)
         self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+
+    def test_substantive_repair_groups_findings_and_preserves_unselected_gaps(self):
+        project = self._seed_project()
+        snapshot = project.current_snapshots["test_cases"]
+        path = f"qa_projects/{project.project_id}/snapshots/{snapshot.snapshot_id}"
+        tasks = [
+            {
+                "kind": "substantive_coverage",
+                "source_test_case_id": "TC-001",
+                "requirement_ids": ["REQ-001"],
+                "scenario_refs": ["REQ-001-SCN-01"],
+                "reason": "Observe booking creation at upper boundary",
+            },
+            {
+                "kind": "substantive_coverage",
+                "source_test_case_id": "TC-001",
+                "requirement_ids": ["REQ-001"],
+                "scenario_refs": ["REQ-001-SCN-01"],
+                "reason": "Confirm supplied user fixture",
+            },
+            {
+                "kind": "substantive_coverage",
+                "source_test_case_id": "TC-002",
+                "requirement_ids": ["REQ-002"],
+                "scenario_refs": ["REQ-002-SCN-01"],
+                "reason": "Check durable retry identity",
+            },
+        ]
+        self.store[path]["payload"]["generation_tasks"] = tasks
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
+        recs = [r for r in analyzed.current_snapshots["impact_analysis"].payload["recommendations"] if r["recommendation_id"].startswith("repair-")]
+        self.assertEqual(len(recs), 2)
+        selected = next(r for r in recs if r["test_case_id"] == "TC-001")
+        result = apply_project_impact_update(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="apply",
+            base_project_revision=analyzed.current_revision,
+            accepted_recommendation_ids=[selected["recommendation_id"]],
+        )
+        payload = result.current_snapshots["test_cases"].payload
+        self.assertEqual(payload["generation_tasks"], [tasks[2]])
+        self.assertEqual(payload["substantive_assessment"]["status"], "unknown")
+        evidence = result.current_snapshots["test_cases"].metadata["targeted_generation_runs"]
+        self.assertEqual(evidence[0]["substantive_assessment"]["input_hash"], "synthetic-review")
+        self.assertFalse(payload["review"]["approved"])
+        self.assertEqual(self.generator.call_count, 1)
+        self.assertIn(tasks[0]["reason"], self.generator.call_args.args[0].feedback)
+        self.assertIn(tasks[1]["reason"], self.generator.call_args.args[0].feedback)
+        unchanged = next(c for c in payload["test_cases"] if c["id"] == "TC-002")
+        self.assertEqual(unchanged["artifact_version_number"], 1)
 
     def test_unsaved_withheld_row_is_added_instead_of_updating_missing_identity(self):
         project = self._seed_project()

@@ -13,6 +13,14 @@ from app.models import GenerateTestCasesInput, RefineTestCasesInput, Requirement
 
 
 class ActorPropagationTests(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate generation/delivery. Independent review is covered separately.
+        assessment = patch(
+            "app.agents.test_case_agent.assess_delivered_suite", return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []}
+        )
+        assessment.start()
+        self.addCleanup(assessment.stop)
+
     def test_extract_requirements_passes_actor_to_requirement_workflow(self) -> None:
         with patch("app.agents.requirements_agent.get_settings") as get_settings:
             get_settings.return_value.model_name = "test-model"

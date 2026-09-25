@@ -208,3 +208,54 @@ test("a changed source snapshot resets selections and instructions", async ({ pa
 	await expect(panel(page).getByRole("checkbox", { name: issue, exact: true })).not.toBeChecked();
 	await expect(panel(page).getByRole("textbox")).toHaveValue("");
 });
+
+for (const width of [390, 1488]) {
+	test(`source obligations distinguish design coverage and prerequisites at ${width}px`, { tag: "@p1" }, async ({ page }) => {
+		await page.setViewportSize({ width, height: 1000 });
+		await open(page, {
+			payload: {
+				substantive_assessment: {
+					status: "incomplete",
+					reason: "Independent design review; no booking execution.",
+					obligations: [
+						{
+							requirement_id: "ROOM-101",
+							source_quote: "whole number from 1 to 8 inclusive",
+							obligation: "Create at upper boundary 8",
+							status: "unmet",
+							reason: "Only entering 8 does not observe creation.",
+							evidence: [{ test_case_id: "TC-002", step: 1, action: "Enter 8", expected: "Field contains 8" }],
+						},
+					],
+					case_grounding: [
+						{
+							test_case_id: "TC-002",
+							reason: "Source requirements take precedence over conflicting context.",
+							prerequisites: [
+								{
+									description: "Provision Alice",
+									status: "missing_prerequisite",
+									required: true,
+									reason: "User fixture was not supplied.",
+								},
+							],
+						},
+					],
+				},
+			},
+		});
+		const region = page.getByRole("region", { name: "Business coverage assessment" });
+		await expect(region).toContainText("Business coverage: incomplete");
+		await region.getByText("Source obligations and prerequisites", { exact: true }).click();
+		await expect(region).toContainText("Create at upper boundary 8 — unmet");
+		await expect(region).toContainText("TC-002, step 1: Enter 8 → Field contains 8");
+		await expect(region).toContainText("Provision Alice");
+		await page.reload();
+		await expect(region).toContainText("Business coverage: incomplete");
+		await region.getByText("Source obligations and prerequisites", { exact: true }).click();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+		const results = await new AxeBuilder({ page }).analyze();
+		expect(results.violations.filter((v) => ["serious", "critical"].includes(v.impact))).toEqual([]);
+		await page.screenshot({ path: test.info().outputPath(`business-coverage-${width}.png`), fullPage: true });
+	});
+}
