@@ -191,7 +191,7 @@ test.describe("Use Cases review workbench", () => {
 		project.stage_state.use_cases.approved = true;
 		await openUseCaseReview(page, { initialProject: project });
 
-		await expect(machineReviewRegion(page)).toContainText(/quality check passed/i);
+		await expect(machineReviewRegion(page)).toContainText(/structural checks passed/i);
 		await expect(humanReviewRegion(page)).toContainText(/pending human decision/i);
 		await expect(reviewMain(page).getByRole("status", { name: "Current human review status" })).toContainText(/Awaiting human review/i);
 		await page
