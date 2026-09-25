@@ -17,6 +17,32 @@ not an ID prefix: a real test named `TC-FB-001` remains a real test. Exports rej
 placeholder content even with a draft override. This is a conservative guard for
 known filler patterns and missing steps, not a guarantee of semantic test quality.
 
+## Final delivery contract
+
+Generated case-level and step-level `test_data` remains a string or null in the
+public API and exports. At the model-output boundary, JSON objects and lists are
+converted to deterministic compact JSON text (sorted string keys, preserved
+Unicode and array order). Decoding that text recovers the original data; existing
+strings and null are unchanged. Structured conversion is limited to 16,000 output
+characters, 2,048 value/container nodes and nesting depth 12, with the root at
+depth zero. Non-finite numbers, non-JSON values, non-string object keys and
+oversized structures are rejected, never truncated or converted with Python repr.
+
+Every case rejected at final contract validation becomes an explicit
+`generation_tasks` entry with its available case, requirement and scenario
+references and a field-level reason. Diagnostics include no rejected test-data
+values. Valid siblings remain delivered. Counts, coverage and provenance totals
+are recomputed from the final deliverable set; even a redundant rejected case
+blocks suite approval until resolved. Existing project replacement guards reject
+incomplete updates before writing artifact versions or snapshots. Unchanged
+artifact identities survive refinement serialization.
+
+Generation and refinement prompts require a description and the canonical
+case/step fields even when a display template selects fewer columns. The public
+schema still accepts legacy optional descriptions; this change does not migrate
+saved artifacts or enable held guidance stages. Matched live quality evidence
+and the separate rollout decision remain necessary under #280/#274.
+
 ## Repair a suite
 
 1. Review and approve current requirements and the affected Use Cases.
