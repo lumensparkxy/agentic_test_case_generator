@@ -25,9 +25,12 @@ import {
 	visibleFirebaseAuthProviders,
 } from "./firebase";
 import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
+import TestCaseReadiness from "./components/projects/TestCaseReadiness";
+import { getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
 import AutomationPanel from "./components/automation/AutomationPanel";
 import {
 	getDefaultSelectedCandidateIds,
+	getExecutionEligibility,
 	normalizeAutomationPreview,
 	resolveSelectedExecutableCandidates,
 } from "./components/automation/automationPreview";
@@ -339,6 +342,8 @@ export default function App() {
 	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
 	const [changedTestCaseIds, setChangedTestCaseIds] = useState(null);
 	const [exportMessage, setExportMessage] = useState("");
+	const [exportDraftRequiredFor, setExportDraftRequiredFor] = useState(null);
+	const [exportError, setExportError] = useState("");
 	const {
 		executionTargetBaseUrl,
 		setExecutionTargetBaseUrl,
@@ -662,6 +667,12 @@ export default function App() {
 		!useCasesStageState.stale &&
 		latestUseCasesHumanReview?.snapshot_id === useCasesStageState.current_snapshot_id &&
 		latestUseCasesHumanReview?.decision === "approve"
+	);
+	const normalGenerationReady = Boolean(
+		projectStageState.requirements?.current_snapshot_id &&
+		projectStageState.requirements.approved &&
+		!projectStageState.requirements.stale &&
+		(!useCasesStageState.current_snapshot_id || useCasesHumanApproved)
 	);
 	const projectSnapshots = currentProject?.current_snapshots || {};
 	const persistedTestCaseCount = projectSnapshots.test_cases?.payload?.test_cases?.length || 0;
@@ -1575,6 +1586,7 @@ export default function App() {
 		setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
 		resetExportWorkflowState();
 		setExportMessage("");
+		setExportError("");
 
 		setExecutionTargetBaseUrl(executionPayload?.target_base_url || "");
 		setExecutionTargetEnvironment(executionPayload?.target_environment || "");
@@ -3127,6 +3139,12 @@ export default function App() {
 		}
 	};
 
+	const executionEligibility = getExecutionEligibility(executionPreview, {
+		projectId: currentProjectId,
+		projectRevision: currentProjectRevision,
+		sourceSnapshotId: projectSnapshots.test_cases?.snapshot_id,
+	});
+
 	const runApprovedExecution = async () => {
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
@@ -3142,6 +3160,10 @@ export default function App() {
 		}
 		if (!preview?.isConsistent || preview.requiresRefresh) {
 			setStatus("Preview execution again before running candidates.");
+			return;
+		}
+		if (!executionEligibility.ready) {
+			setExecutionError(executionEligibility.message);
 			return;
 		}
 		const executableCandidates = resolveSelectedExecutableCandidates(preview, selectedExecutionCandidateIds);
@@ -3218,6 +3240,10 @@ export default function App() {
 
 	const generateTestCases = async (withFeedback = false, { fullRegeneration = false, feedbackText = feedback } = {}) => {
 		if (withFeedback && (testCaseActionDisabled || isGenerating || upstreamChangedForImpact || !testCases.length)) return false;
+		if (!withFeedback && !fullRegeneration && !normalGenerationReady) {
+			setStatus("Review current requirements and Use Cases before normal generation. Use the explicit draft action when available.");
+			return false;
+		}
 		if (testCaseWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Test-case workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -3460,7 +3486,7 @@ export default function App() {
 			return true;
 		}
 		if (action === "execute") {
-			if (!executionPreview || !executionPreview.isConsistent || executionPreview.requiresRefresh) {
+			if (!executionPreview || !executionPreview.isConsistent || executionPreview.requiresRefresh || !executionEligibility.ready) {
 				await previewExecution();
 				return true;
 			}
@@ -3505,13 +3531,22 @@ export default function App() {
 		execute: isPreviewingExecution || isRunningExecution,
 	};
 	const orchestratorActionDisabled = {
-		generate: testCaseActionDisabled,
+		generate: testCaseActionDisabled || !normalGenerationReady,
 		full_regenerate: testCaseActionDisabled,
 		analyze_impact: testCaseActionDisabled,
 		apply_update: testCaseActionDisabled,
 	};
-	const exportReviewApproved = Boolean(testCaseReview?.approved);
-	const exportRequiresOverride = Boolean(testCases.length > 0 && testCaseReview && !testCaseReview.approved);
+	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
+	const exportReviewApproved = Boolean(
+		exportDraftRequiredFor !== exportEvidenceKey &&
+		testCaseReview?.approved &&
+		projectStageState.test_cases?.approved &&
+		!projectStageState.test_cases?.stale &&
+		projectSnapshots.test_cases?.snapshot_id &&
+		Array.isArray(projectSnapshots.test_cases?.payload?.generation_tasks) &&
+		generationTasks.length === 0
+	);
+	const exportRequiresOverride = Boolean(testCases.length > 0 && !exportReviewApproved);
 	const draftExportOverrideReasonProvided = draftExportOverrideReason.trim().length > 0;
 	const exportGateLocked = Boolean(exportRequiresOverride && (!draftExportOverrideRequested || !draftExportOverrideReasonProvided));
 
@@ -3527,10 +3562,12 @@ export default function App() {
 		}
 		setIsExporting(true);
 		setExportMessage("");
+		setExportError("");
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
 			const payload = {
 				test_cases: testCases,
+				source_snapshot_id: projectSnapshots.test_cases?.snapshot_id || null,
 				approved: exportReviewApproved,
 				review: testCaseReview || undefined,
 				draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
@@ -3549,6 +3586,15 @@ export default function App() {
 			});
 
 			if (!res.ok) {
+				if (res.status === 422) {
+					const rejection = await res
+						.clone()
+						.json()
+						.catch(() => null);
+					if (rejection?.detail?.code === "draft_override_required" && isProjectOperationCurrent(operationScope)) {
+						setExportDraftRequiredFor(exportEvidenceKey);
+					}
+				}
 				const errorMessage = await parseApiError(res, "Export failed");
 				throw new Error(errorMessage);
 			}
@@ -3570,6 +3616,7 @@ export default function App() {
 			setStatus(message);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
+				setExportError(`Export failed: ${error.message}`);
 				setStatus(`Export failed: ${error.message}`);
 			}
 		} finally {
@@ -3855,15 +3902,7 @@ export default function App() {
 			: canGenerateFromApprovedRequirements
 				? "pending"
 				: "blocked",
-		4: executionRunResult
-			? "complete"
-			: executionPreview
-				? executionPreview.isConsistent && !executionPreview.requiresRefresh
-					? "complete"
-					: "attention"
-				: testCases.length
-					? "pending"
-					: "blocked",
+		4: getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: projectStageState.execution?.stale }).status,
 		5: projectStageState.reports?.stale
 			? "attention"
 			: exportMessage
@@ -3892,7 +3931,15 @@ export default function App() {
 		destination: PROJECT_DESTINATIONS.TEST_CASES,
 	}).primaryAction;
 	const hasOrchestratorRecommendations = Boolean(Array.isArray(orchestratorStatus?.next_actions) && orchestratorStatus.next_actions.length);
-	const allowLegacyTestCaseMutations = !hasOrchestratorRecommendations;
+	const allowLegacyTestCaseMutations =
+		(upstreamChangedForImpact ||
+			((!useCasesStageState.current_snapshot_id || useCasesHumanApproved) &&
+				projectStageState.requirements?.approved &&
+				!projectStageState.requirements?.stale)) &&
+		!hasOrchestratorRecommendations &&
+		!orchestratorError &&
+		!isLoadingOrchestrator &&
+		orchestratorStatus?.project_revision === currentProjectRevision;
 	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
 	const workflowShellClassName = ["workflow-shell", isWorkflowNavCollapsed ? "nav-collapsed" : ""].filter(Boolean).join(" ");
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
@@ -4176,6 +4223,7 @@ export default function App() {
 									currentProject={currentProject}
 									status={orchestratorStatus}
 									currentDestination={route.destination}
+									hasTestCases={hasExistingTestCaseBaseline}
 									hidden={route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2}
 									compact={route.destination === PROJECT_DESTINATIONS.TEST_CASES}
 									isLoading={isLoadingOrchestrator}
@@ -4900,38 +4948,32 @@ export default function App() {
 											<p className="panel-description">
 												Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
 											</p>
-											{requirements.length > 0 &&
-												(!testCases.length || !canGenerateFromApprovedRequirements || upstreamChangedForImpact) && (
-													<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
-														<div>
-															<strong>
-																{impactApplication.state === "applied" && !upstreamChangedForImpact
-																	? "Changes applied — review changed tests"
-																	: isApplyingImpactUpdate
-																		? "Applying accepted recommendations"
-																		: impactAnalysis && !impactStageState.stale
-																			? "Recommendations ready to apply"
-																			: upstreamChangedForImpact
-																				? "Existing suite needs impact analysis"
-																				: canGenerateFromApprovedRequirements
-																					? "Ready for approved-requirement generation"
-																					: "Approval required before generation"}
-															</strong>
-															<p>
-																{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
-																{rejectedRequirementCount} rejected
-																{upstreamChangedForImpact
-																	? ". The current suite is preserved while impact analysis reviews changed inputs."
-																	: ". Only approved requirements are sent to the test-case agents."}
-															</p>
-														</div>
-														{!canGenerateFromApprovedRequirements && (
-															<Button type="button" className="secondary small" onClick={() => selectWorkflowTab(0)}>
-																Review requirements
-															</Button>
-														)}
+											<TestCaseReadiness
+												project={currentProject}
+												status={orchestratorStatus}
+												unavailable={Boolean(orchestratorError) || isLoadingOrchestrator}
+												caseCount={testCases.length}
+												taskCount={generationTasks.length}
+												onReview={selectWorkflowTab}
+											/>
+											{upstreamChangedForImpact && (
+												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
+													<div>
+														<strong>
+															{isApplyingImpactUpdate
+																? "Applying accepted recommendations"
+																: impactAnalysis && !impactStageState.stale
+																	? "Review impact recommendations"
+																	: "Existing suite needs impact analysis"}
+														</strong>
+														<p>
+															{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
+															{rejectedRequirementCount} rejected . The current suite is preserved while impact analysis reviews changed
+															inputs.
+														</p>
 													</div>
-												)}
+												</div>
+											)}
 											{!contextualTestCaseTask &&
 											allowLegacyTestCaseMutations &&
 											(!hasExistingTestCaseBaseline || upstreamChangedForImpact) ? (
@@ -5133,6 +5175,9 @@ export default function App() {
 											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
 											executionError={executionError}
+											effectiveTarget={executionTargetBaseUrl.trim() || appLink}
+											executionStale={projectStageState.execution?.stale}
+											executionEligibility={executionEligibility}
 											isPreviewingExecution={isPreviewingExecution}
 											isRunningExecution={isRunningExecution}
 											authActionDisabled={authActionDisabled}
@@ -5160,6 +5205,7 @@ export default function App() {
 											authActionDisabled={authActionDisabled}
 											exportToFormat={exportToFormat}
 											exportMessage={exportMessage}
+											exportError={exportError}
 											goPrev={goPrev}
 										/>
 									)}

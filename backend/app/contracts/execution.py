@@ -47,6 +47,21 @@ class ExecutionPreviewSummary(BaseModel):
     invalid: int = 0
 
 
+class ExecutionReadinessBlocker(BaseModel):
+    code: str
+    message: str
+
+
+class ExecutionReadiness(BaseModel):
+    run_allowed: bool = False
+    blockers: List[ExecutionReadinessBlocker] = Field(default_factory=list)
+    project_id: Optional[str] = None
+    project_revision: Optional[int] = None
+    source_snapshot_id: Optional[str] = None
+    target_base_url: Optional[str] = None
+    target_source: Literal["request", "configured_default", "unspecified"] = "unspecified"
+
+
 class ExecutionPreviewResponse(BaseModel):
     executable: List[ExecutionCandidate] = Field(default_factory=list)
     manual: List[ExecutionCandidate] = Field(default_factory=list)
@@ -54,6 +69,7 @@ class ExecutionPreviewResponse(BaseModel):
     invalid: List[ExecutionCandidate] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     summary: ExecutionPreviewSummary = Field(default_factory=ExecutionPreviewSummary)
+    readiness: Optional[ExecutionReadiness] = None
 
     @model_validator(mode="after")
     def align_summary_with_candidates(self):
@@ -108,6 +124,8 @@ class ExecutionRunResponse(BaseModel):
 
 
 __all__ = [
+    "ExecutionReadiness",
+    "ExecutionReadinessBlocker",
     "ExecutionIssue",
     "ExecutionUnsupportedStep",
     "ExecutionCandidate",

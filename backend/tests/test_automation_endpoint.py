@@ -10,6 +10,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from execution_fixtures import project_fixture
+
 from app.main import app, get_current_user
 from app.models import AuthUser, AutomationResponse, ExecutionCandidate, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
 
@@ -58,6 +60,7 @@ class AutomationEndpointTests(unittest.TestCase):
             status="generated",
             files=["pages/login_page.py", "tests/test_login.py"],
             notes="Generated Playwright stubs.",
+            diagnostics={"generated_case_count": 1},
         )
 
         with patch("app.main.start_workflow_run", return_value="run-automation-1") as start_run:
@@ -75,6 +78,84 @@ class AutomationEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["files"], ["pages/login_page.py", "tests/test_login.py"])
         self.assertEqual(record_event.call_args.kwargs["event_type"], "automation.playwright.generated")
         self.assertEqual(record_event.call_args.kwargs["quantity"], 1)
+
+    def test_project_generation_saves_a_valid_report_stage_not_execution_evidence(self) -> None:
+        payload = {
+            "project_id": "project-1",
+            "test_cases": [{"id": "TC-1", "title": "Unknown UI", "steps": [{"step": 1, "action": "Open feature", "expected": "Feature visible"}]}],
+        }
+        response = AutomationResponse(
+            status="skipped",
+            files=[],
+            diagnostics={"generated_case_count": 0},
+            case_diagnostics=[
+                {"test_case_id": "TC-1", "status": "manual", "reason": "Missing observed interface", "source_expected_results": ["Feature visible"]}
+            ],
+        )
+        project = SimpleNamespace(current_revision=9)
+        with (
+            patch("app.routers.automation.project_for", return_value=project),
+            patch("app.main.start_workflow_run", return_value="run-manual"),
+            patch("app.main.complete_workflow_run"),
+            patch("app.main.record_usage_event", return_value="event-manual"),
+            patch("app.main.generate_playwright_pom", return_value=response),
+            patch("app.routers.automation.append_stage_snapshot") as append,
+            patch("app.routers.automation.finish_generation", side_effect=lambda response, *args: response),
+            TestClient(app) as client,
+        ):
+            result = client.post("/automation/playwright", json=payload)
+        self.assertEqual(result.status_code, 200, result.text)
+        saved = append.call_args.kwargs
+        self.assertEqual(saved["stage"], "reports")
+        self.assertEqual(saved["base_project_revision"], 9)
+        self.assertFalse(saved["approved"])
+        self.assertEqual(saved["payload"]["source"], "automation_generation")
+        self.assertEqual(saved["payload"]["execution_status"], "not_executed")
+        self.assertEqual(saved["payload"]["case_diagnostics"][0]["status"], "manual")
+
+    def test_generation_report_revision_conflict_is_recoverable(self) -> None:
+        from app.services.workflow_project_service import ProjectConflictError
+
+        payload = {"project_id": "project-1", "test_cases": []}
+        response = AutomationResponse(status="skipped", files=[], diagnostics={"generated_case_count": 0})
+        with (
+            patch("app.routers.automation.project_for", return_value=SimpleNamespace(current_revision=9)),
+            patch("app.main.start_workflow_run", return_value="run-conflict"),
+            patch("app.main.complete_workflow_run"),
+            patch("app.main.record_usage_event", return_value="event-conflict"),
+            patch("app.main.generate_playwright_pom", return_value=response),
+            patch("app.routers.automation.append_stage_snapshot", side_effect=ProjectConflictError(10)),
+            TestClient(app) as client,
+        ):
+            result = client.post("/automation/playwright", json=payload)
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["detail"]["latest_revision"], 10)
+
+    def test_missing_interface_evidence_is_not_logged_as_generated_cases(self) -> None:
+        payload = {
+            "test_cases": [
+                {
+                    "id": "TC-1",
+                    "title": "Unknown UI",
+                    "steps": [{"step": 1, "action": "Open feature", "expected": "Feature visible"}],
+                    "automation_status": "To Be Automated",
+                }
+            ]
+        }
+        with (
+            patch("app.main.start_workflow_run", return_value="run-manual"),
+            patch("app.main.complete_workflow_run"),
+            patch("app.main.record_usage_event", return_value="event-manual") as event,
+            patch("app.agents.automation_agent.genai.Client") as model,
+            TestClient(app) as client,
+        ):
+            response = client.post("/automation/playwright", json=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "skipped")
+        self.assertEqual(response.json()["files"], [])
+        self.assertEqual(response.json()["diagnostics"]["manual_case_count"], 1)
+        self.assertEqual(event.call_args.kwargs["quantity"], 0)
+        model.assert_not_called()
 
     def test_execution_preview_logs_usage_and_returns_buckets(self) -> None:
         payload = {
@@ -149,14 +230,14 @@ class AutomationEndpointTests(unittest.TestCase):
             manual=[manual_candidate],
             summary={"executable": 20, "manual": 0, "unsupported": 9, "invalid": 4},
         )
-        project = SimpleNamespace(current_snapshots={"test_cases": SimpleNamespace(snapshot_id="snap-test-v1")})
+        project = project_fixture(payload["test_cases"], owner="automation-user", snapshot_id="snap-test-v1")
 
         with patch("app.main.start_workflow_run", return_value="run-execution-preview-1"):
             with patch("app.main.complete_workflow_run"):
                 with patch("app.main.record_usage_event", return_value="event-execution-preview-1") as record_event:
                     with patch("app.main.preview_execution", return_value=service_response):
                         with patch("app.routers.automation.get_project", return_value=project):
-                            with patch("app.routers.automation.append_stage_snapshot") as append_snapshot:
+                            with patch("app.routers.automation.append_stage_snapshot", return_value=SimpleNamespace(project_revision=8)) as append_snapshot:
                                 with TestClient(app) as client:
                                     response = client.post(
                                         "/automation/execution/preview",
@@ -250,7 +331,7 @@ class AutomationEndpointTests(unittest.TestCase):
             preview=ExecutionPreviewResponse(),
             summary=ExecutionRunSummary(passed=0, failed=1),
         )
-        project = SimpleNamespace(current_snapshots={"test_cases": SimpleNamespace(snapshot_id="snap-test-v1")})
+        project = project_fixture(payload["test_cases"], owner="automation-user", snapshot_id="snap-test-v1")
         execution_snapshot = SimpleNamespace(snapshot_id="snap-exec-v1", project_revision=8)
         report_snapshot = SimpleNamespace(snapshot_id="snap-report-v1", project_revision=9)
 

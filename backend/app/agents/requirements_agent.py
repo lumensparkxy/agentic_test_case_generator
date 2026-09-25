@@ -341,6 +341,7 @@ def _convert_to_requirements(extracted: List[Dict[str, Any]]) -> List[Requiremen
 def _extract_requirement_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
     """Extract optional review/source metadata from model output without trusting arbitrary fields."""
     allowed_fields = {
+        "original_requirement_ids",
         "source_system",
         "source_issue_key",
         "source_issue_type",

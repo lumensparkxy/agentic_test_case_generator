@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
+import { expectNoSeriousOrCriticalViolations } from "./support/accessibility.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
 
 const PROJECT_ID = "automation-preview-project";
@@ -58,8 +59,22 @@ function nonExecutableCandidate(id, sourceTestCaseId, status) {
 	};
 }
 
+function readinessFixture(overrides = {}) {
+	return {
+		run_allowed: true,
+		blockers: [],
+		project_id: PROJECT_ID,
+		project_revision: 4,
+		source_snapshot_id: TEST_CASE_SNAPSHOT_ID,
+		target_base_url: "https://staging.example.test/app",
+		target_source: "configured_default",
+		...overrides,
+	};
+}
+
 function previewFixture(executable = [], overrides = {}) {
 	return {
+		readiness: readinessFixture(),
 		executable,
 		manual: [],
 		unsupported: [],
@@ -576,7 +591,7 @@ test.describe("Automation preview consistency", () => {
 
 	test("renders a persisted compact preview but requires a fresh preview before execution", async ({ page }) => {
 		const candidate = executableCandidate("candidate-checkout", "TC-001");
-		const livePreview = previewFixture([candidate]);
+		const livePreview = previewFixture([candidate], { readiness: readinessFixture({ project_revision: 5 }) });
 		const scenario = {
 			project: projectFixture({
 				executionPayload: persistedPreviewPayload([candidate]),
@@ -599,4 +614,113 @@ test.describe("Automation preview consistency", () => {
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		expect(requests.previews).toBe(1);
 	});
+});
+
+test("preview evidence remains distinct from execution through navigation and reload", async ({ page }, testInfo) => {
+	const preview = previewFixture([executableCandidate("candidate-1", "TC-001")]);
+	const scenario = { project: projectFixture(), previews: [preview] };
+	await installApi(page, scenario);
+	await openAutomation(page);
+	await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+	await expect(page.getByLabel("Automation evidence")).toContainText("Preview ready; not executed");
+	await expect(page.getByLabel("Automation evidence")).toContainText("Ready to run selected eligible candidates");
+	await expect(page.getByRole("link", { name: "Automation, Preview ready", exact: true })).toBeVisible();
+	await expect(page.getByRole("link", { name: "Automation, Complete", exact: true })).toHaveCount(0);
+	for (const width of [1488, 390]) {
+		await page.setViewportSize({ width, height: 900 });
+		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+		await page.screenshot({ path: testInfo.outputPath(`preview-${width}.png`), fullPage: true });
+	}
+	scenario.project = projectFixture({ executionPayload: persistedPreviewPayload(preview.executable) });
+	await page.reload();
+	await expect(page.getByLabel("Automation evidence")).toContainText("Preview needs refresh");
+	await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
+});
+
+for (const state of ["passed", "failed", "disabled", "unknown", "stale"]) {
+	test(`saved run evidence: ${state}`, async ({ page }) => {
+		const payload = {
+			run_id: "exec-evidence",
+			status: state,
+			results: [{ id: "result-1", source_test_case_id: "TC-001", status: state }],
+			summary: { passed: state === "passed" ? 1 : 0, failed: state === "failed" ? 1 : 0 },
+		};
+		if (state === "stale") {
+			payload.status = "passed";
+			payload.results[0].status = "passed";
+		}
+		const project = projectFixture({ executionPayload: payload });
+		project.current_snapshots.execution.operation = "automation.execution.run";
+		project.stage_state.execution.stale = state === "stale";
+		const scenario = { project, previews: [] };
+		await installApi(page, scenario);
+		await openAutomation(page);
+		const labels = {
+			passed: "Execution passed",
+			failed: "Execution failed",
+			disabled: "Execution disabled",
+			unknown: "Execution evidence unavailable",
+			stale: "Past run; inputs changed",
+		};
+		await expect(page.getByLabel("Automation evidence")).toContainText(labels[state]);
+		await expect(page.getByLabel("Automation evidence")).toContainText("Run exec-evidence");
+		await page.reload();
+		await expect(page.getByLabel("Automation evidence")).toContainText(labels[state]);
+		await expect(page.getByRole("link", { name: "Automation, Complete", exact: true })).toHaveCount(0);
+	});
+}
+
+for (const state of ["missing", "blocked", "target", "revision", "snapshot", "contradictory"]) {
+	test(
+		`execution admission blocks ${state} readiness before any run request`,
+		{ tag: state === "blocked" ? "@p1" : [] },
+		async ({ page }, testInfo) => {
+			const readiness = readinessFixture();
+			if (state === "blocked") {
+				readiness.run_allowed = false;
+				readiness.blockers = [{ code: "unapproved_test_cases", message: "Approve the current test cases before running." }];
+			}
+			if (state === "target") {
+				readiness.target_base_url = null;
+				readiness.target_source = "unspecified";
+			}
+			if (state === "revision") readiness.project_revision = 3;
+			if (state === "snapshot") readiness.source_snapshot_id = "old-tests";
+			if (state === "contradictory")
+				readiness.blockers = [{ code: "incomplete_suite", message: "Resolve unfinished generation tasks before running." }];
+			const preview = previewFixture([executableCandidate("candidate-1", "TC-001")], { readiness: state === "missing" ? null : readiness });
+			const scenario = { project: projectFixture(), previews: [preview] };
+			const requests = await installApi(page, scenario);
+			await openAutomation(page);
+			await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+			const run = page.getByRole("button", { name: /^Run 1 Candidate$/ });
+			await expect(run).toBeDisabled();
+			await expect(page.getByLabel("Automation evidence")).not.toContainText("Ready to run selected eligible candidates");
+			await run.evaluate((button) => button.click());
+			expect(requests.runs).toBe(0);
+			if (state === "blocked") {
+				for (const width of [1488, 390]) {
+					await page.setViewportSize({ width, height: 900 });
+					await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+					await expectNoSeriousOrCriticalViolations(page, `Blocked execution at ${width}px`);
+					await page.screenshot({ path: testInfo.outputPath(`blocked-${width}.png`), fullPage: true });
+				}
+			}
+		}
+	);
+}
+
+test("a newer preview revision requires project reload before execution can recover", async ({ page }) => {
+	const preview = previewFixture([executableCandidate("candidate-1", "TC-001")], { readiness: readinessFixture({ project_revision: 5 }) });
+	const scenario = { project: projectFixture(), previews: [preview] };
+	const requests = await installApi(page, scenario);
+	await openAutomation(page);
+	await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+	await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeDisabled();
+	await expect(page.getByLabel("Automation evidence")).toContainText("Project inputs changed or cannot be verified");
+	scenario.project.current_revision = 5;
+	await page.reload();
+	await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+	await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
+	expect(requests.runs).toBe(0);
 });

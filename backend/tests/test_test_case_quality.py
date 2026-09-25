@@ -6,7 +6,7 @@ from unittest.mock import patch
 from app.models import Requirement, TestCase, GenerateTestCasesInput, TestCaseTemplate, ExportTestCasesInput
 from app.services.test_case_quality import placeholder_reason, project_test_case_view, separate_generation_work
 from app.agents.test_case_agent import generate_test_cases
-from app.routers.export import _export_audit_metadata
+from app.services.export_evidence import build_export_evidence
 from fastapi import HTTPException
 
 
@@ -48,7 +48,7 @@ class TestCaseQualityTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual({r for t in tasks for r in t["scenario_refs"]}, {"SCN-DECLINE", "SCN-OTHER"})
         with self.assertRaises(HTTPException) as caught:
-            _export_audit_metadata(ExportTestCasesInput(test_cases=[bad], approved=True, draft_override_requested=True))
+            build_export_evidence(ExportTestCasesInput(test_cases=[bad], approved=True, draft_override_requested=True), None)
         self.assertEqual(caught.exception.status_code, 422)
 
     def test_targeted_generation_preserves_exact_reviewed_scenario_slice(self):

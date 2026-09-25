@@ -90,6 +90,46 @@ changes**. Only the selected current replacement is eligible; a changed revision
 requires fresh inspection. Original baseline IDs/approvals are retained and new IDs
 are allocated for unrelated incoming requirements. Historical snapshots remain intact.
 
+## Original identifiers and verified document quotations
+
+Normalized `REQ-*` IDs and internal `requirement_uid` values are distinct from
+`original_requirement_ids`. Extraction and normalization preserve source claims;
+the file-upload boundary verifies them before comparison or persistence. Canonical
+source references retain original identifiers, the document label, parsed-text
+line location, a SHA-256 content version and the exact matching quotation.
+Each split child can refer to the same original identifier. Reviewed imports can
+attach multiple source references without replacing earlier evidence.
+
+Quote matching collapses whitespace only. Case, spelling and punctuation must
+match; the stored excerpt is copied from the parsed source, preserving its
+original whitespace. Explicit source labels such as `ROOM-101`, `FR-123` and
+`RULE_20` at the start of a heading or requirement line identify the enclosing
+source section. Original IDs are never inferred from generated REQ IDs. Missing
+labels remain unavailable. Document identity distinguishes filenames; repeated
+filenames within one batch receive upload ordinals and still require reviewed
+matching on reimport.
+
+Quotations are bounded to 8,000 characters and 32 matches per requirement.
+Oversized, absent, ambiguous or unverifiable claims become unavailable with a
+quality flag. No normalized requirement text substitutes for a source quotation.
+File imports do not accept model-supplied external issue keys, sync destinations
+or persistence identifiers as source identity.
+
+Existing references default to `excerpt_verified=false`. Their metadata remains
+stored, but the UI and mapping download do not present an unverified historical
+excerpt or identifier as verified evidence. Reimported document evidence can be
+attached through Compare/Apply; historical snapshots are not rewritten. This
+verification currently covers uploaded parsed documents; external issue keys and
+URLs remain distinct metadata, and an external quotation without verification
+is explicitly unavailable.
+
+The import comparison and requirement workbench share the same evidence view.
+**Download source mapping (JSON)** exports `requirement_source_mapping_v1` from
+the displayed requirements, including normalized/internal IDs, content versions
+and source references. Unverified excerpts export as null. This mapping is not an
+approval receipt or execution result; snapshot-bound test-case export audit
+metadata is a separate work item.
+
 ## Validation
 
 `backend/tests/test_requirement_imports.py` covers reconciliation, rollback, revisions,

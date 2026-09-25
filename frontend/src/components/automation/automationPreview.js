@@ -263,3 +263,32 @@ export function resolveSelectedExecutableSourceIds(preview, selectedIds) {
 }
 
 export { PREVIEW_BUCKETS };
+
+/** Server preflight is required in addition to a well-formed current preview. */
+export function getExecutionEligibility(preview, { projectId, projectRevision, sourceSnapshotId } = {}) {
+	const blocked = (message) => ({ ready: false, message });
+	if (!preview?.hasPreview) return blocked("Preview the current suite to check execution prerequisites.");
+	if (!preview.isConsistent || preview.requiresRefresh) return blocked("Refresh the preview before running.");
+	const readiness = preview.readiness;
+	if (!readiness || typeof readiness.run_allowed !== "boolean" || !Array.isArray(readiness.blockers)) {
+		return blocked("Execution readiness is unavailable. Refresh the preview before running.");
+	}
+	if (
+		!projectId ||
+		readiness.project_id !== projectId ||
+		readiness.project_revision !== projectRevision ||
+		!sourceSnapshotId ||
+		readiness.source_snapshot_id !== sourceSnapshotId
+	) {
+		return blocked("Project inputs changed or cannot be verified. Refresh the preview before running.");
+	}
+	if (!readiness.run_allowed || readiness.blockers.length > 0) {
+		return blocked(
+			readiness.blockers.find((blocker) => typeof blocker?.message === "string")?.message || "Execution prerequisites are not satisfied."
+		);
+	}
+	if (!readiness.target_base_url || !["request", "configured_default"].includes(readiness.target_source)) {
+		return blocked("An application target is required before running.");
+	}
+	return { ready: true, message: "Ready to run selected eligible candidates." };
+}
