@@ -75,3 +75,38 @@ placeholders, reporting uncovered scenarios, blocking approval, and truthful
 counts. Its model-backed quality thresholds remain unchanged. Offline and mocked
 browser checks do not establish live model quality or production repair success.
 The separate structured-data/guidance rollout work in issue #280 remains held.
+
+## Substantive business coverage
+
+Generation and refinement assess the exact hydrated, delivered cases independently
+of the generation score. `substantive_assessment` records the input hash, rubric,
+source obligations, exact source quotations and step citations, and required or
+optional prerequisites. The Improve tests view exposes this evidence after reload.
+Requirement/scenario reference ratios remain separate from behavioral coverage.
+
+`assessed_complete` means a model assessed the test design against the supplied
+requirements, context and actual run guidance. It does not establish execution,
+human acceptance or exhaustive correctness. Citation validation binds a judgment
+to its evidence; it cannot prove that a model enumerated every semantic obligation.
+Current requirements outrank conflicting context/memory; curated methods are not
+product facts. Valid boundaries and each stated invalid example must be assessed
+separately. A trigger and its durable result must belong to the same coherent case.
+
+The final review has one request, no HTTP retries, a 60-second HTTP timeout,
+160,000-byte input limit and 24,000-token output limit. Missing credentials,
+empty output, oversized inputs, malformed evidence or provider failure preserve
+cases but leave coverage `unknown`, unapproved and explicitly needing review.
+This adds a bounded model call to generation/refinement; it does not enable held
+guidance. The review never upgrades another failed quality or completeness gate.
+
+Actionable unmet obligations and required assumptions feed `generation_tasks`
+and the existing impact/targeted-repair workflow. Findings for the same case and
+requirement are grouped into one recommendation. Only accepted findings are
+retired; unselected findings and unchanged case identities remain. A failed
+replacement preserves the baseline. Successful repair leaves the combined suite
+unapproved and its assessment unknown until reviewed again. No second repair
+engine, automatic human approval or new execution path is introduced.
+
+Source route placeholders such as `/bookings/{bookingId}` remain literal text.
+Source/feedback blocks are inserted after ADK expands its own workflow state,
+so product braces cannot request internal state or artifacts.

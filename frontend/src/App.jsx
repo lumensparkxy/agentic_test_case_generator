@@ -316,6 +316,8 @@ export default function App() {
 		setCoveragePlan,
 		coverageMetrics,
 		setCoverageMetrics,
+		substantiveAssessment,
+		setSubstantiveAssessment,
 		testCaseReview,
 		setTestCaseReview,
 		testCaseWorkflowDiagnostics,
@@ -1565,6 +1567,7 @@ export default function App() {
 		setTestCases(generationPayload.test_cases || []);
 		setGenerationTasks(generationPayload.generation_tasks || []);
 		setTestCaseReview(generationPayload.review || useCases.review || null);
+		setSubstantiveAssessment(generationPayload.substantive_assessment || null);
 		setTestCaseWorkflowDiagnostics(hydratedTestCaseDiagnostics);
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
@@ -3315,6 +3318,7 @@ export default function App() {
 			setCoveragePlan(data.coverage_plan || []);
 			setCoverageMetrics(data.coverage_metrics || null);
 			setTestCaseReview(data.review || null);
+			setSubstantiveAssessment(data.substantive_assessment || null);
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
@@ -4954,7 +4958,10 @@ export default function App() {
 											{generationTasks.length > 0 ? (
 												<section aria-label="Unfinished test generation" role="status">
 													<h3>{generationTasks.length} generation tasks need concrete tests</h3>
-													<p>These gaps are excluded from the test suite and must be generated and reviewed before coverage is complete.</p>
+													<p>
+														Concrete tests are retained. These coverage gaps need generation or prerequisite review before coverage is
+														complete.
+													</p>
 													<ul>
 														{generationTasks.map((task, index) => (
 															<li key={index}>
@@ -5023,6 +5030,7 @@ export default function App() {
 															<ImproveTestsPanel
 																key={`${sourceCaseSnapshot}:${improvementReload}`}
 																review={testCaseReview}
+																assessment={substantiveAssessment}
 																meta={testCaseReviewMeta}
 																testCases={testCases}
 																busy={isGenerating}

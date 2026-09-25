@@ -11,6 +11,7 @@ export default function useTestCaseWorkflowState() {
 	const [coveragePlan, setCoveragePlan] = useState([]);
 	const [coverageMetrics, setCoverageMetrics] = useState(null);
 	const [testCaseReview, setTestCaseReview] = useState(null);
+	const [substantiveAssessment, setSubstantiveAssessment] = useState(null);
 	const [testCaseWorkflowDiagnostics, setTestCaseWorkflowDiagnostics] = useState(null);
 	const [appliedTestCaseWorkflowSettings, setAppliedTestCaseWorkflowSettings] = useState(null);
 	const [testCaseIterationHistory, setTestCaseIterationHistory] = useState([]);
@@ -26,6 +27,7 @@ export default function useTestCaseWorkflowState() {
 		setCoveragePlan([]);
 		setCoverageMetrics(null);
 		setTestCaseReview(null);
+		setSubstantiveAssessment(null);
 		setTestCaseWorkflowDiagnostics(null);
 		setAppliedTestCaseWorkflowSettings(null);
 		setTestCaseIterationHistory([]);
@@ -48,6 +50,8 @@ export default function useTestCaseWorkflowState() {
 		setCoveragePlan,
 		coverageMetrics,
 		setCoverageMetrics,
+		substantiveAssessment,
+		setSubstantiveAssessment,
 		testCaseReview,
 		setTestCaseReview,
 		testCaseWorkflowDiagnostics,

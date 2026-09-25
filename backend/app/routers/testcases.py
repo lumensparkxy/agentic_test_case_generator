@@ -96,6 +96,7 @@ def _use_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, 
 def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, Any]:
     return {
         "test_cases": _model_payload(response.test_cases),
+        "substantive_assessment": response.substantive_assessment,
         "generation_tasks": response.generation_tasks,
         "approved": response.approved,
         "review": _model_payload(response.review),

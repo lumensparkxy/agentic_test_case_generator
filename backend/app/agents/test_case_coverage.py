@@ -368,6 +368,7 @@ def _extract_linked_requirement_ids_from_test_case(
     candidates.extend(_normalize_string_list(test_case.get("linked_requirement_ids")))
     candidates.extend(_normalize_string_list(test_case.get("requirement_ids")))
     candidates.extend(_normalize_string_list(test_case.get("requirement_id")))
+    explicit_ids = set(candidates)
     candidates.extend(_normalize_string_list(test_case.get("tags")))
 
     linked: List[str] = []
@@ -379,7 +380,7 @@ def _extract_linked_requirement_ids_from_test_case(
             if value in requirement_id_set:
                 linked.append(value)
             continue
-        if re.match(r"^REQ-[A-Za-z0-9_-]+$", value, flags=re.IGNORECASE):
+        if value in explicit_ids or re.match(r"^REQ-[A-Za-z0-9_-]+$", value, flags=re.IGNORECASE):
             linked.append(value)
     return _dedupe_preserve(linked)
 

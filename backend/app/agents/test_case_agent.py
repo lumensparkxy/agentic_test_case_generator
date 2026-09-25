@@ -21,6 +21,8 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 
+from .literal_instructions import literal_source_agent
+from .substantive_review import assess_delivered_suite, apply_assessment
 from .adk_runtime import json_generation_config, tool_generation_config
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
@@ -1141,14 +1143,15 @@ async def _run_test_case_workflow_async(
     is_refinement = existing_test_cases is not None
 
     if is_refinement:
-        root_agent = _build_refinement_pipeline(
+        root_agent = literal_source_agent(
+            _build_refinement_pipeline,
             model,
             requirements_text,
             context_text,
             template_text,
             threshold,
             max_iterations,
-            human_feedback or "No human feedback provided.",
+            human_feedback=human_feedback or "No human feedback provided.",
         )
         message_text = f"""Refine these existing test cases using the human feedback.
 
@@ -1168,7 +1171,8 @@ Human feedback:
 {human_feedback or "No human feedback provided."}
 """
     else:
-        root_agent = _build_generation_pipeline(
+        root_agent = literal_source_agent(
+            _build_generation_pipeline,
             model,
             requirements_text,
             context_text,
@@ -1750,7 +1754,8 @@ async def _run_parallel_test_case_shard_workflow_async(
         }
     )
 
-    root_agent = _build_test_case_generator_agent(
+    root_agent = literal_source_agent(
+        _build_test_case_generator_agent,
         model,
         requirements_text,
         context_text,
@@ -2777,7 +2782,15 @@ def generate_test_cases(
     )
     contract_rejections = []
     test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
-    return _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
+    response = _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
+    assessment = assess_delivered_suite(
+        response["test_cases"],
+        payload.requirements,
+        payload.context,
+        settings=settings if not workflow.get("workflow_diagnostics", {}).get("used_fallback") else None,
+        scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" else None,
+    )
+    return apply_assessment(response, assessment)
 
 
 def refine_test_cases(
@@ -2879,4 +2892,12 @@ def refine_test_cases(
 
     contract_rejections = []
     test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
-    return _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
+    response = _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
+    assessment = assess_delivered_suite(
+        response["test_cases"],
+        payload.requirements,
+        payload.context,
+        settings=settings if not workflow.get("workflow_diagnostics", {}).get("used_fallback") else None,
+        scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" else None,
+    )
+    return apply_assessment(response, assessment)
