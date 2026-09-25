@@ -145,6 +145,8 @@ __all__ = [
     "JiraExportInput",
     "JiraExportResponse",
     "ExportTestCasesInput",
+    "ExportAuditMetadata",
+    "ExportTestCasesDocument",
     "AutomationInput",
     "AutomationCaseDiagnostic",
     "AutomationResponse",

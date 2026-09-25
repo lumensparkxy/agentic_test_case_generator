@@ -1,6 +1,7 @@
 /* Export Section Styles */
 .export-readiness-card {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: space-between;
 	gap: 1rem;
 	padding: 1rem;
@@ -8,6 +9,11 @@
 	border: 1px solid var(--border-color);
 	margin-bottom: 1rem;
 	background: #f8fafc;
+}
+
+.export-readiness-card > div:first-child {
+	flex: 1 1 20rem;
+	min-width: 0;
 }
 
 .export-readiness-card.approved {
@@ -33,7 +39,8 @@
 }
 
 .draft-export-override {
-	min-width: 280px;
+	flex: 1 1 280px;
+	min-width: 0;
 	max-width: 420px;
 }
 
@@ -47,6 +54,7 @@
 }
 
 .draft-export-reason {
+	box-sizing: border-box;
 	width: 100%;
 	resize: vertical;
 	min-height: 84px;

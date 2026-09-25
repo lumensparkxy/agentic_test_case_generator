@@ -370,6 +370,7 @@ export interface ExportTestCasesInput {
 	draft_override_requested?: boolean;
 	project_id?: string | null;
 	review?: ReviewResult;
+	source_snapshot_id?: string | null;
 	test_cases: Array<TestCase>;
 }
 

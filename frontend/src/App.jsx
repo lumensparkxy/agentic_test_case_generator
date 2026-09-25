@@ -340,6 +340,8 @@ export default function App() {
 	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
 	const [changedTestCaseIds, setChangedTestCaseIds] = useState(null);
 	const [exportMessage, setExportMessage] = useState("");
+	const [exportDraftRequiredFor, setExportDraftRequiredFor] = useState(null);
+	const [exportError, setExportError] = useState("");
 	const {
 		executionTargetBaseUrl,
 		setExecutionTargetBaseUrl,
@@ -1581,6 +1583,7 @@ export default function App() {
 		setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
 		resetExportWorkflowState();
 		setExportMessage("");
+		setExportError("");
 
 		setExecutionTargetBaseUrl(executionPayload?.target_base_url || "");
 		setExecutionTargetEnvironment(executionPayload?.target_environment || "");
@@ -3529,8 +3532,17 @@ export default function App() {
 		analyze_impact: testCaseActionDisabled,
 		apply_update: testCaseActionDisabled,
 	};
-	const exportReviewApproved = Boolean(testCaseReview?.approved);
-	const exportRequiresOverride = Boolean(testCases.length > 0 && testCaseReview && !testCaseReview.approved);
+	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
+	const exportReviewApproved = Boolean(
+		exportDraftRequiredFor !== exportEvidenceKey &&
+		testCaseReview?.approved &&
+		projectStageState.test_cases?.approved &&
+		!projectStageState.test_cases?.stale &&
+		projectSnapshots.test_cases?.snapshot_id &&
+		Array.isArray(projectSnapshots.test_cases?.payload?.generation_tasks) &&
+		generationTasks.length === 0
+	);
+	const exportRequiresOverride = Boolean(testCases.length > 0 && !exportReviewApproved);
 	const draftExportOverrideReasonProvided = draftExportOverrideReason.trim().length > 0;
 	const exportGateLocked = Boolean(exportRequiresOverride && (!draftExportOverrideRequested || !draftExportOverrideReasonProvided));
 
@@ -3546,10 +3558,12 @@ export default function App() {
 		}
 		setIsExporting(true);
 		setExportMessage("");
+		setExportError("");
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
 			const payload = {
 				test_cases: testCases,
+				source_snapshot_id: projectSnapshots.test_cases?.snapshot_id || null,
 				approved: exportReviewApproved,
 				review: testCaseReview || undefined,
 				draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
@@ -3568,6 +3582,15 @@ export default function App() {
 			});
 
 			if (!res.ok) {
+				if (res.status === 422) {
+					const rejection = await res
+						.clone()
+						.json()
+						.catch(() => null);
+					if (rejection?.detail?.code === "draft_override_required" && isProjectOperationCurrent(operationScope)) {
+						setExportDraftRequiredFor(exportEvidenceKey);
+					}
+				}
 				const errorMessage = await parseApiError(res, "Export failed");
 				throw new Error(errorMessage);
 			}
@@ -3589,6 +3612,7 @@ export default function App() {
 			setStatus(message);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
+				setExportError(`Export failed: ${error.message}`);
 				setStatus(`Export failed: ${error.message}`);
 			}
 		} finally {
@@ -5173,6 +5197,7 @@ export default function App() {
 											authActionDisabled={authActionDisabled}
 											exportToFormat={exportToFormat}
 											exportMessage={exportMessage}
+											exportError={exportError}
 											goPrev={goPrev}
 										/>
 									)}
