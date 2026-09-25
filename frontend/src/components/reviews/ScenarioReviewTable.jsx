@@ -26,7 +26,7 @@ export function scenarioReview(group, scenario, state, snapshotId) {
 	);
 }
 
-export default function ScenarioReviewTable({ groups, allGroups, state, snapshot, revision, review, drafts, setDrafts }) {
+export default function ScenarioReviewTable({ groups, allGroups, state, snapshot, revision, review, drafts, setDrafts, assessment }) {
 	const headingPrefix = useId();
 	const [widths, setWidths] = useTableColumnWidths(COLUMNS, "use-cases-grouped-v1");
 	const [statusFilter, setStatusFilter] = useState("");
@@ -40,7 +40,10 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 		.flatMap((group) =>
 			group.scenarios.map((scenario) => {
 				const key = keyFor(group, scenario);
-				return { group, scenario, key, value: drafts[key] || scenarioReview(group, scenario, state, snapshot.snapshot_id) };
+				const findings = assessment?.items?.find(
+					(item) => item.requirement_id === group.requirement_id && item.scenario_id === scenario.id
+				);
+				return { group, scenario, key, findings, value: drafts[key] || scenarioReview(group, scenario, state, snapshot.snapshot_id) };
 			})
 		)
 		.filter(
@@ -159,6 +162,25 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 										<td>
 											<strong>{row.scenario.title || row.scenario.objective}</strong>
 											<p>{row.scenario.objective}</p>
+											<div aria-label={`Semantic assessment for ${row.scenario.id}`}>
+												<strong>
+													{row.findings?.status === "passed"
+														? "Semantic checks passed"
+														: row.findings?.status === "needs_review"
+															? "Semantic findings"
+															: "Semantic assessment unavailable"}
+												</strong>
+												{row.findings?.warnings?.length ? (
+													<ul>
+														{row.findings.warnings.map((warning, index) => (
+															<li key={index}>{warning}</li>
+														))}
+													</ul>
+												) : null}
+												{row.findings && !row.findings.review_available ? (
+													<p>Semantic reviewer unavailable; any listed warnings are local checks.</p>
+												) : null}
+											</div>
 										</td>
 										<td>
 											<div className="scenario-status-filter">

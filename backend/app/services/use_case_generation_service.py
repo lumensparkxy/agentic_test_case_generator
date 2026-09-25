@@ -26,7 +26,7 @@ def _validate_output(result, requirements):
     if (
         diagnostics.used_fallback
         or diagnostics.status in {"failed", "fallback"}
-        or diagnostics.timed_out
+        or (diagnostics.timed_out and diagnostics.failure_reason != "semantic_review_timeout")
         or diagnostics.failed_shard_count
         or diagnostics.fallback_shard_count
     ):
