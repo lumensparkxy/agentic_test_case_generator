@@ -152,7 +152,9 @@ test.describe("Live project workbench acceptance", () => {
 						.getByLabel(/Reason for exporting this draft/i)
 						.fill("Synthetic live QA evidence. Incomplete or unapproved output is retained as a draft, not accepted for release.");
 				}
-				const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^JSON$/i }).click()]);
+				const exportButton = page.getByRole("button", { name: /JSON API\/Import ready/i });
+				await expect(exportButton).toBeEnabled();
+				const [download] = await Promise.all([page.waitForEvent("download"), exportButton.click()]);
 				const destination = testInfo.outputPath("inspected-export.json");
 				await download.saveAs(destination);
 				const exported = JSON.parse(await fs.readFile(destination, "utf8"));
