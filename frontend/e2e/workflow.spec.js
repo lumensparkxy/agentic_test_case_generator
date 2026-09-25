@@ -31,6 +31,8 @@ test.describe("Live project workbench acceptance", () => {
 	);
 
 	test("isolated Room Booking project preserves source, review, generation and inspected export gates", async ({ page }, testInfo) => {
+		// UI actions must fail promptly; model calls retain their explicit longer waits.
+		page.setDefaultTimeout(30_000);
 		const fixture = await liveFixture(page, testInfo);
 		try {
 			await test.step("Import and explicitly review source in the project workbench", async () => {
@@ -104,7 +106,7 @@ test.describe("Live project workbench acceptance", () => {
 				const response = await uiResponse(
 					page,
 					"/testcases/generate",
-					() => page.getByRole("button", { name: /Generate from \d+ Approved/ }).click(),
+					() => page.getByRole("button", { name: "Start generation", exact: true }).click(),
 					{ timeout: 360_000 }
 				);
 				generated = await response.json();

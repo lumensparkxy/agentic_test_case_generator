@@ -144,9 +144,10 @@ export async function liveFixture(page, testInfo) {
 }
 
 export async function uiResponse(page, pathEnd, action, { timeout = 180_000, status = 200 } = {}) {
-	const waiting = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(pathEnd) && r.request().method() !== "GET", { timeout });
-	await action();
-	const response = await waiting;
+	const [response] = await Promise.all([
+		page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(pathEnd) && r.request().method() !== "GET", { timeout }),
+		action(),
+	]);
 	const detail = response.status() === status ? "" : await response.text().catch(() => "Response body unavailable");
 	expect(response.status(), `${pathEnd}: ${detail.slice(0, 1000)}`).toBe(status);
 	return response;
