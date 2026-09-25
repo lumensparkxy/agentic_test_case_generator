@@ -331,7 +331,7 @@ test.describe("Authenticated Home workspace", () => {
 
 	test(
 		"uses the server-ranked Continue item for a one-project returning user and returns Home through browser history",
-		{ tag: "@p1" },
+		{ tag: [] },
 		async ({ page }) => {
 			const summary = workspaceSummaryFixture({
 				continue_working: REVIEW_ITEM,

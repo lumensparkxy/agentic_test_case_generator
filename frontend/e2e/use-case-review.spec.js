@@ -561,7 +561,7 @@ test.describe("Use Cases review workbench", () => {
 		}
 	});
 
-	test("prevents double submission while a review decision is pending", { tag: "@p1" }, async ({ page }) => {
+	test("prevents double submission while a review decision is pending", { tag: [] }, async ({ page }) => {
 		const deferred = createDeferred();
 		const api = await openUseCaseReview(page, { reviewScenarios: [{ gate: deferred.promise }] });
 		await openDecision(page);

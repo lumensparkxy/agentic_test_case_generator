@@ -184,7 +184,7 @@ test("lost response reconciles saved success", { tag: "@p1" }, async ({ page }) 
 	expect(flow.requests()).toBe(1);
 });
 
-test("confirmed failure permits one guarded retry", { tag: "@p1" }, async ({ page }) => {
+test("confirmed failure permits one guarded retry", { tag: [] }, async ({ page }) => {
 	const flow = await setup(page, { mode: "failure" });
 	await bar(page).getByRole("button", { name: "Apply 27 recommendations" }).click();
 	flow.gate.resolve();

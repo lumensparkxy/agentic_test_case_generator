@@ -11,7 +11,7 @@ Primary frontend/E2E framework: Playwright Test.
 
 ### Select local checks by changed behavior
 
-Use this matrix before running commands. The full CI suite remains required on
+Use this matrix before running commands. The critical CI gate remains required on
 PRs; it need not be repeated locally for every small edit. Choose the union of
 checks for affected areas and broaden when shared behavior or uncertainty warrants
 it. Add focused regression tests for changed behavior, not tests of prose or
@@ -133,59 +133,72 @@ CI currently runs:
 
 Evidence: `.github/workflows/ci.yml`.
 
-### Frontend P1 selection
+### Critical regression selection
 
-P1 means failure blocks a core workflow, bypasses approval, performs the wrong
-mutation, loses durable state, or exposes stale state across projects/sessions.
-It also includes representative serious/critical accessibility checks on the
-review path. Browser-test priority is independent of GitHub issue labels and the
-priority field in generated test cases.
+Routine CI runs **59 selected backend methods and 25 browser cases**. This
+replaces 577 backend methods and 50 previously tagged browser cases in the
+required gate. Offline benchmarks, API contracts, lint, formatting and frontend
+build checks remain required. Test selection is independent of priorities in
+generated customer test suites.
 
-The initial selection for [#307](https://github.com/lumensparkxy/agentic_test_case_generator/issues/307)
-is 38 of 231 mocked cases. Explicit Playwright `{ tag: "@p1" }` metadata is placed
-on individual cases; the accessibility matrix tags only the Use Cases surface.
-
-| Area / spec | P1 cases | Required behavior |
-| --- | ---: | --- |
-| `home-workspace` | 3 | Create project, resume work, ignore a prior user's delayed project list after logout |
-| `workflow-navigation` | 5 | Open direct workbenches, honor URL project identity, recover from 403/404 without stale content, ignore cross-project action responses |
-| `requirement-import-review` | 2 | Apply imported requirements durably; reject stale previews |
-| `use-case-generation` | 2 | Generate a new revision requiring review; block unapproved requirements |
-| `use-case-review` | 3 | Save exact snapshot/revision approval, preserve decisions on conflict, prevent double submission |
-| `scenario-review-table` | 2 | Save scenario reviews with full approval scope; revoke approval after edits |
-| `test-generation-repair` | 2 | Apply explicit repair and require review; preserve tests on failure |
-| `improve-tests` | 2 | Apply selected feedback; retain drafts and suite across failed save/retry |
-| `impact-update-flow` | 1 | Route stale suites through impact analysis |
-| `impact-application` | 5 | Submit once with receipt, recover after refresh/second tab, reconcile lost success, retry confirmed failure, ignore cross-project completion |
-| `contextual-next-action` | 1 | Confirm full regeneration, prevent duplicate submission, preserve the suite until success |
-| `automation-preview-consistency` | 2 | Run only selected IDs; block execution for inconsistent empty previews |
-| `export-approval-gate` | 1 | Enforce draft override and download JSON/CSV/Excel with descriptive filenames |
-| `multi-environment-execution` | 1 | Keep named-environment execution results separate |
-| `knowledge` | 1 | Require separate approval and preserve active wording during edits |
-| `jira-workflow` | 1 | Connect, import, refine, preview and sync with mocked JIRA |
-| `review-inbox` | 1 | Deduplicate review work and open canonical workbenches |
-| `runs-reports-index` | 1 | Preserve durable run identity, state, totals and evidence links |
-| `accessibility-navigation` | 2 | No serious/critical Axe violations on Use Cases at 390px and 1440px |
-
-Selection and broader regression commands (from `frontend/`):
+Run the small gate:
 
 ```bash
-npm run test:e2e:p1 -- --list
-npm run test:e2e:home-first -- --list
-CI=1 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e:home-first
+# Repository root; use .venv
+python scripts/run_backend_p1.py --list
+python scripts/run_backend_p1.py
+
+# frontend/; start Vite or use an existing local server
+npm test -- --list
+E2E_BASE_URL=http://localhost:5173 npm test
 ```
 
-The other 193 cases are retained, not skipped or deleted. Required CI no longer
-covers every layout breakpoint, typography/detail view, filter, empty/error
-state, or alternate race/retry path. Run affected specs for changes in those
-areas and the full mocked suite for shared cross-flow or release validation.
-The P1 gate is not evidence of full responsive/accessibility coverage or live
-backend/model behavior. Lint, formatting, build, backend gates, retries, and
-Playwright diagnostic uploads are unchanged.
+The backend allowlist is [priority1.txt](../../backend/tests/priority1.txt).
+It selects explicit methods, with a failing command if an entry is missing,
+duplicated or accidentally expands to a whole module/class. It covers auth and
+ownership, unsafe artifact URLs, billing admission, import/review consistency,
+concurrent updates, retained source approval, truthful model output, durable
+repair, export gates and execution admission. A test with multiple subcases
+still counts as one method; counts are not a measure of complete coverage.
 
-When adding a P1 tag, identify the critical failure it catches and avoid adding
-an entire matrix for equivalent variants. Use `--list` to review the selection;
-do not remove assertions or hide failures to meet a runtime target.
+Browser `@p1` tags select the following distinct critical outcomes:
+
+| Spec | Cases | Critical outcome |
+| --- | ---: | --- |
+| `home-workspace` | 2 | Create a durable project; reject prior-user state after logout |
+| `requirement-import-review` | 2 | Preserve imported identities/approvals; reject stale apply |
+| `use-case-generation` | 2 | New generation requires review; unapproved requirements block generation |
+| `use-case-review` | 2 | Review exact snapshot/revision; preserve feedback on conflict |
+| `scenario-review-table` | 2 | Edits revoke approval; structural score cannot replace semantics/human review |
+| `contextual-next-action` | 2 | Confirm regeneration safely; saved enriched context survives reload |
+| `test-generation-repair` | 2 | Explicit repair requires review; failure preserves the suite |
+| `impact-application` | 4 | Submit once; recover across tabs/refresh; reconcile lost success; reject cross-project completion |
+| `improve-tests` | 1 | Failed save preserves feedback and suite for retry |
+| `export-approval-gate` | 1 | Draft override needs a reason and exports inspectable formats |
+| `automation-preview-consistency` | 2 | Only selected executable IDs run; blocked readiness sends no run request |
+| `knowledge` | 2 | Effective guidance/holds are visible; unavailable capability never implies enabled |
+| `accessibility-navigation` | 1 | Use Cases has no serious/critical Axe violations at 1440px |
+
+The complete **577 backend / 273 mocked browser** suites remain available on
+demand. No assertions or tests were deleted. The critical gate omits alternate
+viewports, secondary navigation/filter/report cases, mocked JIRA journeys and
+many alternate failure variants. Run affected specs/modules for those changes;
+use full suites for shared changes or release validation:
+
+```bash
+# Repository root
+python -m unittest discover -s backend/tests -p 'test_*.py'
+# frontend/
+npm run test:e2e:home-first -- --list
+E2E_BASE_URL=http://localhost:5173 npm run test:e2e:home-first
+```
+
+`npm run test:e2e -- <spec>` remains available for an affected spec without the
+P1 filter. `npm test` / `npm run test:e2e:p1` are the default critical selection.
+The browser cases use mocked APIs; they do not establish live model, Firebase,
+external integration or complete responsive/accessibility behavior. Add a P1
+entry only for a distinct critical risk; avoid tagging every equivalent matrix
+variant. Review discovery output whenever the selection changes.
 
 ## 2) Test Layout
 

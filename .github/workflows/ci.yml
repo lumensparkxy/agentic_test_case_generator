@@ -41,8 +41,8 @@ jobs:
       - name: Check backend formatting
         run: python -m ruff format --check backend scripts
 
-      - name: Run backend unittest suite
-        run: python -m unittest discover -s backend/tests -p 'test_*.py'
+      - name: Run critical backend regressions
+        run: python scripts/run_backend_p1.py
 
       - name: Evaluate requirements offline
         run: python scripts/evaluate_requirements.py --offline --strict

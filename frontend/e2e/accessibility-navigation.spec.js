@@ -47,7 +47,7 @@ for (const width of [390, 1440]) {
 	for (const surface of Object.keys(surfaceRoutes)) {
 		test(
 			`${surface} has no serious or critical WCAG A/AA violations at ${width}px`,
-			{ tag: surface === "Use Cases" ? "@p1" : [] },
+			{ tag: surface === "Use Cases" && width === 1440 ? "@p1" : [] },
 			async ({ page }) => {
 				await openSurface(page, surface, width);
 				await expectNoSeriousOrCriticalViolations(page, `${surface} at ${width}px`);

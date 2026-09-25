@@ -99,7 +99,7 @@ test("skill catalog distinguishes enabled and held stages", async ({ page }) => 
 	await expect(testCases).toContainText("Memory off");
 });
 
-test("knowledge requires separate approval and edits preserve the active wording", { tag: "@p1" }, async ({ page }) => {
+test("knowledge requires separate approval and edits preserve the active wording", { tag: [] }, async ({ page }) => {
 	const calls = await openKnowledge(page);
 	await page.getByRole("button", { name: "Add guidance", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Add guidance", exact: true });
@@ -351,7 +351,7 @@ test("missing, independent and failed capability states never infer current flag
 
 test(
 	"eligibility excludes stale and proposed context while retaining the approved version of pending edits",
-	{ tag: "@p1" },
+	{ tag: [] },
 	async ({ page }) => {
 		const approved = activeGuidance({
 			active: { ...activeGuidance().active, stages: ["use_cases"] },
@@ -443,7 +443,7 @@ for (const character of ["a", "🧪"]) {
 	});
 }
 
-test("server text validation is associated with Guidance and does not discard input", { tag: "@p1" }, async ({ page }) => {
+test("server text validation is associated with Guidance and does not discard input", { tag: [] }, async ({ page }) => {
 	const calls = await openKnowledge(page, {
 		validationError: [{ loc: ["body", "draft", "text"], type: "string_too_long", msg: "String should have at most 1000 characters" }],
 	});

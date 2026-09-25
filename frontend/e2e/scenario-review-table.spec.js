@@ -14,7 +14,7 @@ async function open(page, options = {}) {
 
 test(
 	"persists scenario status and multiple quality flags, filters rows and preserves full approval scope",
-	{ tag: "@p1" },
+	{ tag: [] },
 	async ({ page }) => {
 		const api = await open(page);
 		await status(page).selectOption("approved");
@@ -310,48 +310,52 @@ test("requirement ID and text start inline and wrap within the group", async ({ 
 });
 
 for (const width of [390, 1488]) {
-	test(`separates structural 100 from semantic findings and human approval at ${width}px`, { tag: "@p1" }, async ({ page }) => {
-		await page.setViewportSize({ width, height: 900 });
-		const project = useCaseProjectFixture();
-		project.current_snapshots.use_cases.payload.review = {
-			approved: false,
-			score: 100,
-			threshold: 85,
-			structural_checks: { approved: true, score: 100, threshold: 85 },
-			semantic_assessment: {
-				status: "needs_review",
-				assessed_count: 3,
-				scenario_count: 4,
-				flagged_count: 1,
-				summary: "One scenario needs a concrete expected outcome. One semantic assessment is unavailable.",
-				items: [
-					{
-						requirement_id: "REQ-101",
-						scenario_id: scenarioId,
-						status: "needs_review",
-						review_available: true,
-						warnings: ["Specify the observable booking result; a category alone does not describe the behavior."],
-					},
-				],
-			},
-		};
-		const api = await open(page, { initialProject: project });
-		const row = page.getByRole("row").filter({ has: status(page) });
-		await expect(row).toContainText("Semantic findings");
-		await expect(row).toContainText("Specify the observable booking result");
-		await expect(status(page)).toHaveValue("needs_review");
-		await page.getByText("Quality, coverage and review history", { exact: true }).click();
-		const quality = page.getByRole("region", { name: "Machine quality review", exact: true });
-		await expect(quality).toContainText("Structural checks passed");
-		await expect(quality).toContainText("Structural score 100");
-		await expect(quality).toContainText("Semantic review requires attention");
-		await expect(page.getByRole("main")).not.toContainText("Machine quality check passed");
-		await expect(page.getByRole("region", { name: "Human review status", exact: true })).toContainText("Pending human decision");
-		expect(api.requests.review).toHaveLength(0);
-		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-		const results = await new AxeBuilder({ page }).include(".use-case-review-workbench").analyze();
-		expect(results.violations).toEqual([]);
-	});
+	test(
+		`separates structural 100 from semantic findings and human approval at ${width}px`,
+		{ tag: width === 1488 ? "@p1" : [] },
+		async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			const project = useCaseProjectFixture();
+			project.current_snapshots.use_cases.payload.review = {
+				approved: false,
+				score: 100,
+				threshold: 85,
+				structural_checks: { approved: true, score: 100, threshold: 85 },
+				semantic_assessment: {
+					status: "needs_review",
+					assessed_count: 3,
+					scenario_count: 4,
+					flagged_count: 1,
+					summary: "One scenario needs a concrete expected outcome. One semantic assessment is unavailable.",
+					items: [
+						{
+							requirement_id: "REQ-101",
+							scenario_id: scenarioId,
+							status: "needs_review",
+							review_available: true,
+							warnings: ["Specify the observable booking result; a category alone does not describe the behavior."],
+						},
+					],
+				},
+			};
+			const api = await open(page, { initialProject: project });
+			const row = page.getByRole("row").filter({ has: status(page) });
+			await expect(row).toContainText("Semantic findings");
+			await expect(row).toContainText("Specify the observable booking result");
+			await expect(status(page)).toHaveValue("needs_review");
+			await page.getByText("Quality, coverage and review history", { exact: true }).click();
+			const quality = page.getByRole("region", { name: "Machine quality review", exact: true });
+			await expect(quality).toContainText("Structural checks passed");
+			await expect(quality).toContainText("Structural score 100");
+			await expect(quality).toContainText("Semantic review requires attention");
+			await expect(page.getByRole("main")).not.toContainText("Machine quality check passed");
+			await expect(page.getByRole("region", { name: "Human review status", exact: true })).toContainText("Pending human decision");
+			expect(api.requests.review).toHaveLength(0);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+			const results = await new AxeBuilder({ page }).include(".use-case-review-workbench").analyze();
+			expect(results.violations).toEqual([]);
+		}
+	);
 }
 
 test("legacy structural pass leaves semantic assessment unavailable", async ({ page }) => {

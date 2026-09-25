@@ -293,7 +293,14 @@ If no `GOOGLE_API_KEY` or `GEMINI_API_KEY` is configured, the script automatical
 
 The current backend suite is written with `unittest` and does not require `pytest`:
 
-- `python -m unittest discover -s backend/tests -p 'test_*.py'`
+- Critical gate (59 selected methods): `python scripts/run_backend_p1.py`
+- Inspect selection: `python scripts/run_backend_p1.py --list`
+- Full suite on demand: `python -m unittest discover -s backend/tests -p 'test_*.py'`
+
+For the browser gate, run `npm test` from `frontend/` with the local Vite server
+running (25 critical cases). Use `npm run test:e2e:home-first` for the complete
+mocked browser suite. Selection rationale and affected-check commands are in
+[Testing Patterns](docs/codebase/TESTING.md#critical-regression-selection).
 
 If you prefer pytest locally, install it separately; it is not required by the checked-in test suite today.
 

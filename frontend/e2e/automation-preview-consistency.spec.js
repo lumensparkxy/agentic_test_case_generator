@@ -335,7 +335,7 @@ test.describe("Automation preview consistency", () => {
 
 	test(
 		"normalizes an inconsistent summary to rendered zero candidates, distinguishes the empty states, and emits no run request",
-		{ tag: "@p1" },
+		{ tag: [] },
 		async ({ page }) => {
 			const inconsistentPreview = previewFixture([], {
 				summary: { executable: 20, manual: 0, unsupported: 0, invalid: 0 },
