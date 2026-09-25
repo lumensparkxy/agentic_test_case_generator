@@ -44,13 +44,26 @@ export default function GuidanceUsed({ manifest, request, projectId }) {
 			}}
 		>
 			<summary>
-				Guidance used · {manifest.skills?.length || 0} skills · {manifest.memories?.length || 0} knowledge entries
+				Guidance used · {manifest.skills?.length ?? "Unknown"} skills · {manifest.memories?.length ?? "Unknown"} knowledge entries
 			</summary>
 			<p>
 				Model: {manifest.model}.{" "}
 				{manifest.memory_bypassed
 					? "Run without remembered guidance was explicitly selected."
 					: "Guidance was fixed when this run started."}
+			</p>
+			<p>
+				Recorded at run start — Skills:{" "}
+				{manifest.skills_enabled === true ? "Enabled" : manifest.skills_enabled === false ? "Disabled by configuration" : "Not recorded"}.{" "}
+				Approved context:{" "}
+				{manifest.memory_bypassed
+					? "Explicitly bypassed"
+					: manifest.memory_enabled === true
+						? "Enabled"
+						: manifest.memory_enabled === false
+							? "Disabled by configuration"
+							: "Not recorded"}
+				.
 			</p>
 			{details &&
 				((manifest.knowledge_revision && details.latest.revision !== manifest.knowledge_revision) ||
