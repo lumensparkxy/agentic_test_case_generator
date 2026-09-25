@@ -31,6 +31,8 @@ test.describe("Live project workbench acceptance", () => {
 	);
 
 	test("isolated Room Booking project preserves source, review, generation and inspected export gates", async ({ page }, testInfo) => {
+		// UI actions must fail promptly; model calls retain their explicit longer waits.
+		page.setDefaultTimeout(30_000);
 		const fixture = await liveFixture(page, testInfo);
 		try {
 			await test.step("Import and explicitly review source in the project workbench", async () => {
@@ -104,7 +106,7 @@ test.describe("Live project workbench acceptance", () => {
 				const response = await uiResponse(
 					page,
 					"/testcases/generate",
-					() => page.getByRole("button", { name: /Generate from \d+ Approved/ }).click(),
+					() => page.getByRole("button", { name: "Start generation", exact: true }).click(),
 					{ timeout: 360_000 }
 				);
 				generated = await response.json();
@@ -150,7 +152,9 @@ test.describe("Live project workbench acceptance", () => {
 						.getByLabel(/Reason for exporting this draft/i)
 						.fill("Synthetic live QA evidence. Incomplete or unapproved output is retained as a draft, not accepted for release.");
 				}
-				const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^JSON$/i }).click()]);
+				const exportButton = page.getByRole("button", { name: /JSON API\/Import ready/i });
+				await expect(exportButton).toBeEnabled();
+				const [download] = await Promise.all([page.waitForEvent("download"), exportButton.click()]);
 				const destination = testInfo.outputPath("inspected-export.json");
 				await download.saveAs(destination);
 				const exported = JSON.parse(await fs.readFile(destination, "utf8"));

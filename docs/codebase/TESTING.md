@@ -447,6 +447,14 @@ outside `test-results` before the next run clears it. Actual model names are in
 guidance manifests; correlate captured request IDs with backend logs for
 provider and usage. Unavailable usage or cost is unknown, never zero.
 
+The Room Booking context includes an explicitly owner-accepted synthetic
+response-loss proxy assumption for test design. It describes forwarding the
+submission, recording the booking ID and suppressing only the successful
+response before retry. No real proxy capability or booking execution has been
+demonstrated. Any design result depends on that assumption; provision and verify
+the tool before execution. The live harness uses the current `Start generation`
+and JSON export actions, with bounded UI waits and separate model-response waits.
+
 This is a gated live journey, not complete release acceptance. The audit run
 stopped on scenario semantics, so downstream generation, repair and export were
 not exercised in that run. Source apply/re-review/targeted repair, stale/retry,
