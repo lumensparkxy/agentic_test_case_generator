@@ -86,6 +86,12 @@ STATE_VALIDATION_FEEDBACK = "validation_feedback"
 STATE_COVERAGE_PLAN = "coverage_plan"
 STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 EVIDENCE_PAYLOAD_STRATEGY = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
+TEST_CASE_CONTRACT_INSTRUCTIONS = """Canonical output contract (template field selection does not override it):
+Include id, title, a description of the verified behavior, steps, and traceability fields.
+At both case and step level, test_data MUST be a string or null, never a JSON object or array.
+For structured data, put valid JSON encoded as text in test_data. Preserve supplied data and identities.
+Each step is an object with an integer step, string action, string expected, and optional string/null test_data.
+"""
 GENERATION_SOURCE_MODEL = "model"
 GENERATION_SOURCE_MODEL_RECOVERED = "model_recovered"
 GENERATION_SOURCE_PARALLEL_RETRY = "parallel_retry"
@@ -835,6 +841,7 @@ def _build_review_loop(
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {TEST_CASE_CONTRACT_INSTRUCTIONS}
     {REAL_WORLD_QA_POLICY}
 
 **Current Test Cases:**
@@ -895,6 +902,7 @@ def _build_review_loop(
         instruction=f"""You are a QA Engineer refining test cases.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {TEST_CASE_CONTRACT_INSTRUCTIONS}
 
 **Current Test Cases:**
 ```
@@ -955,6 +963,7 @@ def _build_test_case_generator_agent(
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {TEST_CASE_CONTRACT_INSTRUCTIONS}
     {REAL_WORLD_QA_POLICY}
 
 **Requirements to Test:**
@@ -1050,6 +1059,7 @@ def _build_refinement_pipeline(
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
+    {TEST_CASE_CONTRACT_INSTRUCTIONS}
     {REAL_WORLD_QA_POLICY}
 
 Use the existing test cases, requirements, context, template, and human feedback in the user message to produce an improved JSON object shaped like {{"test_cases": [...]}}.
@@ -2321,11 +2331,13 @@ def _prepare_workflow_inputs(requirements: List[Requirement], context: Optional[
     return requirements_text, context_text, template_text
 
 
-def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement], context: Optional[Any]) -> Dict[str, Any]:
+def _build_response(
+    test_cases: List[TestCase], workflow: Dict[str, Any], requirements: List[Requirement], context: Optional[Any], *, contract_rejections=()
+) -> Dict[str, Any]:
     raw_requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(requirements))
     raw_coverage_plan = list(workflow.get("coverage_plan") or _fallback_coverage_plan(requirements))
     normalized_coverage_plan = raw_coverage_plan if workflow.get("strict_coverage_plan") else _normalize_coverage_plan(raw_coverage_plan, requirements)
-    test_cases, generation_tasks = separate_generation_work(test_cases, normalized_coverage_plan)
+    test_cases, generation_tasks = separate_generation_work(test_cases, normalized_coverage_plan, pending_tasks=contract_rejections)
     serialized = _serialize_test_cases(test_cases)
     resolved_settings = dict(workflow.get("workflow_settings") or {})
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
@@ -2377,6 +2389,14 @@ def _build_response(test_cases: List[TestCase], workflow: Dict[str, Any], requir
         workflow_diagnostics["status"] = "partial"
     for key in ("missing_requirements_count", "missing_must_have_scenario_count", "missing_optional_scenario_count"):
         workflow_diagnostics[key] = evidence[key]
+    if contract_rejections:
+        workflow_diagnostics["status"] = "partial" if test_cases else "failed"
+        workflow_diagnostics["failure_reason"] = workflow_diagnostics.get("failure_reason") or "final_contract_validation"
+        warnings = list(workflow_diagnostics.get("warnings") or [])
+        warnings.append(f"{len(contract_rejections)} generated case(s) rejected at final contract validation; see generation tasks.")
+        workflow_diagnostics["warnings"] = warnings
+        evidence["final_status"] = workflow_diagnostics["status"]
+    evidence["warning_count"] = len(workflow_diagnostics.get("warnings") or [])
 
     return {
         "test_cases": test_cases,
@@ -2755,8 +2775,9 @@ def generate_test_cases(
         workflow_settings=resolved_settings,
         generation_settings=generation_settings,
     )
-    test_cases = _hydrate_test_cases(raw_test_cases)
-    return _build_response(test_cases, workflow, payload.requirements, payload.context)
+    contract_rejections = []
+    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
+    return _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
 
 
 def refine_test_cases(
@@ -2856,5 +2877,6 @@ def refine_test_cases(
             "workflow_diagnostics": workflow_diagnostics,
         }
 
-    test_cases = _hydrate_test_cases(raw_test_cases)
-    return _build_response(test_cases, workflow, payload.requirements, payload.context)
+    contract_rejections = []
+    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
+    return _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)

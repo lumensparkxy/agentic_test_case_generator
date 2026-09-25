@@ -1,5 +1,6 @@
 """Hydration helpers for normalized test-case workflow payloads."""
 
+import json
 import logging
 import re
 from typing import Any, Dict, List
@@ -46,6 +47,45 @@ GENERATION_SOURCE_VALUES = {
     "deterministic_full_fallback",
     "deterministic_coverage_completion",
 }
+
+MAX_STRUCTURED_TEST_DATA_CHARS = 16000
+MAX_STRUCTURED_TEST_DATA_NODES = 2048
+MAX_STRUCTURED_TEST_DATA_DEPTH = 12
+
+
+def _normalize_test_data(value: Any, field: str) -> str | None:
+    """Preserve canonical text/null; encode bounded JSON objects/lists without loss."""
+    if value is None or isinstance(value, str):
+        return value
+    if not isinstance(value, (dict, list)):
+        raise ValueError(f"{field}: expected a string, JSON object/list, or null")
+    pending = [(value, 0)]
+    nodes = 0
+    while pending:
+        item, depth = pending.pop()
+        nodes += 1
+        if nodes > MAX_STRUCTURED_TEST_DATA_NODES or depth > MAX_STRUCTURED_TEST_DATA_DEPTH:
+            raise ValueError(f"{field}: structured data exceeds node/depth limits")
+        if isinstance(item, (dict, list)) and nodes + len(pending) + len(item) > MAX_STRUCTURED_TEST_DATA_NODES:
+            raise ValueError(f"{field}: structured data exceeds node/depth limits")
+        if isinstance(item, dict):
+            if any(not isinstance(key, str) for key in item):
+                raise ValueError(f"{field}: JSON object keys must be strings")
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+        elif not isinstance(item, (str, int, float, bool, type(None))):
+            raise ValueError(f"{field}: structured data must contain JSON values")
+    try:
+        chunks, size = [], 0
+        for chunk in json.JSONEncoder(ensure_ascii=False, sort_keys=True, allow_nan=False, separators=(",", ":")).iterencode(value):
+            size += len(chunk)
+            if size > MAX_STRUCTURED_TEST_DATA_CHARS:
+                raise ValueError("size")
+            chunks.append(chunk)
+        return "".join(chunks)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ValueError(f"{field}: structured data must be finite JSON within {MAX_STRUCTURED_TEST_DATA_CHARS} characters") from exc
 
 
 def _extract_step_text_blocks(text: str, marker_pattern: re.Pattern[str]) -> List[str]:
@@ -141,10 +181,12 @@ def _hydrate_text_step(raw_step: str, step_number: int) -> TestStep:
     )
 
 
-def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
+def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]], *, rejections: List[Dict[str, Any]] | None = None) -> List[TestCase]:
     test_cases: List[TestCase] = []
     for index, raw_test_case in enumerate(raw_test_cases, start=1):
         try:
+            if not isinstance(raw_test_case, dict):
+                raise ValueError("case: expected an object")
             tags = _normalize_string_list(raw_test_case.get("tags"))
             linked_requirement_ids = _extract_linked_requirement_ids_from_test_case({**raw_test_case, "tags": tags})
             scenario_refs = _extract_scenario_refs_from_test_case(raw_test_case)
@@ -163,7 +205,7 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                         step=raw_step.get("step", len(steps) + 1),
                         action=str(raw_step.get("action", "") or ""),
                         expected=str(raw_step.get("expected", "") or ""),
-                        test_data=raw_step.get("test_data"),
+                        test_data=_normalize_test_data(raw_step.get("test_data"), f"steps[{len(steps)}].test_data"),
                     )
                 )
 
@@ -178,7 +220,7 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     preconditions=raw_test_case.get("preconditions"),
                     steps=steps,
                     expected_result=raw_test_case.get("expected_result"),
-                    test_data=raw_test_case.get("test_data"),
+                    test_data=_normalize_test_data(raw_test_case.get("test_data"), "test_data"),
                     estimated_time=str(raw_test_case["estimated_time"]) if raw_test_case.get("estimated_time") is not None else None,
                     automation_status=_normalize_automation_status(raw_test_case.get("automation_status")),
                     component=raw_test_case.get("component"),
@@ -195,8 +237,25 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]]) -> List[TestCase]:
                     source_refs=_normalize_source_refs(raw_test_case.get("source_refs")),
                 )
             )
-        except (ValidationError, KeyError) as exc:
-            logging.warning("[TestCase Workflow] Skipping invalid test case: %s", exc)
+        except (ValidationError, ValueError, KeyError) as exc:
+            # Never copy validation input values (potentially sensitive test data)
+            # into logs or diagnostics. Keep field locations and error types only.
+            if isinstance(exc, ValidationError):
+                reason = "; ".join(
+                    f"{'.'.join(str(part) for part in error['loc'])}: {error['type']}" for error in exc.errors(include_input=False, include_context=False)[:8]
+                )
+            else:
+                reason = str(exc)[:400]
+            row = raw_test_case if isinstance(raw_test_case, dict) else {}
+            rejection = {
+                "source_test_case_id": row.get("id") if isinstance(row.get("id"), str) else None,
+                "requirement_ids": _extract_linked_requirement_ids_from_test_case(row),
+                "scenario_refs": _extract_scenario_refs_from_test_case(row),
+                "reason": f"Final contract validation rejected generated case {index}: {reason}. Regenerate this work.",
+            }
+            if rejections is not None:
+                rejections.append(rejection)
+            logging.warning("[TestCase Workflow] Rejected generated case %s at final contract validation: %s", index, reason)
             continue
     return test_cases
 
