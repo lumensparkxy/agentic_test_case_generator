@@ -465,6 +465,16 @@ not prove the entire source-change path against live generation. Resume that
 live path after the upstream quality gate is resolved; do not bypass the gate
 or substitute mocked output to make this scenario green.
 
+### Generation source snapshot regression
+
+`test_generation_source_snapshot.py` checks that Test Case generation/refinement
+retains the exact current Use Cases snapshot when its nonempty coverage plan is
+unchanged and not stale. Downstream analysis and review must not replace the
+source semantic assessment or human decisions. Changed, missing, empty or stale
+plans still create an unapproved source snapshot; reusing a source keeps the
+client revision check on the Test Cases write. This persistence check does not
+establish generated case quality or live execution.
+
 ## 6) Additional affected-test targets
 
 The selection matrix in section 1 is authoritative for local gate size. These
