@@ -134,6 +134,7 @@ class UseCaseAgentTests(unittest.TestCase):
         self.assertEqual(result["workflow_diagnostics"]["worker_count"], 3)
         self.assertEqual(result["workflow_diagnostics"]["failed_shard_count"], 0)
         self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 0)
+        self.assertTrue(all(len(group.scenarios) == 2 for group in result["coverage_plan"]))
 
     def test_duplicate_scenario_ids_are_normalized_after_merge(self) -> None:
         payload = _payload(4)
@@ -163,6 +164,7 @@ class UseCaseAgentTests(unittest.TestCase):
         self.assertEqual(worker_mock.call_count, 1)
         self.assertEqual(result["workflow_diagnostics"]["shard_count"], 1)
         self.assertEqual(result["workflow_diagnostics"]["worker_count"], 1)
+        self.assertTrue(all(len(group.scenarios) == 2 for group in result["coverage_plan"]))
 
     def test_failed_shard_falls_back_without_corrupting_other_shards(self) -> None:
         payload = _payload(5)
@@ -186,6 +188,9 @@ class UseCaseAgentTests(unittest.TestCase):
         self.assertEqual(result["workflow_diagnostics"]["fallback_shard_count"], 1)
         self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "shard_fallback")
         self.assertTrue(any("shard-02 failed" in warning for warning in result["workflow_diagnostics"]["warnings"]))
+        for group in result["coverage_plan"]:
+            if group.requirement_id in {"REQ-001", "REQ-002", "REQ-005"}:
+                self.assertEqual(len(group.scenarios), 2)
 
 
 if __name__ == "__main__":
