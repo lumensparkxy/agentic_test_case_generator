@@ -34,8 +34,10 @@ references and a field-level reason. Diagnostics include no rejected test-data
 values. Valid siblings remain delivered. Counts, coverage and provenance totals
 are recomputed from the final deliverable set; even a redundant rejected case
 blocks suite approval until resolved. Existing project replacement guards reject
-incomplete updates before writing artifact versions or snapshots. Unchanged
-artifact identities survive refinement serialization.
+incomplete updates before writing artifact versions or snapshots. Persistence
+identifiers are excluded from model serialization and ignored in model output;
+the existing versioning service matches refined cases to the previous suite by
+case ID and assigns the artifact metadata.
 
 Generation and refinement prompts require a description and the canonical
 case/step fields even when a display template selects fewer columns. The public

@@ -167,11 +167,17 @@ class DeliveredTestCaseContractTests(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertIn("expected an object", rejected[0]["reason"])
 
-    def test_refinement_serialization_preserves_existing_artifact_identity(self):
+    def test_model_boundary_preserves_case_references_but_ignores_persistence_identifiers(self):
         original = TestCase(**case(), artifact_set_id="set", artifact_item_id="item", artifact_version_id="version", artifact_version_number=4)
-        restored = _hydrate_test_cases(_serialize_test_cases([original]))[0]
-        for key in ("id", "artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"):
+        serialized = _serialize_test_cases([original])[0]
+        persistence_fields = ("artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number")
+        for key in persistence_fields:
+            self.assertNotIn(key, serialized)
+        restored = _hydrate_test_cases([{**serialized, **{key: getattr(original, key) for key in persistence_fields}}])[0]
+        for key in ("id", "linked_requirement_ids", "scenario_refs"):
             self.assertEqual(getattr(restored, key), getattr(original, key))
+        for key in persistence_fields:
+            self.assertIsNone(getattr(restored, key))
 
     def test_generate_and_refine_use_final_contract_validation_for_supported_and_rejected_data(self):
         common = {

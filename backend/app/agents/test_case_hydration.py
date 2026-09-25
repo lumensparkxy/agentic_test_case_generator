@@ -235,10 +235,6 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]], *, rejections: Lis
                     if raw_test_case.get("coverage_completion_reason") is not None
                     else None,
                     source_refs=_normalize_source_refs(raw_test_case.get("source_refs")),
-                    artifact_set_id=raw_test_case.get("artifact_set_id"),
-                    artifact_item_id=raw_test_case.get("artifact_item_id"),
-                    artifact_version_id=raw_test_case.get("artifact_version_id"),
-                    artifact_version_number=raw_test_case.get("artifact_version_number"),
                 )
             )
         except (ValidationError, ValueError, KeyError) as exc:
@@ -299,10 +295,6 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
                 "source_case_id": test_case.source_case_id,
                 "coverage_completion_reason": test_case.coverage_completion_reason,
                 "source_refs": test_case.source_refs or [],
-                "artifact_set_id": test_case.artifact_set_id,
-                "artifact_item_id": test_case.artifact_item_id,
-                "artifact_version_id": test_case.artifact_version_id,
-                "artifact_version_number": test_case.artifact_version_number,
             }
         )
     return serialized
