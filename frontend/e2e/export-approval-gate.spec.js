@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { buildTestCaseExportFilename } from "../src/services/exportFilename.js";
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
+import { expectNoSeriousOrCriticalViolations } from "./support/accessibility.js";
 
 const PROJECT_ID = "project-export-gate";
 const PROJECT = {
@@ -302,3 +303,93 @@ test("export filenames handle missing and long international project names", () 
 		buildTestCaseExportFilename({ name: "QA" }, "json", exportedAt)
 	);
 });
+
+for (const reviewState of ["approved", "unavailable", "incomplete", "server-rejected"]) {
+	test(
+		`saved ${reviewState} suite exports with snapshot identity`,
+		{ tag: reviewState === "unavailable" ? "@p1" : [] },
+		async ({ page }, testInfo) => {
+			const cases = [
+				{
+					id: "TC-SAVED",
+					title: "Observe checkout",
+					status: "Ready",
+					steps: [{ step: 1, action: "Open checkout", expected: "Checkout is visible" }],
+				},
+			];
+			const approved = ["approved", "server-rejected"].includes(reviewState);
+			const project = structuredClone(PROJECT);
+			project.current_revision = 7;
+			project.stage_state.test_cases = { current_snapshot_id: "tests-saved", approved: reviewState !== "unavailable", stale: false };
+			project.current_snapshots.test_cases = {
+				snapshot_id: "tests-saved",
+				stage: "test_cases",
+				version: 2,
+				approved,
+				payload: {
+					test_cases: cases,
+					generation_tasks: reviewState === "incomplete" ? [{ reason: "Missing cancellation" }] : [],
+					...(reviewState !== "unavailable" ? { review: { approved: true, score: 100, threshold: 90 } } : {}),
+				},
+			};
+			let exported;
+			await page.route("**/*", async (route) => {
+				if (!["fetch", "xhr"].includes(route.request().resourceType())) return route.fallback();
+				const pathname = new URL(route.request().url()).pathname;
+				if (pathname === "/auth/me") return jsonResponse(route, { sub: "playwright-e2e-user", name: "QA" });
+				if (pathname === "/projects") return jsonResponse(route, { projects: [project] });
+				if (pathname === `/projects/${PROJECT_ID}`) return jsonResponse(route, project);
+				if (pathname.endsWith("/orchestrator/status")) return jsonResponse(route, { ...orchestratorStatus(), project_revision: 7 });
+				if (pathname === "/export/json") {
+					exported = route.request().postDataJSON();
+					if (reviewState === "server-rejected" && !exported.draft_override_requested) {
+						return jsonResponse(route, { detail: { code: "draft_override_required", message: "Saved coverage is incomplete." } }, 422);
+					}
+					return jsonResponse(
+						route,
+						{
+							export_format: "test_cases_v1",
+							total_count: 1,
+							test_cases: cases,
+							audit_metadata: { schema_version: 1, snapshot_id: exported.source_snapshot_id, is_draft: !approved },
+						},
+						200,
+						{ "content-disposition": "attachment; filename=test_cases.json" }
+					);
+				}
+				return jsonResponse(route, {});
+			});
+			await seedAuthenticatedSession(page);
+			await page.goto(buildProjectPath(PROJECT_ID, "reports"));
+			const downloadButton = page.getByRole("button", { name: /JSON/ });
+			if (reviewState === "server-rejected") {
+				await downloadButton.click();
+				await expect(page.getByText("Export failed: Saved coverage is incomplete.", { exact: false }).first()).toBeVisible();
+				for (const width of [1488, 390]) {
+					await page.setViewportSize({ width, height: 900 });
+					await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+					await expectNoSeriousOrCriticalViolations(page, `Export rejection at ${width}px`);
+					await page.screenshot({ path: testInfo.outputPath(`export-recovery-${width}.png`), fullPage: true });
+				}
+			}
+			if (!approved || reviewState === "server-rejected") {
+				await expect(downloadButton).toBeDisabled();
+				await page.getByLabel(/export draft anyway/i).check();
+				await expect(downloadButton).toBeDisabled();
+				await page.getByPlaceholder(/Reason for exporting this draft/i).fill("Independent QA review requested.");
+			}
+			await expect(downloadButton).toBeEnabled();
+			const downloadPromise = page.waitForEvent("download");
+			await downloadButton.click();
+			const download = await downloadPromise;
+			const stream = await download.createReadStream();
+			let content = "";
+			for await (const chunk of stream) content += chunk.toString();
+			const document = JSON.parse(content);
+			expect(document.audit_metadata.snapshot_id).toBe("tests-saved");
+			expect(document.test_cases[0].id).toBe("TC-SAVED");
+			expect(exported.base_project_revision).toBe(7);
+			expect(exported.draft_override_requested).toBe(!approved || reviewState === "server-rejected");
+		}
+	);
+}

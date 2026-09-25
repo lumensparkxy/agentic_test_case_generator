@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Surface, Disclosure } from "../ui/surfaces";
-import { Button, Link, Select, Checkbox } from "../ui/controls";
+import { Button, Select, Checkbox } from "../ui/controls";
 import { TableScroll, Table } from "../ui/collections";
 import { REQUIREMENT_QUALITY_FLAG_OPTIONS, REQUIREMENT_REVIEW_STATUSES } from "../../constants/workflow";
 import { getRequirementReviewStatus, normalizeStringArray } from "../../utils/requirements";
+import { requirementSources, downloadSourceMapping } from "../../utils/requirementSources";
+import RequirementSourceEvidence from "./RequirementSourceEvidence";
 
 function RequirementHistory({ requirement, loadHistory }) {
 	const [history, setHistory] = useState(null);
@@ -76,6 +78,9 @@ export default function RequirementReviewWorkbench({
 							</p>
 						</div>
 						<div className="requirement-review-bulk-actions">
+							<Button className="secondary small" onClick={() => downloadSourceMapping(requirements)} disabled={busy}>
+								Download source mapping (JSON)
+							</Button>
 							<Button className="secondary small" onClick={onApproveNonRejected} disabled={busy}>
 								Approve non-rejected
 							</Button>
@@ -99,17 +104,7 @@ export default function RequirementReviewWorkbench({
 								{requirements.map((req) => {
 									const status = getRequirementReviewStatus(req);
 									const flags = normalizeStringArray(req.quality_flags);
-									const sources = req.sources?.length
-										? req.sources
-										: [
-												{
-													source_id: "legacy",
-													source_version: "legacy",
-													label: req.source_path || req.source_section || req.source_issue_key || "Imported requirements",
-													excerpt: req.source_excerpt,
-													source_issue_url: req.source_issue_url,
-												},
-											];
+									const sources = requirementSources(req);
 									return (
 										<tr
 											key={req.requirement_uid || req.id}
@@ -125,17 +120,7 @@ export default function RequirementReviewWorkbench({
 											<td>
 												<Disclosure>
 													<summary>Source evidence ({new Set(sources.map((source) => source.source_id)).size})</summary>
-													{sources.map((source) => (
-														<div key={`${source.source_id}-${source.source_version}`}>
-															<strong>{source.label}</strong>
-															{source.source_issue_url && (
-																<Link href={source.source_issue_url} target="_blank" rel="noreferrer">
-																	Open source ↗
-																</Link>
-															)}
-															<p>{source.excerpt || req.text}</p>
-														</div>
-													))}
+													<RequirementSourceEvidence requirement={req} />
 												</Disclosure>
 											</td>
 											<td>

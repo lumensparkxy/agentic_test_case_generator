@@ -7,6 +7,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from ..services.test_case_quality import placeholder_reason
+from ..services.export_evidence import build_export_evidence
+from ..contracts.exports import ExportTestCasesDocument
 from ..agents.export_agent import export_to_csv, export_to_excel, export_to_jira, export_to_json
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, ExportTestCasesInput, JiraExportInput, JiraExportResponse
@@ -15,95 +17,32 @@ from ..services.workflow_project_service import append_stage_snapshot, get_proje
 
 router = APIRouter()
 
-REPORT_EVIDENCE_STAGES = (
-    "requirements",
-    "context",
-    "use_cases",
-    "impact_analysis",
-    "test_cases",
-    "execution",
-)
-
 
 def _get_request_id(request: Request) -> str:
     return str(getattr(request.state, "request_id", "") or uuid4())
 
 
-def _export_audit_metadata(payload: ExportTestCasesInput) -> dict[str, Any]:
-    if any(placeholder_reason(case) for case in payload.test_cases):
-        raise HTTPException(422, "Unfinished generation instructions cannot be exported as test cases. Generate concrete tests first.")
-    review = payload.review or None
-    override_reason = (payload.draft_override_reason or "").strip()
-    metadata: dict[str, Any] = {
-        "test_case_count": len(payload.test_cases),
-        "approved": bool(payload.approved),
-        "draft_override_requested": bool(payload.draft_override_requested),
-    }
-    if review:
-        metadata.update(
-            {
-                "review_approved": bool(review.approved),
-                "review_score": review.score,
-                "review_threshold": review.threshold,
-            }
-        )
-    if override_reason:
-        metadata["draft_override_reason"] = override_reason[:500]
-    return metadata
+def _export_audit_metadata(payload: ExportTestCasesInput, *, actor: AuthUser) -> dict[str, Any]:
+    project = None
+    if payload.project_id:
+        try:
+            project = get_project(payload.project_id, actor=actor)
+        except Exception as exc:
+            raise project_error_to_http(exc) from exc
+    return build_export_evidence(payload, project).model_dump(mode="json")
 
 
-def _model_payload(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_model_payload(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _model_payload(item) for key, item in value.items()}
-    return value
-
-
-def _project_report_evidence(payload: ExportTestCasesInput, *, actor: AuthUser) -> dict[str, Any]:
-    if not payload.project_id:
-        return {
-            "source_snapshot_ids": {},
-            "execution_run_ids": [],
-            "evidence_refs": [],
-            "primary_source_snapshot_id": None,
-        }
-    project = get_project(payload.project_id, actor=actor)
-    source_snapshot_ids = {stage: project.current_snapshots[stage].snapshot_id for stage in REPORT_EVIDENCE_STAGES if stage in project.current_snapshots}
-    execution_run_ids = [run.run_id for run in project.execution_runs if run.run_id]
-    evidence_refs = [
-        {
-            "role": "evidence",
-            "stage": stage,
-            "snapshot_id": snapshot_id,
-            "metadata": {"source": "project_snapshot"},
-        }
-        for stage, snapshot_id in source_snapshot_ids.items()
+def _project_report_evidence(metadata: dict[str, Any]) -> dict[str, Any]:
+    source_ids = metadata["source_snapshot_ids"]
+    refs = [
+        {"role": "evidence", "stage": stage, "snapshot_id": snapshot_id, "metadata": {"source": "project_snapshot"}}
+        for stage, snapshot_id in source_ids.items()
     ]
-    evidence_refs.extend(
-        {
-            "role": "evidence",
-            "stage": "execution",
-            "snapshot_id": run.snapshot_id,
-            "item_ids": [run.run_id],
-            "metadata": {
-                "source": "execution_run",
-                "target_environment": run.target_environment,
-                "status": run.status,
-            },
-        }
-        for run in project.execution_runs
-        if run.run_id
+    refs.extend(
+        {"role": "evidence", "stage": "execution", "item_ids": [run["run_id"]], "metadata": {"source": "execution_run", "status": run["status"]}}
+        for run in metadata["execution_runs"]
     )
-    primary_source_snapshot_id = source_snapshot_ids.get("execution") or source_snapshot_ids.get("test_cases")
-    return {
-        "source_snapshot_ids": source_snapshot_ids,
-        "execution_run_ids": execution_run_ids,
-        "evidence_refs": evidence_refs,
-        "primary_source_snapshot_id": primary_source_snapshot_id,
-    }
+    return {"source_snapshot_ids": source_ids, "execution_run_ids": metadata["execution_run_ids"], "evidence_refs": refs}
 
 
 def _record_project_export_snapshot(
@@ -119,7 +58,8 @@ def _record_project_export_snapshot(
     if not payload.project_id:
         return
     try:
-        evidence = _project_report_evidence(payload, actor=current_user)
+        evidence = _project_report_evidence(result_metadata)
+        audit_metadata = {key: value for key, value in result_metadata.items() if key not in {"content_length", "byte_count"}}
         append_stage_snapshot(
             project_id=payload.project_id,
             stage="reports",
@@ -127,11 +67,12 @@ def _record_project_export_snapshot(
                 "source": "export",
                 "format": export_format,
                 "test_case_count": len(payload.test_cases),
-                "approved": payload.approved,
-                "review": _model_payload(payload.review),
-                "draft_override_requested": payload.draft_override_requested,
-                "draft_override_reason": payload.draft_override_reason,
-                "result_metadata": result_metadata,
+                "approved": not result_metadata["is_draft"],
+                "review": result_metadata["machine_review"],
+                "audit_metadata": audit_metadata,
+                "draft_override_requested": result_metadata["draft_override_used"],
+                "draft_override_reason": result_metadata["draft_override_reason"],
+                "result_metadata": {key: result_metadata[key] for key in ("content_length", "byte_count") if key in result_metadata},
                 "evidence": {
                     "source_snapshot_ids": evidence["source_snapshot_ids"],
                     "execution_run_ids": evidence["execution_run_ids"],
@@ -143,8 +84,8 @@ def _record_project_export_snapshot(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             source_event_id=source_event_id,
-            approved=payload.approved,
-            source_snapshot_id=evidence["primary_source_snapshot_id"],
+            approved=not result_metadata["is_draft"],
+            source_snapshot_id=result_metadata["snapshot_id"],
             title=f"{export_format.upper()} export",
             metadata={
                 "format": export_format,
@@ -270,7 +211,7 @@ async def export_csv(
 ):
     """Export test cases to CSV format."""
     request_id = _get_request_id(request)
-    export_metadata = _export_audit_metadata(payload)
+    export_metadata = _export_audit_metadata(payload, actor=current_user)
     workflow_run_id = start_workflow_run(
         operation="export.csv",
         actor=current_user,
@@ -278,7 +219,7 @@ async def export_csv(
         metadata=export_metadata,
     )
     try:
-        csv_content = export_to_csv(payload.test_cases)
+        csv_content = export_to_csv(payload.test_cases, audit_metadata=export_metadata)
         result_metadata = {**export_metadata, "content_length": len(csv_content)}
         event_id = _log_success(
             current_user=current_user,
@@ -327,7 +268,7 @@ async def export_excel_endpoint(
 ):
     """Export test cases to Excel format."""
     request_id = _get_request_id(request)
-    export_metadata = _export_audit_metadata(payload)
+    export_metadata = _export_audit_metadata(payload, actor=current_user)
     workflow_run_id = start_workflow_run(
         operation="export.excel",
         actor=current_user,
@@ -335,7 +276,7 @@ async def export_excel_endpoint(
         metadata=export_metadata,
     )
     try:
-        excel_bytes = export_to_excel(payload.test_cases)
+        excel_bytes = export_to_excel(payload.test_cases, audit_metadata=export_metadata)
         result_metadata = {**export_metadata, "byte_count": len(excel_bytes)}
         event_id = _log_success(
             current_user=current_user,
@@ -376,7 +317,7 @@ async def export_excel_endpoint(
         raise
 
 
-@router.post("/export/json")
+@router.post("/export/json", response_model=ExportTestCasesDocument)
 async def export_json_endpoint(
     request: Request,
     payload: ExportTestCasesInput,
@@ -384,7 +325,7 @@ async def export_json_endpoint(
 ):
     """Export test cases to JSON format."""
     request_id = _get_request_id(request)
-    export_metadata = _export_audit_metadata(payload)
+    export_metadata = _export_audit_metadata(payload, actor=current_user)
     workflow_run_id = start_workflow_run(
         operation="export.json",
         actor=current_user,
@@ -392,7 +333,7 @@ async def export_json_endpoint(
         metadata=export_metadata,
     )
     try:
-        json_content = export_to_json(payload.test_cases)
+        json_content = export_to_json(payload.test_cases, audit_metadata=export_metadata)
         result_metadata = {**export_metadata, "content_length": len(json_content)}
         event_id = _log_success(
             current_user=current_user,

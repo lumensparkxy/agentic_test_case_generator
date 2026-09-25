@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Select } from "../ui/controls";
 import { Disclosure, Surface } from "../ui/surfaces";
+import RequirementSourceEvidence from "./RequirementSourceEvidence";
 
 const labels = {
 	new: "New",
@@ -168,8 +169,7 @@ export default function RequirementImportReview({ preview, revision, busy, error
 								)}
 								<Disclosure>
 									<summary>Source evidence and suggested matches</summary>
-									<p>{candidate.requirement.source_excerpt || candidate.requirement.text}</p>
-									<p>{candidate.requirement.source_path || preview.source_name}</p>
+									<RequirementSourceEvidence requirement={candidate.requirement} />
 									{candidate.suggestions.map((s) => (
 										<p key={s.requirement_uid}>
 											<strong>{current.get(s.requirement_uid)?.id}</strong> — {s.reason}

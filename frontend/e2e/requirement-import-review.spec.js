@@ -190,6 +190,35 @@ async function stage(page) {
 }
 const workbench = (page) => page.getByRole("region", { name: "Project requirements table", exact: true });
 
+test("comparison displays verified original IDs and quotes before applying", async ({ page }) => {
+	await setup(page, {
+		candidates: [
+			{
+				...incoming[0],
+				requirement: {
+					...incoming[0].requirement,
+					sources: [
+						{
+							source_id: "room-document",
+							source_version: "room-v1",
+							label: "rooms.md",
+							original_requirement_ids: ["ROOM-101"],
+							source_section: "Lines 6-6",
+							excerpt: "Attendees must be a whole number from 1 to 8.",
+							excerpt_verified: true,
+						},
+					],
+				},
+			},
+		],
+	});
+	await stage(page);
+	await page.getByText("Source evidence and suggested matches", { exact: true }).click();
+	await expect(page.getByText("Original IDs: ROOM-101", { exact: true })).toBeVisible();
+	await expect(page.locator("blockquote").filter({ hasText: "Attendees must be a whole number from 1 to 8." })).toBeVisible();
+	await expect(workbench(page).getByRole("row")).toHaveCount(9);
+});
+
 test("stages eight plus two, applies ten, and retains IDs and approvals after reload", { tag: "@p1" }, async ({ page }) => {
 	const state = await setup(page);
 	await stage(page);
