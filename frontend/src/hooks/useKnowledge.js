@@ -10,6 +10,7 @@ export default function useKnowledge(request, projectId) {
 	const mutating = useRef(false);
 	const [data, setData] = useState(null);
 	const [error, setError] = useState("");
+	const [fieldErrors, setFieldErrors] = useState({});
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
 	useEffect(() => {
@@ -23,6 +24,7 @@ export default function useKnowledge(request, projectId) {
 			if (current === epoch.current) {
 				setData(value);
 				setError("");
+				setFieldErrors({});
 			}
 		} catch (e) {
 			if (current === epoch.current) setError(e.message);
@@ -34,6 +36,7 @@ export default function useKnowledge(request, projectId) {
 		scopeVersion.current++;
 		setData(null);
 		setError("");
+		setFieldErrors({});
 		setBusy(false);
 		mutating.current = false;
 		attempt.current = null;
@@ -51,6 +54,7 @@ export default function useKnowledge(request, projectId) {
 		if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, id: crypto.randomUUID() };
 		setBusy(true);
 		setError("");
+		setFieldErrors({});
 		try {
 			const result = await knowledgeRequest(requester.current, path, {
 				method: "POST",
@@ -62,7 +66,10 @@ export default function useKnowledge(request, projectId) {
 			await load();
 			return result;
 		} catch (e) {
-			if (current === scopeVersion.current) setError(e.message);
+			if (current === scopeVersion.current) {
+				setError(e.message);
+				setFieldErrors(e.fieldErrors || {});
+			}
 			return null;
 		} finally {
 			if (current === scopeVersion.current) {
@@ -71,5 +78,5 @@ export default function useKnowledge(request, projectId) {
 			}
 		}
 	};
-	return { data, error, loading, busy, load, mutate };
+	return { data, error, fieldErrors, loading, busy, load, mutate };
 }

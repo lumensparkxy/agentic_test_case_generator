@@ -1,5 +1,6 @@
 import useUseCaseGeneration from "../hooks/useUseCaseGeneration";
 import GuidanceUsed from "../components/knowledge/GuidanceUsed";
+import GenerationGuidance from "../components/knowledge/GenerationGuidance";
 import KnowledgeSuggestion from "../components/knowledge/KnowledgeSuggestion";
 import { Badge } from "../components/ui/surfaces";
 import { Button, Link } from "../components/ui/controls";
@@ -91,6 +92,13 @@ export default function UseCaseReviewPage({
 						</div>
 					) : null
 				}
+			/>
+
+			<GenerationGuidance
+				key={`${identity}:${projectId}:${project?.current_revision}`}
+				request={request}
+				projectId={projectId}
+				stage="use_cases"
 			/>
 
 			<p>

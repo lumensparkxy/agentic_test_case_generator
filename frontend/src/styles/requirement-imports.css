@@ -131,3 +131,12 @@
 	padding-block: 0.75rem;
 	border-bottom: 1px solid var(--color-border, #d5dee8);
 }
+
+.requirement-source-evidence blockquote {
+	margin: 0.65rem 0;
+	padding-inline-start: 0.65rem;
+	border-inline-start: 2px solid var(--color-border, #d5dee8);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: 1.55;
+}

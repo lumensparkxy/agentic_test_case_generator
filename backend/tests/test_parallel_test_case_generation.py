@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -219,6 +220,31 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         self.assertTrue(all(shard["raw_output_count"] > 0 for shard in evidence["passes"][0]["shards"]))
         self.assertFalse(evidence["passes"][0]["raw_output_summary"]["raw_content_stored"])
         self.assertEqual(result["workflow_diagnostics"]["generation_source_counts"], {"model": len(result["test_cases"])})
+        GenerateTestCasesResponse(**result)
+
+    def test_parallel_merge_retains_structured_data_through_final_contract(self) -> None:
+        def structured_worker(shard, **kwargs):
+            output = _worker_output(shard, **kwargs)
+            for row in output["test_cases"]:
+                row["test_data"] = {"room": "Birch", "attendees": [1, 8]}
+                row["steps"][0]["test_data"] = ["Alice", "Bob"]
+            return output
+
+        with (
+            patch("app.agents.test_case_agent._get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+            patch("app.agents.test_case_agent._run_workflow_sync") as sequential,
+            patch("app.agents.test_case_agent._run_parallel_test_case_shard_workflow_sync", side_effect=structured_worker),
+        ):
+            result = generate_test_cases(_payload(3))
+        sequential.assert_not_called()
+        self.assertTrue(result["test_cases"])
+        self.assertEqual(result["generation_tasks"], [])
+        self.assertEqual(result["generation_evidence"]["final_test_case_count"], len(result["test_cases"]))
+        self.assertEqual(len({case.id for case in result["test_cases"]}), len(result["test_cases"]))
+        for case in result["test_cases"]:
+            self.assertEqual(json.loads(case.test_data), {"room": "Birch", "attendees": [1, 8]})
+            self.assertEqual(json.loads(case.steps[0].test_data), ["Alice", "Bob"])
+            self.assertTrue(case.scenario_refs)
         GenerateTestCasesResponse(**result)
 
     def test_large_precomputed_plan_can_use_more_shards_than_workers(self) -> None:

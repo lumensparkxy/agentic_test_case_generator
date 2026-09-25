@@ -10,6 +10,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from execution_fixtures import project_fixture
+
 from app.main import app, get_current_user
 from app.models import AuthUser, AutomationResponse, ExecutionCandidate, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
 
@@ -228,14 +230,14 @@ class AutomationEndpointTests(unittest.TestCase):
             manual=[manual_candidate],
             summary={"executable": 20, "manual": 0, "unsupported": 9, "invalid": 4},
         )
-        project = SimpleNamespace(current_snapshots={"test_cases": SimpleNamespace(snapshot_id="snap-test-v1")})
+        project = project_fixture(payload["test_cases"], owner="automation-user", snapshot_id="snap-test-v1")
 
         with patch("app.main.start_workflow_run", return_value="run-execution-preview-1"):
             with patch("app.main.complete_workflow_run"):
                 with patch("app.main.record_usage_event", return_value="event-execution-preview-1") as record_event:
                     with patch("app.main.preview_execution", return_value=service_response):
                         with patch("app.routers.automation.get_project", return_value=project):
-                            with patch("app.routers.automation.append_stage_snapshot") as append_snapshot:
+                            with patch("app.routers.automation.append_stage_snapshot", return_value=SimpleNamespace(project_revision=8)) as append_snapshot:
                                 with TestClient(app) as client:
                                     response = client.post(
                                         "/automation/execution/preview",
@@ -329,7 +331,7 @@ class AutomationEndpointTests(unittest.TestCase):
             preview=ExecutionPreviewResponse(),
             summary=ExecutionRunSummary(passed=0, failed=1),
         )
-        project = SimpleNamespace(current_snapshots={"test_cases": SimpleNamespace(snapshot_id="snap-test-v1")})
+        project = project_fixture(payload["test_cases"], owner="automation-user", snapshot_id="snap-test-v1")
         execution_snapshot = SimpleNamespace(snapshot_id="snap-exec-v1", project_revision=8)
         report_snapshot = SimpleNamespace(snapshot_id="snap-report-v1", project_revision=9)
 

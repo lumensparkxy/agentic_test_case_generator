@@ -5,10 +5,12 @@ import sys
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import HTTPException, APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 
 from ..agents.automation_agent import generate_playwright_pom
+from ..config import get_execution_settings
+from ..services.execution_readiness import assess_execution, selected_candidates
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
@@ -117,14 +119,6 @@ def _target_environment(payload: ExecutionPreviewInput) -> str:
     return "default"
 
 
-def _project_test_case_snapshot_id(project_id: Optional[str], *, actor: AuthUser) -> Optional[str]:
-    if not project_id:
-        return None
-    project = get_project(project_id, actor=actor)
-    snapshot = project.current_snapshots.get("test_cases")
-    return snapshot.snapshot_id if snapshot else None
-
-
 def _action_idempotency_key(action: str, *, request_id: str, target_environment: str) -> str:
     return f"{action}:{request_id}:{target_environment}"
 
@@ -135,6 +129,7 @@ def _preview_project_payload(response: ExecutionPreviewResponse, *, target_envir
         "target_base_url": target_base_url,
         "summary": _model_payload(response.summary),
         "warnings": list(response.warnings or []),
+        "readiness": _model_payload(response.readiness),
         "candidate_counts": {
             "executable": len(response.executable),
             "manual": len(response.manual),
@@ -262,6 +257,20 @@ async def automation_playwright(
         raise
 
 
+def _execution_project(payload: ExecutionPreviewInput, actor: AuthUser):
+    if not payload.project_id:
+        return None
+    try:
+        return get_project(payload.project_id, actor=actor)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+def _require_execution_ready(readiness) -> None:
+    if not readiness.run_allowed:
+        raise HTTPException(status_code=409, detail={"message": "Execution prerequisites are not satisfied.", "readiness": readiness.model_dump(mode="json")})
+
+
 @router.post("/automation/execution/preview", response_model=ExecutionPreviewResponse)
 async def automation_execution_preview(
     request: Request,
@@ -276,13 +285,18 @@ async def automation_execution_preview(
         metadata={"test_case_count": len(payload.test_cases)},
     )
     try:
-        target_base_url = str(payload.target_base_url) if payload.target_base_url else None
+        project = await run_in_threadpool(_execution_project, payload, current_user)
+        settings = get_execution_settings()
+        readiness = assess_execution(payload, project=project, settings=settings)
+        target_base_url = readiness.target_base_url
         target_environment = _target_environment(payload)
         response = await run_in_threadpool(
             _resolve_main_callable("preview_execution", preview_execution),
             payload.test_cases,
             target_base_url=target_base_url,
+            settings=settings,
         )
+        response.readiness = assess_execution(payload, project=project, settings=settings, preview=response)
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -301,8 +315,8 @@ async def automation_execution_preview(
         )
         if payload.project_id:
             try:
-                source_snapshot_id = _project_test_case_snapshot_id(payload.project_id, actor=current_user)
-                append_stage_snapshot(
+                source_snapshot_id = response.readiness.source_snapshot_id
+                preview_snapshot = append_stage_snapshot(
                     project_id=payload.project_id,
                     stage="execution",
                     payload=_preview_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
@@ -330,6 +344,7 @@ async def automation_execution_preview(
                         target_environment=target_environment,
                     ),
                 )
+                response.readiness.project_revision = preview_snapshot.project_revision
             except Exception as project_exc:
                 raise project_error_to_http(project_exc) from project_exc
         return response
@@ -364,14 +379,32 @@ async def automation_execution_run(
         },
     )
     try:
-        target_base_url = str(payload.target_base_url) if payload.target_base_url else None
+        project = await run_in_threadpool(_execution_project, payload, current_user)
+        settings = get_execution_settings()
+        readiness = assess_execution(payload, project=project, settings=settings)
+        _require_execution_ready(readiness)
+        target_base_url = readiness.target_base_url
+        preview = await run_in_threadpool(
+            _resolve_main_callable("preview_execution", preview_execution),
+            payload.test_cases,
+            target_base_url=target_base_url,
+            settings=settings,
+        )
+        readiness = assess_execution(payload, project=project, settings=settings, preview=preview)
+        _require_execution_ready(readiness)
+        try:
+            selected_ids = selected_candidates(preview, payload.selected_test_case_ids)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         target_environment = _target_environment(payload)
         response = await run_in_threadpool(
             _resolve_main_callable("run_execution", run_execution),
             payload.test_cases,
-            selected_test_case_ids=payload.selected_test_case_ids,
+            selected_test_case_ids=selected_ids,
             target_base_url=target_base_url,
+            settings=settings,
         )
+        response.preview.readiness = readiness
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -392,7 +425,7 @@ async def automation_execution_run(
         )
         if payload.project_id:
             try:
-                source_snapshot_id = _project_test_case_snapshot_id(payload.project_id, actor=current_user)
+                source_snapshot_id = readiness.source_snapshot_id
                 execution_snapshot = append_stage_snapshot(
                     project_id=payload.project_id,
                     stage="execution",
