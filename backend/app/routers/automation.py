@@ -192,8 +192,7 @@ async def automation_playwright(
     current_user: AuthUser = Depends(get_current_user),
 ) -> AutomationResponse:
     request_id = _get_request_id(request)
-    if payload.project_id:
-        await run_in_threadpool(project_for, payload.project_id, current_user)
+    project = await run_in_threadpool(project_for, payload.project_id, current_user) if payload.project_id else None
     workflow_run_id = _resolve_main_callable("start_workflow_run", start_workflow_run)(
         operation="automation.playwright.generate",
         actor=current_user,
@@ -209,23 +208,40 @@ async def automation_playwright(
             operation="automation.playwright.generate",
             event_type="automation.playwright.generated",
             billing_key="automation.playwright.generate",
-            quantity=len(payload.test_cases),
+            quantity=int(response.diagnostics.get("generated_case_count", 0)),
             unit="test_case",
-            result_metadata={"file_count": len(response.files), "test_case_count": len(payload.test_cases)},
+            result_metadata={
+                "file_count": len(response.files),
+                "test_case_count": len(payload.test_cases),
+                "generated_case_count": response.diagnostics.get("generated_case_count", 0),
+                "status": response.status,
+            },
         )
         if payload.project_id:
-            await run_in_threadpool(
-                append_stage_snapshot,
-                project_id=payload.project_id,
-                stage="automation",
-                payload={"artifact_kind": "generated_code", "files": response.files, "notes": response.notes, "diagnostics": response.diagnostics},
-                operation="automation.playwright.generate",
-                actor=current_user,
-                request_id=request_id,
-                approved=False,
-                title="Generated automation code",
-                metadata={"file_count": len(response.files)},
-            )
+            try:
+                await run_in_threadpool(
+                    append_stage_snapshot,
+                    project_id=payload.project_id,
+                    stage="reports",
+                    payload={
+                        "source": "automation_generation",
+                        "artifact_kind": "generated_code",
+                        "execution_status": "not_executed",
+                        "files": response.files,
+                        "notes": response.notes,
+                        "diagnostics": response.diagnostics,
+                        "case_diagnostics": _model_payload(response.case_diagnostics),
+                    },
+                    operation="automation.playwright.generate",
+                    actor=current_user,
+                    request_id=request_id,
+                    approved=False,
+                    title="Generated automation artifacts (not executed)",
+                    base_project_revision=project.current_revision,
+                    metadata={"file_count": len(response.files)},
+                )
+            except Exception as project_exc:
+                raise project_error_to_http(project_exc) from project_exc
         return finish_generation(response, current_user, payload.project_id, "automation", None, request_id)
     except Exception as exc:
         _log_failure(

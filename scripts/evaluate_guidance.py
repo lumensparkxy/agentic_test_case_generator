@@ -178,6 +178,22 @@ def contains_fallback(value):
     return isinstance(value, list) and any(contains_fallback(item) for item in value)
 
 
+def manual_resolution(output, rows):
+    diagnostics = output.get("diagnostics", {})
+    cases = output.get("case_diagnostics", [])
+    expected_ids = {f"TC-{index}" for index, _ in enumerate(rows, 1)}
+    return (
+        output.get("status") == "skipped"
+        and not output.get("files")
+        and diagnostics.get("generated_case_count") == 0
+        and diagnostics.get("artifact_validation") == "not_applicable"
+        and len(cases) == len(rows)
+        and {case.get("test_case_id") for case in cases} == expected_ids
+        and all(case.get("status") in {"manual", "unsupported"} and case.get("reason") for case in cases)
+        and not contains_fallback(output)
+    )
+
+
 def validate_artifact(stage, output, rows):
     """Check delivered contracts; never import or execute model output."""
     if stage == "test_cases":
@@ -193,6 +209,8 @@ def validate_artifact(stage, output, rows):
             errors.append("missing_delivered_requirement_coverage")
         return errors
     if stage != "automation":
+        return []
+    if manual_resolution(output, rows):
         return []
     code = output.get("notes", "")
     sections = re.split(r"(?m)^#\s*=== FILE: [^\n]+===\s*$", code)
@@ -249,7 +267,9 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                             except Exception as exc:
                                 result.update(status="failed", error_type=type(exc).__name__)
                         result.update(latency_seconds=round(time.monotonic() - start, 3), usage=usage)
-                        if usage["calls"] == 0 or usage["failed_calls"] or contains_fallback(result.get("output")):
+                        if stage == "automation" and manual_resolution(result.get("output", {}), rows):
+                            result["status"] = "manual_resolution"
+                        elif usage["calls"] == 0 or usage["failed_calls"] or contains_fallback(result.get("output")):
                             result["status"] = "fallback_or_failure"
                         if input_rate is not None and output_rate is not None and not usage["missing_usage"]:
                             result["estimated_cost_usd"] = round((usage["input_tokens"] * input_rate + usage["output_tokens"] * output_rate) / 1_000_000, 6)
@@ -258,7 +278,11 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                         on_result(results)
     return {
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "model_backed" if live else "contracts_only",
+        "mode": "model_backed"
+        if live and any((result.get("usage") or {}).get("calls") for result in results)
+        else "live_no_generation"
+        if live
+        else "contracts_only",
         "model": model,
         "repeats": repeats,
         "pricing_usd_per_million": {"input": input_rate, "output_including_thoughts": output_rate},
@@ -267,6 +291,7 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
         "limitations": [
             "Offline mode proves input contracts only, not model quality.",
             "Live output requires independent rubric review; missing measurements are null, never zero.",
+            "manual_resolution is truthful non-execution without model quality or guidance improvement evidence.",
             "Review latency and cost tradeoffs before enabling any stage; this script never changes flags.",
         ],
     }
