@@ -1,7 +1,7 @@
 import QualityFeedbackPanel from "./QualityFeedbackPanel";
 import KnowledgePanel from "../knowledge/KnowledgePanel";
 import { Surface } from "../ui/surfaces";
-import { Field, Input, Button, Checkbox } from "../ui/controls";
+import { Field, Input, Textarea, Button, Checkbox } from "../ui/controls";
 import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
 	request,
@@ -15,9 +15,12 @@ export default function ContextInputsPanel({
 	setDiagramLinks,
 	imageLinks,
 	setImageLinks,
+	contextNotes,
+	setContextNotes,
 	hasContextInputs,
 	analyzeContext,
 	isAnalyzingContext,
+	contextAnalysisError,
 	authActionDisabled,
 	enrichedContext,
 	resetContextAnalysis,
@@ -29,7 +32,7 @@ export default function ContextInputsPanel({
 	return (
 		<Surface as="section" className="panel">
 			<h2 className="panel-title">Context Inputs</h2>
-			<p className="panel-description">Add links and references to enrich the test case generation context.</p>
+			<p className="panel-description">Add notes, links, and references to enrich the test case generation context.</p>
 			<div className="panel-form two-cols">
 				<Field className="form-group">
 					<label>Application link</label>
@@ -48,6 +51,14 @@ export default function ContextInputsPanel({
 					<Input placeholder="Link1; Link2" value={imageLinks} onChange={(e) => setImageLinks(e.target.value)} />
 				</Field>
 			</div>
+			<div className="context-notes">
+				<Field
+					label="Context notes"
+					hint="Describe business rules, roles, test data, and assumptions. Notes can be saved without links. Select Analyze Context to save."
+				>
+					<Textarea rows={8} value={contextNotes} onChange={(e) => setContextNotes(e.target.value)} disabled={isAnalyzingContext} />
+				</Field>
+			</div>
 			{hasContextInputs && (
 				<div className="panel-form button-row">
 					<Button onClick={analyzeContext} disabled={isAnalyzingContext || authActionDisabled}>
@@ -60,6 +71,7 @@ export default function ContextInputsPanel({
 					)}
 				</div>
 			)}
+			{contextAnalysisError && <p role="alert">Context analysis failed: {contextAnalysisError}</p>}
 			{enrichedContext?.grounded_context && (
 				<Surface as="div" className="result-section">
 					<h3>Grounded Context</h3>

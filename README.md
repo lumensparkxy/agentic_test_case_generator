@@ -249,6 +249,11 @@ Run UI:
 
 Open http://localhost:5173
 
+In a project's **Context** workbench, enter **Context notes** for business rules,
+roles, fixtures, and assumptions. Notes can be saved on their own or alongside
+links using **Analyze Context**. Saved notes return on reload and remain part of
+the downstream context; unsaved notes remain editable after a failed analysis.
+
 ### 3.0.1) Install the execution runtime
 
 The Automation tab uses the backend execution runtime under `backend/execution_runtime`.
