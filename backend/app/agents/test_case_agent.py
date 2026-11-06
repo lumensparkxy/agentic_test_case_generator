@@ -1072,6 +1072,7 @@ def _build_refinement_pipeline(
     threshold: int,
     max_iterations: int,
     human_feedback: str,
+    preserve_source_plan: bool = False,
 ) -> Agent:
     refinement_agent = Agent(
         name="TestCaseRefinementAgent",
@@ -1124,15 +1125,21 @@ Rules:
 
     return SequentialAgent(
         name="TestCaseRefinementPipeline",
-        sub_agents=[
-            build_requirement_analysis_agent(
-                model,
-                requirements_text,
-                context_text,
-                output_key=STATE_REQUIREMENT_ANALYSIS,
-                human_feedback=human_feedback,
-            ),
-            _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+        sub_agents=(
+            []
+            if preserve_source_plan
+            else [
+                build_requirement_analysis_agent(
+                    model,
+                    requirements_text,
+                    context_text,
+                    output_key=STATE_REQUIREMENT_ANALYSIS,
+                    human_feedback=human_feedback,
+                ),
+                _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+            ]
+        )
+        + [
             refinement_agent,
             _build_review_loop(model, threshold, max_iterations, requirements_text, human_feedback=human_feedback, context_text=context_text),
         ],
@@ -1155,6 +1162,8 @@ async def _run_test_case_workflow_async(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
+    source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
@@ -1174,6 +1183,7 @@ async def _run_test_case_workflow_async(
             threshold,
             max_iterations,
             human_feedback=human_feedback or "No human feedback provided.",
+            preserve_source_plan=source_coverage_plan is not None,
         )
         message_text = f"""Refine these existing test cases using the human feedback.
 
@@ -1220,14 +1230,14 @@ Human feedback:
         state={
             STATE_TEST_CASES: "[]",
             STATE_VALIDATION_FEEDBACK: "",
-            STATE_COVERAGE_PLAN: "[]",
-            STATE_REQUIREMENT_ANALYSIS: "[]",
+            STATE_COVERAGE_PLAN: json.dumps(source_coverage_plan or []),
+            STATE_REQUIREMENT_ANALYSIS: json.dumps(source_requirement_analysis or []),
         },
     )
 
     current_test_cases: List[Dict[str, Any]] = []
-    current_coverage_plan: List[Dict[str, Any]] = []
-    current_requirement_analysis: List[Dict[str, Any]] = []
+    current_coverage_plan: List[Dict[str, Any]] = list(source_coverage_plan or [])
+    current_requirement_analysis: List[Dict[str, Any]] = list(source_requirement_analysis or [])
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
     previous_review: Optional[Dict[str, Any]] = None
@@ -2914,6 +2924,8 @@ def refine_test_cases(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
+    source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -2952,7 +2964,14 @@ def refine_test_cases(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation=operation,
+            source_coverage_plan=source_coverage_plan,
+            source_requirement_analysis=source_requirement_analysis,
         )
+
+    if source_coverage_plan is not None:
+        workflow["coverage_plan"] = source_coverage_plan
+        workflow["requirement_analysis"] = source_requirement_analysis or fallback_requirement_analysis(payload.requirements)
+        workflow["strict_coverage_plan"] = True
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
     requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
@@ -3004,6 +3023,9 @@ def refine_test_cases(
             "workflow_settings": resolved_settings,
             "workflow_diagnostics": workflow_diagnostics,
         }
+
+    if source_coverage_plan is not None:
+        workflow["strict_coverage_plan"] = True
 
     contract_rejections = []
     test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)

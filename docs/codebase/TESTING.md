@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **65 selected backend methods and 28 browser cases**. This
+Routine CI runs **67 selected backend methods and 28 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -555,10 +555,13 @@ delivery behavior, not live model quality.
 `test_generation_source_snapshot.py` checks that Test Case generation/refinement
 retains the exact current Use Cases snapshot when its nonempty coverage plan is
 unchanged and not stale. Downstream analysis and review must not replace the
-source semantic assessment or human decisions. Changed, missing, empty or stale
-plans still create an unapproved source snapshot; reusing a source keeps the
-client revision check on the Test Cases write. This persistence check does not
-establish generated case quality or live execution.
+source semantic assessment or human decisions. Project refinement loads the
+current plan server-side, seeds the agent session with that plan and analysis,
+and skips upstream planning. It rejects missing/stale sources and refuses to
+replace a changed source during persistence. Standalone refinement retains its
+planning path. Generation with a changed plan still creates an unapproved source
+snapshot. Reusing a source keeps the client revision check on the Test Cases
+write. These checks do not establish generated case quality or live execution.
 
 ## 6) Additional affected-test targets
 

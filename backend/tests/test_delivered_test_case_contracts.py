@@ -70,6 +70,29 @@ class DeliveredTestCaseContractTests(unittest.TestCase):
         assessment.start()
         self.addCleanup(assessment.stop)
 
+    def test_project_refinement_retains_exact_source_plan_even_if_workflow_drifts(self):
+        rows = [case(), case("TC-2", "REQ-2", "SCN-2")]
+        saved = GenerateTestCasesResponse(test_cases=[], coverage_plan=workflow(rows)["coverage_plan"])
+        source = [item.model_dump(mode="json") for item in saved.coverage_plan]
+        source[0]["scenarios"][0]["title"] = "Previously reviewed wording"
+        drifted = workflow(rows)
+        drifted["coverage_plan"][0]["scenarios"][0]["title"] = "Unrequested upstream rewrite"
+        payload = RefineTestCasesInput(
+            requirements=[Requirement(id=f"REQ-{i}", text=f"Book room {i}") for i in (1, 2)],
+            test_cases=[TestCase(**row) for row in rows],
+            template={"name": "default", "format": "table", "fields": []},
+            feedback="Tighten assertion",
+        )
+        with (
+            patch("app.agents.test_case_agent._get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+            patch("app.agents.test_case_agent._run_workflow_sync", return_value=drifted) as run,
+        ):
+            result = refine_test_cases(payload, source_coverage_plan=source, source_requirement_analysis=[])
+        self.assertEqual(run.call_args.kwargs["source_coverage_plan"], source)
+        self.assertEqual([item.model_dump(mode="json") for item in result["coverage_plan"]], source)
+        self.assertEqual(result["generation_tasks"], [])
+        self.assertEqual([item.scenario_refs for item in result["test_cases"]], [["SCN-1"], ["SCN-2"]])
+
     def test_string_null_object_and_list_data_round_trip_at_both_levels_without_mutating_input(self):
         for value in (None, "", "Birch · Zürich", {}, [], {"room": "Birch", "attendees": [1, 8], "confirmed": False}, [None, {"room": "Atlas"}]):
             with self.subTest(value=value):
