@@ -1,3 +1,4 @@
+from .quality_feedback import ExecutionPrerequisite
 from typing import List, Optional, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -67,6 +68,7 @@ class EnrichInput(BaseModel):
     prototype_link: Optional[HttpUrl] = None
     diagram_links: Optional[List[HttpUrl]] = None
     image_links: Optional[List[HttpUrl]] = None
+    execution_prerequisites: list[ExecutionPrerequisite] = Field(default_factory=list, max_length=30)
     notes: Optional[str] = None
     grounded_context: Optional[GroundedContext] = None
     project_id: Optional[str] = None

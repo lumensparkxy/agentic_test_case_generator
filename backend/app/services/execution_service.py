@@ -322,7 +322,18 @@ def run_execution(
 
 
 def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> ExecutionCandidate:
+    from .execution_prerequisites import prerequisite_blockers
+
     candidate_id = _slug_identifier(test_case.id)
+    blockers = prerequisite_blockers(test_case)
+    if blockers:
+        return ExecutionCandidate(id=candidate_id, source_test_case_id=test_case.id, title=test_case.title, status="manual", review_reasons=blockers)
+    test_case = test_case.model_copy(deep=True)
+    for prerequisite in test_case.execution_prerequisites:
+        if prerequisite.reference and prerequisite.reference.startswith("env:PETF_TEST_"):
+            marker = "[[" + prerequisite.reference + "]]"
+            for step in test_case.steps:
+                step.action = step.action.replace("{{" + prerequisite.name + "}}", marker)
     metadata = _metadata_for_test_case(test_case)
     traceability_ids = [
         *test_case.linked_requirement_ids,

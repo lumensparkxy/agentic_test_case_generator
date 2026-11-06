@@ -1,0 +1,261 @@
+{
+  "version": "application-quality-v1",
+  "fixtures": {
+    "missing_supervisor": {
+      "requirements": [
+        {
+          "id": "R1",
+          "text": "Only Supervisors may approve submitted expenses; employees must be denied."
+        }
+      ],
+      "context": {
+        "execution_prerequisites": [
+          {
+            "name": "supervisor",
+            "kind": "credential",
+            "description": "Provisioned Supervisor account",
+            "status": "missing",
+            "requirement_ids": [
+              "R1"
+            ]
+          }
+        ]
+      },
+      "obligations": {
+        "supervisor_approval": "A provisioned Supervisor approves a submitted expense.",
+        "employee_denial": "An employee cannot approve the same expense.",
+        "missing_actor": "Missing login is an explicit prerequisite, never an invented account."
+      },
+      "obligations_by_stage": {
+        "requirements": {
+          "supervisor_approval": "A provisioned Supervisor approves a submitted expense.",
+          "employee_denial": "An employee cannot approve the same expense."
+        },
+        "use_cases": {
+          "supervisor_approval": "A provisioned Supervisor approves a submitted expense.",
+          "employee_denial": "An employee cannot approve the same expense."
+        }
+      },
+      "coverage_plan": [
+        {
+          "requirement_id": "R1",
+          "requirement_text": "Only Supervisors may approve submitted expenses; employees must be denied.",
+          "scenarios": [
+            {
+              "id": "R1-S1",
+              "requirement_id": "R1",
+              "title": "Supervisor approves submitted expense",
+              "objective": "An authorized Supervisor approves a submitted expense; confirm the approved state.",
+              "scenario_type": "Happy Path",
+              "must_have": true
+            },
+            {
+              "id": "R1-S2",
+              "requirement_id": "R1",
+              "title": "Employee approval denied",
+              "objective": "An employee attempts approval; access is denied and the expense remains submitted.",
+              "scenario_type": "Authorization",
+              "must_have": true
+            }
+          ]
+        }
+      ]
+    },
+    "ambiguous_limit": {
+      "requirements": [
+        {
+          "id": "R1",
+          "text": "Expenses above the configured limit need additional approval; the limit is not specified."
+        }
+      ],
+      "obligations": {
+        "unknown_limit": "Identify the missing limit without inventing an amount.",
+        "approval": "Preserve the additional-approval obligation pending the limit."
+      }
+    },
+    "conflicting_context": {
+      "requirements": [
+        {
+          "id": "R1",
+          "text": "Only Supervisors may approve expenses."
+        }
+      ],
+      "context": {
+        "notes": "An older handbook says any employee can approve expenses."
+      },
+      "obligations": {
+        "conflict": "Flag contradictory context.",
+        "authority": "Preserve the Supervisor restriction from the current requirement."
+      }
+    },
+    "grounding_tail": {
+      "requirements": [
+        {
+          "id": "R1",
+          "text": "A Supervisor can approve a submitted expense from the review panel.",
+          "source_excerpt": "The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The expense review panel lists submitted expenses. The exact approval control is Authorize expense."
+        }
+      ],
+      "context": {
+        "grounded_context": {
+          "artifact_sources": [
+            {
+              "id": "SRC",
+              "label": "Synthetic observed review panel",
+              "status": "Analyzed"
+            }
+          ],
+          "ui_elements": [
+            {
+              "id": "UI-0",
+              "source_id": "SRC",
+              "name": "Unrelated 0",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-1",
+              "source_id": "SRC",
+              "name": "Unrelated 1",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-2",
+              "source_id": "SRC",
+              "name": "Unrelated 2",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-3",
+              "source_id": "SRC",
+              "name": "Unrelated 3",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-4",
+              "source_id": "SRC",
+              "name": "Unrelated 4",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-5",
+              "source_id": "SRC",
+              "name": "Unrelated 5",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-6",
+              "source_id": "SRC",
+              "name": "Unrelated 6",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-7",
+              "source_id": "SRC",
+              "name": "Unrelated 7",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-8",
+              "source_id": "SRC",
+              "name": "Unrelated 8",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-9",
+              "source_id": "SRC",
+              "name": "Unrelated 9",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-10",
+              "source_id": "SRC",
+              "name": "Unrelated 10",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-11",
+              "source_id": "SRC",
+              "name": "Unrelated 11",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-12",
+              "source_id": "SRC",
+              "name": "Unrelated 12",
+              "description": "Navigation control"
+            },
+            {
+              "id": "UI-APPROVE",
+              "source_id": "SRC",
+              "name": "Authorize expense",
+              "element_type": "Button",
+              "description": "Available to Supervisors for submitted expenses"
+            }
+          ]
+        }
+      },
+      "obligations": {
+        "label": "Use the evidenced Authorize expense control with source provenance.",
+        "state": "Preserve Supervisor role and submitted state."
+      }
+    },
+    "evidenced_automation": {
+      "requirements": [
+        {
+          "id": "R1",
+          "text": "The sign-in page displays the heading Sign in."
+        }
+      ],
+      "obligations": {
+        "heading": "Assert the observed Sign in heading at the supplied route."
+      },
+      "automation": {
+        "target_base_url": "https://synthetic.example.invalid",
+        "test_cases": [
+          {
+            "id": "TC-1",
+            "title": "Sign in heading",
+            "linked_requirement_ids": [
+              "R1"
+            ],
+            "automation_status": "To Be Automated",
+            "steps": [
+              {
+                "step": 1,
+                "action": "Open https://synthetic.example.invalid/sign-in",
+                "expected": "Heading Sign in is visible"
+              }
+            ]
+          }
+        ],
+        "interface_evidence": [
+          {
+            "test_case_id": "TC-1",
+            "source_reference": "Synthetic reviewed DOM fixture v1",
+            "locators": [
+              {
+                "method": "get_by_role",
+                "value": "heading",
+                "name": "Sign in"
+              }
+            ],
+            "assertions": [
+              {
+                "step": 1,
+                "method": "to_be_visible",
+                "locator": {
+                  "method": "get_by_role",
+                  "value": "heading",
+                  "name": "Sign in"
+                }
+              }
+            ],
+            "allowed_urls": [
+              "https://synthetic.example.invalid/sign-in"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

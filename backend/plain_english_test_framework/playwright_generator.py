@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -115,7 +116,7 @@ def _render_action(step: Mapping[str, Any]) -> str:
     if action == "navigate":
         return f"await page.goto({_js_string(step['url'])});"
     if action == "fill":
-        return f"await {_render_locator(step['locator'])}.fill({_js_string(_to_playwright_text(step['value']))});"
+        return f"await {_render_locator(step['locator'])}.fill({_input_value(step['value'])});"
     if action == "click":
         return f"await {_render_locator(step['locator'])}.click();"
     if action == "assert_visible":
@@ -200,3 +201,14 @@ def _to_non_negative_int(value: Any) -> int:
 
 def _js_string(value: Any) -> str:
     return json.dumps(str(value), ensure_ascii=True)
+
+
+def _input_value(value):
+    text = _to_playwright_text(value)
+    match = re.fullmatch(r"\[\[env:(PETF_TEST_[A-Z0-9_]+)\]\]", text)
+    if match:
+        name = _js_string(match[1])
+        return f"(() => {{ const value = process.env[{name}]; if (!value) throw new Error('Execution prerequisite unavailable'); return value; }})()"
+    if "[[env:" in text:
+        raise PlaywrightGenerationError((ValidationIssue("$", "Unsupported execution reference", "playwright.reference_invalid"),))
+    return _js_string(text)

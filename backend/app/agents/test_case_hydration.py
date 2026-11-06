@@ -218,6 +218,7 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]], *, rejections: Lis
                     type=_normalize_test_case_type(raw_test_case.get("type")),
                     status=_normalize_status(raw_test_case.get("status")),
                     preconditions=raw_test_case.get("preconditions"),
+                    execution_prerequisites=raw_test_case.get("execution_prerequisites", []),
                     steps=steps,
                     expected_result=raw_test_case.get("expected_result"),
                     test_data=_normalize_test_data(raw_test_case.get("test_data"), "test_data"),
@@ -272,6 +273,7 @@ def _serialize_test_cases(test_cases: List[TestCase]) -> List[Dict[str, Any]]:
                 "type": test_case.type,
                 "status": test_case.status,
                 "preconditions": test_case.preconditions,
+                "execution_prerequisites": [p.model_dump(mode="json") for p in test_case.execution_prerequisites],
                 "steps": [
                     {
                         "step": step.step,

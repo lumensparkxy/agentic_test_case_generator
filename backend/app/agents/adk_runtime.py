@@ -4,6 +4,7 @@ Keep model-call behavior deterministic and resilient across the agent pipelines.
 """
 
 from google.genai import types
+from .quality_goal import QUALITY_GOAL
 
 DEFAULT_MODEL_HTTP_RETRY_ATTEMPTS = 2
 DEFAULT_MODEL_HTTP_RETRY_INITIAL_DELAY = 1.0
@@ -45,7 +46,7 @@ def text_generation_config(
 ) -> types.GenerateContentConfig:
     """Config for direct text generations that still need stable, retryable behavior."""
     return types.GenerateContentConfig(
-        system_instruction=system_instruction,
+        system_instruction=QUALITY_GOAL + "\n" + (system_instruction or ""),
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         http_options=_http_options(),

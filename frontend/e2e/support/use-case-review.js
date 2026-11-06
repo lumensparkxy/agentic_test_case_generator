@@ -608,6 +608,9 @@ export async function installUseCaseReviewApi(page, options = {}) {
 			return jsonResponse(route, { runs: [], events: [], checkpoints: [] });
 		}
 
+		if (pathname.endsWith("/quality-findings") && method === "GET")
+			return jsonResponse(route, { project_revision: serverProject.current_revision, findings: [] });
+
 		const detailMatch = pathname.match(/^\/projects\/([^/]+)$/);
 		if (detailMatch && method === "GET") {
 			const index = requests.projectDetail.length;

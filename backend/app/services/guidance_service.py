@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from google.adk.skills import load_skill_from_dir
+from ..agents.quality_goal import QUALITY_GOAL
 from ..contracts.guidance import GuidanceManifest, SkillGuidance, MemoryGuidance, OmittedGuidance
 
 STAGES = ("requirements", "use_cases", "test_cases", "automation")
@@ -135,9 +136,20 @@ def public_manifest(manifest=None):
 
 def apply_agent_guidance(agent, stage=None):
     role_stage = "use_cases" if getattr(agent, "name", "") in ("CoveragePlannerAgent", "RequirementAnalysisAgent") else stage
-    text = guidance_text(role_stage)
+    text = QUALITY_GOAL + guidance_text(role_stage)
     if text and isinstance(getattr(agent, "instruction", None), str):
         agent.instruction += text
+    elif text and callable(getattr(agent, "instruction", None)):
+        import inspect
+
+        original = agent.instruction
+
+        async def instruction(context):
+            value = original(context)
+            value = await value if inspect.isawaitable(value) else value
+            return QUALITY_GOAL + value + guidance_text(role_stage)
+
+        agent.instruction = instruction
     for child in getattr(agent, "sub_agents", ()):
         apply_agent_guidance(child, stage)
     return agent

@@ -230,6 +230,7 @@ export interface EnrichInput {
 	app_link?: string | null;
 	base_project_revision?: number | null;
 	diagram_links?: Array<string> | null;
+	execution_prerequisites?: Array<ExecutionPrerequisite>;
 	grounded_context?: GroundedContext | null;
 	image_links?: Array<string> | null;
 	notes?: string | null;
@@ -242,6 +243,7 @@ export interface EnrichResponse {
 	app_link?: string | null;
 	base_project_revision?: number | null;
 	diagram_links?: Array<string> | null;
+	execution_prerequisites?: Array<ExecutionPrerequisite>;
 	grounded_context?: GroundedContext;
 	image_links?: Array<string> | null;
 	notes?: string | null;
@@ -266,6 +268,15 @@ export interface ExecutionIssue {
 	code: string;
 	message: string;
 	path?: string;
+}
+
+export interface ExecutionPrerequisite {
+	description: string;
+	kind: "test_data" | "credential" | "role" | "environment" | "setup" | "cleanup";
+	name: string;
+	reference?: string | null;
+	requirement_ids?: Array<string>;
+	status?: "missing" | "configured";
 }
 
 export interface ExecutionPreviewInput {
@@ -998,6 +1009,7 @@ export interface TestCase {
 	coverage_completion_reason?: string | null;
 	description?: string | null;
 	estimated_time?: string | null;
+	execution_prerequisites?: Array<ExecutionPrerequisite>;
 	expected_result?: string | null;
 	generation_pass_id?: string | null;
 	generation_source?: "model" | "model_recovered" | "parallel_retry" | "deterministic_full_fallback" | "deterministic_coverage_completion" | null;

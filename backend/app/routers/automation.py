@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from ..agents.automation_agent import generate_playwright_pom
 from ..config import get_execution_settings
 from ..services.execution_readiness import assess_execution, selected_candidates
+from ..services.execution_prerequisites import execution_reference_scope
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
@@ -266,6 +267,11 @@ def _execution_project(payload: ExecutionPreviewInput, actor: AuthUser):
         raise project_error_to_http(exc) from exc
 
 
+async def _execution_with_references(function, payload, actor, **kwargs):
+    with execution_reference_scope(actor.sub, payload.project_id):
+        return await run_in_threadpool(function, payload.test_cases, **kwargs)
+
+
 def _require_execution_ready(readiness) -> None:
     if not readiness.run_allowed:
         raise HTTPException(status_code=409, detail={"message": "Execution prerequisites are not satisfied.", "readiness": readiness.model_dump(mode="json")})
@@ -290,9 +296,10 @@ async def automation_execution_preview(
         readiness = assess_execution(payload, project=project, settings=settings)
         target_base_url = readiness.target_base_url
         target_environment = _target_environment(payload)
-        response = await run_in_threadpool(
+        response = await _execution_with_references(
             _resolve_main_callable("preview_execution", preview_execution),
-            payload.test_cases,
+            payload,
+            current_user,
             target_base_url=target_base_url,
             settings=settings,
         )
@@ -384,9 +391,10 @@ async def automation_execution_run(
         readiness = assess_execution(payload, project=project, settings=settings)
         _require_execution_ready(readiness)
         target_base_url = readiness.target_base_url
-        preview = await run_in_threadpool(
+        preview = await _execution_with_references(
             _resolve_main_callable("preview_execution", preview_execution),
-            payload.test_cases,
+            payload,
+            current_user,
             target_base_url=target_base_url,
             settings=settings,
         )
@@ -397,9 +405,10 @@ async def automation_execution_run(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         target_environment = _target_environment(payload)
-        response = await run_in_threadpool(
+        response = await _execution_with_references(
             _resolve_main_callable("run_execution", run_execution),
-            payload.test_cases,
+            payload,
+            current_user,
             selected_test_case_ids=selected_ids,
             target_base_url=target_base_url,
             settings=settings,

@@ -515,6 +515,7 @@ async def enrich_requirements(
             diagram_links=payload.diagram_links,
             image_links=payload.image_links,
             notes=payload.notes,
+            execution_prerequisites=payload.execution_prerequisites,
             grounded_context=grounded_context,
             project_id=payload.project_id,
             base_project_revision=payload.base_project_revision,

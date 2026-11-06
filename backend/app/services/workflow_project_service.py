@@ -565,6 +565,11 @@ def append_stage_snapshot(
         "created_at": now,
     }
 
+    if stage == "execution":
+        from .quality_feedback import execution_finding_writes
+
+        pending_writes = [*pending_writes, *execution_finding_writes(project_id, snapshot_payload)]
+
     stage_metadata = dict(metadata or {})
     if stage == "use_cases":
         previous_snapshot = _snapshot_for(project_id, previous_state.get("current_snapshot_id")) if previous_state.get("current_snapshot_id") else None

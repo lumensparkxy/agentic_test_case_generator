@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **59 selected backend methods and 25 browser cases**. This
+Routine CI runs **61 selected backend methods and 26 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -165,6 +165,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 
 | Spec | Cases | Critical outcome |
 | --- | ---: | --- |
+| `quality-feedback` | 1 | Record a missing login, backfill a non-secret reference, propose scoped learning and retain pending verification |
 | `home-workspace` | 2 | Create a durable project; reject prior-user state after logout |
 | `requirement-import-review` | 2 | Preserve imported identities/approvals; reject stale apply |
 | `use-case-generation` | 2 | New generation requires review; unapproved requirements block generation |
