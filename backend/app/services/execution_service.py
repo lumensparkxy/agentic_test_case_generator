@@ -68,10 +68,11 @@ HEADING_VISIBLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ROLE_VISIBLE_PATTERN = re.compile(
-    r"\b(?P<exact>exact\s+)?(?P<role>heading|link|button)\s+['\"](?P<text>[^'\"]+)['\"]\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    r"""\b(?P<exact>exact\s+)?(?P<role>heading|link|button)\s+(?P<quote>['"])(?P<text>.+?)(?P=quote)"""
+    r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
     re.IGNORECASE,
 )
-EXACT_TEXT_PATTERN = re.compile(r"""\bexact\s+(?:visible\s+)?text\s+['"](?P<text>[^'"]+)['"]""", re.IGNORECASE)
+EXACT_TEXT_PATTERN = re.compile(r"""\bexact\s+(?:visible\s+)?text\s+(?P<quote>['"])(?P<text>.+?)(?P=quote)""", re.IGNORECASE)
 EXACT_INTENT_PATTERN = re.compile(r"\b(?:exact (?:text|case|match)|(?:text|name) matches exactly)\b", re.IGNORECASE)
 VISIBLE_INTENT_PATTERN = re.compile(r"\b(?:displays?|displayed|visible|shown|present|appears)\b", re.IGNORECASE)
 PAGE_TITLE_EQUALS_PATTERN = re.compile(
@@ -544,14 +545,14 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
 
     if match := ROLE_VISIBLE_PATTERN.search(text):
         role = str(match.group("role")).lower()
-        role_text = _clean_value(match.group("text"))
+        exact = bool(match.group("exact") or EXACT_INTENT_PATTERN.search(text))
+        role_text = match.group("text") if exact else _clean_value(match.group("text"))
         if role_text:
-            exact = "exact " if match.group("exact") or EXACT_INTENT_PATTERN.search(text) else ""
-            return _ConvertedStep("assert_visible", f'{exact}{role} "{_escape_step_text(role_text)}" should be visible')
+            qualifier = "exact " if exact else ""
+            return _ConvertedStep("assert_visible", f'{qualifier}{role} "{_escape_step_text(role_text)}" should be visible')
 
     if (match := EXACT_TEXT_PATTERN.search(text)) and VISIBLE_INTENT_PATTERN.search(text):
-        visible_text = _clean_value(match.group("text"))
-        return _ConvertedStep("assert_visible", f'exact text "{_escape_step_text(visible_text)}" should be visible')
+        return _ConvertedStep("assert_visible", f'exact text "{_escape_step_text(match.group("text"))}" should be visible')
 
     if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.search(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))

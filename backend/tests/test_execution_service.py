@@ -401,6 +401,8 @@ class ExecutionServiceTests(unittest.TestCase):
                 TestStep(step=2, action="Inspect the status message", expected='The exact visible text "No results" is displayed'),
                 TestStep(step=3, action="Inspect the supporting heading", expected='heading "Help" is visible'),
                 TestStep(step=4, action="Inspect the form heading", expected='heading "Account" is visible with exact text "Account"'),
+                TestStep(step=5, action="Inspect confirmation", expected='exact text "You\'re signed in." is visible'),
+                TestStep(step=6, action="Inspect notice", expected="""exact text 'Select "Search".' is visible"""),
             ],
         )
         preview = preview_execution([case], target_base_url="https://example.test")
@@ -418,6 +420,8 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('page.getByText("No results", { exact: true })', generated)
         self.assertIn('page.getByRole("heading", { name: "Help" })', generated)
         self.assertIn('page.getByRole("heading", { name: "Account", exact: true })', generated)
+        self.assertIn('page.getByText("You\'re signed in.", { exact: true })', generated)
+        self.assertIn(r'page.getByText("Select \"Search\".", { exact: true })', generated)
 
     def test_preview_compiler_and_generator_support_explicit_browser_assertion_dsl(self) -> None:
         semantic_case = TestCase(
