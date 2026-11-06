@@ -129,9 +129,16 @@ export default function UseCaseReviewPage({
 				</p>
 			)}
 
-			<GuidanceUsed key={snapshot?.snapshot_id || "none"} manifest={snapshot?.metadata?.guidance} request={request} projectId={projectId} />
+			{snapshot ? (
+				<GuidanceUsed
+					key={`guidance:${snapshot.snapshot_id}`}
+					manifest={snapshot.metadata?.guidance}
+					request={request}
+					projectId={projectId}
+				/>
+			) : null}
 			<KnowledgeSuggestion
-				key={review.response?.review?.review_id || "none"}
+				key={`suggestion:${review.response?.review?.review_id || "none"}`}
 				suggestion={review.response?.knowledge_suggestion}
 				request={request}
 				projectId={projectId}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -40,6 +41,7 @@ from ..utils.workflow_diagnostics import public_workflow_diagnostics
 
 DEFAULT_USE_CASE_WORKER_COUNT = 3
 SMALL_INPUT_SEQUENTIAL_LIMIT = 3
+MERGED_REVIEW_TIMEOUT_SECONDS = 120
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,7 @@ def _use_case_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None):
+def _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None, *, review_in_shard=True):
     # Source braces (routes, JSON, artifact-like strings) are literal data. Only
     # our own templates may expand ADK session state.
     source_text = requirements_text + "\n" + context_text
@@ -133,8 +135,8 @@ def _build_use_case_pipeline(model, requirements_text, context_text, semantic_in
             sub_agents=[
                 build_requirement_analysis_agent(model, requirements, context, output_key=STATE_REQUIREMENT_ANALYSIS, human_feedback=human_feedback),
                 _build_coverage_planner_agent(model, requirements, context, human_feedback=human_feedback),
-                build_scenario_critic(model, semantic_input, source_text),
-            ],
+            ]
+            + ([build_scenario_critic(model, semantic_input, source_text)] if review_in_shard else []),
             description="Plans requirement analysis and scenario coverage without generating test cases",
         )
 
@@ -151,6 +153,7 @@ async def _run_single_use_case_shard_workflow_async(
     human_feedback: Optional[str] = None,
     workflow_settings: Optional[WorkflowSettings] = None,
     actor_user_id: Optional[str] = None,
+    review_in_shard: bool = True,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     timeout_seconds = resolved_settings["timeout_seconds"]
@@ -161,7 +164,7 @@ async def _run_single_use_case_shard_workflow_async(
         plan, _ = _canonicalize_coverage_scenario_ids(_normalize_coverage_plan(raw_plan or [], shard.requirements))
         return assessment_input(plan, shard.requirements, context_text)
 
-    root_agent = _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard.index, human_feedback)
+    root_agent = _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard.index, human_feedback, review_in_shard=review_in_shard)
     session_service = InMemorySessionService()
     runner = Runner(
         agent=root_agent,
@@ -227,7 +230,7 @@ async def _run_single_use_case_shard_workflow_async(
         diagnostics["status"] = "partial"
         diagnostics["timed_out"] = True
         diagnostics["failure_reason"] = diagnostics["failure_reason"] or (
-            "semantic_review_timeout" if current_coverage_plan and current_requirement_analysis else "timeout"
+            "semantic_review_timeout" if review_in_shard and current_coverage_plan and current_requirement_analysis else "timeout"
         )
         _append_unique_message(
             diagnostics["warnings"],
@@ -235,13 +238,18 @@ async def _run_single_use_case_shard_workflow_async(
         )
 
     except Exception:
-        # The planning output remains useful when only its advisory critic fails.
+        # Preserve available planning output when a later pipeline step fails.
         # Do not expose provider exception content in the delivered review.
         if not current_coverage_plan:
             raise
         diagnostics["status"] = "partial"
-        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "semantic_review_error"
-        _append_unique_message(diagnostics["warnings"], "Semantic review did not finish. The generated plan still requires human review.")
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or ("semantic_review_error" if review_in_shard else "planning_error")
+        _append_unique_message(
+            diagnostics["warnings"],
+            "Semantic review did not finish. The generated plan still requires human review."
+            if review_in_shard
+            else "Planning did not finish. The partial plan still requires review.",
+        )
 
     updated_session = await session_service.get_session(
         app_name="use_case_planner",
@@ -315,6 +323,49 @@ def _run_single_use_case_shard_workflow_sync(**kwargs: Any) -> Dict[str, Any]:
         return asyncio.run(_run_single_use_case_shard_workflow_async(**kwargs))
 
 
+async def _review_merged_use_cases_async(*, coverage_plan, requirements, context_text, model, timeout_seconds, actor_user_id):
+    """One critic over the canonical delivered plan; never fall back to shard passes."""
+
+    async def consume():
+        rows = assessment_input(coverage_plan, requirements, context_text)
+        source_text = json.dumps([{"id": r.id, "text": r.text} for r in requirements], ensure_ascii=False) + "\n" + context_text
+        critic = build_scenario_critic(model, lambda _state: rows, source_text)
+        sessions = InMemorySessionService()
+        runner = Runner(agent=critic, app_name="use_case_semantic_review", session_service=sessions)
+        user_id = str(actor_user_id or "use-case-review")
+        session = await sessions.create_session(app_name="use_case_semantic_review", user_id=user_id, state={STATE_SCENARIO_ASSESSMENT: ""})
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text="Review this complete delivered plan once. Do not rewrite it.")]),
+        ):
+            if getattr(event, "error_code", None):
+                raise RuntimeError("Semantic reviewer reported an error")
+        updated = await sessions.get_session(app_name="use_case_semantic_review", user_id=user_id, session_id=session.id)
+        return parse_critic_output(updated.state.get(STATE_SCENARIO_ASSESSMENT, "")) if updated else []
+
+    try:
+        result = await asyncio.wait_for(consume(), timeout=min(timeout_seconds or MERGED_REVIEW_TIMEOUT_SECONDS, MERGED_REVIEW_TIMEOUT_SECONDS))
+        return result, None if result else "semantic_review_unavailable"
+    except asyncio.TimeoutError:
+        return [], "semantic_review_timeout"
+    except Exception:
+        # Retain the plan, never provider exception text or a fabricated verdict.
+        return [], "semantic_review_error"
+
+
+def _review_merged_use_cases_sync(**kwargs):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        import nest_asyncio
+
+        nest_asyncio.apply()
+    return asyncio.run(_review_merged_use_cases_async(**kwargs))
+
+
 def _fallback_shard_result(shard: _UseCaseShard, *, reason: str, warning: str, failed: bool = False) -> _UseCaseShardResult:
     diagnostics = _new_use_case_diagnostics(shard_count=1, worker_count=1)
     diagnostics["status"] = "fallback"
@@ -341,12 +392,24 @@ def _run_shard_with_fallback(
     human_feedback: Optional[str],
     workflow_settings: Optional[WorkflowSettings],
     actor_user_id: Optional[str],
+    all_requirements: Optional[List[Requirement]] = None,
 ) -> _UseCaseShardResult:
     requirements_text, context_text, _template_text = _prepare_workflow_inputs(
         shard.requirements,
         context,
         type("_Template", (), {"name": "Use Case Planning", "format": "structured", "fields": ["requirement_analysis", "coverage_plan"]})(),
     )
+    catalogue = all_requirements or shard.requirements
+    review_in_shard = len(catalogue) == len(shard.requirements)
+    if not review_in_shard:
+        requirements_text = (
+            "OUTPUT SCOPE: Analyze and generate groups ONLY for these assigned requirements:\n"
+            + requirements_text
+            + "\nREFERENCE CATALOGUE (all project requirements; do not output unassigned groups):\n"
+            + json.dumps([{"id": r.id, "text": r.text} for r in catalogue], ensure_ascii=False)
+            + "\nMap each scenario to the requirement that owns its tested rule. Shared context supplies setup, not additional coverage obligations. "
+            "Do not repeat a behavior owned by another requirement, including an unassigned requirement. Preserve distinct input partitions and assertions."
+        )
     try:
         workflow = _run_single_use_case_shard_workflow_sync(
             shard=shard,
@@ -357,6 +420,7 @@ def _run_shard_with_fallback(
             human_feedback=human_feedback,
             workflow_settings=workflow_settings,
             actor_user_id=actor_user_id,
+            review_in_shard=review_in_shard,
         )
     except Exception as exc:
         return _fallback_shard_result(
@@ -586,6 +650,7 @@ def _run_use_case_workflow_sync_inner(
                 human_feedback=human_feedback,
                 workflow_settings=WorkflowSettings(**resolved_settings),
                 actor_user_id=actor_user_id,
+                all_requirements=requirements,
             )
         ]
     else:
@@ -601,6 +666,7 @@ def _run_use_case_workflow_sync_inner(
                     human_feedback=human_feedback,
                     workflow_settings=WorkflowSettings(**resolved_settings),
                     actor_user_id=actor_user_id,
+                    all_requirements=requirements,
                 ): shard
                 for shard in shards
             }
@@ -632,6 +698,22 @@ def _run_use_case_workflow_sync_inner(
     )
     semantic_rows = [row for result in shard_results for row in result.semantic_rows]
     _, context_text, _ = _prepare_workflow_inputs(requirements, context, type("_Template", (), {"name": "Use Cases", "format": "json", "fields": []})())
+    if len(shards) > 1:
+        semantic_rows = []
+        if not diagnostics["used_fallback"]:
+            semantic_rows, failure = _review_merged_use_cases_sync(
+                coverage_plan=coverage_plan,
+                requirements=requirements,
+                context_text=context_text,
+                model=model,
+                timeout_seconds=resolved_settings["timeout_seconds"],
+                actor_user_id=actor_user_id,
+            )
+            if failure:
+                diagnostics["status"] = "partial"
+                diagnostics["timed_out"] = diagnostics["timed_out"] or failure == "semantic_review_timeout"
+                diagnostics["failure_reason"] = diagnostics["failure_reason"] or failure
+                _append_unique_message(diagnostics["warnings"], "Complete-plan semantic review did not finish. No semantic pass is established.")
     review = combine_review(review, assess_scenarios(coverage_plan, requirements, context_text, semantic_rows))
     coverage_metrics = _compute_use_case_metrics(requirement_analysis, coverage_plan, requirements, merge_warnings)
 

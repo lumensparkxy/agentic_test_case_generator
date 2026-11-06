@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.agents import use_case_agent as agent
@@ -38,7 +38,7 @@ def plan(*scenarios):
     ]
 
 
-def passes(coverage, context=""):
+def passes(coverage, context="", requirements=None):
     return [
         {
             "requirement_id": entry["requirement_id"],
@@ -46,7 +46,7 @@ def passes(coverage, context=""):
             "content_hash": entry["content_hash"],
             **{criterion: {"passed": True, "reason": "Concrete supplied input and observable result."} for criterion in CRITERIA},
         }
-        for entry in assessment_input(coverage, [REQ], context)
+        for entry in assessment_input(coverage, requirements or [REQ], context)
     ]
 
 
@@ -110,6 +110,36 @@ class ScenarioAssessmentTests(unittest.TestCase):
         result = assess_scenarios(coverage, [REQ], "", passes(coverage))
         self.assertEqual(result["flagged_count"], 2)
         self.assertTrue(all("Duplicate" in row["warnings"][0] for row in result["items"]))
+
+    def test_cross_requirement_objectives_are_compared_even_with_different_titles(self):
+        other = Requirement(id="REQ-002", text="Nine attendees are rejected without a booking.")
+        coverage = plan(("Attendee validation", "Submit nine attendees; no booking is created."))
+        second = deepcopy(coverage[0])
+        second.update(requirement_id=other.id, requirement_text=other.text)
+        second["scenarios"][0].update(id="REQ-002-SCN-01", requirement_id=other.id, title="Boundary rejection")
+        coverage.append(second)
+        result = assess_scenarios(coverage, [REQ, other], "", passes(coverage, requirements=[REQ, other]))
+        self.assertEqual(result["flagged_count"], 2)
+        self.assertTrue(all("across requirements" in row["warnings"][0] for row in result["items"]))
+        # Shared language with a different input/outcome is not exact duplication.
+        second["scenarios"][0]["objective"] = "Submit one attendee; one booking is created."
+        self.assertEqual(assess_scenarios(coverage, [REQ, other], "", passes(coverage, requirements=[REQ, other]))["status"], "passed")
+        # Identical generic objectives do not erase distinct concrete titles.
+        coverage[0]["scenarios"][0].update(title="Nine attendees are rejected without a booking", objective="Verify the primary flow.")
+        second["scenarios"][0].update(title="One attendee creates one booking", objective="Verify the primary flow.")
+        self.assertEqual(assess_scenarios(coverage, [REQ, other], "", passes(coverage, requirements=[REQ, other]))["status"], "passed")
+
+    def test_shard_passes_and_changed_neighbours_cannot_certify_the_complete_plan(self):
+        coverage = plan(("Accept one", "Submit one attendee; booking created."), ("Reject nine", "Submit nine; no booking."))
+        rows = passes(coverage)
+        changed = deepcopy(coverage)
+        changed[0]["scenarios"][1]["objective"] = "Submit one attendee; booking created."
+        result = assess_scenarios(changed, [REQ], "", rows)
+        self.assertEqual(result["assessed_count"], 0)
+        partial = deepcopy(coverage)
+        partial[0]["scenarios"] = partial[0]["scenarios"][:1]
+        partial_rows = passes(partial)
+        self.assertEqual(assess_scenarios(coverage, [REQ], "", partial_rows)["assessed_count"], 0)
 
     def test_unsupported_prescriptions_need_confirmation(self):
         coverage = plan(("Create booking", "POST /api/bookings must debounce clicks for 500ms."))
@@ -261,6 +291,51 @@ class ScenarioAssessmentTests(unittest.TestCase):
         self.assertEqual(result["coverage_plan"], coverage)
         self.assertEqual(result["semantic_rows"], [])
         self.assertIn("Semantic review did not finish", str(result["workflow_diagnostics"]))
+
+    def test_merged_critic_is_bounded_and_returns_only_complete_parseable_output(self):
+        coverage = plan(("Accept one", "Submit one attendee; one booking is created."))
+        rows = passes(coverage)
+        for mode, failure in (
+            ("success", None),
+            ("malformed", "semantic_review_unavailable"),
+            ("timeout", "semantic_review_timeout"),
+            ("error", "semantic_review_error"),
+            ("event_error", "semantic_review_error"),
+            ("setup_error", "semantic_review_error"),
+        ):
+            with self.subTest(mode=mode):
+                session = SimpleNamespace(id="review-session", state={})
+                sessions = SimpleNamespace(create_session=AsyncMock(return_value=session), get_session=AsyncMock(return_value=session))
+
+                class ReviewerRunner:
+                    calls = 0
+
+                    def __init__(self, **kwargs):
+                        if mode == "setup_error":
+                            raise RuntimeError("provider detail must not leak")
+                        self.agent = kwargs["agent"]
+
+                    async def run_async(self, **kwargs):
+                        ReviewerRunner.calls += 1
+                        if mode == "timeout":
+                            await asyncio.Event().wait()
+                        if mode == "error":
+                            raise RuntimeError("provider detail must not leak")
+                        if mode == "event_error":
+                            yield SimpleNamespace(error_code="provider_failed")
+                            return
+                        session.state[agent.STATE_SCENARIO_ASSESSMENT] = json.dumps({"assessments": rows}) if mode == "success" else "malformed"
+                        yield SimpleNamespace()
+
+                with patch.object(agent, "Runner", ReviewerRunner), patch.object(agent, "InMemorySessionService", return_value=sessions):
+                    actual, reason = asyncio.run(
+                        agent._review_merged_use_cases_async(
+                            coverage_plan=coverage, requirements=[REQ], context_text="", model="fixture", timeout_seconds=0.01, actor_user_id=None
+                        )
+                    )
+                self.assertEqual(actual, rows if mode == "success" else [])
+                self.assertEqual(reason, failure)
+                self.assertLessEqual(ReviewerRunner.calls, 1)
 
 
 if __name__ == "__main__":

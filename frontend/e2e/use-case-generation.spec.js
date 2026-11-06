@@ -75,6 +75,7 @@ async function setup(page, options = {}) {
 				json: { detail: options.message || "Generation failed; previous snapshot preserved." },
 			});
 		const next = freshProject(project);
+		if (options.guidance) next.current_snapshots.use_cases.metadata = { guidance: options.guidance };
 		api.setProject(next);
 		await route.fulfill({ json: next });
 	});
@@ -122,6 +123,49 @@ test("offers generation directly when no snapshot exists", async ({ page }) => {
 	await page.getByRole("button", { name: "Generate Use Cases", exact: true }).click();
 	await expect(page.getByText("Fresh REQ-10", { exact: true })).toBeVisible();
 	await expect(page.getByRole("heading", { name: "No Use Cases snapshot" })).toHaveCount(0);
+});
+
+test("guidance stays singular across first generation, review and reload without React key errors", { tag: "@p1" }, async ({ page }) => {
+	const errors = [];
+	page.on("console", (message) => {
+		if (message.type() === "error" && /same key|unique.*key|children.*key/i.test(message.text())) errors.push(message.text());
+	});
+	page.on("pageerror", (error) => errors.push(error.message));
+	const project = staleProject();
+	delete project.current_snapshots.use_cases;
+	delete project.stage_state.use_cases;
+	const gate = createDeferred();
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/knowledge`, (route) =>
+		route.fulfill({ json: { entries: [], skills: [], features: {}, revision: "0" } })
+	);
+	await setup(page, { project, gate: gate.promise, guidance: { model: "fixture-model", skills: [], memories: [] } });
+	await expect(page.getByText("Guidance not recorded", { exact: true })).toHaveCount(0);
+	await page.getByRole("button", { name: "Generate Use Cases", exact: true }).click();
+	await expect(page.getByRole("button", { name: "Generating Use Cases…", exact: true })).toBeDisabled();
+	await expect(page.getByText("Guidance not recorded", { exact: true })).toHaveCount(0);
+	gate.resolve();
+	const guidance = page.getByText("Guidance used · 0 skills · 0 knowledge entries", { exact: true });
+	await expect(guidance).toHaveCount(1);
+	await expect(page.getByText("Guidance not recorded", { exact: true })).toHaveCount(0);
+	await page
+		.getByRole("region", { name: "Use Cases review actions" })
+		.getByRole("button", { name: "Request changes", exact: true })
+		.click();
+	const form = page.getByRole("form", { name: "Human review decision" });
+	await form.getByRole("textbox", { name: /Review comment/ }).fill("Synthetic review: correct the duplicate scenario mapping.");
+	await form.getByRole("button", { name: "Request changes", exact: true }).click();
+	await expect(page.getByLabel("Current human review status")).toHaveText("Changes requested");
+	await expect(guidance).toHaveCount(1);
+	await expect(page.getByText("Guidance not recorded", { exact: true })).toHaveCount(0);
+	await page.reload();
+	await expect(guidance).toHaveCount(1);
+	await expect(page.getByLabel("Current human review status")).toHaveText("Changes requested");
+	expect(errors).toEqual([]);
+});
+
+test("an existing artifact without a guidance manifest reports that absence once", async ({ page }) => {
+	await setup(page);
+	await expect(page.getByText("Guidance not recorded", { exact: true })).toHaveCount(1);
 });
 
 test("unapproved requirements disable regeneration with a recovery destination", { tag: "@p1" }, async ({ page }) => {

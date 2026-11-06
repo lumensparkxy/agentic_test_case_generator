@@ -96,6 +96,82 @@ def _worker_output(shard, **_kwargs):
 
 
 class UseCaseAgentTests(unittest.TestCase):
+    def setUp(self):
+        # Coordinator tests never invoke a live reviewer; individual tests supply
+        # exact merged-plan verdicts when checking delivery of semantic results.
+        reviewer_patch = patch.object(use_case_agent, "_review_merged_use_cases_sync", return_value=([], "semantic_review_unavailable"))
+        self.merged_reviewer = reviewer_patch.start()
+        self.addCleanup(reviewer_patch.stop)
+
+    def test_cross_shard_mapping_findings_review_the_complete_plan_once(self):
+        payload = _payload(4)
+        payload.requirements[0].text = "Booking with a valid attendee count creates a Confirmed booking displaying the room and count."
+        payload.requirements[3].text = "Retrying an interrupted submission returns the existing booking and lists it once after refresh."
+
+        def worker(shard, **kwargs):
+            self.assertFalse(kwargs["review_in_shard"])
+            self.assertIn(payload.requirements[3].text, kwargs["requirements_text"])
+            output = _worker_output(shard)
+            for group in output["coverage_plan"]:
+                group["scenarios"] = [group["scenarios"][0]]
+                group["scenarios"][0].update(title="Observe the specified outcome", objective=group["requirement_text"])
+            if shard.index == 1:
+                output["coverage_plan"][0]["scenarios"].append(
+                    {
+                        **output["coverage_plan"][0]["scenarios"][0],
+                        "title": "Pending submission retry under response loss",
+                        "objective": "Retry after response loss; only the originally processed booking ID remains durable.",
+                    }
+                )
+            # Old per-shard certificates cannot replace complete-plan review.
+            output["semantic_rows"] = [{"obsolete_shard_verdict": True}]
+            return output
+
+        def reviewer(**kwargs):
+            coverage = kwargs["coverage_plan"]
+            self.assertEqual([g["requirement_id"] for g in coverage], [r.id for r in payload.requirements])
+            rows = []
+            for entry in assessment_input(coverage, kwargs["requirements"], kwargs["context_text"]):
+                row = {
+                    "requirement_id": entry["requirement_id"],
+                    "scenario_id": entry["scenario"]["id"],
+                    "content_hash": entry["content_hash"],
+                    **{criterion: {"passed": True, "reason": "Distinct source-backed behavior."} for criterion in CRITERIA},
+                }
+                if row["scenario_id"] == "REQ-001-SCN-02":
+                    row["source_grounding"] = {"passed": False, "reason": "Retry recovery is owned by REQ-004, not successful creation in REQ-001."}
+                    row["distinct_behavior"] = {"passed": False, "reason": "Duplicates the interrupted submission behavior in REQ-004-SCN-01."}
+                rows.append(row)
+            return rows, None
+
+        self.merged_reviewer.side_effect = reviewer
+        with (
+            patch.object(use_case_agent, "_get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+            patch.object(use_case_agent, "_run_single_use_case_shard_workflow_sync", side_effect=worker),
+        ):
+            result = use_case_agent.generate_use_cases(payload)
+        self.merged_reviewer.assert_called_once()
+        self.assertEqual(sum(len(g.scenarios) for g in result["coverage_plan"]), 5)
+        self.assertTrue(result["review"]["structural_checks"]["approved"])
+        self.assertFalse(result["approved"])
+        assessment = result["review"]["semantic_assessment"]
+        self.assertEqual(assessment["assessed_count"], 5)
+        self.assertEqual(assessment["flagged_count"], 1)
+        self.assertIn("owned by REQ-004", str(assessment))
+
+    def test_merged_review_timeout_preserves_plan_without_reusing_shard_verdicts(self):
+        self.merged_reviewer.return_value = ([], "semantic_review_timeout")
+        with (
+            patch.object(use_case_agent, "_get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+            patch.object(use_case_agent, "_run_single_use_case_shard_workflow_sync", side_effect=_worker_output),
+        ):
+            result = use_case_agent.generate_use_cases(_payload(4))
+        self.assertEqual(len(result["coverage_plan"]), 4)
+        self.assertEqual(result["review"]["semantic_assessment"]["assessed_count"], 0)
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["workflow_diagnostics"]["failure_reason"], "semantic_review_timeout")
+        self.assertTrue(result["workflow_diagnostics"]["timed_out"])
+
     def test_single_distinct_behavior_can_pass_without_category_companions(self) -> None:
         req = Requirement(id="REQ-001", text="Non-creators cannot cancel a booking; its status remains Confirmed.")
         for category in ("Happy Path", "Negative", "Authorization", "Boundary"):
