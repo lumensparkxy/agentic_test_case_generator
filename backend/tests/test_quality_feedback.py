@@ -12,7 +12,7 @@ from app.contracts.quality_feedback import QualityFindingInput, QualityFindingAc
 from app.contracts.test_cases import TestCase
 from app.services import workflow_project_service as projects
 from app.services.quality_feedback import capture_finding, update_finding, list_findings
-from app.services.execution_prerequisites import prerequisite_blockers
+from app.services.execution_prerequisites import prerequisite_blockers, execution_reference_scope
 
 
 class QualityFeedbackTests(unittest.TestCase):
@@ -96,8 +96,21 @@ class QualityFeedbackTests(unittest.TestCase):
         case.execution_prerequisites[0].reference = "env:PETF_TEST_LOGIN"
         with patch.dict("os.environ", {"PETF_TEST_LOGIN": ""}):
             self.assertTrue(prerequisite_blockers(case))
-        with patch.dict("os.environ", {"PETF_TEST_LOGIN": "synthetic"}):
-            self.assertEqual(prerequisite_blockers(case), [])
+        with patch.dict(
+            "os.environ",
+            {
+                "PETF_TEST_LOGIN": "synthetic",
+                "PETF_TEST_REFERENCE_ACCESS": '[{"owner_user_id":"owner","project_id":"project","variables":["PETF_TEST_LOGIN"]}]',
+            },
+        ):
+            self.assertTrue(prerequisite_blockers(case))
+            with execution_reference_scope("other-owner", "project"):
+                self.assertTrue(prerequisite_blockers(case))
+            with execution_reference_scope("owner", "other-project"):
+                self.assertTrue(prerequisite_blockers(case))
+            with execution_reference_scope("owner", "project"):
+                self.assertEqual(prerequisite_blockers(case), [])
+            self.assertTrue(prerequisite_blockers(case))
 
     def test_stale_source_and_application_defect_cannot_backfill_assertions(self):
         project = self.fixture()
@@ -214,3 +227,35 @@ class QualityFeedbackTests(unittest.TestCase):
                 "verify",
             )
         self.assertIn("Changed assertions", error.exception.detail)
+
+    def test_literal_runtime_marker_cannot_bypass_project_authorization(self):
+        case = TestCase(id="TC", title="Input", steps=[{"step": 1, "action": 'Enter "[[env:PETF_TEST_LOGIN]]" into "Login"', "expected": "Signed in"}])
+        with patch.dict("os.environ", {"PETF_TEST_LOGIN": "synthetic", "PETF_TEST_REFERENCE_ACCESS": "not-json"}):
+            with execution_reference_scope("owner", "project"):
+                self.assertTrue(prerequisite_blockers(case))
+
+    def test_reference_scope_reaches_worker_and_resets_after_execution(self):
+        import asyncio
+        from types import SimpleNamespace
+        from app.routers.automation import _execution_with_references
+
+        case = TestCase(
+            id="TC",
+            title="Input",
+            steps=[],
+            execution_prerequisites=[
+                {"name": "login", "kind": "credential", "description": "Login", "reference": "env:PETF_TEST_LOGIN", "status": "configured"}
+            ],
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "PETF_TEST_LOGIN": "synthetic",
+                "PETF_TEST_REFERENCE_ACCESS": '[{"owner_user_id":"user-1","project_id":"project","variables":["PETF_TEST_LOGIN"]}]',
+            },
+        ):
+            result = asyncio.run(
+                _execution_with_references(lambda cases: prerequisite_blockers(cases[0]), SimpleNamespace(project_id="project", test_cases=[case]), self.actor)
+            )
+            self.assertEqual(result, [])
+            self.assertTrue(prerequisite_blockers(case))

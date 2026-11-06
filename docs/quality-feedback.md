@@ -48,8 +48,17 @@ even when a model omits them. Requirement links scope future generation.
 
 For the deterministic browser runtime, provision a dedicated environment value
 such as `PETF_TEST_SUPERVISOR_LOGIN` and store only
-`env:PETF_TEST_SUPERVISOR_LOGIN` as its reference. Runtime checks presence, not
-whether the account has the right permissions. Actual login/assertions establish
+`env:PETF_TEST_SUPERVISOR_LOGIN` as its reference. The server must also grant that reference to the authenticated owner and project
+through `PETF_TEST_REFERENCE_ACCESS`, for example:
+
+```json
+[{"owner_user_id":"owner-id","project_id":"project-id","variables":["PETF_TEST_SUPERVISOR_LOGIN"]}]
+```
+
+Missing/malformed configuration, another owner/project, or a literal marker
+without a matching grant stays blocked. Artifact text cannot grant access to
+server environment values. Runtime checks presence and reference authorization,
+not whether the account has the right permissions. Actual login/assertions establish
 that evidence. The reference may be stale or wrong and the test should fail
 truthfully. Role/setup/cleanup references likewise identify explicit prerequisites;
 setting an environment value does not itself perform setup or cleanup.
