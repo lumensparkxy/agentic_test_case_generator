@@ -377,6 +377,48 @@ class ExecutionServiceTests(unittest.TestCase):
         generated = generate_playwright_spec(ir).contents
         self.assertIn('page.getByRole("heading", { name: "Running and debugging tests" })', generated)
 
+    def test_preview_keeps_url_punctuation_only_inside_delimiters(self) -> None:
+        bare = "https://example.test/directory?view=all#results"
+        literal = "https://example.test/a(b)."
+        for action, expected, url in (
+            (f"Navigate to {bare}.", f"The URL should be {bare}.", bare),
+            (f'Open "{literal}".', f'URL should be "{literal}".', literal),
+            (f"Open <{literal}>.", f"URL should be <{literal}>.", literal),
+            (f"Open `{literal}`.", f"URL should be `{literal}`.", literal),
+        ):
+            with self.subTest(action=action):
+                case = TestCase(id="TC-URL", title="Verify route", automation_status="Automated", steps=[TestStep(step=1, action=action, expected=expected)])
+                preview = preview_execution([case], target_base_url="https://example.test")
+                self.assertEqual(preview.executable[0].spec["steps"], [f'Given I open "{url}"', f'Then URL should be "{url}"'])
+
+    def test_exact_visibility_intent_survives_preview_and_compilation(self) -> None:
+        case = TestCase(
+            id="TC-EXACT",
+            title="Verify exact copy and a legacy partial match",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test/sign-in.", expected='exact heading "Sign in" is visible'),
+                TestStep(step=2, action="Inspect the status message", expected='The exact visible text "No results" is displayed'),
+                TestStep(step=3, action="Inspect the supporting heading", expected='heading "Help" is visible'),
+                TestStep(step=4, action="Inspect the form heading", expected='heading "Account" is visible with exact text "Account"'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url="https://example.test")
+        candidate = preview.executable[0]
+        self.assertFalse(candidate.unsupported_steps)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "case.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(candidate.spec), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("heading", { name: "Sign in", exact: true })', generated)
+        self.assertIn('page.getByText("No results", { exact: true })', generated)
+        self.assertIn('page.getByRole("heading", { name: "Help" })', generated)
+        self.assertIn('page.getByRole("heading", { name: "Account", exact: true })', generated)
+
     def test_preview_compiler_and_generator_support_explicit_browser_assertion_dsl(self) -> None:
         semantic_case = TestCase(
             id="TC-SEMANTIC-DSL",

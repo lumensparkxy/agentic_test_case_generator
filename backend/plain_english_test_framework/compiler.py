@@ -22,9 +22,9 @@ OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into "(?P<label>[^"]+)"$')
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
-ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<role>heading|link|button) "(?P<text>[^"]+)" should be visible$')
+ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact )?(?P<role>heading|link|button) "(?P<text>[^"]+)" should be visible$')
 LOCATOR_VISIBLE_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be visible$')
-VISIBLE_PATTERN = re.compile(r'^"(?P<text>[^"]+)" should be visible$')
+VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact text )?"(?P<text>[^"]+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
 URL_EQUALS_PATTERN = re.compile(r'^URL should be "(?P<url>[^"]+)"$')
 TITLE_EQUALS_PATTERN = re.compile(r'^page title should be "(?P<title>[^"]*)"$')
@@ -274,6 +274,7 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
                 "strategy": "role",
                 "role": role,
                 "value": text,
+                **({"exact": True} if match.group("exact") else {}),
             },
         }
 
@@ -368,6 +369,7 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "locator": {
                 "strategy": "text",
                 "value": text,
+                **({"exact": True} if match.group("exact") else {}),
             },
         }
 

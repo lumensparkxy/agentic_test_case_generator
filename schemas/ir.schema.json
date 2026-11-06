@@ -114,6 +114,18 @@
         "role": {
           "type": "string",
           "minLength": 1
+        },
+        "exact": {
+          "type": "boolean"
+        }
+      },
+      "dependentSchemas": {
+        "exact": {
+          "properties": {
+            "strategy": {
+              "enum": ["role", "text"]
+            }
+          }
         }
       }
     },

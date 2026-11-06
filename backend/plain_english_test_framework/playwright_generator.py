@@ -152,11 +152,13 @@ def _render_locator(locator: Mapping[str, Any]) -> str:
         return f"page.getByTestId({value})"
     if strategy == "role":
         role = _js_string(locator.get("role", "button"))
-        return f"page.getByRole({role}, {{ name: {value} }})"
+        exact = ", exact: true" if locator.get("exact") else ""
+        return f"page.getByRole({role}, {{ name: {value}{exact} }})"
     if strategy == "label":
         return f"page.getByLabel({value})"
     if strategy == "text":
-        return f"page.getByText({value})"
+        exact = ", { exact: true }" if locator.get("exact") else ""
+        return f"page.getByText({value}{exact})"
     if strategy == "css":
         return f"page.locator({value})"
 
