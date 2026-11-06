@@ -296,12 +296,16 @@ export default function App() {
 		setDiagramLinks,
 		imageLinks,
 		setImageLinks,
+		contextNotes,
+		setContextNotes,
 		enrichedContext,
 		setEnrichedContext,
 		selectedArtifactSourceIds,
 		setSelectedArtifactSourceIds,
 		isAnalyzingContext,
 		setIsAnalyzingContext,
+		contextAnalysisError,
+		setContextAnalysisError,
 		resetContextAnalysis,
 	} = useContextWorkflowState();
 	const {
@@ -602,7 +606,7 @@ export default function App() {
 		return !operationScope || (operationScope.projectId === projectId && isProjectOperationCurrent(operationScope));
 	};
 	syncProjectOperationScope();
-	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim());
+	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim() || contextNotes.trim());
 	const billingEnforcementEnabled = Boolean(billingEntitlements && !billingEntitlements.shadow_mode);
 	const requirementWorkflowLocked = Boolean(
 		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.requirements?.exhausted
@@ -918,7 +922,7 @@ export default function App() {
 						.map((x) => x.trim())
 						.filter(Boolean)
 				: null,
-			notes: enrichedContext?.notes ?? null,
+			notes: contextNotes || null,
 			execution_prerequisites: enrichedContext?.execution_prerequisites || [],
 			project_id: currentProjectId || null,
 			base_project_revision: currentProjectRevision,
@@ -1550,6 +1554,8 @@ export default function App() {
 		setPrototypeLink(contextPayload?.prototype_link || "");
 		setDiagramLinks((contextPayload?.diagram_links || []).join("; "));
 		setImageLinks((contextPayload?.image_links || []).join("; "));
+		setContextNotes(contextPayload?.notes ?? "");
+		setContextAnalysisError("");
 		if (contextPayload) {
 			setEnrichedContext({
 				requirements: contextPayload.requirements || requirementPayload?.requirements || [],
@@ -3841,6 +3847,7 @@ export default function App() {
 			return;
 		}
 		setIsAnalyzingContext(true);
+		setContextAnalysisError("");
 		setStatus("Analyzing context artifacts...");
 		try {
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, {
@@ -3867,6 +3874,7 @@ export default function App() {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Context analysis failed: ${error.message}`);
 				resetContextAnalysis();
+				setContextAnalysisError(error.message);
 			}
 		} finally {
 			if (isProjectOperationCurrent(operationScope)) {
@@ -4922,9 +4930,12 @@ export default function App() {
 											setDiagramLinks={setDiagramLinks}
 											imageLinks={imageLinks}
 											setImageLinks={setImageLinks}
+											contextNotes={contextNotes}
+											setContextNotes={setContextNotes}
 											hasContextInputs={hasContextInputs}
 											analyzeContext={analyzeContext}
 											isAnalyzingContext={isAnalyzingContext}
+											contextAnalysisError={contextAnalysisError}
 											authActionDisabled={authActionDisabled}
 											enrichedContext={enrichedContext}
 											resetContextAnalysis={resetContextAnalysis}

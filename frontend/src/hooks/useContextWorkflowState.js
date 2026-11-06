@@ -5,13 +5,16 @@ export default function useContextWorkflowState() {
 	const [prototypeLink, setPrototypeLink] = useState("");
 	const [diagramLinks, setDiagramLinks] = useState("");
 	const [imageLinks, setImageLinks] = useState("");
+	const [contextNotes, setContextNotes] = useState("");
 	const [enrichedContext, setEnrichedContext] = useState(null);
 	const [selectedArtifactSourceIds, setSelectedArtifactSourceIds] = useState([]);
 	const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
+	const [contextAnalysisError, setContextAnalysisError] = useState("");
 
 	const resetContextAnalysis = () => {
 		setEnrichedContext(null);
 		setSelectedArtifactSourceIds([]);
+		setContextAnalysisError("");
 	};
 
 	return {
@@ -23,12 +26,16 @@ export default function useContextWorkflowState() {
 		setDiagramLinks,
 		imageLinks,
 		setImageLinks,
+		contextNotes,
+		setContextNotes,
 		enrichedContext,
 		setEnrichedContext,
 		selectedArtifactSourceIds,
 		setSelectedArtifactSourceIds,
 		isAnalyzingContext,
 		setIsAnalyzingContext,
+		contextAnalysisError,
+		setContextAnalysisError,
 		resetContextAnalysis,
 	};
 }

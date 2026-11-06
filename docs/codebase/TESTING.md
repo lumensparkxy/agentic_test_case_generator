@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **61 selected backend methods and 26 browser cases**. This
+Routine CI runs **61 selected backend methods and 27 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -171,6 +171,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 | `use-case-generation` | 2 | New generation requires review; unapproved requirements block generation |
 | `use-case-review` | 2 | Review exact snapshot/revision; preserve feedback on conflict |
 | `scenario-review-table` | 2 | Edits revoke approval; structural score cannot replace semantics/human review |
+| `context-notes` | 1 | Save notes without links, preserve approved requirements, and restore exact notes after reload |
 | `contextual-next-action` | 2 | Confirm regeneration safely; saved enriched context survives reload |
 | `test-generation-repair` | 2 | Explicit repair requires review; failure preserves the suite |
 | `impact-application` | 4 | Submit once; recover across tabs/refresh; reconcile lost success; reject cross-project completion |
@@ -180,7 +181,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 | `knowledge` | 2 | Effective guidance/holds are visible; unavailable capability never implies enabled |
 | `accessibility-navigation` | 1 | Use Cases has no serious/critical Axe violations at 1440px |
 
-The complete **577 backend / 273 mocked browser** suites remain available on
+The complete **577 backend / 279 mocked browser** suites remain available on
 demand. No assertions or tests were deleted. The critical gate omits alternate
 viewports, secondary navigation/filter/report cases, mocked JIRA journeys and
 many alternate failure variants. Run affected specs/modules for those changes;
@@ -443,7 +444,12 @@ E2E_LIVE=1 E2E_API_BASE=http://127.0.0.1:8000 E2E_BASE_URL=http://127.0.0.1:5173
 
 The live scenario creates one uniquely named, test-owned Room Booking project,
 imports the real fixture through Requirements, explicitly reviews it, compares
-and cancels an 8-to-6 change, saves synthetic context, and generates Use Cases.
+and cancels an 8-to-6 change, enters synthetic notes in the Context workbench,
+saves with Analyze Context, verifies reload persistence, and generates Use Cases.
+The notes setup uses the UI rather than a direct enrichment API write.
+`context-notes.spec.js` covers notes-only input, failure/retry, links, project
+isolation, and reload without live services; downstream notes propagation is
+also covered by `contextual-next-action.spec.js`.
 It stops before synthetic reviewer approval when semantic or structural review
 fails. If those gates pass, it generates real cases, checks structured quality,
 reloads saved identities and inspects a downloaded JSON export. An incomplete

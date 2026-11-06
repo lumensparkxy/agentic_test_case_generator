@@ -71,16 +71,15 @@ test.describe("Live project workbench acceptance", () => {
 			await test.step("Save controlled context without inventing an application URL", async () => {
 				const current = await fixture.read();
 				const context = (await fs.readFile(roomContext, "utf8")).trim();
-				await fixture.checked("POST", "/requirements/enrich", {
-					requirements: current.current_snapshots.requirements.payload.requirements,
-					notes: context,
-					project_id: fixture.project.project_id,
-					base_project_revision: current.current_revision,
-				});
 				await page.goto(`${fixture.prefix}/context`);
+				await page.getByRole("textbox", { name: "Context notes", exact: true }).fill(context);
+				await uiResponse(page, "/requirements/enrich", () => page.getByRole("button", { name: "Analyze Context", exact: true }).click());
+				await page.reload();
+				await expect(page.getByRole("textbox", { name: "Context notes", exact: true })).toHaveValue(context);
 				const saved = await fixture.read();
 				expect(saved.current_snapshots.context.payload.notes).toBe(context);
 				expect(saved.stage_state.context.approved).toBe(true);
+				expect(saved.current_snapshots.requirements.snapshot_id).toBe(current.current_snapshots.requirements.snapshot_id);
 			});
 
 			await test.step("Generate Use Cases and stop on failed quality before synthetic reviewer approval", async () => {
