@@ -217,6 +217,17 @@ Create a Python 3.14 virtual environment and install deps:
 - `python -m pip install -r backend/requirements.txt`
 - `python -m pip install -r backend/requirements-dev.txt` for lint and format tooling
 
+For an existing environment, use `--upgrade` with those requirements and run
+`python -m pip check`. Older ADK installations can leave optional packages behind;
+if retained, pyOpenSSL needs version 26.4.0 or later for cryptography 50.
+ADK 2.13 requires Google Gen AI 2.x and caps OpenTelemetry at 1.44.0. Keep the
+tracing packages aligned. This leaves
+[GHSA-xcq7-p3pf-p88h](https://github.com/advisories/GHSA-xcq7-p3pf-p88h)
+pending upstream compatibility with OpenTelemetry 1.45.1 or later. Tracing is
+disabled by default; deployments enabling it must enforce an inbound HTTP header
+size limit (8 KiB or lower) at the server/gateway and verify that limit on their
+actual ingress path. Dependency installation alone does not enforce that limit.
+
 Run the API:
 - `uvicorn app.main:app --reload --app-dir backend --reload-dir backend`
 
@@ -224,6 +235,14 @@ Run the API:
 
 Install deps:
 - `npm ci` in frontend
+
+The frontend scopes a gRPC security override to Firebase Firestore because its
+upstream package still requests the affected 1.9.x line. Remove the override only
+when Firebase resolves a patched release itself. The application imports Firebase
+Auth, not the Firestore Node transport; browser checks do not validate that
+transport. ESLint's minimatch advisory
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+remains in development dependencies until ESLint supports the patched major.
 
 Run UI:
 - `npm run dev` in frontend
