@@ -141,5 +141,6 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
                     await endpoint(Request({"type": "http"}), payload, AuthUser(sub="owner", email="owner@example.com", name="Owner"))
                 self.assertEqual(caught.exception.status_code, 422)
                 self.assertIn("Candidate findings: Incomplete", caught.exception.detail)
+                self.assertIn("scenarios: S1", caught.exception.detail)
                 versions.assert_not_called()
                 snapshot.assert_not_called()

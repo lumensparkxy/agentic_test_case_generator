@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **62 selected backend methods and 28 browser cases**. This
+Routine CI runs **64 selected backend methods and 28 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -512,12 +512,9 @@ outside `test-results` before the next run clears it. Actual model names are in
 guidance manifests; correlate captured request IDs with backend logs for
 provider and usage. Unavailable usage or cost is unknown, never zero.
 
-The Room Booking context includes an explicitly owner-accepted synthetic
-response-loss proxy assumption for test design. It describes forwarding the
-submission, recording the booking ID and suppressing only the successful
-response before retry. No real proxy capability or booking execution has been
-demonstrated. Any design result depends on that assumption; provision and verify
-the tool before execution. The live harness uses the current `Start generation`
+The Room Booking context records the implemented, transport-verified response-loss
+harness described above. Real-target binding and booking behavior still require
+verification before execution. The live harness uses the current `Start generation`
 and JSON export actions, with bounded UI waits and separate model-response waits.
 
 This is a gated live journey, not complete release acceptance. The audit run
@@ -531,6 +528,19 @@ live path after the upstream quality gate is resolved; do not bypass the gate
 or substitute mocked output to make this scenario green.
 
 ### Generation source snapshot regression
+
+`test_partial_shard_recovery.py` and the parallel-generation delivery regression
+cover incomplete model output. A partial model shard retains its concrete,
+contract-valid cases with exact scenario references and gets one additional call
+for only its missing scenarios. Recovery is capped at 120 seconds (or the shorter
+configured workflow timeout), runs within the existing worker limit, and never
+recurses. Complete shards and deterministic fallbacks do not trigger recovery.
+Malformed, placeholder, duplicate or out-of-scope recovery rows cannot claim
+coverage. Exhaustion retains usable cases and leaves missing-scenario tasks;
+independent assessment and the existing saved-suite rejection gate still apply.
+Diagnostics record two attempts, recovered/remaining counts and scenario IDs;
+raw model responses are not persisted. These synthetic tests prove recovery and
+delivery behavior, not live model quality.
 
 `test_generation_source_snapshot.py` checks that Test Case generation/refinement
 retains the exact current Use Cases snapshot when its nonempty coverage plan is

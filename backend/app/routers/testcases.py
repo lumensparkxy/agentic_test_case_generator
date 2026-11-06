@@ -111,7 +111,13 @@ def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str,
 
 
 def _incomplete_generation_message(response: GenerateTestCasesResponse) -> str:
-    reasons = list(dict.fromkeys(str(task.get("reason") or "") for task in response.generation_tasks))
+    reasons = list(
+        dict.fromkeys(
+            str(task.get("reason") or "")
+            + (" (scenarios: " + ", ".join(str(ref) for ref in task["scenario_refs"][:5]) + ")" if task.get("scenario_refs") else "")
+            for task in response.generation_tasks
+        )
+    )
     details = "; ".join(reason[:600] for reason in reasons[:3] if reason)
     return "Generated candidate is incomplete; the existing suite was preserved. " + (
         f"Candidate findings: {details}" if details else "Review unresolved coverage and retry targeted generation."
