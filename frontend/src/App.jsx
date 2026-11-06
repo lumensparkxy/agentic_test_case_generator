@@ -1582,7 +1582,7 @@ export default function App() {
 		};
 		setRequirementAnalysis(useCases.requirement_analysis || []);
 		setCoveragePlan(useCases.coverage_plan || []);
-		setCoverageMetrics(useCases.coverage_metrics || null);
+		setCoverageMetrics(hydratedGenerationPayload.coverage_metrics);
 		setTestCases(generationPayload.test_cases || []);
 		setGenerationTasks(generationPayload.generation_tasks || []);
 		setTestCaseReview(generationPayload.review || useCases.review || null);
@@ -3388,6 +3388,7 @@ export default function App() {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Generation failed: ${error.message}`);
 				if (withFeedback) throw error;
+				if (fullRegeneration) return { error: error.message };
 			}
 			return false;
 		} finally {

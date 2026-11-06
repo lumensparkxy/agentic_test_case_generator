@@ -24,6 +24,7 @@ from app.agents.test_case_agent import (
 from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import EnrichInput, GenerateTestCasesInput, GroundedContext, GroundedUIElement, Requirement, TestCaseTemplate
 from app.utils.llm_json import parse_test_cases_json_detailed
+from app.agents.prompting import TEST_CASE_BEHAVIOR_POLICY
 
 
 class TestCaseGenerationRecoveryTests(unittest.TestCase):
@@ -46,6 +47,19 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertEqual(getattr(agent, "output_key", None), "coverage_plan")
         self.assertGreaterEqual(agent.generate_content_config.max_output_tokens, 24000)
         self.assertEqual(agent.generate_content_config.response_mime_type, "application/json")
+
+    def test_project_refinement_skips_upstream_planning(self) -> None:
+        pipeline = _build_refinement_pipeline(
+            "test-model",
+            "REQ-1: Book a room",
+            "Synthetic context",
+            "default",
+            threshold=90,
+            max_iterations=1,
+            human_feedback="Fix cancellation assertion",
+            preserve_source_plan=True,
+        )
+        self.assertEqual([agent.name for agent in pipeline.sub_agents], ["TestCaseRefinementAgent", "ValidationLoop"])
 
     def test_test_case_agents_use_raw_json_output_for_parser_recovery(self) -> None:
         generation_pipeline = _build_generation_pipeline(
@@ -100,9 +114,11 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         refinement_agent = next(agent for agent in refinement_pipeline.sub_agents if agent.name == "TestCaseRefinementAgent")
 
         for instruction in (generation_agent.instruction, validator_agent.instruction, refinement_agent.instruction):
+            self.assertIn(TEST_CASE_BEHAVIOR_POLICY, instruction)
             self.assertIn('"heading" should be visible', instruction)
             self.assertIn('heading "Exact accessible name" is visible', instruction)
             self.assertIn('"#email-input" should be visible', instruction)
+        self.assertIn(TEST_CASE_BEHAVIOR_POLICY, review_loop.sub_agents[1].instruction)
 
     def test_grounded_context_prompt_preserves_element_type_and_exact_accessible_name(self) -> None:
         requirements = [Requirement(id="REQ-001", text="The docs page shall show installation guidance.")]

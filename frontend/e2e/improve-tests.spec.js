@@ -146,6 +146,39 @@ test("revision conflict requires reload and new selection", async ({ page }) => 
 	await expect(apply(page)).toBeEnabled();
 });
 
+test("unfinished semantic review keeps its score and actionable finding after response and reload", async ({ page }) => {
+	const finding = "TC-002 must compare the recorded booking ID after refresh.";
+	await open(page, {
+		payload: {
+			generation_tasks: [{ source_test_case_id: "TC-002", requirement_ids: ["REQ-101"], scenario_refs: [], reason: finding }],
+			substantive_assessment: { status: "incomplete", reason: "Source assertion remains unresolved.", obligations: [], case_grounding: [] },
+			coverage_metrics: { cases_with_traceability: 2, covered_planned_scenarios: 2, planned_scenarios_total: 3 },
+		},
+		resultReview: {
+			approved: false,
+			score: 88,
+			threshold: 90,
+			summary: "Source assertion remains unresolved.",
+			blocking_issues: [finding],
+		},
+	});
+	await panel(page).getByRole("checkbox", { name: issue, exact: true }).check();
+	await apply(page).click();
+	await expect(panel(page)).toContainText("Quality score 88/100");
+	await expect(panel(page).getByRole("checkbox", { name: finding, exact: true })).toBeVisible();
+	await page.getByRole("tab", { name: /^Traceability Matrix/ }).click();
+	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Cases with traceability 2/2");
+	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Scenario coverage 2/3");
+	await page.reload();
+	await expect(panel(page)).toContainText("Quality score 88/100");
+	await expect(panel(page).getByRole("checkbox", { name: finding, exact: true })).toBeVisible();
+	await expect(page.getByRole("region", { name: "Test Cases readiness" })).toContainText("Draft incomplete");
+	await expect(page.getByText("1 generation task(s) remain unresolved.", { exact: true })).toHaveCount(0);
+	await page.getByRole("tab", { name: /^Traceability Matrix/ }).click();
+	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Cases with traceability 2/2");
+	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Scenario coverage 2/3");
+});
+
 test("stale suite blocks refinement and exposes impact review", async ({ page }) => {
 	const { requests } = await open(page, { stale: true });
 	await expect(apply(page)).toBeDisabled();

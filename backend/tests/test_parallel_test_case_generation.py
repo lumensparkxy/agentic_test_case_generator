@@ -181,6 +181,44 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
         assessment.start()
         self.addCleanup(assessment.stop)
 
+    def test_partial_shards_recover_complete_delivery_before_independent_assessment(self) -> None:
+        payload = _payload(3)
+        seen = set()
+        initial_steps = {}
+
+        def partial_once(shard, **kwargs):
+            output = _worker_output(shard, **kwargs)
+            if shard.index not in seen:
+                seen.add(shard.index)
+                output["test_cases"] = output["test_cases"][:-1]
+                initial_steps.update({row["scenario_refs"][0]: row["steps"] for row in output["test_cases"]})
+                output["workflow_diagnostics"]["parser_recoveries"] = ["Recovered complete entries from truncated JSON."]
+            else:
+                self.assertEqual(sum(len(p["scenarios"]) for p in shard.coverage_plan), 1)
+            return output
+
+        with (
+            patch("app.agents.test_case_agent._get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+            patch("app.agents.test_case_agent._run_parallel_test_case_shard_workflow_sync", side_effect=partial_once) as worker,
+            patch(
+                "app.agents.test_case_agent.assess_delivered_suite",
+                return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []},
+            ) as assessment,
+        ):
+            result = generate_test_cases(payload)
+        self.assertEqual(worker.call_count, len(seen) * 2)
+        self.assertEqual(result["generation_tasks"], [])
+        self.assertEqual(result["coverage_metrics"]["scenario_coverage_ratio"], 1.0)
+        self.assertEqual(result["workflow_diagnostics"]["attempt_count"], 2)
+        self.assertEqual(result["workflow_diagnostics"]["recovery_reason"], "incomplete_shard_coverage")
+        self.assertEqual(result["generation_evidence"]["final_test_case_count"], len(result["test_cases"]))
+        for row in result["test_cases"]:
+            if row.scenario_refs[0] in initial_steps:
+                self.assertEqual([step.model_dump() for step in row.steps], initial_steps[row.scenario_refs[0]])
+        assessment.assert_called_once()
+        self.assertEqual(len(assessment.call_args.args[0]), len(result["test_cases"]))
+        GenerateTestCasesResponse(**result)
+
     def test_plans_121_scenarios_into_bounded_shards_independent_of_workers(self) -> None:
         requirements = _requirements(11)
         coverage_plan = [

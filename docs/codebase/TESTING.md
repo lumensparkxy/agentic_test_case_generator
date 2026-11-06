@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **61 selected backend methods and 28 browser cases**. This
+Routine CI runs **67 selected backend methods and 28 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -181,7 +181,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 | `knowledge` | 2 | Effective guidance/holds are visible; unavailable capability never implies enabled |
 | `accessibility-navigation` | 1 | Use Cases has no serious/critical Axe violations at 1440px |
 
-The complete backend and **281 mocked browser** suites remain available on
+The complete backend and **282 mocked browser** suites remain available on
 demand. No assertions or tests were deleted. The critical gate omits alternate
 viewports, secondary navigation/filter/report cases, mocked JIRA journeys and
 many alternate failure variants. Run affected specs/modules for those changes;
@@ -435,6 +435,53 @@ discarding scenarios or claiming a pass. Paraphrase and business ownership check
 still require the semantic reviewer and inspection of the live delivered plan;
 mocked verdicts establish transport/validation behavior, not model accuracy.
 
+Stage 5 regressions in `test_substantive_review.py`, `test_test_case_quality.py`
+and `improve-tests.spec.js` cover bounded recovery from transient assessment
+failure, rejection of invalid/stale evidence, and unchanged score/actionable
+findings and delivered traceability metrics after response, persistence and
+reload. Legacy placeholder rows still
+invalidate the scored suite. The Room Booking Chrome check additionally reviews
+actor/state sequencing, unsupported permission or request-level assumptions,
+and the retry identity/count assertions; mocked checks do not establish live
+model quality or provision the synthetic execution harness.
+
+The v3 delivered-suite reviewer cites a requirement ID and `source_field`
+(`text` or nonempty `source_excerpt`). The server resolves the exact source text
+from the same hash-bound review input, as it does for compact step references.
+Legacy full-text citations still require an exact match; paraphrases are never
+silently corrected. Unknown, empty or conflicting references fail closed. Safe
+validation categories distinguish citation, binding, completeness and schema
+failures without exposing raw model values. Cancellation review permits any
+source-supported denial mechanism, including a visible action denied on use;
+it does not invent a hidden/disabled-control requirement.
+
+The Room Booking response-loss prerequisite now has a reusable synthetic harness
+in `scripts/response_loss_proxy.py`. Verify its transport contract separately:
+
+```bash
+.venv/bin/python -m unittest discover -s backend/tests -p test_response_loss_proxy.py -v
+```
+
+These tests start and clean up loopback listeners. The proxy forwards the initial
+submission, completely reads the successful response and records its ID before
+closing the client connection. It forwards the identical retry without adding
+deduplication. Error responses and unrelated requests do not consume the loss;
+missing ID/evidence-write failure cannot claim successful capture. The reference
+stub intentionally returns a stable ID: this verifies the proxy, not application
+retry behavior, browser integration, or durable storage across server restarts.
+The main transport test is included in the critical backend gate.
+
+For a separately running synthetic HTTP target, use
+`python scripts/response_loss_proxy.py --help` to supply its loopback port, exact
+submission path, top-level JSON string ID field, and an evidence file outside
+the repository. Each instance suppresses only its first matching 2xx response;
+restart it to arm a new isolated test. Only small GET/POST fixtures are supported
+(1 MiB bodies, five-second socket timeouts); it is not an HTTPS interception or
+general production proxy. The original response and retry are never synthesized.
+Real-target routing, ID extraction and browser/application behavior need separate
+verification when an execution target becomes available. Never treat this
+fixture capability check as booking execution or human acceptance.
+
 `frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
 scenario is opt-in; the default full suite reports it as skipped. Its anonymous
 sign-in check remains offline. Start frontend and backend from the same checkout
@@ -475,12 +522,9 @@ outside `test-results` before the next run clears it. Actual model names are in
 guidance manifests; correlate captured request IDs with backend logs for
 provider and usage. Unavailable usage or cost is unknown, never zero.
 
-The Room Booking context includes an explicitly owner-accepted synthetic
-response-loss proxy assumption for test design. It describes forwarding the
-submission, recording the booking ID and suppressing only the successful
-response before retry. No real proxy capability or booking execution has been
-demonstrated. Any design result depends on that assumption; provision and verify
-the tool before execution. The live harness uses the current `Start generation`
+The Room Booking context records the implemented, transport-verified response-loss
+harness described above. Real-target binding and booking behavior still require
+verification before execution. The live harness uses the current `Start generation`
 and JSON export actions, with bounded UI waits and separate model-response waits.
 
 This is a gated live journey, not complete release acceptance. The audit run
@@ -495,13 +539,29 @@ or substitute mocked output to make this scenario green.
 
 ### Generation source snapshot regression
 
+`test_partial_shard_recovery.py` and the parallel-generation delivery regression
+cover incomplete model output. A partial model shard retains its concrete,
+contract-valid cases with exact scenario references and gets one additional call
+for only its missing scenarios. Recovery is capped at 120 seconds (or the shorter
+configured workflow timeout), runs within the existing worker limit, and never
+recurses. Complete shards and deterministic fallbacks do not trigger recovery.
+Malformed, placeholder, duplicate or out-of-scope recovery rows cannot claim
+coverage. Exhaustion retains usable cases and leaves missing-scenario tasks;
+independent assessment and the existing saved-suite rejection gate still apply.
+Diagnostics record two attempts, recovered/remaining counts and scenario IDs;
+raw model responses are not persisted. These synthetic tests prove recovery and
+delivery behavior, not live model quality.
+
 `test_generation_source_snapshot.py` checks that Test Case generation/refinement
 retains the exact current Use Cases snapshot when its nonempty coverage plan is
 unchanged and not stale. Downstream analysis and review must not replace the
-source semantic assessment or human decisions. Changed, missing, empty or stale
-plans still create an unapproved source snapshot; reusing a source keeps the
-client revision check on the Test Cases write. This persistence check does not
-establish generated case quality or live execution.
+source semantic assessment or human decisions. Project refinement loads the
+current plan server-side, seeds the agent session with that plan and analysis,
+and skips upstream planning. It rejects missing/stale sources and refuses to
+replace a changed source during persistence. Standalone refinement retains its
+planning path. Generation with a changed plan still creates an unapproved source
+snapshot. Reusing a source keeps the client revision check on the Test Cases
+write. These checks do not establish generated case quality or live execution.
 
 ## 6) Additional affected-test targets
 

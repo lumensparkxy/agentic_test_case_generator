@@ -39,8 +39,27 @@ class TestCaseQualityTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in view["test_cases"]], [good.id])
         self.assertFalse(view["approved"])
         self.assertFalse(view["review"]["approved"])
+        self.assertEqual(view["review"]["score"], 0)
+        self.assertEqual(project_test_case_view(view), view)
         self.assertEqual(view["generation_tasks"][0]["source_test_case_id"], "ordinary-id")
         self.assertIsNone(placeholder_reason(self.concrete("TC-IMPACT-REQ-001")))
+
+    def test_saved_semantic_tasks_retain_review_score_findings_and_coverage(self):
+        finding = "TC-013 must compare the original booking ID after refresh."
+        payload = {
+            "test_cases": [self.concrete().model_dump(mode="json")],
+            "approved": False,
+            "review": {"approved": False, "score": 100, "summary": "Business coverage is incomplete.", "blocking_issues": [finding]},
+            "generation_tasks": [{"source_test_case_id": "TC-013", "scenario_refs": [], "reason": finding}],
+            "coverage_metrics": {"substantive_coverage_status": "incomplete"},
+        }
+        before = deepcopy(payload)
+        view = project_test_case_view(payload)
+        self.assertEqual(payload, before)
+        self.assertEqual(view["review"], payload["review"])
+        self.assertEqual(view["generation_tasks"], payload["generation_tasks"])
+        self.assertEqual(view["coverage_metrics"]["substantive_coverage_status"], "incomplete")
+        self.assertEqual(project_test_case_view(view), view)
 
     def test_missing_steps_and_scenarios_are_work_not_deliverables(self):
         bad = self.concrete().model_copy(update={"steps": []})
@@ -105,6 +124,7 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(generator=generator), ExitStack() as stack:
                 for name in ("validate_generation_baseline", "enforce_billing_access", "start_workflow_run", "_log_failure"):
                     stack.enter_context(patch.object(routes, name))
+                stack.enter_context(patch.object(routes, "_refinement_source_inputs", return_value={}))
                 stack.enter_context(
                     patch.object(
                         routes,
@@ -121,5 +141,7 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(HTTPException) as caught:
                     await endpoint(Request({"type": "http"}), payload, AuthUser(sub="owner", email="owner@example.com", name="Owner"))
                 self.assertEqual(caught.exception.status_code, 422)
+                self.assertIn("Candidate findings: Incomplete", caught.exception.detail)
+                self.assertIn("scenarios: S1", caught.exception.detail)
                 versions.assert_not_called()
                 snapshot.assert_not_called()

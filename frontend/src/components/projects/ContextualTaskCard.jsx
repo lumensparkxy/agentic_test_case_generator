@@ -150,8 +150,10 @@ export default function ContextualTaskCard({
 		if (!confirmationAction || invocationLockRef.current) return;
 		setConfirmationError("");
 		const result = await invokeAction(confirmationAction);
-		if (result === false) {
-			setConfirmationError("Regeneration did not complete. The current suite was preserved; you can try again.");
+		if (result === false || result?.error) {
+			setConfirmationError(
+				`Regeneration did not complete. The current suite was preserved.${result?.error ? ` ${result.error}` : " You can try again."}`
+			);
 			return;
 		}
 		setConfirmationAction(null);

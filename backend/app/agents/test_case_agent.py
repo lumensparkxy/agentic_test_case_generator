@@ -25,7 +25,7 @@ from .literal_instructions import literal_source_agent
 from .substantive_review import assess_delivered_suite, apply_assessment
 from .adk_runtime import json_generation_config, tool_generation_config
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
-from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
+from .prompting import REAL_WORLD_QA_POLICY, TEST_CASE_BEHAVIOR_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
 from ..config import GenerationSettings, get_generation_settings, get_settings
 from ..models import (
     GenerateTestCasesInput,
@@ -61,7 +61,7 @@ from .test_case_coverage import (
     _scenario_tag,
 )
 from .test_case_fallback import _fallback_raw_test_cases
-from ..services.test_case_quality import separate_generation_work
+from ..services.test_case_quality import placeholder_reason, separate_generation_work
 from ..contracts.requirements import RequirementCoveragePlan, StructuralChecks
 from .test_case_hydration import (
     _hydrate_coverage_plan,
@@ -860,6 +860,8 @@ def _build_review_loop(
         output_schema=StructuralChecks,
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
 
+    {TEST_CASE_BEHAVIOR_POLICY}
+
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
     {REAL_WORLD_QA_POLICY}
@@ -914,6 +916,8 @@ def _build_review_loop(
         include_contents="none",
         generate_content_config=tool_generation_config(max_output_tokens=16000, temperature=0.15),
         instruction=f"""You are a QA Engineer refining test cases.
+
+    {TEST_CASE_BEHAVIOR_POLICY}
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
@@ -977,6 +981,8 @@ def _build_test_case_generator_agent(
         include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
+
+    {TEST_CASE_BEHAVIOR_POLICY}
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
@@ -1066,6 +1072,7 @@ def _build_refinement_pipeline(
     threshold: int,
     max_iterations: int,
     human_feedback: str,
+    preserve_source_plan: bool = False,
 ) -> Agent:
     refinement_agent = Agent(
         name="TestCaseRefinementAgent",
@@ -1073,6 +1080,8 @@ def _build_refinement_pipeline(
         include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
+
+    {TEST_CASE_BEHAVIOR_POLICY}
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
@@ -1116,15 +1125,21 @@ Rules:
 
     return SequentialAgent(
         name="TestCaseRefinementPipeline",
-        sub_agents=[
-            build_requirement_analysis_agent(
-                model,
-                requirements_text,
-                context_text,
-                output_key=STATE_REQUIREMENT_ANALYSIS,
-                human_feedback=human_feedback,
-            ),
-            _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+        sub_agents=(
+            []
+            if preserve_source_plan
+            else [
+                build_requirement_analysis_agent(
+                    model,
+                    requirements_text,
+                    context_text,
+                    output_key=STATE_REQUIREMENT_ANALYSIS,
+                    human_feedback=human_feedback,
+                ),
+                _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+            ]
+        )
+        + [
             refinement_agent,
             _build_review_loop(model, threshold, max_iterations, requirements_text, human_feedback=human_feedback, context_text=context_text),
         ],
@@ -1147,6 +1162,8 @@ async def _run_test_case_workflow_async(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
+    source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
@@ -1166,6 +1183,7 @@ async def _run_test_case_workflow_async(
             threshold,
             max_iterations,
             human_feedback=human_feedback or "No human feedback provided.",
+            preserve_source_plan=source_coverage_plan is not None,
         )
         message_text = f"""Refine these existing test cases using the human feedback.
 
@@ -1212,14 +1230,14 @@ Human feedback:
         state={
             STATE_TEST_CASES: "[]",
             STATE_VALIDATION_FEEDBACK: "",
-            STATE_COVERAGE_PLAN: "[]",
-            STATE_REQUIREMENT_ANALYSIS: "[]",
+            STATE_COVERAGE_PLAN: json.dumps(source_coverage_plan or []),
+            STATE_REQUIREMENT_ANALYSIS: json.dumps(source_requirement_analysis or []),
         },
     )
 
     current_test_cases: List[Dict[str, Any]] = []
-    current_coverage_plan: List[Dict[str, Any]] = []
-    current_requirement_analysis: List[Dict[str, Any]] = []
+    current_coverage_plan: List[Dict[str, Any]] = list(source_coverage_plan or [])
+    current_requirement_analysis: List[Dict[str, Any]] = list(source_requirement_analysis or [])
     iteration_history: List[Dict[str, Any]] = []
     model_review: Optional[Dict[str, Any]] = None
     previous_review: Optional[Dict[str, Any]] = None
@@ -1930,6 +1948,103 @@ def _fallback_parallel_test_case_shard(
     )
 
 
+def _usable_shard_cases(test_cases: List[Dict[str, Any]], coverage_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Count concrete, contract-valid cases with exact in-scope scenario identity."""
+    scenario_by_id = _scenario_lookup(coverage_plan)
+    usable = []
+    for row in test_cases:
+        hydrated = _hydrate_test_cases([row])
+        if not hydrated or hydrated[0].status == "Deprecated" or placeholder_reason(hydrated[0]):
+            continue
+        refs = set(hydrated[0].scenario_refs)
+        if not refs or not refs <= scenario_by_id.keys():
+            continue
+        owners = {scenario_by_id[ref]["requirement_id"] for ref in refs}
+        linked = set(hydrated[0].linked_requirement_ids)
+        if linked and linked != owners:
+            continue
+        usable.append(row)
+    return usable
+
+
+def _recover_incomplete_test_case_shard(
+    workflow: Dict[str, Any],
+    *,
+    shard: _ParallelTestCaseShard,
+    context: Optional[Any],
+    template: Any,
+    model: str,
+    human_feedback: Optional[str],
+    workflow_settings: Optional[WorkflowSettings],
+    actor_user_id: Optional[str],
+) -> Dict[str, Any]:
+    """One additional model call for missing coverage, never recursive recovery."""
+    diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
+    if diagnostics.get("used_fallback"):
+        return workflow
+    retained = _usable_shard_cases(list(workflow.get("test_cases") or []), shard.coverage_plan)
+    covered = {ref for row in retained for ref in _extract_scenario_refs_from_test_case(row)}
+    missing = set(_scenario_lookup(shard.coverage_plan)) - covered
+    if not missing:
+        return workflow
+    plan = [
+        {**group, "scenarios": [scenario for scenario in group["scenarios"] if scenario["id"] in missing]}
+        for group in shard.coverage_plan
+        if any(scenario["id"] in missing for scenario in group["scenarios"])
+    ]
+    requirement_ids = {group["requirement_id"] for group in plan}
+    recovery_shard = _ParallelTestCaseShard(
+        index=shard.index,
+        requirements=[req for req in shard.requirements if req.id in requirement_ids],
+        requirement_analysis=[item for item in shard.requirement_analysis if item["requirement_id"] in requirement_ids],
+        coverage_plan=plan,
+    )
+    resolved = _resolve_test_case_workflow_settings(workflow_settings)
+    # Even an otherwise unbounded workflow gets a finite recovery call.
+    resolved["timeout_seconds"] = min(resolved.get("timeout_seconds") or 120, 120)
+    requirements_text, context_text, template_text = _prepare_workflow_inputs(recovery_shard.requirements, context, template)
+    _log_test_case_workflow("shard_coverage_recovery_started", shard_id=shard.shard_id, missing_scenario_ids=sorted(missing))
+    diagnostics.update({"status": "partial", "attempt_count": 2, "recovery_reason": "incomplete_shard_coverage"})
+    try:
+        recovery = _run_parallel_test_case_shard_workflow_sync(
+            shard=recovery_shard,
+            context=context,
+            requirements_text=requirements_text,
+            context_text=context_text,
+            template_text=template_text,
+            model=model,
+            human_feedback=human_feedback,
+            workflow_settings=WorkflowSettings(**resolved),
+            actor_user_id=actor_user_id,
+        )
+        recovery_diagnostics = recovery.get("workflow_diagnostics") or {}
+        for key in ("parser_failures", "parser_recoveries", "warnings"):
+            diagnostics[key] = _dedupe_preserve(diagnostics[key] + list(recovery_diagnostics.get(key) or []))
+        diagnostics["timed_out"] = bool(diagnostics.get("timed_out") or recovery_diagnostics.get("timed_out"))
+        candidates = [] if recovery_diagnostics.get("used_fallback") else _usable_shard_cases(recovery.get("test_cases") or [], plan)
+    except Exception as exc:
+        # Keep recovered sibling cases; do not replace the whole shard with fallback.
+        candidates = []
+        _append_unique_message(diagnostics["warnings"], f"Coverage recovery for {shard.shard_id} failed ({type(exc).__name__}).")
+    recovered = set()
+    for row in candidates:
+        refs = set(_extract_scenario_refs_from_test_case(row))
+        if refs & recovered:
+            continue
+        retained.append(row)
+        recovered.update(refs)
+    remaining = missing - recovered
+    message = f"Coverage recovery for {shard.shard_id}: recovered {len(recovered)}/{len(missing)} missing scenario(s)."
+    if remaining:
+        diagnostics["failure_reason"] = diagnostics.get("failure_reason") or "incomplete_shard_coverage"
+        message += " Still missing: " + ", ".join(sorted(remaining)) + "."
+    _append_unique_message(diagnostics["warnings"], message)
+    _log_test_case_workflow(
+        "shard_coverage_recovery_completed", shard_id=shard.shard_id, recovered_scenario_ids=sorted(recovered), missing_scenario_ids=sorted(remaining)
+    )
+    return {**workflow, "test_cases": retained, "workflow_diagnostics": public_workflow_diagnostics(diagnostics)}
+
+
 def _run_parallel_test_case_shard_with_fallback(
     *,
     shard: _ParallelTestCaseShard,
@@ -1962,6 +2077,16 @@ def _run_parallel_test_case_shard_with_fallback(
             failed=True,
         )
 
+    workflow = _recover_incomplete_test_case_shard(
+        workflow,
+        shard=shard,
+        context=context,
+        template=template,
+        model=model,
+        human_feedback=human_feedback,
+        workflow_settings=workflow_settings,
+        actor_user_id=actor_user_id,
+    )
     diagnostics = dict(workflow.get("workflow_diagnostics") or {})
     return _ParallelTestCaseShardResult(
         shard=shard,
@@ -1969,7 +2094,13 @@ def _run_parallel_test_case_shard_with_fallback(
         diagnostics=diagnostics,
         used_fallback=bool(diagnostics.get("used_fallback")),
         failed=False,
-        evidence=dict(workflow.get("generation_evidence") or {}),
+        evidence=_shard_evidence(
+            shard=shard,
+            test_cases=list(workflow.get("test_cases") or []),
+            diagnostics=diagnostics,
+            used_fallback=bool(diagnostics.get("used_fallback")),
+            failed=False,
+        ),
     )
 
 
@@ -2099,6 +2230,11 @@ def _merge_parallel_diagnostics(
                 _append_unique_message(diagnostics[key], str(message))
         if shard_diagnostics.get("timed_out"):
             diagnostics["timed_out"] = True
+        if shard_diagnostics.get("recovery_reason") == "incomplete_shard_coverage":
+            diagnostics["attempt_count"] = max(diagnostics["attempt_count"], 2)
+            diagnostics["recovery_reason"] = "incomplete_shard_coverage"
+            diagnostics["status"] = "partial"
+            diagnostics["failure_reason"] = diagnostics["failure_reason"] or shard_diagnostics.get("failure_reason")
 
     if failed_shards:
         diagnostics["status"] = "partial"
@@ -2788,6 +2924,8 @@ def refine_test_cases(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
+    source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -2826,7 +2964,14 @@ def refine_test_cases(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation=operation,
+            source_coverage_plan=source_coverage_plan,
+            source_requirement_analysis=source_requirement_analysis,
         )
+
+    if source_coverage_plan is not None:
+        workflow["coverage_plan"] = source_coverage_plan
+        workflow["requirement_analysis"] = source_requirement_analysis or fallback_requirement_analysis(payload.requirements)
+        workflow["strict_coverage_plan"] = True
 
     raw_test_cases = workflow.get("test_cases", []) or existing_test_cases
     requirement_analysis = list(workflow.get("requirement_analysis") or fallback_requirement_analysis(payload.requirements))
@@ -2878,6 +3023,9 @@ def refine_test_cases(
             "workflow_settings": resolved_settings,
             "workflow_diagnostics": workflow_diagnostics,
         }
+
+    if source_coverage_plan is not None:
+        workflow["strict_coverage_plan"] = True
 
     contract_rejections = []
     test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)

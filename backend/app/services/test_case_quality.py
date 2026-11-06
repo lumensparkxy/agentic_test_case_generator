@@ -68,22 +68,33 @@ def separate_generation_work(cases, coverage_plan=(), *, strict=True, pending_ta
 def project_test_case_view(payload):
     """A read-only projection; immutable saved snapshots are never rewritten."""
     rows, tasks = separate_generation_work(payload.get("test_cases") or [], strict=False)
+    removed_placeholders = bool(tasks)
     tasks = tasks + [t for t in payload.get("generation_tasks", []) if t not in tasks]
     if not tasks:
         return payload
+    review = payload.get("review") or {}
+    findings = list(dict.fromkeys((review.get("blocking_issues") or []) + [t["reason"] for t in tasks if t.get("reason")]))
     return {
         **payload,
         "test_cases": rows,
         "generation_tasks": tasks,
         "approved": False,
         "review": {
-            **(payload.get("review") or {}),
+            **review,
             "approved": False,
-            "score": 0,
-            "summary": "Unfinished generation work must be repaired and reviewed.",
-            "blocking_issues": [f"{len(tasks)} generation task(s) remain unresolved."],
+            # A semantic gap does not erase an existing structural score. Only
+            # newly removed legacy placeholders invalidate the scored suite.
+            "score": 0 if removed_placeholders else review.get("score", 0),
+            "summary": "Unfinished generation work must be repaired and reviewed."
+            if removed_placeholders
+            else review.get("summary") or "Unfinished generation work must be repaired and reviewed.",
+            "blocking_issues": findings or [f"{len(tasks)} generation task(s) remain unresolved."],
         },
-        "coverage_metrics": {**delivered_coverage(rows, payload.get("coverage_plan") or []), "unresolved_generation_task_count": len(tasks)},
+        "coverage_metrics": {
+            **(payload.get("coverage_metrics") or {}),
+            **delivered_coverage(rows, payload.get("coverage_plan") or []),
+            "unresolved_generation_task_count": len(tasks),
+        },
     }
 
 

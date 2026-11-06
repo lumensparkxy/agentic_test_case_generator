@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import AuthUser, GenerateTestCasesResponse
-from app.routers.testcases import _append_project_generation_snapshots
+from app.routers.testcases import _append_project_generation_snapshots, _refinement_source_inputs
 from app.services.workflow_project_service import ProjectConflictError
 
 
@@ -45,7 +45,7 @@ class GenerationSourceSnapshotTests(unittest.TestCase):
         )
         self.project = SimpleNamespace(current_snapshots={"use_cases": self.source}, stage_state={"use_cases": self.state})
 
-    def persist(self, append_effect=None):
+    def persist(self, append_effect=None, operation="testcases.generate"):
         with (
             patch("app.routers.testcases.get_project", return_value=self.project),
             patch(
@@ -57,7 +57,7 @@ class GenerationSourceSnapshotTests(unittest.TestCase):
             _append_project_generation_snapshots(
                 project_id="project-1",
                 response=self.response,
-                operation="testcases.generate",
+                operation=operation,
                 actor=AuthUser(sub="tester", name="Synthetic tester"),
                 request_id="request-1",
                 workflow_run_id="run-1",
@@ -125,6 +125,31 @@ class GenerationSourceSnapshotTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             self.persist(concurrent_write)
         self.assertEqual(error.exception.status_code, 409)
+
+    def test_refinement_binds_current_plan_without_replacing_reviewed_source(self):
+        before = deepcopy(self.project)
+        with patch("app.routers.testcases.get_project", return_value=self.project):
+            source = _refinement_source_inputs("project-1", AuthUser(sub="tester", name="Synthetic tester"))
+        self.assertEqual(source["source_coverage_plan"], self.source.payload["coverage_plan"])
+        self.assertEqual(source["source_requirement_analysis"], self.source.payload["requirement_analysis"])
+        append = self.persist(operation="testcases.refine")
+        append.assert_called_once()
+        self.assertEqual(append.call_args.kwargs["source_snapshot_id"], self.source.snapshot_id)
+        self.assertEqual(self.project, before)
+
+    def test_refinement_rejects_missing_stale_and_changed_source(self):
+        for stale in (True, False):
+            with self.subTest(stale=stale):
+                self.state.stale = stale
+                if not stale:
+                    self.source.payload["coverage_plan"] = []
+                with patch("app.routers.testcases.get_project", return_value=self.project), self.assertRaises(HTTPException) as error:
+                    _refinement_source_inputs("project-1", AuthUser(sub="tester", name="Synthetic tester"))
+                self.assertEqual(error.exception.status_code, 409)
+        with self.assertRaises(HTTPException) as error:
+            self.persist(operation="testcases.refine")
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(_refinement_source_inputs(None, AuthUser(sub="tester", name="Synthetic tester")), {})
 
 
 if __name__ == "__main__":

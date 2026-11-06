@@ -110,6 +110,34 @@ def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str,
     }
 
 
+def _incomplete_generation_message(response: GenerateTestCasesResponse) -> str:
+    reasons = list(
+        dict.fromkeys(
+            str(task.get("reason") or "")
+            + (" (scenarios: " + ", ".join(str(ref) for ref in task["scenario_refs"][:5]) + ")" if task.get("scenario_refs") else "")
+            for task in response.generation_tasks
+        )
+    )
+    details = "; ".join(reason[:600] for reason in reasons[:3] if reason)
+    return "Generated candidate is incomplete; the existing suite was preserved. " + (
+        f"Candidate findings: {details}" if details else "Review unresolved coverage and retry targeted generation."
+    )
+
+
+def _refinement_source_inputs(project_id: str | None, actor: AuthUser) -> dict[str, Any]:
+    if not project_id:
+        return {}
+    project = get_project(project_id, actor=actor)
+    snapshot = project.current_snapshots.get("use_cases")
+    state = project.stage_state.get("use_cases")
+    if not snapshot or not state or state.stale or state.current_snapshot_id != snapshot.snapshot_id or not snapshot.payload.get("coverage_plan"):
+        raise HTTPException(409, "Review current Use Cases before refining Test Cases; the source plan is missing or stale.")
+    return {
+        "source_coverage_plan": snapshot.payload["coverage_plan"],
+        "source_requirement_analysis": snapshot.payload.get("requirement_analysis") or [],
+    }
+
+
 def _append_project_generation_snapshots(
     *,
     project_id: str | None,
@@ -141,6 +169,8 @@ def _append_project_generation_snapshots(
         )
         # Test Case review/analysis belongs to the downstream artifact. Reusing a
         # plan must retain its exact source assessment and human review record.
+        if operation == "testcases.refine" and not reuse_use_cases:
+            raise HTTPException(409, "Use Cases changed during refinement. Reload and retry against the current source plan.")
         if not reuse_use_cases:
             use_case_snapshot = append_stage_snapshot(
                 project_id=project_id,
@@ -191,6 +221,8 @@ def _append_project_generation_snapshots(
                 "source_context_hash": _content_hash(source_context) if source_context is not None else None,
             },
         )
+    except HTTPException:
+        raise
     except Exception as project_exc:
         raise project_error_to_http(project_exc) from project_exc
 
@@ -314,9 +346,7 @@ async def generate_test_cases_endpoint(
         if response.generation_tasks and payload.project_id:
             existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
             if existing.current_snapshots.get("test_cases"):
-                raise HTTPException(
-                    422, "Generation is incomplete. The existing suite was preserved. Review unresolved coverage and retry targeted generation."
-                )
+                raise HTTPException(422, _incomplete_generation_message(response))
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -386,6 +416,7 @@ async def refine_test_cases_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
     await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
+    source_inputs = await run_in_threadpool(_refinement_source_inputs, payload.project_id, current_user)
     request_id = _get_request_id(request)
     billing_context = await run_in_threadpool(
         enforce_billing_access,
@@ -406,14 +437,13 @@ async def refine_test_cases_endpoint(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation="testcases.refine",
+            **source_inputs,
         )
         response = GenerateTestCasesResponse(**result)
         if response.generation_tasks and payload.project_id:
             existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
             if existing.current_snapshots.get("test_cases"):
-                raise HTTPException(
-                    422, "Generation is incomplete. The existing suite was preserved. Review unresolved coverage and retry targeted generation."
-                )
+                raise HTTPException(422, _incomplete_generation_message(response))
         modified_count = _count_snapshot_changes(
             _test_case_snapshot(payload.test_cases),
             _test_case_snapshot(response.test_cases),

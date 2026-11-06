@@ -285,6 +285,33 @@ class BrowserAssertionReviewTests(unittest.TestCase):
         self.assertTrue(review["approved"])
         self.assertFalse(any("Generic browser assertions" in issue for issue in review["blocking_issues"]))
 
+    def test_named_button_with_record_scope_is_not_a_synthetic_label(self):
+        review = _heuristic_test_case_review(
+            [self._browser_case(action='Click the "Cancel booking" button for booking B-EXISTING.', expected='Status becomes "Cancelled".')],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+        self.assertTrue(review["approved"])
+        mixed = _heuristic_test_case_review(
+            [
+                self._browser_case(
+                    action='Click "Cancel booking" button for B-EXISTING, then the link/button for reports.', expected='Status becomes "Cancelled".'
+                )
+            ],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+        self.assertFalse(mixed["approved"])
+        generic = _heuristic_test_case_review(
+            [self._browser_case(action='Click "button" button for booking B-EXISTING.', expected='Status becomes "Cancelled".')],
+            self.requirements,
+            90,
+            coverage_plan=self.coverage_plan,
+        )
+        self.assertFalse(generic["approved"])
+
 
 class CoveragePlanNormalizationTests(unittest.TestCase):
     def test_nonempty_model_plan_is_not_padded_with_generic_categories(self) -> None:

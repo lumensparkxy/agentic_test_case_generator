@@ -235,7 +235,16 @@ def _review_browser_assertion_grounding(test_cases: List[Dict[str, Any]], contex
                 elif _looks_like_implementation_only_visible_text(normalized):
                     findings.append(f"{step_label}: implementation/runtime concept `{value}` is used as browser visible text.")
 
-            if _SYNTHETIC_BROWSER_LABEL_PATTERN.search(step_text):
+            # A named control followed by record scope is concrete, e.g.
+            # 'Click "Cancel booking" button for booking B-EXISTING'. The
+            # placeholder guard applies to controls without a supplied name.
+            unnamed_controls = []
+            for match in _SYNTHETIC_BROWSER_LABEL_PATTERN.finditer(step_text):
+                named = re.search(r"([\"'])([^\"']+)\1\s*$", step_text[: match.start()])
+                name = _normalize_assertion_text(named.group(2)) if named else ""
+                if not name or is_ambiguous_semantic_visible_text(name) or _looks_like_selector_text(name):
+                    unnamed_controls.append(match)
+            if unnamed_controls:
                 findings.append(f"{step_label}: synthetic browser control label is used instead of exact accessible text.")
 
     findings = _dedupe_preserve(findings)
