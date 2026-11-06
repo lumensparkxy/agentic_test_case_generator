@@ -20,6 +20,10 @@ from app.models import QaProjectStageSnapshot
 
 class SpecialistAgentRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
+        # These contract tests mock workers and must not read live guidance storage.
+        guidance_env = patch.dict("os.environ", {"ADK_MEMORY_ENABLED": "false", "ADK_SKILLS_ENABLED": "false"})
+        guidance_env.start()
+        self.addCleanup(guidance_env.stop)
         self.trace = SpecialistTaskTrace(
             request_id="req-123",
             workflow_run_id="wf-123",

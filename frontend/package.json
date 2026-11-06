@@ -18,7 +18,7 @@
 	},
 	"dependencies": {
 		"@react-oauth/google": "^0.13.5",
-		"firebase": "^12.17.1",
+		"firebase": "^12.19.0",
 		"lucide-react": "^1.32.0",
 		"react": "^19.2.8",
 		"react-dom": "^19.2.8"
@@ -33,6 +33,11 @@
 		"globals": "^17.11.0",
 		"jsonwebtoken": "^9.0.3",
 		"prettier": "^3.9.6",
-		"vite": "^8.2.1"
+		"vite": "^8.3.6"
+	},
+	"overrides": {
+		"@firebase/firestore": {
+			"@grpc/grpc-js": "^1.13.6"
+		}
 	}
 }
