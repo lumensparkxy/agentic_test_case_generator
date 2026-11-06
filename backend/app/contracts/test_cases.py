@@ -1,3 +1,4 @@
+from .quality_feedback import ExecutionPrerequisite
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Literal
 from uuid import uuid4
@@ -34,6 +35,7 @@ class TestCase(BaseModel):
     priority: Literal["Critical", "High", "Medium", "Low"] = "Medium"
     type: Literal["Functional", "Integration", "E2E", "Regression", "Smoke", "Security", "Performance", "Usability", "UAT"] = "Functional"
     status: Literal["Draft", "Ready", "In Review", "Approved", "Deprecated"] = "Draft"
+    execution_prerequisites: list[ExecutionPrerequisite] = Field(default_factory=list, max_length=30)
     preconditions: Optional[str] = None
     steps: List[TestStep]
     expected_result: Optional[str] = None  # Overall expected outcome

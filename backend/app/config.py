@@ -487,7 +487,7 @@ def get_generation_settings() -> GenerationSettings:
 
 
 @lru_cache
-def get_settings() -> Settings:
+def _cached_settings() -> Settings:
     google_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None
     gemini_api_key_env = (os.getenv("GEMINI_API_KEY") or "").strip() or None
     gemini_api_key = gemini_api_key_env or google_api_key
@@ -505,3 +505,30 @@ def get_settings() -> Settings:
 
     _warn_if_dependency_mismatch()
     return Settings(gemini_api_key=gemini_api_key, model_name=model_name)
+
+
+from contextvars import ContextVar
+from contextlib import contextmanager
+
+_model_override: ContextVar[str | None] = ContextVar("model_override", default=None)
+
+
+def get_settings() -> Settings:
+    settings = _cached_settings()
+    model = _model_override.get()
+    return settings.model_copy(update={"model_name": model}) if model else settings
+
+
+get_settings.cache_clear = _cached_settings.cache_clear
+
+
+@contextmanager
+def model_scope(model: str):
+    """Request-local model selection; copied with guidance into worker threads."""
+    if not model or not model.strip():
+        raise ValueError("A model is required")
+    token = _model_override.set(model)
+    try:
+        yield
+    finally:
+        _model_override.reset(token)

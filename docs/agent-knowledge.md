@@ -84,3 +84,9 @@ The report compares every arm's coverage, assumptions, repeated corrections, lat
 Before enabling any stage, require all correctness gates, complete paired measurements, and useful improvement in coverage or repeated corrections without increased unsupported assumptions. Report any latency/cost increase explicitly in the rollout PR and justify acceptance. Expand fixtures for the target domain before a broad release. Enable skills and memory independently for approved stages; rollback by disabling the relevant flag. Do not rewrite approved records or existing artifact decisions during rollout. This release starts with no imported historical lessons or personal selections.
 
 See `docs/guidance-rollout-report.md` for actual measured/blocked status; infrastructure readiness is separate from model-quality evidence. ADK marks [skills experimental](https://adk.dev/skills/), so loader/instruction injection stays behind the adapter. ADK's [memory service](https://adk.dev/sessions/memory/) remains separate from session state; our adapter cannot ingest sessions or approve records.
+
+## Downstream quality feedback
+
+[Shared quality goal and feedback](quality-feedback.md) describes execution findings,
+prerequisite backfill, scoped lesson proposals and verified reruns. These reuse
+the approval lifecycle above and do not enable held guidance stages.

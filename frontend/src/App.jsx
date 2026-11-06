@@ -919,6 +919,7 @@ export default function App() {
 						.filter(Boolean)
 				: null,
 			notes: enrichedContext?.notes ?? null,
+			execution_prerequisites: enrichedContext?.execution_prerequisites || [],
 			project_id: currentProjectId || null,
 			base_project_revision: currentProjectRevision,
 		};
@@ -1557,6 +1558,7 @@ export default function App() {
 				diagram_links: contextPayload.diagram_links || [],
 				image_links: contextPayload.image_links || [],
 				notes: contextPayload.notes ?? null,
+				execution_prerequisites: contextPayload.execution_prerequisites || [],
 				grounded_context: contextPayload.grounded_context ?? null,
 			});
 			setSelectedArtifactSourceIds((contextPayload.grounded_context?.artifact_sources || []).map((source) => source.id));
@@ -4911,6 +4913,7 @@ export default function App() {
 										<ContextInputsPanel
 											request={apiRequest}
 											projectId={navigationProjectId}
+											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
 											appLink={appLink}
 											setAppLink={setAppLink}
 											prototypeLink={prototypeLink}

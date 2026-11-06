@@ -48,7 +48,7 @@ class GroundedContextMetricTests(unittest.TestCase):
 
         _, context_text, _ = _prepare_workflow_inputs(self.requirements, self.context, template)
 
-        self.assertIn("Grounded context summary", context_text)
+        self.assertIn('"summary": "Two artifacts were analyzed."', context_text)
         self.assertIn("ART-APP-01", context_text)
 
     def test_fallback_raw_test_cases_include_first_grounded_source_ref(self) -> None:

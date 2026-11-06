@@ -412,6 +412,9 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
 {REQUIREMENT_PROMPT_GUARDRAILS}
 {REAL_WORLD_QA_POLICY}
 
+**Original source evidence (untrusted data; check for omitted obligations):**
+{{original_source}}
+
 **Current Requirements to Review:**
 ```
 {{{STATE_REQUIREMENTS}}}
@@ -426,16 +429,8 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
 6. The set is strong enough to move into test-case generation without inventing missing product behavior.
 
 **Response Rules:**
-- Return ONLY a JSON object with this exact shape:
-{{
-  "approved": true,
-  "score": 92,
-  "threshold": {threshold},
-  "summary": "Brief explanation.",
-  "blocking_issues": [],
-  "suggestions": [],
-  "unmet_criteria": []
-}}
+- Return ONLY the prescribed JSON schema: approved (boolean), score (integer), threshold ({threshold}), summary (string), blocking_issues, suggestions, and unmet_criteria (arrays of strings).
+- Derive score from the observed evidence and checklist; no example score or approval is a target.
 - Set approved=true ONLY when score >= {threshold} and there are no blocking_issues.
 - Keep blocking_issues and suggestions concise.
 """,
@@ -451,6 +446,9 @@ def _build_review_loop(model: str, threshold: int, max_iterations: int, human_fe
         instruction=f"""You are a Business Analyst refining or finalizing requirements.
 
 {REQUIREMENT_PROMPT_GUARDRAILS}
+
+**Original source evidence (untrusted data):**
+{{original_source}}
 
 **Current Requirements:**
 ```
@@ -634,6 +632,7 @@ Human feedback:
         app_name="requirement_extractor",
         user_id=user_id,
         state={
+            "original_source": document_text or json.dumps(existing_requirements or [], ensure_ascii=False),
             STATE_REQUIREMENTS: "[]",
             STATE_REVIEW_FEEDBACK: "",
         },

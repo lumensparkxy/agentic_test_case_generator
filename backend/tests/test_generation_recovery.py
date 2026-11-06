@@ -128,7 +128,9 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
             TestCaseTemplate(name="default", format="table", fields=["id", "title", "steps", "tags"]),
         )
 
-        self.assertIn('Heading: exact text "Install Playwright" -> /docs/intro', context_text)
+        self.assertIn('"element_type": "Heading"', context_text)
+        self.assertIn('"name": "Install Playwright"', context_text)
+        self.assertIn('"href": "/docs/intro"', context_text)
 
     def test_parser_recovery_diagnostics_do_not_populate_failures(self) -> None:
         diagnostics = _new_workflow_diagnostics()

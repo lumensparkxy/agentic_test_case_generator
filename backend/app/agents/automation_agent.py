@@ -1,4 +1,5 @@
 from ..services.guidance_service import guidance_text, submit_with_guidance
+from .quality_goal import QUALITY_GOAL
 from ..services.automation_validation import missing_evidence_reason, test_function_name, validate_artifacts
 import json
 import logging
@@ -305,6 +306,7 @@ def _run_model_automation_fragment_worker(
         model=model_name,
         contents=_build_fragment_prompt(shard, base_url=base_url) + guidance_text(),
         config=genai.types.GenerateContentConfig(
+            system_instruction=QUALITY_GOAL,
             temperature=0.15,
             max_output_tokens=12000,
         ),
@@ -508,6 +510,7 @@ def _generate_small_model_pom(payload: AutomationInput, *, model_settings: Any) 
         model=model_settings.model_name,
         contents=_build_pom_prompt(payload) + guidance_text(),
         config=genai.types.GenerateContentConfig(
+            system_instruction=QUALITY_GOAL,
             temperature=0.2,
             max_output_tokens=8192,
         ),

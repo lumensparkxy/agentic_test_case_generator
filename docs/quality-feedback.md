@@ -1,0 +1,128 @@
+# Shared test-quality goal and feedback
+
+Every generation/review role and direct automation/critic call consumes
+`application-quality-v1` from `backend/app/agents/quality_goal.py`. Its outcome is
+source-grounded tests that expose application defects and prevent regressions,
+with observable assertions and explicit execution prerequisites. Counts, model
+self-scores and passing scripts alone are not quality evidence. Curated stage
+skills reinforce the same method; project facts remain scoped approved knowledge.
+
+## Product workflow
+
+In **Context → Quality feedback**, select the evidence snapshot and record the
+observed problem, expected behavior, affected case IDs, environment and missing
+prerequisites. Execution previews and failed/invalid/skipped results also create
+findings in the same transaction as their saved evidence. An execution failure is
+initially **unknown**, not automatically an application defect. Classify it before
+verification; add missing prerequisites when reviewing the finding.
+
+For missing data, access or environment findings, configure non-secret references
+and choose **Apply prerequisite correction**. This atomically creates new Context
+and Test Cases snapshots. The old evidence remains immutable; corrected cases are
+drafts, upstream scenarios and downstream execution/reports require review.
+Business assertions are preserved. Regenerate/review affected artifacts using the
+normal workflow before execution. Changed source suites reject stale corrections.
+Three correction attempts are the maximum per finding.
+
+A configured reference is not a verified resource. **Verify against latest
+execution** requires a real saved execution snapshot, passing results for all
+affected cases, the current non-stale suite and the same environment. Application
+defect verification also requires unchanged source actions/assertions. Missing
+inputs and previews cannot close findings. Source/script/ambiguous-behavior
+findings require their normal review/edit workflow; prerequisite backfill cannot
+rewrite expected product behavior.
+
+**Propose lesson** creates an inactive, versioned project-knowledge proposal for
+the selected stages; approval remains a separate Context action. Knowledge flags
+and rollout holds still apply. Learn a reusable method, not passwords or
+unverified product facts. General methodology needing a code/skill change follows
+the issue-linked PR workflow; agents do not silently rewrite their system prompts.
+
+## Prerequisite contract
+
+Context and test cases support `execution_prerequisites`, each with `name`,
+`kind`, `description`, optional `requirement_ids`, `reference`, and `status`
+(`missing` or `configured`). Kinds cover data, credentials, roles, environment,
+setup and cleanup. Applicable context contracts survive case hydration/refinement,
+even when a model omits them. Requirement links scope future generation.
+
+For the deterministic browser runtime, provision a dedicated environment value
+such as `PETF_TEST_SUPERVISOR_LOGIN` and store only
+`env:PETF_TEST_SUPERVISOR_LOGIN` as its reference. Runtime checks presence, not
+whether the account has the right permissions. Actual login/assertions establish
+that evidence. The reference may be stale or wrong and the test should fail
+truthfully. Role/setup/cleanup references likewise identify explicit prerequisites;
+setting an environment value does not itself perform setup or cleanup.
+
+Input actions may contain `{{supervisor_login}}` (a prerequisite name) or the
+literal `[[env:PETF_TEST_SUPERVISOR_LOGIN]]` marker. The compiler retains the marker;
+the generated Playwright fill reads `process.env` at execution time. Only the
+`PETF_TEST_*` namespace is supported. Values are never substituted into saved
+specs, IR or generated source. Fixture/context/setup/secret references are accepted
+as contracts but remain blocked by this runtime until supplied through a supported
+test environment binding. Generated Python automation retains its existing
+interface-evidence admission; this change does not add a secret manager to it.
+
+## API
+
+Authenticated owner-only endpoints:
+
+- `GET /projects/{id}/quality-findings`
+- `POST /projects/{id}/quality-findings` — capture evidence and prerequisite gaps
+- `POST /projects/{id}/quality-findings/{finding_id}` — `classify`, `apply`,
+  `propose_lesson`, or `verify`
+
+Writes require `X-Request-ID` and `base_project_revision`. Exact duplicate captures
+reuse a finding; action retries reuse the last completed request, while stale
+project revisions fail with conflict. Feedback, new snapshots and invalidation
+commit together. Knowledge proposals use the existing separate idempotent approval
+lifecycle. A failed knowledge-followup update can safely be retried without making
+a second proposal. Feedback is project-owned and is never automatically shared
+across projects.
+
+## Evaluation before changing models
+
+The existing smoke corpus remains available. The versioned quality corpus adds
+missing actor/data prerequisites, ambiguity, contradictory context, evidence past
+the former truncation limits and evidence-complete automation. Expected obligations
+are reviewer-only data, not injected into generation prompts. Unit regressions add
+partial-run, stale review, missing usage, source-change and runtime reference cases.
+
+```bash
+.venv/bin/python scripts/evaluate_guidance.py \
+  --corpus scripts/quality_fixtures/corpus.json --output /tmp/quality-contracts.json
+# Run model-backed trials only under an explicitly scoped experiment:
+.venv/bin/python scripts/evaluate_guidance.py --live --model MODEL_ID \
+  --corpus scripts/quality_fixtures/corpus.json --repeats 3 \
+  --output /tmp/quality-live.json
+```
+
+`--model` is request-scoped and propagates to worker threads. Per-call telemetry
+records resolved model, prompt hash and non-secret generation settings; report
+provenance includes code/SDK/goal versions. A provider-model mismatch cannot count
+as a successful comparison. Unknown failed-call usage stays unknown, and partial
+or timed-out outputs remain incomplete even when all requirement IDs appear.
+Streaming requests are not measured by this collector; use the non-streaming
+workflow or extend capture before measuring streaming. SDK-internal retry costs
+may remain unknown. No report changes rollout flags.
+
+Adjudication rehashes the actual output and verifies `run_hash` (inputs, output,
+guidance, usage/configuration and report provenance). Reviews must supply both
+`output_hash` and `run_hash`. For quality-corpus samples also supply
+`rubric_version: application-quality-v1` and an `obligations` map keyed by every
+fixture obligation ID; each judgment has `status: covered|unmet|unknown` and an
+evidence-based `reason`. Coverage is computed from those judgments. Supply the
+independent reviewer and adjudicated unsupported-assumption/repeated-correction
+counts. Old reports lacking these bindings must not be reused as new evidence.
+
+Preserve the audited baseline commit and compare a 2×2 matrix: current model vs
+Argon, each with baseline vs improved generation/prompts. Use this corrected
+measurement harness for **all four cells**; run the old generation in its isolated
+checkout rather than trusting the old measurement bugs. Hold fixtures, input
+versions, budgets and guidance arm constant; record model-specific settings.
+Rotate ordering, repeat runs and blind artifact reviewers to model/configuration.
+Report behavior coverage, unsupported assumptions, executable prerequisites,
+duplicate behavior, reviewer rework, failure rate, latency and known/unknown cost.
+Promote only after paired improvement without increased unsupported assumptions.
+A detected application defect must retain its assertion, not be “fixed” into a
+passing test. No Argon experiment or default-model change is part of this PR.

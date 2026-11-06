@@ -728,7 +728,7 @@ Focus on rules that change expected behavior: validations, boundaries, role perm
     }}
   ]
 }}
-3. Always include at least one business rule and one suggested scenario per requirement.
+3. Extract supported rules and scenarios. When source behavior is ambiguous or absent, record the unresolved gap; do not invent a rule to meet a minimum count.
 4. Use only these rule types: Business, Validation, Authorization, State Transition, Integration, Notification, Data, Constraint, Other.
 5. Use only these constraint types: Required, Format, Length, Range, File Type, File Size, Allowed Values, Uniqueness, Dependency, Other.
 6. Use only these risk categories: Security, Data Integrity, Availability, Usability, Compliance, Workflow, Validation, Integration, Other.

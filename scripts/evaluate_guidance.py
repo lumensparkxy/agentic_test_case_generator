@@ -25,7 +25,10 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
-from app.config import DEFAULT_MODEL_NAME, get_settings
+from app.config import DEFAULT_MODEL_NAME, get_settings, model_scope
+from app.agents.quality_goal import QUALITY_GOAL, QUALITY_GOAL_VERSION
+from importlib.metadata import version
+import subprocess
 from app.contracts.guidance import MemoryGuidance
 from app.models import AutomationInput, GenerateTestCasesInput, TestCase, WorkflowSettings
 from app.services.guidance_service import STAGES, build_manifest, guidance_scope, public_manifest
@@ -70,15 +73,20 @@ def manifest_for(stage, arm, model):
         return build_manifest(stage, model, project_id="evaluation-fixture", memories=entries)
 
 
-def payload_for(rows):
+def payload_for(rows, fixture=None):
+    from app.contracts.grounding import EnrichInput
+
+    context = (fixture or {}).get("context")
     return GenerateTestCasesInput(
         requirements=rows,
+        coverage_plan=(fixture or {}).get("coverage_plan", []),
+        context=EnrichInput(requirements=rows, **context) if context else None,
         template={"name": "default", "format": "table", "fields": ["id", "title", "steps", "expected_result"]},
         workflow_settings=WorkflowSettings(max_iterations=1, retry_attempts=0, timeout_seconds=90),
     )
 
 
-def run_stage(stage, rows):
+def run_stage(stage, rows, fixture=None):
     from app.agents.requirements_agent import extract_requirements
     from app.agents.use_case_agent import generate_use_cases
     from app.agents.test_case_agent import generate_test_cases
@@ -86,12 +94,15 @@ def run_stage(stage, rows):
 
     if stage == "requirements":
         return extract_requirements(
-            "\n".join(f"{r['id']}: {r['text']}" for r in rows), workflow_settings=WorkflowSettings(max_iterations=1, retry_attempts=0, timeout_seconds=90)
+            "\n".join(f"{r['id']}: {r['text']}\n{r.get('source_excerpt') or ''}" for r in rows),
+            workflow_settings=WorkflowSettings(max_iterations=1, retry_attempts=0, timeout_seconds=90),
         )
     if stage == "use_cases":
-        return generate_use_cases(payload_for(rows))
+        return generate_use_cases(payload_for(rows, fixture))
     if stage == "test_cases":
-        return generate_test_cases(payload_for(rows))
+        return generate_test_cases(payload_for(rows, fixture))
+    if (fixture or {}).get("automation"):
+        return generate_playwright_pom(AutomationInput(**fixture["automation"]))
     cases = [
         TestCase(
             id=f"TC-{i}",
@@ -102,6 +113,25 @@ def run_stage(stage, rows):
         for i, row in enumerate(rows, 1)
     ]
     return generate_playwright_pom(AutomationInput(test_cases=cases))
+
+
+def canonical_hash(value):
+    return sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def run_provenance(model):
+    return {
+        "model": model,
+        "quality_goal_version": QUALITY_GOAL_VERSION,
+        "quality_goal_hash": canonical_hash(QUALITY_GOAL),
+        "code_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "adk_version": version("google-adk"),
+        "genai_version": version("google-genai"),
+        "source_hashes": {
+            str(path.relative_to(ROOT)): sha256(path.read_bytes()).hexdigest()
+            for path in sorted([*ROOT.glob("backend/app/**/*.py"), ROOT / "scripts/evaluate_guidance.py", *ROOT.glob("backend/app/skills/*/SKILL.md")])
+        },
+    }
 
 
 def serialize(value):
@@ -118,7 +148,7 @@ def serialize(value):
 def collect_usage():
     from google.genai.models import Models, AsyncModels
 
-    stats = {"calls": 0, "failed_calls": 0, "input_tokens": 0, "output_tokens": 0, "missing_usage": 0}
+    stats = {"calls": 0, "failed_calls": 0, "input_tokens": 0, "output_tokens": 0, "missing_usage": 0, "requests": []}
     lock = Lock()
     original_sync, original_async = Models.generate_content, AsyncModels.generate_content
 
@@ -132,7 +162,22 @@ def collect_usage():
                 stats["output_tokens"] += (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
             return response
 
+    def capture(kwargs):
+        config = kwargs.get("config")
+        config = config.model_dump(mode="json", exclude_none=True) if hasattr(config, "model_dump") else dict(config or {})
+        prompt = {"contents": str(kwargs.get("contents", "")), "system_instruction": config.pop("system_instruction", None)}
+        # Hash raw content, retaining only non-secret generation settings.
+        with lock:
+            stats["requests"].append(
+                {
+                    "model": kwargs.get("model"),
+                    "prompt_hash": canonical_hash(prompt),
+                    "config": {k: config[k] for k in ("temperature", "top_p", "top_k", "max_output_tokens", "thinking_config") if k in config},
+                }
+            )
+
     def sync(client, *args, **kwargs):
+        capture(kwargs)
         with lock:
             stats["calls"] += 1
         try:
@@ -140,9 +185,11 @@ def collect_usage():
         except Exception:
             with lock:
                 stats["failed_calls"] += 1
+                stats["missing_usage"] += 1
             raise
 
     async def asynchronous(client, *args, **kwargs):
+        capture(kwargs)
         with lock:
             stats["calls"] += 1
         try:
@@ -150,6 +197,7 @@ def collect_usage():
         except Exception:
             with lock:
                 stats["failed_calls"] += 1
+                stats["missing_usage"] += 1
             raise
 
     with patch.object(Models, "generate_content", sync), patch.object(AsyncModels, "generate_content", asynchronous):
@@ -172,7 +220,7 @@ def contains_fallback(value):
     if isinstance(value, dict):
         if value.get("used_fallback") or value.get("fallback_shards", 0) or value.get("fallback_shard_count", 0):
             return True
-        if value.get("status") in {"fallback", "failed", "timeout"}:
+        if value.get("status") in {"fallback", "failed", "timeout", "timed_out", "partial"}:
             return True
         return any(contains_fallback(item) for item in value.values())
     return isinstance(value, list) and any(contains_fallback(item) for item in value)
@@ -200,6 +248,8 @@ def validate_artifact(stage, output, rows):
         cases = output.get("test_cases", [])
         expected_count = output.get("generation_evidence", {}).get("final_test_case_count")
         errors = []
+        if output.get("generation_tasks") or contains_fallback(output):
+            errors.append("incomplete_generation")
         if not cases:
             errors.append("no_delivered_test_cases")
         if expected_count is not None and expected_count != len(cases):
@@ -229,13 +279,16 @@ def validate_artifact(stage, output, rows):
     return errors
 
 
-def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, reviews=None, input_rate=None, output_rate=None, on_result=None):
+def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, reviews=None, input_rate=None, output_rate=None, on_result=None, fixtures=None):
     results = []
+    provenance = run_provenance(model)
     for repeat in range(repeats):
         # Rotate ordering to avoid assigning the same arm a systematic warm-up advantage.
         arms = list(ARMS)
         arms = arms[repeat % 4 :] + arms[: repeat % 4]
-        for fixture, rows in FIXTURES.items():
+        for fixture, fixture_data in (fixtures or FIXTURES).items():
+            spec = fixture_data if isinstance(fixture_data, dict) else {"requirements": fixture_data}
+            rows = spec["requirements"]
             for stage in stages:
                 for arm in arms:
                     manifest = manifest_for(stage, arm, model)
@@ -246,7 +299,8 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                         "stage": stage,
                         "arm": arm,
                         "repeat": repeat + 1,
-                        "input_hash": sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest(),
+                        "input_hash": canonical_hash(spec),
+                        "obligations": spec.get("obligations_by_stage", {}).get(stage, spec.get("obligations", {})),
                         "guidance": public_manifest(manifest),
                         "status": "contract_only",
                         "latency_seconds": None,
@@ -256,10 +310,10 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                     }
                     if live:
                         start = time.monotonic()
-                        with guidance_scope(manifest), collect_usage() as usage:
+                        with model_scope(model), guidance_scope(manifest), collect_usage() as usage:
                             try:
-                                result["output"] = serialize(run_stage(stage, rows))
-                                result["output_hash"] = sha256(json.dumps(result["output"], sort_keys=True).encode()).hexdigest()
+                                result["output"] = serialize(run_stage(stage, rows, spec) if fixtures else run_stage(stage, rows))
+                                result["output_hash"] = canonical_hash(result["output"])
                                 result["status"] = "generated"
                                 result["validation_errors"] = validate_artifact(stage, result["output"], rows)
                                 if result["validation_errors"]:
@@ -267,16 +321,31 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                             except Exception as exc:
                                 result.update(status="failed", error_type=type(exc).__name__)
                         result.update(latency_seconds=round(time.monotonic() - start, 3), usage=usage)
-                        if stage == "automation" and manual_resolution(result.get("output", {}), rows):
+                        result["generation_complete"] = (
+                            not contains_fallback(result.get("output")) and not result.get("validation_errors") and "output" in result
+                        )
+                        result["semantic_review"] = (
+                            result.get("output", {}).get("substantive_assessment")
+                            or result.get("output", {}).get("review", {}).get("semantic_assessment")
+                            or "unmeasured"
+                        )
+                        if any(call["model"] != model for call in usage["requests"]):
+                            result["status"] = "model_mismatch"
+                            result["generation_complete"] = False
+                        elif stage == "automation" and manual_resolution(result.get("output", {}), rows):
                             result["status"] = "manual_resolution"
                         elif usage["calls"] == 0 or usage["failed_calls"] or contains_fallback(result.get("output")):
                             result["status"] = "fallback_or_failure"
-                        if input_rate is not None and output_rate is not None and not usage["missing_usage"]:
+                        if input_rate is not None and output_rate is not None and not usage["missing_usage"] and not usage["failed_calls"]:
                             result["estimated_cost_usd"] = round((usage["input_tokens"] * input_rate + usage["output_tokens"] * output_rate) / 1_000_000, 6)
+                    result["run_hash"] = canonical_hash(
+                        {"provenance": provenance, **{key: result.get(key) for key in ("input_hash", "output_hash", "guidance", "usage", "obligations")}}
+                    )
                     results.append(result)
                     if on_result:
                         on_result(results)
     return {
+        "provenance": provenance,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "mode": "model_backed"
         if live and any((result.get("usage") or {}).get("calls") for result in results)
@@ -302,8 +371,21 @@ def adjudicate(report, reviews):
     for result in report["results"]:
         review = reviews.get(result["id"])
         if review:
-            if not result.get("output_hash") or review.get("output_hash") != result["output_hash"]:
+            if "output" not in result or canonical_hash(result["output"]) != result.get("output_hash") or review.get("output_hash") != result["output_hash"]:
                 raise ValueError("Review output hash does not match the recorded generation")
+            expected_run_hash = canonical_hash(
+                {"provenance": report.get("provenance"), **{key: result.get(key) for key in ("input_hash", "output_hash", "guidance", "usage", "obligations")}}
+            )
+            if expected_run_hash != result.get("run_hash") or review.get("run_hash") != expected_run_hash:
+                raise ValueError("Review provenance does not match the recorded run")
+            obligations = result.get("obligations", {})
+            if obligations:
+                judgments = review.get("obligations", {})
+                if review.get("rubric_version") != QUALITY_GOAL_VERSION or set(judgments) != set(obligations):
+                    raise ValueError("Review must assess every versioned fixture obligation")
+                if any(item.get("status") not in ("covered", "unmet", "unknown") or not item.get("reason") for item in judgments.values()):
+                    raise ValueError("Every obligation needs an evidence-based judgment")
+                review = {**review, "coverage": sum(item["status"] == "covered" for item in judgments.values()) / len(obligations)}
             result["review"] = validate_review(review)
     summaries = []
     for stage in STAGES:
@@ -336,6 +418,8 @@ def adjudicate(report, reviews):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Call the configured Gemini model on synthetic fixtures")
+    parser.add_argument("--corpus", type=Path, help="Versioned synthetic obligation corpus")
+    parser.add_argument("--model", help="Explicit model for every agent in this evaluation")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--stage", choices=STAGES, action="append")
     parser.add_argument("--reviews", type=Path)
@@ -347,7 +431,7 @@ def main():
     if not 1 <= args.repeats <= 10:
         parser.error("repeats must be between 1 and 10")
     reviews = json.loads(args.reviews.read_text()) if args.reviews else {}
-    model = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+    model = args.model or os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
     if args.review_report:
         if args.live or not args.reviews:
             parser.error("--review-report requires --reviews and cannot be combined with --live")
@@ -383,6 +467,7 @@ def main():
         print(f"{latest['id']}: {latest['status']} ({latest['latency_seconds']}s)", flush=True)
 
     report = evaluate(
+        fixtures=json.loads(args.corpus.read_text())["fixtures"] if args.corpus else None,
         live=args.live,
         repeats=args.repeats,
         model=model,

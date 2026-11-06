@@ -72,3 +72,31 @@ async def retry_knowledge_feedback(project_id: str, payload: FeedbackRetry, acto
     from ..services.knowledge_feedback import retry_feedback
 
     return await guarded(retry_feedback, actor, project_id, payload.stage, payload.feedback, payload.source_request_id)
+
+
+from ..contracts.quality_feedback import QualityFindingInput, QualityFindingAction
+from ..services.quality_feedback import list_findings, capture_finding, update_finding
+
+
+def feedback_request_id(request):
+    value = request.headers.get("X-Request-ID")
+    if not value or len(value) > 160:
+        raise HTTPException(422, "A bounded X-Request-ID is required")
+    return value
+
+
+@router.get("/projects/{project_id}/quality-findings")
+async def quality_findings(project_id: str, actor: AuthUser = Depends(get_current_user)):
+    return await guarded(list_findings, project_id, actor)
+
+
+@router.post("/projects/{project_id}/quality-findings")
+async def create_quality_finding(project_id: str, payload: QualityFindingInput, request: Request, actor: AuthUser = Depends(get_current_user)):
+    return await guarded(capture_finding, project_id, actor, payload, feedback_request_id(request))
+
+
+@router.post("/projects/{project_id}/quality-findings/{finding_id}")
+async def change_quality_finding(
+    project_id: str, finding_id: str, payload: QualityFindingAction, request: Request, actor: AuthUser = Depends(get_current_user)
+):
+    return await guarded(update_finding, project_id, finding_id, actor, payload, feedback_request_id(request))
