@@ -49,6 +49,20 @@ Primary constraints:
   `TC-*` IDs, restores coverage-plan order, and applies one suite-level
   heuristic review before the router records billing, usage, versions, or
   project snapshots.
+- Delivered Test Cases also receive an independent business-coverage assessment
+  with exact source/step citation validation. Compact case/step references are
+  resolved against the hash-bound input into exact public evidence, avoiding
+  repeated long step text in the model output. Transient provider or transport
+  failure permits one retry within a 180-second HTTP budget (at most 120 seconds
+  per call, SDK retries disabled). Invalid evidence and authentication errors
+  are not retried; unavailable review cannot approve a suite. Generation,
+  refinement and review share actor/state and source-grounding instructions.
+  Immediate delivery and project reload preserve the same score and actionable
+  findings; a semantic gap blocks approval without erasing the structural score.
+  Test Case traceability restores the delivered artifact's metrics rather than
+  the upstream scenario plan's metrics.
+  Incomplete replacement candidates preserve the existing suite and expose
+  bounded candidate findings in the regeneration error for review.
 - Planned scenario coverage is exact-ID first. Generated cases should preserve
   `scenario_refs` for every covered coverage-plan scenario; scenario-type
   inference remains a degraded compatibility fallback for legacy or malformed

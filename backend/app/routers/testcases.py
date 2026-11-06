@@ -110,6 +110,14 @@ def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str,
     }
 
 
+def _incomplete_generation_message(response: GenerateTestCasesResponse) -> str:
+    reasons = list(dict.fromkeys(str(task.get("reason") or "") for task in response.generation_tasks))
+    details = "; ".join(reason[:600] for reason in reasons[:3] if reason)
+    return "Generated candidate is incomplete; the existing suite was preserved. " + (
+        f"Candidate findings: {details}" if details else "Review unresolved coverage and retry targeted generation."
+    )
+
+
 def _append_project_generation_snapshots(
     *,
     project_id: str | None,
@@ -314,9 +322,7 @@ async def generate_test_cases_endpoint(
         if response.generation_tasks and payload.project_id:
             existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
             if existing.current_snapshots.get("test_cases"):
-                raise HTTPException(
-                    422, "Generation is incomplete. The existing suite was preserved. Review unresolved coverage and retry targeted generation."
-                )
+                raise HTTPException(422, _incomplete_generation_message(response))
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -411,9 +417,7 @@ async def refine_test_cases_endpoint(
         if response.generation_tasks and payload.project_id:
             existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
             if existing.current_snapshots.get("test_cases"):
-                raise HTTPException(
-                    422, "Generation is incomplete. The existing suite was preserved. Review unresolved coverage and retry targeted generation."
-                )
+                raise HTTPException(422, _incomplete_generation_message(response))
         modified_count = _count_snapshot_changes(
             _test_case_snapshot(payload.test_cases),
             _test_case_snapshot(response.test_cases),

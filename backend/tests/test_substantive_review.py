@@ -2,6 +2,8 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+from google.genai import errors as genai_errors
+import httpx
 
 from app.agents.substantive_review import (
     review_input,
@@ -55,6 +57,81 @@ def fixture(*, retry=True):
 
 
 class SubstantiveReviewTests(unittest.TestCase):
+    def test_compact_step_references_resolve_exact_delivered_evidence_and_reject_invalid_refs(self):
+        _, _, data, digest, output = fixture(retry=False)
+        original = output["obligations"][0]["evidence"][0].copy()
+        output["obligations"][0]["evidence"] = [{"test_case_id": original["test_case_id"], "step": original["step"]}]
+        result = validate_assessment(json.dumps(output), data, digest)
+        self.assertEqual(result["obligations"][0]["evidence"], [original])
+        for reference in (
+            {"test_case_id": "invented", "step": 1},
+            {"test_case_id": original["test_case_id"], "step": 99},
+            {"test_case_id": original["test_case_id"], "step": True},
+        ):
+            output["obligations"][0]["evidence"] = [reference]
+            with self.subTest(reference=reference), self.assertRaises(ValueError):
+                validate_assessment(json.dumps(output), data, digest)
+
+    def test_transient_provider_failure_recovers_once_without_weakening_evidence(self):
+        req, case, _, _, output = fixture(retry=False)
+        for error in (genai_errors.ServerError(503, {"error": {"message": "private provider detail"}}), httpx.ReadTimeout("private detail")):
+            with self.subTest(error=type(error).__name__), patch("app.agents.substantive_review._call_critic", side_effect=[error, json.dumps(output)]) as call:
+                result = assess_delivered_suite([case], [req], None, settings=object())
+                self.assertEqual(result["status"], "assessed_complete")
+                self.assertEqual(result["diagnostics"], {"attempt_count": 2, "failure_reason": None})
+                self.assertEqual(call.call_count, 2)
+                self.assertEqual(call.call_args_list[0].args, call.call_args_list[1].args)
+                self.assertTrue(all(0 < c.kwargs["timeout_seconds"] <= 120 for c in call.call_args_list))
+
+    def test_assessment_failure_budget_and_invalid_evidence_stay_fail_closed(self):
+        req, case, _, _, output = fixture(retry=False)
+        private_error = genai_errors.ServerError(503, {"error": {"message": "private provider detail"}})
+        scenarios = [
+            ([private_error, private_error], 2, "provider_unavailable"),
+            ([genai_errors.ClientError(401, {"error": {"message": "private key"}})], 1, "provider_unavailable"),
+            (["not JSON"], 1, "invalid_evidence"),
+            ([json.dumps({**output, "input_hash": "stale"})], 1, "invalid_evidence"),
+        ]
+        for side_effect, attempts, reason in scenarios:
+            with self.subTest(reason=reason, attempts=attempts), patch("app.agents.substantive_review._call_critic", side_effect=side_effect) as call:
+                result = assess_delivered_suite([case], [req], None, settings=object())
+                self.assertEqual(result["status"], "unknown")
+                self.assertEqual(result["diagnostics"], {"attempt_count": attempts, "failure_reason": reason})
+                self.assertEqual(call.call_count, attempts)
+                self.assertNotIn("private", str(result))
+        with (
+            patch("app.agents.substantive_review.monotonic", side_effect=[0, 0, 181]),
+            patch("app.agents.substantive_review._call_critic", side_effect=private_error) as call,
+        ):
+            result = assess_delivered_suite([case], [req], None, settings=object())
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(result["status"], "unknown")
+
+    def test_applied_assessment_keeps_score_and_specific_findings_after_project_reload(self):
+        from app.services.test_case_quality import project_test_case_view
+
+        _, case, data, digest, output = fixture()
+        assessment = validate_assessment(json.dumps(output), data, digest)
+        result = apply_assessment(
+            {
+                "test_cases": [case.model_dump(mode="json")],
+                "generation_tasks": [],
+                "approved": True,
+                "review": {"approved": True, "score": 100, "threshold": 90},
+                "workflow_diagnostics": {"status": "completed"},
+                "generation_evidence": {},
+                "coverage_metrics": {},
+            },
+            assessment,
+        )
+        persisted = json.loads(json.dumps(result))
+        reloaded = project_test_case_view(persisted)
+        self.assertEqual(result, reloaded)
+        self.assertEqual(result["review"]["score"], 100)
+        self.assertFalse(result["approved"])
+        self.assertTrue(any("lost-response" in issue.lower() for issue in result["review"]["blocking_issues"]))
+        self.assertEqual(result["coverage_metrics"]["substantive_coverage_status"], "incomplete")
+
     def test_incomplete_is_not_closed_by_links_or_high_generator_score(self):
         req, case, data, digest, output = fixture()
         assessment = validate_assessment(json.dumps(output), data, digest)
@@ -209,7 +286,7 @@ class SubstantiveReviewTests(unittest.TestCase):
             client.return_value.__enter__.return_value.models.generate_content.return_value = SimpleNamespace(text=json.dumps(output))
             _call_critic(SimpleNamespace(gemini_api_key="synthetic", model_name="fixture"), "prompt")
             config = client.return_value.__enter__.return_value.models.generate_content.call_args.kwargs["config"]
-            self.assertEqual(config.http_options.timeout, 60000)
+            self.assertEqual(config.http_options.timeout, 120_000)
             self.assertEqual(config.http_options.retry_options.attempts, 1)
         data, _, _ = review_input([case], [req], None, scope_plan=[{"requirement_id": req.id, "scenarios": []}])
         self.assertEqual(data["scope"], "selected_scenarios")

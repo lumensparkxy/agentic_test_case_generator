@@ -181,7 +181,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 | `knowledge` | 2 | Effective guidance/holds are visible; unavailable capability never implies enabled |
 | `accessibility-navigation` | 1 | Use Cases has no serious/critical Axe violations at 1440px |
 
-The complete backend and **281 mocked browser** suites remain available on
+The complete backend and **282 mocked browser** suites remain available on
 demand. No assertions or tests were deleted. The critical gate omits alternate
 viewports, secondary navigation/filter/report cases, mocked JIRA journeys and
 many alternate failure variants. Run affected specs/modules for those changes;
@@ -434,6 +434,15 @@ review binding, source mapping findings, and bounded reviewer failure without
 discarding scenarios or claiming a pass. Paraphrase and business ownership checks
 still require the semantic reviewer and inspection of the live delivered plan;
 mocked verdicts establish transport/validation behavior, not model accuracy.
+
+Stage 5 regressions in `test_substantive_review.py`, `test_test_case_quality.py`
+and `improve-tests.spec.js` cover bounded recovery from transient assessment
+failure, rejection of invalid/stale evidence, and unchanged score/actionable
+findings and delivered traceability metrics after response, persistence and reload. Legacy placeholder rows still
+invalidate the scored suite. The Room Booking Chrome check additionally reviews
+actor/state sequencing, unsupported permission or request-level assumptions,
+and the retry identity/count assertions; mocked checks do not establish live
+model quality or provision the synthetic execution harness.
 
 `frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
 scenario is opt-in; the default full suite reports it as skipped. Its anonymous

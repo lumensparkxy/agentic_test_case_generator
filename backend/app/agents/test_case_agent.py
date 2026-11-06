@@ -25,7 +25,7 @@ from .literal_instructions import literal_source_agent
 from .substantive_review import assess_delivered_suite, apply_assessment
 from .adk_runtime import json_generation_config, tool_generation_config
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
-from .prompting import REAL_WORLD_QA_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
+from .prompting import REAL_WORLD_QA_POLICY, TEST_CASE_BEHAVIOR_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
 from ..config import GenerationSettings, get_generation_settings, get_settings
 from ..models import (
     GenerateTestCasesInput,
@@ -860,6 +860,8 @@ def _build_review_loop(
         output_schema=StructuralChecks,
         instruction=f"""You are a QA Lead reviewing test cases for quality, completeness, and traceability.
 
+    {TEST_CASE_BEHAVIOR_POLICY}
+
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
     {REAL_WORLD_QA_POLICY}
@@ -914,6 +916,8 @@ def _build_review_loop(
         include_contents="none",
         generate_content_config=tool_generation_config(max_output_tokens=16000, temperature=0.15),
         instruction=f"""You are a QA Engineer refining test cases.
+
+    {TEST_CASE_BEHAVIOR_POLICY}
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
@@ -977,6 +981,8 @@ def _build_test_case_generator_agent(
         include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
+
+    {TEST_CASE_BEHAVIOR_POLICY}
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}
@@ -1073,6 +1079,8 @@ def _build_refinement_pipeline(
         include_contents="default",
         generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
         instruction=f"""You are a Senior QA Engineer refining an existing test suite.
+
+    {TEST_CASE_BEHAVIOR_POLICY}
 
     {TEST_DESIGN_PROMPT_GUARDRAILS}
     {TEST_CASE_CONTRACT_INSTRUCTIONS}

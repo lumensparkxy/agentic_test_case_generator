@@ -632,6 +632,7 @@ test.describe("Contextual next task", () => {
 		await dialog.getByRole("button", { name: /^Confirm regeneration$/i }).click();
 
 		await expect(dialog.getByRole("alert")).toContainText(/current suite was preserved/i);
+		await expect(dialog.getByRole("alert")).toContainText("Synthetic regeneration failure");
 		await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeEnabled();
 		await expect(dialog.getByRole("button", { name: /^Confirm regeneration$/i })).toBeFocused();
 		await expect(page.getByRole("button", { name: new RegExp(OLD_CASE_TITLE, "i") })).toBeVisible();

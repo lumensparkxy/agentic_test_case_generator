@@ -24,6 +24,7 @@ from app.agents.test_case_agent import (
 from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import EnrichInput, GenerateTestCasesInput, GroundedContext, GroundedUIElement, Requirement, TestCaseTemplate
 from app.utils.llm_json import parse_test_cases_json_detailed
+from app.agents.prompting import TEST_CASE_BEHAVIOR_POLICY
 
 
 class TestCaseGenerationRecoveryTests(unittest.TestCase):
@@ -100,9 +101,11 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         refinement_agent = next(agent for agent in refinement_pipeline.sub_agents if agent.name == "TestCaseRefinementAgent")
 
         for instruction in (generation_agent.instruction, validator_agent.instruction, refinement_agent.instruction):
+            self.assertIn(TEST_CASE_BEHAVIOR_POLICY, instruction)
             self.assertIn('"heading" should be visible', instruction)
             self.assertIn('heading "Exact accessible name" is visible', instruction)
             self.assertIn('"#email-input" should be visible', instruction)
+        self.assertIn(TEST_CASE_BEHAVIOR_POLICY, review_loop.sub_agents[1].instruction)
 
     def test_grounded_context_prompt_preserves_element_type_and_exact_accessible_name(self) -> None:
         requirements = [Requirement(id="REQ-001", text="The docs page shall show installation guidance.")]
