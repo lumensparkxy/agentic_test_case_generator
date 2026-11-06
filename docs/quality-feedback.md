@@ -91,6 +91,18 @@ across projects.
 
 ## Evaluation before changing models
 
+For browser cases, quote an observed URL when writing navigation or URL
+expectations. A bare URL at the end of a sentence can have its prose punctuation
+removed. Use `exact heading "Sign in" is visible` for an exact accessible name,
+or `exact text "No results" is visible` for exact displayed text. Unqualified
+visibility assertions retain their existing partial-match behavior.
+
+Place supplied non-secret inputs directly in steps or test data. When a case
+depends on an existing user, record or setting, cite its fixture or provide a
+supported setup recipe. Record unresolved dependencies as missing. Input
+actions use runtime bindings only when the corresponding reference was supplied
+and the runner has access to it.
+
 The existing smoke corpus remains available. The versioned quality corpus adds
 missing actor/data prerequisites, ambiguity, contradictory context, evidence past
 the former truncation limits and evidence-complete automation. Expected obligations

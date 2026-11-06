@@ -125,6 +125,7 @@ Required test function names:
 
 Rules:
 - Do not invent navigation, selectors, input values or credentials. Only supplied target/allowed_urls may be passed to goto; use explicit literal URLs.
+- Use supplied non-secret literal inputs as values. Keep supplied runtime references separate from literals and never make up a reference or an existing fixture. Preserve evidenced text equality; a contains check does not verify exact text.
 - Use from playwright.sync_api import Page, expect. Keep the default TLS verification; no ignore_https_errors, fixed sleeps, skip/xfail, suppressed assertions or empty smoke substitutes.
 - Emit exactly one named test function per case. Each evidenced assertion must be a direct expect(page...).METHOD(EXPECTED) expression statement in that function, with the observed locator and value. Do not hide assertions in conditions, helpers or comments. No decorators on test functions.
 - Page objects may encapsulate evidenced actions; assertions remain direct in the test for independent validation. Do not substitute body-visible for a business expectation.

@@ -89,14 +89,26 @@ STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 EVIDENCE_PAYLOAD_STRATEGY = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
 TEST_CASE_CONTRACT_INSTRUCTIONS = """Canonical output contract (template field selection does not override it):
 Include id, title, a description of the verified behavior, steps, and traceability fields.
-Preserve applicable execution_prerequisites from context on each case. Each prerequisite has name,
-kind (test_data|credential|role|environment|setup|cleanup), description, reference (non-secret identifier or null),
-and status (missing|configured). Configured means a supplied reference, not successful execution.
-Never drop a prerequisite during refinement; unresolved references remain missing.
-For configured input references, use the literal [[env:PETF_TEST_NAME]] marker in input actions.
-It is an execution-time reference, not a supplied secret or proof of a provisioned account.
-At both case and step level, test_data MUST be a string or null, never a JSON object or array.
-For structured data, put valid JSON encoded as text in test_data. Preserve supplied data and identities.
+Preconditions and case/step test_data MUST each be a string or null, never an object or array.
+For structured test data, encode JSON as a string.
+Use supplied non-secret literal inputs directly in steps or test_data (for example a supplied
+search name). A literal value is not an execution_prerequisite or a reference. A fixture
+that must already exist needs evidence of provision or a supported setup recipe.
+Preserve applicable execution_prerequisites from context and identify any missing dependency.
+Each prerequisite has a name (identifier starting with a letter, no spaces), kind
+(test_data|credential|role|environment|setup|cleanup), description, reference, and status.
+Missing credentials, existing records or settings use status "missing" and reference null
+when no reference was supplied. Name what to provision or confirm; do not invent IDs,
+accounts, thresholds, roles or configuration actions. Do not drop unresolved prerequisites.
+For a configured env:PETF_TEST_ runtime reference supplied in context, wrap that exact
+reference in double square brackets in the input action. Never invent a marker or embed
+a credential value. A supplied reference alone is not proof of successful setup.
+For evidenced browser cases with supported actions/assertions and no unresolved setup, use
+automation_status "To Be Automated"; use "Manual" if prerequisites or UI evidence are missing.
+Put grounded URLs in quotes in navigation and URL expectations. Avoid generic "page loads"
+assertions when the source specifies a concrete outcome. When exactness is required, write
+'exact heading "Dashboard" is visible' for an accessible name or
+'exact text "No results" is visible' for displayed text. Preserve exactness in review and refinement.
 Each step is an object with an integer step, string action, string expected, and optional string/null test_data.
 """
 GENERATION_SOURCE_MODEL = "model"
@@ -1001,9 +1013,9 @@ def _build_test_case_generator_agent(
 13. Do not write generic quoted browser assertions such as `"heading" should be visible`, `"href" should be visible`, `"page" should be visible`, or `"#email-input" should be visible`; write `heading "Exact accessible name" is visible`, `link "Exact link name" is visible`, direct href validation, or mark unsupported/manual.
 14. Never return `steps` as a single string, markdown list, or paragraph.
 15. Make steps real-world executable: name the actor/role, setup data, UI/API action, validation point, and observable outcome.
-16. Use concrete but non-sensitive test data. If exact data is unknown, put explicit assumptions in preconditions or test_data; never use TBD/placeholder text.
+16. Use concrete non-sensitive test data when supplied or supported by a setup recipe. Record missing data as prerequisites.
 17. Include negative, boundary, authorization, and error-handling coverage when the coverage plan or requirement analysis calls for it; do not overproduce only happy paths.
-18. Prefer business-readable test data such as `qa.manager@example.test`, `INV-1001`, or `2026-05-10`; do not use real personal data or secrets.
+18. Use new synthetic input values only where the test controls their creation or entry. Never imply that a made-up ID or account already exists.
 19. Output ONLY a JSON object shaped like {{"test_cases": [...]}}.
 """,
         description="Generates initial test cases from approved requirements",

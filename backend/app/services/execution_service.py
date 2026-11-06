@@ -36,7 +36,12 @@ from ..models import (
 )
 
 
-URL_PATTERN = re.compile(r"https?://[^\s\"')]+", re.IGNORECASE)
+URL_PATTERN = re.compile(
+    r"""(?P<quote>["'\x60])(?P<quoted>https?://[^\s]+?)(?P=quote)"""
+    r"|<(?P<angled>https?://[^\s<>]+)>"
+    r"""|(?P<bare>https?://[^\s"'\x60()<>]+)""",
+    re.IGNORECASE,
+)
 QUOTED_PATTERN = re.compile(r"['\"]([^'\"]+)['\"]")
 VISUAL_LOOKUP_PATTERN = re.compile(
     r"\b(?:locate|find|scan|inspect|review|check|verify|confirm)\b",
@@ -63,9 +68,13 @@ HEADING_VISIBLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ROLE_VISIBLE_PATTERN = re.compile(
-    r"\b(?P<role>heading|link|button)\s+['\"](?P<text>[^'\"]+)['\"]\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    r"""\b(?P<exact>exact\s+)?(?P<role>heading|link|button)\s+(?P<quote>['"])(?P<text>.+?)(?P=quote)"""
+    r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
     re.IGNORECASE,
 )
+EXACT_TEXT_PATTERN = re.compile(r"""\bexact\s+(?:visible\s+)?text\s+(?P<quote>['"])(?P<text>.+?)(?P=quote)""", re.IGNORECASE)
+EXACT_INTENT_PATTERN = re.compile(r"\b(?:exact (?:text|case|match)|(?:text|name) matches exactly)\b", re.IGNORECASE)
+VISIBLE_INTENT_PATTERN = re.compile(r"\b(?:displays?|displayed|visible|shown|present|appears)\b", re.IGNORECASE)
 PAGE_TITLE_EQUALS_PATTERN = re.compile(
     r"\b(?:page\s+)?title\s+(?:is|should\s+be|equals?|should\s+equal)\s+['\"](?P<title>[^'\"]*)['\"]",
     re.IGNORECASE,
@@ -523,9 +532,9 @@ def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:
 
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
-    if re.search(r"\bURL\b", text, re.IGNORECASE):
-        if match := URL_PATTERN.search(text):
-            return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(match.group(0))}"')
+    if re.search(r"\b(?:URL|loads successfully at)\b", text, re.IGNORECASE):
+        if url := _extract_prose_url(text):
+            return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(url)}"')
 
     if _contains_runtime_assertion_intent(text) or _contains_page_title_visible_assertion(text) or _contains_attribute_visible_assertion(text):
         return None
@@ -536,9 +545,14 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
 
     if match := ROLE_VISIBLE_PATTERN.search(text):
         role = str(match.group("role")).lower()
-        role_text = _clean_value(match.group("text"))
+        exact = bool(match.group("exact") or EXACT_INTENT_PATTERN.search(text))
+        role_text = match.group("text") if exact else _clean_value(match.group("text"))
         if role_text:
-            return _ConvertedStep("assert_visible", f'{role} "{_escape_step_text(role_text)}" should be visible')
+            qualifier = "exact " if exact else ""
+            return _ConvertedStep("assert_visible", f'{qualifier}{role} "{_escape_step_text(role_text)}" should be visible')
+
+    if (match := EXACT_TEXT_PATTERN.search(text)) and VISIBLE_INTENT_PATTERN.search(text):
+        return _ConvertedStep("assert_visible", f'exact text "{_escape_step_text(match.group("text"))}" should be visible')
 
     if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.search(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
@@ -579,7 +593,7 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
             return _ConvertedStep("assert_text_equals", f'"{_escape_step_text(label)}" should equal "{_escape_step_text(expected)}"')
 
     quoted_values = QUOTED_PATTERN.findall(text)
-    if quoted_values and re.search(r"\b(displays?|displayed|visible|shown|present|appears)\b", text, re.IGNORECASE):
+    if quoted_values and VISIBLE_INTENT_PATTERN.search(text):
         visible_text = _clean_value(quoted_values[-1])
         if not is_ambiguous_semantic_visible_text(visible_text):
             return _ConvertedStep("assert_visible", f'"{_escape_step_text(visible_text)}" should be visible')
@@ -1057,11 +1071,20 @@ def _looks_like_navigation(text: str) -> bool:
 
 
 def _resolve_step_url(action: str, base_url: str) -> str:
-    if match := URL_PATTERN.search(action):
-        return match.group(0)
+    if url := _extract_prose_url(action):
+        return url
     if path_match := re.search(r"\b(?:path|route|url)\s+['\"]([^'\"]+)['\"]", action, re.IGNORECASE):
         return urljoin(base_url.rstrip("/") + "/", path_match.group(1).lstrip("/"))
     return base_url
+
+
+def _extract_prose_url(text: str) -> str | None:
+    match = URL_PATTERN.search(text)
+    if match is None:
+        return None
+    # Bare URLs in sentences can end at punctuation. Delimit a URL when
+    # punctuation is part of the address.
+    return match.group("quoted") or match.group("angled") or match.group("bare").rstrip(".,;:!?")
 
 
 def _metadata_for_test_case(test_case: TestCase) -> dict[str, Any]:
