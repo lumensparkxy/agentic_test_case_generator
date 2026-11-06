@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **61 selected backend methods and 28 browser cases**. This
+Routine CI runs **62 selected backend methods and 28 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -438,11 +438,39 @@ mocked verdicts establish transport/validation behavior, not model accuracy.
 Stage 5 regressions in `test_substantive_review.py`, `test_test_case_quality.py`
 and `improve-tests.spec.js` cover bounded recovery from transient assessment
 failure, rejection of invalid/stale evidence, and unchanged score/actionable
-findings and delivered traceability metrics after response, persistence and reload. Legacy placeholder rows still
+findings and delivered traceability metrics after response, persistence and
+reload. Legacy placeholder rows still
 invalidate the scored suite. The Room Booking Chrome check additionally reviews
 actor/state sequencing, unsupported permission or request-level assumptions,
 and the retry identity/count assertions; mocked checks do not establish live
 model quality or provision the synthetic execution harness.
+
+The Room Booking response-loss prerequisite now has a reusable synthetic harness
+in `scripts/response_loss_proxy.py`. Verify its transport contract separately:
+
+```bash
+.venv/bin/python -m unittest discover -s backend/tests -p test_response_loss_proxy.py -v
+```
+
+These tests start and clean up loopback listeners. The proxy forwards the initial
+submission, completely reads the successful response and records its ID before
+closing the client connection. It forwards the identical retry without adding
+deduplication. Error responses and unrelated requests do not consume the loss;
+missing ID/evidence-write failure cannot claim successful capture. The reference
+stub intentionally returns a stable ID: this verifies the proxy, not application
+retry behavior, browser integration, or durable storage across server restarts.
+The main transport test is included in the critical backend gate.
+
+For a separately running synthetic HTTP target, use
+`python scripts/response_loss_proxy.py --help` to supply its loopback port, exact
+submission path, top-level JSON string ID field, and an evidence file outside
+the repository. Each instance suppresses only its first matching 2xx response;
+restart it to arm a new isolated test. Only small GET/POST fixtures are supported
+(1 MiB bodies, five-second socket timeouts); it is not an HTTPS interception or
+general production proxy. The original response and retry are never synthesized.
+Real-target routing, ID extraction and browser/application behavior need separate
+verification when an execution target becomes available. Never treat this
+fixture capability check as booking execution or human acceptance.
 
 `frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
 scenario is opt-in; the default full suite reports it as skipped. Its anonymous
