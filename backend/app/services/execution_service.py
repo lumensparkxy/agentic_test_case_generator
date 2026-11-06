@@ -532,7 +532,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:
 
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
-    if re.search(r"\bURL\b", text, re.IGNORECASE):
+    if re.search(r"\b(?:URL|loads successfully at)\b", text, re.IGNORECASE):
         if url := _extract_prose_url(text):
             return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(url)}"')
 

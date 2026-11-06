@@ -383,6 +383,7 @@ class ExecutionServiceTests(unittest.TestCase):
         for action, expected, url in (
             (f"Navigate to {bare}.", f"The URL should be {bare}.", bare),
             (f'Open "{literal}".', f'URL should be "{literal}".', literal),
+            (f'Open "{literal}".', f'The directory page loads successfully at "{literal}".', literal),
             (f"Open <{literal}>.", f"URL should be <{literal}>.", literal),
             (f"Open `{literal}`.", f"URL should be `{literal}`.", literal),
         ):
