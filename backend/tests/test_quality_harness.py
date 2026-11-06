@@ -82,6 +82,21 @@ class QualityHarnessTests(unittest.TestCase):
         self.assertNotIn("private synthetic marker", json.dumps(usage))
         self.assertEqual(usage["requests"][0]["model"], "candidate")
 
+    def test_usage_capture_allows_adk_to_pass_a_response_schema_class(self):
+        from google.genai import types
+        from google.genai.models import AsyncModels
+
+        config = types.GenerateContentConfig(response_schema=Requirement, temperature=0.2, system_instruction="private instructions")
+        response = types.GenerateContentResponse(usage_metadata=types.GenerateContentResponseUsageMetadata(prompt_token_count=5, candidates_token_count=2))
+        with patch.object(AsyncModels, "generate_content", return_value=response) as generate:
+            with evaluation.collect_usage() as usage:
+                result = asyncio.run(AsyncModels.generate_content(None, model="candidate", contents="private fixture", config=config))
+        generate.assert_awaited_once_with(None, model="candidate", contents="private fixture", config=config)
+        self.assertIs(result, response)
+        self.assertEqual(usage["requests"][0]["config"], {"temperature": 0.2})
+        self.assertEqual((usage["calls"], usage["input_tokens"], usage["output_tokens"]), (1, 5, 2))
+        self.assertNotIn("private", json.dumps(usage))
+
     def test_runtime_binding_reads_only_test_namespace_and_never_embeds_value(self):
         step = {"action": "fill", "locator": {"strategy": "label", "value": "Password"}, "value": "[[env:PETF_TEST_LOGIN]]"}
         with patch.dict("os.environ", {"PETF_TEST_LOGIN": "not-in-script"}):

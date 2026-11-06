@@ -164,7 +164,14 @@ def collect_usage():
 
     def capture(kwargs):
         config = kwargs.get("config")
-        config = config.model_dump(mode="json", exclude_none=True) if hasattr(config, "model_dump") else dict(config or {})
+        settings = ("temperature", "top_p", "top_k", "max_output_tokens", "thinking_config")
+        # ADK may supply a Pydantic model class as response_schema. Serialize
+        # only the fields we record so telemetry cannot interrupt that call.
+        config = (
+            config.model_dump(mode="json", include={*settings, "system_instruction"}, exclude_none=True)
+            if hasattr(config, "model_dump")
+            else dict(config or {})
+        )
         prompt = {"contents": str(kwargs.get("contents", "")), "system_instruction": config.pop("system_instruction", None)}
         # Hash raw content, retaining only non-secret generation settings.
         with lock:
@@ -172,7 +179,7 @@ def collect_usage():
                 {
                     "model": kwargs.get("model"),
                     "prompt_hash": canonical_hash(prompt),
-                    "config": {k: config[k] for k in ("temperature", "top_p", "top_k", "max_output_tokens", "thinking_config") if k in config},
+                    "config": {k: config[k] for k in settings if k in config},
                 }
             )
 
