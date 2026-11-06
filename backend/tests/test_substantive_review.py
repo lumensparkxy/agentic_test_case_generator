@@ -57,6 +57,57 @@ def fixture(*, retry=True):
 
 
 class SubstantiveReviewTests(unittest.TestCase):
+    def test_compact_source_references_resolve_hash_bound_text_and_excerpt(self):
+        req, case, _, _, output = fixture(retry=False)
+        req.source_excerpt = "Original source excerpt: retain the same identity."
+        data, digest, _ = review_input([case], [req], None)
+        output["input_hash"] = digest
+        source = data["requirements"][0]
+        for field in ("text", "source_excerpt"):
+            with self.subTest(field=field):
+                compact = json.loads(json.dumps(output))
+                obligation = compact["obligations"][0]
+                obligation.pop("source_quote")
+                obligation["source_field"] = field
+                result = validate_assessment(json.dumps(compact), data, digest)
+                self.assertEqual(result["obligations"][0]["source_quote"], source[field])
+                self.assertNotIn("source_field", result["obligations"][0])
+                self.assertEqual(result["status"], "assessed_complete")
+
+    def test_unknown_empty_or_ambiguous_source_reference_is_rejected(self):
+        _, _, data, digest, output = fixture(retry=False)
+        for update in (
+            {"source_field": "notes"},
+            {"source_field": "source_excerpt"},
+            {"source_field": "text", "requirement_id": "invented"},
+            {"source_field": "text", "source_quote": "Double-click"},
+        ):
+            with self.subTest(update=update):
+                compact = json.loads(json.dumps(output))
+                compact["obligations"][0].pop("source_quote")
+                compact["obligations"][0].update(update)
+                with self.assertRaisesRegex(ValueError, "Source reference"):
+                    validate_assessment(json.dumps(compact), data, digest)
+
+    def test_paraphrased_source_still_fails_closed_with_safe_diagnostic(self):
+        req, case, _, _, output = fixture(retry=False)
+        output["obligations"][0]["source_quote"] = "must be a whole number from 1 to 8 inclusive"
+        with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)) as call:
+            result = assess_delivered_suite([case], [req], None, settings=object())
+        call.assert_called_once()
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["diagnostics"]["validation_error"], "source_citation_mismatch")
+        self.assertNotIn(output["obligations"][0]["source_quote"], str(result))
+        self.assertIn("source citation mismatch", result["reason"])
+
+    def test_invalid_schema_diagnostic_does_not_expose_model_values(self):
+        req, case, _, _, output = fixture(retry=False)
+        output["obligations"][0]["status"] = "private model detail"
+        with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)):
+            result = assess_delivered_suite([case], [req], None, settings=object())
+        self.assertEqual(result["diagnostics"]["validation_error"], "invalid_output_schema")
+        self.assertNotIn("private model detail", str(result))
+
     def test_compact_step_references_resolve_exact_delivered_evidence_and_reject_invalid_refs(self):
         _, _, data, digest, output = fixture(retry=False)
         original = output["obligations"][0]["evidence"][0].copy()
@@ -96,7 +147,10 @@ class SubstantiveReviewTests(unittest.TestCase):
             with self.subTest(reason=reason, attempts=attempts), patch("app.agents.substantive_review._call_critic", side_effect=side_effect) as call:
                 result = assess_delivered_suite([case], [req], None, settings=object())
                 self.assertEqual(result["status"], "unknown")
-                self.assertEqual(result["diagnostics"], {"attempt_count": attempts, "failure_reason": reason})
+                self.assertEqual(result["diagnostics"]["attempt_count"], attempts)
+                self.assertEqual(result["diagnostics"]["failure_reason"], reason)
+                if reason == "invalid_evidence":
+                    self.assertIn(result["diagnostics"]["validation_error"], {"malformed_json", "content_binding_mismatch"})
                 self.assertEqual(call.call_count, attempts)
                 self.assertNotIn("private", str(result))
         with (

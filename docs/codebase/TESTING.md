@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **64 selected backend methods and 28 browser cases**. This
+Routine CI runs **65 selected backend methods and 28 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -444,6 +444,16 @@ invalidate the scored suite. The Room Booking Chrome check additionally reviews
 actor/state sequencing, unsupported permission or request-level assumptions,
 and the retry identity/count assertions; mocked checks do not establish live
 model quality or provision the synthetic execution harness.
+
+The v3 delivered-suite reviewer cites a requirement ID and `source_field`
+(`text` or nonempty `source_excerpt`). The server resolves the exact source text
+from the same hash-bound review input, as it does for compact step references.
+Legacy full-text citations still require an exact match; paraphrases are never
+silently corrected. Unknown, empty or conflicting references fail closed. Safe
+validation categories distinguish citation, binding, completeness and schema
+failures without exposing raw model values. Cancellation review permits any
+source-supported denial mechanism, including a visible action denied on use;
+it does not invent a hidden/disabled-control requirement.
 
 The Room Booking response-loss prerequisite now has a reusable synthetic harness
 in `scripts/response_loss_proxy.py`. Verify its transport contract separately:
