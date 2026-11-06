@@ -48,3 +48,7 @@ class UseCaseLiteralSourceTests(unittest.IsolatedAsyncioTestCase):
         critic_text = pipeline.sub_agents[2].instruction(context)
         self.assertIn(source, critic_text)
         self.assertIn(notes, critic_text)
+
+    async def test_parallel_planning_omits_shard_critic_in_favor_of_complete_plan_review(self):
+        pipeline = use_case_agent._build_use_case_pipeline("fixture", "Assigned requirements", "Shared setup", lambda _state: [], 1, review_in_shard=False)
+        self.assertEqual([agent.name for agent in pipeline.sub_agents], ["RequirementAnalysisAgent", "CoveragePlannerAgent"])

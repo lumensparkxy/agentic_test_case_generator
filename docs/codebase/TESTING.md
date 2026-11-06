@@ -135,7 +135,7 @@ Evidence: `.github/workflows/ci.yml`.
 
 ### Critical regression selection
 
-Routine CI runs **61 selected backend methods and 27 browser cases**. This
+Routine CI runs **61 selected backend methods and 28 browser cases**. This
 replaces 577 backend methods and 50 previously tagged browser cases in the
 required gate. Offline benchmarks, API contracts, lint, formatting and frontend
 build checks remain required. Test selection is independent of priorities in
@@ -168,7 +168,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 | `quality-feedback` | 1 | Record a missing login, backfill a non-secret reference, propose scoped learning and retain pending verification |
 | `home-workspace` | 2 | Create a durable project; reject prior-user state after logout |
 | `requirement-import-review` | 2 | Preserve imported identities/approvals; reject stale apply |
-| `use-case-generation` | 2 | New generation requires review; unapproved requirements block generation |
+| `use-case-generation` | 3 | New generation requires review; unapproved requirements block generation; guidance stays singular across generation/review/reload without React key errors |
 | `use-case-review` | 2 | Review exact snapshot/revision; preserve feedback on conflict |
 | `scenario-review-table` | 2 | Edits revoke approval; structural score cannot replace semantics/human review |
 | `context-notes` | 1 | Save notes without links, preserve approved requirements, and restore exact notes after reload |
@@ -181,7 +181,7 @@ Browser `@p1` tags select the following distinct critical outcomes:
 | `knowledge` | 2 | Effective guidance/holds are visible; unavailable capability never implies enabled |
 | `accessibility-navigation` | 1 | Use Cases has no serious/critical Axe violations at 1440px |
 
-The complete **577 backend / 279 mocked browser** suites remain available on
+The complete backend and **281 mocked browser** suites remain available on
 demand. No assertions or tests were deleted. The critical gate omits alternate
 viewports, secondary navigation/filter/report cases, mocked JIRA journeys and
 many alternate failure variants. Run affected specs/modules for those changes;
@@ -426,6 +426,14 @@ fallback scaffolding, which is not semantic approval. Regression coverage in
 normalization, identifiers, ownership, sequential/parallel preservation, and
 fallback review behavior. The structural and semantic quality gates remain in
 force; removing server-added padding does not prove the model output is adequate.
+
+Use Case semantic review compares the complete plan across requirement groups,
+including groups planned by separate workers. `test_scenario_assessment.py` and
+`test_use_case_agent.py` cover exact cross-group duplicate warnings, whole-plan
+review binding, source mapping findings, and bounded reviewer failure without
+discarding scenarios or claiming a pass. Paraphrase and business ownership checks
+still require the semantic reviewer and inspection of the live delivered plan;
+mocked verdicts establish transport/validation behavior, not model accuracy.
 
 `frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
 scenario is opt-in; the default full suite reports it as skipped. Its anonymous

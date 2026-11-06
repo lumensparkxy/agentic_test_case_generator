@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from .adk_runtime import json_generation_config
 
 STATE_SCENARIO_ASSESSMENT = "scenario_semantic_assessment"
-RUBRIC_VERSION = "scenario_semantics_v2"
+RUBRIC_VERSION = "scenario_semantics_v3"
 CRITERIA = ("specific_trigger", "observable_outcome", "distinct_behavior", "source_grounding")
 _ROUTE = re.compile(r"(?<![\w/])/(?:[\w{}:.-]+/)*[\w{}:.-]+/?")
 
@@ -77,11 +77,14 @@ class CriticOutput(BaseModel):
 
 def assessment_input(plan, requirements, context_text):
     sources = {r.id: r.text for r in requirements}
+    # Distinctness and mapping are relative to the entire delivered plan/source
+    # catalogue. A passing shard review cannot certify a changed neighbour.
+    scope_hash = sha256(json.dumps({"plan": plan, "sources": sources, "rubric": RUBRIC_VERSION}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     rows = []
     for group in plan:
         for scenario in group.get("scenarios") or []:
             row = {"requirement_id": group["requirement_id"], "scenario": scenario}
-            binding = {**row, "requirement_text": sources.get(group["requirement_id"], ""), "context": context_text}
+            binding = {**row, "requirement_text": sources.get(group["requirement_id"], ""), "context": context_text, "scope_hash": scope_hash}
             row["content_hash"] = sha256(json.dumps(binding, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             rows.append(row)
     return rows
@@ -105,8 +108,8 @@ For EVERY scenario return its exact requirement_id, scenario_id (scenario.id), a
 Assess four criteria with a boolean passed and a short evidence-based reason:
 - specific_trigger: title and objective together specify an actionable condition/action or concrete input. Category-only scaffolding is insufficient. Short valid content is acceptable.
 - observable_outcome: content specifies what a tester can observe and assert. 'Validate requirement under negative conditions' is insufficient. Do not demand steps in a scenario plan.
-- distinct_behavior: it adds a different behavior within the requirement. Renaming a category/title without a different trigger or outcome is padding; flag all members of a duplicate cluster.
-- source_grounding: expected business behavior and mandatory technical prescriptions follow the supplied facts. Invented routes, mandatory debouncing, statuses, permissions, or timing policies are unsupported assumptions. Explain what to confirm or remove. Clearly marked optional exploratory assumptions may remain but cannot establish required coverage.
+- distinct_behavior: compare against EVERY scenario across ALL requirement groups, not just this requirement. Paraphrasing the same trigger and outcome under another requirement is duplicate coverage; flag the redundant scenario and cite its counterpart. Shared setup, actors or words alone are not duplicates when the tested rule or observable outcome differs. Keep distinct input partitions and assertions.
+- source_grounding: the tested business rule must belong to this scenario's mapped requirement. Context may supply fixtures and setup but does not assign every described behavior to every requirement. If another requirement owns the rule (for example retry recovery versus ordinary successful creation), flag the incorrect mapping and identify the owner. Expected behavior and mandatory technical prescriptions must follow the supplied facts. Invented routes, mandatory debouncing, statuses, permissions, or timing policies are unsupported assumptions. Explain what to confirm or remove. Clearly marked optional exploratory assumptions may remain but cannot establish required coverage.
 Read the FULL title and objective. A generic title alone is not a defect. Do not infer adequacy from category counts, priority, IDs, or a structural score.
 For each failure identify the missing element and a useful correction without inventing a product fact.
 Return ONLY a JSON object of this shape (one assessment per scenario, all four criteria required):
@@ -152,6 +155,7 @@ def local_findings(plan, source_text):
     source_routes = _routes(source_text)
     source_facts = _ROUTE.sub(" ", source_text)
     source_values = {token.rstrip(".") for token in re.findall(r"(?<![\w.-])[A-Za-z0-9_][A-Za-z0-9_.-]*", source_facts)}
+    by_objective = {}
     for group in plan:
         by_content = {}
         for scenario in group.get("scenarios") or []:
@@ -171,6 +175,8 @@ def local_findings(plan, source_text):
                         f"Route {route} is not supplied by the source. Confirm it as an assumption or describe the business action without an invented route."
                     )
             findings[key] = warnings
+            if not generic and _normal(objective):
+                by_objective.setdefault(_normal(objective), []).append(key)
             # Ignore category-only titles when finding identical objective padding.
             content = _normal(objective) if _generic_title(title) else _normal(f"{title} {objective}")
             by_content.setdefault(content, []).append(key)
@@ -180,6 +186,13 @@ def local_findings(plan, source_text):
                     findings[key].append(
                         "Duplicate scenario content within this requirement. Define a distinct trigger or expected outcome, or remove the duplicate."
                     )
+    for keys in by_objective.values():
+        if len({key[0] for key in keys}) > 1:
+            for key in keys:
+                counterparts = ", ".join(scenario_id for requirement_id, scenario_id in keys if requirement_id != key[0])
+                findings[key].append(
+                    f"Duplicate objective across requirements ({counterparts}). Consolidate under the requirement that owns the behavior, or specify a distinct assertion."
+                )
     return findings
 
 

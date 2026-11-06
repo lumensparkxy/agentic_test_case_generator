@@ -32,7 +32,13 @@ Primary constraints:
 - Use-case planning is split from full test-case generation. The orchestrator
   `use_cases` specialist uses a bounded backend coordinator that shards
   requirements, merges requirement analysis and coverage plans centrally, and
-  leaves project snapshot writes to the existing router/service flow.
+  leaves project snapshot writes to the existing router/service flow. Each
+  planning shard sees the full requirement catalogue for behavior ownership.
+  Multi-shard runs replace shard critics with one complete-plan semantic review
+  (at most 120 seconds, or the shorter configured workflow timeout) to check
+  duplicate behavior and mapping across groups. Single-shard runs retain their
+  in-pipeline critic. Review certificates bind the rubric, full plan, requirements
+  and context; missing or failed review never establishes a semantic pass.
 - Human Use Cases review is a separate durable decision from generated content.
   `POST /projects/{id}/use-cases/reviews` records an approval or requested-change
   decision against the exact current snapshot and project revision without
