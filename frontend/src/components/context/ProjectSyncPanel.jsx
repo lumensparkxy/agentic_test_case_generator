@@ -240,7 +240,7 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 						))}
 				</Select>
 			</label>
-			<Button variant="plain" onClick={load}>
+			<Button variant="secondary" size="compact" onClick={load}>
 				Reload findings
 			</Button>
 			{selected && (
