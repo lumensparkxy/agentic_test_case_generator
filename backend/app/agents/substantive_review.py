@@ -13,6 +13,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from .adk_runtime import json_generation_config
+from .evaluation_limits import current_evaluation_limits
 from .quality_goal import QUALITY_GOAL
 from .prompting import TEST_CASE_BEHAVIOR_POLICY
 from ..services.test_case_quality import project_test_case_view
@@ -341,7 +342,8 @@ def assess_delivered_suite(cases, requirements, context, *, settings=None, scope
     data, input_hash, encoded = review_input(cases, requirements, context, scope_plan=scope_plan)
     if not cases or not requirements or settings is None:
         return unknown_assessment(data, input_hash, "No independent model assessment is available for this delivered suite.")
-    if len(encoded.encode()) > MAX_INPUT_BYTES:
+    budget = current_evaluation_limits.get().review_bytes or MAX_INPUT_BYTES
+    if len(encoded.encode()) > budget:
         return unknown_assessment(data, input_hash, "Assessment input exceeds the bounded review size; split the scope for review.")
     deadline = monotonic() + ASSESSMENT_BUDGET_SECONDS
     prompt = review_prompt(data, input_hash)

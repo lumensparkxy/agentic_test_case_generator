@@ -10,7 +10,14 @@ sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).res
 import evaluate_guidance as evaluation
 from app.config import get_settings, model_scope
 from app.agents.context_evidence import prepare_context_evidence
-from app.agents.test_case_agent import _build_generation_pipeline, _prepare_workflow_inputs
+from app.agents.test_case_agent import (
+    _build_generation_pipeline,
+    _build_test_case_generator_agent,
+    _combined_event_text,
+    _prepare_workflow_inputs,
+    _record_event_error,
+)
+from app.agents.evaluation_limits import EvaluationLimits, evaluation_limits_scope
 from app.agents.quality_goal import QUALITY_GOAL
 from app.services.guidance_service import apply_agent_guidance
 from app.contracts.grounding import EnrichInput, GroundedContext, GroundedUIElement, GroundedApiSurface
@@ -19,6 +26,46 @@ from plain_english_test_framework.playwright_generator import _render_action, Pl
 
 
 class QualityHarnessTests(unittest.TestCase):
+    def test_trial_context_and_writer_limits_are_scoped(self):
+        requirement = Requirement(id="R", text="Verify the control")
+        marker = "TAIL-EVIDENCE"
+        context = EnrichInput(requirements=[requirement], notes="x" * 61_250 + marker)
+        self.assertNotIn(marker, prepare_context_evidence([requirement], context))
+        with evaluation_limits_scope(EvaluationLimits(context_chars=128_000, case_output_tokens=256_000)):
+            self.assertIn(marker, prepare_context_evidence([requirement], context))
+            for model, expected in (("gemini-4-argon", 256_000), ("gemini-3.8-flash", 20_000)):
+                agent = _build_test_case_generator_agent(model, "R", "context", "template")
+                self.assertEqual(agent.generate_content_config.max_output_tokens, expected)
+        self.assertNotIn(marker, prepare_context_evidence([requirement], context))
+        self.assertEqual(_build_test_case_generator_agent("gemini-4-argon", "R", "context", "template").generate_content_config.max_output_tokens, 20_000)
+
+    def test_continued_json_joins_without_separators_and_omits_thoughts(self):
+        from google.genai import types
+
+        content = types.Content(parts=[types.Part(text="internal thought", thought=True), types.Part(text='{"title":"Approve exp'), types.Part(text='ense"}')])
+        event = SimpleNamespace(content=content)
+        self.assertEqual(json.loads(_combined_event_text(event)), {"title": "Approve expense"})
+        for finish_reason in (types.FinishReason.MAX_TOKENS, types.FinishReason.CONTINUATION):
+            diagnostics = {"status": "completed", "failure_reason": None, "warnings": []}
+            _record_event_error(diagnostics, "TestCaseGeneratorAgent", SimpleNamespace(finish_reason=finish_reason))
+            self.assertEqual(diagnostics["status"], "partial")
+            self.assertEqual(diagnostics["failure_reason"], "incomplete_model_output")
+
+    def test_trial_review_budget_allows_large_input_without_bypassing_validation(self):
+        from app.agents.substantive_review import assess_delivered_suite
+
+        requirement = Requirement(id="R", text="Verify the control")
+        context = EnrichInput(requirements=[requirement], notes="x" * 180_000)
+        with patch("app.agents.substantive_review._call_critic", return_value="invalid JSON") as critic:
+            baseline = assess_delivered_suite([{"id": "TC-1"}], [requirement], context, settings=object())
+            critic.assert_not_called()
+            self.assertIn("bounded review size", baseline["reason"])
+            with evaluation_limits_scope(EvaluationLimits(review_bytes=512_000)):
+                trial = assess_delivered_suite([{"id": "TC-1"}], [requirement], context, settings=object())
+            critic.assert_called_once()
+            self.assertEqual(trial["status"], "unknown")
+            self.assertEqual(trial["diagnostics"]["validation_error"], "malformed_json")
+
     def test_requested_model_controls_settings_and_restores_them(self):
         before = get_settings().model_name
         with model_scope("candidate"):
