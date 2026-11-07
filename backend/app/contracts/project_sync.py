@@ -50,4 +50,3 @@ class AcceptProjectFinding(BaseModel):
 class ResumeProjectSync(BaseModel):
     model_config = ConfigDict(extra="forbid")
     change_id: str = Field(min_length=1, max_length=160)
-
