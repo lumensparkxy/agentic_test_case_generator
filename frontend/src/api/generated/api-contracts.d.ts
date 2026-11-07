@@ -434,6 +434,7 @@ export interface GenerateTestCasesResponse {
 	knowledge_suggestion?: Record<string, unknown> | null;
 	requirement_analysis?: Array<RequirementAnalysis>;
 	review?: ReviewResult;
+	scoped_refinement?: Record<string, unknown> | null;
 	substantive_assessment?: Record<string, unknown> | null;
 	test_cases: Array<TestCase>;
 	workflow_diagnostics?: WorkflowDiagnostics;
@@ -815,6 +816,7 @@ export interface RefineTestCasesInput {
 	feedback: string;
 	project_id?: string | null;
 	requirements: Array<Requirement>;
+	selected_test_case_ids?: Array<string>;
 	template: TestCaseTemplate;
 	test_cases: Array<TestCase>;
 	workflow_settings?: WorkflowSettings | null;
@@ -825,6 +827,8 @@ export interface Requirement {
 	artifact_set_id?: string | null;
 	artifact_version_id?: string | null;
 	artifact_version_number?: number | null;
+	clarification_finding_id?: string | null;
+	clarification_status?: "open" | "deferred" | "excluded" | "resolved" | null;
 	content_version?: number;
 	id: string;
 	lifecycle_status?: "active" | "retired";

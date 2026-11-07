@@ -55,7 +55,7 @@ class QualityFindingInput(BaseModel):
 
 class QualityFindingAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["apply", "verify", "propose_lesson", "classify"]
+    action: Literal["apply", "verify", "propose_lesson", "classify", "defer", "exclude"]
     base_project_revision: int = Field(ge=0)
     prerequisites: list[ExecutionPrerequisite] = Field(default_factory=list, max_length=30)
     category: (
@@ -64,3 +64,9 @@ class QualityFindingAction(BaseModel):
     ) = None
     verification_snapshot_id: str | None = Field(default=None, max_length=160)
     lesson: KnowledgeDraft | None = None
+    reason: str = Field(default="", max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def non_sensitive_reason(cls, value):
+        return KnowledgeDraft(text=value, stages=["test_cases"]).text if value else value

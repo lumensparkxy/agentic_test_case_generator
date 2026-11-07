@@ -1,12 +1,18 @@
+import useReviewDraft from "../../hooks/useReviewDraft";
+import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
 import { Input, Button } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
-import { useId, useState } from "react";
+import { useId, useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
 export default function GeneratedTestCasesView({
 	testCases,
+	identity,
+	projectId,
+	snapshotId,
+	onReport,
 	selectedId,
 	setSelectedId,
 	qualityIssues = [],
@@ -15,11 +21,27 @@ export default function GeneratedTestCasesView({
 	changedIds = null,
 	onClearChanged,
 }) {
-	const [query, setQuery] = useState("");
+	const recovery = useReviewDraft({
+		identity,
+		projectId,
+		snapshotId,
+		name: "test-review",
+		initialValue: { query: "", selectedId: "", scrollTop: 0, changedIds: null },
+	});
+	const query = recovery.value.query;
+	const setQuery = (query) => recovery.setValue((old) => ({ ...old, query }));
+	const listRef = useRef(null);
+	useEffect(() => {
+		if (listRef.current) listRef.current.scrollTop = recovery.value.scrollTop || 0;
+	}, [snapshotId]);
 	const searchId = useId();
+	const visibleChanges = changedIds ?? recovery.value.changedIds ?? null;
+	useEffect(() => {
+		if (changedIds !== null) recovery.setValue((old) => ({ ...old, changedIds }));
+	}, [changedIds]);
 	const cases = testCases.filter(
 		(tc) =>
-			(changedIds === null || changedIds.includes(tc.id)) &&
+			(visibleChanges === null || visibleChanges.includes(tc.id)) &&
 			[
 				tc.id,
 				tc.title,
@@ -32,7 +54,7 @@ export default function GeneratedTestCasesView({
 				.toLowerCase()
 				.includes(query.toLowerCase().trim())
 	);
-	const selected = cases.find((tc) => tc.id === selectedId) || cases[0];
+	const selected = cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
 	const steps = selected?.steps || [];
 	const findings = selected
 		? qualityIssues.filter((issue) => new RegExp(`\\b${selected.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(issue))
@@ -46,11 +68,18 @@ export default function GeneratedTestCasesView({
 				aria-label="Generated test cases"
 			>
 				<div className="test-review-list">
+					<DraftRecoveryNotice draft={recovery} />
 					<h2>Generated Test Cases</h2>
-					{changedIds !== null && (
+					{visibleChanges !== null && (
 						<div role="status">
 							<p>Showing changed tests</p>
-							<Button variant="secondary" onClick={onClearChanged}>
+							<Button
+								variant="secondary"
+								onClick={() => {
+									recovery.setValue((old) => ({ ...old, changedIds: null }));
+									onClearChanged?.();
+								}}
+							>
 								Show all tests
 							</Button>
 						</div>
@@ -68,7 +97,13 @@ export default function GeneratedTestCasesView({
 					<ResultCount as="p" className="test-list-count" role="status">
 						{cases.length} of {testCases.length} test cases
 					</ResultCount>
-					<List as="div" variant="grouped" className="test-review-items">
+					<List
+						as="div"
+						variant="grouped"
+						className="test-review-items"
+						ref={listRef}
+						onScroll={(event) => recovery.setValue((old) => ({ ...old, scrollTop: event.currentTarget.scrollTop }))}
+					>
 						{cases.map((tc) => (
 							<SelectableItem
 								key={tc.id}
@@ -76,7 +111,10 @@ export default function GeneratedTestCasesView({
 								className={`test-review-item ${selected?.id === tc.id ? "selected" : ""}`}
 								aria-pressed={selected?.id === tc.id}
 								aria-controls="selected-test-case"
-								onClick={() => setSelectedId(tc.id)}
+								onClick={() => {
+									setSelectedId(tc.id);
+									recovery.setValue((old) => ({ ...old, selectedId: tc.id }));
+								}}
 							>
 								<span>
 									<small>{tc.id}</small> <strong>{tc.title}</strong>
@@ -88,7 +126,7 @@ export default function GeneratedTestCasesView({
 					{!cases.length && (
 						<CollectionState kind={testCases.length ? "filtered" : "empty"}>
 							<p>
-								{changedIds?.length === 0
+								{visibleChanges?.length === 0
 									? "This application preserved all tests. There are no changed tests to review."
 									: testCases.length
 										? "No test cases match your search."
@@ -113,6 +151,11 @@ export default function GeneratedTestCasesView({
 								{getTestCaseLinkedRequirementIds(selected).join(", ")}
 							</p>
 							<h2>{selected.title}</h2>
+							{onReport && (
+								<Button variant="secondary" onClick={() => onReport(selected)}>
+									Report a problem
+								</Button>
+							)}
 							{selected.description && <p>{selected.description}</p>}
 							{findings.length > 0 && (
 								<Disclosure className="test-inline-findings">

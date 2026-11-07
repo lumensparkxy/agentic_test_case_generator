@@ -3035,6 +3035,6 @@ def refine_test_cases(
         payload.requirements,
         payload.context,
         settings=settings if not workflow.get("workflow_diagnostics", {}).get("used_fallback") else None,
-        scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" else None,
+        scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" or payload.selected_test_case_ids else None,
     )
     return apply_assessment(response, assessment)

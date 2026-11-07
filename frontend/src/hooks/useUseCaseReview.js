@@ -1,3 +1,4 @@
+import useReviewDraft from "./useReviewDraft";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createRequestId } from "../services/apiClient";
@@ -40,8 +41,16 @@ export default function useUseCaseReview({
 	const projectScopeRef = useRef("");
 	const requestScopeRef = useRef("");
 	const scopeContextRef = useRef(null);
-	const [decision, setDecisionState] = useState("");
-	const [comment, setCommentState] = useState("");
+	const recovery = useReviewDraft({
+		identity,
+		projectId,
+		snapshotId,
+		name: "use-case-decision",
+		initialValue: { decision: "", comment: "", revision: baseProjectRevision },
+	});
+	const { decision, comment } = recovery.value;
+	const recoveryRef = useRef(recovery);
+	recoveryRef.current = recovery;
 	const [outcome, setOutcome] = useState(initialOutcome);
 
 	requestRef.current = request;
@@ -72,8 +81,6 @@ export default function useUseCaseReview({
 		retryIdentityRef.current = null;
 
 		if (projectChanged) {
-			setDecisionState("");
-			setCommentState("");
 			setOutcome(initialOutcome());
 			return;
 		}
@@ -109,21 +116,37 @@ export default function useUseCaseReview({
 		[]
 	);
 
-	const setDecision = useCallback((nextDecision) => {
-		setDecisionState(nextDecision);
-		retryIdentityRef.current = null;
-		setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
-	}, []);
+	const setDecision = useCallback(
+		(nextDecision) => {
+			recoveryRef.current.setValue((old) => ({ ...old, decision: nextDecision, revision: baseProjectRevision }));
+			retryIdentityRef.current = null;
+			setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
+		},
+		[baseProjectRevision]
+	);
 
-	const setComment = useCallback((nextComment) => {
-		setCommentState(nextComment);
-		retryIdentityRef.current = null;
-		setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
-	}, []);
+	const setComment = useCallback(
+		(nextComment) => {
+			recoveryRef.current.setValue((old) => ({ ...old, comment: nextComment, revision: baseProjectRevision }));
+			retryIdentityRef.current = null;
+			setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
+		},
+		[baseProjectRevision]
+	);
 
 	const submit = useCallback(
 		async (options = {}) => {
 			const scenarioReviews = options.scenarioReviews;
+			if (!scenarioReviews && recoveryRef.current.value.revision !== baseProjectRevision) {
+				setOutcome({
+					status: "conflict",
+					error: "This draft belongs to an older project revision. Reload and review your decision before saving.",
+					conflict: { reload_required: true },
+					response: null,
+					announcement: "Review the current source before saving.",
+				});
+				return null;
+			}
 			const submittedDecision = scenarioReviews ? "review_scenarios" : decision;
 			lastSubmissionRef.current = options;
 			if (submittingRef.current || !["approve", "request_changes", "review_scenarios"].includes(submittedDecision)) {
@@ -180,6 +203,7 @@ export default function useUseCaseReview({
 					return null;
 				}
 				retryIdentityRef.current = null;
+				recoveryRef.current.clear({ keepVisible: true });
 				activeRequestRef.current = { ...activeRequestRef.current, phase: "committed" };
 				setOutcome({
 					status: "submitting",
@@ -278,6 +302,7 @@ export default function useUseCaseReview({
 				throw new Error("The latest Use Cases could not be loaded. Try again.");
 			}
 			retryIdentityRef.current = null;
+
 			setOutcome({
 				status: "idle",
 				error: "",
@@ -303,6 +328,7 @@ export default function useUseCaseReview({
 	}, []);
 
 	return {
+		recovery,
 		decision,
 		setDecision,
 		comment,

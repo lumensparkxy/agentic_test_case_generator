@@ -103,6 +103,8 @@ def capture_finding(project_id, actor, payload: QualityFindingInput, request_id)
         "affected_stages": ["context", "use_cases", "test_cases", "execution", "reports"],
         "attempts": 0,
     }
+    if record["category"] in ("ambiguous_requirement", "unsupported_assumption"):
+        return _commit_clarification(project, actor, request_id, record)
     return _commit(project, actor, request_id, record)
 
 
@@ -128,6 +130,55 @@ def _snapshot(project, stage, payload, finding, actor, revision, metadata):
     return value, state
 
 
+def _commit_clarification(project, actor, request_id, record):
+    baseline = project.current_snapshots.get("requirements")
+    if not baseline:
+        raise HTTPException(409, "Import requirements before raising a clarification")
+    cases = project.current_snapshots.get("test_cases")
+    affected = set(record.get("requirement_ids") or []) | {
+        rid
+        for case in (cases.payload.get("test_cases", []) if cases else [])
+        if case["id"] in record.get("test_case_ids", [])
+        for rid in case.get("linked_requirement_ids", [])
+    }
+    rows = deepcopy(baseline.payload.get("requirements", []))
+    source_text = {row["id"]: row["text"] for row in rows if row["id"] in affected}
+    if (
+        record["source_snapshot_id"] not in {snapshot.snapshot_id for snapshot in project.current_snapshots.values()}
+        and record.get("requirement_source_text") != source_text
+    ):
+        raise HTTPException(409, "The clarification source changed. Reload and record the question against the current source.")
+    record["requirement_source_text"] = source_text
+    if not affected or not affected <= {row["id"] for row in rows}:
+        raise HTTPException(422, "Link the clarification to current requirements")
+    for row in rows:
+        if row["id"] in affected:
+            if row.get("clarification_status") in ("open", "deferred", "excluded") and row.get("clarification_finding_id") != record["id"]:
+                raise HTTPException(409, "Resolve the existing clarification for this requirement first")
+            row["review_status"] = "Rejected" if record["status"] == "excluded" else "Needs Review"
+            row["clarification_status"] = record["status"]
+            row["clarification_finding_id"] = record["id"]
+    revision = project.current_revision + 1
+    value, state = _snapshot(
+        project,
+        "requirements",
+        {**baseline.payload, "requirements": rows},
+        record,
+        actor,
+        revision,
+        {"affected_requirement_ids": sorted(affected), "clarification_status": record["status"]},
+    )
+    record.setdefault("original_source_snapshot_id", record["source_snapshot_id"])
+    record.update(source_snapshot_id=value["snapshot_id"], requirement_ids=sorted(affected))
+    states = {key: item.model_dump(mode="json") for key, item in project.stage_state.items()}
+    states["requirements"] = state
+    for key in ("context", "use_cases", "test_cases", "execution", "reports"):
+        if key in states:
+            states[key].update(stale=True, approved=False, stale_reason="Resolve or exclude the affected requirement scope before updating this artifact.")
+    reference = projects._get_project_doc(project.project_id).collection("snapshots").document(value["snapshot_id"])
+    return _commit(project, actor, request_id, record, updates={"stage_state": states}, writes=[(reference, value, False)])
+
+
 def update_finding(project_id, identity, actor, payload: QualityFindingAction, request_id):
     project = _project(project_id, actor)
     ref = projects._get_project_doc(project_id).collection("quality_findings").document(identity)
@@ -142,10 +193,19 @@ def update_finding(project_id, identity, actor, payload: QualityFindingAction, r
     _check_revision(project, payload.base_project_revision)
     record = deepcopy(saved)
     record.update(revision=saved["revision"] + 1, last_request_id=request_id, last_fingerprint=fingerprint)
+    if payload.action in ("defer", "exclude"):
+        if record["category"] not in ("ambiguous_requirement", "unsupported_assumption") or record["status"] not in ("open", "deferred"):
+            raise HTTPException(409, "Only unresolved business clarifications can be deferred or excluded")
+        if not payload.reason.strip():
+            raise HTTPException(422, "Record why this scope is deferred or excluded")
+        record.update(status="deferred" if payload.action == "defer" else "excluded", disposition_reason=payload.reason)
+        return _commit_clarification(project, actor, request_id, record)
     if payload.action == "classify":
         if record["status"] != "open" or not payload.category:
             raise HTTPException(409, "Classify an open finding before applying a correction")
         record.update(category=payload.category, prerequisites=[p.model_dump(mode="json") for p in payload.prerequisites])
+        if record["category"] in ("ambiguous_requirement", "unsupported_assumption"):
+            return _commit_clarification(project, actor, request_id, record)
         return _commit(project, actor, request_id, record)
     if payload.action == "propose_lesson":
         if payload.lesson is None:

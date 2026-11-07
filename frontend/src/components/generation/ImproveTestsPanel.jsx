@@ -1,10 +1,18 @@
+import useReviewDraft from "../../hooks/useReviewDraft";
+import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import BusinessCoverageSummary from "./BusinessCoverageSummary";
-import { useId, useState } from "react";
+import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
 import { improvementFindings, findingCaseIds, improvementFeedback } from "./improvementFindings";
 
 export default function ImproveTestsPanel({
 	review,
+	identity,
+	projectId,
+	snapshotId,
+	reportedCase,
+	onClearReport,
+	summary,
 	assessment,
 	meta,
 	testCases,
@@ -19,8 +27,28 @@ export default function ImproveTestsPanel({
 	onReviewCases,
 }) {
 	const findings = improvementFindings(review);
-	const [selected, setSelected] = useState([]);
-	const [instructions, setInstructions] = useState("");
+	const recovery = useReviewDraft({
+		identity,
+		projectId,
+		snapshotId,
+		name: "test-improvements",
+		initialValue: { selected: [], instructions: "", caseId: "" },
+	});
+	const selected = recovery.value.selected;
+	const instructions = recovery.value.instructions;
+	const setSelected = (next) => recovery.setValue((old) => ({ ...old, selected: typeof next === "function" ? next(old.selected) : next }));
+	useEffect(() => {
+		if (reportedCase && recovery.value.caseId !== reportedCase.id)
+			recovery.setValue({ selected: [], instructions: "", caseId: reportedCase.id });
+	}, [reportedCase?.id]);
+	const target = reportedCase || testCases.find((item) => item.id === recovery.value.caseId);
+	const evidence = target
+		? [
+				`Test ${target.id}: ${target.title}`,
+				...(target.steps || []).map((step, index) => `Step ${index + 1}: ${step.action} | Expected: ${step.expected}`),
+				`Overall expected: ${target.expected_result || "Not specified"}`,
+			].join("\n")
+		: "";
 	const [error, setError] = useState("");
 	const [conflict, setConflict] = useState(false);
 	const [reloading, setReloading] = useState(false);
@@ -28,15 +56,23 @@ export default function ImproveTestsPanel({
 	const instructionsId = useId();
 	const locked = busy || disabled || conflict || reloading;
 	const chosen = findings.filter((finding) => selected.includes(finding));
-	const canApply = !locked && testCases.length > 0 && (findings.length ? chosen.length > 0 : Boolean(instructions.trim()));
+	const canApply =
+		!locked &&
+		testCases.length > 0 &&
+		(target ? Boolean(instructions.trim()) : findings.length ? chosen.length > 0 : Boolean(instructions.trim()));
 	const apply = async () => {
 		if (!canApply) return;
 		setError("");
 		setSaved(false);
 		try {
-			if (await onApply(improvementFeedback(chosen, instructions))) {
-				setSelected([]);
-				setInstructions("");
+			if (
+				await onApply(
+					improvementFeedback(target ? [] : chosen, target ? `${evidence}\nReported problem: ${instructions}` : instructions),
+					target ? [target.id] : []
+				)
+			) {
+				recovery.clear();
+				onClearReport?.();
 				setSaved(true);
 			}
 		} catch (failure) {
@@ -50,6 +86,28 @@ export default function ImproveTestsPanel({
 	};
 	return (
 		<section className="improve-tests" aria-label="Improve test quality">
+			<DraftRecoveryNotice draft={recovery} />
+			{summary && (
+				<p role="status">
+					{summary.changed} changed · {summary.added} added · {summary.preserved} preserved. Review changed tests before accepting.
+				</p>
+			)}
+			{target && (
+				<div className="selected-test-report">
+					<h3>Report a problem · {target.id}</h3>
+					<p>Only this test will be repaired. Its current evidence is included below.</p>
+					<pre>{evidence}</pre>
+					<Button
+						variant="secondary"
+						onClick={() => {
+							recovery.setValue((old) => ({ ...old, caseId: "" }));
+							onClearReport?.();
+						}}
+					>
+						Return to suite improvements
+					</Button>
+				</div>
+			)}
 			<h2>{review?.approved ? "Machine quality check passed" : review ? "What needs fixing" : "Review your test cases"}</h2>
 			<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
 			<BusinessCoverageSummary assessment={assessment} />
@@ -85,8 +143,7 @@ export default function ImproveTestsPanel({
 									if (await onReload()) {
 										setConflict(false);
 										setError("");
-										setSelected([]);
-										setInstructions("");
+										recovery.clear();
 									} else setError("The project could not be reloaded. Try reloading again before applying fixes.");
 								} finally {
 									setReloading(false);
@@ -99,7 +156,7 @@ export default function ImproveTestsPanel({
 				</div>
 			)}
 			{saved && <p role="status">Test cases updated. Review the latest quality result and remaining findings.</p>}
-			{findings.length > 0 && (
+			{!target && findings.length > 0 && (
 				<fieldset disabled={locked} className="improve-tests-findings">
 					<legend>Select findings to address</legend>
 					<div className="button-row">
@@ -130,18 +187,18 @@ export default function ImproveTestsPanel({
 					))}
 				</fieldset>
 			)}
-			<label htmlFor={instructionsId}>Additional instructions (optional)</label>
+			<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
 			<Textarea
 				id={instructionsId}
 				value={instructions}
-				onChange={(event) => setInstructions(event.target.value)}
+				onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
 				disabled={locked}
 				rows={4}
 				placeholder="Describe any details the fixes should take into account…"
 			/>
 			<div className="button-row improve-tests-actions">
 				<Button disabled={!canApply} onClick={() => void apply()}>
-					{busy ? "Applying fixes…" : findings.length ? "Apply selected fixes" : "Apply improvements"}
+					{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
 				</Button>
 				<span>{chosen.length} selected</span>
 			</div>

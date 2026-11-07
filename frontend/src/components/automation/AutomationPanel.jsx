@@ -246,6 +246,9 @@ export default function AutomationPanel({
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
 			<h2 className="panel-title">Execution setup</h2>
+			<p className="helper-text">
+				Automation is optional. You can review and export manual test cases without generating or running scripts.
+			</p>
 			<div className="workflow-result-notice" role="region" aria-label="Automation evidence">
 				<strong>{evidence.label}</strong>
 				{executionRunResult?.run_id ? (

@@ -76,8 +76,6 @@ def accept_finding(project_id, actor, payload, request_id):
         raise HTTPException(409, "Select an open project finding")
     if finding.get("category") in ("unknown", "application_defect"):
         raise HTTPException(409, "Classify the source correction first. An application defect requires verification, not rewritten expectations.")
-    if finding["source_snapshot_id"] not in {s.snapshot_id for s in project.current_snapshots.values()}:
-        raise HTTPException(409, "The finding source changed. Record a finding against the current source.")
     baseline = project.current_snapshots.get("requirements")
     if not baseline:
         raise HTTPException(409, "Import requirements before accepting a correction")
@@ -92,6 +90,20 @@ def accept_finding(project_id, actor, payload, request_id):
     }
     if not affected or not affected <= by_id.keys():
         raise HTTPException(422, "Link the finding to current requirements before accepting it")
+    if finding["source_snapshot_id"] not in {s.snapshot_id for s in project.current_snapshots.values()} and finding.get("requirement_source_text") != {
+        r["id"]: r["text"] for r in requirements if r["id"] in affected
+    }:
+        raise HTTPException(409, "The finding source changed. Record a finding against the current source.")
+    unresolved = {
+        r["id"]
+        for r in requirements
+        if r.get("clarification_status") in ("open", "deferred", "excluded") and r.get("clarification_finding_id") != finding["id"]
+    }
+    if unresolved & affected:
+        raise HTTPException(409, "Resolve other open clarifications for these requirements before refreshing drafts")
+    for row in requirements:
+        if row["id"] in affected:
+            row["clarification_status"] = "resolved"
     corrections = {c.requirement_id: c for c in payload.corrections}
     if len(corrections) != len(payload.corrections) or not corrections.keys() <= affected:
         raise HTTPException(422, "Corrections must uniquely reference the finding's requirements")
@@ -156,6 +168,8 @@ def accept_finding(project_id, actor, payload, request_id):
             if set(case.get("linked_requirement_ids", [])) & affected:
                 affected.update(case.get("linked_requirement_ids", []))
         changed = before != affected
+    if unresolved & affected:
+        raise HTTPException(409, "A shared test also depends on an unresolved clarification. Resolve that question before refreshing drafts.")
     inputs = manifest_from_payload(
         {"project_id": project_id, "input_revision": project.input_revision + 1, "stage_state": states, "project_decisions": decisions}
     )

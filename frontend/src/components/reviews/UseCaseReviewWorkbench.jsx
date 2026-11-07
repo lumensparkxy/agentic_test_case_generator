@@ -1,3 +1,5 @@
+import useReviewDraft from "../../hooks/useReviewDraft";
+import DraftRecoveryNotice from "./DraftRecoveryNotice";
 import ScenarioReviewTable from "./ScenarioReviewTable";
 import { Dialog } from "../ui/dialog";
 import { ListItem, List, CollectionToolbar } from "../ui/collections";
@@ -437,16 +439,23 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 	);
 }
 
-export default function UseCaseReviewWorkbench({ project, snapshot, stageState, review }) {
+export default function UseCaseReviewWorkbench({ identity, project, snapshot, stageState, review }) {
 	const searchId = useId();
 	const searchRef = useRef(null);
-	const [query, setQuery] = useState("");
-	const [draftState, setDraftState] = useState({ snapshotId: snapshot.snapshot_id, items: {} });
-	const drafts = draftState.snapshotId === snapshot.snapshot_id ? draftState.items : {};
+	const recovery = useReviewDraft({
+		identity,
+		projectId: project.project_id,
+		snapshotId: snapshot.snapshot_id,
+		name: "scenario-review",
+		initialValue: { query: "", items: {}, revision: project.current_revision, statusFilter: "", flagFilters: [] },
+	});
+	const { query, items: drafts } = recovery.value;
+	const setQuery = (query) => recovery.setValue((old) => ({ ...old, query }));
 	const setDrafts = (next) =>
-		setDraftState((current) => ({
-			snapshotId: snapshot.snapshot_id,
-			items: typeof next === "function" ? next(current.snapshotId === snapshot.snapshot_id ? current.items : {}) : next,
+		recovery.setValue((old) => ({
+			...old,
+			revision: Object.keys(old.items).length ? old.revision : project.current_revision,
+			items: typeof next === "function" ? next(old.items) : next,
 		}));
 	const payload = snapshot.payload || {};
 	const coveragePlan = normalizeList(payload.coverage_plan);
@@ -498,6 +507,8 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 
 	return (
 		<div className="use-case-review-workbench">
+			<DraftRecoveryNotice draft={recovery} />
+			<DraftRecoveryNotice draft={review.recovery} />
 			<div className="use-case-meta-row">
 				<div className="use-case-compact-summary">
 					<strong>{scenarioTotal} scenarios</strong>
@@ -579,6 +590,7 @@ export default function UseCaseReviewWorkbench({ project, snapshot, stageState, 
 					revision={project.current_revision}
 					review={review}
 					drafts={drafts}
+					recovery={recovery}
 					setDrafts={setDrafts}
 				/>
 			</section>

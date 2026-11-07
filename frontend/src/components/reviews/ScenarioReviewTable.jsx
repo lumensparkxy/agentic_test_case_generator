@@ -1,6 +1,6 @@
 import { MultiSelect } from "../ui/multi-select";
 import { ResizableTable, useTableColumnWidths } from "../ui/resizable-table";
-import { useId, useState } from "react";
+import { useId } from "react";
 import { Button, Select } from "../ui/controls";
 import { Alert } from "../ui/surfaces";
 import { TableScroll, CollectionState } from "../ui/collections";
@@ -26,12 +26,23 @@ export function scenarioReview(group, scenario, state, snapshotId) {
 	);
 }
 
-export default function ScenarioReviewTable({ groups, allGroups, state, snapshot, revision, review, drafts, setDrafts, assessment }) {
+export default function ScenarioReviewTable({
+	groups,
+	allGroups,
+	state,
+	snapshot,
+	revision,
+	review,
+	drafts,
+	setDrafts,
+	assessment,
+	recovery,
+}) {
 	const headingPrefix = useId();
 	const [widths, setWidths] = useTableColumnWidths(COLUMNS, "use-cases-grouped-v1");
-	const [statusFilter, setStatusFilter] = useState("");
-	const [flagFilters, setFlagFilters] = useState([]);
-	const [draftRevision, setDraftRevision] = useState(revision);
+	const { statusFilter, flagFilters, revision: draftRevision } = recovery.value;
+	const setStatusFilter = (statusFilter) => recovery.setValue((old) => ({ ...old, statusFilter }));
+	const setFlagFilters = (flagFilters) => recovery.setValue((old) => ({ ...old, flagFilters }));
 	const dirty = Object.keys(drafts).length > 0;
 	const conflict = dirty && draftRevision !== revision;
 	const disabled =
@@ -63,7 +74,6 @@ export default function ScenarioReviewTable({ groups, allGroups, state, snapshot
 	);
 	const total = allGroups.reduce((count, group) => count + (group.scenarios || []).length, 0);
 	const change = (row, values) => {
-		if (!dirty) setDraftRevision(revision);
 		setDrafts((previous) => ({
 			...previous,
 			[row.key]: {

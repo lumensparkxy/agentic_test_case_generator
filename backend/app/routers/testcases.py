@@ -1,3 +1,4 @@
+from ..services.scoped_refinement import prepare_scoped_refinement, merge_scoped_refinement
 from ..services.knowledge_feedback import finish_generation
 from ..services.guidance_dependency import generation_guidance
 import json
@@ -96,6 +97,7 @@ def _use_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, 
 def _test_case_project_payload(response: GenerateTestCasesResponse) -> dict[str, Any]:
     return {
         "test_cases": _model_payload(response.test_cases),
+        "scoped_refinement": response.scoped_refinement,
         "substantive_assessment": response.substantive_assessment,
         "generation_tasks": response.generation_tasks,
         "approved": response.approved,
@@ -417,6 +419,7 @@ async def refine_test_cases_endpoint(
 ) -> GenerateTestCasesResponse:
     await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
     source_inputs = await run_in_threadpool(_refinement_source_inputs, payload.project_id, current_user)
+    model_payload, model_sources, baseline = await run_in_threadpool(prepare_scoped_refinement, payload, source_inputs, current_user)
     request_id = _get_request_id(request)
     billing_context = await run_in_threadpool(
         enforce_billing_access,
@@ -432,15 +435,25 @@ async def refine_test_cases_endpoint(
     try:
         result = await run_in_threadpool(
             refine_test_cases,
-            payload,
+            model_payload,
             actor_user_id=current_user.sub,
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation="testcases.refine",
-            **source_inputs,
+            **model_sources,
         )
         response = GenerateTestCasesResponse(**result)
-        if response.generation_tasks and payload.project_id:
+        if baseline is not None:
+            response = merge_scoped_refinement(response, baseline, payload.selected_test_case_ids, source_inputs)
+            canonical = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
+            payload = payload.model_copy(
+                update={
+                    "test_cases": baseline.test_cases,
+                    "requirements": canonical.current_snapshots["requirements"].payload.get("requirements", []),
+                    "context": model_payload.context,
+                }
+            )
+        if response.generation_tasks and payload.project_id and baseline is None:
             existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
             if existing.current_snapshots.get("test_cases"):
                 raise HTTPException(422, _incomplete_generation_message(response))

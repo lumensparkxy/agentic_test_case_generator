@@ -30,6 +30,7 @@ test("@p1 capture missing login, backfill references and keep verification pendi
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/context`);
 	const panel = page.getByRole("region", { name: "Quality feedback" });
 	await expect(panel).toBeVisible();
+	await panel.getByText("Record a quality finding", { exact: true }).click();
 	await panel.getByLabel("Observed problem").fill("Supervisor login is missing");
 	await panel.getByLabel("Expected behavior").fill("Supervisor approves the expense");
 	await panel.getByLabel("Affected test case IDs").fill("TC-1");

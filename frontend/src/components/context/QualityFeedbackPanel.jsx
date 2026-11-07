@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Select, Textarea } from "../ui/controls";
-import { Surface } from "../ui/surfaces";
+import { Surface, Disclosure } from "../ui/surfaces";
 
 const categories = [
 	"unknown",
@@ -113,93 +113,96 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 	return (
 		<Surface as="section" className="result-section" aria-labelledby="quality-feedback-heading">
 			<h3 id="quality-feedback-heading">Quality feedback</h3>
-			<p>Capture findings from any stage. Correct missing prerequisites, preserve business assertions, and learn from verified results.</p>
+			<p>Capture findings from any stage. Correct missing prerequisites, preserve business assertions, and verify corrections.</p>
 			{error && <p role="alert">{error}</p>}
 			{notice && <p role="status">{notice}</p>}
 			<Button className="secondary" disabled={busy} onClick={() => load().catch((e) => setError(e.message))}>
 				Refresh findings
 			</Button>
 			{data && <p>{data.findings.filter((f) => f.status !== "verified").length} findings awaiting resolution or verification</p>}
-			<form
-				onSubmit={(event) => {
-					event.preventDefault();
-					save(`/projects/${projectId}/quality-findings`, {
-						base_project_revision: project.current_revision,
-						source_snapshot_id: sourceId || source.snapshot_id,
-						category: form.category,
-						summary: form.summary,
-						expected_behavior: form.expected_behavior,
-						test_case_ids: ids(form.test_case_ids),
-						requirement_ids: ids(form.requirement_ids),
-						environment: form.environment,
-						prerequisites: form.name ? [{ name: form.name, kind: form.kind, description: form.description, status: "missing" }] : [],
-					});
-				}}
-			>
-				<fieldset disabled={busy || !source} className="panel-form">
-					<legend>Record a finding</legend>
-					<label>
-						Evidence snapshot
-						<Select value={sourceId || source?.snapshot_id || ""} onChange={(event) => setSourceId(event.target.value)}>
-							{Object.entries(project?.current_snapshots || {}).map(([stage, snapshot]) => (
-								<option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
-									{words(stage)} — version {snapshot.version}
-								</option>
-							))}
-						</Select>
-					</label>
-					<label>
-						Finding type
-						<Select value={form.category} onChange={change("category")}>
-							{categories.map((c) => (
-								<option key={c} value={c}>
-									{words(c)}
-								</option>
-							))}
-						</Select>
-					</label>
-					<label>
-						Observed problem
-						<Textarea required maxLength={1000} value={form.summary} onChange={change("summary")} />
-					</label>
-					<label>
-						Expected behavior
-						<Textarea required maxLength={1000} value={form.expected_behavior} onChange={change("expected_behavior")} />
-					</label>
-					<label>
-						Affected test case IDs
-						<Input value={form.test_case_ids} onChange={change("test_case_ids")} placeholder="TC-001, TC-002" />
-					</label>
-					<label>
-						Requirement IDs
-						<Input value={form.requirement_ids} onChange={change("requirement_ids")} placeholder="REQ-001, REQ-002" />
-					</label>
-					<label>
-						Environment
-						<Input required maxLength={120} value={form.environment} onChange={change("environment")} />
-					</label>
-					<label>
-						Missing prerequisite name
-						<Input value={form.name} onChange={change("name")} placeholder="supervisor_login" pattern="[A-Za-z][A-Za-z0-9_.-]*" />
-					</label>
-					<label>
-						Prerequisite kind
-						<Select value={form.kind} onChange={change("kind")}>
-							{kinds.map((k) => (
-								<option key={k} value={k}>
-									{words(k)}
-								</option>
-							))}
-						</Select>
-					</label>
-					<label>
-						Prerequisite description
-						<Input required={Boolean(form.name)} value={form.description} onChange={change("description")} maxLength={500} />
-					</label>
-					<p>Describe the required role or fixture. Keep passwords and tokens in execution configuration.</p>
-					<Button type="submit">Record finding</Button>
-				</fieldset>
-			</form>
+			<Disclosure>
+				<summary>Record a quality finding</summary>
+				<form
+					onSubmit={(event) => {
+						event.preventDefault();
+						save(`/projects/${projectId}/quality-findings`, {
+							base_project_revision: project.current_revision,
+							source_snapshot_id: sourceId || source.snapshot_id,
+							category: form.category,
+							summary: form.summary,
+							expected_behavior: form.expected_behavior,
+							test_case_ids: ids(form.test_case_ids),
+							requirement_ids: ids(form.requirement_ids),
+							environment: form.environment,
+							prerequisites: form.name ? [{ name: form.name, kind: form.kind, description: form.description, status: "missing" }] : [],
+						});
+					}}
+				>
+					<fieldset disabled={busy || !source} className="panel-form">
+						<legend>Record a finding</legend>
+						<label>
+							Evidence snapshot
+							<Select value={sourceId || source?.snapshot_id || ""} onChange={(event) => setSourceId(event.target.value)}>
+								{Object.entries(project?.current_snapshots || {}).map(([stage, snapshot]) => (
+									<option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
+										{words(stage)} — version {snapshot.version}
+									</option>
+								))}
+							</Select>
+						</label>
+						<label>
+							Finding type
+							<Select value={form.category} onChange={change("category")}>
+								{categories.map((c) => (
+									<option key={c} value={c}>
+										{words(c)}
+									</option>
+								))}
+							</Select>
+						</label>
+						<label>
+							Observed problem
+							<Textarea required maxLength={1000} value={form.summary} onChange={change("summary")} />
+						</label>
+						<label>
+							Expected behavior
+							<Textarea required maxLength={1000} value={form.expected_behavior} onChange={change("expected_behavior")} />
+						</label>
+						<label>
+							Affected test case IDs
+							<Input value={form.test_case_ids} onChange={change("test_case_ids")} placeholder="TC-001, TC-002" />
+						</label>
+						<label>
+							Requirement IDs
+							<Input value={form.requirement_ids} onChange={change("requirement_ids")} placeholder="REQ-001, REQ-002" />
+						</label>
+						<label>
+							Environment
+							<Input required maxLength={120} value={form.environment} onChange={change("environment")} />
+						</label>
+						<label>
+							Missing prerequisite name
+							<Input value={form.name} onChange={change("name")} placeholder="supervisor_login" pattern="[A-Za-z][A-Za-z0-9_.-]*" />
+						</label>
+						<label>
+							Prerequisite kind
+							<Select value={form.kind} onChange={change("kind")}>
+								{kinds.map((k) => (
+									<option key={k} value={k}>
+										{words(k)}
+									</option>
+								))}
+							</Select>
+						</label>
+						<label>
+							Prerequisite description
+							<Input required={Boolean(form.name)} value={form.description} onChange={change("description")} maxLength={500} />
+						</label>
+						<p>Describe the required role or fixture. Keep passwords and tokens in execution configuration.</p>
+						<Button type="submit">Record finding</Button>
+					</fieldset>
+				</form>
+			</Disclosure>
 			<ul>
 				{(data?.findings || []).map((finding) => (
 					<li key={finding.id}>

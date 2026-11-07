@@ -1252,7 +1252,6 @@
 
 .panel {
 	padding: 2.25rem;
-	animation: fadeIn 0.25s ease-out;
 }
 
 @keyframes fadeIn {

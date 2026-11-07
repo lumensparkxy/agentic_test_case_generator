@@ -1039,3 +1039,54 @@ select {
 .ui-table-group-heading.scenario-group-heading h3 {
 	margin-right: var(--space-2);
 }
+
+/* Keep source questions and recovery subordinate to the active review. */
+.clarification-queue {
+	margin-block: 18px;
+	padding: 18px;
+	border: 1px solid var(--border-color, #cbd5e1);
+	border-radius: 12px;
+	background: #f8fafc;
+}
+.clarification-queue ul {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	gap: 16px;
+}
+.clarification-queue li {
+	padding-bottom: 16px;
+	border-bottom: 1px solid #cbd5e1;
+}
+.clarification-queue li:last-child {
+	border-bottom: 0;
+}
+.clarification-queue label,
+.project-sync-panel form label {
+	display: grid;
+	gap: 8px;
+	margin-block: 12px;
+}
+.draft-recovery-notice {
+	padding: 12px;
+	background: #fffbeb;
+	border: 1px solid #d6ba74;
+	border-radius: 8px;
+	margin-block: 12px;
+}
+.draft-recovery-notice pre,
+.selected-test-report pre {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font: inherit;
+	max-height: 260px;
+	overflow-y: auto;
+}
+.selected-test-report {
+	padding: 18px;
+	border-left: 3px solid #2563eb;
+	background: #eff6ff;
+	border-radius: 8px;
+	margin-bottom: 18px;
+}

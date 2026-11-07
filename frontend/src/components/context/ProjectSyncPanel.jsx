@@ -77,6 +77,9 @@ export function ProjectSyncStatus({ project, request, onUpdated }) {
 
 export default function ProjectSyncPanel({ project, request, onUpdated }) {
 	const [findings, setFindings] = useState([]);
+	const [question, setQuestion] = useState("");
+	const [questionRequirement, setQuestionRequirement] = useState("");
+	const [dispositionReason, setDispositionReason] = useState("");
 	const [selectedId, setSelectedId] = useState("");
 	const [decision, setDecision] = useState("");
 	const [corrections, setCorrections] = useState({});
@@ -85,6 +88,7 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const attempt = useRef(null);
+	const queueRef = useRef(null);
 	const alive = useRef(true);
 	useEffect(() => {
 		alive.current = true;
@@ -103,6 +107,26 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 	useEffect(() => {
 		void load();
 	}, [project.project_id, project.current_revision]);
+	const sourceRequirements = project.current_snapshots?.requirements?.payload?.requirements || [];
+	const clarifications = findings.filter((item) => ["ambiguous_requirement", "unsupported_assumption"].includes(item.category));
+	const saveClarification = async (path, payload) => {
+		if (busy) return;
+		setBusy(true);
+		setError("");
+		try {
+			await read(request, path, payload);
+			await onUpdated?.();
+			await load();
+			setQuestion("");
+			setDispositionReason("");
+			setSelectedId("");
+			window.requestAnimationFrame(() => queueRef.current?.focus({ preventScroll: true }));
+		} catch (e) {
+			setError(e.message);
+		} finally {
+			setBusy(false);
+		}
+	};
 	const selected = findings.find((item) => item.id === selectedId);
 	const cases = project.current_snapshots?.test_cases?.payload?.test_cases || [];
 	const affected = new Set([
@@ -113,6 +137,84 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 	const overlaps = (project.project_decisions || []).filter((item) => item.requirement_ids.some((id) => affected.has(id)));
 	return (
 		<Surface as="section" className="project-sync-panel" aria-label="Shared project corrections">
+			<h3>Clarifications and shared decisions</h3>
+			<p>
+				Missing or conflicting business rules stay out of generation until you answer them. Other requirements keep their existing review
+				decisions.
+			</p>
+			<section ref={queueRef} tabIndex={-1} aria-label="Business clarifications" className="clarification-queue">
+				{clarifications.length ? (
+					<ul>
+						{clarifications.map((item) => (
+							<li key={item.id}>
+								<strong>
+									{item.requirement_ids?.join(", ")} · {words(item.status)}
+								</strong>
+								<p>{item.summary}</p>
+								<Disclosure>
+									<summary>Source and decision history</summary>
+									<p>Source: {item.original_source_snapshot_id || item.source_snapshot_id}</p>
+									{sourceRequirements
+										.filter((r) => item.requirement_ids?.includes(r.id))
+										.map((r) => (
+											<blockquote key={r.id}>{r.text}</blockquote>
+										))}
+									{item.disposition_reason && <p>{item.disposition_reason}</p>}
+								</Disclosure>
+								{["open", "deferred"].includes(item.status) && (
+									<Button
+										variant="secondary"
+										onClick={() => {
+											setSelectedId(item.id);
+											setDecision("");
+											setCorrections({});
+											setResolution("");
+											setReplace(false);
+										}}
+									>
+										Answer {item.requirement_ids?.join(", ") || "clarification"}
+									</Button>
+								)}
+							</li>
+						))}
+					</ul>
+				) : (
+					<p>No business clarifications recorded.</p>
+				)}
+				<Disclosure>
+					<summary>Ask about a missing business rule</summary>
+					<label>
+						Requirement needing clarification
+						<Select value={questionRequirement} onChange={(e) => setQuestionRequirement(e.target.value)}>
+							<option value="">Choose a requirement</option>
+							{sourceRequirements.map((r) => (
+								<option key={r.id} value={r.id}>
+									{r.id} — {r.text}
+								</option>
+							))}
+						</Select>
+					</label>
+					<label>
+						What needs clarification?
+						<Textarea value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={1000} />
+					</label>
+					<Button
+						disabled={busy || !question.trim() || !questionRequirement}
+						onClick={() =>
+							saveClarification(`/projects/${project.project_id}/quality-findings`, {
+								base_project_revision: project.current_revision,
+								source_snapshot_id: project.current_snapshots.requirements.snapshot_id,
+								category: "ambiguous_requirement",
+								summary: question,
+								expected_behavior: "Unresolved: a source-backed business decision is required.",
+								requirement_ids: [questionRequirement],
+							})
+						}
+					>
+						Add clarification
+					</Button>
+				</Disclosure>
+			</section>
 			<h3>Resolve a finding across the project</h3>
 			<p>Confirm the business rule once. Agents will refresh affected scenarios, tests and existing script drafts together.</p>
 			{error && <p role="alert">{error}</p>}
@@ -174,7 +276,38 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 						}
 					}}
 				>
-					<p>Source snapshot: {selected.source_snapshot_id}</p>
+					<p>Source snapshot: {selected.original_source_snapshot_id || selected.source_snapshot_id}</p>
+					{["ambiguous_requirement", "unsupported_assumption"].includes(selected.category) && (
+						<Disclosure>
+							<summary>Defer or exclude this scope</summary>
+							<p>
+								Defer keeps the question open. Exclude removes its requirements from new generation. Neither action invents an expected
+								result.
+							</p>
+							<label>
+								Reason for the scope decision
+								<Textarea value={dispositionReason} onChange={(e) => setDispositionReason(e.target.value)} maxLength={1000} />
+							</label>
+							<div className="button-row">
+								{["defer", "exclude"].map((action) => (
+									<Button
+										key={action}
+										variant="secondary"
+										disabled={busy || !dispositionReason.trim()}
+										onClick={() =>
+											saveClarification(`/projects/${project.project_id}/quality-findings/${selected.id}`, {
+												action,
+												base_project_revision: project.current_revision,
+												reason: dispositionReason,
+											})
+										}
+									>
+										{action === "defer" ? "Defer affected scope" : "Exclude affected scope"}
+									</Button>
+								))}
+							</div>
+						</Disclosure>
+					)}
 					<blockquote>{selected.expected_behavior}</blockquote>
 					<label>
 						Accepted business decision

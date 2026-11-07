@@ -1,3 +1,5 @@
+import ClarificationScopeNotice from "../components/context/ClarificationScopeNotice";
+import { hasApprovedGenerationScope } from "../utils/requirementScope";
 import useUseCaseGeneration from "../hooks/useUseCaseGeneration";
 import GuidanceUsed from "../components/knowledge/GuidanceUsed";
 import GenerationGuidance from "../components/knowledge/GenerationGuidance";
@@ -37,12 +39,7 @@ export default function UseCaseReviewPage({
 	});
 	const requirementsSnapshot = project?.current_snapshots?.requirements || null;
 	const requirementsState = project?.stage_state?.requirements || null;
-	const requirementsReady = Boolean(
-		requirementsSnapshot &&
-		requirementsState?.current_snapshot_id === requirementsSnapshot.snapshot_id &&
-		requirementsState.approved &&
-		!requirementsState.stale
-	);
+	const requirementsReady = hasApprovedGenerationScope(project);
 	const generationAllowed = requirementsReady && project?.status === "active" && !generationDisabled;
 	const responseStageState = review.response?.use_cases_state;
 	const effectiveStageState = responseStageState?.current_snapshot_id === snapshot?.snapshot_id ? responseStageState : stageState;
@@ -94,6 +91,7 @@ export default function UseCaseReviewPage({
 				}
 			/>
 
+			<ClarificationScopeNotice project={project} onOpen={() => navigate(buildProjectPath(projectId, "context"))} />
 			<GenerationGuidance
 				key={`${identity}:${projectId}:${project?.current_revision}`}
 				request={request}
@@ -146,6 +144,7 @@ export default function UseCaseReviewPage({
 			{snapshot ? (
 				<fieldset disabled={generation.isBusy} className="use-case-generation-review">
 					<UseCaseReviewWorkbench
+						identity={identity}
 						key={`${identity}:${projectId}`}
 						project={project}
 						snapshot={snapshot}

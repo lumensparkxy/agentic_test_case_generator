@@ -282,76 +282,73 @@ test.describe("Use Cases review workbench", () => {
 		await expect(humanReviewRegion(page)).toContainText("Add converted-currency threshold coverage.");
 	});
 
-	test(
-		"preserves feedback and the selected decision on 409 until Reload latest replaces the artifact",
-		{ tag: "@p1" },
-		async ({ page }) => {
-			const latestCoveragePlan = useCaseCoveragePlanFixture();
-			latestCoveragePlan[1].scenarios.push({
-				id: "REQ-202-SCN-03",
-				requirement_id: "REQ-202",
-				scenario_type: "Data Variation",
-				title: "Apply approval after currency conversion",
-				objective: "Compare the converted account-currency amount with the approval threshold.",
-				priority: "High",
-				must_have: true,
-			});
-			const latestSnapshot = useCaseSnapshotFixture({
-				snapshot_id: "snapshot-use-cases-v4",
-				version: 4,
-				project_revision: USE_CASE_BASE_REVISION + 1,
-				created_at: "2026-07-17T12:30:00Z",
-				payload: {
-					...useCaseSnapshotFixture().payload,
-					coverage_plan: latestCoveragePlan,
-					coverage_metrics: {
-						...useCaseSnapshotFixture().payload.coverage_metrics,
-						planned_scenarios_total: 5,
-					},
+	test("preserves conflict feedback for reference without carrying a decision into a new artifact", { tag: "@p1" }, async ({ page }) => {
+		const latestCoveragePlan = useCaseCoveragePlanFixture();
+		latestCoveragePlan[1].scenarios.push({
+			id: "REQ-202-SCN-03",
+			requirement_id: "REQ-202",
+			scenario_type: "Data Variation",
+			title: "Apply approval after currency conversion",
+			objective: "Compare the converted account-currency amount with the approval threshold.",
+			priority: "High",
+			must_have: true,
+		});
+		const latestSnapshot = useCaseSnapshotFixture({
+			snapshot_id: "snapshot-use-cases-v4",
+			version: 4,
+			project_revision: USE_CASE_BASE_REVISION + 1,
+			created_at: "2026-07-17T12:30:00Z",
+			payload: {
+				...useCaseSnapshotFixture().payload,
+				coverage_plan: latestCoveragePlan,
+				coverage_metrics: {
+					...useCaseSnapshotFixture().payload.coverage_metrics,
+					planned_scenarios_total: 5,
 				},
-			});
-			const latestProject = useCaseProjectFixture({ snapshot: latestSnapshot, current_revision: USE_CASE_BASE_REVISION + 1 });
-			const api = await openUseCaseReview(page, {
-				reviewScenarios: [
-					{
-						status: 409,
-						serverProject: latestProject,
-						payload: {
-							detail: {
-								message: "The reviewed Use Cases snapshot is no longer current. Reload before submitting a decision.",
-								latest_revision: USE_CASE_BASE_REVISION + 1,
-								current_snapshot_id: latestSnapshot.snapshot_id,
-								reload_required: true,
-							},
+			},
+		});
+		const latestProject = useCaseProjectFixture({ snapshot: latestSnapshot, current_revision: USE_CASE_BASE_REVISION + 1 });
+		const api = await openUseCaseReview(page, {
+			reviewScenarios: [
+				{
+					status: 409,
+					serverProject: latestProject,
+					payload: {
+						detail: {
+							message: "The reviewed Use Cases snapshot is no longer current. Reload before submitting a decision.",
+							latest_revision: USE_CASE_BASE_REVISION + 1,
+							current_snapshot_id: latestSnapshot.snapshot_id,
+							reload_required: true,
 						},
 					},
-				],
-			});
+				},
+			],
+		});
 
-			const comment = "Keep my feedback while the latest artifact loads.";
-			await openDecision(page);
-			await reviewComment(page).fill(comment);
-			await openDecision(page);
-			await requestChangesOption(page).check();
-			await requestChangesButton(page).click();
+		const comment = "Keep my feedback while the latest artifact loads.";
+		await openDecision(page);
+		await reviewComment(page).fill(comment);
+		await openDecision(page);
+		await requestChangesOption(page).check();
+		await requestChangesButton(page).click();
 
-			const conflict = decisionPanel(page).getByRole("alert");
-			await expect(conflict).toContainText(/no longer current/i);
-			await expect(reviewComment(page)).toHaveValue(comment);
-			await expect(requestChangesOption(page)).toBeChecked();
-			await expect(reviewMain(page)).not.toContainText("Apply approval after currency conversion");
-			expect(api.requests.review).toHaveLength(1);
+		const conflict = decisionPanel(page).getByRole("alert");
+		await expect(conflict).toContainText(/no longer current/i);
+		await expect(reviewComment(page)).toHaveValue(comment);
+		await expect(requestChangesOption(page)).toBeChecked();
+		await expect(reviewMain(page)).not.toContainText("Apply approval after currency conversion");
+		expect(api.requests.review).toHaveLength(1);
 
-			await conflict.getByRole("button", { name: /^Reload latest$/i }).click();
-			await expect(reviewMain(page)).toContainText("Use Cases v4");
-			await expect(reviewMain(page)).toContainText("5 scenarios");
-			await expect(reviewMain(page)).toContainText("Apply approval after currency conversion");
-			await expect(reviewComment(page)).toHaveValue(comment);
-			await expect(requestChangesOption(page)).toBeChecked();
-			await expect(decisionPanel(page)).toBeFocused();
-			expect(api.requests.review).toHaveLength(1);
-		}
-	);
+		await conflict.getByRole("button", { name: /^Reload latest$/i }).click();
+		await expect(reviewMain(page)).toContainText("Use Cases v4");
+		await expect(reviewMain(page)).toContainText("5 scenarios");
+		await expect(reviewMain(page)).toContainText("Apply approval after currency conversion");
+		await expect(reviewComment(page)).toHaveValue("");
+		await expect(requestChangesOption(page)).not.toBeChecked();
+		await expect(page.getByText("Previous source draft kept for reference", { exact: true })).toBeVisible();
+		await expect(decisionPanel(page)).toBeFocused();
+		expect(api.requests.review).toHaveLength(1);
+	});
 
 	test("retains the attempted decision after a 503 and retries the identical idempotent request", async ({ page }) => {
 		const api = await openUseCaseReview(page, {
