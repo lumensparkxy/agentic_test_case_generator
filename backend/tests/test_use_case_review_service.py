@@ -297,6 +297,8 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         )
         self.store = _seed_store()
         self.client = FakeFirestoreClient(self.store)
+        self.enterContext(patch("app.services.workflow_project_service.get_required_firestore_client", return_value=self.client))
+        self.enterContext(patch("app.services.workflow_project_service.transactional", side_effect=_run_transaction))
         self.firestore_client_patch = patch(
             "app.services.use_case_review_service.get_required_firestore_client",
             return_value=self.client,

@@ -27,6 +27,8 @@ class SelectedOperation(NamedTuple):
 
 
 SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
+    SelectedOperation("projectChangeAccept", "post", "/projects/{project_id}/changes/accept", "ProjectChangeAcceptRequest", "ProjectChangeAcceptResponse"),
+    SelectedOperation("projectChangeResume", "post", "/projects/{project_id}/changes/resume", "ProjectChangeResumeRequest", "ProjectChangeResumeResponse"),
     SelectedOperation("workspaceSummary", "get", "/workspace/summary", "WorkspaceSummaryGetRequest", "WorkspaceSummaryGetResponse"),
     SelectedOperation("projectsCreate", "post", "/projects", "ProjectsCreateRequest", "ProjectsCreateResponse"),
     SelectedOperation("projectsList", "get", "/projects", "ProjectsListRequest", "ProjectsListResponse"),

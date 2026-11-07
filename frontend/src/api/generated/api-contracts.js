@@ -2,6 +2,8 @@
 // Source: FastAPI OpenAPI schema. Do not edit by hand.
 
 export const API_CONTRACT_ENDPOINTS = Object.freeze({
+	projectChangeAccept: Object.freeze({ method: "POST", path: "/projects/{project_id}/changes/accept" }),
+	projectChangeResume: Object.freeze({ method: "POST", path: "/projects/{project_id}/changes/resume" }),
 	workspaceSummary: Object.freeze({ method: "GET", path: "/workspace/summary" }),
 	projectsCreate: Object.freeze({ method: "POST", path: "/projects" }),
 	projectsList: Object.freeze({ method: "GET", path: "/projects" }),

@@ -232,6 +232,7 @@ async def automation_playwright(
                         "notes": response.notes,
                         "diagnostics": response.diagnostics,
                         "case_diagnostics": _model_payload(response.case_diagnostics),
+                        "automation_input": payload.model_dump(mode="json"),
                     },
                     operation="automation.playwright.generate",
                     actor=current_user,

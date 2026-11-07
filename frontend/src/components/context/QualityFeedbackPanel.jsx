@@ -37,6 +37,7 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 		summary: "",
 		expected_behavior: "",
 		test_case_ids: "",
+		requirement_ids: "",
 		environment: "default",
 		name: "",
 		kind: "test_data",
@@ -129,6 +130,7 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 						summary: form.summary,
 						expected_behavior: form.expected_behavior,
 						test_case_ids: ids(form.test_case_ids),
+						requirement_ids: ids(form.requirement_ids),
 						environment: form.environment,
 						prerequisites: form.name ? [{ name: form.name, kind: form.kind, description: form.description, status: "missing" }] : [],
 					});
@@ -167,6 +169,10 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 					<label>
 						Affected test case IDs
 						<Input value={form.test_case_ids} onChange={change("test_case_ids")} placeholder="TC-001, TC-002" />
+					</label>
+					<label>
+						Requirement IDs
+						<Input value={form.requirement_ids} onChange={change("requirement_ids")} placeholder="REQ-001, REQ-002" />
 					</label>
 					<label>
 						Environment

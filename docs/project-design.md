@@ -208,3 +208,45 @@ Regression: `e2e/desktop-review.spec.js` covers incompatible snapshot metrics,
 missing metrics, reload, step search and source evidence at desktop widths.
 This UI delivery does not implement automatic project-wide draft refresh or
 change the existing knowledge approval permissions.
+
+## Shared project corrections
+
+Project findings are durable source data, independent of optional memory flags.
+In Context, accept an explicit correction against the current requirement text;
+resolve overlapping accepted decisions before replacing them. The change record
+retains the original finding, superseded decisions, source versions and progress.
+Requirements and Context change atomically. A separate input revision changes
+only when source snapshots change; downstream draft writes use output revisions.
+
+`POST /projects/{id}/changes/accept` takes a bounded `X-Request-ID`, finding ID,
+base project revision, accepted decision, exact before/after requirement text,
+and any explicitly superseded decision IDs/resolution. It refreshes affected
+Use Cases, then Test Cases, then existing automation drafts. Unrelated cases
+and unchanged scenario review decisions are retained. The owner can resume a
+partial update through `POST /projects/{id}/changes/resume`; completed stages
+are not repeated. `GET /projects/{id}/changes` exposes the project history.
+A lease and transactional revision/token checks fence concurrent and obsolete
+results. An interrupted request can resume after its twenty-minute lease expires.
+
+Each agent receives the same mandatory source manifest and accepted decisions,
+even when optional memory is disabled or bypassed. Shared workers inherit it.
+Artifacts retain the manifest and deployed behaviour hash. Missing source data
+fails closed. Generated work remains provisional: no automatic human approval,
+export or execution. Failed stages preserve their previous snapshots. Existing
+scripts without current interface evidence remain blocked rather than inventing
+selectors or assertions. Automation remains optional when no script draft exists.
+
+Runtime knowledge writes can only propose or dismiss inactive project feedback.
+Publishing, revising, deleting, selecting or promoting behavioural guidance is
+restricted to `/maintenance/projects/{id}/knowledge` and
+`/maintenance/me/knowledge`, authenticated with the `agent_maintainer` role and
+`AGENT_MAINTENANCE_ENABLED=true` in a separate maintenance session. This flag is
+off by default; organization/billing admin roles do not grant maintenance access.
+Current run scopes cannot enter maintenance. Code, prompts and skills have no
+application write API; publish them through the protected repository/deployment
+workflow. Their content hash is pinned and checked before results become current.
+Application feedback never edits those files or automatically activates a lesson.
+
+Validation uses synthetic source corrections, failed-stage resume, old-run
+fencing, ownership, protected behaviour mutations and desktop reload flows.
+It does not establish model quality, production persistence or live execution.

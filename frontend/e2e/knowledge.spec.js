@@ -99,24 +99,17 @@ test("skill catalog distinguishes enabled and held stages", async ({ page }) => 
 	await expect(testCases).toContainText("Memory off");
 });
 
-test("knowledge requires separate approval and edits preserve the active wording", { tag: [] }, async ({ page }) => {
+test("runtime feedback stays proposed and behavioural publishing is unavailable", { tag: "@p1" }, async ({ page }) => {
 	const calls = await openKnowledge(page);
 	await page.getByRole("button", { name: "Add guidance", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Add guidance", exact: true });
 	await dialog.getByLabel("Guidance", { exact: true }).fill("Include expired-token scenarios");
 	await dialog.getByRole("button", { name: "Save proposal" }).click();
 	await expect(page.getByRole("cell", { name: "Suggested", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "Review", exact: true }).click();
-	const approval = page.getByRole("dialog", { name: "Approve knowledge", exact: true });
-	await expect(approval).toContainText("does not approve generated artifacts");
-	await approval.getByRole("button", { name: "Approve knowledge", exact: true }).click();
-	await page.getByLabel("Filter knowledge").selectOption("active");
-	await expect(page.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "Edit", exact: true }).click();
-	await page.getByRole("dialog").getByLabel("Guidance", { exact: true }).fill("Include expired and invalid-token scenarios");
-	await page.getByRole("button", { name: "Save proposal" }).click();
-	await expect(page.getByText("Active version: Include expired-token scenarios", { exact: true })).toBeVisible();
-	expect(calls.map((c) => c.payload.action)).toEqual(["propose", "approve", "revise"]);
+	const panel = page.getByRole("region", { name: "Project knowledge" });
+	await expect(panel).toContainText("Agent behaviour is read-only");
+	await expect(panel.getByRole("button", { name: /^(Review|Edit|Promote|Delete|Retire)$/ })).toHaveCount(0);
+	expect(calls.map((c) => c.payload.action)).toEqual(["propose"]);
 });
 
 test("failed saves keep the dialog and reuse the same idempotency key", async ({ page }) => {
@@ -129,19 +122,10 @@ test("failed saves keep the dialog and reuse the same idempotency key", async ({
 	expect(calls[0]).toEqual(calls[1]);
 });
 
-test("personal guidance requires selection and keyboard dialogs restore focus", async ({ page }) => {
+test("runtime cannot select reusable behaviour from another project", async ({ page }) => {
 	const calls = await openKnowledge(page);
-	const trigger = page.getByRole("button", { name: "Choose from personal library", exact: true });
-	await trigger.click();
-	const chooser = page.getByRole("dialog", { name: "Choose from personal library", exact: true });
-	await chooser.getByRole("checkbox", { name: "Use supervisor terminology", exact: true }).click();
-	await expect(chooser.getByRole("checkbox", { name: "Use supervisor terminology", exact: true })).toBeChecked();
-	await page.keyboard.press("Escape");
-	await expect(trigger).toBeFocused();
-	await expect(page.getByRole("cell", { name: "Use supervisor terminology", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "Remove from project", exact: true }).click();
-	await expect(page.getByRole("cell", { name: "Use supervisor terminology", exact: true })).toHaveCount(0);
-	expect(calls.map((c) => c.payload.action)).toEqual(["select", "unselect"]);
+	await expect(page.getByRole("button", { name: "Choose from personal library", exact: true })).toHaveCount(0);
+	expect(calls).toEqual([]);
 });
 
 for (const width of [390, 1488])
@@ -382,7 +366,7 @@ test(
 		const row = page.getByRole("row").filter({ hasText: "Proposed future Automation convention" });
 		await expect(row).toContainText("Proposed: Automation");
 		await expect(row).toContainText("Approved: Use Cases");
-		await row.getByRole("button", { name: "Edit", exact: true }).click();
+		await row.getByRole("button", { name: "View", exact: true }).click();
 		const details = page.getByRole("group", { name: "Current effective eligibility", exact: true });
 		await expect(details).toContainText("Use Cases: Eligible before run selection");
 		await expect(details).toContainText("Test Cases: Disabled by configuration");

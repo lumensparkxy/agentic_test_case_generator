@@ -10,6 +10,9 @@ from app.contracts.guidance import MemoryGuidance
 
 
 class GuidanceTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict("os.environ", {"ADK_GUIDANCE_STAGES": "requirements,use_cases,test_cases,automation"}))
+
     def test_defaults_do_not_enable_features(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(build_manifest("use_cases", "test").skills, ())

@@ -38,7 +38,8 @@ class MemoryRepository:
 
 class KnowledgeTests(unittest.TestCase):
     def setUp(self):
-        self.actor = AuthUser(sub="owner", name="Owner", email="owner@example.com")
+        self.actor = AuthUser(sub="owner", name="Owner", email="owner@example.com", roles=["agent_maintainer"])
+        self.enterContext(patch.dict("os.environ", {"AGENT_MAINTENANCE_ENABLED": "true"}))
         self.repo = MemoryRepository()
         self.counter = 0
         self.project = SimpleNamespace(current_snapshots={"requirements": SimpleNamespace(payload={"requirements": [{"id": "R1", "text": "Original rule"}]})})
@@ -52,12 +53,15 @@ class KnowledgeTests(unittest.TestCase):
 
     def mutate(self, action, entry=None, project="p1", draft=None, key=None):
         self.counter += 1
-        return service.mutate_knowledge(
-            self.actor,
-            project,
-            KnowledgeMutation(action=action, entry_id=entry.id if entry else None, base_revision=entry.revision if entry else 0, draft=draft),
-            key or str(self.counter),
-        )
+        from app.services.behaviour_maintenance import maintenance_scope
+
+        with maintenance_scope(self.actor):
+            return service.mutate_knowledge(
+                self.actor,
+                project,
+                KnowledgeMutation(action=action, entry_id=entry.id if entry else None, base_revision=entry.revision if entry else 0, draft=draft),
+                key or str(self.counter),
+            )
 
     def draft(self, **kwargs):
         return {"text": "Include boundary values", "stages": ["use_cases"], **kwargs}
@@ -133,8 +137,8 @@ class KnowledgeTests(unittest.TestCase):
         app.dependency_overrides[get_current_user] = lambda: self.actor
         try:
             with TestClient(app) as client:
-                self.assertEqual(client.post("/me/knowledge", json={"action": "propose", "draft": self.draft()}).status_code, 422)
-                response = client.post("/me/knowledge", json={"action": "propose", "draft": self.draft()}, headers={"X-Request-ID": "api"})
+                self.assertEqual(client.post("/maintenance/me/knowledge", json={"action": "propose", "draft": self.draft()}).status_code, 422)
+                response = client.post("/maintenance/me/knowledge", json={"action": "propose", "draft": self.draft()}, headers={"X-Request-ID": "api"})
                 self.assertEqual(response.status_code, 200, response.text)
         finally:
             app.dependency_overrides.clear()

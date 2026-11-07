@@ -44,6 +44,9 @@ class FakeClient:
 class GuidanceWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.actor = AuthUser(sub="owner", name="Owner", email="owner@example.com")
+        from app.contracts.project_sync import ProjectInputManifest
+
+        self.enterContext(patch("app.services.project_inputs.load_inputs", return_value=ProjectInputManifest(project_id="p", revision=1)))
         self.memory = MemoryGuidance(id="m1", revision=1, scope="project", text="Use Supervisor terminology", source="Human feedback", reason="project_stage")
         self.env = patch.dict(
             "os.environ", {"ADK_MEMORY_ENABLED": "true", "ADK_SKILLS_ENABLED": "true", "ADK_GUIDANCE_STAGES": "requirements,use_cases,test_cases,automation"}
@@ -109,7 +112,7 @@ class GuidanceWorkflowTests(unittest.TestCase):
         response = RequirementsWorkflowResponse(requirements=[], raw_text="source", source_name="fixture", approved=True)
         with (
             guidance_scope(build_manifest("requirements", "model")),
-            patch("app.services.knowledge_feedback.mutate_knowledge", side_effect=RuntimeError("offline")),
+            patch("app.services.knowledge_feedback.record_project_feedback", side_effect=RuntimeError("offline")),
         ):
             result = finish_generation(response, self.actor, "p", "requirements", "Include negative cases", "review-1")
         self.assertTrue(result.approved)

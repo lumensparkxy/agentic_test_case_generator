@@ -20,6 +20,9 @@ from app.models import QaProjectStageSnapshot
 
 class SpecialistAgentRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
+        from app.contracts.project_sync import ProjectInputManifest
+
+        self.enterContext(patch("app.services.project_inputs.load_inputs", return_value=ProjectInputManifest(project_id="project-1", revision=1)))
         # These contract tests mock workers and must not read live guidance storage.
         guidance_env = patch.dict("os.environ", {"ADK_MEMORY_ENABLED": "false", "ADK_SKILLS_ENABLED": "false"})
         guidance_env.start()

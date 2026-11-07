@@ -225,7 +225,16 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
         if _application_retry:
             raise ProjectConflictError(application.result_project_revision)
         return get_project(project_id, actor=actor, _application_retry=True)
+    sync = payload.get("project_sync")
+    if sync:
+        from .project_inputs import manifest_from_payload
+
+        if sync.get("input_manifest") != manifest_from_payload(payload).model_dump(mode="json"):
+            sync = {**sync, "status": "superseded", "error": "Project sources changed. Review the current sources before starting another update."}
     return QaProjectDetail(
+        input_revision=payload.get("input_revision", 0),
+        project_sync=sync,
+        project_decisions=payload.get("project_decisions") or [],
         impact_application=application,
         **summary.model_dump(),
         current_snapshots=current_snapshots,
@@ -450,6 +459,14 @@ def _commit_project_revision(project_id, actor, expected_revision, update, event
             if existing:
                 return existing
         _check_revision(current, expected_revision)
+        from .project_inputs import check_run_inputs
+
+        check_run_inputs(current)
+        if "stage_state" in update:
+            old = current.get("stage_state") or {}
+            new = update["stage_state"]
+            if any((old.get(s) or {}).get("current_snapshot_id") != (new.get(s) or {}).get("current_snapshot_id") for s in ("requirements", "context")):
+                update["input_revision"] = current.get("input_revision", 0) + 1
         if transaction_guard:
             transaction_guard(transaction, snapshot)
         for reference, value, merge in pending_writes:

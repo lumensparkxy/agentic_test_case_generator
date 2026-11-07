@@ -1,4 +1,5 @@
 import QualityFeedbackPanel from "./QualityFeedbackPanel";
+import ProjectSyncPanel, { ProjectSyncStatus } from "./ProjectSyncPanel";
 import KnowledgePanel from "../knowledge/KnowledgePanel";
 import { Surface } from "../ui/surfaces";
 import { Field, Input, Textarea, Button, Checkbox } from "../ui/controls";
@@ -6,6 +7,7 @@ import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
 	request,
 	projectId,
+	project,
 	onProjectUpdated,
 	appLink,
 	setAppLink,
@@ -126,6 +128,12 @@ export default function ContextInputsPanel({
 						)}
 					</div>
 				</Surface>
+			)}
+			{projectId && request && (
+				<ProjectSyncStatus key={`sync-status-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
+			)}
+			{projectId && project && request && (
+				<ProjectSyncPanel key={`sync-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
 			{projectId && request && (
 				<QualityFeedbackPanel key={`feedback-${projectId}`} request={request} projectId={projectId} onUpdated={onProjectUpdated} />
