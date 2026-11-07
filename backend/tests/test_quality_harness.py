@@ -77,12 +77,12 @@ class QualityHarnessTests(unittest.TestCase):
             critic.assert_not_called()
             self.assertIn("bounded review size", baseline["reason"])
             trial = assess_delivered_suite([{"id": "TC-1"}], [requirement], context, settings=object())
-            critic.assert_called_once()
+            self.assertEqual(critic.call_count, 2)
             self.assertEqual(trial["status"], "unknown")
             self.assertEqual(trial["diagnostics"]["validation_error"], "malformed_json")
             oversized = context.model_copy(update={"notes": "x" * 512_000})
             result = assess_delivered_suite([{"id": "TC-1"}], [requirement], oversized, settings=object())
-            critic.assert_called_once()
+            self.assertEqual(critic.call_count, 2)
             self.assertIn("bounded review size", result["reason"])
 
     def test_requested_model_controls_settings_and_restores_them(self):

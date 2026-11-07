@@ -2,7 +2,7 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from google.genai import errors as genai_errors
+from google.genai import errors as genai_errors, types
 import httpx
 
 from app.agents.substantive_review import (
@@ -140,7 +140,7 @@ class SubstantiveReviewTests(unittest.TestCase):
         scenarios = [
             ([private_error, private_error], 2, "provider_unavailable"),
             ([genai_errors.ClientError(401, {"error": {"message": "private key"}})], 1, "provider_unavailable"),
-            (["not JSON"], 1, "invalid_evidence"),
+            (["not JSON", "not JSON again"], 2, "invalid_evidence"),
             ([json.dumps({**output, "input_hash": "stale"})], 1, "invalid_evidence"),
         ]
         for side_effect, attempts, reason in scenarios:
@@ -160,6 +160,64 @@ class SubstantiveReviewTests(unittest.TestCase):
             result = assess_delivered_suite([case], [req], None, settings=object())
         self.assertEqual(call.call_count, 1)
         self.assertEqual(result["status"], "unknown")
+
+    def test_bad_review_format_and_cross_case_citation_can_be_retried_once(self):
+        req, case, _, _, output = fixture(retry=False)
+        other = case.model_copy(update={"id": "TC-OTHER"})
+        _, digest, _ = review_input([case, other], [req], None)
+        output["input_hash"] = digest
+        output["case_grounding"].append({"test_case_id": other.id, "reason": "Grounded", "prerequisites": []})
+        mixed = json.loads(json.dumps(output))
+        mixed["obligations"][0]["evidence"].append({**mixed["obligations"][0]["evidence"][0], "test_case_id": other.id})
+        for invalid, code in (("not JSON", "malformed_json"), (json.dumps(mixed), "incoherent_case_evidence")):
+            with self.subTest(code=code), patch("app.agents.substantive_review._call_critic", side_effect=[invalid, json.dumps(output)]) as call:
+                result = assess_delivered_suite([case, other], [req], None, settings=object())
+            self.assertEqual(result["status"], "assessed_complete")
+            self.assertEqual(result["diagnostics"]["first_validation_error"], code)
+            self.assertEqual(result["diagnostics"]["attempt_count"], 2)
+            self.assertIn(code, call.call_args.args[1])
+            self.assertIn(digest, call.call_args.args[1])
+
+    def test_declared_missing_setup_blocks_combined_gate_even_when_critic_omits_it(self):
+        req, case, _, _, output = fixture(retry=False)
+        from app.contracts.quality_feedback import ExecutionPrerequisite
+
+        case.execution_prerequisites = [ExecutionPrerequisite(name="bookingAccount", kind="credential", description="Provision the booking account")]
+        data, digest, _ = review_input([case], [req], None)
+        output["input_hash"] = digest
+        blocker = {"test_case_id": case.id, "prerequisite_name": "bookingAccount"}
+        gap = {
+            "description": "Provision the booking account",
+            "status": "missing_prerequisite",
+            "required": True,
+            "reason": "No provisioned account was supplied",
+            "execution_prerequisite_name": "bookingAccount",
+        }
+        for findings in ([], [gap]):
+            output["case_grounding"][0]["prerequisites"] = findings
+            assessment = validate_assessment(json.dumps(output), data, digest)
+            self.assertEqual(assessment["status"], "incomplete")
+            self.assertEqual(assessment["design_status"], "assessed_complete")
+            self.assertEqual(assessment["execution_status"], "blocked")
+            self.assertEqual(assessment["execution_blockers"], [blocker])
+            result = apply_assessment(
+                {
+                    "test_cases": [case],
+                    "approved": True,
+                    "review": {"approved": True},
+                    "workflow_diagnostics": {"status": "completed"},
+                    "generation_evidence": {},
+                    "coverage_metrics": {},
+                },
+                assessment,
+            )
+            self.assertFalse(result["approved"])
+            self.assertEqual(result["generation_tasks"], [])
+        output["case_grounding"][0]["prerequisites"] = [{**gap, "execution_prerequisite_name": "invented"}]
+        with self.assertRaisesRegex(ValueError, "declared missing prerequisite"):
+            validate_assessment(json.dumps(output), data, digest)
+        output["case_grounding"][0]["prerequisites"] = [{**gap, "execution_prerequisite_name": None, "status": "unsupported_fact"}]
+        self.assertEqual(validate_assessment(json.dumps(output), data, digest)["design_status"], "incomplete")
 
     def test_applied_assessment_keeps_score_and_specific_findings_after_project_reload(self):
         from app.services.test_case_quality import project_test_case_view
@@ -334,14 +392,28 @@ class SubstantiveReviewTests(unittest.TestCase):
 
     def test_transport_bounded_and_complete_source_not_truncated(self):
         req, case, _, digest, output = fixture()
-        from app.agents.substantive_review import _call_critic, review_prompt
+        from app.agents.substantive_review import IncompleteCriticResponse, _call_critic, review_prompt
 
         with patch("app.agents.substantive_review.genai.Client") as client:
-            client.return_value.__enter__.return_value.models.generate_content.return_value = SimpleNamespace(text=json.dumps(output))
-            _call_critic(SimpleNamespace(gemini_api_key="synthetic", model_name="fixture"), "prompt")
-            config = client.return_value.__enter__.return_value.models.generate_content.call_args.kwargs["config"]
+            generate = client.return_value.__enter__.return_value.models.generate_content
+            generate.return_value = types.GenerateContentResponse(
+                candidates=[
+                    types.Candidate(
+                        content=types.Content(parts=[types.Part(text="thinking", thought=True), types.Part(text=json.dumps(output))]),
+                        finish_reason=types.FinishReason.STOP,
+                    )
+                ]
+            )
+            settings = SimpleNamespace(gemini_api_key="synthetic", model_name="fixture")
+            self.assertEqual(json.loads(_call_critic(settings, "prompt")), output)
+            config = generate.call_args.kwargs["config"]
+            self.assertIn("source_field", config.response_schema["$defs"]["ObligationReference"]["required"])
+            self.assertNotIn("additionalProperties", json.dumps(config.response_schema))
             self.assertEqual(config.http_options.timeout, 120_000)
             self.assertEqual(config.http_options.retry_options.attempts, 1)
+            generate.return_value.candidates[0].finish_reason = types.FinishReason.MAX_TOKENS
+            with self.assertRaises(IncompleteCriticResponse):
+                _call_critic(settings, "prompt")
         data, _, _ = review_input([case], [req], None, scope_plan=[{"requirement_id": req.id, "scenarios": []}])
         self.assertEqual(data["scope"], "selected_scenarios")
         self.assertIn(req.text, review_prompt(data, digest))

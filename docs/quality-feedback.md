@@ -194,3 +194,11 @@ The archived threshold appears after 128,000 characters in its fixture.
 .venv/bin/python scripts/evaluate_argon.py --conflict-pilot --live --output /tmp/argon-conflicts
 .venv/bin/python scripts/review_argon.py /tmp/argon-conflicts --live
 ```
+
+Substantive review reports business design coverage separately from declared
+execution blockers. A design can cover every source obligation while its cases
+still need provisioned accounts, data, or an environment. Missing prerequisites
+remain blockers for the combined assessment and do not become requests to
+regenerate an otherwise covered design. The reviewer receives a structured
+response schema and can retry a malformed or incoherent response once within
+its existing deadline. Source binding and exact step validation still apply.
