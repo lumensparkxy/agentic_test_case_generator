@@ -12,7 +12,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
-from evaluate_argon import PROFILES, fixtures, write_json
+from evaluate_argon import ALL_PROFILES, conflict_fixtures, fixtures, write_json
 from evaluate_guidance import canonical_hash, get_settings, payload_for, TestCase
 from app.agents.context_evidence import prepare_context_evidence
 
@@ -183,7 +183,7 @@ def review_packet(packet):
 def summarize(folder, reviews):
     key = json.loads((folder / "blind-key.json").read_text())
     packets = {packet["blind_id"]: packet for packet in json.loads((folder / "blind-packets.json").read_text())}
-    specs = fixtures()
+    specs = {**fixtures(), **conflict_fixtures()}
     source_by_profile = {}
     rows = {}
     for review in reviews:
@@ -211,7 +211,7 @@ def summarize(folder, reviews):
         expected_evidence = spec.get("evidence_markers", {})
         if (fixture, profile) not in source_by_profile:
             payload = payload_for(spec["requirements"], spec)
-            selected = prepare_context_evidence(payload.requirements, payload.context, budget=PROFILES[profile][1])
+            selected = prepare_context_evidence(payload.requirements, payload.context, budget=ALL_PROFILES[profile][1])
             source_by_profile[fixture, profile] = {identity for identity, marker in expected_evidence.items() if marker in selected}
         selected_evidence = source_by_profile[fixture, profile]
         incomplete = any(
@@ -243,6 +243,7 @@ def summarize(folder, reviews):
         ("flash-context", "flash-current-context", "flash-expanded"),
         ("argon-context", "argon-current-context", "argon-expanded"),
         ("argon-output", "argon-expanded", "argon-long-output"),
+        ("conflict-pilot", "flash-conflict-pilot", "argon-conflict-pilot"),
     ]:
         for fixture in sorted({row["fixture"] for row in rows.values()}):
             pairs = [

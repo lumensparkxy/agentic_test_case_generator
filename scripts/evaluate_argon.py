@@ -13,6 +13,7 @@ import sys
 from google.genai import types
 
 import evaluate_guidance as guidance
+from app.agents.context_evidence import MAX_CONTEXT_CHARS
 from app.agents.evaluation_limits import EvaluationLimits
 
 FLASH = "gemini-3.8-flash"
@@ -25,6 +26,11 @@ PROFILES = {
     "argon-current-context": (ARGON, 48_000, None),
     "argon-long-output": (ARGON, 128_000, 256_000),
 }
+CONFLICT_PROFILES = {
+    "flash-conflict-pilot": (FLASH, MAX_CONTEXT_CHARS, None),
+    "argon-conflict-pilot": (ARGON, MAX_CONTEXT_CHARS, None),
+}
+ALL_PROFILES = {**PROFILES, **CONFLICT_PROFILES}
 RATES = {FLASH: (0.75, 3.75), ARGON: (2.0, 10.0)}
 
 RULES = {
@@ -87,26 +93,59 @@ def fixtures():
     return {name: {**fixture, "workflow_timeout_seconds": DEADLINE_SECONDS} for name, fixture in result.items()}
 
 
-def trial_matrix():
-    names = list(fixtures())
+def conflict_fixtures():
+    return {
+        "conflicting_authorization": fixtures()["authorization"],
+        "conflicting_threshold": {
+            "requirements": [{"id": "R1", "text": "A receipt is required only when an expense exceeds 173 EUR."}],
+            "context": {
+                "notes": "Archive index entry. No expense behavior specified. " * 2_900 + "\nAn archived expense guide says the receipt threshold is 250 EUR."
+            },
+            "obligations": {
+                "authority": "Verify no receipt is required at 173 EUR and a receipt is required above 173 EUR.",
+                "conflict": "Explicitly flag the archived 250 EUR rule and verify the current threshold on an amount above 173 EUR and at or below 250 EUR.",
+            },
+            "evidence_markers": {"current_threshold": "173 EUR", "archived_threshold": "250 EUR"},
+            "workflow_timeout_seconds": DEADLINE_SECONDS,
+        },
+        "conflicting_withdrawal": {
+            "requirements": [{"id": "R1", "text": "Withdrawing a Submitted expense returns it to the editable Draft reopened state."}],
+            "context": {"notes": "An older workflow guide says withdrawal permanently changes the expense to a read-only Cancelled state."},
+            "obligations": {
+                "authority": "Withdraw a Submitted expense and verify Draft reopened and that editing is allowed.",
+                "conflict": "Explicitly flag the older read-only Cancelled rule and verify the withdrawal does not leave the expense cancelled or read-only.",
+            },
+            "evidence_markers": {"current_state": "Draft reopened", "archived_state": "Cancelled"},
+            "workflow_timeout_seconds": DEADLINE_SECONDS,
+        },
+    }
+
+
+def trial_matrix(conflict_pilot=False):
+    names = list(conflict_fixtures() if conflict_pilot else fixtures())
     for repeat in range(1, 4):
         for name in names[repeat - 1 :] + names[: repeat - 1]:
-            profiles = list(PROFILES) if name in {"project_long", "project_over_budget"} else list(PROFILES)[:2]
+            if conflict_pilot:
+                profiles = list(CONFLICT_PROFILES)
+            else:
+                profiles = list(PROFILES) if name in {"project_long", "project_over_budget"} else list(PROFILES)[:2]
             offset = (repeat - 1) % len(profiles)
             for profile in profiles[offset:] + profiles[:offset]:
                 yield name, profile, repeat
 
 
 def sample(name, profile):
-    model, context_cap, output_cap = PROFILES[profile]
+    model, context_cap, output_cap = ALL_PROFILES[profile]
+    pilot = profile in CONFLICT_PROFILES
+    spec = (conflict_fixtures() if pilot else fixtures())[name]
     input_rate, output_rate = RATES[model]
     return guidance.evaluate(
         live=True,
         model=model,
         stages=("test_cases",),
-        fixtures={name: fixtures()[name]},
+        fixtures={name: spec},
         guidance_arms=("combined",),
-        limits=EvaluationLimits(context_cap, 512_000, output_cap),
+        limits=EvaluationLimits() if pilot else EvaluationLimits(context_cap, 512_000, output_cap),
         input_rate=input_rate,
         output_rate=output_rate,
     )
@@ -138,7 +177,7 @@ def run_trial(output, item):
 
 def blind_packets(output, index):
     packets, key = [], {}
-    specs = fixtures()
+    specs = {**fixtures(), **conflict_fixtures()}
     for trial in index:
         rows = json.loads((output / trial["file"]).read_text())["results"]
         row = rows[0] if rows else {}
@@ -178,14 +217,15 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, choices=range(1, 7), default=4)
     parser.add_argument("--live", action="store_true")
+    parser.add_argument("--conflict-pilot", action="store_true", help="Compare only conflicting requirements using the app's input limits")
     parser.add_argument("--sample", nargs=2, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.sample:
         write_json(args.output, sample(*args.sample))
         return
-    matrix = list(trial_matrix())
+    matrix = list(trial_matrix(args.conflict_pilot))
     if not args.live:
-        for name, spec in fixtures().items():
+        for name, spec in (conflict_fixtures() if args.conflict_pilot else fixtures()).items():
             guidance.payload_for(spec["requirements"], spec)
             print(name, len(json.dumps(spec["context"], ensure_ascii=False)))
         print(f"{len(matrix)} planned samples, no model calls")

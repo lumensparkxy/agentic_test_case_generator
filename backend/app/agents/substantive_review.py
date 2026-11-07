@@ -21,7 +21,7 @@ from ..services.guidance_service import current_guidance, public_manifest
 from ..utils.genai_response import extract_response_text
 
 RUBRIC = "delivered_business_coverage_v3"
-MAX_INPUT_BYTES = 160_000
+MAX_INPUT_BYTES = 512_000
 ASSESSMENT_BUDGET_SECONDS = 180
 ASSESSMENT_ATTEMPT_SECONDS = 120
 

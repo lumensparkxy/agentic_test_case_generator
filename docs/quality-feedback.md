@@ -151,8 +151,7 @@ passing test.
 ### Expanded-context model comparison
 
 Issue #360 compares Flash and Argon on five synthetic fixtures with three
-paired repeats. The default model and application limits remain in effect
-outside the evaluator. Use the repository virtual environment with the Google
+paired repeats. Its trial arms use explicit limits. Use the repository virtual environment with the Google
 Gen AI SDK version recorded in the report. The long-output trial uses SDK
 continuation on non-streaming Argon case-writing calls.
 
@@ -178,3 +177,20 @@ readability, contextual evidence, traceability and unsupported assumptions.
 Run and artifact hashes bind the scored outputs. Model-based scoring is
 separate from human approval or test execution. Treat invalid or failed
 reviews as unscored and retain partial or absent deliveries in the report.
+
+### Conflict-only Argon pilot
+
+The app defaults to Gemini 3.8 Flash and selects up to 256,000 characters of
+additional context for Use Cases and Test Cases. Substantive assessment accepts
+up to 512,000 bytes of review input and reports larger packages as unreviewed.
+
+Issue #362 runs three matched Flash and Argon repeats on synthetic conflicts in
+authorization, receipt thresholds, and withdrawal states. This opt-in mode uses
+the app's context and review limits and the standard case-writing output cap.
+The archived threshold appears after 128,000 characters in its fixture.
+
+```bash
+.venv/bin/python scripts/evaluate_argon.py --conflict-pilot --output /tmp/argon-conflicts
+.venv/bin/python scripts/evaluate_argon.py --conflict-pilot --live --output /tmp/argon-conflicts
+.venv/bin/python scripts/review_argon.py /tmp/argon-conflicts --live
+```
