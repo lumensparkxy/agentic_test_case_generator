@@ -345,7 +345,7 @@ test("Test Cases keeps three result tabs and compact traceability rows", async (
 	await expect(tabs).not.toContainText(/Diagnostics|Generation Summary/);
 	await tabs.getByRole("tab", { name: /^Traceability Matrix/ }).click();
 	const table = page.getByRole("region", { name: "Requirement traceability table" }).getByRole("table");
-	await expect(table.getByRole("columnheader")).toHaveText(["Requirement", "Linked test cases", "Scenario coverage", "Status"]);
+	await expect(table.getByRole("columnheader")).toHaveText(["Requirement", "Linked test cases", "Linked scenarios", "Status"]);
 	for (const [index, requirement] of project.current_snapshots.requirements.payload.requirements.entries()) {
 		await expect(
 			table
@@ -357,9 +357,9 @@ test("Test Cases keeps three result tabs and compact traceability rows", async (
 		await expect(table).not.toContainText(requirement.text);
 	}
 	await expect(table.getByRole("row").nth(1)).toContainText("TC-001");
-	await expect(table.getByRole("row").nth(1)).toContainText("Covered");
+	await expect(table.getByRole("row").nth(1)).toContainText("Tests linked");
 	await expect(table.getByRole("row").nth(2)).toContainText("No linked tests");
-	await expect(table.getByRole("row").nth(2)).toContainText("Gap");
+	await expect(table.getByRole("row").nth(2).getByRole("cell").last()).toHaveText("No linked tests");
 	for (const width of [1488, 390]) {
 		await page.setViewportSize({ width, height: 900 });
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

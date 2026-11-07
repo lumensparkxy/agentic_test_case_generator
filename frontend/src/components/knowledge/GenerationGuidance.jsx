@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import useKnowledge from "../../hooks/useKnowledge";
 import { Button } from "../ui/controls";
-import { Badge } from "../ui/surfaces";
+import { Badge, Disclosure } from "../ui/surfaces";
 import { GUIDANCE_STAGES, guidanceAvailability } from "./guidanceAvailability";
 
 export function GuidanceAvailability({ data, stage }) {
@@ -44,18 +44,29 @@ export default function GenerationGuidance({ request, projectId, stage }) {
 	const data = knowledge.error || knowledge.loading ? null : knowledge.data;
 	return (
 		<section className="generation-guidance" aria-label="Guidance for next generation" aria-busy={knowledge.loading || undefined}>
-			<h2>Guidance for next generation</h2>
-			<GuidanceAvailability data={data} stage={stage} />
-			<p>
-				Availability is checked before matching run inputs and context limits. The saved run records what was actually used; these settings
-				do not change earlier artifacts or their approval.
-			</p>
-			{stage === "automation" && <p>These settings apply to AI code generation. Execution preview is a deterministic check.</p>}
-			{knowledge.loading && <p role="status">Checking guidance availability…</p>}
-			{knowledge.error && <p aria-live="polite">Guidance availability could not be checked. Retry to see current settings.</p>}
-			<Button variant="secondary" disabled={knowledge.loading} onClick={load}>
-				Refresh guidance availability
-			</Button>
+			{!knowledge.loading &&
+				["skills", "memory"].some((kind) =>
+					["Unavailable", "Disabled by configuration"].includes(guidanceAvailability(data, stage, kind).label)
+				) && (
+					<p className="guidance-limitation">
+						Some generation guidance is unavailable or disabled. Review assumptions before approval; expand details for the affected
+						sources.
+					</p>
+				)}
+			<Disclosure>
+				<summary>Guidance for next generation</summary>
+				<GuidanceAvailability data={data} stage={stage} />
+				<p>
+					Availability is checked before matching run inputs and context limits. The saved run records what was actually used; these
+					settings do not change earlier artifacts or their approval.
+				</p>
+				{stage === "automation" && <p>These settings apply to AI code generation. Execution preview is a deterministic check.</p>}
+				{knowledge.loading && <p role="status">Checking guidance availability…</p>}
+				{knowledge.error && <p aria-live="polite">Guidance availability could not be checked. Retry to see current settings.</p>}
+				<Button variant="secondary" disabled={knowledge.loading} onClick={load}>
+					Refresh guidance availability
+				</Button>
+			</Disclosure>
 		</section>
 	);
 }

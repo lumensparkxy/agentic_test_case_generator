@@ -168,7 +168,7 @@ test("unfinished semantic review keeps its score and actionable finding after re
 	await expect(panel(page).getByRole("checkbox", { name: finding, exact: true })).toBeVisible();
 	await page.getByRole("tab", { name: /^Traceability Matrix/ }).click();
 	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Cases with traceability 2/2");
-	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Scenario coverage 2/3");
+	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Linked scenarios 2/3");
 	await page.reload();
 	await expect(panel(page)).toContainText("Quality score 88/100");
 	await expect(panel(page).getByRole("checkbox", { name: finding, exact: true })).toBeVisible();
@@ -176,7 +176,7 @@ test("unfinished semantic review keeps its score and actionable finding after re
 	await expect(page.getByText("1 generation task(s) remain unresolved.", { exact: true })).toHaveCount(0);
 	await page.getByRole("tab", { name: /^Traceability Matrix/ }).click();
 	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Cases with traceability 2/2");
-	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Scenario coverage 2/3");
+	await expect(page.getByRole("tabpanel", { name: "Traceability Matrix", exact: true })).toContainText("Linked scenarios 2/3");
 });
 
 test("stale suite blocks refinement and exposes impact review", async ({ page }) => {

@@ -188,3 +188,23 @@ introduce a billing retry worker or alter billing policy.
 Validation covers backend reservation/replay, interrupted leases, lost commits,
 legacy evidence, approval/revision gates, and synthetic browser refresh, keyboard,
 second-tab, retry, connection loss and mobile accessibility flows.
+
+## Desktop test review: evidence and linkage
+
+Test Cases hydrates delivered metrics and review from the Test Cases snapshot.
+Use Cases planning metrics must never substitute for missing suite evidence.
+The traceability view labels associations as linked tests/scenarios; these are
+separate from substantive coverage assessment, human approval and execution.
+Missing or inconsistent scenario totals display as unavailable.
+
+The two-pane test review searches steps, expected results and test data as well
+as case identifiers and titles. “Why this test?” exposes current requirements
+for comparison and source quotations/step evidence from the saved assessment.
+Current requirements may differ from the generation baseline; absent assessment
+evidence stays explicit. Routine generation guidance is collapsed, with a
+visible limitation when sources are disabled or unavailable.
+
+Regression: `e2e/desktop-review.spec.js` covers incompatible snapshot metrics,
+missing metrics, reload, step search and source evidence at desktop widths.
+This UI delivery does not implement automatic project-wide draft refresh or
+change the existing knowledge approval permissions.

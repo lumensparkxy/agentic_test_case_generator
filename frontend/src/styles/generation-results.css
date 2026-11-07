@@ -812,3 +812,30 @@ button.small {
 		flex: 1;
 	}
 }
+
+/* Keep evidence close to the selected test without adding a permanent pane. */
+.test-source-evidence {
+	margin: 16px 0;
+	padding: 12px 16px;
+	background: var(--surface-container);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+}
+.test-source-evidence summary {
+	cursor: pointer;
+	font-weight: 600;
+	color: var(--primary-strong);
+}
+.test-source-evidence blockquote {
+	margin: 12px 0;
+	padding-left: 16px;
+	border-left: 3px solid var(--primary);
+}
+.generation-guidance summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+.generation-guidance .guidance-limitation {
+	margin: 0 0 12px;
+	color: var(--warning-text);
+}
