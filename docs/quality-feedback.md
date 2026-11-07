@@ -146,7 +146,7 @@ Report behavior coverage, unsupported assumptions, executable prerequisites,
 duplicate behavior, reviewer rework, failure rate, latency and known/unknown cost.
 Promote only after paired improvement without increased unsupported assumptions.
 A detected application defect must retain its assertion, not be “fixed” into a
-passing test. No Argon experiment or default-model change is part of this PR.
+passing test.
 
 ### Expanded-context model comparison
 

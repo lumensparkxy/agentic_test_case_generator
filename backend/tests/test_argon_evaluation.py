@@ -16,6 +16,7 @@ from app.agents.context_evidence import prepare_context_evidence
 
 
 class ArgonEvaluationTests(unittest.TestCase):
+    @unittest.skipUnless(hasattr(AsyncModels, "_generate_content_with_continuation"), "SDK lacks automatic continuation support")
     def test_sdk_continuation_counts_hops_and_normalizes_terminal_reason(self):
         def response(fragment, reason, token=None):
             return types.GenerateContentResponse(

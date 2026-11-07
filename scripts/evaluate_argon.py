@@ -10,6 +10,8 @@ import random
 import subprocess
 import sys
 
+from google.genai import types
+
 import evaluate_guidance as guidance
 from app.agents.evaluation_limits import EvaluationLimits
 
@@ -188,6 +190,8 @@ def main():
             print(name, len(json.dumps(spec["context"], ensure_ascii=False)))
         print(f"{len(matrix)} planned samples, no model calls")
         return
+    if "automatic_continuation" not in types.GenerateContentConfig.model_fields:
+        parser.error("The live trial requires a Google Gen AI SDK with automatic continuation support.")
     args.output.mkdir(parents=True, exist_ok=False)
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         index = list(pool.map(lambda item: run_trial(args.output, item), matrix))
