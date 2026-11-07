@@ -18,6 +18,28 @@ from app.services.behaviour_maintenance import maintenance_scope
 from app.services.knowledge_service import mutate_knowledge
 
 
+class ProjectSyncEndpointTests(unittest.TestCase):
+    def test_source_conflicts_and_validation_keep_their_http_status(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.routers.project_sync import router, get_current_user
+        from app.models import AuthUser
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="test-owner", email="owner@example.com", name="Test owner")
+        with TestClient(app) as client:
+            for status, detail in ((409, "Project changed. Reload before updating feedback."), (422, "Resolve the business rule explicitly")):
+                with self.subTest(status=status), patch.object(sync, "accept_finding", side_effect=HTTPException(status, detail)):
+                    response = client.post(
+                        "/projects/test-project/changes/accept",
+                        headers={"X-Request-ID": "test-request"},
+                        json={"base_project_revision": 1, "finding_id": "finding-1", "decision": "Maximum is six"},
+                    )
+                    self.assertEqual(response.status_code, status)
+                    self.assertEqual(response.json(), {"detail": detail})
+
+
 class ProjectSyncTests(unittest.TestCase):
     def setUp(self):
         fixtures.WorkflowProjectServiceTests.setUp(self)
@@ -52,22 +74,32 @@ class ProjectSyncTests(unittest.TestCase):
             (
                 "use_cases",
                 {
+                    "requirement_analysis": [
+                        {"requirement_id": "R1", "requirement_text": "Limit is 8"},
+                        {"requirement_id": "R2", "requirement_text": "Show receipt"},
+                    ],
                     "coverage_plan": [
                         {
                             "requirement_id": "R2",
                             "requirement_text": "Show receipt",
                             "scenarios": [{"id": "S2", "requirement_id": "R2", "title": "Receipt", "objective": "Show receipt"}],
                         }
-                    ]
+                    ],
                 },
             ),
             (
                 "test_cases",
                 {
+                    "requirement_analysis": [
+                        {"requirement_id": "R1", "requirement_text": "Limit is 8"},
+                        {"requirement_id": "R2", "requirement_text": "Show receipt"},
+                    ],
+                    "generation_evidence": {"request_id": "baseline-generation"},
+                    "iteration_history": [{"approved": True, "summary": "Baseline approved"}],
                     "test_cases": [
                         {"id": "TC1", "title": "Limit", "linked_requirement_ids": ["R1"], "steps": [{"step": 1, "action": "Enter 8", "expected": "Accepted"}]},
                         self.preserved,
-                    ]
+                    ],
                 },
             ),
         ):
@@ -123,7 +155,26 @@ class ProjectSyncTests(unittest.TestCase):
                 }
             ],
             "approved": False,
+            "generation_evidence": {"request_id": kwargs["request_id"]},
         }
+
+    def test_refreshed_tests_do_not_keep_old_analysis_or_review_evidence(self):
+        before = self.fixture()
+        with (
+            patch.object(sync, "enforce_billing_access"),
+            patch.object(sync, "generate_use_cases", side_effect=self.planner),
+            patch.object(sync, "generate_test_cases", side_effect=self.generator),
+        ):
+            result = sync.accept_finding(self.pid, self.actor, self.payload, "accept")
+        self.assertEqual(result.project_sync["status"], "ready_for_review", result.project_sync)
+        payload = result.current_snapshots["test_cases"].payload
+        self.assertEqual(payload["requirement_analysis"], result.current_snapshots["use_cases"].payload["requirement_analysis"])
+        self.assertEqual({r["requirement_id"]: r["requirement_text"] for r in payload["requirement_analysis"]}, {"R1": "Limit is 6", "R2": "Show receipt"})
+        self.assertEqual(payload["iteration_history"], [])
+        self.assertEqual(payload["generation_evidence"]["request_id"], f"{result.project_sync['id']}:test_cases:1")
+        self.assertEqual(next(c for c in payload["test_cases"] if c["id"] == "TC2"), self.preserved)
+        old = projects.get_project_stage_snapshot(self.pid, before.current_snapshots["test_cases"].snapshot_id, actor=self.actor)
+        self.assertEqual(old.payload["generation_evidence"]["request_id"], "baseline-generation")
 
     def test_accept_refresh_retry_preservation_and_mandatory_worker_inputs(self):
         before = self.fixture()
