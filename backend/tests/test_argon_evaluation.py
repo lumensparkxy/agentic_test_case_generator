@@ -9,10 +9,11 @@ from google.genai import types
 from google.genai.models import AsyncModels
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from evaluate_argon import PROFILES, fixtures, trial_matrix
+from evaluate_argon import ARGON, CONFLICT_PROFILES, PROFILES, conflict_fixtures, fixtures, sample, trial_matrix
 from evaluate_guidance import collect_usage, payload_for
 from review_argon import Review, score
 from app.agents.context_evidence import prepare_context_evidence
+from app.agents.evaluation_limits import EvaluationLimits
 
 
 class ArgonEvaluationTests(unittest.TestCase):
@@ -61,6 +62,22 @@ class ArgonEvaluationTests(unittest.TestCase):
             profiles = set(PROFILES) if fixture in {"project_long", "project_over_budget"} else {"flash-expanded", "argon-expanded"}
             self.assertEqual({profile for name, profile, _ in matrix if name == fixture}, profiles)
             self.assertEqual(payload_for(spec["requirements"], spec).workflow_settings.timeout_seconds, 600)
+
+    def test_conflict_pilot_pairs_only_conflicts_and_uses_app_limits(self):
+        matrix = list(trial_matrix(conflict_pilot=True))
+        self.assertEqual(len(matrix), 18)
+        self.assertEqual(set(matrix), {(name, profile, repeat) for name in conflict_fixtures() for profile in CONFLICT_PROFILES for repeat in (1, 2, 3)})
+        with patch("evaluate_argon.guidance.evaluate") as evaluate:
+            with self.assertRaises(KeyError):
+                sample("directory", "argon-conflict-pilot")
+            evaluate.assert_not_called()
+            sample("conflicting_authorization", "argon-conflict-pilot")
+        self.assertEqual(evaluate.call_args.kwargs["model"], ARGON)
+        self.assertEqual(evaluate.call_args.kwargs["limits"], EvaluationLimits())
+        spec = conflict_fixtures()["conflicting_threshold"]
+        payload = payload_for(spec["requirements"], spec)
+        self.assertNotIn("250 EUR", prepare_context_evidence(payload.requirements, payload.context, budget=128_000))
+        self.assertIn("250 EUR", prepare_context_evidence(payload.requirements, payload.context))
 
     def test_long_fixtures_expose_the_context_limit_difference(self):
         for name in ("project_long", "project_over_budget"):
