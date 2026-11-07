@@ -9,6 +9,8 @@ export interface ApiOperation<Request, Response, Method extends string, Path ext
 }
 
 export interface ApiContractOperations {
+	projectChangeAccept: ApiOperation<ProjectChangeAcceptRequest, ProjectChangeAcceptResponse, "POST", "/projects/{project_id}/changes/accept">;
+	projectChangeResume: ApiOperation<ProjectChangeResumeRequest, ProjectChangeResumeResponse, "POST", "/projects/{project_id}/changes/resume">;
 	workspaceSummary: ApiOperation<WorkspaceSummaryGetRequest, WorkspaceSummaryGetResponse, "GET", "/workspace/summary">;
 	projectsCreate: ApiOperation<ProjectsCreateRequest, ProjectsCreateResponse, "POST", "/projects">;
 	projectsList: ApiOperation<ProjectsListRequest, ProjectsListResponse, "GET", "/projects">;
@@ -44,6 +46,10 @@ export interface ApiContractOperations {
 	billingEntitlementsMe: ApiOperation<BillingEntitlementsMeRequest, BillingEntitlementsMeResponse, "GET", "/entitlements/me">;
 }
 
+export type ProjectChangeAcceptRequest = AcceptProjectFinding;
+export type ProjectChangeAcceptResponse = QaProjectDetail;
+export type ProjectChangeResumeRequest = ResumeProjectSync;
+export type ProjectChangeResumeResponse = QaProjectDetail;
 export type WorkspaceSummaryGetRequest = {
 	include_archived?: boolean;
 	projects_limit?: number;
@@ -118,6 +124,15 @@ export type AutomationExecutionRunRequest = ExecutionRunInput;
 export type AutomationExecutionRunResponse = ExecutionRunResponse;
 export type BillingEntitlementsMeRequest = undefined;
 export type BillingEntitlementsMeResponse = BillingEntitlementResponse;
+
+export interface AcceptProjectFinding {
+	base_project_revision: number;
+	corrections?: Array<RequirementCorrection>;
+	decision: string;
+	finding_id: string;
+	resolution?: string;
+	supersedes?: Array<string>;
+}
 
 export interface ArtifactSource {
 	id: string;
@@ -676,9 +691,12 @@ export interface QaProjectDetail {
 	description?: string | null;
 	execution_runs?: Array<QaProjectExecutionRun>;
 	impact_application?: ImpactApplication | null;
+	input_revision?: number;
 	name: string;
 	owner_user_id: string;
+	project_decisions?: Array<Record<string, unknown>>;
 	project_id: string;
+	project_sync?: Record<string, unknown> | null;
 	stage_state?: Record<string, QaProjectStageState>;
 	status?: "active" | "archived";
 	timeline?: Array<QaProjectTimelineEvent>;
@@ -843,6 +861,12 @@ export interface RequirementAnalysis {
 	suggested_scenarios?: Array<string>;
 }
 
+export interface RequirementCorrection {
+	previous_text: string;
+	requirement_id: string;
+	text: string;
+}
+
 export interface RequirementCoveragePlan {
 	requirement_id: string;
 	requirement_text: string;
@@ -905,6 +929,10 @@ export interface RequirementsWorkflowResponse {
 	source_names?: Array<string>;
 	workflow_diagnostics?: WorkflowDiagnostics;
 	workflow_settings?: WorkflowSettings;
+}
+
+export interface ResumeProjectSync {
+	change_id: string;
 }
 
 export interface ReviewResult {

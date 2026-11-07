@@ -18,6 +18,9 @@ from app.models import AuthUser, AutomationResponse, ExecutionCandidate, Executi
 
 class AutomationEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
+        from app.contracts.project_sync import ProjectInputManifest
+
+        self.enterContext(patch("app.services.project_inputs.load_inputs", return_value=ProjectInputManifest(project_id="project-1", revision=1)))
         app.dependency_overrides[get_current_user] = lambda: AuthUser(
             sub="automation-user",
             email="automation@example.com",

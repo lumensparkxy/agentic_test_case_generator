@@ -96,6 +96,9 @@ class QaProjectExecutionRun(BaseModel):
 
 
 class QaProjectDetail(QaProjectSummary):
+    input_revision: int = 0
+    project_sync: Optional[Dict[str, Any]] = None
+    project_decisions: List[Dict[str, Any]] = Field(default_factory=list)
     impact_application: Optional[ImpactApplication] = None
     current_snapshots: Dict[ProjectStageName, QaProjectStageSnapshot] = Field(default_factory=dict)
     timeline: List[QaProjectTimelineEvent] = Field(default_factory=list)

@@ -50,6 +50,22 @@ async def change_personal_knowledge(payload: KnowledgeMutation, request: Request
     return await mutate(request, actor, None, payload)
 
 
+@router.post("/maintenance/projects/{project_id}/knowledge", response_model=KnowledgeEntry)
+async def maintain_project_knowledge(project_id: str, payload: KnowledgeMutation, request: Request, actor: AuthUser = Depends(get_current_user)):
+    from ..services.behaviour_maintenance import maintenance_scope
+
+    with maintenance_scope(actor):
+        return await mutate(request, actor, project_id, payload)
+
+
+@router.post("/maintenance/me/knowledge", response_model=KnowledgeEntry)
+async def maintain_personal_knowledge(payload: KnowledgeMutation, request: Request, actor: AuthUser = Depends(get_current_user)):
+    from ..services.behaviour_maintenance import maintenance_scope
+
+    with maintenance_scope(actor):
+        return await mutate(request, actor, None, payload)
+
+
 @router.get("/projects/{project_id}/knowledge/{entry_id}/versions/{revision}")
 async def read_knowledge_version(project_id: str, entry_id: str, revision: int, actor: AuthUser = Depends(get_current_user)):
     from ..services.knowledge_service import knowledge_version

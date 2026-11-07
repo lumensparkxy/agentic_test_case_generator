@@ -19,6 +19,7 @@ from .routers.export import router as export_router
 from .routers.integrations_azure_devops import router as azure_devops_router
 from .routers.integrations_jira import router as jira_router
 from .routers.projects import router as projects_router
+from .routers.project_sync import router as project_sync_router
 from .routers.requirements import _build_grounded_context_from_enrich_input, router as requirements_router
 from .routers.reports import router as reports_router
 from .routers.testcases import router as testcases_router
@@ -46,6 +47,7 @@ app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(reports_router)
 app.include_router(projects_router)
+app.include_router(project_sync_router)
 app.include_router(requirements_router)
 app.include_router(requirement_imports_router)
 app.include_router(jira_router)

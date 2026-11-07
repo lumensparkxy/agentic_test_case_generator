@@ -40,9 +40,10 @@ def restore_manifest(value, actor, project_id):
     return GuidanceManifest.model_validate(data)
 
 
-def prepare_run(stage, actor, project_id, request_id, *, requirement_ids=(), memory_bypass=False, input_fingerprint=""):
+def _prepare_optional_guidance(stage, actor, project_id, request_id, *, requirement_ids=(), memory_bypass=False, input_fingerprint=""):
     model = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
-    # Disabled and explicit-bypass paths never depend on knowledge storage.
+    # Optional memory bypass does not bypass the mandatory project input
+    # manifest attached by prepare_run and persisted with project artifacts.
     if not run_enabled("memory", stage) or memory_bypass or not project_id:
         return build_manifest(stage, model, project_id=project_id, memory_bypass=memory_bypass)
     try:
@@ -73,3 +74,18 @@ def prepare_run(stage, actor, project_id, request_id, *, requirement_ids=(), mem
         return manifest if saved == value else restore_manifest(saved["manifest"], actor, project_id)
     except Exception as exc:
         raise unavailable(exc) from exc
+
+
+def prepare_run(stage, actor, project_id, request_id, *, requirement_ids=(), memory_bypass=False, input_fingerprint=""):
+    from .project_inputs import load_inputs, behavioural_version
+
+    inputs = load_inputs(project_id, actor) if project_id else None
+    behaviour = behavioural_version()
+    # Include mandatory inputs in retry identity even when optional memory is off.
+    fingerprint = sha256(json.dumps([input_fingerprint, inputs.model_dump(mode="json") if inputs else None, behaviour], sort_keys=True).encode()).hexdigest()
+    manifest = _prepare_optional_guidance(
+        stage, actor, project_id, request_id, requirement_ids=requirement_ids, memory_bypass=memory_bypass, input_fingerprint=fingerprint
+    )
+    values = {"project_inputs": inputs, "behaviour_version": behaviour}
+    values["manifest_id"] = sha256((manifest.manifest_id + fingerprint).encode()).hexdigest()
+    return manifest.model_copy(update=values)

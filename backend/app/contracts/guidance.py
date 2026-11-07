@@ -2,6 +2,7 @@
 
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from .project_sync import ProjectInputManifest
 
 GuidanceStage = Literal["requirements", "use_cases", "test_cases", "automation"]
 
@@ -48,6 +49,8 @@ class GuidanceManifest(FrozenGuidance):
     skills: tuple[SkillGuidance, ...] = ()
     memories: tuple[MemoryGuidance, ...] = ()
     omitted: tuple[OmittedGuidance, ...] = ()
+    project_inputs: ProjectInputManifest | None = None
+    behaviour_version: str = ""
 
 
 class GuidanceRunOptions(BaseModel):

@@ -35,6 +35,7 @@ import {
 	resolveSelectedExecutableCandidates,
 } from "./components/automation/automationPreview";
 import ContextInputsPanel from "./components/context/ContextInputsPanel";
+import { ProjectSyncStatus } from "./components/context/ProjectSyncPanel";
 import ExportPanel from "./components/export/ExportPanel";
 import GeneratedTestCasesView from "./components/generation/GeneratedTestCasesView";
 import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
@@ -4222,6 +4223,14 @@ export default function App() {
 								/>
 
 								{["requirements", "test-cases", "automation"].includes(route.destination) && (
+									<ProjectSyncStatus
+										key={`sync-${navigationProjectId}`}
+										project={currentProject}
+										request={apiRequest}
+										onUpdated={() => openProject(navigationProjectId, { silent: true })}
+									/>
+								)}
+								{["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<GenerationGuidance
 										key={`${knowledgeScope}:${route.destination}:${currentProjectRevision}`}
 										request={apiRequest}
@@ -4920,6 +4929,7 @@ export default function App() {
 
 									{activeTab === 1 && (
 										<ContextInputsPanel
+											project={currentProject}
 											request={apiRequest}
 											projectId={navigationProjectId}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}

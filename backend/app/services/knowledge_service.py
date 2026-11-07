@@ -88,6 +88,9 @@ def list_knowledge(actor, project_id=None):
 
 
 def mutate_knowledge(actor, project_id, mutation: KnowledgeMutation, request_id: str, *, source="Manual guidance"):
+    from .behaviour_maintenance import check_knowledge_mutation
+
+    check_knowledge_mutation(actor, project_id, mutation.action)
     project = project_for(project_id, actor)
     hashes = requirement_hashes(project)
     values = mutation.model_dump()

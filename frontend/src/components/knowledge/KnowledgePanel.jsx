@@ -178,54 +178,10 @@ function GuidanceText({ text }) {
 	);
 }
 
-function PersonalChooser({ request, knowledge, onClose }) {
-	const personal = useKnowledge(request, null);
-	const entries = personal.data?.entries.filter((e) => e.status === "active") || [];
-	return (
-		<Modal title="Choose from personal library" onClose={onClose}>
-			<p>Only selected entries will be available to this project.</p>
-			{personal.error && (
-				<Alert role="alert" tone="danger">
-					{personal.error}
-					<Button onClick={personal.load}>Retry</Button>
-				</Alert>
-			)}
-			{knowledge.error && (
-				<Alert role="alert" tone="danger">
-					{knowledge.error}
-				</Alert>
-			)}
-			{entries.map((entry) => (
-				<label className="knowledge-check" key={entry.id}>
-					<Checkbox
-						aria-disabled={knowledge.busy}
-						checked={knowledge.data?.entries.some((e) => e.id === entry.id && e.selected) || false}
-						onChange={() =>
-							void knowledge.mutate({
-								action: knowledge.data?.entries.some((e) => e.id === entry.id && e.selected) ? "unselect" : "select",
-								entry_id: entry.id,
-								base_revision: entry.revision,
-							})
-						}
-					/>
-					{entry.active.text}
-				</label>
-			))}
-			{!personal.loading && !entries.length && (
-				<CollectionState>No approved personal guidance yet. Add and approve it in Settings → Personal knowledge.</CollectionState>
-			)}
-			<Button variant="secondary" onClick={onClose}>
-				Done
-			</Button>
-		</Modal>
-	);
-}
-
 export default function KnowledgePanel({ request, projectId, personal = false }) {
 	const knowledge = useKnowledge(request, personal ? null : projectId);
 	const [filter, setFilter] = useState("active");
 	const [dialog, setDialog] = useState(null);
-	const [chooser, setChooser] = useState(false);
 	const entries = knowledge.data?.entries || [];
 	const filtered = entries.filter((e) => filter === "all" || (filter === "suggested" ? !!e.pending : e.status === filter));
 	const change = async (payload) => {
@@ -240,7 +196,7 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 			<p>
 				{personal
 					? "Reusable guidance you explicitly select for each project."
-					: "Approved guidance for future generation. Suggestions stay inactive until approved."}
+					: "Project feedback stays inactive. Agent behaviour is read-only here; publishing changes requires authenticated maintenance."}
 			</p>
 			{!personal && (
 				<section aria-label="Current stage guidance">
@@ -261,14 +217,9 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 						))}
 					</Select>
 				</div>
-				<Button disabled={knowledge.busy} onClick={() => setDialog({ mode: "propose" })}>
+				<Button disabled={knowledge.busy || personal} onClick={() => setDialog({ mode: "propose" })}>
 					Add guidance
 				</Button>
-				{!personal && (
-					<Button variant="secondary" onClick={() => setChooser(true)}>
-						Choose from personal library
-					</Button>
-				)}
 			</CollectionToolbar>
 			{knowledge.error && !dialog && (
 				<Alert tone="danger" role="alert">
@@ -333,54 +284,17 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 										</td>
 										<td>
 											<div className="knowledge-actions">
-												{shared ? (
-													<>
-														<Button variant="plain" onClick={() => setDialog({ entry, mode: "view" })}>
-															View
-														</Button>
-														<Button
-															variant="plain"
-															disabled={knowledge.busy}
-															onClick={() => void change({ action: "unselect", entry_id: entry.id, base_revision: entry.revision })}
-														>
-															Remove from project
-														</Button>
-													</>
-												) : (
-													<>
-														<Button variant="plain" disabled={knowledge.busy} onClick={() => setDialog({ entry, mode: "revise" })}>
-															Edit
-														</Button>
-														{(entry.pending || entry.status === "needs_confirmation") && (
-															<Button disabled={knowledge.busy} onClick={() => setDialog({ entry, mode: "approve" })}>
-																Review
-															</Button>
-														)}
-														{entry.pending && (
-															<Button
-																variant="plain"
-																disabled={knowledge.busy}
-																onClick={() => void change({ action: "dismiss", entry_id: entry.id, base_revision: entry.revision })}
-															>
-																Dismiss
-															</Button>
-														)}
-														{entry.status === "active" && (
-															<>
-																<Button variant="plain" disabled={knowledge.busy} onClick={() => setDialog({ entry, mode: "retire" })}>
-																	Retire
-																</Button>
-																{!personal && entry.active.kind !== "business_fact" && (
-																	<Button variant="plain" onClick={() => setDialog({ entry, mode: "promote" })}>
-																		Promote
-																	</Button>
-																)}
-															</>
-														)}
-														<Button variant="plain" disabled={knowledge.busy} onClick={() => setDialog({ entry, mode: "delete" })}>
-															Delete
-														</Button>
-													</>
+												<Button variant="plain" onClick={() => setDialog({ entry, mode: "view" })}>
+													View
+												</Button>
+												{entry.pending && !shared && !personal && (
+													<Button
+														variant="plain"
+														disabled={knowledge.busy}
+														onClick={() => void change({ action: "dismiss", entry_id: entry.id, base_revision: entry.revision })}
+													>
+														Dismiss
+													</Button>
 												)}
 											</div>
 										</td>
@@ -430,7 +344,6 @@ export default function KnowledgePanel({ request, projectId, personal = false })
 					onSubmit={change}
 				/>
 			)}
-			{chooser && <PersonalChooser request={request} knowledge={knowledge} onClose={() => setChooser(false)} />}
 		</Surface>
 	);
 }

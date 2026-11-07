@@ -285,6 +285,11 @@ def start_workflow_run(
     workspace_id: Optional[str] = None,
 ) -> str:
     run_id = str(uuid4())
+    from .guidance_service import public_manifest
+
+    guidance = public_manifest()
+    if guidance is not None:
+        metadata = {**(metadata or {}), "guidance": guidance}
     record_workflow_started(run_id, operation, status=status)
     payload = _attach_trace_id(
         {
