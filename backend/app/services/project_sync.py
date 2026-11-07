@@ -354,17 +354,34 @@ def _generate_stage(project, actor, record, stage):
                 pending_writes=pending_writes,
             )
             generated_ids = {c["id"] for c in generated}
-            combined = [c.model_dump(mode="json") for c in versioned]
+            preserved_by_id = {c["id"]: c for c in preserved}
+            combined = []
+            for case in versioned:
+                value = case.model_dump(mode="json")
+                if case.id in preserved_by_id:
+                    # Keep canonical untouched content, including absent optional
+                    # fields. Legacy cases may acquire version references only.
+                    value = {
+                        **deepcopy(preserved_by_id[case.id]),
+                        **{key: item for key, item in value.items() if key.startswith("artifact_") and item is not None},
+                    }
+                combined.append(value)
             generated = [c for c in combined if c["id"] in generated_ids]
             value = {
                 **old_payload,
                 "test_cases": combined,
                 "approved": False,
+                "requirement_analysis": plans["requirement_analysis"],
                 "coverage_plan": plans["coverage_plan"],
                 "coverage_metrics": delivered_coverage(combined, plans["coverage_plan"]),
                 "generation_tasks": [],
                 "substantive_assessment": {"status": "unknown", "reason": "The refreshed suite requires combined assessment and human review."},
                 "review": {"approved": False, "score": 0, "summary": "Review project changes before export."},
+                # The original evidence remains on the prior immutable snapshot.
+                # A scoped refresh cannot inherit its combined-suite approval.
+                "iteration_history": [],
+                "generation_evidence": output.generation_evidence.model_dump(mode="json"),
+                "workflow_settings": output.workflow_settings.model_dump(mode="json"),
                 "workflow_diagnostics": output.workflow_diagnostics.model_dump(mode="json"),
             }
             counts = {

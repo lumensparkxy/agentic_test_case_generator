@@ -482,6 +482,28 @@ Real-target routing, ID extraction and browser/application behavior need separat
 verification when an execution target becomes available. Never treat this
 fixture capability check as booking execution or human acceptance.
 
+`frontend/e2e/live-project-sync.spec.js` exercises the real-provider shared
+correction journey on an isolated synthetic Draft order project. It imports and
+reviews source, saves context, requires passing scenario and delivered-suite
+quality gates, then changes the quantity range from 1–8 to 1–6 through the
+shared-correction UI. It checks pinned source/decision manifests, corrected
+output, unchanged independent cases, renewed review, durable reload and exact
+request replay. Automation is optional and is not requested by this fixture.
+With the local prerequisites below, run:
+
+```bash
+E2E_LIVE=1 E2E_API_BASE=http://127.0.0.1:8000 E2E_BASE_URL=http://127.0.0.1:5173 npm run test:e2e -- e2e/live-project-sync.spec.js --workers=1 --retries=0
+```
+
+Use matching frontend API configuration and backend CORS origins if using other
+loopback ports. Start the backend from the checkout being tested; an older
+non-reloading process does not verify newly merged code. The test retains live
+source, planning, generation and correction evidence and archives only its own
+uniquely named project, including after a failed gate. Reviewer actions are
+explicit synthetic setup. Passing this bounded design fixture does not prove
+production behavior, execution against a target, or the separate Room Booking
+acceptance criteria.
+
 `frontend/e2e/workflow.spec.js` uses the current project workbenches. The live
 scenario is opt-in; the default full suite reports it as skipped. Its anonymous
 sign-in check remains offline. Start frontend and backend from the same checkout

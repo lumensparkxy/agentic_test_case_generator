@@ -2,6 +2,29 @@ import { test, expect } from "@playwright/test";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { installUseCaseReviewApi, useCaseProjectFixture, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
 
+test("context navigation reflects stale and refreshed draft inputs", { tag: "@p1" }, async ({ page }) => {
+	const project = useCaseProjectFixture();
+	project.current_snapshots.context = {
+		snapshot_id: "context-before-correction",
+		payload: { requirements: [], notes: "Saved context", grounded_context: { artifact_sources: [], ui_elements: [], workflows: [] } },
+	};
+	project.stage_state.context = { current_snapshot_id: "context-before-correction", stale: true, approved: false };
+	const api = await installUseCaseReviewApi(page, { initialProject: project });
+	await seedAuthenticatedSession(page);
+	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/context`);
+	await expect(page.getByRole("link", { name: "Context, Needs attention", exact: true })).toBeVisible();
+	project.stage_state.context.stale = false;
+	project.current_revision++;
+	api.setProject(project);
+	await page.reload();
+	await expect(page.getByRole("link", { name: "Context, Needs attention", exact: true })).toBeVisible();
+	project.stage_state.context.approved = true;
+	project.current_revision++;
+	api.setProject(project);
+	await page.reload();
+	await expect(page.getByRole("link", { name: "Context, Complete", exact: true })).toBeVisible();
+});
+
 for (const width of [1366, 1920]) {
 	test(`project correction refresh is reviewable and resumes at ${width}px`, { tag: width === 1366 ? "@p1" : [] }, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });

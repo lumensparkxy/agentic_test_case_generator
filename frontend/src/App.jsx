@@ -3922,7 +3922,12 @@ export default function App() {
 	const workflowNavStatusByTabId = {
 		7: currentProject ? "complete" : "pending",
 		0: requirements.length ? (reviewPendingRequirementCount || rejectedRequirementCount ? "attention" : "complete") : "pending",
-		1: enrichedContext?.grounded_context ? "complete" : hasContextInputs ? "pending" : "pending",
+		1:
+			projectStageState.context?.stale || (projectStageState.context?.current_snapshot_id && !projectStageState.context.approved)
+				? "attention"
+				: enrichedContext?.grounded_context
+					? "complete"
+					: "pending",
 		6: useCasesHumanApproved
 			? "complete"
 			: projectStageState.use_cases?.current_snapshot_id

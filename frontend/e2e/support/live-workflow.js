@@ -11,7 +11,7 @@ export const roomSource = path.join(root, "backend/tests/fixtures/room-booking-r
 export const roomContext = path.join(root, "frontend/e2e/fixtures/room-booking-context.txt");
 const expectedSourceIds = ["ROOM-101", "ROOM-205", "ROOM-310", "ROOM-440"];
 
-export async function liveFixture(page, testInfo) {
+export async function liveFixture(page, testInfo, { namePrefix = "Live Room Booking" } = {}) {
 	assertLocalJwtCompatibilityMode();
 	const apiBase = process.env.E2E_API_BASE || "http://127.0.0.1:8000";
 	expect(["127.0.0.1", "localhost", "[::1]"]).toContain(new URL(apiBase).hostname);
@@ -42,7 +42,7 @@ export async function liveFixture(page, testInfo) {
 		return response.json();
 	};
 	await checked("GET", "/auth/me");
-	const name = `Live Room Booking ${randomUUID()}`;
+	const name = `${namePrefix} ${randomUUID()}`;
 	const project = await checked("POST", "/projects", {
 		name,
 		description: "Test-owned synthetic live integration fixture; automated reviewer actions are test setup, not human business acceptance.",
@@ -63,6 +63,9 @@ export async function liveFixture(page, testInfo) {
 		"backend/app/agents/test_case_agent.py",
 		"backend/app/agents/scenario_assessment.py",
 		"backend/app/agents/substantive_review.py",
+		"backend/app/services/project_sync.py",
+		"backend/app/services/project_inputs.py",
+		"backend/app/services/guidance_service.py",
 		"backend/tests/fixtures/room-booking-requirements.md",
 		"frontend/e2e/fixtures/room-booking-context.txt",
 	];
