@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, QaProjectDetail
@@ -13,6 +13,8 @@ router = APIRouter()
 async def perform(function, *args):
     try:
         return await run_in_threadpool(function, *args)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 

@@ -18,6 +18,28 @@ from app.services.behaviour_maintenance import maintenance_scope
 from app.services.knowledge_service import mutate_knowledge
 
 
+class ProjectSyncEndpointTests(unittest.TestCase):
+    def test_source_conflicts_and_validation_keep_their_http_status(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.routers.project_sync import router, get_current_user
+        from app.models import AuthUser
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="test-owner", email="owner@example.com", name="Test owner")
+        with TestClient(app) as client:
+            for status, detail in ((409, "Project changed. Reload before updating feedback."), (422, "Resolve the business rule explicitly")):
+                with self.subTest(status=status), patch.object(sync, "accept_finding", side_effect=HTTPException(status, detail)):
+                    response = client.post(
+                        "/projects/test-project/changes/accept",
+                        headers={"X-Request-ID": "test-request"},
+                        json={"base_project_revision": 1, "finding_id": "finding-1", "decision": "Maximum is six"},
+                    )
+                    self.assertEqual(response.status_code, status)
+                    self.assertEqual(response.json(), {"detail": detail})
+
+
 class ProjectSyncTests(unittest.TestCase):
     def setUp(self):
         fixtures.WorkflowProjectServiceTests.setUp(self)
