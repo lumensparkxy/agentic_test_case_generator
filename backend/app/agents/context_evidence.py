@@ -3,12 +3,16 @@
 import json
 import re
 
+from .evaluation_limits import current_evaluation_limits
+
 MAX_CONTEXT_CHARS = 48000
 
 
-def prepare_context_evidence(requirements, context, *, budget=MAX_CONTEXT_CHARS):
+def prepare_context_evidence(requirements, context, *, budget=None):
     if context is None:
         return "No additional context provided."
+    if budget is None:
+        budget = current_evaluation_limits.get().context_chars or MAX_CONTEXT_CHARS
     data = context.model_dump(mode="json", exclude_none=True)
     data.pop("requirements", None)
     for key in ("project_id", "base_project_revision"):

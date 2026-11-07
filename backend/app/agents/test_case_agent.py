@@ -24,6 +24,7 @@ from google.genai import types
 from .literal_instructions import literal_source_agent
 from .substantive_review import assess_delivered_suite, apply_assessment
 from .adk_runtime import json_generation_config, tool_generation_config
+from .evaluation_limits import current_evaluation_limits
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .prompting import REAL_WORLD_QA_POLICY, TEST_CASE_BEHAVIOR_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
 from ..config import GenerationSettings, get_generation_settings, get_settings
@@ -744,14 +745,20 @@ def _combined_event_text(event: Any) -> str:
     text_parts = []
     for part in event.content.parts:
         text = getattr(part, "text", None)
-        if text:
+        if text and not getattr(part, "thought", False):
             text_parts.append(str(text))
-    return "\n".join(text_parts).strip()
+    return "".join(text_parts).strip()
 
 
 def _record_event_error(diagnostics: Dict[str, Any], author: str, event: Any) -> None:
     error_code = getattr(event, "error_code", None)
     error_message = getattr(event, "error_message", None)
+    finish_reason = getattr(event, "finish_reason", None)
+    if finish_reason in {"MAX_TOKENS", "CONTINUATION"}:
+        diagnostics["status"] = "partial"
+        diagnostics["failure_reason"] = diagnostics["failure_reason"] or "incomplete_model_output"
+        _append_unique_message(diagnostics["warnings"], f"{author}: model output ended with {finish_reason}.")
+        return
     if not error_code and not error_message:
         return
 
@@ -974,12 +981,13 @@ def _build_test_case_generator_agent(
     human_feedback: Optional[str] = None,
 ) -> Agent:
     feedback_section = human_feedback_section("Human Feedback to Address", human_feedback)
+    output_limit = current_evaluation_limits.get().case_output_tokens if model == "gemini-4-argon" else None
 
     return Agent(
         name="TestCaseGeneratorAgent",
         model=model,
         include_contents="default",
-        generate_content_config=json_generation_config(max_output_tokens=20000, temperature=0.15),
+        generate_content_config=json_generation_config(max_output_tokens=output_limit or 20000, temperature=0.15),
         instruction=f"""You are a Senior QA Engineer specializing in detailed, execution-ready test design.
 
     {TEST_CASE_BEHAVIOR_POLICY}
@@ -1509,6 +1517,9 @@ Human feedback:
         diagnostics["failure_reason"] = diagnostics["failure_reason"] or ("empty_refinement" if is_refinement else "empty_generation")
     elif not final_review["approved"] and not diagnostics["failure_reason"]:
         diagnostics["failure_reason"] = "quality_rejection"
+
+    if diagnostics["failure_reason"] == "incomplete_model_output":
+        final_review["approved"] = False
 
     if iteration_history and diagnostics.get("best_iteration") in {None, iteration_history[-1]["iteration"]}:
         iteration_history[-1] = _make_history_entry(

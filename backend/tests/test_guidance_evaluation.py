@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import nullcontext
 import sys
 import unittest
 from unittest.mock import patch
@@ -53,6 +54,31 @@ class GuidanceEvaluationTests(unittest.TestCase):
         self.assertTrue(evaluation.contains_fallback({"workflow_diagnostics": {"used_fallback": True}}))
         self.assertTrue(evaluation.contains_fallback({"case_diagnostics": [{"status": "fallback"}]}))
         self.assertFalse(evaluation.contains_fallback({"case_diagnostics": [{"status": "manual"}], "used_fallback": False}))
+
+    def test_provider_failure_and_incomplete_finish_cannot_report_completion(self):
+        model = "gemini-4-argon"
+        artifact = {"test_cases": [{"linked_requirement_ids": ["R1"]}]}
+        for calls, failed_calls, finish, expected in [
+            (0, 0, None, "fallback_or_failure"),
+            (1, 1, None, "fallback_or_failure"),
+            (1, 0, "MAX_TOKENS", "incomplete_model_output"),
+            (1, 0, "CONTINUATION", "incomplete_model_output"),
+            (1, 0, "STOP", "generated"),
+        ]:
+            with self.subTest(expected=expected, finish=finish):
+                requests = [{"model": model, "finish_reasons": [finish]}] if calls else []
+                usage = {"calls": calls, "failed_calls": failed_calls, "requests": requests}
+                with patch.object(evaluation, "collect_usage", return_value=nullcontext(usage)), patch.object(evaluation, "run_stage", return_value=artifact):
+                    report = evaluation.evaluate(
+                        live=True,
+                        model=model,
+                        stages=("test_cases",),
+                        guidance_arms=("combined",),
+                        fixtures={"test": [{"id": "R1", "text": "An observable requirement"}]},
+                    )
+                result = report["results"][0]
+                self.assertEqual(result["status"], expected)
+                self.assertEqual(result["generation_complete"], expected == "generated")
 
     def test_checkpoint_receives_each_completed_sample(self):
         counts = []

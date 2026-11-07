@@ -146,4 +146,35 @@ Report behavior coverage, unsupported assumptions, executable prerequisites,
 duplicate behavior, reviewer rework, failure rate, latency and known/unknown cost.
 Promote only after paired improvement without increased unsupported assumptions.
 A detected application defect must retain its assertion, not be “fixed” into a
-passing test. No Argon experiment or default-model change is part of this PR.
+passing test.
+
+### Expanded-context model comparison
+
+Issue #360 compares Flash and Argon on five synthetic fixtures with three
+paired repeats. The default model and application limits remain in effect
+outside the evaluator. Use the repository virtual environment with the Google
+Gen AI SDK version recorded in the report. The long-output trial uses SDK
+continuation on non-streaming Argon case-writing calls.
+
+```bash
+.venv/bin/python scripts/evaluate_argon.py --output /tmp/argon-quality
+# Live requests use the configured paid Gemini account. Pick a new directory.
+.venv/bin/python scripts/evaluate_argon.py --live --output /tmp/argon-quality
+.venv/bin/python scripts/review_argon.py /tmp/argon-quality --live
+```
+
+Each sample gets a 600-second process deadline including substantive review.
+The experiment varies the context selection limit and the Argon writer's
+output cap separately. All arms use the same 512,000-byte substantive review
+limit. The expanded context limit is 128,000 characters, and the long-output
+arm permits up to 256,000 tokens including reasoning. Reports record prompt
+evidence IDs, provider finish reasons, continuation requests and token usage.
+An output ceiling is not evidence that the model used it.
+
+The review command sends only anonymized synthetic artifacts and the answer
+key to a fixed Gemini 3.7 Flash reviewer. The command checks the delivered
+schema and links, verifies cited step references, and compares source accuracy,
+readability, contextual evidence, traceability and unsupported assumptions.
+Run and artifact hashes bind the scored outputs. Model-based scoring is
+separate from human approval or test execution. Treat invalid or failed
+reviews as unscored and retain partial or absent deliveries in the report.

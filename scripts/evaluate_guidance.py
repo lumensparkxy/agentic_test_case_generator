@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -26,6 +27,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 from app.config import DEFAULT_MODEL_NAME, get_settings, model_scope
+from app.agents.evaluation_limits import EvaluationLimits, evaluation_limits_scope
 from app.agents.quality_goal import QUALITY_GOAL, QUALITY_GOAL_VERSION
 from importlib.metadata import version
 import subprocess
@@ -82,7 +84,7 @@ def payload_for(rows, fixture=None):
         coverage_plan=(fixture or {}).get("coverage_plan", []),
         context=EnrichInput(requirements=rows, **context) if context else None,
         template={"name": "default", "format": "table", "fields": ["id", "title", "steps", "expected_result"]},
-        workflow_settings=WorkflowSettings(max_iterations=1, retry_attempts=0, timeout_seconds=90),
+        workflow_settings=WorkflowSettings(max_iterations=1, retry_attempts=0, timeout_seconds=(fixture or {}).get("workflow_timeout_seconds", 90)),
     )
 
 
@@ -145,21 +147,45 @@ def serialize(value):
 
 
 @contextmanager
-def collect_usage():
+def collect_usage(evidence_markers=None):
     from google.genai.models import Models, AsyncModels
 
-    stats = {"calls": 0, "failed_calls": 0, "input_tokens": 0, "output_tokens": 0, "missing_usage": 0, "requests": []}
+    stats = {
+        "calls": 0,
+        "failed_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "visible_tokens": 0,
+        "thinking_tokens": 0,
+        "missing_usage": 0,
+        "requests": [],
+        "continuation_requests": 0,
+    }
     lock = Lock()
     original_sync, original_async = Models.generate_content, AsyncModels.generate_content
+    original_sync_hop, original_async_hop = Models._generate_content, AsyncModels._generate_content
 
-    def record(response):
+    def record(response, request):
         with lock:
+            request["finish_reasons"] = [
+                getattr(candidate.finish_reason, "value", candidate.finish_reason)
+                for candidate in response.candidates or []
+                if candidate.finish_reason is not None
+            ]
+            request["model_version"] = response.model_version
             usage = response.usage_metadata
             if usage is None:
                 stats["missing_usage"] += 1
             else:
                 stats["input_tokens"] += usage.prompt_token_count or 0
+                stats["visible_tokens"] += usage.candidates_token_count or 0
+                stats["thinking_tokens"] += usage.thoughts_token_count or 0
                 stats["output_tokens"] += (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
+                request["token_usage"] = {
+                    "input": usage.prompt_token_count,
+                    "visible": usage.candidates_token_count,
+                    "thinking": usage.thoughts_token_count,
+                }
             return response
 
     def capture(kwargs):
@@ -174,21 +200,37 @@ def collect_usage():
         )
         prompt = {"contents": str(kwargs.get("contents", "")), "system_instruction": config.pop("system_instruction", None)}
         # Hash raw content, retaining only non-secret generation settings.
+        request = {
+            "model": kwargs.get("model"),
+            "prompt_hash": canonical_hash(prompt),
+            "config": {k: config[k] for k in settings if k in config},
+        }
+        if evidence_markers:
+            rendered = " ".join(str(value) for value in prompt.values())
+            request["evidence_ids"] = sorted(key for key, marker in evidence_markers.items() if marker in rendered)
         with lock:
-            stats["requests"].append(
-                {
-                    "model": kwargs.get("model"),
-                    "prompt_hash": canonical_hash(prompt),
-                    "config": {k: config[k] for k in settings if k in config},
-                }
-            )
+            stats["requests"].append(request)
+            stats["calls"] += 1
+        return request
+
+    def count_hop(config):
+        token = config.get("continuation_token") if isinstance(config, dict) else getattr(config, "continuation_token", None)
+        if token:
+            with lock:
+                stats["continuation_requests"] += 1
+
+    def sync_hop(client, *args, **kwargs):
+        count_hop(kwargs.get("config"))
+        return original_sync_hop(client, *args, **kwargs)
+
+    async def async_hop(client, *args, **kwargs):
+        count_hop(kwargs.get("config"))
+        return await original_async_hop(client, *args, **kwargs)
 
     def sync(client, *args, **kwargs):
-        capture(kwargs)
-        with lock:
-            stats["calls"] += 1
+        request = capture(kwargs)
         try:
-            return record(original_sync(client, *args, **kwargs))
+            return record(original_sync(client, *args, **kwargs), request)
         except Exception:
             with lock:
                 stats["failed_calls"] += 1
@@ -196,18 +238,21 @@ def collect_usage():
             raise
 
     async def asynchronous(client, *args, **kwargs):
-        capture(kwargs)
-        with lock:
-            stats["calls"] += 1
+        request = capture(kwargs)
         try:
-            return record(await original_async(client, *args, **kwargs))
+            return record(await original_async(client, *args, **kwargs), request)
         except Exception:
             with lock:
                 stats["failed_calls"] += 1
                 stats["missing_usage"] += 1
             raise
 
-    with patch.object(Models, "generate_content", sync), patch.object(AsyncModels, "generate_content", asynchronous):
+    with (
+        patch.object(Models, "generate_content", sync),
+        patch.object(AsyncModels, "generate_content", asynchronous),
+        patch.object(Models, "_generate_content", sync_hop),
+        patch.object(AsyncModels, "_generate_content", async_hop),
+    ):
         yield stats
 
 
@@ -265,8 +310,10 @@ def validate_artifact(stage, output, rows):
         if {row["id"] for row in rows} - covered:
             errors.append("missing_delivered_requirement_coverage")
         return errors
-    if stage != "automation":
-        return []
+    if stage == "requirements":
+        return [] if output.get("requirements") else ["no_delivered_requirements"]
+    if stage == "use_cases":
+        return [] if any(plan.get("scenarios") for plan in output.get("coverage_plan", [])) else ["no_delivered_scenarios"]
     if manual_resolution(output, rows):
         return []
     code = output.get("notes", "")
@@ -286,13 +333,29 @@ def validate_artifact(stage, output, rows):
     return errors
 
 
-def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, reviews=None, input_rate=None, output_rate=None, on_result=None, fixtures=None):
+def evaluate(
+    *,
+    live=False,
+    repeats=1,
+    model=DEFAULT_MODEL_NAME,
+    stages=STAGES,
+    reviews=None,
+    input_rate=None,
+    output_rate=None,
+    on_result=None,
+    fixtures=None,
+    guidance_arms=None,
+    limits=EvaluationLimits(),
+):
     results = []
     provenance = run_provenance(model)
+    if limits != EvaluationLimits():
+        provenance["evaluation_limits"] = asdict(limits)
     for repeat in range(repeats):
         # Rotate ordering to avoid assigning the same arm a systematic warm-up advantage.
-        arms = list(ARMS)
-        arms = arms[repeat % 4 :] + arms[: repeat % 4]
+        arms = list(guidance_arms or ARMS)
+        offset = repeat % len(arms)
+        arms = arms[offset:] + arms[:offset]
         for fixture, fixture_data in (fixtures or FIXTURES).items():
             spec = fixture_data if isinstance(fixture_data, dict) else {"requirements": fixture_data}
             rows = spec["requirements"]
@@ -317,7 +380,12 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                     }
                     if live:
                         start = time.monotonic()
-                        with model_scope(model), guidance_scope(manifest), collect_usage() as usage:
+                        with (
+                            model_scope(model),
+                            guidance_scope(manifest),
+                            evaluation_limits_scope(limits),
+                            collect_usage(spec.get("evidence_markers")) as usage,
+                        ):
                             try:
                                 result["output"] = serialize(run_stage(stage, rows, spec) if fixtures else run_stage(stage, rows))
                                 result["output_hash"] = canonical_hash(result["output"])
@@ -328,9 +396,6 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                             except Exception as exc:
                                 result.update(status="failed", error_type=type(exc).__name__)
                         result.update(latency_seconds=round(time.monotonic() - start, 3), usage=usage)
-                        result["generation_complete"] = (
-                            not contains_fallback(result.get("output")) and not result.get("validation_errors") and "output" in result
-                        )
                         result["semantic_review"] = (
                             result.get("output", {}).get("substantive_assessment")
                             or result.get("output", {}).get("review", {}).get("semantic_assessment")
@@ -338,11 +403,13 @@ def evaluate(*, live=False, repeats=1, model=DEFAULT_MODEL_NAME, stages=STAGES, 
                         )
                         if any(call["model"] != model for call in usage["requests"]):
                             result["status"] = "model_mismatch"
-                            result["generation_complete"] = False
                         elif stage == "automation" and manual_resolution(result.get("output", {}), rows):
                             result["status"] = "manual_resolution"
+                        elif any(reason in {"MAX_TOKENS", "CONTINUATION"} for call in usage["requests"] for reason in call.get("finish_reasons", [])):
+                            result["status"] = "incomplete_model_output"
                         elif usage["calls"] == 0 or usage["failed_calls"] or contains_fallback(result.get("output")):
                             result["status"] = "fallback_or_failure"
+                        result["generation_complete"] = result["status"] == "generated"
                         if input_rate is not None and output_rate is not None and not usage["missing_usage"] and not usage["failed_calls"]:
                             result["estimated_cost_usd"] = round((usage["input_tokens"] * input_rate + usage["output_tokens"] * output_rate) / 1_000_000, 6)
                     result["run_hash"] = canonical_hash(
