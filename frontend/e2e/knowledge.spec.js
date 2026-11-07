@@ -83,6 +83,7 @@ async function openKnowledge(page, { failFirst = false, features = {}, initialEn
 		return route.fulfill({ json: entry });
 	});
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/context`);
+	await page.getByText("Project knowledge and diagnostics", { exact: true }).click();
 	await expect(page.getByRole("region", { name: "Project knowledge" })).toBeVisible();
 	return calls;
 }

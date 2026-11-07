@@ -1,5 +1,6 @@
 """Generate a fresh, reviewable Use Cases snapshot from the durable baseline."""
 
+from .requirement_scope import approved_generation_requirements
 from hashlib import sha256
 import json
 
@@ -62,13 +63,9 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
     if project.status != "active":
         raise HTTPException(409, "Restore this project before generating Use Cases.")
     baseline = project.current_snapshots.get("requirements")
-    state = project.stage_state.get("requirements")
-    if not baseline or not state or state.current_snapshot_id != baseline.snapshot_id or state.stale or not state.approved:
-        raise HTTPException(409, "Review and approve the current requirements before generating Use Cases.")
-    active = [Requirement.model_validate(r) for r in baseline.payload.get("requirements", [])]
-    active = [r for r in active if r.lifecycle_status == "active" and r.review_status != "Rejected"]
-    if not active or any(r.review_status != "Approved" for r in active) or len({r.id for r in active}) != len(active):
-        raise HTTPException(409, "Review and approve the current requirements before generating Use Cases.")
+    active = approved_generation_requirements(project)
+    if not active:
+        raise HTTPException(409, "Review current requirements or explicitly defer unresolved scope before generating Use Cases.")
 
     context_snapshot = project.current_snapshots.get("context")
     context_payload = context_snapshot.payload if context_snapshot else {}

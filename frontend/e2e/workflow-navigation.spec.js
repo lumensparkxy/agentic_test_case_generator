@@ -601,7 +601,7 @@ test.describe("Route-driven application shell", () => {
 
 		await expect(page.getByRole("button", { name: /Parsing/i })).toBeDisabled();
 		await expect(page.getByText(oldRequirementText, { exact: true })).toHaveCount(0);
-		expect(api.detailProjectIds).toEqual([PROJECT_A.project_id, PROJECT_B.project_id, PROJECT_A.project_id]);
+		expect(api.detailProjectIds).toEqual([PROJECT_A.project_id, PROJECT_B.project_id, PROJECT_A.project_id, PROJECT_A.project_id]);
 
 		const newParseResponse = page.waitForResponse(
 			(response) => new URL(response.url()).pathname === "/requirements/parse" && response.request().method() === "POST"
@@ -611,7 +611,7 @@ test.describe("Route-driven application shell", () => {
 		await expect(page.getByText(newRequirementText, { exact: true }).first()).toBeVisible();
 		await expect(page.getByRole("button", { name: /^Parse Requirements$/i })).toBeVisible();
 		await expect(page.getByText(oldRequirementText, { exact: true })).toHaveCount(0);
-		await expect.poll(() => api.detailProjectIds.length).toBe(3);
+		await expect.poll(() => api.detailProjectIds.length).toBe(4);
 		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
 		expect(api.detailProjectIds.at(-1)).toBe(PROJECT_A.project_id);
 	});

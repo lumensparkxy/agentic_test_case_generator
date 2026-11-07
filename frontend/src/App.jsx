@@ -1,3 +1,7 @@
+import ClarificationScopeNotice from "./components/context/ClarificationScopeNotice";
+import { hasApprovedGenerationScope } from "./utils/requirementScope";
+import useReviewDraft from "./hooks/useReviewDraft";
+import DraftRecoveryNotice from "./components/reviews/DraftRecoveryNotice";
 import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
 import useRequirementImports from "./hooks/useRequirementImports";
@@ -658,7 +662,10 @@ export default function App() {
 		return acc;
 	}, {});
 	const approvedRequirements = requirements.filter(
-		(requirement) => requirement.lifecycle_status !== "retired" && getRequirementReviewStatus(requirement) === "Approved"
+		(requirement) =>
+			requirement.lifecycle_status !== "retired" &&
+			getRequirementReviewStatus(requirement) === "Approved" &&
+			!["open", "deferred", "excluded"].includes(requirement.clarification_status)
 	);
 	const approvedRequirementCount = approvedRequirements.length;
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
@@ -675,7 +682,7 @@ export default function App() {
 	);
 	const normalGenerationReady = Boolean(
 		projectStageState.requirements?.current_snapshot_id &&
-		projectStageState.requirements.approved &&
+		hasApprovedGenerationScope(currentProject) &&
 		!projectStageState.requirements.stale &&
 		(!useCasesStageState.current_snapshot_id || useCasesHumanApproved)
 	);
@@ -720,11 +727,20 @@ export default function App() {
 	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
 	const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
-	const [improvementReload, setImprovementReload] = useState(0);
+
+	const pasteDraft = useReviewDraft({
+		identity: currentUser?.sub,
+		projectId: currentProjectId,
+		snapshotId: currentProject?.current_snapshots?.requirements?.snapshot_id || "empty",
+		name: "pasted-requirements",
+		initialValue: "",
+	});
+	const [reportedCase, setReportedCase] = useState(null);
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
 	const focusResultContent = useRef(false);
 	useEffect(() => {
 		setSelectedTestCaseId(null);
+		setReportedCase(null);
 		setChangedTestCaseIds(null);
 	}, [sourceCaseSnapshot]);
 	useEffect(() => {
@@ -1790,7 +1806,7 @@ export default function App() {
 			}
 			recordProjectRevision(projectId, data.current_revision);
 			setCurrentProject(data || null);
-			if (hydrate && data) {
+			if (hydrate && data && (hydrate !== "if-changed" || data.current_revision !== currentProject?.current_revision)) {
 				hydrateProjectWorkflow(data);
 			}
 			if (data?.project_id) {
@@ -2062,6 +2078,7 @@ export default function App() {
 			localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, route.projectId);
 			setProjectRouteStatus("ready");
 			setProjectRouteError("");
+			void openProject(route.projectId, { hydrate: "if-changed", silent: true, routeRequestId });
 			return;
 		}
 
@@ -3001,7 +3018,9 @@ export default function App() {
 			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
 			return;
 		}
-		if (!file && !withFeedback) return;
+		const sourceFile =
+			requirementSourceMode === "paste" ? new File([pasteDraft.value], "pasted-requirements.md", { type: "text/markdown" }) : file;
+		if ((!sourceFile || (requirementSourceMode === "paste" && !pasteDraft.value.trim())) && !withFeedback) return;
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
 			setStatus("Open a QA project before parsing requirements.");
@@ -3014,7 +3033,7 @@ export default function App() {
 			const formData = new FormData();
 			const requestId = createRequestId();
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			if (file) formData.append("file", file);
+			if (sourceFile) formData.append("file", sourceFile);
 			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
 			formData.append("project_id", operationScope.projectId);
 			formData.append("import_mode", "review");
@@ -3247,7 +3266,10 @@ export default function App() {
 		}
 	};
 
-	const generateTestCases = async (withFeedback = false, { fullRegeneration = false, feedbackText = feedback } = {}) => {
+	const generateTestCases = async (
+		withFeedback = false,
+		{ fullRegeneration = false, feedbackText = feedback, selectedTestCaseIds = [] } = {}
+	) => {
 		if (withFeedback && (testCaseActionDisabled || isGenerating || upstreamChangedForImpact || !testCases.length)) return false;
 		if (!withFeedback && !fullRegeneration && !normalGenerationReady) {
 			setStatus("Review current requirements and Use Cases before normal generation. Use the explicit draft action when available.");
@@ -3320,6 +3342,7 @@ export default function App() {
 				? {
 						...sharedPayload,
 						test_cases: testCases,
+						selected_test_case_ids: selectedTestCaseIds,
 						feedback: feedbackText.trim(),
 					}
 				: {
@@ -3908,7 +3931,7 @@ export default function App() {
 					? "pending"
 					: "blocked",
 		3: testCases.length
-			? testCaseStageState.stale || (testCaseReview && !testCaseReview.approved)
+			? testCaseStageState.stale || !testCaseStageState.approved || (testCaseReview && !testCaseReview.approved)
 				? "attention"
 				: "complete"
 			: canGenerateFromApprovedRequirements
@@ -3946,7 +3969,7 @@ export default function App() {
 	const allowLegacyTestCaseMutations =
 		(upstreamChangedForImpact ||
 			((!useCasesStageState.current_snapshot_id || useCasesHumanApproved) &&
-				projectStageState.requirements?.approved &&
+				hasApprovedGenerationScope(currentProject) &&
 				!projectStageState.requirements?.stale)) &&
 		!hasOrchestratorRecommendations &&
 		!orchestratorError &&
@@ -4222,12 +4245,24 @@ export default function App() {
 									}
 								/>
 
+								{["requirements", "test-cases"].includes(route.destination) && (
+									<ClarificationScopeNotice
+										project={currentProject}
+										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
+									/>
+								)}
 								{["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}
 										project={currentProject}
 										request={apiRequest}
 										onUpdated={() => openProject(navigationProjectId, { silent: true })}
+									/>
+								)}
+								{["requirements", "test-cases"].includes(route.destination) && (
+									<ClarificationScopeNotice
+										project={currentProject}
+										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
 									/>
 								)}
 								{["requirements", "test-cases", "automation"].includes(route.destination) && (
@@ -4288,6 +4323,27 @@ export default function App() {
 													</Field>
 													<Button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
 														{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
+													</Button>
+												</div>
+											) : requirementSourceMode === "paste" ? (
+												<div className="panel-form">
+													<label htmlFor="pasted-requirements">Requirements text</label>
+													<Textarea
+														id="pasted-requirements"
+														rows={9}
+														value={pasteDraft.value}
+														onChange={(e) => pasteDraft.setValue(e.target.value)}
+														placeholder="Paste business rules, acceptance criteria or a requirement document…"
+													/>
+													<p className="helper-text">
+														Your text becomes a named source. Review the comparison before applying it to the project.
+													</p>
+													<DraftRecoveryNotice draft={pasteDraft} />
+													<Button
+														onClick={() => parseRequirements(false)}
+														disabled={!pasteDraft.value.trim() || isParsing || requirementActionDisabled}
+													>
+														{isParsing ? "Parsing…" : "Parse Requirements"}
 													</Button>
 												</div>
 											) : requirementSourceMode === "jira" ? (
@@ -5095,7 +5151,13 @@ export default function App() {
 													>
 														<div hidden={activeGenerateResultTab !== "improve"}>
 															<ImproveTestsPanel
-																key={`${sourceCaseSnapshot}:${improvementReload}`}
+																identity={currentUser?.sub}
+																projectId={currentProjectId}
+																snapshotId={sourceCaseSnapshot}
+																reportedCase={reportedCase}
+																summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
+																onClearReport={() => setReportedCase(null)}
+																key={sourceCaseSnapshot}
 																review={testCaseReview}
 																assessment={substantiveAssessment}
 																meta={testCaseReviewMeta}
@@ -5123,14 +5185,15 @@ export default function App() {
 																	setActiveGenerateResultTab("test-cases");
 																	document.querySelector(".generation-gate-card")?.scrollIntoView({ block: "center" });
 																}}
-																onApply={(feedbackText) => generateTestCases(true, { feedbackText })}
+																onApply={(feedbackText, selectedTestCaseIds) =>
+																	generateTestCases(true, { feedbackText, selectedTestCaseIds })
+																}
 																onReload={async () => {
 																	const project = await refreshCurrentProject({
 																		hydrate: true,
 																		operationScope: captureProjectOperationScope(),
 																	});
 																	if (project) {
-																		setImprovementReload((value) => value + 1);
 																		setActiveGenerateResultTab("improve");
 																	}
 																	return Boolean(project);
@@ -5154,6 +5217,14 @@ export default function App() {
 																{guidanceSummary("test_cases")}
 																{suggestionSummary("test_cases")}
 																<GeneratedTestCasesView
+																	identity={currentUser?.sub}
+																	projectId={currentProjectId}
+																	snapshotId={sourceCaseSnapshot}
+																	onReport={(testCase) => {
+																		setReportedCase(testCase);
+																		setActiveGenerateResultTab("improve");
+																		focusResultContent.current = true;
+																	}}
 																	key={`${sourceCaseSnapshot}:${changedTestCaseIds ? "changed" : "all"}`}
 																	changedIds={changedTestCaseIds}
 																	onClearChanged={() => setChangedTestCaseIds(null)}

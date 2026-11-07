@@ -250,3 +250,74 @@ Application feedback never edits those files or automatically activates a lesson
 Validation uses synthetic source corrections, failed-stage resume, old-run
 fencing, ownership, protected behaviour mutations and desktop reload flows.
 It does not establish model quality, production persistence or live execution.
+
+### Guided desktop review and recovery (#354)
+
+Requirement input supports pasted text as `pasted-requirements.md`. It uses the
+same multipart review import, source provenance, comparison and explicit apply
+pipeline as uploaded Markdown. A parse never replaces the saved baseline.
+
+The Context clarification queue records missing or conflicting rules against a
+source snapshot and requirement IDs. Opening a question marks only the affected
+requirement rows as needing review, retains their text, and invalidates downstream
+artifact approval. Defer keeps the question open; exclude marks its scope rejected.
+Both require a reason and preserve the original source. Explicitly deferred or
+excluded requirements stay outside generation while the remaining approved scope
+can proceed. An open question still requires a disposition. Requirement review
+cannot approve away an unresolved clarification. Answering uses the shared project
+correction workflow and requires an actual source correction, never a guessed
+expected result. Other requirement approvals and immutable earlier artifacts remain
+available. A text change to the affected source requires a new finding; unrelated
+review changes do not invalidate the question.
+
+The desktop keeps test selection, search, list scroll and changed-test filtering,
+scenario review drafts/filters, whole-artifact review comments and decisions,
+selected-test repair instructions, and pasted input in browser-local recovery.
+Recovery is scoped to authenticated user, project and source snapshot. Same-source
+scenario drafts retain their original project revision, so a newer revision blocks
+saving until the user reloads and discards/reviews the edits. A different source
+starts a fresh review and keeps the previous draft separately for reference.
+Recovered approvals are unsaved choices, never durable acceptance. Successful
+server saves clear recovery; a failed workspace refresh remains explicitly distinct
+from a failed save. Storage denial/quota failure leaves the in-memory edit intact
+and displays that local recovery is unavailable. These drafts are device-local,
+not cross-device synchronization. Stage navigation rechecks saved project revisions
+and hydrates only newer source state.
+
+A selected test offers **Report a problem**, prefilling its ID and step/expected
+result evidence. `POST /testcases/refine` accepts optional
+`selected_test_case_ids` (unique saved IDs, at most 100). The backend loads the
+canonical current suite, requirements, context and source plan, sends only the
+selected cases and relevant scenarios for repair, and requires exactly the selected
+IDs and original source links back. Incomplete/fallback output, placeholders,
+unknown IDs, changed links or obsolete revisions cannot replace the saved suite.
+The backend merges valid repairs with unchanged server-owned cases and returns
+`scoped_refinement` (`changed`, `added`, `preserved`, `changed_ids`). The combined
+suite becomes a reviewable draft with an unknown combined business assessment;
+it is not automatically accepted, exported or executed. Omitting the selection
+retains existing whole-suite refinement behavior.
+
+Automation remains an optional next stage. Source linkage, machine assessment,
+human acceptance and execution evidence retain their separate meanings throughout
+these flows. Desktop checks use 1366, 1440 and 1920 pixel viewports, including a
+200-case fixture, keyboard focus, contrast and 200% zoom. Synthetic browser tests
+and offline model tests do not establish practitioner usability or live generation
+quality. The five-practitioner study below and live acceptance in #251 remain
+external validation dependencies.
+
+#### Practitioner study protocol
+
+Recruit five QA practitioners with no prior walkthrough. Give each the same
+bounded, non-sensitive requirement source with one deliberately missing business
+rule, plus its authoritative answer withheld until requested. Ask each to paste
+and review requirements, record/defer/answer the question, review scenarios,
+inspect a test, request one scoped repair, recover an unfinished review after a
+reload, and reach an honestly labelled manual export decision. Do not coach unless
+the participant is blocked; record every intervention.
+
+Record completion, wrong turns, assistance, lost drafts, accidental approvals,
+unresolved assertions presented as certain, and time per task. Compare quality
+errors against the existing flow using the same source and scoring rubric. The
+initial target is at least four of five completing the core journey unassisted
+with no increase in quality errors. Record observations and revisions in #354 and
+live evidence in #251. No participant results have been collected by this change.

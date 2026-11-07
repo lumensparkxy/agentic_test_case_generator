@@ -19,6 +19,8 @@ class RequirementSourceReference(BaseModel):
 
 
 class Requirement(BaseModel):
+    clarification_status: Optional[Literal["open", "deferred", "excluded", "resolved"]] = None
+    clarification_finding_id: Optional[str] = None
     id: str
     text: str
     original_requirement_ids: List[str] = Field(default_factory=list)

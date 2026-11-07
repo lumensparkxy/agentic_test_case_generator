@@ -234,6 +234,8 @@ class RequirementImportRepository:
                     raise HTTPException(422, "Review each active requirement at most once.")
                 seen.add(change.requirement_uid)
                 req = by_uid[change.requirement_uid]
+                if req.clarification_status in ("open", "deferred", "excluded") and change.review_status == "Approved":
+                    raise HTTPException(409, "Answer the linked business clarification in Context before approving this requirement.")
                 req.review_status = change.review_status
                 req.quality_flags = change.quality_flags
             updated = {
@@ -362,6 +364,11 @@ def validate_generation_baseline(project_id, actor, revision, requirements):
     if not project_id:
         return
     project, snapshot = repository().baseline(project_id, actor)
+    unresolved = {
+        r["id"] for r in (snapshot or {}).get("payload", {}).get("requirements", []) if r.get("clarification_status") in ("open", "deferred", "excluded")
+    }
+    if unresolved & {r.id for r in requirements}:
+        raise HTTPException(409, "Resolve the linked business clarification or omit its affected requirement scope before generation.")
     # Legacy callers keep their previous contract until their baseline is migrated.
     if not snapshot or snapshot.get("payload", {}).get("schema_version") != 2:
         return

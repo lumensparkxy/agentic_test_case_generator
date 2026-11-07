@@ -1,7 +1,7 @@
 import QualityFeedbackPanel from "./QualityFeedbackPanel";
 import ProjectSyncPanel, { ProjectSyncStatus } from "./ProjectSyncPanel";
 import KnowledgePanel from "../knowledge/KnowledgePanel";
-import { Surface } from "../ui/surfaces";
+import { Surface, Disclosure } from "../ui/surfaces";
 import { Field, Input, Textarea, Button, Checkbox } from "../ui/controls";
 import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
@@ -138,7 +138,12 @@ export default function ContextInputsPanel({
 			{projectId && request && (
 				<QualityFeedbackPanel key={`feedback-${projectId}`} request={request} projectId={projectId} onUpdated={onProjectUpdated} />
 			)}
-			{projectId && request && <KnowledgePanel key={projectId} request={request} projectId={projectId} />}
+			{projectId && request && (
+				<Disclosure className="context-knowledge-details">
+					<summary>Project knowledge and diagnostics</summary>
+					<KnowledgePanel key={projectId} request={request} projectId={projectId} />
+				</Disclosure>
+			)}
 			<div className="panel-nav">
 				<Button onClick={goPrev} className="secondary">
 					Back

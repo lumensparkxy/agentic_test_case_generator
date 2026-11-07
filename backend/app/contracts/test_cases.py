@@ -174,6 +174,7 @@ class GenerateTestCasesInput(BaseModel):
 
 
 class RefineTestCasesInput(BaseModel):
+    selected_test_case_ids: list[str] = Field(default_factory=list, max_length=100)
     requirements: List[Requirement]
     test_cases: List[TestCase]
     template: TestCaseTemplate
@@ -185,6 +186,7 @@ class RefineTestCasesInput(BaseModel):
 
 
 class GenerateTestCasesResponse(BaseModel):
+    scoped_refinement: Optional[Dict[str, Any]] = None
     substantive_assessment: Optional[Dict[str, Any]] = None
     generation_tasks: List[Dict[str, Any]] = Field(default_factory=list)
     guidance: Optional[Dict[str, Any]] = None

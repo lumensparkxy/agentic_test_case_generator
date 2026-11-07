@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .requirement_scope import approved_generation_requirements
+
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -442,7 +444,7 @@ def _approval_blockers_for_generation(
                 action="generate",
             )
         )
-    elif not requirements_state.approved or requirements_state.stale:
+    elif requirements_state.stale or (not requirements_state.approved and not approved_generation_requirements(project)):
         blockers.append(_approval_blocker("requirements", action="generate"))
     if (
         require_approved_use_cases
@@ -476,7 +478,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
             )
         ]
 
-    if not requirements_state.approved or requirements_state.stale:
+    if requirements_state.stale or (not requirements_state.approved and not approved_generation_requirements(project)):
         actions.append(
             _action(
                 "approve",

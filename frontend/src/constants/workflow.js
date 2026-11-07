@@ -59,6 +59,7 @@ export const DEFAULT_AZURE_DEVOPS_SYNC_SECTION_TITLE = DEFAULT_SYNC_SECTION_TITL
 
 export const REQUIREMENT_SOURCE_OPTIONS = [
 	{ value: "file", label: "File upload" },
+	{ value: "paste", label: "Paste text" },
 	{ value: "jira", label: "JIRA Cloud" },
 	{ value: "azure_devops", label: "Azure DevOps" },
 ];
