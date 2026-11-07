@@ -10,6 +10,8 @@ export default function GeneratedTestCasesView({
 	selectedId,
 	setSelectedId,
 	qualityIssues = [],
+	requirements = [],
+	substantiveAssessment = null,
 	changedIds = null,
 	onClearChanged,
 }) {
@@ -18,7 +20,17 @@ export default function GeneratedTestCasesView({
 	const cases = testCases.filter(
 		(tc) =>
 			(changedIds === null || changedIds.includes(tc.id)) &&
-			[tc.id, tc.title, ...getTestCaseLinkedRequirementIds(tc)].join(" ").toLowerCase().includes(query.toLowerCase().trim())
+			[
+				tc.id,
+				tc.title,
+				tc.description,
+				tc.expected_result,
+				...getTestCaseLinkedRequirementIds(tc),
+				...(tc.steps || []).flatMap((step) => [step.action, step.expected, step.test_data]),
+			]
+				.join(" ")
+				.toLowerCase()
+				.includes(query.toLowerCase().trim())
 	);
 	const selected = cases.find((tc) => tc.id === selectedId) || cases[0];
 	const steps = selected?.steps || [];
@@ -112,6 +124,40 @@ export default function GeneratedTestCasesView({
 									</List>
 								</Disclosure>
 							)}
+							<Disclosure className="test-source-evidence">
+								<summary>Why this test? Source and assessment</summary>
+								{getTestCaseLinkedRequirementIds(selected).map((id) => {
+									const requirement = requirements.find((item) => item.id === id);
+									return (
+										<div key={id}>
+											<strong>{id}</strong>
+											<p>{requirement?.text || "Requirement text unavailable in the current project."}</p>
+										</div>
+									);
+								})}
+								<p>Current requirement text is shown for comparison. It may have changed since this test was generated.</p>
+								{(substantiveAssessment?.obligations || [])
+									.filter((item) => (item.evidence || []).some((evidence) => evidence.test_case_id === selected.id))
+									.map((item, index) => (
+										<div key={index}>
+											<strong>
+												{item.obligation} — {item.status}
+											</strong>
+											<blockquote>{item.source_quote}</blockquote>
+											<p>{item.reason}</p>
+											{(item.evidence || [])
+												.filter((evidence) => evidence.test_case_id === selected.id)
+												.map((evidence, i) => (
+													<p key={i}>
+														Step {evidence.step}: {evidence.action} → {evidence.expected}
+													</p>
+												))}
+										</div>
+									))}
+								{!(substantiveAssessment?.obligations || []).some((item) =>
+									(item.evidence || []).some((evidence) => evidence.test_case_id === selected.id)
+								) && <p>No source-to-step assessment is available for this test. A requirement link alone does not establish coverage.</p>}
+							</Disclosure>
 							<h3>Preconditions</h3>
 							<p>{selected.preconditions || "None specified."}</p>
 							<div className="test-steps-heading">

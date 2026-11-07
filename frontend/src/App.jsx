@@ -1577,7 +1577,7 @@ export default function App() {
 		const hydratedTestCaseDiagnostics = generationPayload.workflow_diagnostics || useCases.workflow_diagnostics || null;
 		const hydratedGenerationPayload = {
 			...generationPayload,
-			coverage_metrics: generationPayload.coverage_metrics || useCases.coverage_metrics || null,
+			coverage_metrics: generationPayload.coverage_metrics || null,
 			workflow_diagnostics: hydratedTestCaseDiagnostics,
 		};
 		setRequirementAnalysis(useCases.requirement_analysis || []);
@@ -1585,7 +1585,7 @@ export default function App() {
 		setCoverageMetrics(hydratedGenerationPayload.coverage_metrics);
 		setTestCases(generationPayload.test_cases || []);
 		setGenerationTasks(generationPayload.generation_tasks || []);
-		setTestCaseReview(generationPayload.review || useCases.review || null);
+		setTestCaseReview(generationPayload.review || null);
 		setSubstantiveAssessment(generationPayload.substantive_assessment || null);
 		setTestCaseWorkflowDiagnostics(hydratedTestCaseDiagnostics);
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
@@ -5149,6 +5149,8 @@ export default function App() {
 																	onClearChanged={() => setChangedTestCaseIds(null)}
 																	testCases={testCases}
 																	qualityIssues={testCaseReview?.blocking_issues || []}
+																	requirements={requirements}
+																	substantiveAssessment={substantiveAssessment}
 																	selectedId={selectedTestCaseId}
 																	setSelectedId={setSelectedTestCaseId}
 																/>

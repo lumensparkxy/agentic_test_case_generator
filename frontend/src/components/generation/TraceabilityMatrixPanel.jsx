@@ -1,4 +1,5 @@
 import { CollectionState, TableScroll, Table } from "../ui/collections";
+import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 import { Surface, Badge } from "../ui/surfaces";
 
 export default function TraceabilityMatrixPanel({
@@ -20,15 +21,28 @@ export default function TraceabilityMatrixPanel({
 	return (
 		<Surface as="div" className="result-section">
 			<h3>Traceability Matrix</h3>
+			<p>Links identify related tests. Business coverage assessment, human approval and execution results are separate evidence.</p>
 			<div className="workflow-diagnostics-pills">
 				<span className="workflow-diagnostics-pill">
-					Approved requirements covered {tracedRequirementCount}/{approvedRequirements.length}
+					Approved requirements with linked tests {tracedRequirementCount}/{approvedRequirements.length}
 				</span>
 				<span className="workflow-diagnostics-pill">
-					Cases with traceability {coverageMetrics?.cases_with_traceability ?? 0}/{testCases.length}
+					Cases with traceability{" "}
+					{
+						testCases.filter((item) =>
+							getTestCaseLinkedRequirementIds(item).some((id) => approvedRequirements.some((requirement) => requirement.id === id))
+						).length
+					}
+					/{testCases.length}
 				</span>
 				<span className="workflow-diagnostics-pill">
-					Scenario coverage {coverageMetrics?.covered_planned_scenarios ?? 0}/{coverageMetrics?.planned_scenarios_total ?? 0}
+					Linked scenarios{" "}
+					{coverageMetrics?.planned_scenarios_total > 0 &&
+					Number.isInteger(coverageMetrics?.covered_planned_scenarios) &&
+					coverageMetrics.covered_planned_scenarios >= 0 &&
+					coverageMetrics.covered_planned_scenarios <= coverageMetrics.planned_scenarios_total
+						? `${coverageMetrics.covered_planned_scenarios}/${coverageMetrics.planned_scenarios_total}`
+						: "Unavailable"}
 				</span>
 			</div>
 			<TableScroll className="traceability-table-wrapper" role="region" aria-label="Requirement traceability table" tabIndex={0}>
@@ -37,7 +51,7 @@ export default function TraceabilityMatrixPanel({
 						<tr>
 							<th scope="col">Requirement</th>
 							<th scope="col">Linked test cases</th>
-							<th scope="col">Scenario coverage</th>
+							<th scope="col">Linked scenarios</th>
 							<th scope="col">Status</th>
 						</tr>
 					</thead>
@@ -61,7 +75,14 @@ export default function TraceabilityMatrixPanel({
 										)}
 									</td>
 									<td>
-										{scenarioSummary ? `${scenarioSummary.covered_scenarios}/${scenarioSummary.planned_scenarios}` : "—"}
+										{scenarioSummary &&
+										scenarioSummary.planned_scenarios > 0 &&
+										Number.isInteger(scenarioSummary.covered_scenarios) &&
+										scenarioSummary.covered_scenarios >= 0 &&
+										scenarioSummary.covered_scenarios <= scenarioSummary.planned_scenarios &&
+										(linkedTestCases.length > 0 || scenarioSummary.covered_scenarios === 0)
+											? `${scenarioSummary.covered_scenarios}/${scenarioSummary.planned_scenarios}`
+											: "Unavailable"}
 										{linkedScenarioTypes.length > 0 && (
 											<div className="traceability-scenario-tags">
 												{linkedScenarioTypes.slice(0, 4).map((scenario) => (
@@ -71,7 +92,9 @@ export default function TraceabilityMatrixPanel({
 										)}
 									</td>
 									<td>
-										<span className={`traceability-status ${isCovered ? "covered" : "missing"}`}>{isCovered ? "Covered" : "Gap"}</span>
+										<span className={`traceability-status ${isCovered ? "covered" : "missing"}`}>
+											{isCovered ? "Tests linked" : "No linked tests"}
+										</span>
 									</td>
 								</tr>
 							);
