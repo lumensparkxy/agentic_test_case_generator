@@ -261,6 +261,24 @@ class OrchestratorServiceTests(unittest.TestCase):
     def _action(self, status: OrchestratorStatusResponse, action_id: str):
         return next(action for action in status.next_actions if action.action == action_id)
 
+    def _append_manual_only_preview(self, project_id: str, source_snapshot_id: str | None) -> None:
+        counts = {"executable": 0, "manual": 1, "unsupported": 0, "invalid": 0}
+        append_stage_snapshot(
+            project_id=project_id,
+            stage="execution",
+            payload={
+                "summary": counts,
+                "candidate_counts": counts,
+                "candidates": {"executable": [], "manual": [{"id": "manual-1"}], "unsupported": [], "invalid": []},
+            },
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="req-manual-preview",
+            approved=True,
+            source_snapshot_id=source_snapshot_id,
+            title="Manual-only preview",
+        )
+
     def test_no_project_status_reports_missing_project_blocker(self) -> None:
         status = build_orchestrator_status(None)
 
@@ -467,22 +485,7 @@ class OrchestratorServiceTests(unittest.TestCase):
     def test_current_manual_preview_recommends_report_before_and_after_export(self) -> None:
         project = self._seed_baseline_suite()
         test_snapshot_id = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
-        counts = {"executable": 0, "manual": 1, "unsupported": 0, "invalid": 0}
-        append_stage_snapshot(
-            project_id=project.project_id,
-            stage="execution",
-            payload={
-                "summary": counts,
-                "candidate_counts": counts,
-                "candidates": {"executable": [], "manual": [{"id": "manual-1"}], "unsupported": [], "invalid": []},
-            },
-            operation="automation.execution.preview",
-            actor=self.actor,
-            request_id="req-manual-preview",
-            approved=True,
-            source_snapshot_id=test_snapshot_id,
-            title="Manual-only preview",
-        )
+        self._append_manual_only_preview(project.project_id, test_snapshot_id)
 
         status = get_project_orchestrator_status(project.project_id, actor=self.actor)
         self.assertEqual(status.current_stage, "reports")
@@ -532,6 +535,16 @@ class OrchestratorServiceTests(unittest.TestCase):
                 detail.stage_state["execution"].stale = stale
                 status = build_orchestrator_status(detail)
                 self.assertEqual(status.next_actions[0].action, expected)
+
+    def test_existing_approved_suite_without_use_cases_can_report_manual_preview(self) -> None:
+        project = self._create_project()
+        self._append_requirements(project.project_id)
+        suite = self._append_test_cases(project.project_id)
+        self._append_manual_only_preview(project.project_id, suite.snapshot_id)
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertTrue(status.has_baseline_test_suite)
+        self.assertEqual(status.next_actions[0].action, "report")
 
     def test_passed_execution_without_report_recommends_report(self) -> None:
         project = self._seed_baseline_suite()

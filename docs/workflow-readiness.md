@@ -22,8 +22,9 @@ Stored or older responses without readiness require a fresh preview.
 
 A saved preview for the current approved test suite that consistently reports
 zero executable candidates leads to Reports. Test-case evidence can be exported
-for manual testing. The Reports navigation shows Complete for current approved
-evidence and Needs attention for draft or stale evidence, including after reload.
+for manual testing, including for saved suites that predate the Use Cases stage.
+The Reports navigation shows Complete for current approved evidence and Needs
+attention for draft or stale evidence, including after reload.
 
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,

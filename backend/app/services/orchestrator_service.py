@@ -595,7 +595,13 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
             actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    if not use_cases_state or not use_cases_state.current_snapshot_id:
+    preview_action = (
+        _execution_preview_action(project, test_case_state.current_snapshot_id)
+        if test_case_state and _execution_operation(project) == "automation.execution.preview"
+        else None
+    )
+    # A saved manual-only suite can report even if it predates the Use Cases stage.
+    if (not use_cases_state or not use_cases_state.current_snapshot_id) and preview_action != "report":
         actions.append(
             _action(
                 "generate",
@@ -608,7 +614,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         )
         return actions
 
-    if use_cases_state.stale:
+    if use_cases_state and use_cases_state.stale:
         return [
             _action(
                 "refine",
@@ -667,8 +673,6 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         return actions
 
     execution_status = _latest_execution_status(project)
-    execution_operation = _execution_operation(project)
-    preview_action = _execution_preview_action(project, test_case_state.current_snapshot_id) if execution_operation == "automation.execution.preview" else None
     report_stale = bool(reports_state and reports_state.current_snapshot_id and reports_state.stale)
     if execution_status == "failed":
         actions.append(
