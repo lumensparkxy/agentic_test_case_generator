@@ -17,7 +17,16 @@ ROOMS = ("Atlas", "Birch")
 SLOTS = ("2026-10-01 10:00–11:00 Europe/Zurich", "2026-10-01 11:00–12:00 Europe/Zurich")
 ACTORS = ("Alice", "Bob")
 SUBMIT_PATH = "/api/bookings"
-DEFECTS = ("allow-nine", "allow-room-conflict", "share-room-availability", "deny-slot-release", "allow-non-owner-cancel", "duplicate-submission")
+DEFECTS = (
+    "allow-nine",
+    "allow-room-conflict",
+    "share-room-availability",
+    "deny-slot-release",
+    "allow-non-owner-cancel",
+    "duplicate-submission",
+    "wrong-saved-room",
+    "wrong-saved-attendees",
+)
 COOKIE = "booking_fixture"
 
 
@@ -66,10 +75,18 @@ class BookingWorkspace:
         row["status"] = "Cancelled"
         return 200, row.copy()
 
-    def view(self, identity):
+    def view(self, identity, defect):
+        bookings = [row.copy() for row in self.bookings.values() if row["owner"] == self.actor]
+        for row in bookings:
+            if row["id"] == "B-EXISTING":
+                continue
+            if defect == "wrong-saved-room":
+                row["room"] = "Birch" if row["room"] == "Atlas" else "Atlas"
+            if defect == "wrong-saved-attendees":
+                row["attendees"] = 8 if row["attendees"] != 8 else 1
         return {
             "actor": self.actor,
-            "bookings": [row.copy() for row in self.bookings.values() if row["owner"] == self.actor],
+            "bookings": bookings,
             "detail": self.bookings[identity].copy() if self.actor and identity in self.bookings else None,
         }
 
@@ -120,7 +137,7 @@ def booking_target(*, port=0, defect=None):
                 identity = parse_qs(url.query).get("booking", [None])[0]
                 with lock:
                     workspace = workspaces.get(key)
-                    view = workspace.view(identity) if workspace else None
+                    view = workspace.view(identity, defect) if workspace else None
                 if view is None:
                     self.reply(401, {"error": "Open the fixture first"})
                 else:

@@ -90,6 +90,8 @@ const controls = {
 		const rows = await rowsAfterReload(page);
 		return [
 			...checks,
+			observe("show selected room on the first saved record", rows.find(([id]) => id === "B-001")?.[1], "Atlas"),
+			observe("show submitted attendees on the first saved record", rows.find(([id]) => id === "B-001")?.[3], "1"),
 			observe(
 				"show both confirmed boundary bookings",
 				rows.slice(1).map((row) => row.slice(1)),
@@ -252,6 +254,8 @@ const faults = [
 	["allow-non-owner-cancel", "non-owner-cancel", "retain Alice's confirmed booking after reload", "Cancelled"],
 	["duplicate-submission", "double-click", "show exactly one new booking after refresh", [existing, "B-001", "B-002"]],
 	["duplicate-submission", "response-loss", "return the recorded original ID on retry", "B-002"],
+	["wrong-saved-room", "attendee-boundaries", "show selected room on the first saved record", "Birch"],
+	["wrong-saved-attendees", "attendee-boundaries", "show submitted attendees on the first saved record", "8"],
 ];
 
 test("Room Booking controls distinguish healthy behavior from seeded faults", async ({ browser }, testInfo) => {

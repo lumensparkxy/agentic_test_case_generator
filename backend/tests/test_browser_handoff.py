@@ -90,6 +90,74 @@ class BrowserHandoffTests(unittest.TestCase):
                 self.assertIn("value lacks exact source", validate_browser_handoff([case], grounded, [REQUIREMENT])[1])
                 self.assertEqual(case.automation_status, "Manual")
 
+    def test_saved_result_requires_matching_input_submit_and_page(self):
+        other_page = "https://example.test/other"
+        binding = f'Browser result css "#saved-ref" on "{TARGET}" shows field "Reference" after button "Save request"'
+        for change, message in (
+            ("none", None),
+            ("different value", "does not match the exact submitted input"),
+            ("before submit", "lacks exact source or controlled input evidence"),
+            ("other button", "lacks exact source or controlled input evidence"),
+            ("other field", "lacks exact source or controlled input evidence"),
+            ("other page", "lacks exact interface evidence"),
+            ("cross origin", "lacks exact interface evidence"),
+            ("conflict", "lacks exact interface evidence"),
+            ("secret reference", None),
+        ):
+            with self.subTest(change=change):
+                case = candidate()
+                grounded = context()
+                declaration = binding
+                assertion = 'css "#saved-ref" text should equal "Q-17"'
+                extra_notes = [f'Browser page "{other_page}"', 'Observed field "Unrelated" and button "Review request".']
+                if change == "different value":
+                    assertion = 'css "#saved-ref" text should equal "Request saved"'
+                elif change == "other button":
+                    case.steps[2].action = 'Click exact button "Review request"'
+                elif change == "other field":
+                    declaration = binding.replace('field "Reference"', 'field "Unrelated"')
+                elif change == "other page":
+                    case.steps.append(TestStep(step=4, action=f'Open "{other_page}"', expected=""))
+                elif change == "cross origin":
+                    declaration = binding.replace(TARGET, "https://other.test/receipt")
+                elif change == "conflict":
+                    extra_notes.append(binding.replace('field "Reference"', 'field "Unrelated"'))
+                elif change == "secret reference":
+                    marker = "[[env:PETF_TEST_REFERENCE]]"
+                    case.steps[1].action = case.steps[1].action.replace("Q-17", marker)
+                    case.steps[1].expected = case.steps[1].expected.replace("Q-17", marker)
+                    assertion = assertion.replace("Q-17", marker)
+                grounded.notes = "\n".join([*extra_notes, declaration])
+                observation = TestStep(step=len(case.steps) + 1, action="Inspect the saved reference", expected=assertion)
+                if change == "before submit":
+                    case.steps.insert(2, observation.model_copy(update={"step": 3}))
+                    case.steps[-1].step = 4
+                else:
+                    case.steps.append(observation)
+
+                warnings = validate_browser_handoff([case], grounded, [REQUIREMENT])
+                if change == "none":
+                    self.assertEqual(warnings, [])
+                    self.assertEqual(case.automation_status, "To Be Automated")
+                else:
+                    self.assertEqual(case.automation_status, "Manual")
+                    if message:
+                        self.assertIn(message, warnings[1])
+
+    def test_saved_result_uses_selected_label_and_not_dropdown_dom_value(self):
+        grounded = context()
+        grounded.notes = (
+            f'Browser dropdown "Category" on "{TARGET}" options ["Selected option"]\n'
+            f'Browser result test id "saved-category" on "{TARGET}" shows field "Category" after button "Save request"\n'
+            'field "Category" DOM value is "option-id"'
+        )
+        case = candidate()
+        case.steps[1] = TestStep(step=2, action='Select exact option "Selected option" in field "Category"', expected="")
+        case.steps.append(TestStep(step=4, action="Inspect the saved category", expected='test id "saved-category" text should equal "Selected option"'))
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+        case.steps[-1].expected = 'test id "saved-category" text should equal "option-id"'
+        self.assertIn("does not match the exact submitted input", validate_browser_handoff([case], grounded, [REQUIREMENT])[1])
+
     def test_checkbox_handoff_requires_native_availability_for_interaction(self):
         grounded = context()
         field = grounded.grounded_context.ui_elements[0]

@@ -513,8 +513,9 @@ general production proxy. The original response and retry are never synthesized.
 
 ### Synthetic Room Booking execution target
 
-Run the authored Chromium controls against a healthy loopback app and six
-independently faulted variants. The command uses the installed frontend
+Run the authored Chromium controls against a healthy loopback app and eight
+independently faulted variants, including corrupted saved room and attendee
+displays. The command uses the installed frontend
 Playwright and Chromium from the usual local test setup.
 
 ```bash
@@ -717,7 +718,10 @@ eligibility separately. Each seeded fault is tried only with healthy-passing
 cases linked to its source requirement. The slot-release probe also requires
 a rebooking action after cancellation. Detection requires a matching failed
 browser assertion. Use a grounded CSS selector or test ID to scope exact text
-checks where the same status can appear in multiple elements. The authored
+checks where the same status can appear in multiple elements. A `Browser result`
+declaration ties an observed result cell to its page, input field and submit
+button. The saved-value probes require a healthy-passing case with an exact
+check of the corresponding cell after submission. The authored
 booking matrix separately exercises native double-click and response-loss
 controls.
 

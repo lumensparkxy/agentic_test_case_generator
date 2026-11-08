@@ -17,7 +17,10 @@ const faults = {
 	"share-room-availability": ["ROOM-205", ["Booking confirmed", "B-001"]],
 	"deny-slot-release": ["ROOM-310", ["Booking confirmed", "B-001"]],
 	"allow-non-owner-cancel": ["ROOM-310", ["Only the creator can cancel this booking", "Confirmed"]],
+	"wrong-saved-room": ["ROOM-101", ["saved room cell"]],
+	"wrong-saved-attendees": ["ROOM-101", ["saved attendee cell"]],
 };
+const savedFieldColumns = { "wrong-saved-room": 2, "wrong-saved-attendees": 4 };
 
 function loopbackUrl(raw) {
 	const url = new URL(raw);
@@ -26,15 +29,25 @@ function loopbackUrl(raw) {
 	return url.href;
 }
 
-function matchedAssertions(item, observations) {
+function assertionFailures(item) {
 	if (item.status !== "failed") return [];
-	const messages = (item.issues || [])
+	return (item.issues || [])
 		.filter((issue) => issue.code === "playwright.error")
 		.map((issue) => stripVTControlCharacters(issue.message))
 		.filter(
 			(message) =>
 				!message.includes("strict mode violation") && /expect\([^\n]*\)\.(?:not\.)?to(?:BeVisible|HaveText|HaveCount)/.test(message)
 		);
+}
+
+function matchedAssertions(item, observations, savedColumn) {
+	const messages = assertionFailures(item);
+	if (savedColumn) {
+		const locator = new RegExp(`^Locator: .*#bookings tr:has\\(.* td:nth-child\\(${savedColumn}\\)`, "m");
+		const mismatch = (message) =>
+			/^Error: expect\([^\n]*\)\.toHaveText\(/.test(message) && /^Received:\s*"/m.test(message) && locator.test(message);
+		return messages.some(mismatch) ? observations : [];
+	}
 	return observations.filter((text) => messages.some((message) => message.includes(`"${text}"`) || message.includes(`'${text}'`)));
 }
 
@@ -42,6 +55,17 @@ function triesRebooking(candidate) {
 	const steps = candidate.spec?.steps || [];
 	const cancellation = steps.findIndex((step) => step.endsWith('I click exact button "Cancel booking"'));
 	return cancellation >= 0 && steps.slice(cancellation + 1).some((step) => step.endsWith('I click exact button "Book"'));
+}
+
+function checksSavedField(candidate, column) {
+	const steps = candidate.spec?.steps || [];
+	const submission = steps.findIndex((step) => step.endsWith('I click exact button "Book"'));
+	return (
+		submission >= 0 &&
+		steps
+			.slice(submission + 1)
+			.some((step) => step.includes("#bookings tr:has(") && step.includes(` td:nth-child(${column})" text should equal `))
+	);
 }
 
 test.use({ trace: "off", video: "off" });
@@ -188,9 +212,12 @@ test.describe("Generated Room Booking execution", () => {
 				);
 				const baseInput = previewResponse.request().postDataJSON();
 				for (const [defect, [sourceId, observations]] of Object.entries(faults)) {
+					const savedColumn = savedFieldColumns[defect];
 					const eligible = preview.executable.filter(
 						(item) =>
-							sourceIdsByCase.get(item.source_test_case_id)?.has(sourceId) && (defect !== "deny-slot-release" || triesRebooking(item))
+							sourceIdsByCase.get(item.source_test_case_id)?.has(sourceId) &&
+							(defect !== "deny-slot-release" || triesRebooking(item)) &&
+							(!savedColumn || checksSavedField(item, savedColumn))
 					);
 					const passing = eligible.filter((item) => healthy.results.some((result) => result.id === item.id && result.status === "passed"));
 					const record = { defect, sourceId, eligible: eligible.map((item) => item.id), tested: passing.map((item) => item.id) };
@@ -211,7 +238,7 @@ test.describe("Generated Room Booking execution", () => {
 					expect(run.results.map((item) => item.id)).toEqual(record.tested);
 					record.run_id = run.run_id;
 					record.matches = run.results.flatMap((item) =>
-						matchedAssertions(item, observations).map((observation) => ({ id: item.id, observation }))
+						matchedAssertions(item, observations, savedColumn).map((observation) => ({ id: item.id, observation }))
 					);
 					record.status = record.matches.length
 						? "detected"

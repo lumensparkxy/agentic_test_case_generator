@@ -30,6 +30,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
 - When the same text can appear in multiple elements, scope its check to a declared unique locator. Use expected 'css "#observed-status" text should equal "source copy"' or 'test id "observed-status" text should equal "source copy"'. Use a separate visibility check when visibility itself is required. Never choose the first match or invent a locator.
+- For a source requirement that says a saved record displays submitted values, check each value on that same record after submission. A form value or confirmation alone leaves this outcome untested. A 'Browser result css "#saved-value" on "https://app.example/" shows field "Name" after button "Save"' declaration supplies an observed result locator. Use a scoped text check with the exact prior selected label or entered literal. For a text entry, include its exact field-value check before submission.
 - For a named role or exact text that should be out of view, write 'exact link "observed link" is not visible' or 'exact text "source copy" is not visible'. Use a separate step at the state where visibility matters. This check allows hidden and absent matches. Keep DOM presence, timing, and authorization requirements separate.
 - The wording above illustrates syntax. Use the actual supplied names, routes and copy. Do not add generic page-load checks or combine a result with phrases such as "and the results update". Preserve any separate source-defined transition as its own observable check.
 - Every business expectation must appear in a source step. Use expected_result to summarize those step outcomes. Keep required backend, audit, timing or unsupported checks in the case and mark it Manual. Missing interface evidence or prerequisites also means Manual.
@@ -41,6 +42,7 @@ _DECLARED_LOCATOR = re.compile(r'(css(?: selector)?|test id)\s+"([^"\n]+)"', re.
 _NOTED_CONTROL = re.compile(r'\b(field|heading|button|link)\s+"([^"\n]+)"|"([^"\n]+)"\s+(field|heading|button|link)\b', re.IGNORECASE)
 _NOTED_PAGE = re.compile(r'Browser page "([^"\n]+)"', re.IGNORECASE)
 _NOTED_DROPDOWN = re.compile(r'Browser dropdown "([^"\n]+)" on "([^"\n]+)" options (.+)', re.IGNORECASE)
+_NOTED_RESULT = re.compile(r'Browser result (css|test id) "([^"\n]+)" on "([^"\n]+)" shows field "([^"\n]+)" after button "([^"\n]+)"', re.IGNORECASE)
 _DROPDOWN_DOM_VALUE = re.compile(r'\bfield\s+"([^"\n]+)"\s+DOM value\s+(?:is\s+)?"([^"\n]*)"', re.IGNORECASE)
 _ROLE_TYPES = {"heading": "Heading", "button": "Button", "link": "Navigation"}
 _CONTROL_TYPES = {"field": "Field", **_ROLE_TYPES}
@@ -57,6 +59,7 @@ class _BrowserEvidence:
     select_options: dict[tuple[str, str], set[str]]
     select_dom_values: dict[str, set[str]]
     checkboxes: dict[tuple[str, str], bool]
+    result_fields: dict[tuple[str, str, str], tuple[str, str]]
 
 
 def _http_url(value: str) -> str | None:
@@ -156,9 +159,11 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
             if key in other_native_fields or key in checkboxes or (key in select_options and select_options[key] != labels):
                 labels = set()
             select_options[key] = labels
-    for leading, name_after, name_before, trailing in _NOTED_CONTROL.findall(notes):
+    notes_lines = notes.splitlines()
+    regular_notes = "\n".join(line for line in notes_lines if not line.strip().lower().startswith("browser result "))
+    for leading, name_after, name_before, trailing in _NOTED_CONTROL.findall(regular_notes):
         names_by_type.setdefault(_CONTROL_TYPES[(leading or trailing).lower()], set()).add(name_after or name_before)
-    source_text = [notes, *(text for item in requirements for text in (item.text, item.source_excerpt or ""))]
+    source_text = [regular_notes, *(text for item in requirements for text in (item.text, item.source_excerpt or ""))]
     literals = {double or single for text in source_text for double, single in _QUOTED.findall(text)}
     literals.update(name for names in names_by_type.values() for name in names)
     declared_locators = {
@@ -168,7 +173,16 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
     for text in source_text:
         for field, value in _DROPDOWN_DOM_VALUE.findall(text):
             select_dom_values.setdefault(field, set()).add(value)
-    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators, select_options, select_dom_values, checkboxes)
+    result_bindings: dict[tuple[str, str, str], set[tuple[str, str]]] = {}
+    for line in notes_lines:
+        if match := _NOTED_RESULT.fullmatch(line.strip()):
+            kind, selector, raw_page, field, button = match.groups()
+            page = _http_url(raw_page)
+            if page in urls and selector.strip() and field in names_by_type.get("Field", ()) and button in names_by_type.get("Button", ()):
+                strategy = "css" if kind.lower() == "css" else "test_id"
+                result_bindings.setdefault((page, strategy, selector), set()).add((button, field))
+    result_fields = {key: next(iter(bindings)) for key, bindings in result_bindings.items() if len(bindings) == 1}
+    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators, select_options, select_dom_values, checkboxes, result_fields)
 
 
 def _locator_supported(locator: dict[str, Any], evidence: _BrowserEvidence) -> bool:
@@ -208,6 +222,8 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
         return "Each browser navigation must use its own explicit action and supplied URL."
 
     entered_values: dict[tuple[str, str], str] = {}
+    pending_values: dict[str, str] = {}
+    submission: tuple[str, dict[str, str]] | None = None
     current_page: str | None = evidence.target
     for step in steps:
         action = step["action"]
@@ -217,18 +233,29 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 return "A browser URL lacks application evidence."
             if action == "navigate" or current_page != page:
                 entered_values.clear()
+                pending_values.clear()
+                submission = None
             current_page = page
         locator = step.get("locator")
-        if locator and not _locator_supported(locator, evidence):
+        binding = evidence.result_fields.get((current_page, locator["strategy"], locator["value"])) if locator else None
+        if locator and not binding and not _locator_supported(locator, evidence):
             return "A browser locator or visible text lacks exact interface evidence."
         if action == "click" and not locator.get("exact"):
             return "Use a complete exact button or link action."
-        if action == "click" and locator.get("role") == "link":
-            current_page = None
-            entered_values.clear()
+        if action == "click":
+            if locator.get("role") == "link":
+                current_page = None
+                entered_values.clear()
+                submission = None
+            else:
+                submission = (locator["value"], pending_values)
+            pending_values = {}
         if action == "select_option":
             if current_page is None or step["value"] not in evidence.select_options.get((current_page, locator["value"]), ()):
                 return "A dropdown selection lacks an exact selectable option for this field and page."
+            pending_values.pop(locator["value"], None)
+            if "[[env:" not in step["value"]:
+                pending_values[locator["value"]] = step["value"]
         if action == "set_checked" or (action == "assert_checked" and locator["strategy"] == "label"):
             availability = evidence.checkboxes.get((current_page, locator["value"])) if current_page is not None else None
             if availability is None:
@@ -250,6 +277,9 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 if known_dropdown:
                     return "A known dropdown needs an exact option selection instead of a text fill."
                 entered_values[(locator["strategy"], field)] = str(step["value"])
+                pending_values.pop(field, None)
+                if locator["strategy"] == "label" and locator.get("exact") and "[[env:" not in str(step["value"]):
+                    pending_values[field] = str(step["value"])
             elif known_dropdown:
                 expected = step["expected"]
                 known_values = evidence.select_dom_values.get(field, ())
@@ -259,6 +289,10 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 continue
         if action in {"assert_text_equals", "assert_title", "assert_attribute_equals", "assert_value_equals", "assert_value_contains"}:
             expected = step["expected"]
+            if action == "assert_text_equals" and binding and submission and submission[0] == binding[0] and binding[1] in submission[1]:
+                if expected != submission[1][binding[1]]:
+                    return "The saved-result text does not match the exact submitted input."
+                continue
             controlled_value = False
             if value_action:
                 entered = entered_values.get((locator["strategy"], locator["value"]), "")
