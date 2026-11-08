@@ -259,15 +259,26 @@ class BrowserAssertionReviewTests(unittest.TestCase):
                 self.assertTrue(any(f"raw selector `{selector}`" in issue for issue in review["blocking_issues"]))
 
     def test_review_allows_selector_as_row_locator(self) -> None:
-        for expected in (
-            'Exactly one data row matching selector "#bookings tr" is displayed with room Birch, time slot '
-            '2026-10-01 10:00–11:00 Europe/Zurich, 2 attendees, and status "Confirmed"',
-            'exact heading "My bookings" is visible, exactly one durable record row is present in "#bookings tr", '
-            "and its displayed ID matches the recorded original ID",
+        for action, expected in (
+            (
+                "Inspect My bookings",
+                'Exactly one data row matching selector "#bookings tr" is displayed with room Birch, time slot '
+                '2026-10-01 10:00–11:00 Europe/Zurich, 2 attendees, and status "Confirmed"',
+            ),
+            (
+                "Inspect My bookings",
+                'exact heading "My bookings" is visible, exactly one durable record row is present in "#bookings tr", '
+                "and its displayed ID matches the recorded original ID",
+            ),
+            ('Inspect data rows in My bookings matching css "#bookings tr"', 'exact text "Birch" is visible'),
+            (
+                'Inspect data rows matching css "#bookings tr" to verify exactly one durable record exists with the recorded original ID',
+                'exact text "Birch" is visible',
+            ),
         ):
-            with self.subTest(expected=expected):
+            with self.subTest(action=action, expected=expected):
                 review = _heuristic_test_case_review(
-                    [self._browser_case(expected=expected)],
+                    [self._browser_case(action=action, expected=expected)],
                     self.requirements,
                     90,
                     coverage_plan=self.coverage_plan,

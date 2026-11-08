@@ -115,6 +115,9 @@ assertions when the source specifies a concrete outcome. When exactness is requi
 'exact heading "Dashboard" is visible' for an accessible name or
 'exact text "No results" is visible' for displayed text. Preserve exactness in review and refinement.
 Each step is an object with an integer step, string action, string expected, and optional string/null test_data.
+For Manual checks, put the full pass condition in expected. When the same required
+outcome includes a record count and a comparison with a recorded identity, state both
+in expected for the observation step. Preserve the triggering action and any required refresh.
 """
     + BROWSER_AUTHORING_GUIDE
 )
