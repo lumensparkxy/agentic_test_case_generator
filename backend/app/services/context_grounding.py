@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 
 from ..models import ArtifactSource, EnrichInput, GroundedApiSurface, GroundedContext, GroundedUIElement, GroundedWorkflow
 from .artifact_fetcher import fetch_artifact
+from .form_field_grounding import extract_form_fields
 
 FetchArtifactFn = Callable[[str], dict]
 
@@ -115,24 +116,21 @@ def extract_ui_elements_from_html(
         if index >= 4:
             break
 
-    for index, field in enumerate(
-        re.findall(r"<(?:input|textarea|select)[^>]*(?:name|id|placeholder)=['\"]?([^'\"\s>]+)", html_text, re.IGNORECASE),
-        start=1,
-    ):
-        label = _strip_html(field)
-        if not label:
-            continue
+    for index, (label, hint) in enumerate(extract_form_fields(html_text)[:6], start=1):
+        description = f"Field identifier extracted from artifact: {hint}"
+        if label:
+            description = f"Accessible field label extracted from artifact: {label}"
+            if hint and hint != label:
+                description += f" (HTML field hint: {hint})"
         elements.append(
             GroundedUIElement(
                 id=f"{source_id}-UI-F-{index:02d}",
                 source_id=source_id,
-                name=label,
+                name=label or hint,
                 element_type="Field",
-                description=f"Field identifier extracted from artifact: {label}",
+                description=description,
             )
         )
-        if index >= 6:
-            break
 
     return elements
 

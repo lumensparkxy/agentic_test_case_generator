@@ -48,10 +48,15 @@ and the separate rollout decision remain necessary under #280/#274.
 ## Browser handoff
 
 Supply the application URL and the exact interface evidence available for the
-scenario. Use observed accessible names and result text in the context, such as
-`field "Reference"`, `button "Save request"`, and `"Request saved"`. Generation
-and refinement use one browser action and at most one observable check per step.
-A case for an initially blank field checks the blank value before submitting.
+scenario. Context analysis reads explicit form labels in linked HTML, including
+`<label for="…">`, simple labels that wrap an input, and `aria-label`. Field IDs,
+names and placeholders stay as hints when a label is unavailable. Supply observed
+names or result text from rendered states in context notes, such as
+`field "Reference"`, `button "Save request"`, and `"Request saved"`.
+
+Generation and refinement use one browser action and at most one observable
+check per step. A case for an initially blank field checks the blank value
+before submitting.
 
 New browser-intended cases go through the deterministic preview and compiler
 without launching the app. Verified cases are marked **To Be Automated**.
