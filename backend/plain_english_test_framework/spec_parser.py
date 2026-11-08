@@ -69,10 +69,20 @@ def parse_spec_text(
     source = Path(source_path) if source_path is not None else None
     yaml_text = _extract_yaml_payload(text, source)
     document = _load_yaml_document(yaml_text, source)
+    return parse_spec_document(document, source_path=source, schema_path=schema_path)
+
+
+def parse_spec_document(
+    document: Any,
+    *,
+    source_path: str | Path | None = None,
+    schema_path: str | Path = DEFAULT_SCHEMA_PATH,
+) -> ParsedSpec:
+    """Validate and parse an already-loaded structured spec."""
     issues = validate_spec_document(document, schema_path=schema_path)
     if issues:
         raise SpecValidationError(issues)
-    return _to_parsed_spec(document, source)
+    return _to_parsed_spec(document, Path(source_path) if source_path is not None else None)
 
 
 def validate_spec_document(document: Any, *, schema_path: str | Path = DEFAULT_SCHEMA_PATH) -> tuple[ValidationIssue, ...]:

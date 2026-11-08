@@ -75,6 +75,24 @@ async function open(page, options = {}) {
 const panel = (page) => page.getByRole("region", { name: "Improve test quality" });
 const apply = (page) => panel(page).getByRole("button", { name: "Apply selected fixes", exact: true });
 
+test("shows the saved browser handoff reason independently of business approval", { tag: "@p1" }, async ({ page }) => {
+	const summary = "Browser handoff retained 1 of 1 browser-intended cases for manual review.";
+	const reason = "Browser handoff for TC-002 needs manual review. Source step 2 could not be mapped to a complete browser check.";
+	await open(page, {
+		payload: {
+			review: { approved: true, score: 95, threshold: 90 },
+			workflow_diagnostics: { warnings: [summary, reason, "Internal workflow warning"] },
+		},
+	});
+	await page.reload();
+	await page.getByRole("tab", { name: /^Improve tests/ }).click();
+	await expect(panel(page).getByRole("heading", { name: "Machine quality check passed" })).toBeVisible();
+	await expect(panel(page).getByRole("heading", { name: "Browser handoff" })).toBeVisible();
+	await expect(panel(page).getByText(summary, { exact: true })).toBeVisible();
+	await expect(panel(page).getByText(reason, { exact: true })).toBeVisible();
+	await expect(panel(page)).not.toContainText("Internal workflow warning");
+});
+
 test("failed review opens actionable findings; selection and instructions survive tab switches and navigate to the exact case", async ({
 	page,
 }) => {

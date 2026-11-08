@@ -62,6 +62,7 @@ from .test_case_coverage import (
     _scenario_tag,
 )
 from .test_case_fallback import _fallback_raw_test_cases
+from ..services.browser_handoff import BROWSER_AUTHORING_GUIDE, validate_browser_handoff
 from ..services.test_case_quality import placeholder_reason, separate_generation_work
 from ..contracts.requirements import RequirementCoveragePlan, StructuralChecks
 from .test_case_hydration import (
@@ -88,7 +89,8 @@ STATE_VALIDATION_FEEDBACK = "validation_feedback"
 STATE_COVERAGE_PLAN = "coverage_plan"
 STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 EVIDENCE_PAYLOAD_STRATEGY = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
-TEST_CASE_CONTRACT_INSTRUCTIONS = """Canonical output contract (template field selection does not override it):
+TEST_CASE_CONTRACT_INSTRUCTIONS = (
+    """Canonical output contract (template field selection does not override it):
 Include id, title, a description of the verified behavior, steps, and traceability fields.
 Preconditions and case/step test_data MUST each be a string or null, never an object or array.
 For structured test data, encode JSON as a string.
@@ -112,6 +114,8 @@ assertions when the source specifies a concrete outcome. When exactness is requi
 'exact text "No results" is visible' for displayed text. Preserve exactness in review and refinement.
 Each step is an object with an integer step, string action, string expected, and optional string/null test_data.
 """
+    + BROWSER_AUTHORING_GUIDE
+)
 GENERATION_SOURCE_MODEL = "model"
 GENERATION_SOURCE_MODEL_RECOVERED = "model_recovered"
 GENERATION_SOURCE_PARALLEL_RETRY = "parallel_retry"
@@ -896,7 +900,7 @@ def _build_review_loop(
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
 2. Steps are executable and expected results are specific. Reject generation instructions such as "review the implemented behavior", "execute the scenario", or "generate tests" as test steps; each action must exercise the product and each assertion must name an observable result.
-3. Steps are sequential, actor-aware, and contain an action plus an observable expected result.
+3. Steps are sequential and actor-aware. Action-only steps may leave expected blank. Each required observable outcome has its own explicit check.
 4. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
 5. Every must-have scenario from the coverage plan is represented by exact `scenario_refs` on at least one test case.
 6. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
@@ -2489,6 +2493,9 @@ def _build_response(
         for case in test_cases:
             applicable = [p for p in context.execution_prerequisites if not p.requirement_ids or set(p.requirement_ids) & set(case.linked_requirement_ids)]
             case.execution_prerequisites = list({p.name: p for p in [*case.execution_prerequisites, *applicable]}.values())
+    handoff_warnings = []
+    if not workflow.get("workflow_diagnostics", {}).get("used_fallback"):
+        handoff_warnings = validate_browser_handoff(test_cases, context, requirements)
     serialized = _serialize_test_cases(test_cases)
     resolved_settings = dict(workflow.get("workflow_settings") or {})
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
@@ -2536,6 +2543,8 @@ def _build_response(
     requirement_analysis = _hydrate_requirement_analysis(raw_requirement_analysis, requirements)
     workflow_diagnostics = _update_generation_source_counts(dict(workflow.get("workflow_diagnostics") or {}), serialized)
     workflow_diagnostics = _update_scenario_ref_diagnostics(workflow_diagnostics, coverage_metrics)
+    if handoff_warnings:
+        workflow_diagnostics["warnings"] = [*(workflow_diagnostics.get("warnings") or []), *handoff_warnings]
     if generation_tasks and workflow_diagnostics.get("status") == "completed":
         workflow_diagnostics["status"] = "partial"
     for key in ("missing_requirements_count", "missing_must_have_scenario_count", "missing_optional_scenario_count"):

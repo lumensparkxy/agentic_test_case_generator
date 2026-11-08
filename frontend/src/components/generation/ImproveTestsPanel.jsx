@@ -14,6 +14,7 @@ export default function ImproveTestsPanel({
 	onClearReport,
 	summary,
 	assessment,
+	browserHandoffWarnings,
 	meta,
 	testCases,
 	busy,
@@ -111,6 +112,16 @@ export default function ImproveTestsPanel({
 			<h2>{review?.approved ? "Machine quality check passed" : review ? "What needs fixing" : "Review your test cases"}</h2>
 			<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
 			<BusinessCoverageSummary assessment={assessment} />
+			{browserHandoffWarnings.length > 0 && (
+				<div>
+					<h3>Browser handoff</h3>
+					<ul>
+						{browserHandoffWarnings.map((warning) => (
+							<li key={warning}>{warning}</li>
+						))}
+					</ul>
+				</div>
+			)}
 			{review && (
 				<p className="helper-text">
 					{meta.scoreLabel}

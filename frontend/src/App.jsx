@@ -3688,6 +3688,7 @@ export default function App() {
 	});
 	const tracedRequirementCount = requirementTraceabilityRows.filter((row) => row.linkedTestCases.length > 0).length;
 	const traceabilityGapCount = Math.max(0, approvedRequirements.length - tracedRequirementCount);
+	const browserHandoffWarnings = (testCaseWorkflowDiagnostics?.warnings || []).filter((warning) => warning.startsWith("Browser handoff "));
 	const hasGenerateResults = Boolean(
 		testCases.length ||
 		coveragePlan.length ||
@@ -3712,8 +3713,8 @@ export default function App() {
 		{
 			id: "improve",
 			label: "Improve tests",
-			badge: improvementFindings(testCaseReview).length,
-			variant: testCaseReview?.approved === false ? "warning" : "muted",
+			badge: improvementFindings(testCaseReview).length + Number(browserHandoffWarnings.length > 0),
+			variant: testCaseReview?.approved === false || browserHandoffWarnings.length > 0 ? "warning" : "muted",
 		},
 	];
 
@@ -5274,6 +5275,7 @@ export default function App() {
 																key={sourceCaseSnapshot}
 																review={testCaseReview}
 																assessment={substantiveAssessment}
+																browserHandoffWarnings={browserHandoffWarnings}
 																meta={testCaseReviewMeta}
 																testCases={testCases}
 																busy={isGenerating}
