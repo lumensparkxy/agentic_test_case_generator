@@ -9,6 +9,7 @@ from .requirements import Requirement
 class ImportMatch(BaseModel):
     requirement_uid: str
     reason: str
+    verified_original_ids: list[str] = Field(default_factory=list)
 
 
 class ImportCandidate(BaseModel):

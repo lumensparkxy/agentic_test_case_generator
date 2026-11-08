@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import AuthUser, Requirement, RequirementsWorkflowResponse
 from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementReviewsInput
 from app.services.requirement_reconciliation import canonical_requirements, build_preview, reconcile
+from app.services.requirement_source_evidence import bind_document_evidence
 from app.services import requirement_import_service as service
 from app.agents.requirement_matching_agent import suggest_matches
 from app.main import app, get_current_user
@@ -31,6 +32,11 @@ def requirement(i, text=None, **kwargs):
         review_status="Approved",
         **kwargs,
     )
+
+
+def from_document(req, source_id="SOURCE-42", label="audit-requirements.md", excerpt=None):
+    req = req.model_copy(update={"source_path": label, "source_excerpt": excerpt if excerpt is not None else req.text})
+    return bind_document_evidence([req], [(label, f"## {source_id}\n\n{req.text}\n")])[0]
 
 
 def snapshot(requirements, sid="original", revision=2):
@@ -164,6 +170,58 @@ class ReconciliationTests(unittest.TestCase):
     def test_same_filename_and_id_do_not_establish_identity(self):
         p = preview([requirement(1)], [requirement(1, "Publish weather maps covering coastal ocean currents.")])
         self.assertEqual(p.candidates[0].classification, "new")
+
+    def test_verified_original_id_ranks_a_revision_ahead_of_similar_wording_without_selecting_it(self):
+        old = from_document(requirement(1, 'Show "No employees found" for an empty result.'))
+        decoy = from_document(requirement(2, 'For guests, the exact feedback is "No users match your query".'), "SOURCE-43")
+        new = from_document(requirement(1, 'For guests, the exact feedback is "No employees match your query".'))
+        p = preview([decoy, old], [new])
+        candidate = p.candidates[0]
+        self.assertNotEqual(old.sources[0].source_version, new.sources[0].source_version)
+        self.assertEqual(candidate.classification, "needs_decision")
+        self.assertIsNone(candidate.target_requirement_uid)
+        self.assertEqual([match.requirement_uid for match in candidate.suggestions], [p.current_requirements[i].requirement_uid for i in (1, 0)])
+        self.assertEqual([match.verified_original_ids for match in candidate.suggestions], [["SOURCE-42"], []])
+
+    def test_exact_wording_on_another_requirement_does_not_override_verified_source(self):
+        old = from_document(requirement(1, "Guests can view meeting room amenities."))
+        new = from_document(requirement(2, "Guests can view meeting room capacity."))
+        decoy = from_document(requirement(3, new.text), "SOURCE-43")
+        p = preview([decoy, old], [new])
+        candidate = p.candidates[0]
+        self.assertEqual(candidate.classification, "needs_decision")
+        self.assertIsNone(candidate.target_requirement_uid)
+        self.assertEqual([match.requirement_uid for match in candidate.suggestions], [p.current_requirements[i].requirement_uid for i in (1, 0)])
+        self.assertEqual(candidate.suggestions[1].reason, "Identical text")
+
+    def test_exact_wording_on_the_verified_source_keeps_the_existing_identity(self):
+        old = from_document(requirement(1))
+        p = preview([old], [old])
+        self.assertEqual(p.candidates[0].classification, "unchanged")
+        self.assertEqual(p.candidates[0].target_requirement_uid, p.current_requirements[0].requirement_uid)
+
+    def test_split_requirements_with_a_shared_source_id_stay_ambiguous(self):
+        old = from_document(requirement(1, "Guests can view room availability."))
+        sibling = from_document(requirement(2, "Employees can reserve an available room."))
+        new = from_document(requirement(3, "Employees can reserve an available room up to 60 days ahead."))
+        p = preview([old, sibling], [new])
+        candidate = p.candidates[0]
+        self.assertEqual(candidate.classification, "needs_decision")
+        self.assertIsNone(candidate.target_requirement_uid)
+        self.assertEqual([match.requirement_uid for match in candidate.suggestions], [r.requirement_uid for r in p.current_requirements])
+        self.assertEqual([match.verified_original_ids for match in candidate.suggestions], [["SOURCE-42"], ["SOURCE-42"]])
+
+    def test_unverified_or_cross_document_source_ids_do_not_create_verified_suggestions(self):
+        old = from_document(requirement(1, "Grant team administrators access to archived records."))
+        new = requirement(2, "Map tides along the coast.")
+        unverified = from_document(new, excerpt="This quote is absent.")
+        different_document = from_document(new, label="different.md")
+        legacy_claim = old.model_copy(update={"sources": [old.sources[0].model_copy(update={"excerpt_verified": False})]})
+        for baseline, incoming in ((old, unverified), (old, different_document), (legacy_claim, from_document(new))):
+            with self.subTest(baseline=baseline, incoming=incoming):
+                candidate = preview([baseline], [incoming]).candidates[0]
+                self.assertEqual(candidate.classification, "new")
+                self.assertEqual(candidate.suggestions, [])
 
     def test_failed_semantics_never_silently_assumes_unrelated(self):
         p = preview()

@@ -10,8 +10,10 @@ Azure DevOps are input adapters, not mutually exclusive project modes.
    and collapses the source form.
 2. Expand an incoming row to compare full text, inspect source evidence, or change
    the proposed decision. Exact matches preserve identity and review;
-   semantic and wording matches are suggestions. Correct a match, add independently,
-   or skip. Resolve ambiguous matches before applying.
+   source, semantic and wording matches are suggestions. A unique verified source
+   match shows the current text and matching original IDs before selection. The
+   decision control groups verified matches and keeps the other choices available.
+   Correct a match, add independently, or skip. Resolve ambiguous matches before applying.
 3. Select a replacement scope only when the incoming content replaces an existing
    subset. Unmatched requirements inside that scope appear in **Retiring** and
    require confirmation. Requirements outside it remain active.
@@ -71,6 +73,9 @@ Firestore's document limit; oversize batches fail without changing the baseline.
 Matching compares every incoming/current chunk using the existing configured model;
 responses are validated against supplied IDs. Model errors are surfaced and uncertain
 candidates require manual decisions. Exact text matches remain usable without a model.
+Verified document excerpts can suggest a match across versions when the source
+identity and original ID agree. Changed text and conflicting matches still require
+an explicit decision.
 No matcher can approve, retire, publish or push requirements to an external system.
 
 A failed apply retains the preview. Retry the same decisions with the same key.

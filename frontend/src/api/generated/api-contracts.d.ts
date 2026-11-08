@@ -559,6 +559,7 @@ export interface ImportHistoryEntry {
 export interface ImportMatch {
 	reason: string;
 	requirement_uid: string;
+	verified_original_ids?: Array<string>;
 }
 
 export interface ImportRecoveryInput {

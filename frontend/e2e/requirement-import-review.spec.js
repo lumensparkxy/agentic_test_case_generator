@@ -233,6 +233,51 @@ test("comparison displays verified original IDs and quotes before applying", asy
 	await expect(workbench(page)).toBeHidden();
 });
 
+test("a verified source suggestion previews the prior requirement and still needs an explicit choice", { tag: "@p1" }, async ({ page }) => {
+	const prior = originals[1];
+	const revisedText = "A task can be archived by its owner after completion.";
+	const state = await setup(page, {
+		candidates: [
+			{
+				...incoming[0],
+				requirement: { ...incoming[0].requirement, text: revisedText, source_system: "file" },
+				classification: "needs_decision",
+				reason: "Verified original IDs suggest a match. Compare the requirements and choose a decision.",
+				suggestions: [
+					{ requirement_uid: prior.requirement_uid, reason: "Verified source reference", verified_original_ids: ["TASK-20"] },
+					{ requirement_uid: originals[0].requirement_uid, reason: "Similar wording" },
+				],
+			},
+		],
+	});
+	await stage(page);
+	await openIncoming(page, revisedText);
+	const apply = page.getByRole("button", { name: "Apply reviewed changes", exact: true });
+	const decision = page.getByLabel("Decision for incoming-1", { exact: true });
+	const sourceOptions = decision.locator('optgroup[label="Verified source matches"] option');
+	await expect(page.getByRole("heading", { name: `Suggested current requirement · ${prior.id}`, exact: true })).toBeVisible();
+	await expect(page.getByText(prior.text, { exact: true })).toBeVisible();
+	await expect(page.getByText("Verified original IDs: TASK-20", { exact: true })).toBeVisible();
+	await expect(sourceOptions).toHaveCount(1);
+	await expect(sourceOptions).toHaveAttribute("value", prior.requirement_uid);
+	await expect(decision.locator(`:scope > option[value="${originals[0].requirement_uid}"]`)).toHaveCount(1);
+	await expect(decision).toHaveValue("");
+	await expect(apply).toBeDisabled();
+	await decision.selectOption(prior.requirement_uid);
+	await expect(page.getByRole("heading", { name: `Current requirement · ${prior.id}`, exact: true })).toBeVisible();
+	await apply.click();
+	await expect(workbench(page)).toBeVisible();
+	expect(state.applies[0].decisions).toEqual([
+		{ candidate_id: "incoming-1", action: "update", target_requirement_uid: prior.requirement_uid },
+	]);
+	expect(state.getProject().current_snapshots.requirements.payload.requirements.find((item) => item.id === prior.id)).toMatchObject({
+		requirement_uid: prior.requirement_uid,
+		text: revisedText,
+		content_version: 2,
+		review_status: "Needs Review",
+	});
+});
+
 test("stages eight plus two, applies ten, and retains IDs and approvals after reload", { tag: "@p1" }, async ({ page }) => {
 	const state = await setup(page);
 	await stage(page);
@@ -345,12 +390,26 @@ test("renewed comparison refreshes the baseline revision after a conflict", asyn
 
 test("comparison works on narrow screens and passes focused accessibility checks", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
-	await setup(page);
+	await setup(page, {
+		candidates: [
+			incoming[0],
+			{
+				...incoming[1],
+				classification: "needs_decision",
+				suggestions: [{ requirement_uid: "original-2", reason: "Verified source reference", verified_original_ids: ["TASK-20"] }],
+			},
+		],
+	});
 	await stage(page);
 	const comparison = page.getByRole("region", { name: "Compare incoming requirements" });
+	const filter = page.getByLabel("Filter import changes");
+	await filter.selectOption("new");
+	await expect(comparison.getByRole("row")).toHaveCount(2);
+	await filter.selectOption("needs_decision");
+	await openIncoming(page, incoming[1].requirement.text);
+	await expect(page.getByText("Verified original IDs: TASK-20", { exact: true })).toBeVisible();
 	const box = await comparison.boundingBox();
 	expect(box.width).toBeLessThanOrEqual(390);
-	await page.getByLabel("Filter import changes").selectOption("new");
 	const results = await new AxeBuilder({ page }).include(".requirement-import-review").analyze();
 	expect(results.violations).toEqual([]);
 });

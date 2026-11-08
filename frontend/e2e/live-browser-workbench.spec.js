@@ -52,12 +52,19 @@ async function repairDirectorySource(page, fixture, suite, { target, faultMarker
 	const unchangedCandidate = findIncoming("DIR-100");
 	expect(preview.candidates).toHaveLength(2);
 	expect(changedCandidate.requirement.text).toContain(revisedCopy);
-	const pick = async (candidate, value) => {
+	expect(changedCandidate).toMatchObject({ classification: "needs_decision", target_requirement_uid: null });
+	expect(changedCandidate.suggestions[0]).toMatchObject({ requirement_uid: previous.requirement_uid, verified_original_ids: ["DIR-200"] });
+	const openDecision = async (candidate) => {
 		await page.getByRole("button", { name: `Review incoming requirement: ${candidate.requirement.text}`, exact: true }).click();
-		await page.getByLabel(`Decision for ${candidate.candidate_id}`, { exact: true }).selectOption(value);
+		return page.getByLabel(`Decision for ${candidate.candidate_id}`, { exact: true });
 	};
-	await pick(unchangedCandidate, "skip");
-	await pick(changedCandidate, previous.requirement_uid);
+	await (await openDecision(unchangedCandidate)).selectOption("skip");
+	const decision = await openDecision(changedCandidate);
+	await expect(decision).toHaveValue("");
+	await expect(page.getByRole("heading", { name: `Suggested current requirement · ${previous.id}`, exact: true })).toBeVisible();
+	await expect(page.getByText("Verified original IDs: DIR-200", { exact: true })).toBeVisible();
+	await expect(decision.locator('optgroup[label="Verified source matches"] option')).toHaveAttribute("value", previous.requirement_uid);
+	await decision.selectOption(previous.requirement_uid);
 	await expect(page.getByText("0 added · 1 updated · 0 retired · 2 active requirements", { exact: true })).toBeVisible();
 	const importResponse = await uiResponse(page, `/requirement-imports/${preview.import_id}/apply`, () =>
 		page.getByRole("button", { name: "Apply reviewed changes", exact: true }).click()
