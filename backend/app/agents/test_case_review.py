@@ -22,6 +22,7 @@ DEFAULT_TEST_CASE_RETRY_ATTEMPTS = 1
 
 _QUOTED_TEXT_PATTERN = re.compile(r'"([^"]+)"|\'([^\']+)\'')
 _VISIBILITY_ASSERTION_PATTERN = re.compile(r"\b(displays?|displayed|visible|shown|present|appears|rendered)\b", re.IGNORECASE)
+_ROW_LOCATOR_PATTERN = re.compile(r"\brows?\s+(?:matching\s+(?:the\s+)?selector|(?:is|are)\s+present\s+in)\s*$", re.IGNORECASE)
 _SELECTOR_TEXT_PATTERN = re.compile(
     r"^(?:#|\.|\[|css=|xpath=|//|/html\b|[a-z][\w-]*(?:[#.\[]|\[[^\]]+\])|data-testid=|testid=)",
     re.IGNORECASE,
@@ -298,9 +299,11 @@ def _visible_quoted_values(text: str) -> List[str]:
         return []
     values: List[str] = []
     for match in _QUOTED_TEXT_PATTERN.finditer(text):
-        value = next((group for group in match.groups() if group), "")
+        value = (match.group(1) or match.group(2)).strip()
+        if _looks_like_selector_text(value) and _ROW_LOCATOR_PATTERN.search(text[: match.start()]):
+            continue
         if value:
-            values.append(value.strip())
+            values.append(value)
     return values
 
 

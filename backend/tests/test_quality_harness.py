@@ -222,9 +222,18 @@ class QualityHarnessTests(unittest.TestCase):
             execution_prerequisites=[
                 {"name": "employee", "kind": "test_data", "description": "Named employee", "reference": "fixture:employee", "status": "configured"}
             ],
+            project_id="synthetic-project",
+            base_project_revision=2,
         )
-        with patch("app.routers.requirements.start_workflow_run", return_value="run"), patch("app.routers.requirements._log_success", return_value="event"):
+        with (
+            patch("app.routers.requirements.start_workflow_run", return_value="run"),
+            patch("app.routers.requirements._log_success", return_value="event"),
+            patch("app.routers.requirements.append_stage_snapshot") as append_snapshot,
+        ):
             response = asyncio.run(
                 enrich_requirements(Request({"type": "http", "headers": []}), payload, AuthUser(sub="synthetic-owner", name="Synthetic owner"))
             )
         self.assertEqual(response.execution_prerequisites, payload.execution_prerequisites)
+        self.assertEqual(
+            append_snapshot.call_args.kwargs["payload"]["execution_prerequisites"], [item.model_dump() for item in payload.execution_prerequisites]
+        )

@@ -710,7 +710,9 @@ same runner with a new output directory.
 
 The test imports the existing Room Booking requirements, supplies observed
 same-origin page and dropdown declarations in Context, and reviews the exact
-saved suite. The matrix records design and setup status, admission, and browser
+saved suite. It verifies the loopback response-loss proxy before saving its
+fixture reference against the sourced retry requirement. The retry remains
+Manual. The matrix records design and setup status, admission, and browser
 eligibility separately. Each seeded fault is tried only with healthy-passing
 cases linked to its source requirement. Detection requires a matching failed
 browser assertion. The authored booking matrix separately exercises native

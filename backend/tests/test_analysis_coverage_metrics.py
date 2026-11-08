@@ -242,15 +242,38 @@ class BrowserAssertionReviewTests(unittest.TestCase):
         self.assertTrue(any("grounded accessible names" in criterion for criterion in review["unmet_criteria"]))
 
     def test_review_blocks_selector_as_visible_text_assertions(self) -> None:
-        review = _heuristic_test_case_review(
-            [self._browser_case(expected='"#email-input" should be visible')],
-            self.requirements,
-            90,
-            coverage_plan=self.coverage_plan,
-        )
+        for expected, selector in (
+            ('"#email-input" should be visible', "#email-input"),
+            ('exact text "#bookings tr" is visible', "#bookings tr"),
+            ('One row is present in "#bookings tr" and exact heading "#bookings tr" is visible', "#bookings tr"),
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review(
+                    [self._browser_case(expected=expected)],
+                    self.requirements,
+                    90,
+                    coverage_plan=self.coverage_plan,
+                )
 
-        self.assertFalse(review["approved"])
-        self.assertTrue(any("raw selector `#email-input`" in issue for issue in review["blocking_issues"]))
+                self.assertFalse(review["approved"])
+                self.assertTrue(any(f"raw selector `{selector}`" in issue for issue in review["blocking_issues"]))
+
+    def test_review_allows_selector_as_row_locator(self) -> None:
+        for expected in (
+            'Exactly one data row matching selector "#bookings tr" is displayed with room Birch, time slot '
+            '2026-10-01 10:00–11:00 Europe/Zurich, 2 attendees, and status "Confirmed"',
+            'exact heading "My bookings" is visible, exactly one durable record row is present in "#bookings tr", '
+            "and its displayed ID matches the recorded original ID",
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review(
+                    [self._browser_case(expected=expected)],
+                    self.requirements,
+                    90,
+                    coverage_plan=self.coverage_plan,
+                )
+
+                self.assertTrue(review["approved"], review["blocking_issues"])
 
     def test_review_blocks_implementation_only_visible_text_assertions(self) -> None:
         review = _heuristic_test_case_review(

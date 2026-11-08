@@ -97,7 +97,9 @@ For structured test data, encode JSON as a string.
 Use supplied non-secret literal inputs directly in steps or test_data (for example a supplied
 search name). A literal value is not an execution_prerequisite or a reference. A fixture
 that must already exist needs evidence of provision or a supported setup recipe.
-Preserve applicable execution_prerequisites from context and identify any missing dependency.
+Preserve applicable execution_prerequisites from context using their exact names, references,
+and status. Do not redeclare supplied setup under a new name. Identify genuinely missing
+dependencies separately. A configured manual fixture does not make its actions automatable.
 Each prerequisite has a name (identifier starting with a letter, no spaces), kind
 (test_data|credential|role|environment|setup|cleanup), description, reference, and status.
 Missing credentials, existing records or settings use status "missing" and reference null

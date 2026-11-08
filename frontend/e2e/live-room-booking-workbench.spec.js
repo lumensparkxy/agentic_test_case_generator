@@ -45,26 +45,50 @@ test.describe("Generated Room Booking execution", () => {
 		page.setDefaultTimeout(30_000);
 		expect(process.env.E2E_DEMO_PROJECT).toBe("demo-tcg-workbench");
 		const target = loopbackUrl(process.env.E2E_BOOKING_TARGET);
+		const lossTarget = loopbackUrl(process.env.E2E_BOOKING_LOSS_TARGET);
 		const variants = JSON.parse(process.env.E2E_BOOKING_DEFECTS);
 		const notes = (await fs.readFile(new URL("./fixtures/room-booking-browser-context.txt", import.meta.url), "utf8"))
 			.replaceAll("{{target}}", target)
-			.replaceAll("{{lossTarget}}", loopbackUrl(process.env.E2E_BOOKING_LOSS_TARGET))
+			.replaceAll("{{lossTarget}}", lossTarget)
 			.trim();
 		const fixture = await liveFixture(page, testInfo, { namePrefix: "Synthetic generated Room Booking execution" });
 		try {
-			const sourceRequirements = await test.step("Save source and observed fixture context", async () => {
+			const { requirements: sourceRequirements, prerequisite } = await test.step("Save source and observed fixture context", async () => {
 				const preview = await importSource(page, fixture);
-				const project = await applyImport(page, fixture, preview);
-				const requirements = project.current_snapshots.requirements.payload.requirements;
+				await applyImport(page, fixture, preview);
+				const approved = await approveRequirements(page, fixture);
+				const requirements = approved.current_snapshots.requirements.payload.requirements;
 				assertSourceMapping(requirements);
-				await approveRequirements(page, fixture);
-				await page.goto(`${fixture.prefix}/context`);
-				await page.getByPlaceholder("https://your-app").fill(target);
-				await page.getByRole("textbox", { name: "Context notes", exact: true }).fill(notes);
-				await uiResponse(page, "/requirements/enrich", () => page.getByRole("button", { name: "Analyze Context", exact: true }).click());
-				expect((await fixture.read()).current_snapshots.context.payload).toMatchObject({ app_link: target, notes });
-				await fixture.save("target-context", { target, notes, requirements });
-				return requirements;
+				const retryRequirements = requirements.filter(
+					(row) =>
+						/\bretr(?:y|ies|ying)\b/i.test(row.text) &&
+						row.sources.some(
+							(source) =>
+								source.excerpt_verified && source.original_requirement_ids.includes("ROOM-440") && /response/i.test(source.excerpt)
+						)
+				);
+				expect(retryRequirements.length, "Verified ROOM-440 response-loss retry requirement").toBeGreaterThan(0);
+				const proxyPage = await page.request.get(lossTarget, { timeout: 5000 });
+				expect(proxyPage.ok(), "Response-loss proxy is provisioned").toBe(true);
+				expect(await proxyPage.text()).toContain("Meeting Room Booking");
+				const prerequisite = {
+					name: "responseLossProxyService",
+					kind: "environment",
+					description: `Provisioned manual response-loss proxy at ${lossTarget}, bound to POST /api/bookings.`,
+					reference: "fixture:room-booking-response-loss",
+					requirement_ids: retryRequirements.map((row) => row.id),
+					status: "configured",
+				};
+				const context = { app_link: target, notes, execution_prerequisites: [prerequisite] };
+				await fixture.checked("POST", "/requirements/enrich", {
+					...context,
+					project_id: approved.project_id,
+					base_project_revision: approved.current_revision,
+					requirements,
+				});
+				expect((await fixture.read()).current_snapshots.context.payload).toMatchObject(context);
+				await fixture.save("target-context", { target, notes, requirements, prerequisite });
+				return { requirements, prerequisite };
 			});
 
 			await test.step("Generate and review Use Cases through their normal gate", async () => {
@@ -125,6 +149,15 @@ test.describe("Generated Room Booking execution", () => {
 				manual_probe: "Double-click and response loss are covered by authored controls on this fixture.",
 			};
 			try {
+				const retryCases = suite.payload.test_cases.filter((row) =>
+					row.linked_requirement_ids.some((id) => prerequisite.requirement_ids.includes(id))
+				);
+				expect(retryCases.length, "Generated coverage for the response-loss retry").toBeGreaterThan(0);
+				for (const row of retryCases) {
+					expect(row.execution_prerequisites).toContainEqual(prerequisite);
+					expect(row.automation_status).toBe("Manual");
+					expect(preview.manual.map((item) => item.source_test_case_id)).toContain(row.id);
+				}
 				expect(preview.readiness.run_allowed, JSON.stringify(preview.readiness.blockers)).toBe(true);
 				expect(candidates.length, "No generated case compiled for this supplied target").toBeGreaterThan(0);
 				const healthyResponse = await uiResponse(

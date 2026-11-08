@@ -151,6 +151,7 @@ def _context_project_payload(response: EnrichResponse) -> dict[str, Any]:
         "diagram_links": [str(item) for item in response.diagram_links or []],
         "image_links": [str(item) for item in response.image_links or []],
         "notes": response.notes,
+        "execution_prerequisites": _model_payload(response.execution_prerequisites),
         "grounded_context": _model_payload(response.grounded_context),
     }
 
