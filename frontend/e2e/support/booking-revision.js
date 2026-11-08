@@ -22,12 +22,6 @@ function attendeeMatches(current, preview) {
 			.map((source) => ({ row, sourceId: source.source_id, revisedQuote: normalize(reviseSource(source.excerpt)) }))
 	);
 	const changed = new Set(revisions.map(({ row }) => row.requirement_uid));
-	for (const clause of revisedClauses) {
-		expect(
-			revisions.some(({ revisedQuote }) => revisedQuote.includes(clause)),
-			`Baseline source must identify ${clause}`
-		).toBe(true);
-	}
 	const choices = new Map();
 	for (const candidate of preview.candidates) {
 		const matches = revisions.filter(({ sourceId, revisedQuote }) =>
@@ -45,6 +39,15 @@ function attendeeMatches(current, preview) {
 		if (rows.size) choices.set(candidate.candidate_id, [...rows][0]);
 	}
 	expect([...choices.values()].map((row) => row.requirement_uid).sort()).toEqual([...changed].sort());
+	const selectedQuotes = preview.candidates
+		.filter((candidate) => choices.has(candidate.candidate_id))
+		.flatMap((candidate) => attendeeSources(candidate.requirement).map((source) => normalize(source.excerpt)));
+	for (const clause of revisedClauses) {
+		expect(
+			selectedQuotes.some((quote) => quote.includes(clause)),
+			`The selected revised source must verify ${clause}`
+		).toBe(true);
+	}
 	return choices;
 }
 
