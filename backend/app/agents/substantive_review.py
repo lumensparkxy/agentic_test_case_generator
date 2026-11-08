@@ -18,9 +18,8 @@ from .quality_goal import QUALITY_GOAL
 from .prompting import TEST_CASE_BEHAVIOR_POLICY
 from ..services.test_case_quality import project_test_case_view
 from ..services.guidance_service import current_guidance, public_manifest
-from ..utils.genai_response import extract_response_text
 
-RUBRIC = "delivered_business_coverage_v3"
+RUBRIC = "delivered_business_coverage_v4"
 MAX_INPUT_BYTES = 512_000
 ASSESSMENT_BUDGET_SECONDS = 180
 ASSESSMENT_ATTEMPT_SECONDS = 120
@@ -30,20 +29,31 @@ class StrictRow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class StepEvidence(StrictRow):
+class StepReference(StrictRow):
     test_case_id: str
     step: int = Field(ge=1)
+
+
+class StepEvidence(StepReference):
     action: str = Field(min_length=1)
     expected: str = Field(min_length=1)
 
 
-class Obligation(StrictRow):
+class ObligationJudgment(StrictRow):
     requirement_id: str
-    source_quote: str = Field(min_length=1)
     obligation: str = Field(min_length=1)
     status: Literal["covered", "unmet", "unknown"]
     reason: str = Field(min_length=1)
+
+
+class Obligation(ObligationJudgment):
+    source_quote: str = Field(min_length=1)
     evidence: list[StepEvidence]
+
+
+class ObligationReference(ObligationJudgment):
+    source_field: Literal["text", "source_excerpt"]
+    evidence: list[StepReference]
 
 
 class Prerequisite(StrictRow):
@@ -51,6 +61,7 @@ class Prerequisite(StrictRow):
     status: Literal["unsupported_fact", "explicit_assumption", "missing_prerequisite", "contradiction"]
     required: StrictBool
     reason: str = Field(min_length=1)
+    execution_prerequisite_name: str | None = None
 
 
 class CaseGrounding(StrictRow):
@@ -63,6 +74,16 @@ class CriticOutput(StrictRow):
     input_hash: str
     obligations: list[Obligation] = Field(min_length=1, max_length=1000)
     case_grounding: list[CaseGrounding] = Field(max_length=1000)
+
+
+class CriticReferenceOutput(StrictRow):
+    input_hash: str
+    obligations: list[ObligationReference] = Field(min_length=1, max_length=1000)
+    case_grounding: list[CaseGrounding] = Field(max_length=1000)
+
+
+class IncompleteCriticResponse(ValueError):
+    pass
 
 
 def _dump(value):
@@ -90,7 +111,7 @@ def review_input(cases, requirements, context, *, scope_plan=None):
     return data, sha256(encoded.encode()).hexdigest(), encoded
 
 
-def review_prompt(data, input_hash):
+def review_prompt(data, input_hash, correction=""):
     return (
         QUALITY_GOAL
         + TEST_CASE_BEHAVIOR_POLICY
@@ -104,11 +125,10 @@ For each obligation cite its requirement_id and source_field ("text" or a nonemp
 Examples of distinctions: entering a maximum value alone is NOT successful creation at that boundary. Occupied-resource rejection and independent-resource availability are different obligations. Owner cancellation and slot release, and non-owner direct-route denial, need their own outcomes. When the source requires durable count and identity after refresh for double-click or lost-response retry, require that chain in the SAME triggering case. A separate refresh-only test closes neither gap. Do not require refresh, identity or request-level deduplication when the source does not state them.
 Assess grounding for EVERY delivered case. Required users, rooms/resources, roles, exact routes/controls and implementation mechanisms must be supported by source/context or explicitly identified as assumptions/missing prerequisites. A named synthetic input may be a test value, but do not assume it is provisioned, authorized or an implemented route. Explicit optional exploratory assumptions are allowed but cannot establish required coverage. Do not invent a technical mechanism (e.g. debouncing) when the source specifies only business behavior.
 Treat supplied non-secret literal inputs as data, not missing dependencies or runtime bindings. Flag invented references and existing record IDs. A missing account or setting must remain a prerequisite until supplied. Treat a substring check as insufficient when the source requires exact text.
-Current source requirements take precedence over contradictory context or approved memory. Report contradictions explicitly. Curated methods are methodology, not product facts. Consider only the actual applied guidance manifest; disabled/held or absent guidance supplies no facts. Missing execution target alone is not a test DESIGN defect, but unavailable facts needed to perform a claimed step are prerequisites.
-A required unsupported assumption, missing prerequisite or contradiction leaves affected coverage unknown or unmet. Covered means design coverage assessed by you, never execution success or human acceptance.
-Return ONLY JSON using this exact schema; copy input_hash exactly, use concise reasons and cite only supplied IDs and step numbers:
-{{"input_hash":"{input_hash}","obligations":[{{"requirement_id":"source ID","source_field":"text","obligation":"one specific behavior","status":"covered|unmet|unknown","reason":"evidence or precise correction","evidence":[{{"test_case_id":"case ID","step":1}}]}}],"case_grounding":[{{"test_case_id":"case ID","reason":"grounding assessment","prerequisites":[{{"description":"assumption or missing prerequisite","status":"unsupported_fact|explicit_assumption|missing_prerequisite|contradiction","required":true,"reason":"support or correction"}}]}}]}}
-Use empty evidence for unmet/unknown when no relevant step exists, and empty prerequisites when all needed facts are grounded.
+Current source requirements take precedence over contradictory context or approved memory. Report a contradiction the case correctly resolves in the grounding reason; an unresolved contradiction affecting behavior is a required design finding. Curated methods are methodology, not product facts. Consider only the actual applied guidance manifest.
+Judge business design and runtime setup separately. If steps verify a sourced rule and outcome, mark the obligation covered even if running those steps requires a declared missing credential, fixture or environment. For a runtime-only blocker, report a required missing_prerequisite and copy the exact name from that case's execution_prerequisites with status missing into execution_prerequisite_name. Never use that name to excuse an unresolved business rule, invented role or unsupported outcome. For a design gap leave execution_prerequisite_name null and mark affected coverage unknown or unmet.
+Copy input_hash exactly as {input_hash}. Split distinct triggers, numeric boundaries or outcomes into separate obligations instead of combining evidence from different cases. For any obligation use evidence from at most one case. Use empty evidence for unmet/unknown when no relevant step exists, and empty prerequisites when all needed facts are grounded.
+{correction}
 DATA:
 {json.dumps(data, ensure_ascii=False)}
 """
@@ -225,7 +245,17 @@ def apply_known_regressions(result, data):
     result["case_grounding"] = list(groundings.values())
     if obligations or prerequisites:
         result["status"] = "incomplete"
+        result["design_status"] = "incomplete"
     return result
+
+
+def declared_execution_blockers(cases):
+    return [
+        {"test_case_id": case["id"], "prerequisite_name": item["name"]}
+        for case in cases
+        for item in case.get("execution_prerequisites") or []
+        if item["status"] == "missing"
+    ]
 
 
 def validate_assessment(raw, data, input_hash):
@@ -280,47 +310,78 @@ def validate_assessment(raw, data, input_hash):
             if not evidence.action.strip() or not evidence.expected.strip():
                 raise ValueError("Evidence needs action and observable result")
     result = output.model_dump()
-    required_gaps = [p for c in result["case_grounding"] for p in c["prerequisites"] if p["required"]]
+    blockers = declared_execution_blockers(data["test_cases"])
+    blocker_keys = {(b["test_case_id"], b["prerequisite_name"]) for b in blockers}
+    for grounding in output.case_grounding:
+        for gap in grounding.prerequisites:
+            name = gap.execution_prerequisite_name
+            if name is not None and (not gap.required or gap.status != "missing_prerequisite" or (grounding.test_case_id, name) not in blocker_keys):
+                raise ValueError("Execution finding must cite a declared missing prerequisite")
+    design_gaps = any(gap.required and gap.execution_prerequisite_name is None for grounding in output.case_grounding for gap in grounding.prerequisites)
+    design_complete = not design_gaps and all(o.status == "covered" for o in output.obligations)
     result.update(
         rubric=RUBRIC,
         scope=data["scope"],
         guidance_manifest_id=(data.get("guidance_manifest") or {}).get("manifest_id"),
-        status="incomplete" if required_gaps or any(o.status != "covered" for o in output.obligations) else "assessed_complete",
-        execution_status="not_assessed",
+        status="assessed_complete" if design_complete and not blockers else "incomplete",
+        design_status="assessed_complete" if design_complete else "incomplete",
+        execution_status="blocked" if blockers else "not_assessed",
+        execution_blockers=blockers,
         reason="Independent model assessment with verified source and step citations; not execution proof.",
     )
-    return apply_known_regressions(result, data)
+    result = apply_known_regressions(result, data)
+    if result["design_status"] == "assessed_complete" and blockers:
+        result["reason"] = "Business test design is assessed. Resolve declared execution prerequisites before approval."
+    return result
 
 
 def unknown_assessment(data, input_hash, reason):
+    blockers = declared_execution_blockers(data["test_cases"])
     return apply_known_regressions(
         {
             "rubric": RUBRIC,
             "input_hash": input_hash,
             "scope": data["scope"],
             "status": "unknown",
+            "design_status": "unknown",
             "reason": reason,
             "obligations": [],
             "case_grounding": [],
-            "execution_status": "not_assessed",
+            "execution_status": "blocked" if blockers else "not_assessed",
+            "execution_blockers": blockers,
         },
         data,
     )
 
 
+def _provider_schema(value):
+    # Keep the provider grammar bounded. The local Pydantic models still enforce the detailed constraints.
+    omitted = {"additionalProperties", "maxItems", "minItems", "minLength", "minimum", "default", "title"}
+    if isinstance(value, dict):
+        return {key: _provider_schema(item) for key, item in value.items() if key not in omitted}
+    if isinstance(value, list):
+        return [_provider_schema(item) for item in value]
+    return value
+
+
 def _call_critic(settings, prompt, *, timeout_seconds=ASSESSMENT_ATTEMPT_SECONDS):
     config = json_generation_config(max_output_tokens=24000)
+    config.response_schema = _provider_schema(CriticReferenceOutput.model_json_schema())
     config.http_options.timeout = max(1, int(timeout_seconds * 1000))
     config.http_options.retry_options.attempts = 1
     with genai.Client(api_key=settings.gemini_api_key) as client:
         response = client.models.generate_content(model=settings.model_name, contents=prompt, config=config)
-    return extract_response_text(response)
+    if response.candidates and response.candidates[0].finish_reason not in (None, "STOP"):
+        raise IncompleteCriticResponse
+    return response.text or ""
 
 
 def _invalid_evidence_code(exc):
     """Expose a useful failure category without model text or validation inputs."""
     if isinstance(exc, json.JSONDecodeError):
         return "malformed_json"
+    if isinstance(exc, IncompleteCriticResponse):
+        return "incomplete_model_output"
     return {
         "Assessment does not match delivered content": "content_binding_mismatch",
         "Ambiguous input identities": "ambiguous_input_identity",
@@ -333,6 +394,7 @@ def _invalid_evidence_code(exc):
         "Evidence needs action and observable result": "incomplete_step_evidence",
         "Covered obligation lacks steps": "missing_step_evidence",
         "Cannot combine unrelated cases to close an obligation": "incoherent_case_evidence",
+        "Execution finding must cite a declared missing prerequisite": "invalid_execution_prerequisite_reference",
         "Assessment must account for every source requirement": "incomplete_requirement_review",
         "Assessment must assess every delivered case exactly once": "incomplete_case_review",
     }.get(str(exc), "invalid_output_schema")
@@ -347,11 +409,25 @@ def assess_delivered_suite(cases, requirements, context, *, settings=None, scope
         return unknown_assessment(data, input_hash, "Assessment input exceeds the bounded review size; split the scope for review.")
     deadline = monotonic() + ASSESSMENT_BUDGET_SECONDS
     prompt = review_prompt(data, input_hash)
-    # Retry only a transient provider/transport failure, never bad evidence or
-    # authentication. SDK retries are disabled so this is at most two calls.
+    # Share one retry between transport recovery and a fresh, schema-bound review.
+    repairable = {"malformed_json", "incomplete_model_output", "incoherent_case_evidence", "invalid_output_schema"}
+    first_validation_error = None
     for attempt in range(1, 3):
         try:
             output = _call_critic(settings, prompt, timeout_seconds=min(ASSESSMENT_ATTEMPT_SECONDS, max(0.001, deadline - monotonic())))
+            result = validate_assessment(output, data, input_hash)
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            code = _invalid_evidence_code(exc)
+            logging.warning("Substantive assessment evidence rejected: %s", code)
+            if attempt == 1 and code in repairable and deadline - monotonic() >= 1:
+                first_validation_error = code
+                correction = (
+                    f"Previous review was rejected for {code}. Produce fresh valid JSON for this exact input. Cite one coherent delivered case per obligation."
+                )
+                prompt = review_prompt(data, input_hash, correction)
+                continue
+            result = unknown_assessment(data, input_hash, f"Independent assessment returned invalid evidence ({code.replace('_', ' ')}); review is required.")
+            result["diagnostics"] = {"attempt_count": attempt, "failure_reason": "invalid_evidence", "validation_error": code}
         except Exception as exc:
             transient = isinstance(exc, (genai_errors.ServerError, httpx.TransportError, TimeoutError))
             logging.warning("Substantive assessment attempt %s unavailable: %s (status=%s)", attempt, type(exc).__name__, getattr(exc, "code", None))
@@ -359,16 +435,10 @@ def assess_delivered_suite(cases, requirements, context, *, settings=None, scope
                 continue
             result = unknown_assessment(data, input_hash, "Independent assessment provider unavailable; review is required.")
             result["diagnostics"] = {"attempt_count": attempt, "failure_reason": "provider_unavailable"}
-            return result
-        try:
-            result = validate_assessment(output, data, input_hash)
-        except (ValueError, TypeError, KeyError, AttributeError) as exc:
-            code = _invalid_evidence_code(exc)
-            logging.warning("Substantive assessment evidence rejected: %s", code)
-            result = unknown_assessment(data, input_hash, f"Independent assessment returned invalid evidence ({code.replace('_', ' ')}); review is required.")
-            result["diagnostics"] = {"attempt_count": attempt, "failure_reason": "invalid_evidence", "validation_error": code}
-            return result
-        result["diagnostics"] = {"attempt_count": attempt, "failure_reason": None}
+        else:
+            result["diagnostics"] = {"attempt_count": attempt, "failure_reason": None}
+        if first_validation_error:
+            result["diagnostics"]["first_validation_error"] = first_validation_error
         return result
 
 
@@ -392,7 +462,7 @@ def assessment_tasks(assessment, cases):
     for grounding in assessment.get("case_grounding", []):
         case = rows.get(grounding["test_case_id"], {})
         for prerequisite in grounding["prerequisites"]:
-            if prerequisite["required"]:
+            if prerequisite["required"] and not prerequisite.get("execution_prerequisite_name"):
                 tasks.append(
                     {
                         "kind": "substantive_coverage",
@@ -415,7 +485,9 @@ def apply_assessment(response, assessment):
         response["review"] = {
             **response["review"],
             "approved": False,
-            "summary": "Business coverage is incomplete or unverified. Review the source obligations and prerequisites.",
+            "summary": assessment["reason"]
+            if assessment.get("design_status") == "assessed_complete" and assessment.get("execution_status") == "blocked"
+            else "Business coverage is incomplete or unverified. Review the source obligations and prerequisites.",
             "blocking_issues": list(dict.fromkeys(response["review"].get("blocking_issues", []) + findings)),
         }
         if response["workflow_diagnostics"].get("status") == "completed":
