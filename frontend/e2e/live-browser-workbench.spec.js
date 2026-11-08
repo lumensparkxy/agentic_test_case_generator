@@ -109,7 +109,7 @@ async function repairDirectorySource(page, fixture, suite, { target, faultMarker
 	expect(selected?.recommendation_id, "The changed source requires a targeted update for the existing case").toBeTruthy();
 	await page.goto(`${fixture.prefix}/test-cases`);
 	for (const item of impact.recommendations) {
-		await page.getByRole("checkbox", { name: `Accept ${item.title}`, exact: true }).setChecked(item === selected);
+		await page.getByTestId(`impact-accept-${item.recommendation_id}`).setChecked(item === selected);
 	}
 	const applied = await uiResponse(
 		page,

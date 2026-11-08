@@ -185,9 +185,7 @@ async function applyAndReviewBookingRepairs(page, fixture, suite, impact, select
 	const selectedIds = selected.map((item) => item.recommendation_id).sort();
 	const affectedIds = new Set(selected.map((item) => item.test_case_id));
 	for (const item of impact.recommendations) {
-		await page
-			.getByRole("checkbox", { name: `Accept ${item.title}`, exact: true })
-			.setChecked(selectedIds.includes(item.recommendation_id));
+		await page.getByTestId(`impact-accept-${item.recommendation_id}`).setChecked(selectedIds.includes(item.recommendation_id));
 	}
 	const applied = await uiResponse(
 		page,

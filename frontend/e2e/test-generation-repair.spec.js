@@ -13,7 +13,7 @@ const concrete = {
 	scenario_refs: ["REQ-101-SCN-01"],
 	status: "Ready",
 };
-async function setup(page, { failure = false, gate, reviewGate, reviewUnavailableOnce = false } = {}) {
+async function setup(page, { failure = false, gate, reviewGate, reviewUnavailableOnce = false, repeatedTitle = false } = {}) {
 	let project = useCaseProjectFixture({ reviewState: "approved" });
 	project.current_snapshots.test_cases = {
 		snapshot_id: "tests-old",
@@ -60,6 +60,11 @@ async function setup(page, { failure = false, gate, reviewGate, reviewUnavailabl
 				],
 			},
 		};
+		if (repeatedTitle) {
+			const { recommendations, summary } = project.current_snapshots.impact_analysis.payload;
+			recommendations.push({ ...recommendations[0], recommendation_id: "repair-2", test_case_id: "TC-FB-002" });
+			summary.recommendation_counts.update = 2;
+		}
 		api.setProject(project);
 		await route.fulfill({ json: project });
 	});
@@ -129,6 +134,17 @@ async function setup(page, { failure = false, gate, reviewGate, reviewUnavailabl
 	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
 	return { requests, reviewRequests, currentRevision: () => project.current_revision };
 }
+
+test("distinguishes repair recommendations with the same title by case ID", { tag: "@p1" }, async ({ page }) => {
+	const { requests } = await setup(page, { repeatedTitle: true });
+	await page.getByRole("button", { name: "Plan targeted repair" }).click();
+	const first = page.getByRole("checkbox", { name: "Accept Generate concrete checkout coverage (TC-FB-001)", exact: true });
+	const second = page.getByRole("checkbox", { name: "Accept Generate concrete checkout coverage (TC-FB-002)", exact: true });
+	await first.check();
+	await expect(second).not.toBeChecked();
+	await page.getByRole("button", { name: "Apply 1 recommendation", exact: true }).click();
+	await expect.poll(() => requests.map((request) => request.accepted_recommendation_ids)).toEqual([["repair-1"]]);
+});
 
 test("plans and explicitly accepts repair, then keeps concrete tests and requires review", { tag: "@p1" }, async ({ page }) => {
 	const deferred = createDeferred();

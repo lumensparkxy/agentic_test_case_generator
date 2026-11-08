@@ -3856,6 +3856,8 @@ export default function App() {
 		const changedItems = impactAnalysis.changed_items || [];
 		const impactedCases = impactAnalysis.impacted_test_cases || [];
 		const recommendations = impactAnalysis.recommendations || [];
+		const titleCounts = new Map();
+		for (const { title } of recommendations) titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
 		const actionLabels = {
 			keep: "Keep",
 			update: "Update",
@@ -3954,44 +3956,49 @@ export default function App() {
 				<div className="impact-table-block">
 					<h3>Recommendations</h3>
 					<List as="div" variant="grouped" className="impact-recommendation-list">
-						{recommendations.map((recommendation) => (
-							<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
-								<div>
-									<strong>{actionLabels[recommendation.action] || recommendation.action}</strong>
-									<span>{recommendation.title}</span>
-									<p>{recommendation.reason}</p>
+						{recommendations.map((recommendation) => {
+							const reference = recommendation.test_case_id || recommendation.scenario_refs?.join(", ") || recommendation.recommendation_id;
+							const title = titleCounts.get(recommendation.title) > 1 ? `${recommendation.title} (${reference})` : recommendation.title;
+							return (
+								<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
+									<div>
+										<strong>{actionLabels[recommendation.action] || recommendation.action}</strong>
+										<span>{title}</span>
+										<p>{recommendation.reason}</p>
+									</div>
+									<div className="impact-recommendation-meta">
+										<span>{Math.round((recommendation.confidence || 0) * 100)}%</span>
+										<label>
+											<Checkbox
+												aria-label={`Accept ${title}`}
+												data-testid={`impact-accept-${recommendation.recommendation_id}`}
+												checked={
+													impactApplication.operation
+														? impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
+														: Boolean(recommendation.accepted)
+												}
+												disabled={isApplyingImpactUpdate || Boolean(impactApplication.operation)}
+												onChange={(event) => {
+													const accepted = event.target.checked;
+													setImpactAnalysis((current) => ({
+														...current,
+														recommendations: current.recommendations.map((item) =>
+															item.recommendation_id === recommendation.recommendation_id ? { ...item, accepted } : item
+														),
+													}));
+												}}
+											/>
+											{impactApplication.operation?.status === "applied" &&
+											impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
+												? "Applied"
+												: acceptedImpactRecommendationIds.includes(recommendation.recommendation_id)
+													? "Accepted"
+													: "Review"}
+										</label>
+									</div>
 								</div>
-								<div className="impact-recommendation-meta">
-									<span>{Math.round((recommendation.confidence || 0) * 100)}%</span>
-									<label>
-										<Checkbox
-											aria-label={`Accept ${recommendation.title}`}
-											checked={
-												impactApplication.operation
-													? impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
-													: Boolean(recommendation.accepted)
-											}
-											disabled={isApplyingImpactUpdate || Boolean(impactApplication.operation)}
-											onChange={(event) => {
-												const accepted = event.target.checked;
-												setImpactAnalysis((current) => ({
-													...current,
-													recommendations: current.recommendations.map((item) =>
-														item.recommendation_id === recommendation.recommendation_id ? { ...item, accepted } : item
-													),
-												}));
-											}}
-										/>
-										{impactApplication.operation?.status === "applied" &&
-										impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
-											? "Applied"
-											: acceptedImpactRecommendationIds.includes(recommendation.recommendation_id)
-												? "Accepted"
-												: "Review"}
-									</label>
-								</div>
-							</div>
-						))}
+							);
+						})}
 					</List>
 				</div>
 
