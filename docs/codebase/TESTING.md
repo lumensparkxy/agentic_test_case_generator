@@ -754,7 +754,9 @@ The declared collection's loaded heading makes an empty count meaningful.
 
 Use `--fixture room-booking-change` to compare and apply the attendee limit
 change from 8 to 6 in the same disposable workbench. The revised source also
-states the new maximum in the successful-booking clause. The benchmark uses
+states the new maximum in the successful-booking clause. If the baseline has
+case-linked substantive findings, the benchmark allows one targeted repair
+and reviews the result before importing the revision. It uses
 verified source quotations to select the updates, checks stale export, and
 reviews the targeted repair. It requires a saved booking at 6 on the revised
 app and a rejection at 7 that fails at the intended assertion on the old app.

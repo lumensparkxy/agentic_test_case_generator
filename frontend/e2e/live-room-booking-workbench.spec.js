@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
 import { expect, test } from "@playwright/test";
-import { previewBookingVersion, verifyBookingRevision } from "./support/booking-revision.js";
+import { previewBookingVersion, repairBookingBaseline, verifyBookingRevision } from "./support/booking-revision.js";
 import {
 	applyImport,
 	approveRequirements,
@@ -152,7 +152,7 @@ test.describe("Generated Room Booking execution", () => {
 				await approveScenarios(page, fixture);
 			});
 
-			const suite = await test.step("Save and inspect the exact generated suite", async () => {
+			const generatedSuite = await test.step("Save and inspect the exact generated suite", async () => {
 				await page.goto(`${fixture.prefix}/test-cases`);
 				const response = await uiResponse(
 					page,
@@ -170,6 +170,7 @@ test.describe("Generated Room Booking execution", () => {
 				expect(snapshot.metadata.source_use_case_snapshot_id).toBe(saved.stage_state.use_cases.current_snapshot_id);
 				return snapshot;
 			});
+			const suite = revisionMarker ? await repairBookingBaseline(page, fixture, generatedSuite) : generatedSuite;
 
 			const { response: previewResponse, preview } = await previewBookingVersion(page, fixture, target, "booking-healthy");
 			await fixture.save("healthy-preview", preview);

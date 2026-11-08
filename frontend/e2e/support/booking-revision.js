@@ -152,8 +152,17 @@ async function repairBookingCases(page, fixture, { suite, affected, target, note
 	expect(affectedIds.size).toBeGreaterThan(0);
 	const selected = impact.recommendations.filter((item) => item.action === "update" && affectedIds.has(item.test_case_id));
 	expect(new Set(selected.map((item) => item.test_case_id))).toEqual(affectedIds);
+	const saved = await applyAndReviewBookingRepairs(page, fixture, suite, impact, selected, "booking-revision");
+	for (const added of saved.payload.test_cases.filter((row) => !baselineCases.some((old) => old.id === row.id))) {
+		expect(added.linked_requirement_ids.some((id) => affected.has(id))).toBe(true);
+	}
+	return { saved, affectedIds };
+}
+
+async function applyAndReviewBookingRepairs(page, fixture, suite, impact, selected, label) {
 	await page.goto(`${fixture.prefix}/test-cases`);
 	const selectedIds = selected.map((item) => item.recommendation_id).sort();
+	const affectedIds = new Set(selected.map((item) => item.test_case_id));
 	for (const item of impact.recommendations) {
 		await page
 			.getByRole("checkbox", { name: `Accept ${item.title}`, exact: true })
@@ -170,12 +179,11 @@ async function repairBookingCases(page, fixture, { suite, affected, target, note
 	);
 	expect(applied.request().postDataJSON().accepted_recommendation_ids.toSorted()).toEqual(selectedIds);
 	const draft = (await applied.json()).current_snapshots.test_cases;
-	await fixture.save("booking-revision-draft", draft);
+	await fixture.save(`${label}-draft`, draft);
 	expect(draft.approved).toBe(false);
 	expect(draft.metadata.targeted_generation_runs).toHaveLength(affectedIds.size);
 	const repaired = draft.payload.test_cases;
-	const oldIds = new Set(baselineCases.map((row) => row.id));
-	for (const old of baselineCases) {
+	for (const old of suite.payload.test_cases) {
 		const row = repaired.find((item) => item.id === old.id);
 		if (affectedIds.has(old.id)) {
 			expect(row).toMatchObject({ artifact_item_id: old.artifact_item_id, artifact_version_number: old.artifact_version_number + 1 });
@@ -183,9 +191,6 @@ async function repairBookingCases(page, fixture, { suite, affected, target, note
 		} else {
 			expect(row).toEqual(old);
 		}
-	}
-	for (const added of repaired.filter((row) => !oldIds.has(row.id))) {
-		expect(added.linked_requirement_ids.some((id) => affected.has(id))).toBe(true);
 	}
 	await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
 	const reviewed = await uiResponse(
@@ -197,10 +202,39 @@ async function repairBookingCases(page, fixture, { suite, affected, target, note
 		}
 	);
 	const saved = (await reviewed.json()).current_snapshots.test_cases;
-	await fixture.save("booking-revision-review", saved);
+	await fixture.save(`${label}-review`, saved);
 	expect(saved).toMatchObject({ approved: true, source_snapshot_id: draft.snapshot_id, operation: "test_cases.review" });
 	expect(saved.payload.test_cases).toEqual(repaired);
-	return { saved, affectedIds };
+	return saved;
+}
+
+export async function repairBookingBaseline(page, fixture, suite) {
+	const tasks = suite.payload.generation_tasks || [];
+	if (suite.approved || !tasks.length || tasks.some((task) => task.kind !== "substantive_coverage" || !task.source_test_case_id))
+		return suite;
+	return test.step("Repair the exact assessed baseline findings before changing the source", async () => {
+		await page.goto(`${fixture.prefix}/test-cases`);
+		const response = await uiResponse(page, "/impact-analysis", () =>
+			page.getByRole("button", { name: "Plan targeted repair", exact: true }).click()
+		);
+		const impact = (await response.json()).current_snapshots.impact_analysis.payload;
+		await fixture.save("booking-baseline-repair-impact", impact);
+		const matches = (item, task) =>
+			item.action === "update" &&
+			item.test_case_id === task.source_test_case_id &&
+			task.requirement_ids.includes(item.requirement_id) &&
+			item.reason.includes(task.reason);
+		const selected = impact.recommendations.filter((item) => tasks.some((task) => matches(item, task)));
+		for (const task of tasks)
+			expect(
+				selected.some((item) => matches(item, task)),
+				task.reason
+			).toBe(true);
+		expect(selected.length).toBeGreaterThan(0);
+		const reviewed = await applyAndReviewBookingRepairs(page, fixture, suite, impact, selected, "booking-baseline-repair");
+		expect(reviewed.payload.generation_tasks).toEqual([]);
+		return reviewed;
+	});
 }
 
 export async function previewBookingVersion(page, fixture, target, environment) {
