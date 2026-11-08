@@ -246,6 +246,7 @@ class BrowserAssertionReviewTests(unittest.TestCase):
             ('"#email-input" should be visible', "#email-input"),
             ('exact text "#bookings tr" is visible', "#bookings tr"),
             ('One row is present in "#bookings tr" and exact heading "#bookings tr" is visible', "#bookings tr"),
+            ('css "#bookings" is visible and exact text "#bookings" is visible', "#bookings"),
         ):
             with self.subTest(expected=expected):
                 review = _heuristic_test_case_review(
@@ -271,6 +272,8 @@ class BrowserAssertionReviewTests(unittest.TestCase):
                 "and its displayed ID matches the recorded original ID",
             ),
             ('Inspect data rows in My bookings matching css "#bookings tr"', 'exact text "Birch" is visible'),
+            ("Inspect the result", 'css "#booking-result" is visible'),
+            ("Inspect the visible result", 'css "#booking-result" text should equal "Booking cancelled"'),
             (
                 'Inspect data rows matching css "#bookings tr" to verify exactly one durable record exists with the recorded original ID',
                 'exact text "Birch" is visible',

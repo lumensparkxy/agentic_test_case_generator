@@ -73,6 +73,23 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertEqual(validate_browser_handoff([case], context(), [requirement]), [])
         self.assertEqual(case.automation_status, "To Be Automated")
 
+    def test_scoped_text_handoff_requires_grounded_locator_and_exact_value(self):
+        for locator in ('css "#result"', 'test id "result"'):
+            with self.subTest(locator=locator):
+                case = candidate()
+                case.steps[2].expected = f'{locator} text should equal "Request saved"'
+                ungrounded = case.model_copy(deep=True)
+                self.assertIn("lacks exact interface evidence", validate_browser_handoff([ungrounded], context(), [REQUIREMENT])[1])
+                self.assertEqual(ungrounded.automation_status, "Manual")
+
+                grounded = context()
+                grounded.notes = f"Observed locator {locator}."
+                self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+                self.assertEqual(case.automation_status, "To Be Automated")
+                case.steps[2].expected = f'{locator} text should equal "Invented status"'
+                self.assertIn("value lacks exact source", validate_browser_handoff([case], grounded, [REQUIREMENT])[1])
+                self.assertEqual(case.automation_status, "Manual")
+
     def test_checkbox_handoff_requires_native_availability_for_interaction(self):
         grounded = context()
         field = grounded.grounded_context.ui_elements[0]

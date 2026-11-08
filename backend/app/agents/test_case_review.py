@@ -25,6 +25,8 @@ _VISIBILITY_ASSERTION_PATTERN = re.compile(r"\b(displays?|displayed|visible|show
 _QUOTED_LOCATOR_PREFIX_PATTERN = re.compile(
     r"\b(?:matching\s+(?:the\s+)?(?:css(?:\s+selector)?|selector)|rows?\s+(?:is|are)\s+present\s+in)\s*$", re.IGNORECASE
 )
+_TYPED_LOCATOR_PREFIX_PATTERN = re.compile(r"\b(?:css|test id)\s+$", re.IGNORECASE)
+_TYPED_LOCATOR_SUFFIX_PATTERN = re.compile(r"\s+(?:(?:is|should be)\s+(?:displayed|visible|shown|present)|text\s+should\s+equal)\b", re.IGNORECASE)
 _SELECTOR_TEXT_PATTERN = re.compile(
     r"^(?:#|\.|\[|css=|xpath=|//|/html\b|[a-z][\w-]*(?:[#.\[]|\[[^\]]+\])|data-testid=|testid=)",
     re.IGNORECASE,
@@ -302,7 +304,10 @@ def _visible_quoted_values(text: str) -> List[str]:
     values: List[str] = []
     for match in _QUOTED_TEXT_PATTERN.finditer(text):
         value = (match.group(1) or match.group(2)).strip()
-        if _looks_like_selector_text(value) and _QUOTED_LOCATOR_PREFIX_PATTERN.search(text[: match.start()]):
+        before = text[: match.start()]
+        if _TYPED_LOCATOR_PREFIX_PATTERN.search(before) and _TYPED_LOCATOR_SUFFIX_PATTERN.match(text, match.end()):
+            continue
+        if _looks_like_selector_text(value) and _QUOTED_LOCATOR_PREFIX_PATTERN.search(before):
             continue
         if value:
             values.append(value)

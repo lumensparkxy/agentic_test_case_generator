@@ -31,8 +31,17 @@ function matchedAssertions(item, observations) {
 	const messages = (item.issues || [])
 		.filter((issue) => issue.code === "playwright.error")
 		.map((issue) => stripVTControlCharacters(issue.message))
-		.filter((message) => /expect\([^\n]*\)\.(?:not\.)?to(?:BeVisible|HaveText|HaveCount)/.test(message));
+		.filter(
+			(message) =>
+				!message.includes("strict mode violation") && /expect\([^\n]*\)\.(?:not\.)?to(?:BeVisible|HaveText|HaveCount)/.test(message)
+		);
 	return observations.filter((text) => messages.some((message) => message.includes(`"${text}"`) || message.includes(`'${text}'`)));
+}
+
+function triesRebooking(candidate) {
+	const steps = candidate.spec?.steps || [];
+	const cancellation = steps.findIndex((step) => step.endsWith('I click exact button "Cancel booking"'));
+	return cancellation >= 0 && steps.slice(cancellation + 1).some((step) => step.endsWith('I click exact button "Book"'));
 }
 
 test.use({ trace: "off", video: "off" });
@@ -179,7 +188,10 @@ test.describe("Generated Room Booking execution", () => {
 				);
 				const baseInput = previewResponse.request().postDataJSON();
 				for (const [defect, [sourceId, observations]] of Object.entries(faults)) {
-					const eligible = preview.executable.filter((item) => sourceIdsByCase.get(item.source_test_case_id)?.has(sourceId));
+					const eligible = preview.executable.filter(
+						(item) =>
+							sourceIdsByCase.get(item.source_test_case_id)?.has(sourceId) && (defect !== "deny-slot-release" || triesRebooking(item))
+					);
 					const passing = eligible.filter((item) => healthy.results.some((result) => result.id === item.id && result.status === "passed"));
 					const record = { defect, sourceId, eligible: eligible.map((item) => item.id), tested: passing.map((item) => item.id) };
 					matrix.faults.push(record);

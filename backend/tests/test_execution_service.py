@@ -761,6 +761,42 @@ class ExecutionServiceTests(unittest.TestCase):
         value_steps[-1].pop("expected")
         self.assertTrue(validate_ir_document(ir.raw))
 
+    def test_scoped_text_checks_compile_to_exact_single_locator_assertions(self) -> None:
+        case = _browser_case()
+        case.steps = [
+            TestStep(step=1, action='Open "https://example.test/login"', expected='css "#login-message" text should equal "Ready"'),
+            TestStep(step=2, action=r'Verify test id "summary" text should equal "Keep \"quotes\""', expected=""),
+            TestStep(step=3, action="Inspect the diagnostic", expected='test id "diagnostic" text should equal ""'),
+        ]
+        response = preview_execution([case], target_base_url="https://example.test")
+        self.assertEqual(response.summary.executable, 1)
+        ir = compile_parsed_spec(
+            parse_spec_document(response.executable[0].spec),
+            environment=ResolvedEnvironment("web", {"baseUrl": "https://example.test"}, "https://example.test", None),
+        )
+        assertions = ir.raw["cases"][0]["steps"][1:]
+        self.assertEqual([step["action"] for step in assertions], ["assert_text_equals"] * 3)
+        self.assertEqual(assertions[0]["locator"], {"strategy": "css", "value": "#login-message"})
+        self.assertEqual(assertions[1]["locator"], {"strategy": "test_id", "value": "summary"})
+        self.assertEqual([step["expected"] for step in assertions], ["Ready", 'Keep "quotes"', ""])
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('await expect(page.locator("#login-message")).toHaveText("Ready");', generated)
+        self.assertIn(r'await expect(page.getByTestId("summary")).toHaveText("Keep \"quotes\"");', generated)
+        self.assertIn('await expect(page.getByTestId("diagnostic")).toHaveText("");', generated)
+
+    def test_malformed_scoped_text_check_does_not_drop_the_expected_result(self) -> None:
+        for statement in (
+            'css "#result" text should contain "Click save"',
+            'css "#result" text should equal "Click save" and capture the time',
+            'css " " text should equal "Ready"',
+        ):
+            with self.subTest(statement=statement):
+                case = _browser_case()
+                case.steps[2] = TestStep(step=3, action=statement, expected="")
+                response = preview_execution([case], target_base_url="https://example.test")
+                self.assertEqual(response.summary.unsupported, 1)
+                self.assertEqual(response.unsupported[0].unsupported_steps[0].step, 3)
+
     def test_unrepresentable_field_value_assertion_blocks_entire_candidate(self) -> None:
         case = TestCase(
             id="TC-FIELD-VALUE-UNSUPPORTED",

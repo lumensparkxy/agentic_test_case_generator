@@ -714,9 +714,12 @@ saved suite. It verifies the loopback response-loss proxy before saving its
 fixture reference against the sourced retry requirement. The retry remains
 Manual. The matrix records design and setup status, admission, and browser
 eligibility separately. Each seeded fault is tried only with healthy-passing
-cases linked to its source requirement. Detection requires a matching failed
-browser assertion. The authored booking matrix separately exercises native
-double-click and response-loss controls.
+cases linked to its source requirement. The slot-release probe also requires
+a rebooking action after cancellation. Detection requires a matching failed
+browser assertion. Use a grounded CSS selector or test ID to scope exact text
+checks where the same status can appear in multiple elements. The authored
+booking matrix separately exercises native double-click and response-loss
+controls.
 
 `test_workflow_project_service.py` covers multi-part execution snapshots,
 ordered readback, atomic rollback, retry, incomplete and corrupted parts, and

@@ -31,6 +31,10 @@ ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact )?(?P<role>heading|link|but
 LOCATOR_VISIBLE_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be visible$')
 VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact text )?"(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
+SCOPED_TEXT_ASSERTION_PATTERN = re.compile(
+    r'(?P<kind>css|test id)\s+"(?P<locator>(?:\\["\\]|[^"\\\r\n])+)"\s+text\s+should\s+equal\s+"(?P<expected>(?:\\["\\]|[^"\\\r\n])*)"',
+    re.IGNORECASE,
+)
 VALUE_ASSERTION_PATTERN = re.compile(
     r'(?P<kind>field|css|test id)\s+"(?P<locator>(?:\\["\\]|[^"\\])+)"\s+value\s+should\s+(?P<operator>equal|contain)\s+"(?P<expected>(?:\\["\\]|[^"\\])*)"',
     re.IGNORECASE,
@@ -459,6 +463,19 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "original": original,
             "action": action,
             "locator": {"strategy": "label", "value": target, "exact": True} if kind == "field" else _locator_for_kind(kind, target),
+            "expected": expected,
+        }
+
+    if match := SCOPED_TEXT_ASSERTION_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        target = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["locator"]), environment, data, path=path)
+        expected = _resolve_value(re.sub(r'\\(["\\])', r"\1", match["expected"]), environment, data, path=path)
+        return {
+            "id": _slug_identifier(f"assert text {target}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_text_equals",
+            "locator": _locator_for_kind(match["kind"], target),
             "expected": expected,
         }
 

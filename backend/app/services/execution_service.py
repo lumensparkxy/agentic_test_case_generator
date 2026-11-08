@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import yaml
 
-from plain_english_test_framework.compiler import VALUE_ASSERTION_PATTERN, CompilerError, compile_spec_file
+from plain_english_test_framework.compiler import SCOPED_TEXT_ASSERTION_PATTERN, VALUE_ASSERTION_PATTERN, CompilerError, compile_spec_file
 from plain_english_test_framework.ir_validator import IrValidationError
 from plain_english_test_framework.local_runner import (
     LocalPlaywrightRunnerError,
@@ -63,6 +63,7 @@ TEXT_EQUALS_PATTERN = re.compile(
 )
 ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s+that)?\s+)?(?:the\s+)?", re.IGNORECASE)
 QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'(?:\\['\\]|[^'\\])*')"""
+SCOPED_TEXT_ASSERTION_INTENT = re.compile(rf"^(?:css|test\s+id)\s+{QUOTED_ASSERTION_TARGET}\s+text\b", re.IGNORECASE)
 EXACT_CLICK_ACTION = re.compile(rf"^Click exact (?P<role>button|link)\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?$", re.IGNORECASE)
 EXACT_CLICK_INTENT = re.compile(r"^Click\s+exact\b", re.IGNORECASE)
 EXACT_SELECT_ACTION = re.compile(
@@ -159,6 +160,7 @@ ASSERTION_KINDS = {
     "assert_visible",
     "assert_hidden",
     "assert_text_equals",
+    "assert_scoped_text_equals",
     "assert_value_equals",
     "assert_value_contains",
     "assert_url",
@@ -564,7 +566,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     exact_select = EXACT_SELECT_ACTION.fullmatch(step.action.strip())
     exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(step.action.strip())
     # A supported assertion's quoted locator and value are data, not operations.
-    literal_assertions = {"assert_hidden", "assert_checked"}
+    literal_assertions = {"assert_hidden", "assert_checked", "assert_scoped_text_equals"}
     action_is_literal = action_value or exact_click or exact_select or exact_checkbox or (action_assertion and action_assertion.kind in literal_assertions)
     expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
     domain_text = " ".join(("" if action_is_literal else step.action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
@@ -601,6 +603,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     elif (
         ASSERTION_ACTION_PATTERN.match(action)
         or EXACT_CHECKBOX_ASSERTION_INTENT.match(_assertion_statement(step.action))
+        or SCOPED_TEXT_ASSERTION_INTENT.match(_assertion_statement(step.action))
         or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action)
         or ACTION_SEQUENCE_PATTERN.search(unquoted_action)
     ):
@@ -689,6 +692,11 @@ def _assertion_statement(text: str) -> str:
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
     text = _assertion_statement(text)
+    if match := SCOPED_TEXT_ASSERTION_PATTERN.fullmatch(text):
+        if match["locator"].strip():
+            return _ConvertedStep("assert_scoped_text_equals", text)
+        return None
+
     if match := EXACT_CHECKBOX_ASSERTION.fullmatch(text):
         target = _assertion_literal(match["name"])
         if not target.strip():
