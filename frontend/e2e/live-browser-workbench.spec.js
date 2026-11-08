@@ -41,10 +41,38 @@ async function repairDirectorySource(page, fixture, suite, { target, faultMarker
 		buffer: Buffer.from(source.buffer.toString("utf8").replace(originalEmptyCopy, revisedCopy)),
 	});
 	await fixture.save("changed-source-preview", preview);
-	expect(preview.candidates.filter((item) => item.classification === "updated")).toMatchObject([
-		{ target_requirement_uid: previous.requirement_uid, requirement: { text: expect.stringContaining(revisedCopy) } },
-	]);
-	const imported = await applyImport(page, fixture, preview);
+	const findIncoming = (sourceId) => {
+		const candidates = preview.candidates.filter((item) =>
+			item.requirement.sources?.some((entry) => entry.excerpt_verified && entry.original_requirement_ids?.includes(sourceId))
+		);
+		expect(candidates, `Verified incoming source ${sourceId}`).toHaveLength(1);
+		return candidates[0];
+	};
+	const changedCandidate = findIncoming("DIR-200");
+	const unchangedCandidate = findIncoming("DIR-100");
+	expect(preview.candidates).toHaveLength(2);
+	expect(changedCandidate.requirement.text).toContain(revisedCopy);
+	const pick = async (candidate, value) => {
+		await page.getByRole("button", { name: `Review incoming requirement: ${candidate.requirement.text}`, exact: true }).click();
+		await page.getByLabel(`Decision for ${candidate.candidate_id}`, { exact: true }).selectOption(value);
+	};
+	await pick(unchangedCandidate, "skip");
+	await pick(changedCandidate, previous.requirement_uid);
+	await expect(page.getByText("0 added · 1 updated · 0 retired · 2 active requirements", { exact: true })).toBeVisible();
+	const importResponse = await uiResponse(page, `/requirement-imports/${preview.import_id}/apply`, () =>
+		page.getByRole("button", { name: "Apply reviewed changes", exact: true }).click()
+	);
+	expect(importResponse.request().postDataJSON().decisions).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				candidate_id: changedCandidate.candidate_id,
+				action: "update",
+				target_requirement_uid: previous.requirement_uid,
+			}),
+			expect.objectContaining({ candidate_id: unchangedCandidate.candidate_id, action: "skip" }),
+		])
+	);
+	const imported = await importResponse.json();
 	const revised = directoryRequirement(imported, "DIR-200");
 	expect(revised).toMatchObject({
 		id: previous.id,
