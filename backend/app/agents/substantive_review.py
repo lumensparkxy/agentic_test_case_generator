@@ -16,13 +16,23 @@ from .adk_runtime import json_generation_config
 from .evaluation_limits import current_evaluation_limits
 from .quality_goal import QUALITY_GOAL
 from .prompting import TEST_CASE_BEHAVIOR_POLICY
+from ..contracts.test_cases import TestCase
+from ..services.browser_handoff import declared_rejection_readbacks, missing_rejection_readbacks
 from ..services.test_case_quality import project_test_case_view
 from ..services.guidance_service import current_guidance, public_manifest
 
-RUBRIC = "delivered_business_coverage_v5"
+RUBRIC = "delivered_business_coverage_v6"
 MAX_INPUT_BYTES = 512_000
 ASSESSMENT_BUDGET_SECONDS = 180
 ASSESSMENT_ATTEMPT_SECONDS = 120
+_RECORD_CREATION = r"(?:booking|reservation|record|order|submission|transaction|entry)"
+_NO_NEW_RECORD = re.compile(
+    rf"\b(?:creat(?:e[sd]?|ing)|sav(?:e[sd]?|ing)) no (?:(?:new|additional) )?{_RECORD_CREATION}\b"
+    rf"|\bno (?:(?:new|additional) )?{_RECORD_CREATION} (?:is|was|shall be|must be|should be) (?:created|saved)\b"
+    rf"|\bprevent(?:s|ing)? (?:the )?(?:creation|saving) of (?:a|an) (?:new|additional) {_RECORD_CREATION}\b"
+    rf"|\b(?:not (?:create|save)|without (?:creating|saving)) (?:a|an|any) (?:(?:new|additional) )?{_RECORD_CREATION}\b",
+    re.IGNORECASE,
+)
 
 
 class StrictRow(BaseModel):
@@ -137,7 +147,7 @@ DATA:
 
 def known_regression_findings(data):
     """Conservative guards for measured false positives; not a general semantic oracle."""
-    obligations, prerequisites = [], []
+    obligations, prerequisites = rejected_write_findings(data), []
     cases = data["test_cases"]
     for requirement in data["requirements"]:
         source = requirement["text"]
@@ -230,6 +240,39 @@ def known_regression_findings(data):
                 }
             )
     return obligations, prerequisites
+
+
+def rejected_write_findings(data):
+    context = data["context"] or {}
+    app_link = context.get("app_link")
+    rules = declared_rejection_readbacks(context.get("notes") or "", app_link)
+    if not rules:
+        return []
+    sources = {
+        requirement["id"]: source
+        for requirement in data["requirements"]
+        if (source := next((requirement[key] for key in ("text", "source_excerpt") if _NO_NEW_RECORD.search(requirement.get(key) or "")), None))
+    }
+    findings = []
+    for case in data["test_cases"]:
+        relevant = [requirement_id for requirement_id in case.get("linked_requirement_ids", []) if requirement_id in sources]
+        if not relevant:
+            continue
+        for rule in missing_rejection_readbacks(TestCase.model_validate(case), app_link, rules):
+            for requirement_id in relevant:
+                findings.append(
+                    {
+                        "requirement_id": requirement_id,
+                        "source_quote": sources[requirement_id],
+                        "obligation": "Verify saved state after a rejected write",
+                        "status": "unmet",
+                        "reason": f'After the rejection "{rule.message}", reopen the same page. Before clicking "{rule.button}" and again after reopening, '
+                        f'check exact {rule.ready_kind} "{rule.ready_name}" is visible and then assert the same count of {rule.kind} "{rule.selector}".',
+                        "evidence": [{"test_case_id": case["id"], **{key: step[key] for key in ("step", "action", "expected")}} for step in case["steps"]],
+                        "assessment_method": "deterministic_regression_guard",
+                    }
+                )
+    return findings
 
 
 def apply_known_regressions(result, data):

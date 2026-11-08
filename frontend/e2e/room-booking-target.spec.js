@@ -274,6 +274,7 @@ const controls = {
 
 const faults = [
 	["allow-nine", "invalid-nine", "retain only original booking after 9", [existing, "B-001"]],
+	["reject-but-save", "invalid-nine", "retain only original booking after 9", [existing, "B-001"]],
 	["allow-room-conflict", "occupied-slot", "create no booking for Bob", 1],
 	["share-room-availability", "independent-room", "keep both rooms confirmed", [["Atlas", "Confirmed"]]],
 	["deny-slot-release", "cancel-release", "preserve cancelled original beside new confirmation", [[existing, "Cancelled"]]],
@@ -311,6 +312,10 @@ test("Room Booking controls distinguish healthy behavior from seeded faults", as
 		await test.step(`Detect ${defect} using ${control}`, async () => {
 			const { origin, evidence } = control === "response-loss" ? targets.loss[defect] : { origin: targets.defects[defect] };
 			const checks = await measure(control, origin, evidence);
+			if (defect === "reject-but-save") {
+				expect(checks.find((check) => check.name === "reject 9")?.matched).toBe(true);
+				expect(checks.find((check) => check.name === "show inline error for 9")?.matched).toBe(true);
+			}
 			const targeted = checks.find((check) => check.name === assertion);
 			report.defects.push({
 				defect,

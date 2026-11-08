@@ -31,6 +31,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
 - When the same text can appear in multiple elements, scope its check to a declared unique locator. Use expected 'css "#observed-status" text should equal "source copy"' or 'test id "observed-status" text should equal "source copy"'. Use a separate visibility check when visibility itself is required. Never choose the first match or invent a locator.
 - For a source requirement that says a saved record displays submitted values, check each value on that same record after submission. A form value or confirmation alone leaves this outcome untested. A 'Browser result css "#saved-value" on "https://app.example/" shows field "Name" after button "Save"' declaration supplies an observed result locator. Use a scoped text check with the exact prior selected label or entered literal. For a text entry, include its exact field-value check before submission.
+- A 'Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible' declaration supplies an observed collection and its loaded indicator. Check the indicator, then assert the grounded starting count with expected 'css "#records tr" count should be 1' before the named submit action. Assert the exact error, then reopen the same URL with 'Open "https://app.example/"'. Check the indicator and the same count in that fresh page. Use the actual supplied selector and actor's starting count.
 - For a named role or exact text that should be out of view, write 'exact link "observed link" is not visible' or 'exact text "source copy" is not visible'. Use a separate step at the state where visibility matters. This check allows hidden and absent matches. Keep DOM presence, timing, and authorization requirements separate.
 - The wording above illustrates syntax. Use the actual supplied names, routes and copy. Do not add generic page-load checks or combine a result with phrases such as "and the results update". Preserve any separate source-defined transition as its own observable check.
 - Every business expectation must appear in a source step. Use expected_result to summarize those step outcomes. Keep required backend, audit, timing or unsupported checks in the case and mark it Manual. Missing interface evidence or prerequisites also means Manual.
@@ -43,6 +44,11 @@ _NOTED_CONTROL = re.compile(r'\b(field|heading|button|link)\s+"([^"\n]+)"|"([^"\
 _NOTED_PAGE = re.compile(r'Browser page "([^"\n]+)"', re.IGNORECASE)
 _NOTED_DROPDOWN = re.compile(r'Browser dropdown "([^"\n]+)" on "([^"\n]+)" options (.+)', re.IGNORECASE)
 _NOTED_RESULT = re.compile(r'Browser result (css|test id) "([^"\n]+)" on "([^"\n]+)" shows field "([^"\n]+)" after button "([^"\n]+)"', re.IGNORECASE)
+_NOTED_REJECTION = re.compile(
+    r'Browser rejection "([^"\n]+)" on "([^"\n]+)" after button "([^"\n]+)" preserves (css|test id) "([^"\n]+)" '
+    r'when exact (heading|text) "([^"\n]+)" is visible',
+    re.IGNORECASE,
+)
 _DROPDOWN_DOM_VALUE = re.compile(r'\bfield\s+"([^"\n]+)"\s+DOM value\s+(?:is\s+)?"([^"\n]*)"', re.IGNORECASE)
 _ROLE_TYPES = {"heading": "Heading", "button": "Button", "link": "Navigation"}
 _CONTROL_TYPES = {"field": "Field", **_ROLE_TYPES}
@@ -60,6 +66,17 @@ class _BrowserEvidence:
     select_dom_values: dict[str, set[str]]
     checkboxes: dict[tuple[str, str], bool]
     result_fields: dict[tuple[str, str, str], tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class RejectionReadback:
+    message: str
+    page: str
+    button: str
+    kind: str
+    selector: str
+    ready_kind: str
+    ready_name: str
 
 
 def _http_url(value: str) -> str | None:
@@ -82,6 +99,80 @@ def declared_browser_pages(notes: str, app_link: str | None) -> set[str]:
             if page and urlsplit(page)[:2] == origin:
                 pages.add(page)
     return pages
+
+
+def declared_rejection_readbacks(notes: str, app_link: str | None) -> list[RejectionReadback]:
+    target = _http_url(app_link) if app_link else None
+    if not target:
+        return []
+    pages = {target, *declared_browser_pages(notes, target)}
+    declarations = []
+    for line in notes.splitlines():
+        if match := _NOTED_REJECTION.fullmatch(line.strip()):
+            message, raw_page, button, kind, selector, ready_kind, ready_name = match.groups()
+            page = _http_url(raw_page)
+            if page in pages and all(value.strip() for value in (message, button, selector, ready_name)):
+                declarations.append(RejectionReadback(message, page, button, kind.lower(), selector, ready_kind.lower(), ready_name))
+    return list(dict.fromkeys(declarations))
+
+
+def _compiled_steps(candidate: ExecutionCandidate, target: str) -> list[dict[str, Any]]:
+    return compile_parsed_spec(parse_spec_document(candidate.spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None)).raw["cases"][0][
+        "steps"
+    ]
+
+
+def _rejection_has_missing_readback(steps: list[dict[str, Any]], rule: RejectionReadback) -> bool:
+    locator = {"strategy": "css" if rule.kind == "css" else "test_id", "value": rule.selector}
+    ready = {"strategy": "text", "value": rule.ready_name, "exact": True}
+    if rule.ready_kind == "heading":
+        ready.update(strategy="role", role="heading")
+
+    def ready_count(page_steps):
+        ready_at = next((index for index, step in enumerate(page_steps) if step["action"] == "assert_visible" and step.get("locator") == ready), None)
+        if ready_at is None:
+            return None
+        return next((step["expected"] for step in page_steps[ready_at + 1 :] if step["action"] == "assert_count" and step.get("locator") == locator), None)
+
+    boundary_actions = {"navigate", "click"}
+    boundaries = [index for index, step in enumerate(steps) if step["action"] in boundary_actions]
+    for index, step in enumerate(steps):
+        error_locator = step.get("locator", {})
+        error = step["action"] == "assert_visible" and error_locator.get("strategy") == "text" and error_locator.get("value") == rule.message
+        error = error or (step["action"] == "assert_text_equals" and step.get("expected") == rule.message)
+        if not error:
+            continue
+        submit_index = next((at for at in reversed(boundaries) if at < index), None)
+        submit_locator = steps[submit_index].get("locator", {}) if submit_index is not None else {}
+        if submit_locator.get("role") != "button" or submit_locator.get("value") != rule.button:
+            continue
+        opened = next((at for at in range(submit_index - 1, -1, -1) if steps[at]["action"] == "navigate"), None)
+        if opened is None or _http_url(steps[opened]["url"]) != rule.page:
+            continue
+        before_start = next(at for at in reversed(boundaries) if at < submit_index)
+        before = ready_count(steps[before_start + 1 : submit_index])
+        later = [at for at in boundaries if at > index]
+        if before is None or not later or steps[later[0]]["action"] != "navigate" or _http_url(steps[later[0]]["url"]) != rule.page:
+            return True
+        end = later[1] if len(later) > 1 else len(steps)
+        after = ready_count(steps[later[0] + 1 : end])
+        if after != before:
+            return True
+    return False
+
+
+def missing_rejection_readbacks(case: TestCase, app_link: str, rules: list[RejectionReadback]) -> list[RejectionReadback]:
+    relevant = [rule for rule in rules if any(rule.message in step.expected for step in case.steps)]
+    if not relevant or case.automation_status == "Manual":
+        return []
+    preview = preview_execution([case], target_base_url=app_link)
+    if not preview.executable:
+        return []
+    try:
+        steps = _compiled_steps(preview.executable[0], app_link)
+    except CompilerError, IrValidationError, SpecValidationError:
+        return []
+    return [rule for rule in relevant if _rejection_has_missing_readback(steps, rule)]
 
 
 def _exact_option_labels(raw: str) -> set[str]:
@@ -208,14 +299,10 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
     if not opening or _http_url(opening[1]) not in evidence.urls:
         return "Start with an explicit navigation to a supplied application URL."
     try:
-        ir = compile_parsed_spec(
-            parse_spec_document(candidate.spec),
-            environment=ResolvedEnvironment("web", {"baseUrl": evidence.target}, evidence.target, None),
-        )
+        steps = _compiled_steps(candidate, evidence.target)
     except CompilerError, IrValidationError, SpecValidationError:
         return "The preview could not be compiled into a valid browser specification."
 
-    steps = ir.raw["cases"][0]["steps"]
     source_navigations = [_http_url(match[1]) for step in case.steps if (match := EXPLICIT_OPEN_ACTION.fullmatch(step.action.strip()))]
     compiled_navigations = [_http_url(step["url"]) for step in steps if step["action"] == "navigate"]
     if source_navigations != compiled_navigations:

@@ -56,7 +56,90 @@ def fixture(*, retry=True):
     return req, case, data, digest, output
 
 
+def rejected_booking_fixture():
+    target = "https://booking.example/"
+    error = "Enter a whole number from 1 to 8"
+    context = {
+        "app_link": target,
+        "notes": f'Browser rejection "{error}" on "{target}" after button "Book" preserves css "#bookings tr" when exact heading "My bookings" is visible',
+    }
+    requirement = Requirement(id="BOOK-1", text="Show an inline error and create no booking when the attendee count is above the maximum.")
+    case = TestCase(
+        id="TC-REJECT",
+        title="Reject an oversized booking",
+        automation_status="To Be Automated",
+        linked_requirement_ids=[requirement.id],
+        expected_result="The inline error is displayed and no booking is created.",
+        steps=[
+            {"step": 1, "action": f'Open "{target}"', "expected": ""},
+            {"step": 2, "action": 'Click exact button "Sign in as Alice"', "expected": 'exact heading "My bookings" is visible'},
+            {"step": 3, "action": "Inspect the bookings", "expected": 'css "#bookings tr" count should be 1'},
+            {"step": 4, "action": 'Enter "9" into the "Attendees" field', "expected": 'field "Attendees" value should equal "9"'},
+            {"step": 5, "action": 'Click exact button "Book"', "expected": f'exact text "{error}" is visible'},
+            {"step": 6, "action": f'Open "{target}"', "expected": 'exact heading "My bookings" is visible'},
+            {"step": 7, "action": "Inspect the bookings", "expected": 'css "#bookings tr" count should be 1'},
+        ],
+    )
+    return requirement, case, context
+
+
 class SubstantiveReviewTests(unittest.TestCase):
+    def test_rejected_write_requires_fresh_saved_state_even_when_the_critic_approves(self):
+        requirement, case, context = rejected_booking_fixture()
+        case.steps = case.steps[:5]
+        data, digest, _ = review_input([case], [requirement], context)
+        output = {
+            "input_hash": digest,
+            "obligations": [
+                {
+                    "requirement_id": requirement.id,
+                    "source_field": "text",
+                    "obligation": "Reject an oversized booking",
+                    "status": "covered",
+                    "reason": "The error is displayed.",
+                    "evidence": [{"test_case_id": case.id, "step": 5}],
+                }
+            ],
+            "case_grounding": [{"test_case_id": case.id, "reason": "The supplied app has the booking form.", "prerequisites": []}],
+        }
+        result = validate_assessment(json.dumps(output), data, digest)
+        self.assertEqual(result["model_status"], "assessed_complete")
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["obligations"][-1]["assessment_method"], "deterministic_regression_guard")
+        self.assertIn('css "#bookings tr"', result["obligations"][-1]["reason"])
+        self.assertEqual(assessment_tasks(result, [case])[0]["source_test_case_id"], case.id)
+
+    def test_rejected_write_readback_checks_the_same_loaded_collection_before_and_after(self):
+        from app.agents.substantive_review import known_regression_findings
+
+        requirement, case, context = rejected_booking_fixture()
+
+        def findings(current, current_context=context):
+            data, _, _ = review_input([current], [requirement], current_context)
+            return known_regression_findings(data)[0]
+
+        self.assertEqual(findings(case), [])
+        for step_index, changes in (
+            (2, {"expected": 'css "#other tr" count should be 1'}),
+            (5, {"action": "Inspect the collection"}),
+            (5, {"action": 'Open "https://booking.example/other"'}),
+            (5, {"expected": ""}),
+            (6, {"expected": 'css "#bookings tr" count should be 2'}),
+            (6, {"expected": 'css "#other tr" count should be 1'}),
+        ):
+            with self.subTest(step=step_index, changes=changes):
+                defective = case.model_copy(deep=True)
+                defective.steps[step_index] = defective.steps[step_index].model_copy(update=changes)
+                self.assertEqual(len(findings(defective)), 1)
+        stale = case.model_copy(update={"steps": [*case.steps[:5], case.steps[-1]]})
+        separate = case.model_copy(update={"id": "TC-LIST", "steps": case.steps[-2:]})
+        data, _, _ = review_input([stale, separate], [requirement], context)
+        self.assertEqual(len(known_regression_findings(data)[0]), 1)
+        self.assertEqual(findings(stale.model_copy(update={"automation_status": "Manual"})), [])
+        self.assertEqual(findings(stale, {**context, "notes": "No declared rejection."}), [])
+        requirement.text = "Show an inline error when the attendee count is above the maximum."
+        self.assertEqual(findings(stale), [])
+
     def test_compact_source_references_resolve_hash_bound_text_and_excerpt(self):
         req, case, _, _, output = fixture(retry=False)
         req.source_excerpt = "Original source excerpt: retain the same identity."

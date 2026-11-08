@@ -746,6 +746,12 @@ check of the corresponding cell after submission. The authored
 booking matrix separately exercises native double-click and response-loss
 controls.
 
+The `reject-but-save` fault returns the correct attendee error while persisting
+an extra booking. The authored control verifies that both the HTTP status and
+message agree with healthy behavior, then detects the extra row after reopening.
+The generated benchmark requires detection at the saved booking count assertion.
+The declared collection's loaded heading makes an empty count meaningful.
+
 Use `--fixture room-booking-change` to compare and apply the attendee limit
 change from 8 to 6 in the same disposable workbench. The revised source also
 states the new maximum in the successful-booking clause. The benchmark uses

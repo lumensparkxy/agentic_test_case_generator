@@ -144,6 +144,17 @@ Current requirements outrank conflicting context/memory; curated methods are not
 product facts. Valid boundaries and each stated invalid example must be assessed
 separately. A trigger and its durable result must belong to the same coherent case.
 
+When the source says a rejection must create no record, assert the error and the
+fresh saved state in the triggering case. A browser Context declaration can bind
+the exact error, submit control, collection and loaded indicator on a supplied
+page. Review checks the compiled steps for the same count after the collection
+loads before submission and after reopening. A missing check stays in review
+with a repair finding for the affected case.
+
+```text
+Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible
+```
+
 The final review has one request, no HTTP retries, a 60-second HTTP timeout,
 160,000-byte input limit and 24,000-token output limit. Missing credentials,
 empty output, oversized inputs, malformed evidence or provider failure preserve

@@ -124,7 +124,7 @@ async function importCapacityChange(page, fixture, suite) {
 async function repairBookingCases(page, fixture, { suite, affected, target, notes, prerequisite, revisionMarker }) {
 	await approveRequirements(page, fixture);
 	await fs.writeFile(revisionMarker, "6\n");
-	const revisedNotes = notes.replace(originalError, revisedError);
+	const revisedNotes = notes.replaceAll(originalError, revisedError);
 	expect(revisedNotes).not.toBe(notes);
 	await page.goto(`${fixture.prefix}/context`);
 	await page.getByRole("textbox", { name: "Context notes", exact: true }).fill(revisedNotes);

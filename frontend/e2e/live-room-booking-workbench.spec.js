@@ -14,6 +14,7 @@ import {
 
 const faults = {
 	"allow-nine": ["ROOM-101", ["Enter a whole number from 1 to 8"]],
+	"reject-but-save": ["ROOM-101", ["saved booking count"]],
 	"allow-room-conflict": ["ROOM-205", ["Room is already booked"]],
 	"share-room-availability": ["ROOM-205", ["Booking confirmed", "B-001"]],
 	"deny-slot-release": ["ROOM-310", ["Booking confirmed", "B-001"]],
@@ -43,6 +44,9 @@ function assertionFailures(item) {
 
 function matchedAssertions(item, observations, savedColumn) {
 	const messages = assertionFailures(item);
+	if (observations.includes("saved booking count")) {
+		return messages.some((message) => /toHaveCount\(/.test(message) && /^Locator: .*#bookings tr/m.test(message)) ? observations : [];
+	}
 	if (savedColumn) {
 		const locator = new RegExp(`^Locator: .*#bookings tr:has\\(.* td:nth-child\\(${savedColumn}\\)`, "m");
 		const mismatch = (message) =>
@@ -66,6 +70,14 @@ function checksSavedField(candidate, column) {
 		steps
 			.slice(submission + 1)
 			.some((step) => step.includes("#bookings tr:has(") && step.includes(` td:nth-child(${column})" text should equal `))
+	);
+}
+
+function checksRejectedBooking(candidate) {
+	const steps = candidate.spec?.steps || [];
+	return (
+		steps.some((step) => step.endsWith('I enter "9" into field "Attendees"')) &&
+		steps.some((step) => step.includes('css "#bookings tr" count should be '))
 	);
 }
 
@@ -225,6 +237,7 @@ test.describe("Generated Room Booking execution", () => {
 						(item) =>
 							sourceIdsByCase.get(item.source_test_case_id)?.has(sourceId) &&
 							(defect !== "deny-slot-release" || triesRebooking(item)) &&
+							(defect !== "reject-but-save" || checksRejectedBooking(item)) &&
 							(!savedColumn || checksSavedField(item, savedColumn))
 					);
 					const passing = eligible.filter((item) => healthy.results.some((result) => result.id === item.id && result.status === "passed"));
@@ -263,6 +276,10 @@ test.describe("Generated Room Booking execution", () => {
 				expect(persisted.map((item) => item.run_id)).toEqual(runIds.reverse());
 				expect(persisted.every((item) => item.source_snapshot_id === suite.snapshot_id)).toBe(true);
 				expect(healthy.summary.passed, "At least one generated browser case must pass on the healthy fixture").toBeGreaterThan(0);
+				expect(
+					matrix.faults.find((row) => row.defect === "reject-but-save")?.status,
+					"The generated rejection must check the saved booking count"
+				).toBe("detected");
 				expect(
 					matrix.faults.some((row) => row.status === "detected"),
 					"No generated case detected a matched seeded fault"

@@ -19,6 +19,7 @@ ACTORS = ("Alice", "Bob")
 SUBMIT_PATH = "/api/bookings"
 DEFECTS = (
     "allow-nine",
+    "reject-but-save",
     "allow-room-conflict",
     "share-room-availability",
     "deny-slot-release",
@@ -41,6 +42,8 @@ class BookingWorkspace:
         upper = 9 if defect == "allow-nine" else attendee_limit
         digits = count.lstrip("0") if isinstance(count, str) else ""
         if digits not in {str(n) for n in range(1, upper + 1)}:
+            if defect == "reject-but-save" and digits == str(attendee_limit + 1):
+                self.create({**body, "attendees": str(attendee_limit)}, None, attendee_limit)
             return 422, {"error": f"Enter a whole number from 1 to {attendee_limit}", "field": "attendees"}
         if room not in ROOMS or slot not in SLOTS or not isinstance(submission, str) or not 1 <= len(submission) <= 80:
             return 422, {"error": "Choose a room and time slot"}
