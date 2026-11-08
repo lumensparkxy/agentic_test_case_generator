@@ -855,6 +855,7 @@ export interface QaProjectUpdateInput {
 
 export interface QaProjectUseCaseGenerationInput {
 	base_project_revision: number;
+	refresh_requirement_ids?: Array<string> | null;
 }
 
 export interface QaProjectUseCaseSnapshotInput {

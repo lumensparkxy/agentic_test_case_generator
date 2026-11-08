@@ -758,6 +758,8 @@ states the new maximum in the successful-booking clause. If the baseline has
 case-linked substantive findings, the benchmark allows one targeted repair
 and reviews the result before importing the revision. It uses
 verified source quotations to select the updates, checks stale export, and
+uses **Review refresh scope** to regenerate only affected Use Case groups. It
+checks that retained groups preserve their exact scenario identities, then
 reviews the targeted repair. It requires a saved booking at 6 on the revised
 app and a rejection at 7 that fails at the intended assertion on the old app.
 The authored Booking controls validate both versions separately from generated

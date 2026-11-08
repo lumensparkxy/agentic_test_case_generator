@@ -103,6 +103,59 @@ class UseCaseAgentTests(unittest.TestCase):
         self.merged_reviewer = reviewer_patch.start()
         self.addCleanup(reviewer_patch.stop)
 
+    def test_scoped_planning_skips_retained_groups_and_reassesses_the_exact_combined_plan(self):
+        payload = _payload(2)
+        payload.requirements[0].text = "The directory shows Alex Rivera after an exact-name search."
+        payload.requirements[1].text = "A non-owner receives a permission error when cancelling a booking."
+
+        def worker(shard, **kwargs):
+            output = _worker_output(shard)
+            for group in output["coverage_plan"]:
+                group["scenarios"] = [{**group["scenarios"][0], "objective": group["requirement_text"]}]
+            return output
+
+        old_rows = worker(use_case_agent._UseCaseShard(index=1, requirements=payload.requirements))
+        for count in (0, 1, 2):
+            retained = {}
+            for index, requirement in enumerate(payload.requirements[:count]):
+                analysis = old_rows["requirement_analysis"][index]
+                prior_plan = old_rows["coverage_plan"][index]
+                scenario = {**prior_plan["scenarios"][0], "id": f"legacy-{requirement.id}"}
+                retained[requirement.id] = use_case_agent.RetainedUseCaseGroup(analysis, {**prior_plan, "scenarios": [scenario]})
+
+            def reviewer(**kwargs):
+                return [
+                    {
+                        "requirement_id": row["requirement_id"],
+                        "scenario_id": row["scenario"]["id"],
+                        "content_hash": row["content_hash"],
+                        **{criterion: {"passed": True, "reason": "Verified fixture."} for criterion in CRITERIA},
+                    }
+                    for row in assessment_input(kwargs["coverage_plan"], kwargs["requirements"], kwargs["context_text"])
+                ], None
+
+            self.merged_reviewer.reset_mock()
+            self.merged_reviewer.side_effect = reviewer
+            with (
+                self.subTest(retained_count=count),
+                patch.object(use_case_agent, "_get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+                patch.object(use_case_agent, "_run_single_use_case_shard_workflow_sync", side_effect=worker) as planner,
+            ):
+                result = use_case_agent.generate_use_cases(payload, retained_groups=retained)
+                if count < 2:
+                    planner.assert_called_once()
+                    self.assertEqual(planner.call_args.kwargs["shard"].requirements, payload.requirements[count:])
+                    self.assertFalse(planner.call_args.kwargs["review_in_shard"])
+                else:
+                    planner.assert_not_called()
+                self.merged_reviewer.assert_called_once()
+                self.assertEqual(self.merged_reviewer.call_args.kwargs["coverage_plan"], result["coverage_plan"])
+                self.assertEqual(self.merged_reviewer.call_args.kwargs["requirements"], payload.requirements)
+                self.assertEqual(result["coverage_plan"][:count], [group.plan for group in retained.values()])
+                self.assertEqual(result["requirement_analysis"][:count], [group.analysis for group in retained.values()])
+                self.assertEqual(result["coverage_metrics"]["requirements_total"], 2)
+                self.assertEqual(result["review"]["semantic_assessment"]["status"], "passed")
+
     def test_cross_shard_mapping_findings_review_the_complete_plan_once(self):
         payload = _payload(4)
         payload.requirements[0].text = "Booking with a valid attendee count creates a Confirmed booking displaying the room and count."

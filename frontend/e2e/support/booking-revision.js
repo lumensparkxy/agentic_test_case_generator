@@ -129,20 +129,41 @@ async function repairBookingCases(page, fixture, { suite, affected, target, note
 	await page.goto(`${fixture.prefix}/context`);
 	await page.getByRole("textbox", { name: "Context notes", exact: true }).fill(revisedNotes);
 	await uiResponse(page, "/requirements/enrich", () => page.getByRole("button", { name: "Analyze Context", exact: true }).click());
-	expect((await fixture.read()).current_snapshots.context.payload).toMatchObject({
+	const source = await fixture.read();
+	expect(source.current_snapshots.context.payload).toMatchObject({
 		app_link: target,
 		notes: revisedNotes,
 		execution_prerequisites: [prerequisite],
 	});
+	const previousPlan = source.current_snapshots.use_cases;
+	const retained = previousPlan.payload.coverage_plan.filter((group) => !affected.has(group.requirement_id));
 	await page.goto(`${fixture.prefix}/use-cases`);
-	await uiResponse(page, "/use-cases/generate", () => page.getByRole("button", { name: "Regenerate Use Cases", exact: true }).click(), {
-		timeout: 300_000,
+	await page.getByRole("button", { name: "Review refresh scope", exact: true }).click();
+	const scope = page.getByRole("dialog", { name: "Review Use Cases refresh scope", exact: true });
+	await expect(scope.getByRole("status")).toHaveText(`${affected.size} changed · 0 added · ${retained.length} kept · 0 removed`);
+	const refreshed = await uiResponse(
+		page,
+		"/use-cases/generate",
+		() => scope.getByRole("button", { name: "Confirm scoped refresh", exact: true }).click(),
+		{ timeout: 300_000 }
+	);
+	expect(refreshed.request().postDataJSON().refresh_requirement_ids.toSorted()).toEqual([...affected].sort());
+	const newPlan = (await refreshed.json()).current_snapshots.use_cases;
+	await fixture.save("booking-revision-use-case-refresh", newPlan);
+	expect(newPlan.approved).toBe(false);
+	expect(newPlan.metadata.use_case_refresh).toEqual({
+		previous_snapshot_id: previousPlan.snapshot_id,
+		refreshed_requirement_ids: [...affected].sort(),
+		retained_requirement_ids: retained.map((group) => group.requirement_id),
+		removed_requirement_ids: [],
 	});
+	expect(newPlan.payload.coverage_plan.filter((group) => !affected.has(group.requirement_id))).toEqual(retained);
 	const planned = await approveScenarios(page, fixture);
 	const analyzed = await fixture.checked("POST", `${fixture.prefix}/impact-analysis`, { base_project_revision: planned.current_revision });
 	const impact = analyzed.current_snapshots.impact_analysis.payload;
 	await fixture.save("booking-revision-impact", impact);
 	const actualChanges = impact.changed_items.filter(({ kind }) => kind === "requirement");
+	expect(impact.changed_items.filter(({ kind }) => kind === "use_case").every((row) => affected.has(row.requirement_id))).toBe(true);
 	expect(actualChanges.map((row) => [row.requirement_id, row.change_type]).sort()).toEqual(
 		[...affected].sort().map((id) => [id, "modified"])
 	);

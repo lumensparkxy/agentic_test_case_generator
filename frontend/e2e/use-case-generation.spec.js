@@ -4,8 +4,8 @@ import { createDeferred } from "./support/workspace.js";
 import { installUseCaseReviewApi, useCaseProjectFixture, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
 
 const path = `/projects/${USE_CASE_PROJECT_ID}/use-cases`;
-function staleProject() {
-	const p = useCaseProjectFixture();
+function staleProject(reviewState = "pending") {
+	const p = useCaseProjectFixture({ reviewState });
 	p.stage_state.use_cases.stale = true;
 	p.current_snapshots.requirements.payload.requirements = Array.from({ length: 10 }, (_, i) => ({
 		id: `REQ-${i + 1}`,
@@ -67,7 +67,8 @@ async function setup(page, options = {}) {
 	const api = await installUseCaseReviewApi(page, { initialProject: project });
 	const requests = [];
 	await page.route(`**${path}/generate`, async (route) => {
-		requests.push(route.request().postDataJSON());
+		const input = route.request().postDataJSON();
+		requests.push(input);
 		if (options.gate) await options.gate;
 		if (options.status)
 			return route.fulfill({
@@ -76,6 +77,28 @@ async function setup(page, options = {}) {
 			});
 		const next = freshProject(project);
 		if (options.guidance) next.current_snapshots.use_cases.metadata = { guidance: options.guidance };
+		if (input.refresh_requirement_ids) {
+			const previous = project.current_snapshots.use_cases;
+			const snapshot = next.current_snapshots.use_cases;
+			const prior = new Map(previous.payload.coverage_plan.map((group) => [group.requirement_id, group]));
+			const removed = project.current_snapshots.requirements.payload.requirements
+				.filter((r) => r.clarification_status === "excluded")
+				.map((r) => r.id);
+			const kept = [];
+			snapshot.payload.coverage_plan = snapshot.payload.coverage_plan
+				.filter((group) => !removed.includes(group.requirement_id))
+				.map((group) => {
+					if (input.refresh_requirement_ids.includes(group.requirement_id)) return group;
+					kept.push(group.requirement_id);
+					return prior.get(group.requirement_id);
+				});
+			snapshot.metadata.use_case_refresh = {
+				previous_snapshot_id: previous.snapshot_id,
+				refreshed_requirement_ids: input.refresh_requirement_ids,
+				retained_requirement_ids: kept,
+				removed_requirement_ids: removed,
+			};
+		}
 		api.setProject(next);
 		await route.fulfill({ json: next });
 	});
@@ -84,6 +107,46 @@ async function setup(page, options = {}) {
 	await expect(page.getByRole("heading", { name: "Use Cases", exact: true })).toBeVisible();
 	return { api, requests, project };
 }
+
+test(
+	"scoped refresh previews the change, preserves unrelated scenarios and requires a fresh decision",
+	{ tag: "@p1" },
+	async ({ page }) => {
+		const project = staleProject("approved");
+		const saved = project.current_snapshots.use_cases;
+		saved.source_snapshot_id = "previous-requirements";
+		saved.metadata.source_requirement_identities = { "REQ-5": { content_version: 1 } };
+		project.current_snapshots.requirements.payload.requirements[0].text = "Revised requirement 1";
+		project.current_snapshots.requirements.payload.requirements[1].clarification_status = "excluded";
+		project.current_snapshots.requirements.payload.requirements[4].content_version = 2;
+		const { requests } = await setup(page, { project });
+		const launch = page.getByRole("button", { name: "Review refresh scope", exact: true });
+		await launch.click();
+		const dialog = page.getByRole("dialog", { name: "Review Use Cases refresh scope", exact: true });
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole("status")).toHaveText("2 changed · 2 added · 5 kept · 1 removed");
+		await expect(dialog.getByRole("region", { name: "Changed requirements" })).toContainText("Revised requirement 1");
+		await expect(dialog.getByRole("region", { name: "Changed requirements" })).toContainText("REQ-5");
+		await expect(dialog.getByRole("region", { name: "Removed from this plan" })).toContainText("REQ-2");
+		await page.keyboard.press("Escape");
+		await expect(launch).toBeFocused();
+		expect(requests).toHaveLength(0);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await launch.click();
+		await dialog.getByRole("checkbox", { name: "Also refresh REQ-3" }).check();
+		await expect(dialog.getByRole("status")).toHaveText("2 changed · 2 added · 4 kept · 1 removed · 1 additionally selected");
+		await dialog.getByRole("button", { name: "Confirm scoped refresh", exact: true }).click();
+		await expect(page.getByText("Fresh REQ-1", { exact: true })).toBeVisible();
+		await expect(page.getByText("Fresh REQ-3", { exact: true })).toBeVisible();
+		await expect(page.getByText("Old REQ-4", { exact: true })).toBeVisible();
+		await expect(page.getByText("Old REQ-2", { exact: true })).toHaveCount(0);
+		await expect(page.getByLabel("Current human review status")).toHaveText("Awaiting human review");
+		await expect(page.getByText(/5 groups refreshed, 4 kept, and 1 removed/)).toBeVisible();
+		expect(requests).toEqual([
+			{ base_project_revision: project.current_revision, refresh_requirement_ids: ["REQ-1", "REQ-5", "REQ-9", "REQ-10", "REQ-3"] },
+		]);
+	}
+);
 
 test("regenerates 8 groups into 10 using one revision-only request and requires review", { tag: "@p1" }, async ({ page }) => {
 	const gate = createDeferred();

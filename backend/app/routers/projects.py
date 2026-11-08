@@ -310,6 +310,7 @@ async def generate_qa_project_use_cases(
             actor=current_user,
             request_id=_get_request_id(request),
             base_project_revision=payload.base_project_revision,
+            refresh_requirement_ids=payload.refresh_requirement_ids,
             memory_bypass=request.headers.get("X-Knowledge-Bypass", "").lower() == "true",
         )
     except HTTPException:

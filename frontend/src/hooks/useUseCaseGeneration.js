@@ -34,14 +34,16 @@ export default function useUseCaseGeneration({ project, identity, request, onGen
 		);
 	}, [scope, revision, projectId, identity]);
 
-	const generate = async () => {
+	const generate = async (refreshRequirementIds) => {
 		if (active.current || !projectId || !Number.isInteger(revision)) return;
 		const operation = { scope, requestId: createRequestId() };
 		active.current = operation;
 		const current = () => mounted.current && scopeRef.current === operation.scope && active.current === operation;
 		setOutcome({
 			status: "pending",
-			message: "Generating Use Cases from the approved requirements. Your current artifacts remain available.",
+			message: refreshRequirementIds
+				? "Refreshing selected Use Cases and reviewing the combined plan. Your current artifacts remain available."
+				: "Generating Use Cases from the approved requirements. Your current artifacts remain available.",
 		});
 		try {
 			const response = await callbacks.current.request(
@@ -49,7 +51,10 @@ export default function useUseCaseGeneration({ project, identity, request, onGen
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json", "X-Request-ID": operation.requestId },
-					body: JSON.stringify({ base_project_revision: revision }),
+					body: JSON.stringify({
+						base_project_revision: revision,
+						...(refreshRequirementIds ? { refresh_requirement_ids: refreshRequirementIds } : {}),
+					}),
 				}
 			);
 			const data = await response.json();
@@ -66,9 +71,12 @@ export default function useUseCaseGeneration({ project, identity, request, onGen
 			) {
 				throw new Error("The generation response did not match this project. Reload latest to check the saved result.");
 			}
+			const refresh = data.current_snapshots.use_cases.metadata?.use_case_refresh;
 			setOutcome({
 				status: "success",
-				message: "New Use Cases are ready for human review. Existing test cases were preserved and marked stale.",
+				message: refresh
+					? `New Use Cases are ready for human review. ${refresh.refreshed_requirement_ids.length} groups refreshed, ${refresh.retained_requirement_ids.length} kept, and ${refresh.removed_requirement_ids.length} removed.`
+					: "New Use Cases are ready for human review. Existing test cases were preserved and marked stale.",
 				committedRevision: data.current_revision,
 				projectId,
 				identity,

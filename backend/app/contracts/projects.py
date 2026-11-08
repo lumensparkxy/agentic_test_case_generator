@@ -137,6 +137,7 @@ class QaProjectUpdateInput(BaseModel):
 class QaProjectUseCaseGenerationInput(BaseModel):
     model_config = {"extra": "forbid"}
     base_project_revision: int = Field(ge=0)
+    refresh_requirement_ids: Optional[List[str]] = Field(default=None, max_length=400)
 
 
 class QaProjectTestCaseReviewInput(BaseModel):

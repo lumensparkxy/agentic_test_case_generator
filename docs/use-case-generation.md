@@ -2,10 +2,17 @@
 
 On a project's **Use Cases** page, select **Generate Use Cases** when there is no
 snapshot, or **Regenerate Use Cases** to replace an existing or stale snapshot.
-The current requirements must be approved. Generation uses those saved
-requirements and the saved project context; for example, an old snapshot with
-eight requirement groups is regenerated against all ten currently approved
-requirements. Test Cases → Full Regenerate remains a separate action.
+The current requirements must be approved. Full regeneration uses every
+currently approved requirement and the saved project Context.
+
+For a stale, previously human-approved snapshot, **Review refresh scope** lists
+the changed, added, retained and removed requirement groups. Changed and added
+groups are selected automatically. Select any other requirements whose scenarios
+need to reflect Context changes. Only the selected groups go to the planner.
+Retained groups keep their exact analysis, scenarios and IDs. Removed groups
+leave the new plan. The independent reviewer assesses the complete plan against
+the current requirements and Context before a new version can be saved.
+Test Cases → Full Regenerate remains a separate action.
 
 The old snapshot stays visible during generation. A successful result creates a
 new Use Cases version awaiting human review. Existing downstream artifacts,
@@ -23,7 +30,7 @@ cannot overwrite a different project, account, route or newer revision in the UI
 ## API
 
 `POST /projects/{project_id}/use-cases/generate` requires authentication and
-accepts only a revision guard:
+accepts a revision guard for full regeneration.
 
 ```json
 {"base_project_revision": 16}
@@ -31,6 +38,14 @@ accepts only a revision guard:
 
 The server verifies ownership, active project status, approved current
 requirements and generation access before invoking the use-case specialist.
+For a scoped refresh, also send `refresh_requirement_ids` with every changed
+and added requirement ID and any extra groups selected for regeneration. An
+empty list is valid when the scope only removes groups. The server checks the
+selection against the exact requirements snapshot used to produce the old
+plan. A mismatch returns HTTP 409 with the required IDs. Older snapshots may
+only show text changes in the dialog. If the server identifies additional
+required groups, select them when reopening the scope.
+
 Client-supplied requirements or old coverage plans are rejected. Runtime guidance
 uses the existing Use Cases stage flags and records the manifest with the new
 snapshot; this endpoint does not enable any deployment flags.
@@ -39,12 +54,15 @@ Successful responses contain the refreshed `QaProjectDetail`. Snapshot creation,
 history, downstream staleness and the project revision commit use the existing
 atomic project transaction. A concurrent edit returns HTTP 409. Invalid or
 incomplete generated output returns HTTP 502; fallback or unavailable generation
-returns an error without publishing a snapshot. Retrying a committed request
+returns an error without publishing a snapshot. Scoped refresh also preserves
+the prior version if the independent reviewer cannot assess every scenario.
+The new snapshot records its previous snapshot ID and the refreshed, retained
+and removed requirement IDs. Retrying a committed request
 with its old revision returns 409, so reload before retrying an uncertain result.
 
 The existing `testcases.generate` billing access gate applies. This operation
-records `use_cases.generate` usage in use-case units, creates no billable test
-cases and introduces no new tariff. Workflow runs retain success/failure and
+records `use_cases.generate` usage for newly planned scenarios, creates no
+billable test cases and introduces no new tariff. Workflow runs retain success/failure and
 source requirement snapshot provenance.
 
 ## Verification
