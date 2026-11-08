@@ -135,7 +135,11 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
                         },
                     )
                 )
-                stack.enter_context(patch.object(routes, "get_project", return_value=SimpleNamespace(current_snapshots={"test_cases": object()})))
+                stack.enter_context(
+                    patch.object(
+                        routes, "get_project", return_value=SimpleNamespace(current_revision=1, stage_state={}, current_snapshots={"test_cases": object()})
+                    )
+                )
                 versions = stack.enter_context(patch.object(routes, "persist_test_case_versions"))
                 snapshot = stack.enter_context(patch.object(routes, "_append_project_generation_snapshots"))
                 with self.assertRaises(HTTPException) as caught:

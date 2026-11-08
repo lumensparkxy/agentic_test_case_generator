@@ -48,6 +48,18 @@ class TestCaseGenerationRecoveryTests(unittest.TestCase):
         self.assertGreaterEqual(agent.generate_content_config.max_output_tokens, 24000)
         self.assertEqual(agent.generate_content_config.response_mime_type, "application/json")
 
+    def test_project_generation_skips_upstream_planning_when_bound_to_approved_source(self) -> None:
+        pipeline = _build_generation_pipeline(
+            "test-model",
+            "REQ-1: Book a room",
+            "Synthetic context",
+            "default",
+            threshold=90,
+            max_iterations=1,
+            preserve_source_plan=True,
+        )
+        self.assertEqual([agent.name for agent in pipeline.sub_agents], ["TestCaseGeneratorAgent", "ValidationLoop"])
+
     def test_project_refinement_skips_upstream_planning(self) -> None:
         pipeline = _build_refinement_pipeline(
             "test-model",

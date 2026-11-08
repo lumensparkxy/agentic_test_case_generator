@@ -9,15 +9,18 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
 
 from ..agents.test_case_agent import generate_test_cases, refine_test_cases
 from ..auth.jwt_auth import get_current_user
+from ..contracts.requirements import RequirementCoveragePlan
 from ..models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse, RefineTestCasesInput
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
+from ..services.orchestrator_service import _use_cases_human_approved
 from ..services.requirement_import_service import validate_generation_baseline
 from ..services.versioning_service import persist_test_case_versions
-from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http
+from ..services.workflow_project_service import ProjectConflictError, append_stage_snapshot, get_project, project_error_to_http
 
 router = APIRouter()
 
@@ -140,6 +143,47 @@ def _refinement_source_inputs(project_id: str | None, actor: AuthUser) -> dict[s
     }
 
 
+def _project_generation_source(payload: GenerateTestCasesInput, actor: AuthUser) -> tuple[int | None, str | None, dict[str, Any]]:
+    if not payload.project_id:
+        return payload.base_project_revision, None, {}
+    try:
+        project = get_project(payload.project_id, actor=actor)
+        if payload.base_project_revision is not None and payload.base_project_revision != project.current_revision:
+            raise ProjectConflictError(project.current_revision)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+    state = project.stage_state.get("use_cases")
+    snapshot = project.current_snapshots.get("use_cases")
+    if not state or state.stale or not _use_cases_human_approved(state):
+        return project.current_revision, None, {}
+
+    error = "Review current Use Cases before generating Test Cases; the approved source plan is missing or incomplete."
+    if not snapshot or snapshot.snapshot_id != state.current_snapshot_id:
+        raise HTTPException(409, error)
+    requirement_ids = {requirement.id for requirement in payload.requirements}
+    try:
+        plans = [RequirementCoveragePlan.model_validate(group) for group in snapshot.payload.get("coverage_plan") or []]
+    except (TypeError, ValidationError) as exc:
+        raise HTTPException(409, error) from exc
+    scoped_plan = [group for group in plans if group.requirement_id in requirement_ids]
+    if not scoped_plan or {group.requirement_id for group in scoped_plan if group.scenarios} != requirement_ids:
+        raise HTTPException(409, error)
+
+    return (
+        project.current_revision,
+        snapshot.snapshot_id,
+        {
+            "source_coverage_plan": _model_payload(scoped_plan),
+            "source_requirement_analysis": [
+                entry
+                for entry in snapshot.payload.get("requirement_analysis") or []
+                if isinstance(entry, dict) and entry.get("requirement_id") in requirement_ids
+            ],
+        },
+    )
+
+
 def _append_project_generation_snapshots(
     *,
     project_id: str | None,
@@ -152,6 +196,7 @@ def _append_project_generation_snapshots(
     base_project_revision: int | None,
     source_requirements: list[Any] | None = None,
     source_context: Any = None,
+    approved_use_case_snapshot_id: str | None = None,
 ) -> None:
     if not project_id:
         return
@@ -169,6 +214,19 @@ def _append_project_generation_snapshots(
             and response.coverage_plan
             and use_case_snapshot.payload.get("coverage_plan") == _model_payload(response.coverage_plan)
         )
+        # A bound generation may cover a subset of the approved plan. Its
+        # response was checked against that scope before saving any versions.
+        if approved_use_case_snapshot_id is not None:
+            if (
+                not use_case_state
+                or use_case_state.stale
+                or not use_case_snapshot
+                or use_case_state.current_snapshot_id != approved_use_case_snapshot_id
+                or use_case_snapshot.snapshot_id != approved_use_case_snapshot_id
+            ):
+                raise HTTPException(409, "Use Cases changed during generation. Reload and retry against the current source plan.")
+            reuse_use_cases = True
+
         # Test Case review/analysis belongs to the downstream artifact. Reusing a
         # plan must retain its exact source assessment and human review record.
         if operation == "testcases.refine" and not reuse_use_cases:
@@ -323,6 +381,7 @@ async def generate_test_cases_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
     await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
+    base_revision, approved_use_case_snapshot_id, source_inputs = await run_in_threadpool(_project_generation_source, payload, current_user)
     request_id = _get_request_id(request)
     billing_context = await run_in_threadpool(
         enforce_billing_access,
@@ -343,8 +402,11 @@ async def generate_test_cases_endpoint(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation="testcases.generate",
+            **source_inputs,
         )
         response = GenerateTestCasesResponse(**result)
+        if source_inputs and _model_payload(response.coverage_plan) != source_inputs["source_coverage_plan"]:
+            raise HTTPException(409, "Generated Test Cases did not match the approved Use Cases plan. Retry generation.")
         if response.generation_tasks and payload.project_id:
             existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
             if existing.current_snapshots.get("test_cases"):
@@ -392,9 +454,10 @@ async def generate_test_cases_endpoint(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
-            base_project_revision=payload.base_project_revision,
+            base_project_revision=base_revision,
             source_requirements=payload.requirements,
             source_context=payload.context,
+            approved_use_case_snapshot_id=approved_use_case_snapshot_id,
         )
         return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:
