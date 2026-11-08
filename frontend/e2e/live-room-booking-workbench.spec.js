@@ -55,10 +55,10 @@ test.describe("Generated Room Booking execution", () => {
 		try {
 			const { requirements: sourceRequirements, prerequisite } = await test.step("Save source and observed fixture context", async () => {
 				const preview = await importSource(page, fixture);
-				await applyImport(page, fixture, preview);
+				const imported = await applyImport(page, fixture, preview);
+				assertSourceMapping(imported.current_snapshots.requirements.payload.requirements);
 				const approved = await approveRequirements(page, fixture);
 				const requirements = approved.current_snapshots.requirements.payload.requirements;
-				assertSourceMapping(requirements);
 				const retryRequirements = requirements.filter(
 					(row) =>
 						/\bretr(?:y|ies|ying)\b/i.test(row.text) &&
