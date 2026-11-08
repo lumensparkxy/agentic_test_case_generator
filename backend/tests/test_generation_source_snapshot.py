@@ -1,5 +1,6 @@
 """Generation must not replace an unchanged reviewed upstream artifact."""
 
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -8,14 +9,16 @@ import unittest
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from starlette.requests import Request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.models import AuthUser, GenerateTestCasesResponse
+from app.models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse
+from app.routers import testcases as routes
 from app.routers.testcases import _append_project_generation_snapshots, _refinement_source_inputs
 from app.services.workflow_project_service import ProjectConflictError
 
 
-class GenerationSourceSnapshotTests(unittest.TestCase):
+class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.response = GenerateTestCasesResponse(
             test_cases=[],
@@ -43,9 +46,15 @@ class GenerationSourceSnapshotTests(unittest.TestCase):
             approved=True,
             metadata={"latest_human_review": {"decision": "approve", "snapshot_id": self.source.snapshot_id}},
         )
-        self.project = SimpleNamespace(current_snapshots={"use_cases": self.source}, stage_state={"use_cases": self.state})
+        self.project = SimpleNamespace(current_revision=7, current_snapshots={"use_cases": self.source}, stage_state={"use_cases": self.state})
+        self.actor = AuthUser(sub="tester", name="Synthetic tester")
+        self.payload = GenerateTestCasesInput(
+            project_id="project-1",
+            requirements=[{"id": "REQ-1", "text": "Create one booking"}],
+            template={"name": "QA", "format": "json", "fields": ["steps"]},
+        )
 
-    def persist(self, append_effect=None, operation="testcases.generate"):
+    def persist(self, append_effect=None, operation="testcases.generate", **source):
         with (
             patch("app.routers.testcases.get_project", return_value=self.project),
             patch(
@@ -63,8 +72,70 @@ class GenerationSourceSnapshotTests(unittest.TestCase):
                 workflow_run_id="run-1",
                 source_event_id="event-1",
                 base_project_revision=7,
+                **source,
             )
         return append
+
+    async def test_generation_binds_server_approved_plan_before_model_and_persists_only_test_cases(self):
+        # Firestore omits nulls, and a caller can send an older client-side plan.
+        self.source.payload["coverage_plan"] = [p.model_dump(mode="json", exclude_none=True) for p in self.response.coverage_plan]
+        self.payload.coverage_plan = [p.model_copy(update={"requirement_text": "Obsolete client input"}) for p in self.response.coverage_plan]
+        before = deepcopy(self.project)
+        with ExitStack() as stack:
+            for name in ("validate_generation_baseline", "enforce_billing_access", "start_workflow_run", "_log_success", "_record_billing_consumption_safe"):
+                stack.enter_context(patch.object(routes, name))
+            stack.enter_context(patch.object(routes, "get_project", return_value=self.project))
+            generate = stack.enter_context(patch.object(routes, "generate_test_cases", return_value=self.response.model_dump()))
+            versions = stack.enter_context(patch.object(routes, "persist_test_case_versions", return_value=[]))
+            append = stack.enter_context(patch.object(routes, "append_stage_snapshot"))
+            stack.enter_context(patch.object(routes, "finish_generation", side_effect=lambda response, *_: response))
+            failure = stack.enter_context(patch.object(routes, "_log_failure"))
+
+            await routes.generate_test_cases_endpoint(Request({"type": "http"}), self.payload, self.actor)
+
+            self.assertEqual(generate.call_args.kwargs["source_coverage_plan"], [p.model_dump(mode="json") for p in self.response.coverage_plan])
+            self.assertEqual(generate.call_args.kwargs["source_requirement_analysis"], self.source.payload["requirement_analysis"])
+            append.assert_called_once()
+            self.assertEqual(append.call_args.kwargs["stage"], "test_cases")
+            self.assertEqual(append.call_args.kwargs["source_snapshot_id"], self.source.snapshot_id)
+            self.assertEqual(append.call_args.kwargs["base_project_revision"], 7)
+            self.assertEqual(self.project, before)
+
+            append.reset_mock()
+            versions.reset_mock()
+            generate.return_value["coverage_plan"][0]["scenarios"][0]["objective"] = "Replanned by the model"
+            with self.assertRaises(HTTPException) as error:
+                await routes.generate_test_cases_endpoint(Request({"type": "http"}), self.payload, self.actor)
+            self.assertEqual(error.exception.status_code, 409)
+            failure.assert_called_once()
+            append.assert_not_called()
+            versions.assert_not_called()
+
+    def test_generation_keeps_legacy_path_without_a_current_approval(self):
+        with patch.object(routes, "get_project", return_value=self.project):
+            for stale, approved, review_id in [(True, True, self.source.snapshot_id), (False, False, self.source.snapshot_id), (False, True, "old")]:
+                with self.subTest(stale=stale, approved=approved, review_id=review_id):
+                    self.state.stale = stale
+                    self.state.approved = approved
+                    self.state.metadata["latest_human_review"]["snapshot_id"] = review_id
+                    self.assertEqual(routes._project_generation_source(self.payload, self.actor), (7, None, {}))
+            self.payload.project_id = None
+            self.assertEqual(routes._project_generation_source(self.payload, self.actor), (None, None, {}))
+
+    def test_bound_generation_can_scope_approved_plan_without_replacing_it(self):
+        other_group = self.response.coverage_plan[0].model_copy(update={"requirement_id": "REQ-2"})
+        self.source.payload["coverage_plan"].append(other_group.model_dump(mode="json"))
+        with patch.object(routes, "get_project", return_value=self.project):
+            revision, snapshot_id, sources = routes._project_generation_source(self.payload, self.actor)
+        self.assertEqual(revision, 7)
+        self.assertEqual([group["requirement_id"] for group in sources["source_coverage_plan"]], ["REQ-1"])
+        self.persist(approved_use_case_snapshot_id=snapshot_id).assert_called_once()
+
+    def test_bound_generation_rejects_new_snapshot(self):
+        self.source.snapshot_id = self.state.current_snapshot_id = "new-reviewed-source"
+        with self.assertRaises(HTTPException) as error:
+            self.persist(approved_use_case_snapshot_id="reviewed-source")
+        self.assertEqual(error.exception.status_code, 409)
 
     def test_unchanged_plan_preserves_source_review_analysis_and_identity(self):
         before = deepcopy(self.project)

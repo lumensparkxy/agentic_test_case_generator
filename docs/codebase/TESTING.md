@@ -435,6 +435,13 @@ discarding scenarios or claiming a pass. Paraphrase and business ownership check
 still require the semantic reviewer and inspection of the live delivered plan;
 mocked verdicts establish transport/validation behavior, not model accuracy.
 
+When a current Use Cases snapshot has explicit approval, Test Case generation
+uses its saved plan and keeps its review and snapshot identity. The generation
+source and parallel generation tests cover server-side plan selection, exact
+scenario IDs, legacy requests and revision conflicts. In Chrome, compare the
+approved Use Cases version and decision before and after generation and reload,
+then verify that the downloaded Excel audit names the same Use Cases snapshot.
+
 Stage 5 regressions in `test_substantive_review.py`, `test_test_case_quality.py`
 and `improve-tests.spec.js` cover bounded recovery from transient assessment
 failure, rejection of invalid/stale evidence, and unchanged score/actionable

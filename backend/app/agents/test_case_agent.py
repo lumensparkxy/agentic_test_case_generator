@@ -1045,6 +1045,7 @@ def _build_generation_pipeline(
     threshold: int,
     max_iterations: int,
     human_feedback: Optional[str] = None,
+    preserve_source_plan: bool = False,
 ) -> Agent:
     generator_agent = _build_test_case_generator_agent(
         model,
@@ -1056,15 +1057,21 @@ def _build_generation_pipeline(
 
     return SequentialAgent(
         name="TestCaseGenerationPipeline",
-        sub_agents=[
-            build_requirement_analysis_agent(
-                model,
-                requirements_text,
-                context_text,
-                output_key=STATE_REQUIREMENT_ANALYSIS,
-                human_feedback=human_feedback,
-            ),
-            _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+        sub_agents=(
+            []
+            if preserve_source_plan
+            else [
+                build_requirement_analysis_agent(
+                    model,
+                    requirements_text,
+                    context_text,
+                    output_key=STATE_REQUIREMENT_ANALYSIS,
+                    human_feedback=human_feedback,
+                ),
+                _build_coverage_planner_agent(model, requirements_text, context_text, human_feedback=human_feedback),
+            ]
+        )
+        + [
             generator_agent,
             _build_review_loop(model, threshold, max_iterations, requirements_text, human_feedback=human_feedback, context_text=context_text),
         ],
@@ -1220,6 +1227,7 @@ Human feedback:
             threshold,
             max_iterations,
             human_feedback=human_feedback,
+            preserve_source_plan=source_coverage_plan is not None,
         )
         message_text = "Generate and validate comprehensive test cases from the approved requirements."
 
@@ -1422,37 +1430,39 @@ Human feedback:
     elif str(state_test_cases_raw).strip() not in {"", "[]"}:
         _record_parser_failure(diagnostics, "SessionStateTestCases", state_test_cases_error, state_test_cases_raw)
 
-    state_coverage_plan_raw = session_state.get(STATE_COVERAGE_PLAN, "[]")
-    state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
-    had_event_coverage_plan = bool(current_coverage_plan)
-    if state_coverage_plan:
-        current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
-        if not had_event_coverage_plan:
-            _record_parser_recovery(
-                diagnostics,
-                "SessionStateCoveragePlan",
-                state_coverage_plan_error,
-                state_coverage_plan_raw,
-                artifact_label="coverage-plan",
-            )
-    elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
+    if source_coverage_plan is None:
+        state_coverage_plan_raw = session_state.get(STATE_COVERAGE_PLAN, "[]")
+        state_coverage_plan, state_coverage_plan_error = parse_coverage_plan_json_detailed(state_coverage_plan_raw)
+        had_event_coverage_plan = bool(current_coverage_plan)
+        if state_coverage_plan:
+            current_coverage_plan = _normalize_coverage_plan(state_coverage_plan, requirements)
+            if not had_event_coverage_plan:
+                _record_parser_recovery(
+                    diagnostics,
+                    "SessionStateCoveragePlan",
+                    state_coverage_plan_error,
+                    state_coverage_plan_raw,
+                    artifact_label="coverage-plan",
+                )
+        elif str(state_coverage_plan_raw).strip() not in {"", "[]"}:
+            _record_parser_failure(diagnostics, "SessionStateCoveragePlan", state_coverage_plan_error, state_coverage_plan_raw)
 
-    state_requirement_analysis_raw = session_state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
-    state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(state_requirement_analysis_raw)
-    had_event_requirement_analysis = bool(current_requirement_analysis)
-    if state_requirement_analysis:
-        current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
-        if not had_event_requirement_analysis:
-            _record_parser_recovery(
-                diagnostics,
-                "SessionStateRequirementAnalysis",
-                state_requirement_analysis_error,
-                state_requirement_analysis_raw,
-                artifact_label="requirement-analysis",
-            )
-    elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
-        _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error, state_requirement_analysis_raw)
+    if source_requirement_analysis is None:
+        state_requirement_analysis_raw = session_state.get(STATE_REQUIREMENT_ANALYSIS, "[]")
+        state_requirement_analysis, state_requirement_analysis_error = parse_requirement_analysis_json_detailed(state_requirement_analysis_raw)
+        had_event_requirement_analysis = bool(current_requirement_analysis)
+        if state_requirement_analysis:
+            current_requirement_analysis = normalize_requirement_analysis(state_requirement_analysis, requirements)
+            if not had_event_requirement_analysis:
+                _record_parser_recovery(
+                    diagnostics,
+                    "SessionStateRequirementAnalysis",
+                    state_requirement_analysis_error,
+                    state_requirement_analysis_raw,
+                    artifact_label="requirement-analysis",
+                )
+        elif str(state_requirement_analysis_raw).strip() not in {"", "[]"}:
+            _record_parser_failure(diagnostics, "SessionStateRequirementAnalysis", state_requirement_analysis_error, state_requirement_analysis_raw)
 
     if not current_requirement_analysis:
         current_requirement_analysis = fallback_requirement_analysis(requirements)
@@ -2669,15 +2679,23 @@ def generate_test_cases(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
+    source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
-    precomputed_requirement_analysis = (
-        normalize_requirement_analysis(_serialize_contract_items(payload.requirement_analysis), payload.requirements) if payload.requirement_analysis else []
-    )
-    precomputed_coverage_plan = (
-        _normalize_coverage_plan(_serialize_contract_items(payload.coverage_plan), payload.requirements) if payload.coverage_plan else []
-    )
+    if source_coverage_plan is not None:
+        precomputed_coverage_plan = source_coverage_plan
+        precomputed_requirement_analysis = source_requirement_analysis or fallback_requirement_analysis(payload.requirements)
+    else:
+        precomputed_requirement_analysis = (
+            normalize_requirement_analysis(_serialize_contract_items(payload.requirement_analysis), payload.requirements)
+            if payload.requirement_analysis
+            else []
+        )
+        precomputed_coverage_plan = (
+            _normalize_coverage_plan(_serialize_contract_items(payload.coverage_plan), payload.requirements) if payload.coverage_plan else []
+        )
     generation_settings = get_generation_settings()
 
     if operation == "impact.update.apply":
@@ -2737,6 +2755,8 @@ def generate_test_cases(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation=operation,
+            source_coverage_plan=source_coverage_plan,
+            source_requirement_analysis=precomputed_requirement_analysis if source_coverage_plan is not None else None,
         )
 
     raw_test_cases = workflow.get("test_cases", [])
@@ -2901,7 +2921,7 @@ def generate_test_cases(
         resolved_settings = dict(workflow.get("workflow_settings") or resolved_settings)
         threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
 
-    if operation == "impact.update.apply":
+    if source_coverage_plan is not None or operation == "impact.update.apply":
         workflow["strict_coverage_plan"] = True
     workflow["generation_evidence"] = _finalize_generation_evidence(
         evidence=dict(workflow.get("generation_evidence") or {}),

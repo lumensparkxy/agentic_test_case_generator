@@ -474,6 +474,47 @@ class ParallelTestCaseGenerationTests(unittest.TestCase):
             any("Accepted lower-count parallel retry because review quality improved" in warning for warning in result["workflow_diagnostics"]["warnings"])
         )
 
+    def test_approved_source_plan_is_used_exactly_by_both_generation_routes(self) -> None:
+        payload = _payload(2)
+        source_plan = [
+            plan.model_copy(update={"scenarios": [plan.scenarios[0].model_copy(update={"id": f"reviewed-{plan.requirement_id}"})]}).model_dump(mode="json")
+            for plan in payload.coverage_plan
+        ]
+        source_analysis = [item.model_dump(mode="json") for item in payload.requirement_analysis]
+
+        def sequential_result(**kwargs):
+            plan = kwargs["source_coverage_plan"]
+            return {
+                **_worker_output(SimpleNamespace(coverage_plan=plan)),
+                "coverage_plan": plan,
+                "requirement_analysis": kwargs["source_requirement_analysis"],
+                "approved": True,
+            }
+
+        for parallel in (False, True):
+            settings = GenerationSettings(
+                parallel_test_case_generation_enabled=parallel,
+                parallel_test_case_min_scenarios=2,
+                parallel_test_case_target_scenarios_per_shard=1,
+            )
+            with (
+                self.subTest(parallel=parallel),
+                patch("app.agents.test_case_agent.get_generation_settings", return_value=settings),
+                patch("app.agents.test_case_agent._get_model_settings_or_none", return_value=SimpleNamespace(model_name="test-model")),
+                patch("app.agents.test_case_agent._run_workflow_sync", side_effect=sequential_result) as sequential,
+                patch("app.agents.test_case_agent._run_parallel_test_case_shard_workflow_sync", side_effect=_worker_output) as worker,
+            ):
+                result = generate_test_cases(payload, source_coverage_plan=source_plan, source_requirement_analysis=source_analysis)
+                self.assertEqual([item.model_dump(mode="json") for item in result["coverage_plan"]], source_plan)
+                self.assertEqual({ref for case in result["test_cases"] for ref in case.scenario_refs}, {"reviewed-REQ-001", "reviewed-REQ-002"})
+                self.assertEqual(result["generation_tasks"], [])
+                if parallel:
+                    sequential.assert_not_called()
+                    self.assertEqual(worker.call_count, 2)
+                else:
+                    sequential.assert_called_once()
+                    worker.assert_not_called()
+
     def test_small_precomputed_suite_uses_existing_sequential_workflow(self) -> None:
         payload = _payload(1)
         sequential_workflow = {
