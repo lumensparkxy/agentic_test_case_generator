@@ -510,9 +510,39 @@ the repository. Each instance suppresses only its first matching 2xx response;
 restart it to arm a new isolated test. Only small GET/POST fixtures are supported
 (1 MiB bodies, five-second socket timeouts); it is not an HTTPS interception or
 general production proxy. The original response and retry are never synthesized.
-Real-target routing, ID extraction and browser/application behavior need separate
-verification when an execution target becomes available. Never treat this
-fixture capability check as booking execution or human acceptance.
+
+### Synthetic Room Booking execution target
+
+Run the authored Chromium controls against a healthy loopback app and six
+independently faulted variants. The command uses the installed frontend
+Playwright and Chromium from the usual local test setup.
+
+```bash
+.venv/bin/python scripts/evaluate_room_booking.py --output /tmp/tcg-room-booking-matrix
+```
+
+Use a new output directory for each run. The matrix lists the expected and
+observed checks for each control. Detection requires that the same control
+passes against the healthy fixture and produces the specified faulty result in
+the broken version. Response-loss evidence includes the original ID and request
+and response hashes. The browser compares the retry body hash and the displayed
+record after reload. No provider key or Firebase configuration is required.
+
+For manual exploration, start `.venv/bin/python scripts/room_booking_fixture.py`
+and open the printed loopback URL. **Sign in as Alice** and **Sign in as Bob**
+select synthetic actors within the same isolated browser session. A fresh
+Chromium context starts from Alice's Confirmed Atlas booking `B-EXISTING`. The
+form exposes exact labels **Room**, **Time slot**, **Attendees**, and **Book**.
+The second listed slot starts free. **My bookings** shows the current actor's
+bookings. `/bookings/B-EXISTING` opens the direct booking page. Cancel attempts
+are checked by the server even when the direct page offers the button.
+
+The retry control binds the existing proxy to `POST /api/bookings` and reads
+its top-level `id`. The app owns the submission identity and booking state.
+The proxy owns the one-shot transport fault. Booking state persists through
+browser reload for the life of the fixture process. These authored controls
+establish synthetic target behavior and defect detection. Live generated-case
+handoff and independent business acceptance require their own evidence.
 
 `frontend/e2e/live-project-sync.spec.js` exercises the real-provider shared
 correction journey on an isolated synthetic Draft order project. It imports and
