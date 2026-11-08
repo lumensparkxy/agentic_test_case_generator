@@ -1037,6 +1037,7 @@ export interface RolePermission {
 }
 
 export interface ScenarioAssessment {
+	boundary_evidence?: Array<ScenarioBoundaryEvidence>;
 	checks?: Record<string, ScenarioCriterion>;
 	content_hash: string;
 	requirement_id: string;
@@ -1044,6 +1045,13 @@ export interface ScenarioAssessment {
 	scenario_id: string;
 	status: "passed" | "needs_review" | "unavailable";
 	warnings?: Array<string>;
+}
+
+export interface ScenarioBoundaryEvidence {
+	endpoint: string;
+	input_quote: string;
+	outcome_quote: string;
+	range_id: string;
 }
 
 export interface ScenarioCriterion {

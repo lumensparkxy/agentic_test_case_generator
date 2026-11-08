@@ -69,7 +69,7 @@ def _contains_excerpt(text, quote):
 
 def verified_boundary_endpoints(scenario, evidence, ranges_by_id):
     if not scenario.get("must_have", True):
-        return set()
+        return []
     text = " ".join(f"{scenario.get('title', '')} {scenario.get('objective', '')}".split())
     inputs = _RANGE_MENTION.sub("…", text)
     claims = {}
@@ -82,14 +82,13 @@ def verified_boundary_endpoints(scenario, evidence, ranges_by_id):
         if (
             not _contains_excerpt(inputs, input_quote)
             or not _contains_excerpt(text, outcome_quote)
-            or outcome_quote in input_quote
-            or input_quote in outcome_quote
+            or input_quote == outcome_quote
             or _NUMERIC_TOKEN.findall(input_quote) != [claim.endpoint]
             or not re.search(r"[^\W\d_]", input_quote)
             or _REJECTED_OUTCOME.search(outcome_quote)
         ):
             continue
-        claims.setdefault(interval.range_id, set()).add(claim.endpoint)
+        claims.setdefault(interval.range_id, {}).setdefault(claim.endpoint, claim)
     # Each explicit endpoint needs a distinct scenario. A combined range claim
     # cannot stand in for running the two input partitions independently.
-    return {(range_id, next(iter(values))) for range_id, values in claims.items() if len(values) == 1}
+    return [next(iter(values.values())) for values in claims.values() if len(values) == 1]

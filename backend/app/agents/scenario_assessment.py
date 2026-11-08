@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from .adk_runtime import json_generation_config
 from .scenario_boundary_coverage import inclusive_input_ranges, verified_boundary_endpoints
+from ..contracts.requirements import ScenarioBoundaryEvidence
 from ..services.browser_handoff import declared_browser_pages
 
 STATE_SCENARIO_ASSESSMENT = "scenario_semantic_assessment"
@@ -66,20 +67,6 @@ class Criterion(BaseModel):
         return value.strip()
 
 
-class BoundaryEvidence(BaseModel):
-    range_id: str = Field(min_length=1, max_length=300)
-    endpoint: str = Field(min_length=1, max_length=40)
-    input_quote: str = Field(min_length=1, max_length=500)
-    outcome_quote: str = Field(min_length=1, max_length=500)
-
-    @field_validator("input_quote", "outcome_quote")
-    @classmethod
-    def nonblank_quote(cls, value):
-        if not value.strip():
-            raise ValueError("Boundary evidence needs an exact excerpt")
-        return value.strip()
-
-
 class CriticRow(BaseModel):
     requirement_id: str
     scenario_id: str
@@ -88,7 +75,7 @@ class CriticRow(BaseModel):
     observable_outcome: Criterion
     distinct_behavior: Criterion
     source_grounding: Criterion
-    boundary_evidence: list[BoundaryEvidence] = Field(default_factory=list, max_length=20)
+    boundary_evidence: list[ScenarioBoundaryEvidence] = Field(default_factory=list, max_length=20)
 
 
 class CriticOutput(BaseModel):
@@ -119,17 +106,21 @@ def parse_critic_output(raw):
 
 def build_scenario_critic(model, input_provider, source_text, *, input_ranges=()):
     boundary_instructions = ""
+    boundary_example = ""
     if input_ranges:
+        boundary_example = (
+            ', "boundary_evidence": [{"range_id": "copy the listed ID", "endpoint": "copy the listed value", '
+            '"input_quote": "exact field and input excerpt", "outcome_quote": "exact observable acceptance excerpt"}]'
+        )
         boundary_instructions = f"""
 Also verify coverage of these explicit inclusive input ranges across the complete plan:
 {json.dumps([asdict(interval) for interval in input_ranges], ensure_ascii=False)}
-For a scenario that independently exercises one listed endpoint, add "boundary_evidence" to its assessment row. Each entry is an object with
-"range_id", "endpoint" (copy the exact string above), "input_quote", and "outcome_quote". Both quotes must be exact, short excerpts from
-the scenario title or objective. Cite only the exact value actually used for the named input, and separately quote the observable result
-that proves the product accepted it. Mentioning a range, a validation error, a data setup value, a record count, or another input is not
-evidence of acceptance. Use one scenario per endpoint. An explicitly related positive behavior in another requirement may prove acceptance
-when it submits the same input and asserts the source-defined outcome. Do not claim evidence for unsupported results or optional scenarios.
-Omit "boundary_evidence" if the scenario does not exercise one of the listed endpoints.
+Include "boundary_evidence" on every assessment row. Use [] for unrelated rows. For each listed endpoint, look across all scenario groups
+for an essential scenario that actually uses that value and checks the source-defined accepted outcome. Quote the named input and exact value
+and the observable acceptance directly from that scenario's title or objective. Use separate scenarios for the lower and upper endpoints.
+A related success requirement can own the scenario when it exercises the same input and checks its source-backed outcome.
+Exclude generic ranges, validation errors, setup-only values, unrelated inputs, record counts and optional scenarios.
+Before returning, check that each endpoint with a qualifying scenario has a boundary_evidence entry in the corresponding row.
 """
 
     def instruction(context):
@@ -146,10 +137,10 @@ Assess four criteria with a boolean passed and a short evidence-based reason:
 - source_grounding: the tested business rule must belong to this scenario's mapped requirement. Context may supply fixtures and setup but does not assign every described behavior to every requirement. If another requirement owns the rule (for example retry recovery versus ordinary successful creation), flag the incorrect mapping and identify the owner. Expected behavior and mandatory technical prescriptions must follow the supplied facts. Invented routes, mandatory debouncing, statuses, permissions, or timing policies are unsupported assumptions. Explain what to confirm or remove. Clearly marked optional exploratory assumptions may remain but cannot establish required coverage.
 Read the FULL title and objective. A generic title alone is not a defect. Do not infer adequacy from category counts, priority, IDs, or a structural score.
 For each failure identify the missing element and a useful correction without inventing a product fact.
-Return ONLY a JSON object of this shape (one assessment per scenario, all four criteria required):
-{{"assessments": [{{"requirement_id": "REQ-001", "scenario_id": "REQ-001-SCN-01", "content_hash": "copy the provided hash", "specific_trigger": {{"passed": true, "reason": "evidence or correction"}}, "observable_outcome": {{"passed": true, "reason": "evidence or correction"}}, "distinct_behavior": {{"passed": true, "reason": "evidence or correction"}}, "source_grounding": {{"passed": true, "reason": "evidence or correction"}}}}]}}
-Do not rewrite scenarios or add requirements.
 {boundary_instructions}
+Return ONLY a JSON object of this shape (one assessment per scenario, all four criteria required):
+{{"assessments": [{{"requirement_id": "REQ-001", "scenario_id": "REQ-001-SCN-01", "content_hash": "copy the provided hash", "specific_trigger": {{"passed": true, "reason": "evidence or correction"}}, "observable_outcome": {{"passed": true, "reason": "evidence or correction"}}, "distinct_behavior": {{"passed": true, "reason": "evidence or correction"}}, "source_grounding": {{"passed": true, "reason": "evidence or correction"}}{boundary_example}}}]}}
+Do not rewrite scenarios or add requirements.
 
 SOURCE FACTS (requirements and supplied context only, not generated analysis):
 {source_text}
@@ -263,8 +254,11 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
         if exact:
             warnings.extend(value["reason"] for value in checks.values() if not value["passed"])
         status = "needs_review" if warnings else "passed" if exact else "unavailable"
+        boundary_evidence = []
         if status == "passed" and input_ranges:
-            covered_endpoints.update(verified_boundary_endpoints(scenario, exact.boundary_evidence, input_ranges))
+            verified = verified_boundary_endpoints(scenario, exact.boundary_evidence, input_ranges)
+            covered_endpoints.update((claim.range_id, claim.endpoint) for claim in verified)
+            boundary_evidence = [claim.model_dump() for claim in verified]
         items.append(
             {
                 "requirement_id": key[0],
@@ -274,6 +268,7 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
                 "review_available": bool(exact),
                 "checks": checks,
                 "warnings": warnings,
+                "boundary_evidence": boundary_evidence,
             }
         )
     available = sum(item["review_available"] for item in items)

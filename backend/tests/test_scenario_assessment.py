@@ -109,7 +109,9 @@ class ScenarioAssessmentTests(unittest.TestCase):
                 }
             ]
         parsed = parse_critic_output(json.dumps({"assessments": rows}))
-        self.assertEqual(assess_scenarios(coverage, requirements, "", parsed)["status"], "passed")
+        assessment = assess_scenarios(coverage, requirements, "", parsed)
+        self.assertEqual(assessment["status"], "passed")
+        self.assertEqual(assessment["items"][-1]["boundary_evidence"], rows[-1]["boundary_evidence"])
 
         for changed_evidence in (
             {"endpoint": "8"},
@@ -125,6 +127,10 @@ class ScenarioAssessmentTests(unittest.TestCase):
         unsupported = deepcopy(rows)
         unsupported[-1]["source_grounding"] = {"passed": False, "reason": "The asserted outcome is unsupported."}
         self.assertEqual(assess_scenarios(coverage, requirements, "", unsupported)["requirement_findings"][0]["missing_endpoints"], ["6"])
+
+        overlapping = deepcopy(rows)
+        overlapping[-1]["boundary_evidence"][0]["outcome_quote"] = "Submit with Attendees set to 6. The booking appears as Confirmed."
+        self.assertEqual(assess_scenarios(coverage, requirements, "", overlapping)["status"], "passed")
 
         longer_value = deepcopy(coverage)
         longer_value[1]["scenarios"][1]["objective"] = success["scenarios"][1]["objective"].replace("6", "6.5")

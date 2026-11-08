@@ -57,7 +57,7 @@ reviews those semantics; absence of a local warning never grants approval.
 `review.structural_checks` retains the structural result.
 `review.semantic_assessment` records rubric version `scenario_semantics_v4`,
 status (`passed`, `needs_review`, `unavailable`), assessed/total/flagged counts,
-per-scenario checks, reasons and warnings, and `requirement_findings` for
+per-scenario checks, reasons, warnings and verified boundary evidence, and `requirement_findings` for
 unverified boundary inputs. A SHA-256 binding covers the complete normalized
 plan, source requirements and supplied Context. Missing, ambiguous,
 malformed or mismatched critic records cannot pass. Known warnings remain
