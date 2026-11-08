@@ -13,8 +13,8 @@ const concrete = {
 	scenario_refs: ["REQ-101-SCN-01"],
 	status: "Ready",
 };
-async function setup(page, { failure = false, gate } = {}) {
-	let project = useCaseProjectFixture();
+async function setup(page, { failure = false, gate, reviewGate, reviewUnavailableOnce = false } = {}) {
+	let project = useCaseProjectFixture({ reviewState: "approved" });
 	project.current_snapshots.test_cases = {
 		snapshot_id: "tests-old",
 		version: 1,
@@ -36,6 +36,7 @@ async function setup(page, { failure = false, gate } = {}) {
 	project.stage_state.test_cases = { current_snapshot_id: "tests-old", approved: false, stale: false };
 	const api = await installUseCaseReviewApi(page, { initialProject: project });
 	const requests = [];
+	const reviewRequests = [];
 	await page.route(`**${path}/impact-analysis`, async (route) => {
 		project = structuredClone(project);
 		project.current_revision++;
@@ -82,6 +83,7 @@ async function setup(page, { failure = false, gate } = {}) {
 			],
 			generation_tasks: [],
 			approved: false,
+			substantive_assessment: { status: "unknown", reason: "Targeted changes require assessment of the combined suite." },
 			review: { approved: false, score: 0, threshold: 90, summary: "Targeted changes require suite review." },
 			impact_update_result: { preserved_count: 1, updated_count: 1, added_count: 0, deprecated_count: 0 },
 		};
@@ -98,13 +100,34 @@ async function setup(page, { failure = false, gate } = {}) {
 			deprecated_count: 0,
 		};
 		project.current_snapshots.test_cases.snapshot_id = "tests-new";
+		project.current_snapshots.test_cases.operation = "impact.update.apply";
+		project.stage_state.test_cases.current_snapshot_id = "tests-new";
+		api.setProject(project);
+		await route.fulfill({ json: project });
+	});
+	await page.route(`**${path}/test-cases/review`, async (route) => {
+		reviewRequests.push(route.request().postDataJSON());
+		if (reviewGate) await reviewGate;
+		if (reviewUnavailableOnce && reviewRequests.length === 1) {
+			return route.fulfill({ status: 503, json: { detail: "Independent review is unavailable. The saved suite is unchanged." } });
+		}
+		project = structuredClone(project);
+		project.current_revision++;
+		const suite = project.current_snapshots.test_cases;
+		suite.snapshot_id = "tests-reviewed";
+		suite.operation = "test_cases.review";
+		suite.approved = true;
+		suite.payload.approved = true;
+		suite.payload.substantive_assessment = { status: "assessed_complete", design_status: "assessed_complete" };
+		suite.payload.review = { approved: true, score: 100, threshold: 90 };
+		project.stage_state.test_cases = { ...project.stage_state.test_cases, current_snapshot_id: suite.snapshot_id, approved: true };
 		api.setProject(project);
 		await route.fulfill({ json: project });
 	});
 	await seedAuthenticatedSession(page);
 	await page.goto(`${path}/test-cases`);
 	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
-	return { requests };
+	return { requests, reviewRequests, currentRevision: () => project.current_revision };
 }
 
 test("plans and explicitly accepts repair, then keeps concrete tests and requires review", { tag: "@p1" }, async ({ page }) => {
@@ -139,4 +162,31 @@ test("failed repair retains concrete tests and unfinished work", { tag: "@p1" },
 	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 	await expect(page.getByRole("button", { name: /TC-GOOD Preserved concrete test/ })).toBeVisible();
 	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
+});
+
+test("reviews the exact saved repaired suite and retries an unavailable assessment", { tag: "@p1" }, async ({ page }) => {
+	const gate = createDeferred();
+	const { reviewRequests, currentRevision } = await setup(page, { reviewGate: gate.promise, reviewUnavailableOnce: true });
+	await page.getByRole("button", { name: "Plan targeted repair" }).click();
+	await page.getByRole("checkbox", { name: "Accept Generate concrete checkout coverage" }).check();
+	await page.getByRole("button", { name: "Apply 1 recommendation", exact: true }).click();
+	const review = page.getByRole("button", { name: "Review saved suite", exact: true });
+	await expect(review).toBeEnabled();
+	const revision = currentRevision();
+	await review.focus();
+	await page.keyboard.press("Enter");
+	await page.keyboard.press("Enter");
+	await expect(review).toBeDisabled();
+	await expect(page.getByText("Reviewing saved test cases…", { exact: true })).toBeVisible();
+	expect(reviewRequests).toEqual([{ snapshot_id: "tests-new", base_project_revision: revision }]);
+	gate.resolve();
+	await expect(page.getByRole("alert").filter({ hasText: "The saved suite is unchanged." })).toBeVisible();
+	await expect(review).toBeEnabled();
+	await review.click();
+	await expect(page.getByText("Saved suite review passed.", { exact: true })).toBeVisible();
+	expect(reviewRequests).toEqual(Array(2).fill({ snapshot_id: "tests-new", base_project_revision: revision }));
+	await page.reload();
+	await expect(review).toHaveCount(0);
+	await expect(page.getByText("Export blocked", { exact: true })).toHaveCount(0);
+	await expect(page.getByRole("button", { name: /TC-GOOD Preserved concrete test/ })).toBeVisible();
 });

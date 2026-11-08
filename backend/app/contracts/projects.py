@@ -139,6 +139,12 @@ class QaProjectUseCaseGenerationInput(BaseModel):
     base_project_revision: int = Field(ge=0)
 
 
+class QaProjectTestCaseReviewInput(BaseModel):
+    model_config = {"extra": "forbid"}
+    snapshot_id: str = Field(min_length=1, max_length=160)
+    base_project_revision: int = Field(ge=0)
+
+
 class QaProjectUseCaseSnapshotInput(BaseModel):
     requirement_analysis: List[RequirementAnalysis] = Field(default_factory=list)
     coverage_plan: List[RequirementCoveragePlan] = Field(default_factory=list)

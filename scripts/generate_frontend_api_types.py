@@ -70,6 +70,9 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "projectImpactUpdateApply", "post", "/projects/{project_id}/impact-update/apply", "ProjectImpactUpdateApplyRequest", "ProjectImpactUpdateApplyResponse"
     ),
     SelectedOperation(
+        "projectTestCasesReview", "post", "/projects/{project_id}/test-cases/review", "ProjectTestCasesReviewRequest", "ProjectTestCasesReviewResponse"
+    ),
+    SelectedOperation(
         "projectUseCasesGenerate", "post", "/projects/{project_id}/use-cases/generate", "ProjectUseCasesGenerateRequest", "ProjectUseCasesGenerateResponse"
     ),
     SelectedOperation("projectUseCasesSave", "post", "/projects/{project_id}/use-cases", "ProjectUseCasesSaveRequest", "ProjectUseCasesSaveResponse"),

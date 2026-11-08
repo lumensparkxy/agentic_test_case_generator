@@ -248,6 +248,62 @@ test.describe("Isolated browser workbench", () => {
 					}
 				}
 			});
+
+			await test.step("Review an exact saved suite after applying a keep recommendation", async () => {
+				const current = await fixture.read();
+				const analyzed = await fixture.checked("POST", `${fixture.prefix}/impact-analysis`, {
+					base_project_revision: current.current_revision,
+				});
+				const impact = analyzed.current_snapshots.impact_analysis;
+				const keep = impact.payload.recommendations.filter((item) => item.action === "keep");
+				expect(keep.length).toBeGreaterThan(0);
+				const updated = await fixture.checked("POST", `${fixture.prefix}/impact-update/apply`, {
+					analysis_snapshot_id: impact.snapshot_id,
+					base_project_revision: analyzed.current_revision,
+					accepted_recommendation_ids: keep.map((item) => item.recommendation_id),
+				});
+				const draft = updated.current_snapshots.test_cases;
+				expect(draft).toMatchObject({ approved: false, payload: { substantive_assessment: { status: "unknown" } } });
+				expect(draft.payload.test_cases).toEqual(suite.payload.test_cases);
+				const previewSaved = (project) =>
+					fixture.checked("POST", "/automation/execution/preview", {
+						project_id: project.project_id,
+						base_project_revision: project.current_revision,
+						test_cases: project.current_snapshots.test_cases.payload.test_cases,
+						target_base_url: target,
+						target_environment: "synthetic-post-change-review",
+					});
+				const before = await previewSaved(updated);
+				expect(before.readiness).toMatchObject({ run_allowed: false, source_snapshot_id: draft.snapshot_id });
+				expect(before.readiness.blockers.map((item) => item.code)).toContain("unapproved_test_cases");
+				const pending = await fixture.read();
+				await page.goto(`${fixture.prefix}/test-cases`);
+				await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
+				const response = await uiResponse(
+					page,
+					"/test-cases/review",
+					() => page.getByRole("button", { name: "Review saved suite", exact: true }).click(),
+					{ timeout: 210_000 }
+				);
+				const reviewed = await response.json();
+				const saved = reviewed.current_snapshots.test_cases;
+				await fixture.save("saved-suite-review", { draft, reviewed: saved, before: before.readiness });
+				expect(saved.payload.test_cases).toEqual(draft.payload.test_cases);
+				expect(saved).toMatchObject({ source_snapshot_id: draft.snapshot_id, approved: true, operation: "test_cases.review" });
+				expect(reviewed.execution_runs).toEqual(current.execution_runs);
+				const replay = await fixture.checked("POST", `${fixture.prefix}/test-cases/review`, {
+					snapshot_id: draft.snapshot_id,
+					base_project_revision: pending.current_revision,
+				});
+				expect(replay.current_snapshots.test_cases.snapshot_id).toBe(saved.snapshot_id);
+				await page.reload();
+				await expect(page.getByRole("button", { name: "Review saved suite", exact: true })).toHaveCount(0);
+				await page.goto(`${fixture.prefix}/reports`);
+				await expect(page.getByText("Approved for export", { exact: true })).toBeVisible();
+				const after = await previewSaved(reviewed);
+				await fixture.save("saved-suite-execution-admission", { before: before.readiness, after: after.readiness });
+				expect(after.readiness).toMatchObject({ run_allowed: true, source_snapshot_id: saved.snapshot_id, blockers: [] });
+			});
 		} finally {
 			await fs.rm(faultMarker, { force: true });
 			await fixture.close();

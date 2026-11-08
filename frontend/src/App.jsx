@@ -124,6 +124,8 @@ const PROJECT_API_PATHS = Object.freeze({
 	orchestratorStatus: (projectId) =>
 		API_CONTRACT_ENDPOINTS.projectOrchestratorStatus.path.replace("{project_id}", encodeURIComponent(projectId)),
 	impactAnalysis: (projectId) => `/projects/${projectId}/impact-analysis`,
+	savedSuiteReview: (projectId) =>
+		API_CONTRACT_ENDPOINTS.projectTestCasesReview.path.replace("{project_id}", encodeURIComponent(projectId)),
 	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
 
@@ -355,6 +357,8 @@ export default function App() {
 	} = useTestCaseWorkflowState();
 	const [impactAnalysis, setImpactAnalysis] = useState(null);
 	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
+	const [savedSuiteReview, setSavedSuiteReview] = useState(null);
+	const savedSuiteReviewRequests = useRef(new Set());
 	const [changedTestCaseIds, setChangedTestCaseIds] = useState(null);
 	const [exportMessage, setExportMessage] = useState("");
 	const [exportDraftRequiredFor, setExportDraftRequiredFor] = useState(null);
@@ -700,6 +704,21 @@ export default function App() {
 	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount || projectSnapshots.test_cases);
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
+	const savedSuite = projectSnapshots.test_cases;
+	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
+	const savedSuiteReviewPending =
+		persistedTestCaseCount > 0 &&
+		["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation) &&
+		savedSuite?.payload?.substantive_assessment?.status === "unknown";
+	const savedSuiteInputsReady =
+		currentProject?.status === "active" &&
+		hasApprovedGenerationScope(currentProject) &&
+		useCasesHumanApproved &&
+		(!testCaseStageState.stale || savedSuite?.operation === "quality.feedback.apply");
+	const savedSuiteReviewState = savedSuiteReview?.key === savedSuiteReviewKey ? savedSuiteReview : null;
+	const savedSuiteReviewed = savedSuite?.operation === "test_cases.review" && !testCaseStageState.stale;
+	const savedSuiteReviewDisabled =
+		!savedSuiteInputsReady || authActionDisabled || isGenerating || isApplyingImpactUpdate || isAnalyzingImpact || isRunningExecution;
 	const testCaseFindings = improvementFindings(testCaseReview, substantiveAssessment);
 	const testCasesNeedSetup =
 		testCaseReview?.approved === false &&
@@ -3577,6 +3596,34 @@ export default function App() {
 		);
 	};
 
+	const reviewSavedSuite = async () => {
+		if (!savedSuiteReviewPending || savedSuiteReviewDisabled || savedSuiteReviewRequests.current.has(savedSuiteReviewKey)) return;
+		const scope = captureProjectOperationScope();
+		if (scope?.projectId !== currentProjectId) return;
+		savedSuiteReviewRequests.current.add(savedSuiteReviewKey);
+		setSavedSuiteReview({ key: savedSuiteReviewKey, busy: true });
+		try {
+			const response = await apiRequest(PROJECT_API_PATHS.savedSuiteReview(scope.projectId), {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
+				body: JSON.stringify({ snapshot_id: savedSuite.snapshot_id, base_project_revision: currentProjectRevision }),
+			});
+			if (!response.ok) throw new Error(await parseApiError(response, "Saved suite review failed"));
+			const project = await response.json();
+			if (!isProjectOperationCurrent(scope)) return;
+			if (project?.project_id !== scope.projectId || !isLatestProjectRevision(project.project_id, project.current_revision)) return;
+			recordProjectRevision(project.project_id, project.current_revision);
+			setCurrentProject(project);
+			hydrateProjectWorkflow(project);
+			void loadProjectOrchestrator(project.project_id, { silent: true, operationScope: scope });
+		} catch (error) {
+			if (isProjectOperationCurrent(scope)) setSavedSuiteReview({ key: savedSuiteReviewKey, busy: false, error: error.message });
+		} finally {
+			savedSuiteReviewRequests.current.delete(savedSuiteReviewKey);
+			setSavedSuiteReview((current) => (current?.key === savedSuiteReviewKey && current.busy ? null : current));
+		}
+	};
+
 	const handleOrchestratorAction = async (recommendation) => {
 		const action = recommendation?.action;
 		if (!recommendation?.enabled) {
@@ -3839,6 +3886,9 @@ export default function App() {
 					recommendations={recommendations}
 					analysisDisabled={isAnalyzingImpact || testCaseActionDisabled}
 					approvalRequired={impactApplyBlockedByApproval}
+					reviewApproved={
+						savedSuiteReviewed && savedSuite.approved && savedSuite.source_snapshot_id === impactApplication.operation?.result_snapshot_id
+					}
 					disabled={!canApplyImpactUpdate || testCaseActionDisabled}
 					onApply={applyImpactUpdate}
 					onCheck={impactApplication.checkStatus}
@@ -5247,6 +5297,30 @@ export default function App() {
 												taskCount={generationTasks.length}
 												onReview={selectWorkflowTab}
 											/>
+											{savedSuiteReviewPending && (
+												<div className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}>
+													<div role="status">
+														<strong>{savedSuiteReviewState?.busy ? "Reviewing saved test cases…" : "Saved suite needs review"}</strong>
+														<p>
+															{savedSuiteInputsReady
+																? "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
+																: "Review current Requirements and Use Cases or resolve upstream changes first."}
+														</p>
+													</div>
+													{savedSuiteReviewState?.error && <p role="alert">{savedSuiteReviewState.error}</p>}
+													<Button onClick={reviewSavedSuite} disabled={savedSuiteReviewDisabled || savedSuiteReviewState?.busy}>
+														Review saved suite
+													</Button>
+												</div>
+											)}
+											{savedSuiteReviewed && (
+												<div className={`generation-gate-card ${savedSuite.approved ? "ready" : "blocked"}`} role="status">
+													<div>
+														<strong>{savedSuite.approved ? "Saved suite review passed." : "Saved suite review needs attention."}</strong>
+														<p>{savedSuite.payload?.review?.summary}</p>
+													</div>
+												</div>
+											)}
 											{upstreamChangedForImpact && (
 												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
 													<div>

@@ -183,6 +183,13 @@ def _fake_batch_run(statuses_by_case_id: dict[str, str], *, returncode: int = 0)
 
 
 class ExecutionServiceTests(unittest.TestCase):
+    def test_execution_preview_excludes_deprecated_cases_before_the_limit(self) -> None:
+        deprecated = _browser_case("TC-OLD").model_copy(update={"status": "Deprecated"})
+        active = _browser_case("TC-ACTIVE")
+        preview = preview_execution([deprecated, active], target_base_url="https://example.test", settings=ExecutionSettings(max_cases_per_request=1))
+        self.assertEqual([candidate.source_test_case_id for candidate in preview.executable], [active.id])
+        self.assertEqual(preview.warnings, [])
+
     def test_local_runner_exposes_runtime_node_modules_to_generated_specs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime = Path(temp_dir) / "runtime"

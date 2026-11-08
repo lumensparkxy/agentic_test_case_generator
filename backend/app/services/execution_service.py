@@ -246,7 +246,7 @@ def preview_execution(
     settings: ExecutionSettings | None = None,
 ) -> ExecutionPreviewResponse:
     settings = settings or get_execution_settings()
-    cases = list(test_cases)
+    cases = [test_case for test_case in test_cases if test_case.status != "Deprecated"]
     warnings: list[str] = []
     if len(cases) > settings.max_cases_per_request:
         warnings.append(f"Only the first {settings.max_cases_per_request} test cases were reviewed for execution.")

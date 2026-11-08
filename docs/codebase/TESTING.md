@@ -622,6 +622,14 @@ not prove the entire source-change path against live generation. Resume that
 live path after the upstream quality gate is resolved; do not bypass the gate
 or substitute mocked output to make this scenario green.
 
+After a targeted update, use **Review saved suite** in Test Cases to run the
+structural and independent review against the current snapshot. A prerequisite
+correction first requires approval of the current Use Cases. The review creates
+a successor snapshot with the same cases and artifact versions. The original
+suite and run evidence remain available. Deprecated cases stay in history and
+are excluded from execution preview. Stale or unavailable review requests leave
+the existing suite in place.
+
 ### Browser fault-detection benchmark
 
 With the local execution runtime and Chromium installed, run the authored

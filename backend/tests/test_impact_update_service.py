@@ -17,6 +17,7 @@ from app.models import AuthUser, TestCase, TestStep
 from copy import deepcopy
 from fastapi import HTTPException
 from app.services import impact_update_service as service
+from app.services import test_case_suite_review as suite_review
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
 from app.services.orchestrator_service import get_project_orchestrator_status
@@ -631,6 +632,158 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         rec = next(r for r in analyzed.current_snapshots["impact_analysis"].payload["recommendations"] if r["recommendation_id"].startswith("repair-"))
         self.assertEqual(rec["action"], "add")
         self.assertIsNone(rec.get("test_case_id"))
+
+    def _suite_pending_review(self, *, pending=()):
+        project = self._seed_project(omit={"REQ-005"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="impact")
+        updated = self._apply(analyzed)
+        state = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]
+        state["metadata"]["latest_human_review"] = {"snapshot_id": state["current_snapshot_id"], "decision": "approve"}
+        current = updated.current_snapshots["test_cases"]
+        path = f"qa_projects/{updated.project_id}/snapshots/{current.snapshot_id}"
+        self.store[path]["payload"]["generation_tasks"] = list(pending)
+        for case in self.store[path]["payload"]["test_cases"]:
+            case["preconditions"] = "Open the provisioned fixture."
+            case["expected_result"] = "The recorded result is displayed."
+        return get_project(updated.project_id, actor=self.actor), path
+
+    def _review_saved_suite(self, project, snapshot_id=None):
+        return suite_review.review_saved_test_cases(
+            project_id=project.project_id,
+            snapshot_id=snapshot_id or project.current_snapshots["test_cases"].snapshot_id,
+            base_project_revision=project.current_revision,
+            actor=self.actor,
+            request_id="review-test",
+        )
+
+    def test_saved_suite_review_preserves_exact_cases_and_can_reopen_approval(self):
+        project, path = self._suite_pending_review()
+        saved = deepcopy(self.store[path])
+        self.assertTrue(any(case["status"] == "Deprecated" for case in saved["payload"]["test_cases"]))
+        artifacts = {key: deepcopy(value) for key, value in self.store.items() if key.startswith("test_case_sets/")}
+        assessment = {"status": "assessed_complete", "design_status": "assessed_complete", "input_hash": "exact-test-review"}
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value=assessment) as critic,
+        ):
+            updated = self._review_saved_suite(project)
+            replay = self._review_saved_suite(project)
+        self.assertEqual(replay.current_revision, updated.current_revision)
+        self.assertEqual(critic.call_count, 1)
+        tested_cases, reviewed_requirements, _ = critic.call_args.args
+        self.assertEqual({case["id"] for case in tested_cases}, {case["id"] for case in saved["payload"]["test_cases"] if case["status"] != "Deprecated"})
+        self.assertNotIn("REQ-005", {requirement.id for requirement in reviewed_requirements})
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertTrue(snapshot.approved)
+        self.assertTrue(snapshot.payload["review"]["approved"])
+        self.assertEqual(snapshot.source_snapshot_id, saved["snapshot_id"])
+        self.assertEqual(snapshot.payload["test_cases"], saved["payload"]["test_cases"])
+        self.assertEqual(snapshot.metadata["source_use_case_snapshot_id"], updated.current_snapshots["use_cases"].snapshot_id)
+        self.assertEqual(self.store[path], saved)
+        self.assertEqual({key: value for key, value in self.store.items() if key.startswith("test_case_sets/")}, artifacts)
+
+    def test_saved_suite_review_keeps_required_work_and_independent_findings(self):
+        task = {"requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-01"], "reason": "Unfinished generation work"}
+        project, _ = self._suite_pending_review(pending=[task])
+        assessment = {
+            "status": "incomplete",
+            "design_status": "incomplete",
+            "reason": "Independent review found missing saved-state coverage.",
+            "obligations": [{"requirement_id": "REQ-002", "status": "unmet", "obligation": "Verify saved value", "reason": "No result was checked"}],
+        }
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value=assessment),
+        ):
+            updated = self._review_saved_suite(project)
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertFalse(snapshot.approved)
+        self.assertEqual(snapshot.payload["generation_tasks"][0], task)
+        self.assertIn("Verify saved value", snapshot.payload["generation_tasks"][1]["reason"])
+        self.assertFalse(updated.stage_state["test_cases"].approved)
+
+    def test_saved_suite_review_rejects_stale_and_unavailable_results_without_publishing(self):
+        project, path = self._suite_pending_review()
+        saved = deepcopy(self.store[path])
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value={"status": "unknown"}) as critic,
+        ):
+            with self.assertRaises(HTTPException) as wrong:
+                self._review_saved_suite(project, "older-suite")
+            self.assertEqual(wrong.exception.status_code, 409)
+            critic.assert_not_called()
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+
+            def concurrent_review(*args, **kwargs):
+                update_project(
+                    project_id=project.project_id, actor=self.actor, request_id="other", name="Another revision", base_project_revision=project.current_revision
+                )
+                return {"status": "assessed_complete"}
+
+            critic.side_effect = concurrent_review
+            with self.assertRaises(ProjectConflictError):
+                self._review_saved_suite(project)
+        self.assertEqual(self.store[path], saved)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).current_snapshots["test_cases"].snapshot_id, saved["snapshot_id"])
+
+    def test_corrected_suite_can_be_reviewed_after_current_use_cases_are_approved(self):
+        project, _ = self._suite_pending_review()
+        context = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="context",
+            payload={"notes": "The test fixture has been provisioned."},
+            operation="quality.feedback.apply",
+            actor=self.actor,
+            request_id="correction",
+        )
+        corrected = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload=project.current_snapshots["test_cases"].payload,
+            operation="quality.feedback.apply",
+            actor=self.actor,
+            request_id="correction",
+            metadata={"source_context_snapshot_id": context.snapshot_id},
+        )
+        with patch.object(suite_review, "assess_delivered_suite") as critic:
+            with self.assertRaises(HTTPException) as upstream:
+                self._review_saved_suite(get_project(project.project_id, actor=self.actor))
+            self.assertEqual(upstream.exception.status_code, 409)
+            critic.assert_not_called()
+        plan = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="use_cases",
+            payload=project.current_snapshots["use_cases"].payload,
+            operation="use_cases.generate",
+            actor=self.actor,
+            request_id="new-plan",
+            approved=True,
+        )
+        state = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]
+        state["metadata"]["latest_human_review"] = {"snapshot_id": plan.snapshot_id, "decision": "approve"}
+        pending = get_project(project.project_id, actor=self.actor)
+        self.assertTrue(pending.stage_state["test_cases"].stale)
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value={"status": "assessed_complete"}) as critic,
+        ):
+            updated = self._review_saved_suite(pending)
+        self.assertEqual(critic.call_args.args[2].notes, "The test fixture has been provisioned.")
+        self.assertTrue(updated.stage_state["test_cases"].approved)
+        self.assertFalse(updated.stage_state["test_cases"].stale)
+        self.assertEqual(updated.current_snapshots["test_cases"].payload["test_cases"], corrected.payload["test_cases"])
 
     def test_owner_archived_unapproved_and_stale_inputs_stop_before_generation(self):
         project = self._seed_project(modified={"REQ-003"})

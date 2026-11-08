@@ -23,6 +23,7 @@ export interface ApiContractOperations {
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
+	projectTestCasesReview: ApiOperation<ProjectTestCasesReviewRequest, ProjectTestCasesReviewResponse, "POST", "/projects/{project_id}/test-cases/review">;
 	projectUseCasesGenerate: ApiOperation<ProjectUseCasesGenerateRequest, ProjectUseCasesGenerateResponse, "POST", "/projects/{project_id}/use-cases/generate">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
@@ -84,6 +85,8 @@ export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
 export type ProjectImpactAnalysisResponse = QaProjectDetail;
 export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
 export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
+export type ProjectTestCasesReviewRequest = QaProjectTestCaseReviewInput;
+export type ProjectTestCasesReviewResponse = QaProjectDetail;
 export type ProjectUseCasesGenerateRequest = QaProjectUseCaseGenerationInput;
 export type ProjectUseCasesGenerateResponse = QaProjectDetail;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
@@ -821,6 +824,11 @@ export interface QaProjectSummary {
 	stage_state?: Record<string, QaProjectStageState>;
 	status?: "active" | "archived";
 	updated_at: string;
+}
+
+export interface QaProjectTestCaseReviewInput {
+	base_project_revision: number;
+	snapshot_id: string;
 }
 
 export interface QaProjectTimelineEvent {
