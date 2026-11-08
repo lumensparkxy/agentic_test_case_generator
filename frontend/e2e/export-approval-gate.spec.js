@@ -240,7 +240,7 @@ test.describe("Export approval gate", () => {
 
 		await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(1);
 
-		await page.getByRole("button", { name: /^Next$/ }).click();
+		await page.getByRole("button", { name: "Continue to Context", exact: true }).click();
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await page.getByRole("button", { name: /^Next$/ }).click();
 		await expect(page).toHaveURL(testCasesPath);

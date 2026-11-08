@@ -33,7 +33,7 @@ export function GuidanceAvailability({ data, stage }) {
 	);
 }
 
-export default function GenerationGuidance({ request, projectId, stage }) {
+export default function GenerationGuidance({ request, projectId, stage, compact = false }) {
 	const knowledge = useKnowledge(request, projectId);
 	const { load } = knowledge;
 	useEffect(() => {
@@ -43,7 +43,11 @@ export default function GenerationGuidance({ request, projectId, stage }) {
 	// A failed or pending refresh must not present a cached flag as current.
 	const data = knowledge.error || knowledge.loading ? null : knowledge.data;
 	return (
-		<section className="generation-guidance" aria-label="Guidance for next generation" aria-busy={knowledge.loading || undefined}>
+		<section
+			className={`generation-guidance${compact ? " compact-guidance" : ""}`}
+			aria-label="Guidance for next generation"
+			aria-busy={knowledge.loading || undefined}
+		>
 			{!knowledge.loading &&
 				["skills", "memory"].some((kind) =>
 					["Unavailable", "Disabled by configuration"].includes(guidanceAvailability(data, stage, kind).label)

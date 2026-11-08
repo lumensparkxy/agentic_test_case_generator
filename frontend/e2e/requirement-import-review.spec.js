@@ -36,8 +36,12 @@ const incoming = ["The agricultural portal displays PDF resources.", "The reader
 	})
 );
 
-async function setup(page, { candidates = incoming, revision = 7, failedApply = false, pendingOnLoad = false } = {}) {
+async function setup(
+	page,
+	{ candidates = incoming, revision = 7, failedApply = false, pendingOnLoad = false, emptyBaseline = false, sourceName = "TX-6" } = {}
+) {
 	await seedAuthenticatedSession(page);
+	const baseline = emptyBaseline ? [] : originals;
 	const summary = workspaceProjectFixture({ project_id: ID, name: "Audit project", project_revision: revision });
 	let project = projectDetailFixture(summary, {
 		current_revision: revision,
@@ -46,7 +50,7 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 			test_cases: { version: 1, approved: true, current_snapshot_id: "tests", stale: false },
 		},
 		current_snapshots: {
-			requirements: { snapshot_id: "original", payload: { requirements: structuredClone(originals) } },
+			requirements: { snapshot_id: "original", payload: { requirements: structuredClone(baseline) } },
 			test_cases: {
 				snapshot_id: "tests",
 				payload: { test_cases: [{ id: "TC-001", title: "Existing task test", linked_requirement_ids: ["REQ-001"], steps: [] }] },
@@ -57,11 +61,11 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 		import_id: "import-1",
 		project_id: ID,
 		base_project_revision: 7,
-		source_name: "TX-6",
+		source_name: sourceName,
 		operation: "requirements.import.jira",
 		status: "pending",
 		created_at: when,
-		current_requirements: structuredClone(originals),
+		current_requirements: structuredClone(baseline),
 		candidates: structuredClone(candidates),
 		suggested_update_scope: [],
 		counts: {},
@@ -118,7 +122,7 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 		applies.push(payload);
 		if (failedApply && applies.length === 1)
 			return route.fulfill({ status: 503, json: { detail: "Temporary apply failure. Retry the same reviewed changes." } });
-		let rows = structuredClone(originals);
+		let rows = structuredClone(baseline);
 		const targeted = new Set();
 		let number = 9;
 		const counts = { added: 0, updated: 0, retired: 0 };
@@ -182,13 +186,22 @@ async function setup(page, { candidates = incoming, revision = 7, failedApply = 
 }
 
 async function stage(page) {
+	const open = page.getByRole("button", { name: "Import requirements", exact: true });
+	if (await open.isVisible()) await open.click();
 	await page
 		.locator('input[type="file"]')
 		.setInputFiles({ name: "new.md", mimeType: "text/markdown", buffer: Buffer.from("Incoming requirements") });
 	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
 	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+	await expect(page.getByRole("heading", { name: "Upload Requirements", exact: true })).toBeHidden();
 }
 const workbench = (page) => page.getByRole("region", { name: "Project requirements table", exact: true });
+const openRequirement = (page, id) =>
+	workbench(page)
+		.getByRole("button", { name: new RegExp(`^Review ${id}:`) })
+		.click();
+const openIncoming = (page, text = incoming[0].requirement.text) =>
+	page.getByRole("button", { name: `Review incoming requirement: ${text}`, exact: true }).click();
 
 test("comparison displays verified original IDs and quotes before applying", async ({ page }) => {
 	await setup(page, {
@@ -213,20 +226,26 @@ test("comparison displays verified original IDs and quotes before applying", asy
 		],
 	});
 	await stage(page);
+	await openIncoming(page);
 	await page.getByText("Source evidence and suggested matches", { exact: true }).click();
 	await expect(page.getByText("Original IDs: ROOM-101", { exact: true })).toBeVisible();
 	await expect(page.locator("blockquote").filter({ hasText: "Attendees must be a whole number from 1 to 8." })).toBeVisible();
-	await expect(workbench(page).getByRole("row")).toHaveCount(9);
+	await expect(workbench(page)).toBeHidden();
 });
 
 test("stages eight plus two, applies ten, and retains IDs and approvals after reload", { tag: "@p1" }, async ({ page }) => {
 	const state = await setup(page);
 	await stage(page);
-	await expect(workbench(page).getByRole("row")).toHaveCount(9);
+	await expect(workbench(page)).toBeHidden();
+	expect(state.getProject().current_snapshots.requirements.payload.requirements).toHaveLength(8);
 	await expect(page.getByText("2 added · 0 updated · 0 retired · 10 active requirements", { exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Apply reviewed changes" }).click();
 	await expect(workbench(page).getByRole("row")).toHaveCount(11);
+	await expect(page.getByRole("heading", { name: "Requirement Review Workbench" })).toBeFocused();
+	await expect(page.getByRole("button", { name: "Import requirements", exact: true })).toHaveAttribute("aria-expanded", "false");
+	await openRequirement(page, "REQ-001");
 	await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Approved");
+	await openRequirement(page, "REQ-009");
 	await expect(page.getByLabel("Review status for REQ-009", { exact: true })).toHaveValue("Needs Review");
 	expect(state.applies[0].update_scope).toEqual([]);
 	expect(state.getProject().stage_state.test_cases.stale).toBeTruthy();
@@ -252,11 +271,13 @@ test("cross-source update requires resolving ambiguity and retains requirement I
 	await setup(page, { candidates });
 	await stage(page);
 	await expect(page.getByRole("button", { name: "Apply reviewed changes" })).toBeDisabled();
+	await openIncoming(page);
 	await page.getByLabel("Decision for incoming-1").selectOption("original-1");
 	await expect(page.getByText("0 added · 1 updated · 0 retired · 8 active requirements", { exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Apply reviewed changes" }).click();
-	await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Needs Review");
 	await expect(workbench(page).getByRole("row")).toHaveCount(9);
+	await openRequirement(page, "REQ-001");
+	await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Needs Review");
 });
 
 test("retirement is confined to selected scope and requires confirming the list", async ({ page }) => {
@@ -271,6 +292,7 @@ test("retirement is confined to selected scope and requires confirming the list"
 	await page.getByRole("checkbox", { name: /Retire these 2 requirements/ }).check();
 	await page.getByRole("button", { name: "Apply reviewed changes" }).click();
 	await expect(page.getByText("Retired requirements (2)", { exact: true })).toBeVisible();
+	await openRequirement(page, "REQ-003");
 	await expect(page.getByLabel("Review status for REQ-003", { exact: true })).toHaveValue("Approved");
 	expect(state.applies[0].update_scope).toEqual(["original-1", "original-2"]);
 });
@@ -281,6 +303,7 @@ test("cancel preserves baseline and removes pending import", async ({ page }) =>
 	await page.getByRole("button", { name: "Cancel import" }).click();
 	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).not.toBeVisible();
 	await expect(workbench(page).getByRole("row")).toHaveCount(9);
+	await expect(page.getByRole("button", { name: "Import requirements", exact: true })).toBeFocused();
 	expect(state.applies).toHaveLength(0);
 	await page.reload();
 	await expect(page.getByRole("button", { name: /^Review import:/ })).toHaveCount(0);
@@ -289,11 +312,14 @@ test("cancel preserves baseline and removes pending import", async ({ page }) =>
 test("failed apply keeps comparison and reuses retry identity", async ({ page }) => {
 	const state = await setup(page, { failedApply: true });
 	await stage(page);
+	await openIncoming(page);
+	await page.getByLabel("Decision for incoming-1").selectOption("skip");
 	await page.getByRole("button", { name: "Apply reviewed changes" }).click();
 	await expect(page.getByRole("alert")).toContainText("Temporary apply failure");
-	await expect(workbench(page).getByRole("row")).toHaveCount(9);
+	await expect(page.getByLabel("Decision for incoming-1")).toHaveValue("skip");
+	expect(state.getProject().current_snapshots.requirements.payload.requirements).toHaveLength(8);
 	await page.getByRole("button", { name: "Apply reviewed changes" }).click();
-	await expect(workbench(page).getByRole("row")).toHaveCount(11);
+	await expect(workbench(page).getByRole("row")).toHaveCount(10);
 	expect(state.applies[0].idempotency_key).toEqual(state.applies[1].idempotency_key);
 });
 
@@ -312,7 +338,7 @@ test("renewed comparison refreshes the baseline revision after a conflict", asyn
 		return route.fulfill({ json: { ...state.preview, import_id: "import-2", base_project_revision: 8 } });
 	});
 	await page.getByRole("button", { name: "Compare again" }).click();
-	await expect(page.getByText("TX-6 · Comparing with project revision 8", { exact: true })).toBeVisible();
+	await expect(page.getByText("TX-6 · Revision 8", { exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Apply reviewed changes" })).toBeEnabled();
 	await expect(page.getByText("Project changed after this comparison. Compare again before applying.", { exact: true })).toHaveCount(0);
 });
@@ -327,4 +353,85 @@ test("comparison works on narrow screens and passes focused accessibility checks
 	await page.getByLabel("Filter import changes").selectOption("new");
 	const results = await new AxeBuilder({ page }).include(".requirement-import-review").analyze();
 	expect(results.violations).toEqual([]);
+});
+
+test("four Low Stock changes and Apply fit on a laptop", { tag: "@p1" }, async ({ page }) => {
+	await page.setViewportSize({ width: 1366, height: 768 });
+	const texts = [
+		"The system shall display a Low stock badge on the inventory dashboard for any item whose available quantity is strictly below the reorder threshold of 10 units.",
+		"The system shall not display a Low stock badge on the inventory dashboard when an item's available quantity is equal to 10 units.",
+		"The system shall filter the inventory dashboard to show only low stock items and hide items with available quantity at or above the threshold when the user selects the Low stock filter.",
+		"Clearing the Low stock filter shall restore all inventory items.",
+	];
+	await setup(page, {
+		emptyBaseline: true,
+		sourceName: "pasted-requirements.md",
+		candidates: texts.map((text, index) => ({
+			...incoming[0],
+			candidate_id: `stock-${index + 1}`,
+			requirement: { id: `STOCK-${index + 1}`, text },
+		})),
+	});
+	await expect(page.getByRole("button", { name: "Hide import setup" })).toHaveAttribute("aria-expanded", "true");
+	await stage(page);
+	const rows = page.locator(".import-candidate-row");
+	await expect(rows).toHaveCount(4);
+	await expect.poll(async () => (await rows.first().boundingBox()).y).toBeLessThanOrEqual(240);
+	for (const row of await rows.all()) await expect(row).toBeInViewport({ ratio: 1 });
+	const apply = page.getByRole("button", { name: "Apply reviewed changes" });
+	await expect(apply).toBeInViewport({ ratio: 1 });
+	await expect(apply).toBeEnabled();
+	await page.getByRole("button", { name: "Cancel import" }).click();
+	await expect(page.getByRole("button", { name: "Hide import setup" })).toBeFocused();
+	await expect(page.getByRole("heading", { name: "Upload Requirements" })).toBeVisible();
+});
+
+test("a server-detected stale import requires a new comparison", async ({ page }) => {
+	const state = await setup(page);
+	await stage(page);
+	let attempts = 0;
+	await page.route(`**/projects/${ID}/requirement-imports/import-1/apply`, (route) => {
+		attempts++;
+		return route.fulfill({
+			status: 409,
+			json: { detail: { code: "stale_import", message: "Project changed. Compare the import again before applying." } },
+		});
+	});
+	const apply = page.getByRole("button", { name: "Apply reviewed changes" });
+	await apply.click();
+	await expect(page.getByRole("alert")).toContainText("Project changed");
+	await expect(apply).toBeDisabled();
+	expect(attempts).toBe(1);
+	await page.route(`**/projects/${ID}/requirement-imports/import-1/compare`, (route) => {
+		state.getProject().current_revision = 8;
+		return route.fulfill({ json: { ...state.preview, import_id: "import-2", base_project_revision: 8 } });
+	});
+	await page.getByRole("button", { name: "Compare again" }).click();
+	await expect(apply).toBeEnabled();
+});
+
+test("sticky import controls leave the keyboard-focused candidate visible", async ({ page }) => {
+	await page.setViewportSize({ width: 1366, height: 768 });
+	const candidates = Array.from({ length: 24 }, (_, index) => ({
+		...incoming[0],
+		candidate_id: `incoming-${index + 1}`,
+		requirement: { id: `STOCK-${index + 1}`, text: `Update the inventory threshold for location ${index + 1}.` },
+	}));
+	await setup(page, { candidates });
+	await stage(page);
+	const apply = page.getByRole("button", { name: "Apply reviewed changes" });
+	await expect(apply).toBeInViewport({ ratio: 1 });
+	const candidatesTable = page.getByRole("region", { name: "Incoming requirement changes" });
+	await candidatesTable.focus();
+	for (let index = 0; index < 17; index++) await page.keyboard.press("Tab");
+	const target = candidatesTable.getByRole("button").nth(16);
+	await expect(target).toBeFocused();
+	await expect(apply).toBeInViewport({ ratio: 1 });
+	const actions = page.locator(".import-apply-bar");
+	await expect
+		.poll(async () => {
+			const [row, bar] = await Promise.all([target.boundingBox(), actions.boundingBox()]);
+			return row.y + row.height <= bar.y;
+		})
+		.toBe(true);
 });

@@ -113,11 +113,13 @@ test.describe("Use Cases review workbench", () => {
 		await expect(main).toContainText(/current|fresh/i);
 
 		const table = main.getByRole("table");
-		await expect(table).toHaveCount(2);
-		await expect(table.getByRole("row")).toHaveCount(6);
+		await expect(table).toHaveCount(1);
+		await expect(table.getByRole("columnheader")).toHaveCount(4);
+		await expect(table.locator(".scenario-group-heading")).toHaveCount(2);
+		await expect(table.locator(".scenario-review-row")).toHaveCount(4);
 		const checkoutRow = table.getByRole("row").filter({ hasText: "REQ-101-SCN-01" });
 		await expect(checkoutRow).toContainText("Complete express checkout");
-		await expect(main.getByRole("table", { name: "REQ-101", exact: true })).toContainText(/declined saved card/i);
+		await expect(main.getByRole("table", { name: "Use case scenarios by requirement", exact: true })).toContainText(/declined saved card/i);
 		await expect(checkoutRow.locator("details")).toHaveCount(0);
 		const approvalRow = table.getByRole("row").filter({ hasText: "REQ-202-SCN-01" });
 		await expect(approvalRow).toContainText("Require supervisor approval");

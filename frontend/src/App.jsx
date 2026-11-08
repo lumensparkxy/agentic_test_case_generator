@@ -10,7 +10,7 @@ import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import GenerationGuidance from "./components/knowledge/GenerationGuidance";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
-import { Disclosure, Surface } from "./components/ui/surfaces";
+import { Badge, Disclosure, Surface } from "./components/ui/surfaces";
 import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from "./components/ui/controls";
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
@@ -261,6 +261,11 @@ export default function App() {
 	const projectOperationScopeRef = useRef({ projectId: "", userId: "", generation: 0 });
 	const projectOperationUserRef = useRef("");
 	const workflowMainRef = useRef(null);
+	const requirementImportControl = useRef(null);
+	const requirementReviewHeading = useRef(null);
+	const [requirementSetup, setRequirementSetup] = useState(null);
+	const [requirementFocus, setRequirementFocus] = useState(null);
+	const [requirementReviewRequest, setRequirementReviewRequest] = useState(null);
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
 	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
@@ -3964,12 +3969,41 @@ export default function App() {
 		if (destination) selectWorkflowTab(getLegacyTabForDestination(destination));
 	};
 	const goNext = () => moveProjectStep(1);
+	const requirementsRoute = route.destination === PROJECT_DESTINATIONS.REQUIREMENTS;
+	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
+	const compactReview = requirementsRoute || testReviewRoute;
+	const requirementSetupOpen =
+		!imports.preview && (requirementSetup?.projectId === navigationProjectId ? requirementSetup.open : requirements.length === 0);
+	const toggleRequirementSetup = () => setRequirementSetup({ projectId: navigationProjectId, open: !requirementSetupOpen });
+	const focusPendingRequirements = () => {
+		setRequirementSetup({ projectId: navigationProjectId, open: false });
+		setRequirementReviewRequest({ projectId: navigationProjectId });
+		requirementReviewHeading.current?.focus({ preventScroll: true });
+		requirementReviewHeading.current?.scrollIntoView({ block: "nearest" });
+	};
+	const reviewRequirementImport = async (action, payload) => {
+		const completed = await imports.mutate(action, payload);
+		if (!completed || action === "compare") return;
+		setRequirementSetup({ projectId: navigationProjectId, open: action === "cancel" && !requirements.length });
+		setRequirementFocus({ projectId: navigationProjectId, target: action === "apply" ? "review" : "import" });
+	};
+	useEffect(() => {
+		if (!requirementsRoute || imports.preview || requirementFocus?.projectId !== navigationProjectId) return;
+		const target = requirementFocus.target === "review" ? requirementReviewHeading.current : requirementImportControl.current;
+		target?.focus({ preventScroll: true });
+		target?.scrollIntoView({ block: "nearest" });
+		setRequirementFocus(null);
+	}, [imports.preview, requirementFocus, requirementsRoute, navigationProjectId]);
+
 	const goPrev = () => moveProjectStep(-1);
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
 	const activeProjectDestinationLabel = tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
 	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
 		destination: PROJECT_DESTINATIONS.TEST_CASES,
 	}).primaryAction;
+	const requirementReviewTask = requirementsRoute
+		? selectContextualTask(orchestratorStatus, { destination: PROJECT_DESTINATIONS.REQUIREMENTS }).primaryAction
+		: null;
 	const hasOrchestratorRecommendations = Boolean(Array.isArray(orchestratorStatus?.next_actions) && orchestratorStatus.next_actions.length);
 	const allowLegacyTestCaseMutations =
 		(upstreamChangedForImpact ||
@@ -4233,32 +4267,96 @@ export default function App() {
 							<main
 								id="main-content"
 								ref={workflowMainRef}
-								className={`workflow-main ${route.destination === "test-cases" ? "test-cases-page" : ""}`}
+								className={`workflow-main ${route.destination === "test-cases" ? "test-cases-page" : ""}${compactReview ? " compact-workbench" : ""}`}
 								aria-label={`Workflow workspace: ${activeProjectDestinationLabel}`}
 								tabIndex={-1}
 							>
 								<ProjectPageHeader
 									title={activeProjectDestinationLabel}
+									compact={compactReview}
 									project={currentProject}
 									navigate={navigate}
 									actions={
-										route.destination === "test-cases" ? (
-											<Button className="secondary" onClick={() => selectWorkflowTab(activeTab === 2 ? 3 : 2)}>
-												{activeTab === 2 ? "Generate and review" : "Template setup"}
-											</Button>
+										requirementsRoute && !imports.preview ? (
+											<div className="workbench-actions">
+												{imports.pending.length === 1 && (
+													<Button
+														variant="secondary"
+														size="compact"
+														aria-label={`Review import: ${imports.pending[0].source_name}`}
+														title={imports.pending[0].source_name}
+														onClick={() => imports.accept(imports.pending[0])}
+													>
+														Review import
+													</Button>
+												)}
+												{imports.pending.length > 1 && (
+													<Disclosure className="pending-import-actions">
+														<summary>Pending imports ({imports.pending.length})</summary>
+														{imports.pending.map((item) => (
+															<Button key={item.import_id} variant="secondary" size="compact" onClick={() => imports.accept(item)}>
+																Review import: {item.source_name}
+															</Button>
+														))}
+													</Disclosure>
+												)}
+												<Button
+													ref={requirementImportControl}
+													variant={requirements.length || requirementSetupOpen ? "secondary" : "primary"}
+													size="compact"
+													aria-expanded={requirementSetupOpen}
+													aria-controls="requirement-import-setup"
+													onClick={toggleRequirementSetup}
+												>
+													{requirementSetupOpen ? "Hide import setup" : "Import requirements"}
+												</Button>
+												{requirements.length > 0 &&
+													(reviewPendingRequirementCount > 0 ? (
+														<Button size="compact" onClick={focusPendingRequirements}>
+															Review pending requirements
+														</Button>
+													) : (
+														<Button size="compact" onClick={goNext}>
+															Continue to Context
+														</Button>
+													))}
+											</div>
+										) : route.destination === "test-cases" ? (
+											<div className="workbench-actions">
+												{testReviewRoute && testCases.length > 0 && exportGateLocked && (
+													<Badge className="workbench-status" tone="warning">
+														Export blocked
+													</Badge>
+												)}
+												<Button variant="secondary" size="compact" onClick={() => selectWorkflowTab(activeTab === 2 ? 3 : 2)}>
+													{activeTab === 2 ? "Generate and review" : "Template setup"}
+												</Button>
+												{testReviewRoute &&
+													testCases.length > 0 &&
+													!contextualTestCaseTask &&
+													!generationTasks.length &&
+													!upstreamChangedForImpact &&
+													hasApprovedGenerationScope(currentProject) &&
+													(!useCasesStageState.current_snapshot_id || useCasesHumanApproved) && (
+														<Button
+															size="compact"
+															onClick={() => {
+																if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
+																else openCaseResults(selectedTestCaseId);
+															}}
+														>
+															Review tests
+														</Button>
+													)}
+											</div>
 										) : null
 									}
 								/>
 
-								{["requirements", "test-cases"].includes(route.destination) && (
-									<ClarificationScopeNotice
-										project={currentProject}
-										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
-									/>
-								)}
 								{["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}
+										compact={compactReview}
 										project={currentProject}
 										request={apiRequest}
 										onUpdated={() => openProject(navigationProjectId, { silent: true })}
@@ -4270,22 +4368,34 @@ export default function App() {
 										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
 									/>
 								)}
-								{["requirements", "test-cases", "automation"].includes(route.destination) && (
-									<GenerationGuidance
-										key={`${knowledgeScope}:${route.destination}:${currentProjectRevision}`}
-										request={apiRequest}
-										projectId={navigationProjectId}
-										stage={route.destination.replaceAll("-", "_")}
-									/>
-								)}
+								{["requirements", "test-cases", "automation"].includes(route.destination) &&
+									!(requirementsRoute && (requirements.length || imports.preview)) &&
+									!(testReviewRoute && testCases.length) && (
+										<GenerationGuidance
+											key={`${knowledgeScope}:${route.destination}:${currentProjectRevision}`}
+											request={apiRequest}
+											projectId={navigationProjectId}
+											stage={route.destination.replaceAll("-", "_")}
+											compact={compactReview}
+										/>
+									)}
 
 								<OrchestratorCockpitPanel
 									currentProject={currentProject}
 									status={orchestratorStatus}
 									currentDestination={route.destination}
 									hasTestCases={hasExistingTestCaseBaseline}
-									hidden={route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2}
-									compact={route.destination === PROJECT_DESTINATIONS.TEST_CASES}
+									hidden={
+										(route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2) ||
+										(requirementsRoute && Boolean(imports.preview))
+									}
+									compact={compactReview}
+									hidePrimary={Boolean(
+										reviewPendingRequirementCount &&
+										requirementReviewTask?.action === "approve" &&
+										requirementReviewTask.enabled &&
+										!requirementReviewTask.blockers?.length
+									)}
 									isLoading={isLoadingOrchestrator}
 									error={orchestratorError}
 									authActionDisabled={authActionDisabled}
@@ -4297,7 +4407,7 @@ export default function App() {
 
 								<div className="tab-content">
 									{activeTab === 0 && (
-										<Surface as="section" className="panel">
+										<section className="panel requirement-workspace" id="requirement-import-setup" hidden={!requirementSetupOpen}>
 											<h2 className="panel-title">Upload Requirements</h2>
 											<p className="panel-description">
 												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
@@ -4676,33 +4786,32 @@ export default function App() {
 													</Disclosure>
 												</div>
 											)}
-
-											{!imports.preview && imports.error && <p role="alert">{imports.error}</p>}
-											{imports.message && <p role="status">{imports.message}</p>}
-											{!imports.preview && imports.pending.length > 0 && (
-												<div className="import-pending-list" aria-label="Pending imports">
-													{imports.pending.map((item) => (
-														<Button key={item.import_id} className="secondary" onClick={() => imports.accept(item)}>
-															Review import: {item.source_name}
-														</Button>
-													))}
-												</div>
-											)}
-											{imports.preview?.guidance && (
+										</section>
+									)}
+									{activeTab === 0 && imports.preview && (
+										<>
+											<RequirementImportReview
+												key={`${imports.preview.import_id}:${imports.preview.base_project_revision}`}
+												preview={imports.preview}
+												revision={currentProjectRevision}
+												busy={imports.busy}
+												error={imports.error}
+												stalePreview={imports.stalePreview}
+												onAction={reviewRequirementImport}
+											/>
+											{imports.preview.guidance && (
 												<GuidanceUsed manifest={imports.preview.guidance} request={apiRequest} projectId={currentProjectId} />
 											)}
-											{imports.preview && (
-												<RequirementImportReview
-													key={imports.preview.import_id}
-													preview={imports.preview}
-													revision={currentProjectRevision}
-													busy={imports.busy}
-													error={imports.error}
-													onAction={imports.mutate}
-												/>
-											)}
-
+										</>
+									)}
+									{activeTab === 0 && !imports.preview && (
+										<section className="panel requirement-workspace">
+											{imports.error && <p role="alert">{imports.error}</p>}
+											{imports.message && <p role="status">{imports.message}</p>}
 											<RequirementReviewWorkbench
+												key={navigationProjectId}
+												headingRef={requirementReviewHeading}
+												reviewRequest={requirementReviewRequest?.projectId === navigationProjectId ? requirementReviewRequest : null}
 												requirements={requirements}
 												approvedRequirementCount={approvedRequirementCount}
 												loadHistory={(uid) => imports.read(`/projects/${currentProjectId}/requirements/${uid}/history`)}
@@ -4956,8 +5065,8 @@ export default function App() {
 											{guidanceSummary("requirements")}
 											{suggestionSummary("requirements")}
 											{requirements.length > 0 && (
-												<div className="feedback-section">
-													<h3>Human Feedback</h3>
+												<Disclosure className="feedback-section">
+													<summary>Human Feedback</summary>
 													<p className="feedback-description">
 														Provide feedback on the extracted requirements. The AI will refine them based on your input.
 													</p>
@@ -4977,15 +5086,21 @@ export default function App() {
 															{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
 														</Button>
 													</div>
-												</div>
+												</Disclosure>
 											)}
+										</section>
+									)}
 
-											<div className="panel-nav">
-												<Button onClick={goNext} className="secondary">
-													Next
-												</Button>
-											</div>
-										</Surface>
+									{activeTab === 0 && (requirements.length > 0 || imports.preview) && (
+										<div className="workbench-support">
+											<GenerationGuidance
+												compact
+												key={`${knowledgeScope}:requirements:${currentProjectRevision}`}
+												request={apiRequest}
+												projectId={navigationProjectId}
+												stage="requirements"
+											/>
+										</div>
 									)}
 
 									{activeTab === 1 && (
@@ -5030,10 +5145,7 @@ export default function App() {
 
 									{activeTab === 3 && (
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
-											<h2 className="panel-title">Generate Test Cases</h2>
-											<p className="panel-description">
-												Generate structured test cases, or analyze impact against an existing suite when upstream inputs change.
-											</p>
+											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
 											<TestCaseReadiness
 												project={currentProject}
 												status={orchestratorStatus}
@@ -5084,38 +5196,35 @@ export default function App() {
 											) : null}
 
 											{generationTasks.length > 0 ? (
-												<section aria-label="Unfinished test generation" role="status">
-													<h3>{generationTasks.length} generation tasks need concrete tests</h3>
-													<p>
-														Concrete tests are retained. These coverage gaps need generation or prerequisite review before coverage is
-														complete.
-													</p>
-													<ul>
-														{generationTasks.map((task, index) => (
-															<li key={index}>
-																{(task.requirement_ids || []).join(", ")}: {task.reason}
-															</li>
-														))}
-													</ul>
+												<section className="compact-generation-tasks" aria-label="Unfinished test generation" role="status">
+													<h3>
+														{generationTasks.length} {generationTasks.length === 1 ? "generation task needs" : "generation tasks need"}{" "}
+														concrete tests
+													</h3>
 													<Button
 														onClick={analyzeImpact}
 														disabled={!canAnalyzeImpact || isAnalyzingImpact || isApplyingImpactUpdate || testCaseActionDisabled}
 													>
 														{isAnalyzingImpact ? "Analyzing repair work…" : "Plan targeted repair"}
 													</Button>
-													<p>Review and accept the resulting Add/Update recommendations, then apply them to generate concrete tests.</p>
+													<Disclosure>
+														<summary>Show unfinished generation tasks</summary>
+														<p>
+															Concrete tests are retained. These coverage gaps need generation or prerequisite review before coverage is
+															complete.
+														</p>
+														<ul>
+															{generationTasks.map((task, index) => (
+																<li key={index}>
+																	{(task.requirement_ids || []).join(", ")}: {task.reason}
+																</li>
+															))}
+														</ul>
+														<p>Review and accept the resulting Add/Update recommendations, then apply them to generate concrete tests.</p>
+													</Disclosure>
 												</section>
 											) : null}
 											{renderImpactAnalysisPanel()}
-
-											<p className="test-suite-summary">
-												{testCases.length} test cases · {approvedRequirementCount} approved requirements
-											</p>
-											<p className="test-export-status">
-												{exportGateLocked
-													? "Export is blocked until the quality gate is met or an explicit draft override is provided."
-													: "Export remains subject to the review and export controls."}
-											</p>
 
 											{hasGenerateResults ? (
 												<div className="generate-results-workspace">
@@ -5219,8 +5328,6 @@ export default function App() {
 
 														{activeGenerateResultTab === "test-cases" && (
 															<>
-																{guidanceSummary("test_cases")}
-																{suggestionSummary("test_cases")}
 																<GeneratedTestCasesView
 																	identity={currentUser?.sub}
 																	projectId={currentProjectId}
@@ -5240,6 +5347,10 @@ export default function App() {
 																	selectedId={selectedTestCaseId}
 																	setSelectedId={setSelectedTestCaseId}
 																/>
+																<div className="workbench-support">
+																	{guidanceSummary("test_cases")}
+																	{suggestionSummary("test_cases")}
+																</div>
 															</>
 														)}
 													</TabPanel>
@@ -5253,11 +5364,22 @@ export default function App() {
 												</Surface>
 											)}
 
+											{testCases.length > 0 && (
+												<div className="workbench-support">
+													<GenerationGuidance
+														compact
+														key={`${knowledgeScope}:test-cases:${currentProjectRevision}`}
+														request={apiRequest}
+														projectId={navigationProjectId}
+														stage="test_cases"
+													/>
+												</div>
+											)}
 											<div className="panel-nav">
 												<Button onClick={goPrev} className="secondary">
 													Back
 												</Button>
-												<Button onClick={goNext} disabled={testCases.length === 0}>
+												<Button variant="secondary" onClick={goNext} disabled={testCases.length === 0}>
 													Next
 												</Button>
 											</div>

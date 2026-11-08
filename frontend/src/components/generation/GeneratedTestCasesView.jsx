@@ -69,7 +69,7 @@ export default function GeneratedTestCasesView({
 			>
 				<div className="test-review-list">
 					<DraftRecoveryNotice draft={recovery} />
-					<h2>Generated Test Cases</h2>
+					<h2 className="sr-only">Generated Test Cases</h2>
 					{visibleChanges !== null && (
 						<div role="status">
 							<p>Showing changed tests</p>
@@ -84,19 +84,21 @@ export default function GeneratedTestCasesView({
 							</Button>
 						</div>
 					)}
-					<label htmlFor={searchId} className="sr-only">
-						Search test cases
-					</label>
-					<Input
-						id={searchId}
-						type="search"
-						placeholder="Search test cases"
-						value={query}
-						onChange={(event) => setQuery(event.target.value)}
-					/>
-					<ResultCount as="p" className="test-list-count" role="status">
-						{cases.length} of {testCases.length} test cases
-					</ResultCount>
+					<div className="compact-test-list-tools">
+						<label htmlFor={searchId} className="sr-only">
+							Search test cases
+						</label>
+						<Input
+							id={searchId}
+							type="search"
+							placeholder="Search test cases"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+						/>
+						<ResultCount as="p" className="test-list-count" role="status">
+							{cases.length} of {testCases.length} test cases
+						</ResultCount>
+					</div>
 					<List
 						as="div"
 						variant="grouped"
@@ -150,62 +152,19 @@ export default function GeneratedTestCasesView({
 								{selected.type || "Functional"} · {selected.priority || "Medium"} priority ·{" "}
 								{getTestCaseLinkedRequirementIds(selected).join(", ")}
 							</p>
-							<h2>{selected.title}</h2>
-							{onReport && (
-								<Button variant="secondary" onClick={() => onReport(selected)}>
-									Report a problem
-								</Button>
-							)}
-							{selected.description && <p>{selected.description}</p>}
-							{findings.length > 0 && (
-								<Disclosure className="test-inline-findings">
-									<summary>Quality findings for {selected.id}</summary>
-									<List>
-										{findings.map((issue) => (
-											<ListItem key={issue}>{issue}</ListItem>
-										))}
-									</List>
-								</Disclosure>
-							)}
-							<Disclosure className="test-source-evidence">
-								<summary>Why this test? Source and assessment</summary>
-								{getTestCaseLinkedRequirementIds(selected).map((id) => {
-									const requirement = requirements.find((item) => item.id === id);
-									return (
-										<div key={id}>
-											<strong>{id}</strong>
-											<p>{requirement?.text || "Requirement text unavailable in the current project."}</p>
-										</div>
-									);
-								})}
-								<p>Current requirement text is shown for comparison. It may have changed since this test was generated.</p>
-								{(substantiveAssessment?.obligations || [])
-									.filter((item) => (item.evidence || []).some((evidence) => evidence.test_case_id === selected.id))
-									.map((item, index) => (
-										<div key={index}>
-											<strong>
-												{item.obligation} — {item.status}
-											</strong>
-											<blockquote>{item.source_quote}</blockquote>
-											<p>{item.reason}</p>
-											{(item.evidence || [])
-												.filter((evidence) => evidence.test_case_id === selected.id)
-												.map((evidence, i) => (
-													<p key={i}>
-														Step {evidence.step}: {evidence.action} → {evidence.expected}
-													</p>
-												))}
-										</div>
-									))}
-								{!(substantiveAssessment?.obligations || []).some((item) =>
-									(item.evidence || []).some((evidence) => evidence.test_case_id === selected.id)
-								) && <p>No source-to-step assessment is available for this test. A requirement link alone does not establish coverage.</p>}
-							</Disclosure>
-							<h3>Preconditions</h3>
-							<p>{selected.preconditions || "None specified."}</p>
+							<div className="test-detail-title">
+								<h2>{selected.title}</h2>
+								{onReport && (
+									<Button variant="secondary" size="compact" onClick={() => onReport(selected)}>
+										Report a problem
+									</Button>
+								)}
+							</div>
 							<div className="test-steps-heading">
 								<h3>Steps and expected results</h3>
-								<span>{steps.length} steps</span>
+								<span>
+									{steps.length} {steps.length === 1 ? "step" : "steps"}
+								</span>
 							</div>
 							<TableScroll aria-label="Test steps and expected results">
 								<Table density="compact" className="test-detail-steps">
@@ -228,9 +187,10 @@ export default function GeneratedTestCasesView({
 												<td>
 													{step.action}
 													{step.test_data && (
-														<p className="test-step-data">
-															<strong>Test data:</strong> {step.test_data}
-														</p>
+														<Disclosure className="test-step-data">
+															<summary>Test data</summary>
+															<p>{step.test_data}</p>
+														</Disclosure>
 													)}
 												</td>
 												<td>{step.expected || "Not specified"}</td>
@@ -241,26 +201,79 @@ export default function GeneratedTestCasesView({
 							</TableScroll>
 							<h3>Expected result</h3>
 							<p>{selected.expected_result || "Not specified."}</p>
-							<Disclosure className="test-case-metadata">
-								<summary>Test data and metadata</summary>
-								<dl>
-									{Object.entries({
-										"Test data": selected.test_data,
-										"Estimated time": selected.estimated_time,
-										"Case status": selected.status || "Draft",
-										Automation: selected.automation_status || "Manual",
-										Component: selected.component,
-										"Linked requirements": getTestCaseLinkedRequirementIds(selected).join(", "),
-										Tags: selected.tags?.join(", "),
-									}).map(([label, value]) => (
-										<div key={label}>
-											<dt>{label}</dt>
-											<dd>{value || "Not specified"}</dd>
-										</div>
-									))}
-								</dl>
-								<p>Case status and automation intent do not indicate quality approval or execution readiness.</p>
-							</Disclosure>
+							<div className="test-case-support">
+								<Disclosure>
+									<summary>Preconditions</summary>
+									<p>{selected.preconditions || "None specified."}</p>
+									{selected.description && <p>{selected.description}</p>}
+								</Disclosure>
+								{findings.length > 0 && (
+									<Disclosure className="test-inline-findings">
+										<summary>Quality findings for {selected.id}</summary>
+										<List>
+											{findings.map((issue) => (
+												<ListItem key={issue}>{issue}</ListItem>
+											))}
+										</List>
+									</Disclosure>
+								)}
+								<Disclosure className="test-source-evidence">
+									<summary>Why this test? Source and assessment</summary>
+									{getTestCaseLinkedRequirementIds(selected).map((id) => {
+										const requirement = requirements.find((item) => item.id === id);
+										return (
+											<div key={id}>
+												<strong>{id}</strong>
+												<p>{requirement?.text || "Requirement text unavailable in the current project."}</p>
+											</div>
+										);
+									})}
+									<p>Current requirement text is shown for comparison. It may have changed since this test was generated.</p>
+									{(substantiveAssessment?.obligations || [])
+										.filter((item) => (item.evidence || []).some((evidence) => evidence.test_case_id === selected.id))
+										.map((item, index) => (
+											<div key={index}>
+												<strong>
+													{item.obligation} — {item.status}
+												</strong>
+												<blockquote>{item.source_quote}</blockquote>
+												<p>{item.reason}</p>
+												{(item.evidence || [])
+													.filter((evidence) => evidence.test_case_id === selected.id)
+													.map((evidence, i) => (
+														<p key={i}>
+															Step {evidence.step}: {evidence.action} → {evidence.expected}
+														</p>
+													))}
+											</div>
+										))}
+									{!(substantiveAssessment?.obligations || []).some((item) =>
+										(item.evidence || []).some((evidence) => evidence.test_case_id === selected.id)
+									) && (
+										<p>No source-to-step assessment is available for this test. A requirement link alone does not establish coverage.</p>
+									)}
+								</Disclosure>
+								<Disclosure className="test-case-metadata">
+									<summary>Test data and metadata</summary>
+									<dl>
+										{Object.entries({
+											"Test data": selected.test_data,
+											"Estimated time": selected.estimated_time,
+											"Case status": selected.status || "Draft",
+											Automation: selected.automation_status || "Manual",
+											Component: selected.component,
+											"Linked requirements": getTestCaseLinkedRequirementIds(selected).join(", "),
+											Tags: selected.tags?.join(", "),
+										}).map(([label, value]) => (
+											<div key={label}>
+												<dt>{label}</dt>
+												<dd>{value || "Not specified"}</dd>
+											</div>
+										))}
+									</dl>
+									<p>Case status and automation intent do not indicate quality approval or execution readiness.</p>
+								</Disclosure>
+							</div>
 						</>
 					) : (
 						<p>Select a test case to review its details.</p>

@@ -370,31 +370,36 @@ test.describe("JIRA requirements workflow", () => {
 		await page.getByRole("button", { name: /Import PROJ-101/i }).click();
 
 		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
-		await expect(page.locator(".requirement-review-table tbody tr")).toHaveCount(0);
+		await expect(page.locator(".requirement-review-table .requirement-row")).toHaveCount(0);
 		await page.getByRole("button", { name: "Apply reviewed changes" }).click();
 
-		const requirementRows = page.locator(".requirement-review-table tbody tr");
+		const requirementRows = page.locator(".requirement-review-table .requirement-row");
 		await expect(requirementRows).toHaveCount(2);
 		const requirementTable = page.locator(".requirement-review-table");
 		await expect(requirementTable.getByRole("columnheader", { name: "Issue" })).toHaveCount(0);
 		await expect(requirementTable.getByRole("columnheader", { name: "ID" })).toBeVisible();
 		await expect(requirementTable.getByRole("columnheader", { name: "ID / Source" })).toHaveCount(0);
-		await expect(requirementTable.getByRole("columnheader", { name: "Sources" })).toBeVisible();
+		await expect(requirementTable.getByRole("columnheader", { name: "Flags" })).toBeVisible();
 		await expect(requirementTable.getByRole("columnheader", { name: "Review status" })).toBeVisible();
 		await expect(requirementRows.nth(0)).toContainText("REQ-001");
 		await expect(requirementRows.nth(1)).toContainText("REQ-002");
 		await expect(page.getByRole("heading", { name: /jira sync preview/i })).toBeVisible();
 
+		await page.getByText("Human Feedback", { exact: true }).click();
 		await page.getByPlaceholder(/Enter your feedback here/i).fill("Make the approval notifications explicit and tighten the language.");
 		await page.getByRole("button", { name: /implement changes/i }).click();
 
 		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
 		await page.getByRole("button", { name: "Apply reviewed changes" }).click();
-		await expect(requirementRows.nth(0).locator(".requirement-item-copy")).toContainText("duplicate checks");
-		await expect(requirementRows.nth(1).locator(".requirement-item-copy")).toContainText("notification recipients");
 		await expect(requirementRows).toHaveCount(2);
-		await expect(requirementRows.nth(0)).toContainText("PROJ-101");
-		await expect(requirementRows.nth(1)).toContainText("PROJ-101");
+		for (const [index, text] of ["duplicate checks", "notification recipients"].entries()) {
+			await expect(requirementRows.nth(index)).toContainText(text);
+			await requirementRows.nth(index).getByRole("button").click();
+			const details = requirementTable.locator(".review-detail-row");
+			await expect(details.locator(".requirement-item-copy")).toContainText(text);
+			await details.getByText(/^Source evidence/).click();
+			await expect(details).toContainText("PROJ-101");
+		}
 
 		await page.getByRole("button", { name: /preview jira update/i }).click();
 		await expect(page.getByText(/Ready 1/)).toBeVisible();

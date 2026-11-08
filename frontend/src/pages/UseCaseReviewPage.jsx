@@ -56,13 +56,14 @@ export default function UseCaseReviewPage({
 	return (
 		<main
 			id="main-content"
-			className="use-case-review-page"
+			className="use-case-review-page compact-workbench"
 			aria-labelledby="use-case-review-title"
 			aria-busy={generation.isBusy || review.isSubmitting || review.isReloading || undefined}
 			tabIndex={-1}
 		>
 			<ProjectPageHeader
 				title="Use Cases"
+				compact
 				titleId="use-case-review-title"
 				project={project}
 				navigate={navigate}
@@ -78,31 +79,24 @@ export default function UseCaseReviewPage({
 								{reviewStatus.label}
 							</Badge>
 							<Button
+								variant={effectiveStageState?.stale ? "primary" : "secondary"}
+								size="compact"
 								onClick={generation.generate}
 								disabled={!generationAllowed || generation.isBusy || review.isSubmitting || review.isReloading}
 							>
 								{generation.isBusy ? "Generating Use Cases…" : "Regenerate Use Cases"}
 							</Button>
-							<Link className="use-case-skip-review-link" href="#use-case-review-decision">
-								Skip to review decision
-							</Link>
+							{matchingHumanDecision !== "approve" && (
+								<Link className="use-case-skip-review-link" href="#use-case-review-decision">
+									Skip to review decision
+								</Link>
+							)}
 						</div>
 					) : null
 				}
 			/>
 
 			<ClarificationScopeNotice project={project} onOpen={() => navigate(buildProjectPath(projectId, "context"))} />
-			<GenerationGuidance
-				key={`${identity}:${projectId}:${project?.current_revision}`}
-				request={request}
-				projectId={projectId}
-				stage="use_cases"
-			/>
-
-			<p>
-				Generate fresh scenarios from the current approved requirements. Existing test cases stay available and become stale after
-				generation succeeds.
-			</p>
 			{!requirementsReady && snapshot ? (
 				<p>
 					Approve the current requirements before regenerating.{" "}
@@ -121,26 +115,12 @@ export default function UseCaseReviewPage({
 						Reload latest
 					</Button>
 				</div>
-			) : (
+			) : generation.message ? (
 				<p role="status" aria-live="polite">
 					{generation.message}
 				</p>
-			)}
-
-			{snapshot ? (
-				<GuidanceUsed
-					key={`guidance:${snapshot.snapshot_id}`}
-					manifest={snapshot.metadata?.guidance}
-					request={request}
-					projectId={projectId}
-				/>
 			) : null}
-			<KnowledgeSuggestion
-				key={`suggestion:${review.response?.review?.review_id || "none"}`}
-				suggestion={review.response?.knowledge_suggestion}
-				request={request}
-				projectId={projectId}
-			/>
+
 			{snapshot ? (
 				<fieldset disabled={generation.isBusy} className="use-case-generation-review">
 					<UseCaseReviewWorkbench
@@ -150,6 +130,7 @@ export default function UseCaseReviewPage({
 						snapshot={snapshot}
 						stageState={stageState}
 						review={review}
+						onContinue={matchingHumanDecision === "approve" && !effectiveStageState?.stale ? onNext : undefined}
 					/>
 				</fieldset>
 			) : (
@@ -183,11 +164,34 @@ export default function UseCaseReviewPage({
 					</div>
 				</section>
 			)}
+			<div className="workbench-support">
+				<GenerationGuidance
+					key={`${identity}:${projectId}:${project?.current_revision}`}
+					request={request}
+					projectId={projectId}
+					stage="use_cases"
+					compact
+				/>
+				{snapshot ? (
+					<GuidanceUsed
+						key={`guidance:${snapshot.snapshot_id}`}
+						manifest={snapshot.metadata?.guidance}
+						request={request}
+						projectId={projectId}
+					/>
+				) : null}
+				<KnowledgeSuggestion
+					key={`suggestion:${review.response?.review?.review_id || "none"}`}
+					suggestion={review.response?.knowledge_suggestion}
+					request={request}
+					projectId={projectId}
+				/>
+			</div>
 			<nav className="panel-nav" aria-label="Workflow steps">
 				<Button variant="secondary" onClick={onBack} title="Back to Context">
 					Back
 				</Button>
-				<Button onClick={onNext} title="Next to Test Cases">
+				<Button variant="secondary" onClick={onNext} title="Next to Test Cases">
 					Next
 				</Button>
 			</nav>
