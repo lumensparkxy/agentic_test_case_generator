@@ -756,7 +756,9 @@ Use `--fixture room-booking-change` to compare and apply the attendee limit
 change from 8 to 6 in the same disposable workbench. The revised source also
 states the new maximum in the successful-booking clause. If the baseline has
 case-linked substantive findings, the benchmark allows one targeted repair
-and reviews the result before importing the revision. It uses
+and reviews the result before importing the revision. If the baseline has no
+generation tasks and independent review reports a provider outage, the
+benchmark tries the normal saved-suite review action once. It uses
 verified source quotations to select the updates, checks stale export, and
 uses **Review refresh scope** to regenerate only affected Use Case groups. It
 checks that retained groups preserve their exact scenario identities, then

@@ -220,6 +220,10 @@ async function applyAndReviewBookingRepairs(page, fixture, suite, impact, select
 			expect(row).toEqual(old);
 		}
 	}
+	return reviewSavedBookingSuite(page, fixture, draft, label);
+}
+
+async function reviewSavedBookingSuite(page, fixture, draft, label) {
 	await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
 	const reviewed = await uiResponse(
 		page,
@@ -232,12 +236,19 @@ async function applyAndReviewBookingRepairs(page, fixture, suite, impact, select
 	const saved = (await reviewed.json()).current_snapshots.test_cases;
 	await fixture.save(`${label}-review`, saved);
 	expect(saved).toMatchObject({ approved: true, source_snapshot_id: draft.snapshot_id, operation: "test_cases.review" });
-	expect(saved.payload.test_cases).toEqual(repaired);
+	expect(saved.payload.test_cases).toEqual(draft.payload.test_cases);
 	return saved;
 }
 
 export async function repairBookingBaseline(page, fixture, suite) {
 	const tasks = suite.payload.generation_tasks || [];
+	const assessment = suite.payload.substantive_assessment;
+	if (!suite.approved && !tasks.length && assessment?.diagnostics?.failure_reason === "provider_unavailable") {
+		return test.step("Retry independent review of the exact saved baseline", async () => {
+			await page.goto(`${fixture.prefix}/test-cases`);
+			return reviewSavedBookingSuite(page, fixture, suite, "booking-baseline-retry");
+		});
+	}
 	if (suite.approved || !tasks.length || tasks.some((task) => task.kind !== "substantive_coverage" || !task.source_test_case_id))
 		return suite;
 	return test.step("Repair the exact assessed baseline findings before changing the source", async () => {
