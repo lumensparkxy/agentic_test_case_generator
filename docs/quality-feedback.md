@@ -201,4 +201,6 @@ still need provisioned accounts, data, or an environment. Missing prerequisites
 remain blockers for the combined assessment and do not become requests to
 regenerate an otherwise covered design. The reviewer receives a structured
 response schema and can retry a malformed or incoherent response once within
-its existing deadline. Source binding and exact step validation still apply.
+its existing deadline. A covered obligation may cite a standalone action with
+an empty expected result when a later cited step in the same case supplies the
+observable result. Source binding and exact step validation still apply.

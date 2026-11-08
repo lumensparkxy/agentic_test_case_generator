@@ -19,7 +19,7 @@ from .prompting import TEST_CASE_BEHAVIOR_POLICY
 from ..services.test_case_quality import project_test_case_view
 from ..services.guidance_service import current_guidance, public_manifest
 
-RUBRIC = "delivered_business_coverage_v4"
+RUBRIC = "delivered_business_coverage_v5"
 MAX_INPUT_BYTES = 512_000
 ASSESSMENT_BUDGET_SECONDS = 180
 ASSESSMENT_ATTEMPT_SECONDS = 120
@@ -36,7 +36,7 @@ class StepReference(StrictRow):
 
 class StepEvidence(StepReference):
     action: str = Field(min_length=1)
-    expected: str = Field(min_length=1)
+    expected: str
 
 
 class ObligationJudgment(StrictRow):
@@ -127,7 +127,7 @@ Assess grounding for EVERY delivered case. Required users, rooms/resources, role
 Treat supplied non-secret literal inputs as data, not missing dependencies or runtime bindings. Flag invented references and existing record IDs. A missing account or setting must remain a prerequisite until supplied. Treat a substring check as insufficient when the source requires exact text.
 Current source requirements take precedence over contradictory context or approved memory. Report a contradiction the case correctly resolves in the grounding reason; an unresolved contradiction affecting behavior is a required design finding. Curated methods are methodology, not product facts. Consider only the actual applied guidance manifest.
 Judge business design and runtime setup separately. If steps verify a sourced rule and outcome, mark the obligation covered even if running those steps requires a declared missing credential, fixture or environment. For a runtime-only blocker, report a required missing_prerequisite and copy the exact name from that case's execution_prerequisites with status missing into execution_prerequisite_name. Never use that name to excuse an unresolved business rule, invented role or unsupported outcome. For a design gap leave execution_prerequisite_name null and mark affected coverage unknown or unmet.
-Copy input_hash exactly as {input_hash}. Split distinct triggers, numeric boundaries or outcomes into separate obligations instead of combining evidence from different cases. For any obligation use evidence from at most one case. Use empty evidence for unmet/unknown when no relevant step exists, and empty prerequisites when all needed facts are grounded.
+Copy input_hash exactly as {input_hash}. Split distinct triggers, numeric boundaries or outcomes into separate obligations instead of combining evidence from different cases. For any obligation use evidence from at most one case. A covered chain may cite standalone trigger steps with empty expected fields, and its final cited step must state the observable expected result. Use empty evidence for unmet/unknown when no relevant step exists, and empty prerequisites when all needed facts are grounded.
 {correction}
 DATA:
 {json.dumps(data, ensure_ascii=False)}
@@ -307,8 +307,12 @@ def validate_assessment(raw, data, input_hash):
             matches = [s for s in case.get("steps", []) if s.get("step") == evidence.step]
             if len(matches) != 1 or matches[0].get("action") != evidence.action or matches[0].get("expected") != evidence.expected:
                 raise ValueError("Evidence must cite exact delivered steps")
-            if not evidence.action.strip() or not evidence.expected.strip():
-                raise ValueError("Evidence needs action and observable result")
+            if not evidence.action.strip():
+                raise ValueError("Evidence needs a concrete action")
+        if obligation.status == "covered":
+            last_step = max(obligation.evidence, key=lambda evidence: evidence.step)
+            if not last_step.expected.strip():
+                raise ValueError("Covered obligation needs an observable result after its cited actions")
     result = output.model_dump()
     blockers = declared_execution_blockers(data["test_cases"])
     blocker_keys = {(b["test_case_id"], b["prerequisite_name"]) for b in blockers}
@@ -391,8 +395,9 @@ def _invalid_evidence_code(exc):
         "Step reference must be an integer": "invalid_step_reference",
         "Evidence references an unknown or ambiguous step": "invalid_step_reference",
         "Evidence must cite exact delivered steps": "step_citation_mismatch",
-        "Evidence needs action and observable result": "incomplete_step_evidence",
+        "Evidence needs a concrete action": "incomplete_step_evidence",
         "Covered obligation lacks steps": "missing_step_evidence",
+        "Covered obligation needs an observable result after its cited actions": "missing_observable_result",
         "Cannot combine unrelated cases to close an obligation": "incoherent_case_evidence",
         "Execution finding must cite a declared missing prerequisite": "invalid_execution_prerequisite_reference",
         "Assessment must account for every source requirement": "incomplete_requirement_review",
@@ -410,7 +415,7 @@ def assess_delivered_suite(cases, requirements, context, *, settings=None, scope
     deadline = monotonic() + ASSESSMENT_BUDGET_SECONDS
     prompt = review_prompt(data, input_hash)
     # Share one retry between transport recovery and a fresh, schema-bound review.
-    repairable = {"malformed_json", "incomplete_model_output", "incoherent_case_evidence", "invalid_output_schema"}
+    repairable = {"malformed_json", "incomplete_model_output", "incoherent_case_evidence", "invalid_output_schema", "missing_observable_result"}
     first_validation_error = None
     for attempt in range(1, 3):
         try:
@@ -422,7 +427,8 @@ def assess_delivered_suite(cases, requirements, context, *, settings=None, scope
             if attempt == 1 and code in repairable and deadline - monotonic() >= 1:
                 first_validation_error = code
                 correction = (
-                    f"Previous review was rejected for {code}. Produce fresh valid JSON for this exact input. Cite one coherent delivered case per obligation."
+                    f"Previous review was rejected for {code}. Produce fresh valid JSON for this exact input. "
+                    "Cite one coherent delivered case per obligation and include its observable expected result after any cited standalone action."
                 )
                 prompt = review_prompt(data, input_hash, correction)
                 continue

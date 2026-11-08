@@ -123,6 +123,61 @@ class SubstantiveReviewTests(unittest.TestCase):
             with self.subTest(reference=reference), self.assertRaises(ValueError):
                 validate_assessment(json.dumps(output), data, digest)
 
+    def test_covered_chain_binds_standalone_action_and_later_observable_result(self):
+        requirement = Requirement(id="DIR-1", text="Pressing Search for Alex Rivera shows the exact result Alex Rivera.")
+        case = TestCase(
+            id="TC-SEARCH",
+            title="Search the directory",
+            linked_requirement_ids=[requirement.id],
+            steps=[
+                {"step": 1, "action": "Open the directory", "expected": "Directory heading is visible"},
+                {"step": 2, "action": 'Click exact button "Search"', "expected": ""},
+                {"step": 3, "action": "Inspect the matching result", "expected": 'exact text "Alex Rivera" is visible'},
+            ],
+        )
+        data, digest, _ = review_input([case], [requirement], None)
+        trigger = {"test_case_id": case.id, "step": 2}
+        result_ref = {"test_case_id": case.id, "step": 3}
+        output = {
+            "input_hash": digest,
+            "obligations": [
+                {
+                    "requirement_id": requirement.id,
+                    "source_field": "text",
+                    "obligation": "Search returns the exact result",
+                    "status": "covered",
+                    "reason": "Search triggers the observed exact result",
+                    "evidence": [trigger, result_ref],
+                }
+            ],
+            "case_grounding": [{"test_case_id": case.id, "reason": "Grounded directory action and result", "prerequisites": []}],
+        }
+        assessment = validate_assessment(json.dumps(output), data, digest)
+        self.assertEqual(assessment["design_status"], "assessed_complete")
+        self.assertEqual(assessment["status"], "assessed_complete")
+        self.assertEqual(
+            assessment["obligations"][0]["evidence"],
+            [{"test_case_id": case.id, **step.model_dump(include={"step", "action", "expected"})} for step in case.steps[1:]],
+        )
+
+        invalid = json.loads(json.dumps(output))
+        for evidence in ([trigger], [{"test_case_id": case.id, "step": 1}, trigger]):
+            invalid["obligations"][0]["evidence"] = evidence
+            with self.subTest(evidence=evidence), self.assertRaisesRegex(ValueError, "observable result after its cited actions"):
+                validate_assessment(json.dumps(invalid), data, digest)
+        with patch("app.agents.substantive_review._call_critic", side_effect=[json.dumps(invalid), json.dumps(output)]) as call:
+            repaired = assess_delivered_suite([case], [requirement], None, settings=object())
+        self.assertEqual(repaired["status"], "assessed_complete")
+        self.assertEqual(repaired["diagnostics"]["first_validation_error"], "missing_observable_result")
+        self.assertEqual(call.call_count, 2)
+
+        invalid["obligations"][0]["evidence"] = [
+            {**trigger, "action": case.steps[1].action, "expected": "Fabricated result"},
+            result_ref,
+        ]
+        with self.assertRaisesRegex(ValueError, "exact delivered steps"):
+            validate_assessment(json.dumps(invalid), data, digest)
+
     def test_transient_provider_failure_recovers_once_without_weakening_evidence(self):
         req, case, _, _, output = fixture(retry=False)
         for error in (genai_errors.ServerError(503, {"error": {"message": "private provider detail"}}), httpx.ReadTimeout("private detail")):
