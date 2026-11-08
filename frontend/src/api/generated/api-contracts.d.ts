@@ -955,6 +955,7 @@ export interface RequirementImportPreview {
 	operation: string;
 	project_id: string;
 	recovery_snapshot_ids?: Array<string>;
+	source_evidence_findings?: Array<RequirementSourceFinding>;
 	source_name: string;
 	status?: "pending" | "applied" | "cancelled";
 	suggested_update_scope?: Array<string>;
@@ -971,6 +972,15 @@ export interface RequirementReviewsInput {
 	base_project_revision: number;
 	idempotency_key: string;
 	reviews: Array<RequirementReviewChange>;
+}
+
+export interface RequirementSourceFinding {
+	excerpt: string;
+	kind: "unverified_range" | "ambiguous_range" | "uncovered_range";
+	original_requirement_ids?: Array<string>;
+	requirement_id?: string | null;
+	source_label: string;
+	source_section?: string | null;
 }
 
 export interface RequirementSourceReference {
@@ -996,6 +1006,7 @@ export interface RequirementsWorkflowResponse {
 	raw_text: string;
 	requirements: Array<Requirement>;
 	review?: ReviewResult;
+	source_evidence_findings?: Array<RequirementSourceFinding>;
 	source_name: string;
 	source_names?: Array<string>;
 	workflow_diagnostics?: WorkflowDiagnostics;

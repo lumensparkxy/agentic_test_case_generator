@@ -424,7 +424,18 @@ async def parse_requirements(
             workflow_diagnostics=workflow.get("workflow_diagnostics", {}),
         )
         response.requirements = _apply_file_source_metadata(response.requirements, source_name, source_names)
-        response.requirements = bind_document_evidence(response.requirements, documents)
+        evidence = await run_in_threadpool(bind_document_evidence, response.requirements, documents)
+        response.requirements = evidence.requirements
+        response.source_evidence_findings = evidence.findings
+        if evidence.findings:
+            response.approved = False
+            response.review = response.review.model_copy(
+                update={
+                    "approved": False,
+                    "summary": "Review the unresolved inclusive range evidence.",
+                    "blocking_issues": [*response.review.blocking_issues, "Inclusive range evidence is incomplete."],
+                }
+            )
         event_id = _log_success(
             current_user=current_user,
             request=request,

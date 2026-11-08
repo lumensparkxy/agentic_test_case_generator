@@ -74,6 +74,7 @@ async function importCapacityChange(page, fixture, suite) {
 	expect(afterCancel.current_snapshots.requirements).toEqual(requirements);
 	const preview = await importSource(page, fixture, source);
 	await fixture.save("booking-revision-preview", preview);
+	expect(preview.source_evidence_findings?.filter((finding) => finding.original_requirement_ids.includes("ROOM-101")) || []).toEqual([]);
 	const choices = attendeeMatches(baseline, preview);
 	for (const candidate of preview.candidates) {
 		const target = choices.get(candidate.candidate_id);

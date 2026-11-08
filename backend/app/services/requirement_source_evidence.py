@@ -1,10 +1,12 @@
 """Bind extraction claims to uploaded text without treating model prose as a quote."""
 
 from collections import Counter
+from dataclasses import dataclass
 from hashlib import sha256
 import re
 
-from ..contracts.requirements import RequirementSourceReference
+from ..contracts.requirements import Requirement, RequirementSourceFinding, RequirementSourceReference
+from ..utils.inclusive_ranges import InclusiveRangeSpan, inclusive_range_spans
 
 
 MAX_EXCERPT_CHARS = 8000
@@ -22,6 +24,58 @@ def _sections(text):
     return [(match.start(), matches[index + 1].start() if index + 1 < len(matches) else len(text), match.group("id")) for index, match in enumerate(matches)]
 
 
+@dataclass(frozen=True)
+class _Document:
+    name: str
+    label: str
+    text: str
+    sections: list[tuple[int, int, str]]
+    version: str
+    ranges: list[InclusiveRangeSpan]
+
+    def original_ids(self, start, end):
+        return list(dict.fromkeys(identifier for left, right, identifier in self.sections if left < end and start < right))
+
+    def lines(self, start, end):
+        first = self.text.count("\n", 0, start) + 1
+        last = self.text.count("\n", 0, end) + 1
+        return f"Lines {first}-{last}"
+
+
+@dataclass(frozen=True)
+class BoundDocumentEvidence:
+    requirements: list[Requirement]
+    findings: list[RequirementSourceFinding]
+
+
+def _check_range_claims(requirement, matched, references, source_label, covered):
+    evidence = {}
+    for document, start, end in matched:
+        for span in document.ranges:
+            if start <= span.start and span.end <= end:
+                evidence.setdefault(span.bounds, set()).add((document.label, span.start))
+    findings = []
+    unique_reference = references[0] if len(references) == 1 else None
+    claims = list(inclusive_range_spans(requirement.text))
+    claim_counts = Counter(claim.bounds for claim in claims)
+    for claim in claims:
+        candidates = evidence.get(claim.bounds, set())
+        if len(candidates) == 1 and claim_counts[claim.bounds] == 1:
+            covered.update(candidates)
+            continue
+        findings.append(
+            RequirementSourceFinding(
+                kind="ambiguous_range" if candidates else "unverified_range",
+                source_label=unique_reference.label if unique_reference else source_label,
+                source_section=unique_reference.source_section if unique_reference else None,
+                original_requirement_ids=list(dict.fromkeys(identifier for ref in references for identifier in ref.original_requirement_ids)),
+                requirement_id=requirement.id,
+                excerpt=requirement.text[claim.start : claim.end],
+            )
+        )
+    return findings
+
+
 def bind_document_evidence(requirements, documents):
     """Whitespace may differ; spelling, punctuation and case must match the source."""
     prepared = []
@@ -30,11 +84,14 @@ def bind_document_evidence(requirements, documents):
     for name, text in documents:
         occurrences[name] += 1
         identity = name if totals[name] == 1 else f"{name} [upload {occurrences[name]}]"
-        prepared.append((name, identity, text, _sections(text), sha256(text.encode()).hexdigest()))
+        prepared.append(_Document(name, identity, text, _sections(text), sha256(text.encode()).hexdigest(), list(inclusive_range_spans(text))))
     result = []
+    findings = []
+    covered = set()
     for requirement in requirements:
         quote = requirement.source_excerpt or ""
         references = []
+        matched = []
         ambiguous = False
         hint = (requirement.source_path or "").split(" > ", 1)[0]
         source_label = hint if hint in totals else ", ".join(totals)
@@ -42,30 +99,30 @@ def bind_document_evidence(requirements, documents):
             pattern = re.compile(r"\s+".join(re.escape(word) for word in quote.split()))
             # A recognized document hint disambiguates repeated quotations. With no
             # recognized hint, retain all actual matches as separate source evidence.
-            documents_to_search = [doc for doc in prepared if doc[0] == hint] or prepared
-            for name, identity, text, sections, version in documents_to_search:
-                for match in pattern.finditer(text):
+            documents_to_search = [doc for doc in prepared if doc.name == hint] or prepared
+            for document in documents_to_search:
+                for match in pattern.finditer(document.text):
                     if len(references) == MAX_SOURCE_MATCHES:
                         ambiguous = True
                         break
-                    ids = [identifier for start, end, identifier in sections if start < match.end() and match.start() < end]
-                    first_line = text.count("\n", 0, match.start()) + 1
-                    last_line = text.count("\n", 0, match.end()) + 1
+                    start, end = match.span()
+                    matched.append((document, start, end))
                     references.append(
                         RequirementSourceReference(
-                            source_id=sha256(f"file:{identity}".encode()).hexdigest(),
-                            source_version=version,
+                            source_id=sha256(f"file:{document.label}".encode()).hexdigest(),
+                            source_version=document.version,
                             import_id="pending",
-                            label=identity,
+                            label=document.label,
                             source_system="file",
-                            source_section=f"Lines {first_line}-{last_line}",
-                            original_requirement_ids=list(dict.fromkeys(ids)),
-                            excerpt=text[match.start() : match.end()],
+                            source_section=document.lines(start, end),
+                            original_requirement_ids=document.original_ids(start, end),
+                            excerpt=document.text[start:end],
                             excerpt_verified=True,
                         )
                     )
                 if ambiguous:
                     references = []
+                    matched = []
                     break
         flags = list(requirement.quality_flags)
         if ambiguous:
@@ -75,6 +132,11 @@ def bind_document_evidence(requirements, documents):
         verified_ids = list(dict.fromkeys(identifier for source in references for identifier in source.original_requirement_ids))
         if set(requirement.original_requirement_ids) - set(verified_ids):
             flags.append("An extracted original requirement ID could not be verified against its supporting source section.")
+        claim_findings = _check_range_claims(requirement, matched, references, source_label, covered)
+        findings.extend(claim_findings)
+        for finding in claim_findings:
+            reason = "could not be matched to one distinct source clause" if finding.kind == "ambiguous_range" else "is absent from the supporting quotation"
+            flags.append(f"Inclusive range “{finding.excerpt}” {reason}. Review the exact source before approval.")
         result.append(
             requirement.model_copy(
                 update={
@@ -100,4 +162,19 @@ def bind_document_evidence(requirements, documents):
                 }
             )
         )
-    return result
+    for document in prepared:
+        for span in document.ranges:
+            if (document.label, span.start) in covered:
+                continue
+            start = max(span.clause_start, span.start - 160)
+            end = min(span.clause_end, span.end + 160)
+            findings.append(
+                RequirementSourceFinding(
+                    kind="uncovered_range",
+                    source_label=document.label,
+                    source_section=document.lines(span.start, span.end),
+                    original_requirement_ids=document.original_ids(span.start, span.end),
+                    excerpt=document.text[start:end].strip(),
+                )
+            )
+    return BoundDocumentEvidence(result, findings)

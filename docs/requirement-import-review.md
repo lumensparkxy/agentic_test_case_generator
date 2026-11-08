@@ -126,6 +126,17 @@ quality flag. No normalized requirement text substitutes for a source quotation.
 File imports do not accept model-supplied external issue keys, sync destinations
 or persistence identifiers as source identity.
 
+For direct affirmative numeric intervals such as “must be from 1 to 6
+inclusive,” extraction keeps the accepted range and explicitly rejected examples
+with exact supporting sentences. During upload, the range check compares both
+bounds in the incoming wording against the literal spans inside verified
+quotations. A nearby quote with only an upper bound can still be a valid
+quotation, while leaving the two-sided claim unverified. A claim with multiple
+possible source spans also needs review. The comparison lists those claims and
+any uncited source interval with its file, original ID when available, and
+line location. These findings survive re-comparison. Existing manual matching
+and approval remain separate.
+
 Existing references default to `excerpt_verified=false`. Their metadata remains
 stored, but the UI and mapping download do not present an unverified historical
 excerpt or identifier as verified evidence. Reimported document evidence can be

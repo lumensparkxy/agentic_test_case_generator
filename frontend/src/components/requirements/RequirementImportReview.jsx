@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Button, Checkbox, Select } from "../ui/controls";
-import { Badge, Disclosure } from "../ui/surfaces";
+import { Alert, Badge, Disclosure } from "../ui/surfaces";
 import { CollectionState, Table, TableScroll } from "../ui/collections";
 import ReviewRowToggle from "../reviews/ReviewRowToggle";
 import RequirementSourceEvidence from "./RequirementSourceEvidence";
@@ -12,6 +12,11 @@ const labels = {
 	needs_decision: "Needs decision",
 	skipped: "Skipped",
 	retiring: "Retiring",
+};
+const evidenceLabels = {
+	unverified_range: "Range absent from the incoming quotation",
+	ambiguous_range: "Range match is ambiguous",
+	uncovered_range: "Source range missing from verified extraction",
 };
 const normalize = (value) => value.trim().replace(/\s+/g, " ");
 const requirementOption = (requirement) => (
@@ -25,6 +30,8 @@ export default function RequirementImportReview({ preview, revision, busy, error
 	const actionBar = useRef(null);
 	const filterControl = useRef(null);
 	const detailId = useId();
+	const evidenceId = useId();
+	const evidenceFindings = preview.source_evidence_findings || [];
 	const [openCandidate, setOpenCandidate] = useState(null);
 	const [filter, setFilter] = useState("all");
 	const [scope, setScope] = useState([]);
@@ -118,6 +125,23 @@ export default function RequirementImportReview({ preview, revision, busy, error
 					{warning}
 				</p>
 			))}
+			{evidenceFindings.length > 0 && (
+				<Alert as="section" tone="warning" className="import-notice" aria-labelledby={evidenceId}>
+					<h3 id={evidenceId}>Numeric source evidence needs review</h3>
+					<p>Compare the incoming wording with the quoted source before deciding what to keep, update, or skip.</p>
+					<ul>
+						{evidenceFindings.map((finding, index) => (
+							<li key={index}>
+								<strong>{evidenceLabels[finding.kind]}</strong>
+								{finding.requirement_id && ` · Incoming ${finding.requirement_id}`}
+								{" · "}
+								{[finding.source_label, ...finding.original_requirement_ids, finding.source_section].filter(Boolean).join(" · ")}
+								<p>“{finding.excerpt}”</p>
+							</li>
+						))}
+					</ul>
+				</Alert>
+			)}
 			{preview.recovery_snapshot_ids.length > 0 && (
 				<Disclosure>
 					<summary>Restore saved baseline ({preview.current_requirements.length} requirements)</summary>

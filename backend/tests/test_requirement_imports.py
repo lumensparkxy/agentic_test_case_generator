@@ -36,7 +36,7 @@ def requirement(i, text=None, **kwargs):
 
 def from_document(req, source_id="SOURCE-42", label="audit-requirements.md", excerpt=None):
     req = req.model_copy(update={"source_path": label, "source_excerpt": excerpt if excerpt is not None else req.text})
-    return bind_document_evidence([req], [(label, f"## {source_id}\n\n{req.text}\n")])[0]
+    return bind_document_evidence([req], [(label, f"## {source_id}\n\n{req.text}\n")]).requirements[0]
 
 
 def snapshot(requirements, sid="original", revision=2):
@@ -396,6 +396,30 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(result.base_project_revision, 8)
         self.assertNotEqual(result.import_id, self.p.import_id)
         self.assertEqual(self.repo.read(PID, self.p.import_id, ACTOR)["status"], "cancelled")
+
+    def test_source_range_findings_survive_staging_and_recomparison(self):
+        response = RequirementsWorkflowResponse(
+            source_name="rooms.md",
+            raw_text="",
+            requirements=[requirement(1)],
+            source_evidence_findings=[
+                {
+                    "kind": "uncovered_range",
+                    "source_label": "rooms.md",
+                    "source_section": "Lines 6-6",
+                    "original_requirement_ids": ["ROOM-101"],
+                    "excerpt": "Attendees must be from 1 to 6 inclusive.",
+                }
+            ],
+        )
+        staged = service.stage_import(PID, ACTOR, 7, response, "requirements.parse")
+        self.assertEqual(staged.source_evidence_findings, response.source_evidence_findings)
+        self.assertEqual(staged.candidates[0].target_requirement_uid, staged.current_requirements[0].requirement_uid)
+        self.assertEqual(staged.current_requirements[0].review_status, "Approved")
+        self.assertEqual(self.repo.read(PID, staged.import_id, ACTOR)["source_evidence_findings"][0]["kind"], "uncovered_range")
+        repeated = service.recompare_import(PID, staged.import_id, ACTOR)
+        self.assertEqual(repeated.source_evidence_findings, staged.source_evidence_findings)
+        self.assertEqual(repeated.current_requirements, staged.current_requirements)
 
     def test_empty_extraction_and_stale_staging_fail_without_changes(self):
         before = deepcopy(self.store)

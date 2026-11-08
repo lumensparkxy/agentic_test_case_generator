@@ -18,6 +18,15 @@ class RequirementSourceReference(BaseModel):
     original_requirement_ids: List[str] = Field(default_factory=list)
 
 
+class RequirementSourceFinding(BaseModel):
+    kind: Literal["unverified_range", "ambiguous_range", "uncovered_range"]
+    source_label: str
+    source_section: Optional[str] = None
+    original_requirement_ids: List[str] = Field(default_factory=list)
+    requirement_id: Optional[str] = None
+    excerpt: str
+
+
 class Requirement(BaseModel):
     clarification_status: Optional[Literal["open", "deferred", "excluded", "resolved"]] = None
     clarification_finding_id: Optional[str] = None
@@ -323,6 +332,7 @@ class RequirementsWorkflowResponse(ParseResponse):
     guidance: Optional[Dict[str, Any]] = None
     knowledge_suggestion: Optional[Dict[str, Any]] = None
     source_names: List[str] = Field(default_factory=list)
+    source_evidence_findings: List[RequirementSourceFinding] = Field(default_factory=list)
     approved: bool = False
     review: ReviewResult = Field(default_factory=ReviewResult)
     iteration_history: List[WorkflowIteration] = Field(default_factory=list)

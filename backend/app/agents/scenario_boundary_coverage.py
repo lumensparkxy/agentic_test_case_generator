@@ -1,28 +1,12 @@
 """Identify explicit valid input intervals and verify exact scenario evidence."""
 
 from dataclasses import dataclass
-from decimal import Decimal
 import re
 
+from ..utils.inclusive_ranges import NUMBER, inclusive_range_spans
 
-_NUMBER = r"[+-]?\d+(?:\.\d+)?"
-_NUMERIC_TOKEN = re.compile(rf"(?<![\w./+\-]){_NUMBER}(?!\w|\.\d)")
-_INTERVAL = re.compile(
-    rf"(?:\b(?:from|between|range\s+of)\s+)?(?<![\w./+\-])(?P<lower>{_NUMBER})"
-    rf"\s*(?:to\b|and\b|[-–—])\s*(?P<upper>{_NUMBER})\s*,?\s*\(?inclusive\b\)?",
-    re.I,
-)
-_RANGE_MENTION = re.compile(rf"{_NUMBER}\s*(?:to\b|[-–—])\s*{_NUMBER}|\bbetween\s+{_NUMBER}\s+and\s+{_NUMBER}", re.I)
-_CLAUSE_BREAK = re.compile(r"[;!?\n]|(?<!\d)\.|\.(?!\d)")
-_QUOTED = re.compile(r""""[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)|‘[^’\n]*’""")
-_POLICY_VERB = re.compile(
-    r"\b(?:accept\w*|allow\w*|permit\w*|require\w*|valid|support\w*|"
-    r"(?:must|shall)\s+be|(?:is|are)\s+(?:a|an|limited|restricted|constrained)|"
-    r"reject\w*|disallow\w*|deny\w*|forbid\w*|invalid\w*|exclude\w*)\b",
-    re.I,
-)
-_REJECTION = re.compile(r"\b(?:reject\w*|disallow\w*|den(?:y\w*|ies|ied)|forbid\w*|invalid\w*|exclude\w*)\b", re.I)
-_NEGATION = re.compile(r"\b(?:not|never|cannot)\b", re.I)
+_NUMERIC_TOKEN = re.compile(rf"(?<![\w./+\-]){NUMBER}(?!\w|\.\d)")
+_RANGE_MENTION = re.compile(rf"{NUMBER}\s*(?:to\b|[-–—])\s*{NUMBER}|\bbetween\s+{NUMBER}\s+and\s+{NUMBER}", re.I)
 _REJECTED_OUTCOME = re.compile(
     r"\b(?:is rejected|are rejected|is denied|are denied|"
     r"(?:displays?|shows?) (?:an? |the )?(?:inline |validation )?error|"
@@ -41,26 +25,16 @@ class InclusiveInputRange:
 
 
 def inclusive_input_ranges(requirements):
-    ranges = []
-    for requirement in requirements:
-        source = _QUOTED.sub(lambda match: " " * len(match[0]), requirement.text)
-        for index, clause in enumerate(_CLAUSE_BREAK.split(source)):
-            for position, match in enumerate(_INTERVAL.finditer(clause)):
-                policy = list(_POLICY_VERB.finditer(clause, 0, match.start()))
-                if not policy or _REJECTION.fullmatch(policy[-1][0]) or _NEGATION.search(clause[: match.start()]):
-                    continue
-                lower, upper = match["lower"], match["upper"]
-                if Decimal(lower) > Decimal(upper):
-                    continue
-                ranges.append(
-                    InclusiveInputRange(
-                        range_id=f"{requirement.id}:{index + 1}:{position + 1}",
-                        requirement_id=requirement.id,
-                        source_excerpt=match[0],
-                        endpoints=(lower,) if Decimal(lower) == Decimal(upper) else (lower, upper),
-                    )
-                )
-    return ranges
+    return [
+        InclusiveInputRange(
+            range_id=f"{requirement.id}:{span.clause_number}:{span.range_number}",
+            requirement_id=requirement.id,
+            source_excerpt=requirement.text[span.start : span.end],
+            endpoints=span.endpoints,
+        )
+        for requirement in requirements
+        for span in inclusive_range_spans(requirement.text)
+    ]
 
 
 def _contains_excerpt(text, quote):

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.agents.requirements_agent import _convert_to_requirements
 from app.contracts.requirements import Requirement
 from app.contracts.requirement_imports import ImportApplyInput
-from app.services.requirement_source_evidence import bind_document_evidence, MAX_SOURCE_MATCHES
+from app.services.requirement_source_evidence import bind_document_evidence as bind_evidence, MAX_SOURCE_MATCHES
 from app.services.requirement_reconciliation import build_preview, reconcile, canonical_requirements
 from app.main import app, get_current_user
 from app.models import AuthUser
@@ -18,6 +18,10 @@ from app.utils.requirements_text import normalize_requirement_payloads
 
 
 SOURCE = (Path(__file__).parent / "fixtures" / "room-booking-requirements.md").read_text()
+
+
+def bind_document_evidence(requirements, documents):
+    return bind_evidence(requirements, documents).requirements
 
 
 def extracted(quote, **kwargs):
@@ -38,6 +42,69 @@ def apply_rows(rows, current=(), import_id="import-1"):
 
 
 class RequirementSourceEvidenceTests(unittest.TestCase):
+    def test_revised_booking_quote_does_not_verify_an_inclusive_range_in_a_nearby_claim(self):
+        revised = (
+            SOURCE.replace("1 to 8 inclusive", "1 to 6 inclusive")
+            .replace("0, 9, or 1.5", "0, 7, or 1.5")
+            .replace("With a valid count and an available room", "With a valid count no greater than 6 and an available room")
+        )
+        rows = [
+            Requirement(
+                id="REQ-001",
+                text="The system shall display an inline error beside Attendees and create no booking when a user presses Book with an empty value, 0, 7, or 1.5 in the Attendees field.",
+                source_excerpt="When a user presses Book with an empty value, 0, 7, or 1.5, show an inline error beside Attendees and create no booking.",
+            ),
+            Requirement(
+                id="REQ-002",
+                text="The system shall create a Confirmed booking displaying the selected room and attendee count when a user presses Book with a valid attendee count between 1 and 6 inclusive for an available room.",
+                source_excerpt="With a valid count no greater than 6 and an available room, pressing Book creates a Confirmed booking displaying the selected room and attendee count.",
+            ),
+        ]
+        result = bind_evidence(rows, [("rooms.md", revised)])
+        self.assertEqual([finding.kind for finding in result.findings], ["unverified_range", "uncovered_range"])
+        self.assertEqual(result.findings[0].requirement_id, "REQ-002")
+        self.assertEqual(result.findings[0].original_requirement_ids, ["ROOM-101"])
+        self.assertIn("must be a whole number from 1 to 6 inclusive", result.findings[1].excerpt)
+        self.assertTrue(result.requirements[1].sources[0].excerpt_verified)
+        self.assertIn("absent from the supporting quotation", result.requirements[1].quality_flags[-1])
+        self.assertEqual(result.requirements[0].sources[0].excerpt, rows[0].source_excerpt)
+
+        range_quote = "On the Book room form, Attendees is required and must be a whole number from 1 to 6 inclusive."
+        complete = [
+            rows[0].model_copy(
+                update={
+                    "text": "The system shall require Attendees to be a whole number from 1 to 6 inclusive. "
+                    "The system shall display an inline error and create no booking for empty, 0, 7, or 1.5.",
+                    "source_excerpt": f"{range_quote} {rows[0].source_excerpt}",
+                }
+            ),
+            rows[1].model_copy(update={"text": rows[1].text.replace("between 1 and 6 inclusive", "no greater than 6")}),
+        ]
+        result = bind_evidence(complete, [("rooms.md", revised)])
+        self.assertEqual(result.findings, [])
+        self.assertEqual(result.requirements[0].sources[0].excerpt, complete[0].source_excerpt)
+        self.assertEqual(result.requirements[1].sources[0].excerpt, complete[1].source_excerpt)
+
+    def test_wrong_and_ambiguous_ranges_cannot_cover_an_uploaded_source_clause(self):
+        source = "## ROOM-101\nAttendees must be from 1 to\n6 inclusive.\n## ROOM-102\nThe room must be ready."
+        quote = "Attendees must be from 1 to 6 inclusive."
+        row = Requirement(id="REQ-001", text="The system shall accept between 1 and 8 inclusive.", source_excerpt=quote)
+        wrong = bind_evidence([row], [("rooms.md", source)])
+        self.assertEqual([finding.kind for finding in wrong.findings], ["unverified_range", "uncovered_range"])
+        self.assertEqual(wrong.findings[1].source_section, "Lines 2-3")
+        self.assertEqual(wrong.requirements[0].sources[0].excerpt, "Attendees must be from 1 to\n6 inclusive.")
+        row = row.model_copy(update={"text": row.text.replace("8", "6")})
+        ambiguous = bind_evidence([row], [("one.md", source), ("two.md", source)])
+        self.assertEqual([finding.kind for finding in ambiguous.findings], ["ambiguous_range", "uncovered_range", "uncovered_range"])
+        row = row.model_copy(update={"source_path": "one.md"})
+        supported = bind_evidence([row], [("one.md", source), ("two.md", source)])
+        self.assertEqual([(finding.kind, finding.source_label) for finding in supported.findings], [("uncovered_range", "two.md")])
+        repeated = row.model_copy(update={"text": row.text + " Duration must be between 1 and 6 inclusive."})
+        duplicate_claim = bind_evidence([repeated], [("one.md", source)])
+        self.assertEqual([finding.kind for finding in duplicate_claim.findings], ["ambiguous_range", "ambiguous_range", "uncovered_range"])
+        control = bind_evidence([extracted("The room must be ready.")], [("plain.md", "The room must be ready.")])
+        self.assertEqual(control.findings, [])
+
     def test_workflow_normalization_preserves_evidence_until_upload_binding(self):
         quote = "A different room in the same slot remains available."
         payload = [
@@ -64,8 +131,8 @@ class RequirementSourceEvidenceTests(unittest.TestCase):
     def test_upload_endpoint_binds_evidence_before_persistence_and_response(self):
         workflow = {
             "requirements": [extracted("A room may be booked.")],
-            "approved": False,
-            "review": {},
+            "approved": True,
+            "review": {"approved": True},
             "iteration_history": [],
             "coverage_metrics": {},
             "workflow_settings": {},
@@ -93,7 +160,11 @@ class RequirementSourceEvidenceTests(unittest.TestCase):
                     response = client.post(
                         "/requirements/parse",
                         files={
-                            "file": ("rooms.md", b"## ROOM-101\nA room may be booked.", "text/markdown"),
+                            "file": (
+                                "rooms.md",
+                                b"## ROOM-101\nA room may be booked.\nAttendees must be from 1 to 6 inclusive.",
+                                "text/markdown",
+                            ),
                         },
                     )
             self.assertEqual(response.status_code, 200, response.text)
@@ -101,6 +172,10 @@ class RequirementSourceEvidenceTests(unittest.TestCase):
             self.assertEqual(delivered["original_requirement_ids"], ["ROOM-101"])
             self.assertTrue(delivered["sources"][0]["excerpt_verified"])
             self.assertEqual(persist.call_args.kwargs["current_requirements"][0].sources[0].excerpt, "A room may be booked.")
+            self.assertFalse(response.json()["approved"])
+            self.assertFalse(response.json()["review"]["approved"])
+            self.assertEqual(response.json()["source_evidence_findings"][0]["kind"], "uncovered_range")
+            self.assertFalse(persist.call_args.kwargs["approved"])
         finally:
             app.dependency_overrides.clear()
 

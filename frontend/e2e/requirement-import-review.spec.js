@@ -38,7 +38,15 @@ const incoming = ["The agricultural portal displays PDF resources.", "The reader
 
 async function setup(
 	page,
-	{ candidates = incoming, revision = 7, failedApply = false, pendingOnLoad = false, emptyBaseline = false, sourceName = "TX-6" } = {}
+	{
+		candidates = incoming,
+		revision = 7,
+		failedApply = false,
+		pendingOnLoad = false,
+		emptyBaseline = false,
+		sourceName = "TX-6",
+		sourceEvidenceFindings = [],
+	} = {}
 ) {
 	await seedAuthenticatedSession(page);
 	const baseline = emptyBaseline ? [] : originals;
@@ -70,6 +78,7 @@ async function setup(
 		suggested_update_scope: [],
 		counts: {},
 		warnings: [],
+		source_evidence_findings: sourceEvidenceFindings,
 		recovery_snapshot_ids: [],
 	};
 	let pending = pendingOnLoad ? [preview] : [];
@@ -231,6 +240,32 @@ test("comparison displays verified original IDs and quotes before applying", asy
 	await expect(page.getByText("Original IDs: ROOM-101", { exact: true })).toBeVisible();
 	await expect(page.locator("blockquote").filter({ hasText: "Attendees must be a whole number from 1 to 8." })).toBeVisible();
 	await expect(workbench(page)).toBeHidden();
+});
+
+test("shows claimed and omitted ranges with their source group before a reviewer decides", { tag: "@p1" }, async ({ page }) => {
+	const source = { source_label: "rooms.md", original_requirement_ids: ["ROOM-101"], source_section: "Lines 6-6" };
+	const text = "The system shall confirm a booking with 1 to 6 attendees.";
+	const state = await setup(page, {
+		candidates: [{ ...incoming[0], requirement: { ...incoming[0].requirement, text }, classification: "needs_decision" }],
+		sourceName: "rooms.md",
+		sourceEvidenceFindings: [
+			{ ...source, kind: "unverified_range", requirement_id: "REQ-001", excerpt: "between 1 and 6 inclusive" },
+			{ ...source, kind: "uncovered_range", excerpt: "Attendees must be a whole number from 1 to 6 inclusive." },
+		],
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	await stage(page);
+	const findings = page.getByRole("region", { name: "Numeric source evidence needs review" });
+	await expect(findings.getByRole("listitem").filter({ hasText: "Range absent from the incoming quotation" })).toContainText(
+		"Incoming REQ-001 · rooms.md · ROOM-101"
+	);
+	await expect(findings.getByRole("listitem").filter({ hasText: "Source range missing from verified extraction" })).toContainText(
+		"Attendees must be a whole number from 1 to 6 inclusive."
+	);
+	await openIncoming(page, text);
+	await expect(page.getByLabel("Decision for incoming-1")).toHaveValue("");
+	await expect(page.getByRole("button", { name: "Apply reviewed changes" })).toBeDisabled();
+	expect(state.applies).toHaveLength(0);
 });
 
 test("a verified source suggestion previews the prior requirement and still needs an explicit choice", { tag: "@p1" }, async ({ page }) => {

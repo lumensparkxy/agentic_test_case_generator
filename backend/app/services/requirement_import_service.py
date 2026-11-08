@@ -302,7 +302,8 @@ def stage_import(project_id, actor, revision, response, operation):
     matches, failed = suggest_matches(current, incoming)
     preview = build_preview(project_id, project["current_revision"], current, incoming, response.source_name, operation, str(uuid4()), matches, failed)
     preview.guidance = response.guidance or public_manifest()
-    workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text"})
+    preview.source_evidence_findings = response.source_evidence_findings
+    workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text", "source_evidence_findings"})
     workflow["guidance"] = preview.guidance
     return repo.save(preview, actor, retired, workflow)
 
@@ -322,6 +323,7 @@ def recompare_import(project_id, import_id, actor):
     matches, failed = suggest_matches(current, incoming)
     preview = build_preview(project_id, project["current_revision"], current, incoming, old.source_name, old.operation, str(uuid4()), matches, failed)
     preview.guidance = old.guidance
+    preview.source_evidence_findings = old.source_evidence_findings
     result = repo.save(preview, actor, retired, data.get("workflow_payload", {}))
     repo.cancel(project_id, import_id, actor)
     return result
