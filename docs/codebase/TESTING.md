@@ -624,6 +624,10 @@ source evidence and reports the separate Test Cases machine review.
 From the Runs index the smoke opens each saved run, reloads its exact Reports
 link, and checks the case identities and recorded assertion for the seeded
 failure.
+For the healthy execution, the browser harness sends the actual request,
+discards the committed response, reloads Automation, and checks its receipt.
+It verifies the exact saved report link and rejects a replay of the original
+request identity without adding another run.
 
 `test_workflow_project_service.py` covers multi-part execution snapshots,
 ordered readback, atomic rollback, retry, incomplete and corrupted parts, and

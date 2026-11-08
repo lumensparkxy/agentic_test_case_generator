@@ -546,10 +546,61 @@ test.describe("Automation preview consistency", () => {
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect.poll(() => requests.runs).toBe(1);
 		await expect(page.getByRole("heading", { name: "Execution Results" })).toHaveCount(0);
-		await expect(page.getByRole("alert")).toContainText(/Execution run failed: Execution response did not include valid run data/i);
+		await expect(page.getByRole("alert")).toContainText(
+			/Execution outcome unconfirmed: Execution response did not include valid run data/i
+		);
 		await expect(page.getByTestId("application-live-status")).toBeEmpty();
 		await expect(page.getByText("Executable 1", { exact: true })).toBeVisible();
-		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
+		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeDisabled();
+		await expect(page.getByRole("button", { name: "Check saved run" })).toBeVisible();
+	});
+
+	test("checks an ambiguous browser request after reload without posting another run", { tag: ["@p1"] }, async ({ page }) => {
+		const livePreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		let requestId;
+		const requests = await installApi(page, {
+			project: projectFixture(),
+			previews: [livePreview],
+			handleRun: async (route) => {
+				requestId = route.request().headers()["x-request-id"];
+				await route.abort("failed");
+			},
+		});
+		let receiptStatus = "pending";
+		await page.route(`**/projects/${PROJECT_ID}/execution-requests/*`, async (route) => {
+			expect(new URL(route.request().url()).pathname).toBe(`/projects/${PROJECT_ID}/execution-requests/${requestId}`);
+			expect(route.request().method()).toBe("GET");
+			return jsonResponse(route, { project_id: PROJECT_ID, request_id: requestId, status: receiptStatus });
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Check saved run" })).toBeVisible();
+		await page.reload();
+		await page.getByRole("button", { name: "Check saved run" }).click();
+		await expect(page.getByRole("button", { name: "Preview Execution", exact: true })).toBeDisabled();
+		await expect(page.getByRole("button", { name: "Acknowledge uncertain outcome" })).toHaveCount(0);
+		receiptStatus = "unconfirmed";
+		await page.getByRole("button", { name: "Check saved run" }).click();
+		await page.getByRole("button", { name: "Acknowledge uncertain outcome" }).click();
+		await expect(page.getByRole("button", { name: "Preview Execution", exact: true })).toBeEnabled();
+		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
+		expect(requests.runs).toBe(1);
+	});
+
+	test("allows a fresh preview after an explicit preflight rejection", async ({ page }) => {
+		await installApi(page, {
+			project: projectFixture(),
+			previews: [previewFixture([executableCandidate("candidate-checkout", "TC-001")])],
+			handleRun: async (route) =>
+				jsonResponse(route, { detail: { message: "Execution prerequisites changed.", readiness: { run_allowed: false } } }, 409),
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		await expect(page.getByRole("alert")).toContainText("Execution run failed: Execution prerequisites changed.");
+		await expect(page.getByRole("button", { name: "Preview Execution", exact: true })).toBeEnabled();
+		await expect(page.getByRole("button", { name: "Check saved run" })).toHaveCount(0);
 	});
 
 	test("ignores an older same-project preview that resolves after the latest request", async ({ page }) => {

@@ -1,8 +1,9 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.concurrency import run_in_threadpool
 
+from ..contracts.execution import ExecutionRequestReceipt
 from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectUseCaseGenerationInput
 from ..services.use_case_generation_service import generate_project_use_cases
 from ..auth.jwt_auth import get_current_user
@@ -22,6 +23,7 @@ from ..models import (
     UseCaseReviewResponse,
 )
 from ..services.impact_update_service import analyze_project_impact, apply_project_impact_update, impact_error_to_http
+from ..services.execution_request_service import public_execution_request, read_execution_request
 from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
 from ..services.use_case_review_service import review_use_case_snapshot, use_case_review_error_to_http
@@ -127,6 +129,21 @@ async def get_qa_project_execution_run(
         return await run_in_threadpool(get_project_execution_run, project_id, run_record_id, actor=current_user)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/execution-requests/{request_id}", response_model=ExecutionRequestReceipt)
+async def get_qa_project_execution_request(
+    project_id: str,
+    request_id: str = Path(max_length=160),
+    current_user: AuthUser = Depends(get_current_user),
+) -> ExecutionRequestReceipt:
+    try:
+        record = await run_in_threadpool(read_execution_request, project_id, request_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+    if not record:
+        raise HTTPException(404, "Execution request has no saved receipt.")
+    return public_execution_request(record)
 
 
 @router.get("/projects/{project_id}/orchestrator/status", response_model=OrchestratorStatusResponse)

@@ -530,6 +530,17 @@ a shared 2 MiB text budget for saved diagnostics and marks abbreviated
 messages. Case identities, outcomes and artifact references remain intact.
 The run response and local Playwright artifacts retain their original output.
 
+Project Run requests with an explicit URL-safe `X-Request-ID` claim that
+identity once before launching Playwright. The claim binds the submitted
+revision, suite, target and selection. Its completed receipt is committed with
+the execution snapshot and run record. Replays return HTTP 409 with either
+the existing receipt or an input conflict. The owner can read the receipt at
+`GET /projects/{project_id}/execution-requests/{request_id}`.
+Automation keeps an unresolved identity in tab session storage. A status check
+can recover the exact Reports link after a dropped response or reload.
+An unconfirmed outcome requires acknowledgment and a fresh preview before
+another run. The original request identity remains single-use.
+
 Execution preview has one count/list invariant for the `executable`, `manual`,
 `unsupported`, and `invalid` buckets: every `summary` count equals the length of
 its matching candidate collection. `ExecutionPreviewResponse` derives the

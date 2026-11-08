@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
@@ -121,6 +122,17 @@ class ExecutionRunResponse(BaseModel):
     preview: ExecutionPreviewResponse
     warnings: List[str] = Field(default_factory=list)
     summary: ExecutionRunSummary = Field(default_factory=ExecutionRunSummary)
+
+
+class ExecutionRequestReceipt(BaseModel):
+    project_id: str
+    request_id: str
+    status: Literal["pending", "completed", "unconfirmed"]
+    source_snapshot_id: str
+    target_environment: str
+    started_at: datetime
+    run_id: Optional[str] = None
+    run_record_id: Optional[str] = None
 
 
 __all__ = [

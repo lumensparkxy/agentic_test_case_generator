@@ -1,6 +1,7 @@
 import ClarificationScopeNotice from "./components/context/ClarificationScopeNotice";
 import { hasApprovedGenerationScope } from "./utils/requirementScope";
 import useReviewDraft from "./hooks/useReviewDraft";
+import useExecutionRecovery from "./hooks/useExecutionRecovery";
 import DraftRecoveryNotice from "./components/reviews/DraftRecoveryNotice";
 import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
@@ -379,6 +380,7 @@ export default function App() {
 	} = useExecutionWorkflowState();
 	const executionPreviewRequestIdRef = useRef(0);
 	const executionRunRequestIdRef = useRef(0);
+	const executingScopeRef = useRef(null);
 	const invalidateExecutionPreviewRequest = () => {
 		executionPreviewRequestIdRef.current += 1;
 		setIsPreviewingExecution(false);
@@ -547,6 +549,8 @@ export default function App() {
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
 	const currentProjectId = currentProject?.project_id || "";
+	const [executionRecovery, saveExecutionRecovery] = useExecutionRecovery(currentUser?.sub, currentProjectId);
+	const executionNeedsResolution = Boolean(executionRecovery && executionRecovery.status !== "completed");
 	const currentProjectRevision = Number.isInteger(currentProject?.current_revision) ? currentProject.current_revision : null;
 	projectOperationUserRef.current = currentUser?.sub || "";
 	if (projectRevisionsRef.current.identity !== projectOperationUserRef.current) {
@@ -3103,6 +3107,10 @@ export default function App() {
 	};
 
 	const previewExecution = async (casesOverride = testCases, options = {}) => {
+		if (executionNeedsResolution) {
+			setExecutionError("Resolve the previous browser request before previewing another run.");
+			return null;
+		}
 		const { updateStatus = true, persistProject = true, operationScope: providedOperationScope = null } = options;
 		const operationScope = providedOperationScope || captureProjectOperationScope();
 		if (!operationScope || !isProjectOperationCurrent(operationScope)) {
@@ -3184,6 +3192,7 @@ export default function App() {
 	});
 
 	const runApprovedExecution = async () => {
+		if (executionNeedsResolution || isRunningExecution || isProjectOperationCurrent(executingScopeRef.current)) return;
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
 			return;
@@ -3217,6 +3226,10 @@ export default function App() {
 		const runningMessage = `Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`;
 		setStatus(runningMessage);
 		setApplicationLiveStatus(runningMessage);
+		const requestId = createRequestId();
+		executingScopeRef.current = operationScope;
+		saveExecutionRecovery({ requestId, status: "pending" });
+		let outcomeUnconfirmed = true;
 		try {
 			const payload = {
 				...buildExecutionPayload(testCases, { operationScope }),
@@ -3224,10 +3237,22 @@ export default function App() {
 			};
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionRun.path, {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
 				body: JSON.stringify(payload),
 			});
 			if (!res.ok) {
+				if (res.status < 500 && isProjectOperationCurrent(operationScope)) {
+					const problem = await res
+						.clone()
+						.json()
+						.catch(() => null);
+					const rejectedBeforeLaunch =
+						problem?.detail?.readiness?.run_allowed === false || problem?.detail?.code === "execution_selection_rejected";
+					if (rejectedBeforeLaunch && isProjectOperationCurrent(operationScope)) {
+						saveExecutionRecovery(null);
+						outcomeUnconfirmed = false;
+					}
+				}
 				const errorMessage = await parseApiError(res, "Failed to run execution candidates");
 				throw new Error(errorMessage);
 			}
@@ -3253,6 +3278,7 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope) || executionRunRequestId !== executionRunRequestIdRef.current) {
 				return;
 			}
+			saveExecutionRecovery(null);
 			setExecutionRunResult({
 				...data,
 				source_snapshot_id: data.preview.readiness?.source_snapshot_id,
@@ -3271,15 +3297,54 @@ export default function App() {
 			await refreshCurrentProject({ hydrate: false, operationScope });
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
-				const message = `Execution run failed: ${error.message}`;
+				const message = `${outcomeUnconfirmed ? "Execution outcome unconfirmed" : "Execution run failed"}: ${error.message}`;
 				setApplicationLiveStatus("");
 				setExecutionError(message);
 			}
 		} finally {
+			if (executingScopeRef.current === operationScope) executingScopeRef.current = null;
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
 				setIsRunningExecution(false);
 			}
 		}
+	};
+
+	const checkExecutionRecovery = async () => {
+		const scope = captureProjectOperationScope();
+		const requestId = executionRecovery?.requestId;
+		if (!scope || !requestId) return;
+		const path = API_CONTRACT_ENDPOINTS.projectExecutionRequest.path
+			.replace("{project_id}", encodeURIComponent(scope.projectId))
+			.replace("{request_id}", encodeURIComponent(requestId));
+		try {
+			const response = await apiRequest(path);
+			const receipt = response.status === 404 ? null : response.ok ? await response.json() : undefined;
+			if (!isProjectOperationCurrent(scope)) return;
+			if (receipt === null) {
+				saveExecutionRecovery({ requestId, status: "missing" });
+				setExecutionError("");
+				return;
+			}
+			if (
+				receipt?.project_id !== scope.projectId ||
+				receipt?.request_id !== requestId ||
+				!["pending", "completed", "unconfirmed"].includes(receipt.status) ||
+				(receipt.status === "completed" && (!receipt.run_record_id || !receipt.run_id))
+			) {
+				throw new Error("The saved execution receipt could not be verified. Check again.");
+			}
+			saveExecutionRecovery({ requestId, status: receipt.status, runId: receipt.run_id, runRecordId: receipt.run_record_id });
+			setExecutionError("");
+			if (receipt.status === "completed") await refreshCurrentProject({ hydrate: true, operationScope: scope });
+		} catch (error) {
+			if (isProjectOperationCurrent(scope)) setExecutionError(error.message);
+		}
+	};
+
+	const acknowledgeExecutionRecovery = () => {
+		saveExecutionRecovery(null);
+		resetExecutionWorkflowState();
+		setStatus("Execution uncertainty acknowledged. Preview the current suite before running again.");
 	};
 
 	const generateTestCases = async (
@@ -5412,6 +5477,15 @@ export default function App() {
 											selectedExecutionCandidateIds={selectedExecutionCandidateIds}
 											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
+											executionRecovery={executionRecovery}
+											executionNeedsResolution={executionNeedsResolution}
+											checkExecutionRecovery={checkExecutionRecovery}
+											acknowledgeExecutionRecovery={acknowledgeExecutionRecovery}
+											recoveredReportPath={
+												executionRecovery?.runRecordId
+													? `${buildProjectPath(currentProjectId, "reports")}?run=${encodeURIComponent(executionRecovery.runRecordId)}`
+													: null
+											}
 											executionError={executionError}
 											effectiveTarget={executionTargetBaseUrl.trim() || appLink}
 											executionStale={projectStageState.execution?.stale}

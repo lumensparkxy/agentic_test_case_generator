@@ -76,7 +76,7 @@ test.describe("Isolated browser workbench", () => {
 				return snapshot;
 			});
 
-			const runTarget = async (environment, expectedStatus, { verifyAdmission = false } = {}) => {
+			const runTarget = async (environment, expectedStatus, { verifyAdmission = false, loseResponse = false } = {}) => {
 				await page.goto(`${fixture.prefix}/automation`);
 				await page.getByPlaceholder("staging, dev, customer-a").fill(environment);
 				await page.getByRole("textbox", { name: "Target base URL", exact: true }).fill(target);
@@ -108,9 +108,43 @@ test.describe("Isolated browser workbench", () => {
 					expect((await fixture.read()).execution_runs).toEqual([]);
 				}
 				const button = page.getByRole("button", { name: new RegExp(`^Run ${candidates.length} Candidate(s)?$`) });
-				const runResponse = await uiResponse(page, "/automation/execution/run", () => button.click());
-				const run = await runResponse.json();
-				expect(runResponse.request().postDataJSON()).toMatchObject({
+				let run;
+				let runInput;
+				if (loseResponse) {
+					const match = "**/automation/execution/run";
+					let requestId;
+					const dropResponse = async (route) => {
+						if (route.request().method() !== "POST") return route.fallback();
+						const response = await route.fetch({ timeout: 120_000 });
+						run = await response.json();
+						runInput = route.request().postDataJSON();
+						requestId = route.request().headers()["x-request-id"];
+						await route.abort("failed");
+					};
+					await page.route(match, dropResponse);
+					await button.click();
+					await expect(page.getByRole("button", { name: "Check saved run" })).toBeVisible({ timeout: 120_000 });
+					await page.unroute(match, dropResponse);
+					expect(requestId).toBeTruthy();
+					await page.reload();
+					await page.getByRole("button", { name: "Check saved run" }).click();
+					const receipt = await fixture.checked("GET", `${fixture.prefix}/execution-requests/${requestId}`);
+					expect(receipt).toMatchObject({ status: "completed", run_id: run.run_id, source_snapshot_id: suite.snapshot_id });
+					await expect(page.getByRole("link", { name: `Open saved run ${run.run_id}` })).toHaveAttribute(
+						"href",
+						`${fixture.prefix}/reports?run=${receipt.run_record_id}`
+					);
+					const duplicate = await fixture.api("POST", "/automation/execution/run", runInput, requestId);
+					expect(duplicate.status()).toBe(409);
+					expect((await duplicate.json()).detail).toMatchObject({ code: "execution_request_exists", receipt });
+					expect((await fixture.read()).execution_runs.map((item) => item.run_id)).toEqual([run.run_id]);
+					await fixture.save("recovered-execution-receipt", receipt);
+				} else {
+					const response = await uiResponse(page, "/automation/execution/run", () => button.click());
+					run = await response.json();
+					runInput = response.request().postDataJSON();
+				}
+				expect(runInput).toMatchObject({
 					target_base_url: target,
 					target_environment: environment,
 					selected_test_case_ids: candidates,
@@ -123,7 +157,7 @@ test.describe("Isolated browser workbench", () => {
 			};
 
 			const healthy = await test.step("Run the current approved suite on healthy data", () =>
-				runTarget("synthetic-healthy", "passed", { verifyAdmission: true }));
+				runTarget("synthetic-healthy", "passed", { verifyAdmission: true, loseResponse: true }));
 			const broken = await test.step("Run the same saved suite with a broken empty result", async () => {
 				await fs.writeFile(faultMarker, "wrong-empty\n");
 				const run = await runTarget("synthetic-wrong-empty", "failed");

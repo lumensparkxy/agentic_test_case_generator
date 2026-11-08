@@ -1,6 +1,8 @@
 from ..services.knowledge_service import project_for
 from ..services.knowledge_feedback import finish_generation
 from ..services.guidance_dependency import generation_guidance
+import logging
+import re
 import sys
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -12,6 +14,13 @@ from ..agents.automation_agent import generate_playwright_pom
 from ..config import get_execution_settings
 from ..services.execution_readiness import assess_execution, selected_candidates
 from ..services.execution_prerequisites import execution_reference_scope
+from ..services.execution_request_service import (
+    claim_execution_request,
+    execution_request_fingerprint,
+    mark_execution_unconfirmed,
+    read_execution_request,
+    reject_execution_replay,
+)
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
@@ -27,6 +36,7 @@ from ..services.execution_service import preview_execution, run_execution
 from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http, record_execution_run
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _resolve_main_callable(name: str, fallback: Callable[..., Any]) -> Callable[..., Any]:
@@ -377,6 +387,18 @@ async def automation_execution_run(
     current_user: AuthUser = Depends(get_current_user),
 ) -> ExecutionRunResponse:
     request_id = _get_request_id(request)
+    tracked = bool(payload.project_id and request.headers.get("X-Request-ID"))
+    fingerprint = execution_request_fingerprint(payload) if tracked else ""
+    if tracked:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,159}", request_id):
+            raise HTTPException(422, "Use a URL-safe execution request identity of up to 160 characters.")
+        try:
+            saved = await run_in_threadpool(read_execution_request, payload.project_id, request_id, actor=current_user)
+        except Exception as exc:
+            raise project_error_to_http(exc) from exc
+        reject_execution_replay(saved, fingerprint)
+
+    request_ref = None
     workflow_run_id = _resolve_main_callable("start_workflow_run", start_workflow_run)(
         operation="automation.execution.run",
         actor=current_user,
@@ -404,8 +426,24 @@ async def automation_execution_run(
         try:
             selected_ids = selected_candidates(preview, payload.selected_test_case_ids)
         except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail={"code": "execution_selection_rejected", "message": str(exc)}) from exc
         target_environment = _target_environment(payload)
+        if tracked:
+            try:
+                request_ref = await run_in_threadpool(
+                    claim_execution_request,
+                    project_id=payload.project_id,
+                    request_id=request_id,
+                    actor=current_user,
+                    revision=readiness.project_revision,
+                    source_snapshot_id=readiness.source_snapshot_id,
+                    target_environment=target_environment,
+                    fingerprint=fingerprint,
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise project_error_to_http(exc) from exc
         response = await _execution_with_references(
             _resolve_main_callable("run_execution", run_execution),
             payload,
@@ -436,6 +474,38 @@ async def automation_execution_run(
         if payload.project_id:
             try:
                 source_snapshot_id = readiness.source_snapshot_id
+
+                def write_run(snapshot_id, project_revision, transaction=None):
+                    return record_execution_run(
+                        project_id=payload.project_id,
+                        actor=current_user,
+                        request_id=request_id,
+                        run_id=response.run_id,
+                        target_environment=target_environment,
+                        target_base_url=target_base_url,
+                        status_value=response.status,
+                        summary=_model_payload(response.summary),
+                        test_case_count=len(payload.test_cases),
+                        snapshot_id=snapshot_id,
+                        source_snapshot_id=source_snapshot_id,
+                        selected_test_case_ids=list(payload.selected_test_case_ids),
+                        artifacts_root=response.artifacts_root,
+                        playwright_report_paths=list(response.playwright_report_paths or []),
+                        workflow_run_id=workflow_run_id,
+                        source_event_id=event_id,
+                        project_revision=project_revision,
+                        transaction=transaction,
+                        idempotency_key=_action_idempotency_key(
+                            "automation.execution.run_record",
+                            request_id=request_id,
+                            target_environment=target_environment,
+                        ),
+                    )
+
+                def complete_request(transaction, snapshot):
+                    run = write_run(snapshot["snapshot_id"], snapshot["project_revision"], transaction)
+                    transaction.update(request_ref, {"status": "completed", "run_id": run.run_id, "run_record_id": run.run_record_id})
+
                 execution_snapshot = append_stage_snapshot(
                     project_id=payload.project_id,
                     stage="execution",
@@ -460,36 +530,15 @@ async def automation_execution_run(
                         "invalid_count": response.summary.invalid,
                     },
                     base_project_revision=payload.base_project_revision,
+                    transaction_guard=complete_request if request_ref is not None else None,
                     idempotency_key=_action_idempotency_key(
                         "automation.execution.run",
                         request_id=request_id,
                         target_environment=target_environment,
                     ),
                 )
-                record_execution_run(
-                    project_id=payload.project_id,
-                    actor=current_user,
-                    request_id=request_id,
-                    run_id=response.run_id,
-                    target_environment=target_environment,
-                    target_base_url=target_base_url,
-                    status_value=response.status,
-                    summary=_model_payload(response.summary),
-                    test_case_count=len(payload.test_cases),
-                    snapshot_id=execution_snapshot.snapshot_id,
-                    source_snapshot_id=source_snapshot_id,
-                    selected_test_case_ids=list(payload.selected_test_case_ids),
-                    artifacts_root=response.artifacts_root,
-                    playwright_report_paths=list(response.playwright_report_paths or []),
-                    workflow_run_id=workflow_run_id,
-                    source_event_id=event_id,
-                    project_revision=execution_snapshot.project_revision,
-                    idempotency_key=_action_idempotency_key(
-                        "automation.execution.run_record",
-                        request_id=request_id,
-                        target_environment=target_environment,
-                    ),
-                )
+                if request_ref is None:
+                    write_run(execution_snapshot.snapshot_id, execution_snapshot.project_revision)
                 append_stage_snapshot(
                     project_id=payload.project_id,
                     stage="reports",
@@ -527,6 +576,11 @@ async def automation_execution_run(
                 raise project_error_to_http(project_exc) from project_exc
         return response
     except Exception as exc:
+        if request_ref is not None:
+            try:
+                await run_in_threadpool(mark_execution_unconfirmed, request_ref)
+            except Exception:
+                logger.warning("Could not update interrupted execution receipt", exc_info=True)
         _log_failure(
             current_user=current_user,
             request=request,
@@ -540,4 +594,9 @@ async def automation_execution_run(
                 "selected_test_case_count": len(payload.selected_test_case_ids),
             },
         )
+        if request_ref is not None:
+            raise HTTPException(
+                503,
+                detail={"code": "execution_request_unconfirmed", "message": "The browser request was admitted. Check its saved status."},
+            ) from exc
         raise

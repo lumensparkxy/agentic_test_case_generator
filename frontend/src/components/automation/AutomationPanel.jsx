@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { getAutomationEvidenceStatus } from "./automationEvidence";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
-import { Checkbox, Field, Input, Button } from "../ui/controls";
+import { Checkbox, Field, Input, Button, Link } from "../ui/controls";
 import { Surface, Alert, Disclosure } from "../ui/surfaces";
 const renderBucketCount = (label, value, tone = "") => (
 	<span className={`workflow-diagnostics-pill ${tone}`.trim()}>
@@ -231,6 +232,11 @@ export default function AutomationPanel({
 	selectedExecutionCandidateIds,
 	setSelectedExecutionCandidateIds,
 	executionRunResult,
+	executionRecovery,
+	executionNeedsResolution,
+	checkExecutionRecovery,
+	acknowledgeExecutionRecovery,
+	recoveredReportPath,
 	executionError,
 	effectiveTarget,
 	executionStale,
@@ -243,15 +249,25 @@ export default function AutomationPanel({
 	goPrev,
 	goNext,
 }) {
+	const [isCheckingRecovery, setIsCheckingRecovery] = useState(false);
+	const checkRecovery = async () => {
+		setIsCheckingRecovery(true);
+		try {
+			await checkExecutionRecovery();
+		} finally {
+			setIsCheckingRecovery(false);
+		}
+	};
 	const evidence = getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: executionStale });
 	const previewSummary = executionPreview?.summary || {};
 	const executableCandidates = executionPreview?.executable || [];
 	const actualCandidateIds = new Set(executableCandidates.map((candidate) => candidate.id));
 	const selectedExecutableCount = selectedExecutionCandidateIds.filter((candidateId) => actualCandidateIds.has(candidateId)).length;
 	const previewIsActionable = executionPreview?.isConsistent === true && !executionPreview?.requiresRefresh;
-	const previewDisabled = !testCases.length || isPreviewingExecution || isRunningExecution || authActionDisabled;
+	const previewDisabled =
+		!testCases.length || isPreviewingExecution || isRunningExecution || executionNeedsResolution || authActionDisabled;
 	const runDisabled = previewDisabled || !previewIsActionable || !executionEligibility?.ready || selectedExecutableCount === 0;
-	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
+	const inputsDisabled = isPreviewingExecution || isRunningExecution || executionNeedsResolution || authActionDisabled;
 
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
@@ -313,6 +329,36 @@ export default function AutomationPanel({
 					<p>{executionError}</p>
 				</Alert>
 			) : null}
+			{executionRecovery && !isRunningExecution && (
+				<div className="workflow-result-notice" role="region" aria-label="Execution request recovery">
+					<strong>{recoveredReportPath ? "Saved execution recovered" : "Check the previous browser request"}</strong>
+					{recoveredReportPath ? (
+						<p>
+							<Link href={recoveredReportPath}>Open saved run {executionRecovery.runId}</Link>
+						</p>
+					) : (
+						<>
+							<p role="status">
+								{executionRecovery.status === "missing"
+									? "No receipt is available yet. Check the application before starting another run."
+									: executionRecovery.status === "unconfirmed"
+										? "The run outcome is unconfirmed. Check the application for changes before starting another run."
+										: "The result is pending confirmation. Checking status does not launch browser actions."}
+							</p>
+							<div className="feedback-actions">
+								<Button type="button" className="secondary" disabled={isCheckingRecovery || authActionDisabled} onClick={checkRecovery}>
+									{isCheckingRecovery ? "Checking…" : "Check saved run"}
+								</Button>
+								{["missing", "unconfirmed"].includes(executionRecovery.status) && (
+									<Button type="button" className="secondary" disabled={isCheckingRecovery} onClick={acknowledgeExecutionRecovery}>
+										Acknowledge uncertain outcome
+									</Button>
+								)}
+							</div>
+						</>
+					)}
+				</div>
+			)}
 
 			{executionPreview ? (
 				<div className="generate-results-workspace">

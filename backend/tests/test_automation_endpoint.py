@@ -352,19 +352,19 @@ class AutomationEndpointTests(unittest.TestCase):
                                         response = client.post(
                                             "/automation/execution/run",
                                             json=payload,
-                                            headers={"X-Request-ID": "req-exec-staging"},
                                         )
 
         self.assertEqual(response.status_code, 200)
+        request_id = response.headers["X-Request-ID"]
         execution_call = append_snapshot.call_args_list[0].kwargs
         report_call = append_snapshot.call_args_list[1].kwargs
         record_call = record_run.call_args.kwargs
         self.assertEqual(execution_call["source_snapshot_id"], "snap-test-v1")
         self.assertEqual(execution_call["metadata"]["target_environment"], "staging")
         self.assertEqual(execution_call["metadata"]["source_snapshot_id"], "snap-test-v1")
-        self.assertEqual(execution_call["idempotency_key"], "automation.execution.run:req-exec-staging:staging")
+        self.assertEqual(execution_call["idempotency_key"], f"automation.execution.run:{request_id}:staging")
         self.assertEqual(report_call["source_snapshot_id"], "snap-exec-v1")
-        self.assertEqual(report_call["idempotency_key"], "reports.execution_summary:req-exec-staging:staging")
+        self.assertEqual(report_call["idempotency_key"], f"reports.execution_summary:{request_id}:staging")
         self.assertEqual(report_call["payload"]["artifacts_root"], "/tmp/exec_staging")
         self.assertEqual(report_call["payload"]["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
         self.assertEqual(record_call["target_environment"], "staging")
@@ -373,7 +373,7 @@ class AutomationEndpointTests(unittest.TestCase):
         self.assertEqual(record_call["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
         self.assertEqual(record_call["source_snapshot_id"], "snap-test-v1")
         self.assertEqual(record_call["selected_test_case_ids"], ["TC-001"])
-        self.assertEqual(record_call["idempotency_key"], "automation.execution.run_record:req-exec-staging:staging")
+        self.assertEqual(record_call["idempotency_key"], f"automation.execution.run_record:{request_id}:staging")
 
 
 if __name__ == "__main__":

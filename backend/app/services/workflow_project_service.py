@@ -697,10 +697,11 @@ def record_execution_run(
     artifacts_root: Optional[str] = None,
     playwright_report_paths: Optional[list[str]] = None,
     idempotency_key: Optional[str] = None,
+    transaction=None,
 ) -> QaProjectExecutionRun:
     now = _utcnow()
     run_record_id = _stable_document_id("execution", project_id, idempotency_key) if idempotency_key else str(uuid4())
-    if idempotency_key:
+    if idempotency_key and transaction is None:
         existing = _document_to_dict(_get_project_doc(project_id).collection("execution_runs").document(run_record_id).get())
         if existing is not None:
             return QaProjectExecutionRun.model_validate(existing)
@@ -727,31 +728,34 @@ def record_execution_run(
         "created_at": now,
     }
     project_doc = _get_project_doc(project_id)
-    project_doc.collection("execution_runs").document(run_record_id).set(payload)
-    _record_timeline_event(
-        project_doc,
-        {
-            "event_id": str(uuid4()),
-            "project_id": project_id,
-            "event_type": "execution.run_recorded",
-            "stage": "execution",
-            "summary": f"{target_environment} execution {status_value}",
-            "project_revision": project_revision,
-            "snapshot_id": snapshot_id,
-            "run_id": run_id,
-            "actor_user_id": actor.sub,
-            "metadata": {
-                "summary": _serialize_value(summary),
-                "target_environment": target_environment,
-                "target_base_url": target_base_url,
-                "artifacts_root": artifacts_root,
-                "playwright_report_paths": _serialize_value(playwright_report_paths or []),
-                "source_snapshot_id": source_snapshot_id,
-                "selected_test_case_ids": _serialize_value(selected_test_case_ids or []),
-            },
-            "occurred_at": now,
+    run_ref = project_doc.collection("execution_runs").document(run_record_id)
+    event = {
+        "event_id": str(uuid4()),
+        "project_id": project_id,
+        "event_type": "execution.run_recorded",
+        "stage": "execution",
+        "summary": f"{target_environment} execution {status_value}",
+        "project_revision": project_revision,
+        "snapshot_id": snapshot_id,
+        "run_id": run_id,
+        "actor_user_id": actor.sub,
+        "metadata": {
+            "summary": _serialize_value(summary),
+            "target_environment": target_environment,
+            "target_base_url": target_base_url,
+            "artifacts_root": artifacts_root,
+            "playwright_report_paths": _serialize_value(playwright_report_paths or []),
+            "source_snapshot_id": source_snapshot_id,
+            "selected_test_case_ids": _serialize_value(selected_test_case_ids or []),
         },
-    )
+        "occurred_at": now,
+    }
+    if transaction is None:
+        run_ref.set(payload)
+        _record_timeline_event(project_doc, event)
+    else:
+        transaction.create(run_ref, payload)
+        transaction.create(project_doc.collection("timeline").document(event["event_id"]), event)
     return QaProjectExecutionRun.model_validate(payload)
 
 

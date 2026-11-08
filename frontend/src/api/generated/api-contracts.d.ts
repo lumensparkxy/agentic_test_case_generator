@@ -18,6 +18,7 @@ export interface ApiContractOperations {
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
 	projectExecutionRun: ApiOperation<ProjectExecutionRunRequest, ProjectExecutionRunResponse, "GET", "/projects/{project_id}/execution-runs/{run_record_id}">;
+	projectExecutionRequest: ApiOperation<ProjectExecutionRequest, ProjectExecutionRequestResponse, "GET", "/projects/{project_id}/execution-requests/{request_id}">;
 	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
@@ -73,6 +74,8 @@ export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
 export type ProjectExecutionRunRequest = undefined;
 export type ProjectExecutionRunResponse = QaProjectExecutionRunDetail;
+export type ProjectExecutionRequest = undefined;
+export type ProjectExecutionRequestResponse = ExecutionRequestReceipt;
 export type ProjectOrchestratorStatusRequest = undefined;
 export type ProjectOrchestratorStatusResponse = OrchestratorStatusResponse;
 export type ProjectOrchestratorRunsRequest = undefined;
@@ -335,6 +338,17 @@ export interface ExecutionReadiness {
 export interface ExecutionReadinessBlocker {
 	code: string;
 	message: string;
+}
+
+export interface ExecutionRequestReceipt {
+	project_id: string;
+	request_id: string;
+	run_id?: string | null;
+	run_record_id?: string | null;
+	source_snapshot_id: string;
+	started_at: string;
+	status: "pending" | "completed" | "unconfirmed";
+	target_environment: string;
 }
 
 export interface ExecutionRunInput {
