@@ -770,6 +770,11 @@ case quality. The original `room-booking` option runs the seeded fault matrix.
   --emulator-jar "$jar" --output /tmp/tcg-live-room-booking-change
 ```
 
+Use `--fixture room-booking-scope` to check source revision and scoped Use
+Cases refresh independently of test-case generation. It verifies exact
+preservation of retained groups and reviews the combined plan through the same
+machine and synthetic reviewer gates as the full revision.
+
 `test_workflow_project_service.py` covers multi-part execution snapshots,
 ordered readback, atomic rollback, retry, incomplete and corrupted parts, and
 bounded Unicode diagnostics. `test_quality_feedback.py` verifies that a passing

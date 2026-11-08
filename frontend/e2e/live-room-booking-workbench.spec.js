@@ -152,6 +152,11 @@ test.describe("Generated Room Booking execution", () => {
 				await approveScenarios(page, fixture);
 			});
 
+			if (process.env.E2E_BOOKING_SCOPE_ONLY === "1") {
+				await verifyBookingRevision(page, fixture, testInfo, { target, notes, prerequisite, revisionMarker });
+				return;
+			}
+
 			const generatedSuite = await test.step("Save and inspect the exact generated suite", async () => {
 				await page.goto(`${fixture.prefix}/test-cases`);
 				const response = await uiResponse(

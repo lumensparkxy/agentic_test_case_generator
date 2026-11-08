@@ -117,8 +117,8 @@ def directory_target(fault_marker: Path):
 
 
 def workbench_fixture(stack: ExitStack, output: Path, fixture: str) -> tuple[str, dict[str, str]]:
-    if fixture in ("room-booking", "room-booking-change"):
-        revision_marker = output / "booking-capacity-six" if fixture == "room-booking-change" else None
+    if fixture in ("room-booking", "room-booking-change", "room-booking-scope"):
+        revision_marker = output / "booking-capacity-six" if fixture != "room-booking" else None
         healthy = stack.enter_context(booking_target(revised_attendee_limit_marker=revision_marker))
         loss = stack.enter_context(ResponseLossProxy(healthy, SUBMIT_PATH, evidence_path=output / "booking-response-loss.json"))
         env = {
@@ -128,6 +128,8 @@ def workbench_fixture(stack: ExitStack, output: Path, fixture: str) -> tuple[str
         }
         if revision_marker:
             env["E2E_BOOKING_REVISION_MARKER"] = str(revision_marker)
+            if fixture == "room-booking-scope":
+                env["E2E_BOOKING_SCOPE_ONLY"] = "1"
         else:
             env["E2E_BOOKING_DEFECTS"] = json.dumps(
                 {name: f"http://127.0.0.1:{stack.enter_context(booking_target(defect=name))}/" for name in DEFECTS if name != "duplicate-submission"}
@@ -228,7 +230,9 @@ def run_workbench(jar: Path, output: Path, api_key: str, *, fixture="directory")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emulator-jar", type=Path, required=True)
-    parser.add_argument("--fixture", choices=("directory", "directory-change", "room-booking", "room-booking-change"), default="directory")
+    parser.add_argument(
+        "--fixture", choices=("directory", "directory-change", "room-booking", "room-booking-change", "room-booking-scope"), default="directory"
+    )
     parser.add_argument("--output", type=Path, required=True, help="New evidence directory outside the checkout.")
     args = parser.parse_args()
     jar, output = args.emulator_jar.resolve(), args.output.resolve()

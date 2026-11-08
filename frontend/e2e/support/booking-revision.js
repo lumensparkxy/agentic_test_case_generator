@@ -109,19 +109,21 @@ async function importCapacityChange(page, fixture, suite) {
 			expect(row).toEqual(old);
 		}
 	}
-	expect(applied.stage_state.test_cases).toMatchObject({ stale: true, current_snapshot_id: suite.snapshot_id });
-	const staleExport = await fixture.api("POST", "/export/json", {
-		project_id: applied.project_id,
-		base_project_revision: applied.current_revision,
-		source_snapshot_id: suite.snapshot_id,
-		test_cases: suite.payload.test_cases,
-	});
-	expect(staleExport.status()).toBe(409);
-	expect((await staleExport.json()).detail).toContain("stale");
+	if (suite) {
+		expect(applied.stage_state.test_cases).toMatchObject({ stale: true, current_snapshot_id: suite.snapshot_id });
+		const staleExport = await fixture.api("POST", "/export/json", {
+			project_id: applied.project_id,
+			base_project_revision: applied.current_revision,
+			source_snapshot_id: suite.snapshot_id,
+			test_cases: suite.payload.test_cases,
+		});
+		expect(staleExport.status()).toBe(409);
+		expect((await staleExport.json()).detail).toContain("stale");
+	}
 	return affected;
 }
 
-async function repairBookingCases(page, fixture, { suite, affected, target, notes, prerequisite, revisionMarker }) {
+async function refreshBookingUseCases(page, fixture, { affected, target, notes, prerequisite, revisionMarker }) {
 	await approveRequirements(page, fixture);
 	await fs.writeFile(revisionMarker, "6\n");
 	const revisedNotes = notes.replaceAll(originalError, revisedError);
@@ -158,7 +160,13 @@ async function repairBookingCases(page, fixture, { suite, affected, target, note
 		removed_requirement_ids: [],
 	});
 	expect(newPlan.payload.coverage_plan.filter((group) => !affected.has(group.requirement_id))).toEqual(retained);
-	const planned = await approveScenarios(page, fixture);
+	expect(newPlan.payload.requirement_analysis.filter((group) => !affected.has(group.requirement_id))).toEqual(
+		previousPlan.payload.requirement_analysis.filter((group) => !affected.has(group.requirement_id))
+	);
+	return approveScenarios(page, fixture);
+}
+
+async function repairBookingCases(page, fixture, { suite, affected, planned }) {
 	const analyzed = await fixture.checked("POST", `${fixture.prefix}/impact-analysis`, { base_project_revision: planned.current_revision });
 	const impact = analyzed.current_snapshots.impact_analysis.payload;
 	await fixture.save("booking-revision-impact", impact);
@@ -289,8 +297,11 @@ async function runBookingVersion(page, fixture, target, suite, environment) {
 export async function verifyBookingRevision(page, fixture, testInfo, { suite, target, notes, prerequisite, revisionMarker, baselineRun }) {
 	const affected = await test.step("Compare, cancel and explicitly apply the attendee revision", () =>
 		importCapacityChange(page, fixture, suite));
+	const planned = await test.step("Refresh affected Use Cases and review the complete plan", () =>
+		refreshBookingUseCases(page, fixture, { affected, target, notes, prerequisite, revisionMarker }));
+	if (!suite) return;
 	const { saved, affectedIds } = await test.step("Repair and review the exact affected saved cases", () =>
-		repairBookingCases(page, fixture, { suite, affected, target, notes, prerequisite, revisionMarker }));
+		repairBookingCases(page, fixture, { suite, affected, planned }));
 	await test.step("Compare generated boundary checks against both versions and inspect saved evidence", async () => {
 		const revised = await runBookingVersion(page, fixture, target, saved, "booking-capacity-six");
 		expect(revised.run).toMatchObject({ status: "passed", summary: { failed: 0, invalid: 0, skipped: 0 } });
