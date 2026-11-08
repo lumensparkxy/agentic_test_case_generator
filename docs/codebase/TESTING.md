@@ -709,6 +709,19 @@ discards the committed response, reloads Automation, and checks its receipt.
 It verifies the exact saved report link and rejects a replay of the original
 request identity without adding another run.
 
+Use `--fixture directory-change` for the live source-change path. It reimports
+the same Directory source with a revised empty-result message, applies only the
+affected test recommendation, and checks exact artifact versions after review.
+The repaired suite runs against the revised app and the original app. The new
+assertion must pass on the revised app and fail on the original app, while the
+unrelated test passes on both. The run saves the import, impact, case versions,
+and reviewed export evidence before archiving the disposable project.
+
+```bash
+.venv/bin/python scripts/e2e_workbench_local.py --fixture directory-change \
+  --emulator-jar "$jar" --output /tmp/tcg-live-directory-change
+```
+
 To measure fresh generated cases on the stateful Room Booking fixture, use the
 same runner with a new output directory.
 

@@ -26,6 +26,7 @@ from room_booking_fixture import DEFECTS, SUBMIT_PATH, booking_target
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_PROJECT = "demo-tcg-workbench"
+REVISED_DIRECTORY_EMPTY_COPY = "No employees match your search"
 API_BOOTSTRAP = """
 import os
 import sys
@@ -88,13 +89,18 @@ def directory_target(fault_marker: Path):
     fixture = FIXTURES["directory"]
     healthy = fixture.documents()[fixture.route]
     broken = fixture.documents(next(defect for defect in fixture.defects if defect.name == "wrong-empty"))[fixture.route]
+    revised = healthy.replace('"No employees found"', json.dumps(REVISED_DIRECTORY_EMPTY_COPY))
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path != fixture.route:
                 self.send_error(404)
                 return
-            content = broken if fault_marker.is_file() else healthy
+            try:
+                mode = fault_marker.read_text().strip()
+            except FileNotFoundError:
+                mode = ""
+            content = {"wrong-empty": broken, "revised-empty": revised}.get(mode, healthy)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -123,7 +129,10 @@ def workbench_fixture(stack: ExitStack, output: Path, fixture: str) -> tuple[str
         }
     fault_marker = output / "directory-fault"
     target = stack.enter_context(directory_target(fault_marker))
-    return "e2e/live-browser-workbench.spec.js", {"E2E_LOCAL_WORKBENCH": "1", "E2E_DIRECTORY_TARGET": target, "E2E_DIRECTORY_FAULT": str(fault_marker)}
+    env = {"E2E_LOCAL_WORKBENCH": "1", "E2E_DIRECTORY_TARGET": target, "E2E_DIRECTORY_FAULT": str(fault_marker)}
+    if fixture == "directory-change":
+        env["E2E_DIRECTORY_REVISED_EMPTY"] = REVISED_DIRECTORY_EMPTY_COPY
+    return "e2e/live-browser-workbench.spec.js", env
 
 
 def run_workbench(jar: Path, output: Path, api_key: str, *, fixture="directory") -> int:
@@ -213,7 +222,7 @@ def run_workbench(jar: Path, output: Path, api_key: str, *, fixture="directory")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emulator-jar", type=Path, required=True)
-    parser.add_argument("--fixture", choices=("directory", "room-booking"), default="directory")
+    parser.add_argument("--fixture", choices=("directory", "directory-change", "room-booking"), default="directory")
     parser.add_argument("--output", type=Path, required=True, help="New evidence directory outside the checkout.")
     args = parser.parse_args()
     jar, output = args.emulator_jar.resolve(), args.output.resolve()

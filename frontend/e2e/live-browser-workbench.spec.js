@@ -17,6 +17,88 @@ When a guest enters "NoMatch Person" in the "Employee name" field and presses "S
 const notes =
 	'This is a public synthetic directory. The observed heading "Employee directory", field "Employee name", and button "Search" are exact accessible names. ' +
 	'Only "Alex Rivera" is seeded. "NoMatch Person" is absent. No sign-in, additional records, or setup is required.';
+const originalEmptyCopy = "No employees found";
+
+function directoryRequirement(project, originalId) {
+	const rows = project.current_snapshots.requirements.payload.requirements.filter((row) =>
+		row.sources?.some((entry) => entry.excerpt_verified && entry.original_requirement_ids?.includes(originalId))
+	);
+	expect(rows, `Verified Directory source ${originalId}`).toHaveLength(1);
+	return rows[0];
+}
+
+async function repairDirectorySource(page, fixture, suite, { target, faultMarker, revisedCopy }) {
+	const current = await fixture.read();
+	const previous = directoryRequirement(current, "DIR-200");
+	const unrelated = directoryRequirement(current, "DIR-100");
+	const oldCase = suite.payload.test_cases.find((row) => row.linked_requirement_ids.includes(previous.id));
+	const keptCase = suite.payload.test_cases.find((row) => row.linked_requirement_ids.includes(unrelated.id));
+	expect(oldCase?.id).toBeTruthy();
+	expect(keptCase?.id).toBeTruthy();
+	expect(oldCase.id).not.toBe(keptCase.id);
+	const preview = await importSource(page, fixture, {
+		...source,
+		buffer: Buffer.from(source.buffer.toString("utf8").replace(originalEmptyCopy, revisedCopy)),
+	});
+	await fixture.save("changed-source-preview", preview);
+	expect(preview.candidates.filter((item) => item.classification === "updated")).toMatchObject([
+		{ target_requirement_uid: previous.requirement_uid, requirement: { text: expect.stringContaining(revisedCopy) } },
+	]);
+	const imported = await applyImport(page, fixture, preview);
+	const revised = directoryRequirement(imported, "DIR-200");
+	expect(revised).toMatchObject({
+		id: previous.id,
+		requirement_uid: previous.requirement_uid,
+		content_version: previous.content_version + 1,
+	});
+	expect(directoryRequirement(imported, "DIR-100").content_version).toBe(unrelated.content_version);
+	expect(imported.stage_state.test_cases).toMatchObject({ current_snapshot_id: suite.snapshot_id, stale: true });
+	await approveRequirements(page, fixture);
+	await fs.writeFile(faultMarker, "revised-empty\n");
+	await page.goto(`${fixture.prefix}/context`);
+	await page.getByPlaceholder("https://your-app").fill(target);
+	await page.getByRole("textbox", { name: "Context notes", exact: true }).fill(notes);
+	await uiResponse(page, "/requirements/enrich", () => page.getByRole("button", { name: "Analyze Context", exact: true }).click());
+	await page.goto(`${fixture.prefix}/use-cases`);
+	await uiResponse(page, "/use-cases/generate", () => page.getByRole("button", { name: "Regenerate Use Cases", exact: true }).click(), {
+		timeout: 240_000,
+	});
+	const reviewed = await approveScenarios(page, fixture);
+	const analyzed = await fixture.checked("POST", `${fixture.prefix}/impact-analysis`, { base_project_revision: reviewed.current_revision });
+	const impact = analyzed.current_snapshots.impact_analysis.payload;
+	await fixture.save("changed-source-impact", impact);
+	expect(impact.changed_items).toEqual(
+		expect.arrayContaining([expect.objectContaining({ kind: "requirement", change_type: "modified", requirement_id: previous.id })])
+	);
+	const selected = impact.recommendations.find((item) => item.action === "update" && item.test_case_id === oldCase.id);
+	expect(selected?.recommendation_id, "The changed source requires a targeted update for the existing case").toBeTruthy();
+	await page.goto(`${fixture.prefix}/test-cases`);
+	for (const item of impact.recommendations) {
+		await page.getByRole("checkbox", { name: `Accept ${item.title}`, exact: true }).setChecked(item === selected);
+	}
+	const applied = await uiResponse(
+		page,
+		"/impact-update/apply",
+		() => page.getByRole("button", { name: "Apply 1 recommendation", exact: true }).click(),
+		{ timeout: 360_000 }
+	);
+	expect(applied.request().postDataJSON().accepted_recommendation_ids).toEqual([selected.recommendation_id]);
+	const updated = await applied.json();
+	const draft = updated.current_snapshots.test_cases;
+	await fixture.save("changed-source-repaired-suite", draft);
+	expect(draft.payload.test_cases).toHaveLength(suite.payload.test_cases.length);
+	expect(draft.payload.test_cases.find((row) => row.id === keptCase.id)).toEqual(keptCase);
+	const repaired = draft.payload.test_cases.find((row) => row.id === oldCase.id);
+	expect(repaired).toMatchObject({
+		artifact_item_id: oldCase.artifact_item_id,
+		artifact_version_number: oldCase.artifact_version_number + 1,
+	});
+	expect(repaired.artifact_version_id).not.toBe(oldCase.artifact_version_id);
+	expect(repaired.steps.some((step) => step.expected.includes(revisedCopy))).toBe(true);
+	expect(repaired.steps.every((step) => !step.expected.includes(originalEmptyCopy))).toBe(true);
+	expect(draft.metadata.targeted_generation_runs).toHaveLength(1);
+	return { updated, repaired, keptCase };
+}
 
 test.describe("Isolated browser workbench", () => {
 	test.describe.configure({ retries: 0, timeout: 12 * 60 * 1000 });
@@ -27,6 +109,7 @@ test.describe("Isolated browser workbench", () => {
 		expect(process.env.E2E_DEMO_PROJECT).toBe("demo-tcg-workbench");
 		const target = process.env.E2E_DIRECTORY_TARGET;
 		const faultMarker = process.env.E2E_DIRECTORY_FAULT;
+		const revisedCopy = process.env.E2E_DIRECTORY_REVISED_EMPTY;
 		expect(new URL(target).hostname).toBe("127.0.0.1");
 		expect(faultMarker).toBeTruthy();
 		const fixture = await liveFixture(page, testInfo, { namePrefix: "Synthetic directory execution" });
@@ -76,7 +159,11 @@ test.describe("Isolated browser workbench", () => {
 				return snapshot;
 			});
 
-			const runTarget = async (environment, expectedStatus, { verifyAdmission = false, loseResponse = false } = {}) => {
+			const runTarget = async (
+				environment,
+				expectedStatus,
+				{ verifyAdmission = false, loseResponse = false, sourceSuite = suite, emptyCopy = originalEmptyCopy } = {}
+			) => {
 				await page.goto(`${fixture.prefix}/automation`);
 				await page.getByPlaceholder("staging, dev, customer-a").fill(environment);
 				await page.getByRole("textbox", { name: "Target base URL", exact: true }).fill(target);
@@ -84,11 +171,15 @@ test.describe("Isolated browser workbench", () => {
 					page.getByRole("button", { name: "Preview Execution", exact: true }).click()
 				);
 				const preview = await previewResponse.json();
-				expect(preview.readiness).toMatchObject({ run_allowed: true, source_snapshot_id: suite.snapshot_id, target_base_url: target });
+				expect(preview.readiness).toMatchObject({
+					run_allowed: true,
+					source_snapshot_id: sourceSuite.snapshot_id,
+					target_base_url: target,
+				});
 				const candidates = preview.executable.map((item) => item.id);
-				const caseIds = suite.payload.test_cases.map((item) => item.id);
+				const caseIds = sourceSuite.payload.test_cases.map((item) => item.id);
 				expect(preview.executable.every((item) => caseIds.includes(item.source_test_case_id))).toBe(true);
-				for (const outcome of ['exact text "Alex Rivera" should be visible', 'exact text "No employees found" should be visible']) {
+				for (const outcome of ['exact text "Alex Rivera" should be visible', `exact text "${emptyCopy}" should be visible`]) {
 					expect(
 						preview.executable.some((item) => item.spec.steps.some((step) => step.endsWith(outcome))),
 						outcome
@@ -129,7 +220,7 @@ test.describe("Isolated browser workbench", () => {
 					await page.reload();
 					await page.getByRole("button", { name: "Check saved run" }).click();
 					const receipt = await fixture.checked("GET", `${fixture.prefix}/execution-requests/${requestId}`);
-					expect(receipt).toMatchObject({ status: "completed", run_id: run.run_id, source_snapshot_id: suite.snapshot_id });
+					expect(receipt).toMatchObject({ status: "completed", run_id: run.run_id, source_snapshot_id: sourceSuite.snapshot_id });
 					await expect(page.getByRole("link", { name: `Open saved run ${run.run_id}` })).toHaveAttribute(
 						"href",
 						`${fixture.prefix}/reports?run=${receipt.run_record_id}`
@@ -249,22 +340,29 @@ test.describe("Isolated browser workbench", () => {
 				}
 			});
 
-			await test.step("Review an exact saved suite after applying a keep recommendation", async () => {
+			const sourceChange = revisedCopy
+				? await test.step("Reimport and repair the changed empty-result requirement", () =>
+						repairDirectorySource(page, fixture, suite, { target, faultMarker, revisedCopy }))
+				: null;
+			const reviewedSuite = await test.step("Review the exact saved suite after applying impact recommendations", async () => {
 				const current = await fixture.read();
-				const analyzed = await fixture.checked("POST", `${fixture.prefix}/impact-analysis`, {
-					base_project_revision: current.current_revision,
-				});
-				const impact = analyzed.current_snapshots.impact_analysis;
-				const keep = impact.payload.recommendations.filter((item) => item.action === "keep");
-				expect(keep.length).toBeGreaterThan(0);
-				const updated = await fixture.checked("POST", `${fixture.prefix}/impact-update/apply`, {
-					analysis_snapshot_id: impact.snapshot_id,
-					base_project_revision: analyzed.current_revision,
-					accepted_recommendation_ids: keep.map((item) => item.recommendation_id),
-				});
+				let updated = sourceChange?.updated;
+				if (!updated) {
+					const analyzed = await fixture.checked("POST", `${fixture.prefix}/impact-analysis`, {
+						base_project_revision: current.current_revision,
+					});
+					const impact = analyzed.current_snapshots.impact_analysis;
+					const keep = impact.payload.recommendations.filter((item) => item.action === "keep");
+					expect(keep.length).toBeGreaterThan(0);
+					updated = await fixture.checked("POST", `${fixture.prefix}/impact-update/apply`, {
+						analysis_snapshot_id: impact.snapshot_id,
+						base_project_revision: analyzed.current_revision,
+						accepted_recommendation_ids: keep.map((item) => item.recommendation_id),
+					});
+					expect(updated.current_snapshots.test_cases.payload.test_cases).toEqual(suite.payload.test_cases);
+				}
 				const draft = updated.current_snapshots.test_cases;
 				expect(draft).toMatchObject({ approved: false, payload: { substantive_assessment: { status: "unknown" } } });
-				expect(draft.payload.test_cases).toEqual(suite.payload.test_cases);
 				const previewSaved = (project) =>
 					fixture.checked("POST", "/automation/execution/preview", {
 						project_id: project.project_id,
@@ -303,7 +401,50 @@ test.describe("Isolated browser workbench", () => {
 				const after = await previewSaved(reviewed);
 				await fixture.save("saved-suite-execution-admission", { before: before.readiness, after: after.readiness });
 				expect(after.readiness).toMatchObject({ run_allowed: true, source_snapshot_id: saved.snapshot_id, blockers: [] });
+				return saved;
 			});
+
+			if (sourceChange) {
+				await test.step("Run the repaired suite against both versions of the Directory", async () => {
+					const options = { sourceSuite: reviewedSuite, emptyCopy: revisedCopy };
+					const revised = await runTarget("synthetic-revised-empty", "passed", options);
+					expect(revised.results).toHaveLength(reviewedSuite.payload.test_cases.length);
+					await fs.rm(faultMarker, { force: true });
+					const old = await runTarget("synthetic-old-empty-copy", "failed", options);
+					expect(old.results.find((row) => row.source_test_case_id === sourceChange.keptCase.id)?.status).toBe("passed");
+					const failed = old.results.find((row) => row.source_test_case_id === sourceChange.repaired.id);
+					expect(failed?.status).toBe("failed");
+					expect(
+						failed.issues.some(
+							(item) => item.code === "playwright.error" && item.message.includes(revisedCopy) && item.message.includes("toBeVisible")
+						)
+					).toBe(true);
+					const { execution_runs: history } = await fixture.read();
+					expect(history.map((row) => [row.run_id, row.source_snapshot_id])).toEqual([
+						[old.run_id, reviewedSuite.snapshot_id],
+						[revised.run_id, reviewedSuite.snapshot_id],
+						[broken.run_id, suite.snapshot_id],
+						[healthy.run_id, suite.snapshot_id],
+					]);
+					await page.goto(`${fixture.prefix}/reports`);
+					await page.reload();
+					await expect(page.getByText("Approved for export", { exact: true })).toBeVisible();
+					const [download] = await Promise.all([
+						page.waitForEvent("download"),
+						page.getByRole("button", { name: /JSON API\/Import ready/i }).click(),
+					]);
+					const exportPath = testInfo.outputPath("changed-source-export.json");
+					await download.saveAs(exportPath);
+					const exported = JSON.parse(await fs.readFile(exportPath, "utf8"));
+					expect(exported.audit_metadata).toMatchObject({
+						snapshot_id: reviewedSuite.snapshot_id,
+						is_draft: false,
+						execution_run_ids: [old.run_id, revised.run_id],
+					});
+					expect(exported.test_cases.find((row) => row.id === sourceChange.repaired.id).steps).toEqual(sourceChange.repaired.steps);
+					await fixture.save("changed-source-run-evidence", { history, export: exported.audit_metadata });
+				});
+			}
 		} finally {
 			await fs.rm(faultMarker, { force: true });
 			await fixture.close();
