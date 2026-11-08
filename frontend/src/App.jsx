@@ -700,6 +700,14 @@ export default function App() {
 	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount || projectSnapshots.test_cases);
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
+	const testCaseFindings = improvementFindings(testCaseReview, substantiveAssessment);
+	const testCasesNeedSetup =
+		testCaseReview?.approved === false &&
+		!testCaseStageState.stale &&
+		!generationTasks.length &&
+		!testCaseFindings.length &&
+		substantiveAssessment?.design_status === "assessed_complete" &&
+		substantiveAssessment.execution_status === "blocked";
 	const upstreamChangedForImpact = Boolean(hasExistingTestCaseBaseline && (testCaseStageState.stale || impactStageState.stale));
 	const estimatedImpactChangedRequirementCount = estimateChangedRequirementCount(projectSnapshots);
 	const impactChangedItemCount =
@@ -3789,10 +3797,7 @@ export default function App() {
 		{
 			id: "improve",
 			label: "Improve tests",
-			badge:
-				improvementFindings(testCaseReview, substantiveAssessment).length +
-				(substantiveAssessment?.execution_blockers?.length || 0) +
-				Number(browserHandoffWarnings.length > 0),
+			badge: testCaseFindings.length + (substantiveAssessment?.execution_blockers?.length || 0) + Number(browserHandoffWarnings.length > 0),
 			variant: testCaseReview?.approved === false || browserHandoffWarnings.length > 0 ? "warning" : "muted",
 		},
 	];
@@ -3999,7 +4004,13 @@ export default function App() {
 				{ id: 0, label: "Requirements", title: "Import and review", href: buildProjectPath(navigationProjectId, "requirements") },
 				{ id: 1, label: "Context", title: "Grounded inputs", href: buildProjectPath(navigationProjectId, "context") },
 				{ id: 6, label: "Use Cases", title: "Review scenarios", href: buildProjectPath(navigationProjectId, "use-cases") },
-				{ id: 3, label: "Test Cases", title: "Design and generate", href: buildProjectPath(navigationProjectId, "test-cases") },
+				{
+					id: 3,
+					label: "Test Cases",
+					title: "Design and generate",
+					href: buildProjectPath(navigationProjectId, "test-cases"),
+					attentionLabel: testCasesNeedSetup ? "Setup needed" : undefined,
+				},
 				{ id: 4, label: "Automation", title: "Preview and run", href: buildProjectPath(navigationProjectId, "automation") },
 				{ id: 5, label: "Reports", title: "Evidence and export", href: buildProjectPath(navigationProjectId, "reports") },
 			]
@@ -4313,6 +4324,7 @@ export default function App() {
 									testCases: testCases.length,
 								}}
 								testCaseReview={testCaseReview}
+								testCasesNeedSetup={testCasesNeedSetup}
 								exportLocked={exportGateLocked}
 								navigate={navigate}
 								contextualTask={
@@ -5354,6 +5366,8 @@ export default function App() {
 																onClearReport={() => setReportedCase(null)}
 																key={sourceCaseSnapshot}
 																review={testCaseReview}
+																findings={testCaseFindings}
+																needsOnlySetup={testCasesNeedSetup}
 																assessment={substantiveAssessment}
 																prerequisiteSnapshotId={
 																	projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id

@@ -3,10 +3,12 @@ import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import BusinessCoverageSummary, { ExecutionSetupSummary } from "./BusinessCoverageSummary";
 import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
-import { improvementFindings, findingCaseIds, improvementFeedback } from "./improvementFindings";
+import { findingCaseIds, improvementFeedback } from "./improvementFindings";
 
 export default function ImproveTestsPanel({
 	review,
+	findings,
+	needsOnlySetup,
 	identity,
 	projectId,
 	snapshotId,
@@ -28,8 +30,6 @@ export default function ImproveTestsPanel({
 	onViewCase,
 	onReviewCases,
 }) {
-	const findings = improvementFindings(review, assessment);
-	const needsOnlySetup = assessment?.design_status === "assessed_complete" && assessment.execution_status === "blocked" && !findings.length;
 	const recovery = useReviewDraft({
 		identity,
 		projectId,
@@ -147,7 +147,7 @@ export default function ImproveTestsPanel({
 					</Button>
 				</>
 			)}
-			{blockedReason && <p role="status">{blockedReason}</p>}
+			{blockedReason && (!needsOnlySetup || target) && <p role="status">{blockedReason}</p>}
 			{stale && (
 				<Button variant="secondary" onClick={onImpact}>
 					Review impact

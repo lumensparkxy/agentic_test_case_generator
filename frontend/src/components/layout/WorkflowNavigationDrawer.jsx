@@ -111,7 +111,7 @@ export default function WorkflowNavigationDrawer({
 							: state === "attention" && tab.id === 6
 								? "Awaiting review"
 								: state === "attention" && tab.id === 3
-									? "Needs refinement"
+									? tab.attentionLabel || "Needs refinement"
 									: STATE_LABELS[state] || STATE_LABELS.pending;
 					const StatusIcon = state === "blocked" ? LockKeyhole : Circle;
 					const WorkflowIcon = WORKFLOW_ICONS[tab.id] || LayoutGrid;

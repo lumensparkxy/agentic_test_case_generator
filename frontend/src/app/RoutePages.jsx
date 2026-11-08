@@ -191,6 +191,7 @@ export function ProjectOverviewPage({
 	contextualTask = null,
 	counts = {},
 	testCaseReview,
+	testCasesNeedSetup,
 	exportLocked,
 }) {
 	const projectId = project?.project_id || "";
@@ -224,7 +225,7 @@ export function ProjectOverviewPage({
 						{attention && (
 							<div className="overview-attention-row">
 								<CircleAlert aria-hidden="true" />
-								<strong>Test cases need refinement</strong>
+								<strong>{testCasesNeedSetup ? "Test cases need execution setup" : "Test cases need refinement"}</strong>
 								<p>{testCaseReview.summary || "Review the quality findings before continuing."}</p>
 								<RouteLink to={buildProjectPath(projectId, "test-cases")} navigate={navigate}>
 									View test cases

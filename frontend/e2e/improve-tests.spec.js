@@ -125,6 +125,11 @@ test("a setup-only finding leads to the exact saved prerequisite, with no automa
 	await expect(panel(page).getByRole("heading", { name: "Execution setup needed" })).toBeVisible();
 	await expect(panel(page).getByRole("checkbox", { name: reason, exact: true })).toHaveCount(0);
 	await expect(panel(page).getByRole("button", { name: /^Apply / })).toHaveCount(0);
+	const navigation = page.getByRole("navigation", { name: "Project navigation" });
+	await expect(navigation.getByRole("link", { name: "Test Cases, Setup needed", exact: true })).toBeVisible();
+	await navigation.getByRole("link", { name: "Overview", exact: true }).click();
+	await expect(page.getByText("Test cases need execution setup", { exact: true })).toBeVisible();
+	await page.getByRole("link", { name: "View test cases", exact: true }).click();
 	const link = setup.getByRole("link", { name: "Review prerequisite supervisor_login for TC-002" });
 	const href = await link.getAttribute("href");
 	await link.focus();
@@ -373,6 +378,7 @@ for (const width of [390, 1488]) {
 		await expect(region).toContainText("Provision Alice");
 		await expect(page.getByRole("region", { name: "Execution setup" })).toContainText("fixture_for_supervisor");
 		await expect(panel(page).getByRole("checkbox", { name: issue, exact: true })).toBeVisible();
+		if (width === 1488) await expect(page.getByRole("link", { name: "Test Cases, Needs refinement", exact: true })).toBeVisible();
 		await page.reload();
 		await expect(region).toContainText("Business coverage: incomplete");
 		await region.getByText("Source obligations and prerequisites", { exact: true }).click();
