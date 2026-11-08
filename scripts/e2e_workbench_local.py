@@ -117,16 +117,22 @@ def directory_target(fault_marker: Path):
 
 
 def workbench_fixture(stack: ExitStack, output: Path, fixture: str) -> tuple[str, dict[str, str]]:
-    if fixture == "room-booking":
-        healthy = stack.enter_context(booking_target())
+    if fixture in ("room-booking", "room-booking-change"):
+        revision_marker = output / "booking-capacity-six" if fixture == "room-booking-change" else None
+        healthy = stack.enter_context(booking_target(revised_attendee_limit_marker=revision_marker))
         loss = stack.enter_context(ResponseLossProxy(healthy, SUBMIT_PATH, evidence_path=output / "booking-response-loss.json"))
-        targets = {name: f"http://127.0.0.1:{stack.enter_context(booking_target(defect=name))}/" for name in DEFECTS if name != "duplicate-submission"}
-        return "e2e/live-room-booking-workbench.spec.js", {
+        env = {
             "E2E_ROOM_BOOKING_WORKBENCH": "1",
             "E2E_BOOKING_TARGET": f"http://127.0.0.1:{healthy}/",
-            "E2E_BOOKING_DEFECTS": json.dumps(targets),
             "E2E_BOOKING_LOSS_TARGET": f"http://127.0.0.1:{loss.port}/",
         }
+        if revision_marker:
+            env["E2E_BOOKING_REVISION_MARKER"] = str(revision_marker)
+        else:
+            env["E2E_BOOKING_DEFECTS"] = json.dumps(
+                {name: f"http://127.0.0.1:{stack.enter_context(booking_target(defect=name))}/" for name in DEFECTS if name != "duplicate-submission"}
+            )
+        return "e2e/live-room-booking-workbench.spec.js", env
     fault_marker = output / "directory-fault"
     target = stack.enter_context(directory_target(fault_marker))
     env = {"E2E_LOCAL_WORKBENCH": "1", "E2E_DIRECTORY_TARGET": target, "E2E_DIRECTORY_FAULT": str(fault_marker)}
@@ -222,7 +228,7 @@ def run_workbench(jar: Path, output: Path, api_key: str, *, fixture="directory")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emulator-jar", type=Path, required=True)
-    parser.add_argument("--fixture", choices=("directory", "directory-change", "room-booking"), default="directory")
+    parser.add_argument("--fixture", choices=("directory", "directory-change", "room-booking", "room-booking-change"), default="directory")
     parser.add_argument("--output", type=Path, required=True, help="New evidence directory outside the checkout.")
     args = parser.parse_args()
     jar, output = args.emulator_jar.resolve(), args.output.resolve()

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
 import { expect, test } from "@playwright/test";
+import { previewBookingVersion, verifyBookingRevision } from "./support/booking-revision.js";
 import {
 	applyImport,
 	approveRequirements,
@@ -79,7 +80,8 @@ test.describe("Generated Room Booking execution", () => {
 		expect(process.env.E2E_DEMO_PROJECT).toBe("demo-tcg-workbench");
 		const target = loopbackUrl(process.env.E2E_BOOKING_TARGET);
 		const lossTarget = loopbackUrl(process.env.E2E_BOOKING_LOSS_TARGET);
-		const variants = JSON.parse(process.env.E2E_BOOKING_DEFECTS);
+		const revisionMarker = process.env.E2E_BOOKING_REVISION_MARKER;
+		const variants = revisionMarker ? {} : JSON.parse(process.env.E2E_BOOKING_DEFECTS);
 		const notes = (await fs.readFile(new URL("./fixtures/room-booking-browser-context.txt", import.meta.url), "utf8"))
 			.replaceAll("{{target}}", target)
 			.replaceAll("{{lossTarget}}", lossTarget)
@@ -157,13 +159,7 @@ test.describe("Generated Room Booking execution", () => {
 				return snapshot;
 			});
 
-			await page.goto(`${fixture.prefix}/automation`);
-			await page.getByPlaceholder("staging, dev, customer-a").fill("booking-healthy");
-			await page.getByRole("textbox", { name: "Target base URL", exact: true }).fill(target);
-			const previewResponse = await uiResponse(page, "/automation/execution/preview", () =>
-				page.getByRole("button", { name: "Preview Execution", exact: true }).click()
-			);
-			const preview = await previewResponse.json();
+			const { response: previewResponse, preview } = await previewBookingVersion(page, fixture, target, "booking-healthy");
 			await fixture.save("healthy-preview", preview);
 			expect(preview.readiness.source_snapshot_id).toBe(suite.snapshot_id);
 			const assessment = suite.payload.substantive_assessment || {};
@@ -203,6 +199,18 @@ test.describe("Generated Room Booking execution", () => {
 				matrix.healthy = { run_id: healthy.run_id, status: healthy.status, summary: healthy.summary, results: healthy.results };
 				await fixture.save("healthy-run", healthy);
 				expect(healthy.results.map((item) => item.id)).toEqual(candidates);
+				if (revisionMarker) {
+					expect(healthy).toMatchObject({ status: "passed", summary: { failed: 0, invalid: 0, skipped: 0 } });
+					await verifyBookingRevision(page, fixture, testInfo, {
+						suite,
+						target,
+						notes,
+						prerequisite,
+						revisionMarker,
+						baselineRun: healthy,
+					});
+					return;
+				}
 
 				const requirementIds = new Map(
 					sourceRequirements.map((row) => [row.id, row.sources.flatMap((item) => item.original_requirement_ids || [])])
@@ -266,7 +274,17 @@ test.describe("Generated Room Booking execution", () => {
 			fixture.evidence.blocking_gates.push(error.message);
 			throw error;
 		} finally {
+			if (revisionMarker) await fs.rm(revisionMarker, { force: true });
 			await fixture.close();
+			if (revisionMarker) {
+				const archived = await fixture.read();
+				expect(archived).toMatchObject({ project_id: fixture.project.project_id, status: "archived" });
+				await fixture.save("booking-revision-archive", {
+					project_id: archived.project_id,
+					status: archived.status,
+					revision: archived.current_revision,
+				});
+			}
 		}
 	});
 });

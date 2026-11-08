@@ -36,12 +36,12 @@ class BookingWorkspace:
         self.bookings = {"B-EXISTING": {"id": "B-EXISTING", "room": "Atlas", "slot": SLOTS[0], "attendees": 4, "owner": "Alice", "status": "Confirmed"}}
         self.submissions = {}
 
-    def create(self, body, defect):
+    def create(self, body, defect, attendee_limit):
         room, slot, count, submission = (body.get(key) for key in ("room", "slot", "attendees", "submission"))
-        upper = 9 if defect == "allow-nine" else 8
+        upper = 9 if defect == "allow-nine" else attendee_limit
         digits = count.lstrip("0") if isinstance(count, str) else ""
         if digits not in {str(n) for n in range(1, upper + 1)}:
-            return 422, {"error": "Enter a whole number from 1 to 8", "field": "attendees"}
+            return 422, {"error": f"Enter a whole number from 1 to {attendee_limit}", "field": "attendees"}
         if room not in ROOMS or slot not in SLOTS or not isinstance(submission, str) or not 1 <= len(submission) <= 80:
             return 422, {"error": "Choose a room and time slot"}
         count = int(digits)
@@ -92,7 +92,7 @@ class BookingWorkspace:
 
 
 @contextmanager
-def booking_target(*, port=0, defect=None):
+def booking_target(*, port=0, defect=None, revised_attendee_limit_marker=None):
     if defect is not None and defect not in DEFECTS:
         raise ValueError(f"Unknown fixture defect {defect}")
     document = Path(__file__).with_name("fixtures").joinpath("room_booking.html").read_bytes()
@@ -172,7 +172,8 @@ def booking_target(*, port=0, defect=None):
             if workspace.actor is None:
                 return 401, {"error": "Choose an employee"}
             if self.path == SUBMIT_PATH:
-                return workspace.create(body, defect)
+                attendee_limit = 6 if revised_attendee_limit_marker and revised_attendee_limit_marker.is_file() else 8
+                return workspace.create(body, defect, attendee_limit)
             if self.path.startswith(f"{SUBMIT_PATH}/") and self.path.endswith("/cancel"):
                 identity = self.path.removeprefix(f"{SUBMIT_PATH}/").removesuffix("/cancel")
                 return workspace.cancel(identity, defect)

@@ -76,6 +76,32 @@ async function invalidAttendees(page, origin, value) {
 }
 
 const controls = {
+	async "capacity-boundaries"(page, origin, limit = 8) {
+		await signIn(page, origin);
+		await fillBooking(page, { room: "Atlas", slot: freeSlot, attendees: "6" });
+		const accepted = await submission(page);
+		await fillBooking(page, { room: "Birch", slot: freeSlot, attendees: "7" });
+		const upper = await submission(page);
+		const inlineAlert = page.getByRole("alert");
+		const inlineError = (await inlineAlert.isVisible()) ? await inlineAlert.textContent() : "";
+		const rows = await rowsAfterReload(page);
+		return [
+			observe("accept 6 attendees", accepted.status, 201),
+			observe(
+				"save the confirmed booking at 6",
+				rows.find(([id]) => id === "B-001"),
+				["B-001", "Atlas", freeSlot, "6", "Confirmed"]
+			),
+			observe("submit 7 attendees", upper.status, limit === 6 ? 422 : 201),
+			observe("show the capacity error for rejected 7", inlineError, limit === 6 ? "Enter a whole number from 1 to 6" : ""),
+			observe(
+				"preserve the exact booking IDs after refresh",
+				rows.map(([id]) => id),
+				limit === 6 ? [existing, "B-001"] : [existing, "B-001", "B-002"]
+			),
+		];
+	},
+
 	async "attendee-boundaries"(page, origin) {
 		await signIn(page, origin);
 		const checks = [];
@@ -262,12 +288,12 @@ test("Room Booking controls distinguish healthy behavior from seeded faults", as
 	test.skip(!process.env.E2E_ROOM_BOOKING_TARGETS, "Run with scripts/evaluate_room_booking.py");
 	test.setTimeout(120_000);
 	const targets = JSON.parse(process.env.E2E_ROOM_BOOKING_TARGETS);
-	const measure = async (control, origin, evidence) => {
+	const measure = async (control, origin, input) => {
 		const context = await browser.newContext();
 		try {
 			const page = await context.newPage();
 			page.setDefaultTimeout(5000);
-			return await controls[control](page, origin, evidence);
+			return await controls[control](page, origin, input);
 		} finally {
 			await context.close();
 		}
@@ -279,6 +305,8 @@ test("Room Booking controls distinguish healthy behavior from seeded faults", as
 			report.healthy[control] = await measure(control, origin, evidence);
 		});
 	}
+	report.revisedCapacity = await test.step("Revised capacity accepts six and rejects seven", () =>
+		measure("capacity-boundaries", targets.revised, 6));
 	for (const [defect, control, assertion, faultValue] of faults) {
 		await test.step(`Detect ${defect} using ${control}`, async () => {
 			const { origin, evidence } = control === "response-loss" ? targets.loss[defect] : { origin: targets.defects[defect] };
@@ -305,6 +333,7 @@ test("Room Booking controls distinguish healthy behavior from seeded faults", as
 			control
 		).toEqual([]);
 	}
+	expect(report.revisedCapacity.filter((check) => !check.matched)).toEqual([]);
 	for (const sample of report.defects) {
 		expect(sample.detected, JSON.stringify(sample)).toBe(true);
 	}

@@ -20,8 +20,11 @@ def run(output: Path) -> int:
 
     with ExitStack() as stack:
         healthy = stack.enter_context(booking_target())
+        revision_marker = output / "booking-capacity-six"
+        revision_marker.touch()
+        revised = stack.enter_context(booking_target(revised_attendee_limit_marker=revision_marker))
         broken = {name: stack.enter_context(booking_target(defect=name)) for name in DEFECTS}
-        targets = {"healthy": origin(healthy), "defects": {name: origin(port) for name, port in broken.items()}, "loss": {}}
+        targets = {"healthy": origin(healthy), "revised": origin(revised), "defects": {name: origin(port) for name, port in broken.items()}, "loss": {}}
         for name, port in (("healthy", healthy), ("duplicate-submission", broken["duplicate-submission"])):
             evidence = output / f"response-loss-{name}.json"
             proxy = stack.enter_context(ResponseLossProxy(port, SUBMIT_PATH, evidence_path=evidence))

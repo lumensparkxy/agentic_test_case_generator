@@ -746,6 +746,20 @@ check of the corresponding cell after submission. The authored
 booking matrix separately exercises native double-click and response-loss
 controls.
 
+Use `--fixture room-booking-change` to compare and apply the attendee limit
+change from 8 to 6 in the same disposable workbench. The revised source also
+states the new maximum in the successful-booking clause. The benchmark uses
+verified source quotations to select the updates, checks stale export, and
+reviews the targeted repair. It requires a saved booking at 6 on the revised
+app and a rejection at 7 that fails at the intended assertion on the old app.
+The authored Booking controls validate both versions separately from generated
+case quality. The original `room-booking` option runs the seeded fault matrix.
+
+```bash
+.venv/bin/python scripts/e2e_workbench_local.py --fixture room-booking-change \
+  --emulator-jar "$jar" --output /tmp/tcg-live-room-booking-change
+```
+
 `test_workflow_project_service.py` covers multi-part execution snapshots,
 ordered readback, atomic rollback, retry, incomplete and corrupted parts, and
 bounded Unicode diagnostics. `test_quality_feedback.py` verifies that a passing
