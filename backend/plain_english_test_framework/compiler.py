@@ -21,6 +21,7 @@ STEP_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+(?P<body>.+)$")
 OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into (?P<exact>field )?"(?P<label>[^"]+)"$')
 EXACT_CLICK_PATTERN = re.compile(r'^I click exact (?P<role>button|link) "(?P<name>(?:\\["\\]|[^"\\])+)"$')
+EXACT_SELECT_PATTERN = re.compile(r'^I select exact option "(?P<option>(?:\\["\\]|[^"\\])+)" in field "(?P<field>(?:\\["\\]|[^"\\])+)"$')
 EXACT_HIDDEN_PATTERN = re.compile(r'^exact (?P<kind>heading|link|button|text) "(?P<target>(?:\\["\\]|[^"\\])+)" should not be visible$')
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
@@ -239,6 +240,19 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
                 **({"exact": True} if match["exact"] else {}),
             },
             "value": value,
+        }
+
+    if match := EXACT_SELECT_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        option = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["option"]), environment, data, path=path)
+        label = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["field"]), environment, data, path=path)
+        return {
+            "id": _slug_identifier(f"select {option} in {label}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "select_option",
+            "locator": {"strategy": "label", "value": label, "exact": True},
+            "value": option,
         }
 
     if match := EXACT_CLICK_PATTERN.fullmatch(body):

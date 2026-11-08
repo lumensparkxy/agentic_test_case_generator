@@ -163,7 +163,7 @@
                 "$ref": "#/$defs/navigateStep"
               },
               {
-                "$ref": "#/$defs/fillStep"
+                "$ref": "#/$defs/fieldInputStep"
               },
               {
                 "$ref": "#/$defs/clickStep"
@@ -277,7 +277,7 @@
         }
       ]
     },
-    "fillStep": {
+    "fieldInputStep": {
       "allOf": [
         {
           "$ref": "#/$defs/stepBase"
@@ -290,7 +290,24 @@
           ],
           "properties": {
             "action": {
-              "const": "fill"
+              "enum": ["fill", "select_option"]
+            }
+          },
+          "if": {
+            "properties": {
+              "action": { "const": "select_option" }
+            }
+          },
+          "then": {
+            "properties": {
+              "locator": {
+                "required": ["exact"],
+                "properties": {
+                  "strategy": { "const": "label" },
+                  "exact": { "const": true }
+                }
+              },
+              "value": { "type": "string", "minLength": 1 }
             }
           },
           "not": {

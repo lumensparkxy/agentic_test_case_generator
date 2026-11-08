@@ -14,6 +14,7 @@ from plain_english_test_framework.validation import ValidationIssue
 SUPPORTED_ACTIONS = {
     "navigate",
     "fill",
+    "select_option",
     "click",
     "assert_visible",
     "assert_hidden",
@@ -108,7 +109,7 @@ def _render_step(step: Mapping[str, Any]) -> list[str]:
 
     lines = [
         f"    await test.step({_js_string(step['original'])}, async () => {{",
-        f"      {_render_action(step)}",
+        *(f"      {line}" for line in _render_action(step).splitlines()),
         "    });",
     ]
     return lines
@@ -120,6 +121,19 @@ def _render_action(step: Mapping[str, Any]) -> str:
         return f"await page.goto({_js_string(step['url'])});"
     if action == "fill":
         return f"await {_render_locator(step['locator'])}.fill({_input_value(step['value'])});"
+    if action == "select_option":
+        locator = _render_locator(step["locator"])
+        label = _js_string(step["value"])
+        return "\n".join(
+            (
+                f'const select = {locator}.and(page.locator("select:not([multiple])"));',
+                "await expect.poll(() => select.locator('option').evaluateAll((options, label) =>",
+                "  options.filter(option => option instanceof HTMLOptionElement && option.label === label)",
+                """    .map(option => !option.matches(':disabled') && !option.closest('[hidden], [inert], [aria-disabled="true" i]')),""",
+                f"  {label})).toEqual([true]);",
+                f"await select.selectOption({{ label: {label} }});",
+            )
+        )
     if action == "click":
         return f"await {_render_locator(step['locator'])}.click();"
     if action == "assert_visible":

@@ -70,6 +70,35 @@ class TestCaseQualityTests(unittest.TestCase):
             build_export_evidence(ExportTestCasesInput(test_cases=[bad], approved=True, draft_override_requested=True), None)
         self.assertEqual(caught.exception.status_code, 422)
 
+    def test_complete_browser_actions_can_precede_an_observable_outcome(self):
+        case = self.concrete()
+        row = case.model_dump()
+        row["steps"] = [
+            {"step": 1, "action": 'Open "https://example.test/orders"', "expected": ""},
+            {"step": 2, "action": 'Select exact option "Closed" in field "Order status"', "expected": ""},
+            {"step": 3, "action": 'Click exact button "Apply filters"', "expected": 'exact text "Closed order 0142" is visible'},
+        ]
+        delivered, tasks = separate_generation_work([TestCase.model_validate(row)])
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(tasks, [])
+        export = build_export_evidence(
+            ExportTestCasesInput(test_cases=delivered, draft_override_requested=True, draft_override_reason="Synthetic browser test review"), None
+        )
+        self.assertTrue(export.draft_override_used)
+
+        for action, final_expected in (
+            ("Open the app", 'exact text "Closed order 0142" is visible'),
+            ('Select exact option "Closed"', 'exact text "Closed order 0142" is visible'),
+            ('Inspect the "Order status" dropdown', 'exact text "Closed order 0142" is visible'),
+            (row["steps"][1]["action"], ""),
+            (row["steps"][1]["action"], "The changed behavior works without regressing preserved coverage."),
+        ):
+            with self.subTest(action=action, final_expected=final_expected):
+                draft = deepcopy(row)
+                draft["steps"][1]["action"] = action
+                draft["steps"][2]["expected"] = final_expected
+                self.assertIsNotNone(placeholder_reason(draft))
+
     def test_targeted_generation_preserves_exact_reviewed_scenario_slice(self):
         requirement = Requirement(id="REQ-001", text="Declined cards keep cart contents", review_status="Approved")
         plan = [

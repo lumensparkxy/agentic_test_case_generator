@@ -65,6 +65,12 @@ ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s
 QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'(?:\\['\\]|[^'\\])*')"""
 EXACT_CLICK_ACTION = re.compile(rf"^Click exact (?P<role>button|link)\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?$", re.IGNORECASE)
 EXACT_CLICK_INTENT = re.compile(r"^Click\s+exact\b", re.IGNORECASE)
+EXACT_SELECT_ACTION = re.compile(
+    rf"^Select exact option\s+(?P<option>{QUOTED_ASSERTION_TARGET})\s+in field\s+(?P<field>{QUOTED_ASSERTION_TARGET})\.?$",
+    re.IGNORECASE,
+)
+EXACT_SELECT_INTENT = re.compile(r"^Select\s+exact\b", re.IGNORECASE)
+EXPLICIT_OPEN_ACTION = re.compile(r'(?:Open|Navigate to)\s+"([^"\n]+)"\.?', re.IGNORECASE)
 QUOTED_FIELD_ASSERTION_PATTERN = re.compile(
     r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?:should\s+)?'
     r'(?P<operator>equals?|contains?|be|is)\s+(?P<expected>"(?:\\["\\]|[^"\\])*")',
@@ -514,8 +520,9 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     action_assertion = _convert_assertion(step.action)
     expected_assertion = _convert_assertion(step.expected)
     exact_click = EXACT_CLICK_ACTION.fullmatch(step.action.strip())
+    exact_select = EXACT_SELECT_ACTION.fullmatch(step.action.strip())
     # A supported assertion's quoted locator and value are data, not operations.
-    action_is_literal = action_value or exact_click or (action_assertion and action_assertion.kind == "assert_hidden")
+    action_is_literal = action_value or exact_click or exact_select or (action_assertion and action_assertion.kind == "assert_hidden")
     expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind == "assert_hidden")
     domain_text = " ".join(("" if action_is_literal else step.action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
     if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
@@ -534,6 +541,13 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
             return [], _unmapped_step(step, action, is_expected=False)
         role = exact_click["role"].lower()
         converted.append(_ConvertedStep("click", f'I click exact {role} "{_escape_step_text(name)}"'))
+    elif EXACT_SELECT_INTENT.match(action):
+        if not exact_select:
+            return [], _unmapped_step(step, action, is_expected=False)
+        option, field = (_assertion_literal(exact_select[key]) for key in ("option", "field"))
+        if not (option.strip() and field.strip()):
+            return [], _unmapped_step(step, action, is_expected=False)
+        converted.append(_ConvertedStep("select_option", f'I select exact option "{_escape_step_text(option)}" in field "{_escape_step_text(field)}"'))
     elif action_assertion:
         converted.append(action_assertion)
     elif ASSERTION_ACTION_PATTERN.match(action) or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action) or ACTION_SEQUENCE_PATTERN.search(unquoted_action):
@@ -579,6 +593,21 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         return [], _unmapped_step(step, action, is_expected=False)
 
     return converted, None
+
+
+def is_complete_browser_action(action: str) -> bool:
+    """Recognize a standalone interaction without substituting a default target."""
+    action = action.strip()
+    converted, issue = _convert_step(TestStep(step=1, action=action, expected=""), base_url="")
+    if issue or len(converted) != 1:
+        return False
+    kind = converted[0].kind
+    if kind == "navigate":
+        opening = EXPLICIT_OPEN_ACTION.fullmatch(action)
+        return bool(opening and URL_PATTERN.fullmatch(opening[1]))
+    if kind == "click":
+        return bool(EXACT_CLICK_ACTION.fullmatch(action))
+    return kind in {"fill", "select_option"}
 
 
 def _field_value_assertion(text: str) -> tuple[_ConvertedStep | None, bool]:

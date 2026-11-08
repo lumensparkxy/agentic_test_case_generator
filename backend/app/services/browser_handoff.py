@@ -16,12 +16,13 @@ from ..contracts.grounding import EnrichInput
 from ..contracts.execution import ExecutionCandidate
 from ..contracts.requirements import Requirement
 from ..contracts.test_cases import TestCase
-from .execution_service import preview_execution
+from .execution_service import EXPLICIT_OPEN_ACTION, preview_execution
 
 BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplied app target and observed interface:
 - Use one browser action and at most one observable check per source step. Split independent outcomes into separate steps.
 - Start with action 'Open "exact supplied URL"'. Leave expected as an empty string on a pure navigation or interaction step when it has no separate source outcome.
 - Use action 'Enter "literal input" into the "observed accessible label" field' and expected 'field "observed accessible label" value should equal "literal input"' when the field value matters.
+- For a native dropdown with grounded select_options, use action 'Select exact option "observed option label" in field "observed accessible label"'. Leave expected empty for a selection with no separate source outcome and verify the business result in its own check. A field-value assertion needs the supplied DOM value, which may differ from the label. Keep unavailable or unsupported options manual.
 - For an initially blank field, use action 'Inspect the "observed accessible label" field' and expected 'field "observed accessible label" value should equal ""'. Submit with no fill step. Empty fills are unsupported. Keep a required clear of a populated field manual.
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
@@ -34,7 +35,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 _QUOTED = re.compile(r""""([^"\n]*)"|(?<!\w)'([^'\n]*)'(?!\w)""")
 _DECLARED_LOCATOR = re.compile(r'(css(?: selector)?|test id)\s+"([^"\n]+)"', re.IGNORECASE)
 _NOTED_CONTROL = re.compile(r'\b(field|heading|button|link)\s+"([^"\n]+)"|"([^"\n]+)"\s+(field|heading|button|link)\b', re.IGNORECASE)
-_OPEN = re.compile(r'(?:Open|Navigate to)\s+"([^"\n]+)"\.?', re.IGNORECASE)
+_DROPDOWN_DOM_VALUE = re.compile(r'\bfield\s+"([^"\n]+)"\s+DOM value\s+(?:is\s+)?"([^"\n]*)"', re.IGNORECASE)
 _ROLE_TYPES = {"heading": "Heading", "button": "Button", "link": "Navigation"}
 _CONTROL_TYPES = {"field": "Field", **_ROLE_TYPES}
 _DIAGNOSTIC_LIMIT = 10
@@ -47,6 +48,8 @@ class _BrowserEvidence:
     names_by_type: dict[str, set[str]]
     text_literals: set[str]
     declared_locators: set[tuple[str, str]]
+    select_options: dict[tuple[str, str], set[str]]
+    select_dom_values: dict[str, set[str]]
 
 
 def _http_url(value: str) -> str | None:
@@ -79,12 +82,16 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
     source_urls = {source_id: url for source_id, url in app_urls.items() if urlsplit(url)[:2] == origin}
     urls = {target, *source_urls.values()}
     names_by_type: dict[str, set[str]] = {}
+    select_options: dict[tuple[str, str], set[str]] = {}
     for element in grounded.ui_elements if grounded else []:
         if element.source_id is not None and element.source_id not in source_urls:
             continue
         if element.element_type == "Field" and element.description.startswith("Field identifier extracted from artifact:"):
             continue  # A DOM identifier alone does not establish the accessible label.
         names_by_type.setdefault(element.element_type, set()).add(element.name)
+        if element.element_type == "Field" and element.select_options is not None:
+            key = (source_urls.get(element.source_id, target), element.name)
+            select_options[key] = set(element.select_options) if key not in select_options else set()
         if element.href:
             try:
                 href = _http_url(urljoin(source_urls.get(element.source_id, target), element.href))
@@ -102,7 +109,11 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
     declared_locators = {
         ("css" if kind.lower().startswith("css") else "test_id", value) for text in source_text for kind, value in _DECLARED_LOCATOR.findall(text)
     }
-    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators)
+    select_dom_values: dict[str, set[str]] = {}
+    for text in source_text:
+        for field, value in _DROPDOWN_DOM_VALUE.findall(text):
+            select_dom_values.setdefault(field, set()).add(value)
+    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators, select_options, select_dom_values)
 
 
 def _locator_supported(locator: dict[str, Any], evidence: _BrowserEvidence) -> bool:
@@ -124,7 +135,7 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             issue = candidate.unsupported_steps[0]
             return f"Source step {issue.step} could not be mapped to a complete browser check ({issue.reason_code})."
         return "The deterministic preview could not verify the steps or execution prerequisites."
-    opening = _OPEN.fullmatch(case.steps[0].action.strip())
+    opening = EXPLICIT_OPEN_ACTION.fullmatch(case.steps[0].action.strip())
     if not opening or _http_url(opening[1]) not in evidence.urls:
         return "Start with an explicit navigation to a supplied application URL."
     try:
@@ -136,29 +147,54 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
         return "The preview could not be compiled into a valid browser specification."
 
     steps = ir.raw["cases"][0]["steps"]
-    source_navigations = [_http_url(match[1]) for step in case.steps if (match := _OPEN.fullmatch(step.action.strip()))]
+    source_navigations = [_http_url(match[1]) for step in case.steps if (match := EXPLICIT_OPEN_ACTION.fullmatch(step.action.strip()))]
     compiled_navigations = [_http_url(step["url"]) for step in steps if step["action"] == "navigate"]
     if source_navigations != compiled_navigations:
         return "Each browser navigation must use its own explicit action and supplied URL."
 
     entered_values: dict[tuple[str, str], str] = {}
+    current_page: str | None = evidence.target
     for step in steps:
         action = step["action"]
-        if action in {"navigate", "assert_url"} and _http_url(step["url"]) not in evidence.urls:
-            return "A browser URL lacks application evidence."
-        if action == "navigate":
-            entered_values.clear()
+        if action in {"navigate", "assert_url"}:
+            page = _http_url(step["url"])
+            if page not in evidence.urls:
+                return "A browser URL lacks application evidence."
+            if action == "navigate" or current_page != page:
+                entered_values.clear()
+            current_page = page
         locator = step.get("locator")
         if locator and not _locator_supported(locator, evidence):
             return "A browser locator or visible text lacks exact interface evidence."
         if action == "click" and not locator.get("exact"):
             return "Use a complete exact button or link action."
-        if action == "fill":
-            entered_values[(locator["strategy"], locator["value"])] = str(step["value"])
+        if action == "click" and locator.get("role") == "link":
+            current_page = None
+            entered_values.clear()
+        if action == "select_option":
+            if current_page is None or step["value"] not in evidence.select_options.get((current_page, locator["value"]), ()):
+                return "A dropdown selection lacks an exact selectable option for this field and page."
+        value_action = action in {"assert_value_equals", "assert_value_contains"}
+        if action == "fill" or value_action:
+            field = locator["value"]
+            known_dropdown = (
+                (current_page, field) in evidence.select_options if current_page is not None else any(label == field for _, label in evidence.select_options)
+            )
+            if action == "fill":
+                if known_dropdown:
+                    return "A known dropdown needs an exact option selection instead of a text fill."
+                entered_values[(locator["strategy"], field)] = str(step["value"])
+            elif known_dropdown:
+                expected = step["expected"]
+                known_values = evidence.select_dom_values.get(field, ())
+                verified = expected in known_values if action == "assert_value_equals" else any(expected in value for value in known_values)
+                if not verified:
+                    return "A dropdown field-value check lacks an explicitly declared DOM value."
+                continue
         if action in {"assert_text_equals", "assert_title", "assert_attribute_equals", "assert_value_equals", "assert_value_contains"}:
             expected = step["expected"]
             controlled_value = False
-            if action in {"assert_value_equals", "assert_value_contains"}:
+            if value_action:
                 entered = entered_values.get((locator["strategy"], locator["value"]), "")
                 controlled_value = expected == entered if action == "assert_value_equals" else expected in entered
             if expected != "" and expected not in evidence.text_literals and not controlled_value:

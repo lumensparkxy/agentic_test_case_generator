@@ -73,6 +73,57 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertEqual(validate_browser_handoff([case], context(), [requirement]), [])
         self.assertEqual(case.automation_status, "To Be Automated")
 
+    def test_dropdown_handoff_requires_the_exact_option_on_its_grounded_page(self):
+        grounded = context()
+        field = grounded.grounded_context.ui_elements[0]
+        field.select_options = ["Q-17"]
+        case = candidate()
+        case.steps[1] = TestStep(step=2, action='Select exact option "Q-17" in field "Reference"', expected="")
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+        self.assertEqual(case.automation_status, "To Be Automated")
+
+        fill = candidate()
+        warnings = validate_browser_handoff([fill], grounded, [REQUIREMENT])
+        self.assertEqual(fill.automation_status, "Manual")
+        self.assertIn("known dropdown", warnings[1])
+
+        for options, action in (
+            (None, case.steps[1].action),  # Older saved evidence supplies the label only.
+            ([], case.steps[1].action),
+            (["Q-17"], 'Select exact option "q-17" in field "Reference"'),
+        ):
+            with self.subTest(options=options, action=action):
+                field.select_options = options
+                selection = case.model_copy(deep=True)
+                selection.steps[1].action = action
+                warnings = validate_browser_handoff([selection], grounded, [REQUIREMENT])
+                self.assertEqual(selection.automation_status, "Manual")
+                self.assertIn("exact selectable option", warnings[1])
+
+        field.select_options = ["Q-17"]
+        second_url = "https://example.test/other"
+        artifact = grounded.grounded_context.artifact_sources[0]
+        grounded.grounded_context.artifact_sources.append(artifact.model_copy(update={"id": "SECOND", "url": second_url}))
+        moved = case.model_copy(deep=True)
+        moved.steps[0].action = f'Open "{second_url}"'
+        warnings = validate_browser_handoff([moved], grounded, [REQUIREMENT])
+        self.assertIn("exact selectable option", warnings[1])
+
+    def test_dropdown_label_does_not_ground_a_dom_value_expectation(self):
+        grounded = context()
+        grounded.grounded_context.ui_elements[0].select_options = ["Q-17"]
+        grounded.notes = 'The option label is "Q-17".'
+        case = candidate()
+        case.steps[1].action = 'Select exact option "Q-17" in field "Reference"'
+        warnings = validate_browser_handoff([case], grounded, [REQUIREMENT])
+        self.assertEqual(case.automation_status, "Manual")
+        self.assertIn("explicitly declared DOM value", warnings[1])
+
+        grounded.notes += ' The field "Reference" DOM value is "q17".'
+        case.automation_status = "To Be Automated"
+        case.steps[1].expected = 'field "Reference" value should equal "q17"'
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+
     def test_unsupported_expectations_and_unverified_evidence_retain_original_case(self):
         for index, changes, reason in (
             (0, {"action": 'Open "https://example.test/invented"'}, "supplied application URL"),

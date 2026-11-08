@@ -477,6 +477,42 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('page.getByRole("link", { name: "Open receipt", exact: true, includeHidden: true }).filter({ visible: true })).toHaveCount(0)', generated)
         self.assertIn(r'page.getByText("Receipt \"saved\"", { exact: true }).filter({ visible: true })).toHaveCount(0)', generated)
 
+    def test_exact_dropdown_selection_compiles_as_a_native_option_action(self) -> None:
+        url = "https://example.test/orders"
+        case = TestCase(
+            id="TC-ORDER",
+            title="Filter orders",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action=r'Select exact option "Closed \"today\"" in field "Order status"', expected=""),
+                TestStep(step=3, action='Click exact button "Apply filters"', expected='exact text "Closed order 0142" is visible'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        step = ir.raw["cases"][0]["steps"][1]
+        self.assertEqual(step["action"], "select_option")
+        self.assertEqual(step["value"], 'Closed "today"')
+        self.assertEqual(step["locator"], {"strategy": "label", "value": "Order status", "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('getByLabel("Order status", { exact: true }).and(page.locator("select:not([multiple])"))', generated)
+        self.assertIn(r'select.selectOption({ label: "Closed \"today\"" })', generated)
+        self.assertIn("toEqual([true])", generated)
+        self.assertIn('getByText("Closed order 0142", { exact: true })).toBeVisible()', generated)
+
+        for malformed in (
+            'Select exact option "Closed" in field "Order status" and click Apply filters',
+            'Select exact option "Closed"',
+            'Select exact option "" in field "Order status"',
+        ):
+            with self.subTest(action=malformed):
+                case.steps[1].action = malformed
+                invalid = preview_execution([case], target_base_url=url)
+                self.assertEqual(invalid.summary.executable, 0)
+                self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
+
     def test_negative_visibility_rejects_incomplete_and_different_expectations(self) -> None:
         for expectation in (
             'exact link "Open receipt" is not visible and the audit log is unchanged',

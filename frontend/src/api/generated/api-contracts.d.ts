@@ -465,6 +465,7 @@ export interface GroundedUIElement {
 	href?: string | null;
 	id: string;
 	name: string;
+	select_options?: Array<string> | null;
 	source_id?: string | null;
 }
 

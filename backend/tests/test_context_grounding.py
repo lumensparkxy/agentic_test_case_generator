@@ -72,6 +72,29 @@ class ContextGroundingTests(unittest.TestCase):
         self.assertEqual([element.name for element in fields], ["dup", "one", "two", "referenced", "Identifier only"])
         self.assertTrue(all(element.description.startswith("Field identifier extracted from artifact:") for element in fields))
 
+    def test_native_dropdowns_keep_exact_available_labels_and_omit_dom_values(self) -> None:
+        fields = extract_ui_elements_from_html(
+            "APP",
+            """
+            <select aria-label="Order status">
+              <option value="private-id">  In   progress
+              <option value="another-id" label="Done &amp; archived">Ignore this text</option>
+              <option>Duplicate</option><option disabled>Duplicate</option>
+              <option disabled>Disabled</option><option hidden>Hidden</option>
+              <option aria-disabled="true">Semantically disabled</option>
+              <optgroup label="Unavailable" disabled><option>In a disabled group</option></optgroup>
+              <optgroup label="Current"><option>Closed</option></optgroup>
+            </select>
+            <fieldset disabled><select aria-label="Locked"><option>Locked choice</option></select></fieldset>
+            <select multiple aria-label="Many"><option>One of many</option></select>
+            <select aria-label="Empty"><option></option></select>
+            <input aria-label="Note">
+            """,
+        )
+        options = {field.name: field.select_options for field in fields}
+        self.assertEqual(options, {"Order status": ["In progress", "Done & archived", "Closed"], "Locked": [], "Many": [], "Empty": [], "Note": None})
+        self.assertNotIn("private-id", str(fields))
+
     def test_linked_html_label_reaches_browser_preview_without_context_notes(self) -> None:
         target = "https://example.test/receipt"
         requirement = Requirement(id="R1", text='Saving a valid reference displays "Request saved".')

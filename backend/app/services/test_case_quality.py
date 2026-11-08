@@ -2,6 +2,8 @@
 
 import re
 
+from .execution_service import is_complete_browser_action
+
 
 _GENERIC_ACTION = re.compile(
     r"^(navigate to the feature area that implements |execute the .+ scenario for REQ-|"
@@ -22,11 +24,16 @@ def placeholder_reason(case, *, strict=True):
     if row.get("status") == "Deprecated":
         return None
     steps = row.get("steps") or []
-    if strict and (not steps or any(not str(s.get("action", "")).strip() or not str(s.get("expected", "")).strip() for s in steps)):
-        return "Concrete test actions and observable expected results are missing."
+    expectations = [str(step.get("expected") or "").strip() for step in steps]
+    if strict:
+        actions = [str(step.get("action") or "").strip() for step in steps]
+        if not any(expectations) or any(
+            not action or (not expected and not is_complete_browser_action(action)) for action, expected in zip(actions, expectations, strict=True)
+        ):
+            return "Concrete test actions and observable expected results are missing."
     if any(_GENERIC_ACTION.search(str(s.get("action", "")).strip()) for s in steps):
         return "This row contains generation instructions instead of concrete test actions."
-    if steps and all(_GENERIC_EXPECTED.fullmatch(str(s.get("expected", "")).strip()) for s in steps):
+    if any(expectations) and all(_GENERIC_EXPECTED.fullmatch(expected) for expected in expectations if expected):
         return "The expected results do not specify an observable outcome."
     return None
 

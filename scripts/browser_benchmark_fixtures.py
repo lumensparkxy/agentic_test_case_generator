@@ -58,6 +58,19 @@ document.querySelector("form").addEventListener("submit", event => {
 });
 </script></html>"""
 
+ORDERS = """<!doctype html><html lang="en"><title>Orders</title><h1>Orders</h1>
+<form>
+<label for="status">Order status</label>
+<select id="status"><option value="open_internal">Open</option><option value="closed_internal">Closed</option></select>
+<button>Apply filters</button></form><p role="status"></p>
+<script>
+document.querySelector("form").addEventListener("submit", event => {
+  event.preventDefault();
+  document.querySelector("[role=status]").textContent =
+    document.querySelector("#status").value === "closed_internal" ? "Closed order 0142" : "Open order 0007";
+});
+</script></html>"""
+
 FIXTURES = {
     "directory": Fixture(
         route="/directory",
@@ -86,6 +99,37 @@ FIXTURES = {
         defects=(
             Defect("wrong-match", "DIR-MATCH", '? "Alex Rivera" :', '? "Alexandra Rivera" :', 'exact text "Alex Rivera" should be visible'),
             Defect("wrong-empty", "DIR-EMPTY", ': "No employees found";', ': "Directory unavailable";', 'exact text "No employees found" should be visible'),
+        ),
+    ),
+    "orders": Fixture(
+        route="/orders",
+        pages={"/orders": ORDERS},
+        requirements={"ORD-CLOSED": 'Selecting the "Closed" order status and applying filters displays exact text "Closed order 0142".'},
+        notes='The orders filter is public. Choose "Closed" in the native field "Order status" and use the "Apply filters" button.',
+        controls=(
+            (
+                "ORD-CLOSED",
+                (
+                    ('Select exact option "Closed" in field "Order status"', ""),
+                    ('Click exact button "Apply filters"', 'exact text "Closed order 0142" is visible'),
+                ),
+            ),
+        ),
+        defects=(
+            Defect(
+                "wrong-order-result",
+                "ORD-CLOSED",
+                '? "Closed order 0142" :',
+                '? "Open order 0007" :',
+                'exact text "Closed order 0142" should be visible',
+            ),
+            Defect(
+                "wrong-option-label",
+                "ORD-CLOSED",
+                ">Closed</option>",
+                ">Closed archive</option>",
+                'I select exact option "Closed" in field "Order status"',
+            ),
         ),
     ),
     "receipt": Fixture(

@@ -55,9 +55,19 @@ names or result text from rendered states in context notes, such as
 `field "Reference"`, `button "Save request"`, and `"Request saved"`.
 
 Generation and refinement use one browser action and at most one observable
-check per step. Use `Click exact button "Save request"` and
+check per step. Complete browser actions may leave their expected result
+empty when the case has a separate observable outcome. Use
+`Click exact button "Save request"` and
 `Click exact link "View receipt"` for whole accessible names. A case for an
 initially blank field checks the blank value before submitting.
+
+For a grounded native single-choice dropdown, use
+`Select exact option "Closed" in field "Order status"`. Linked HTML supplies
+the selectable labels. A separate field-value check needs an explicit
+declaration such as `field "Order status" DOM value is "closed_internal"`
+in the supplied context. The browser verifies one available exact option
+before selecting it. Cases with unsupported or unavailable choices stay
+manual.
 
 For an out-of-view state, use an expectation such as
 `exact link "Open receipt" is not visible`. The browser waits for zero visible

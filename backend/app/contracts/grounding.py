@@ -32,6 +32,9 @@ class GroundedUIElement(BaseModel):
     ] = "Other"
     description: str
     href: Optional[str] = None
+    select_options: list[str] | None = Field(
+        default=None, max_length=40, description="Exact selectable labels on a native dropdown. An empty list denotes a dropdown without supported choices."
+    )
 
 
 class GroundedApiSurface(BaseModel):

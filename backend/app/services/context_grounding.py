@@ -116,7 +116,8 @@ def extract_ui_elements_from_html(
         if index >= 4:
             break
 
-    for index, (label, hint) in enumerate(extract_form_fields(html_text)[:6], start=1):
+    for index, field in enumerate(extract_form_fields(html_text)[:6], start=1):
+        label, hint = field.label, field.hint
         description = f"Field identifier extracted from artifact: {hint}"
         if label:
             description = f"Accessible field label extracted from artifact: {label}"
@@ -129,6 +130,7 @@ def extract_ui_elements_from_html(
                 name=label or hint,
                 element_type="Field",
                 description=description,
+                select_options=list(field.select_options) if field.select_options is not None else None,
             )
         )
 
