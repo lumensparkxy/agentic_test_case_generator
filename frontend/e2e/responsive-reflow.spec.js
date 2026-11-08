@@ -441,7 +441,10 @@ test.describe("Responsive project shell", () => {
 	test("limits horizontal scrolling to named, focusable intrinsic table regions", async ({ page }) => {
 		await openResponsiveProject(page, { width: 320, height: 900 }, { destination: "requirements" });
 		await expect(page.getByRole("region", { name: /requirements table/i })).toBeVisible();
-		await page.getByText("Raw extracted text", { exact: true }).click();
+		await page.getByRole("button", { name: "Import requirements", exact: true }).click();
+		const rawTextDisclosure = page.getByText("Raw extracted text", { exact: true });
+		await expect(rawTextDisclosure).toBeVisible();
+		await rawTextDisclosure.click();
 		const rawTextRegion = page.getByRole("region", { name: "Raw extracted requirements text" });
 		await expect(rawTextRegion).toBeVisible();
 		await expect(rawTextRegion).toHaveAttribute("tabindex", "0");
