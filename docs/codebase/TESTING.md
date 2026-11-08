@@ -625,6 +625,11 @@ From the Runs index the smoke opens each saved run, reloads its exact Reports
 link, and checks the case identities and recorded assertion for the seeded
 failure.
 
+`test_workflow_project_service.py` covers multi-part execution snapshots,
+ordered readback, atomic rollback, retry, incomplete and corrupted parts, and
+bounded Unicode diagnostics. `test_quality_feedback.py` verifies that a passing
+run can close a finding only when its saved case evidence is complete.
+
 Choose a new output directory for each run. The runner keeps service logs,
 browser evidence and execution artifacts there, archives the exact test-owned
 project, and stops its local services when the run ends. Model quality and

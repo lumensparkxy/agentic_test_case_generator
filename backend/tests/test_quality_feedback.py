@@ -163,23 +163,25 @@ class QualityFeedbackTests(unittest.TestCase):
             "classify",
         )
         self.assertEqual(classified["finding"]["category"], "environment")
-        passed = projects.append_stage_snapshot(
-            project_id=self.project_id,
-            stage="execution",
-            payload={"results": [{"source_test_case_id": "TC-1", "status": "passed"}]},
-            operation="automation.execution.run",
-            actor=self.actor,
-            request_id="rerun",
-            source_snapshot_id=source,
-            metadata={"target_environment": "staging"},
-        )
-        result = update_finding(
-            self.project_id,
-            finding["id"],
-            self.actor,
-            QualityFindingAction(action="verify", base_project_revision=passed.project_revision, verification_snapshot_id=passed.snapshot_id),
-            "verify",
-        )
+        with patch("app.services.execution_result_storage.INLINE_RESULT_BYTES", 1):
+            passed = projects.append_stage_snapshot(
+                project_id=self.project_id,
+                stage="execution",
+                payload={"results": [{"source_test_case_id": "TC-1", "status": "passed"}]},
+                operation="automation.execution.run",
+                actor=self.actor,
+                request_id="rerun",
+                source_snapshot_id=source,
+                metadata={"target_environment": "staging"},
+            )
+        verification = QualityFindingAction(action="verify", base_project_revision=passed.project_revision, verification_snapshot_id=passed.snapshot_id)
+        part_path = f"qa_projects/{self.project_id}/snapshots/{passed.snapshot_id}/execution_result_parts/0000"
+        part = self.store.pop(part_path)
+        with self.assertLogs(level="WARNING"), self.assertRaises(HTTPException) as incomplete:
+            update_finding(self.project_id, finding["id"], self.actor, verification, "verify")
+        self.assertEqual(incomplete.exception.status_code, 409)
+        self.store[part_path] = part
+        result = update_finding(self.project_id, finding["id"], self.actor, verification, "verify")
         self.assertEqual(result["finding"]["status"], "verified")
 
     def test_ownership_and_stale_revisions_prevent_writes(self):

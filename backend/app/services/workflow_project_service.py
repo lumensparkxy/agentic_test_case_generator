@@ -21,6 +21,7 @@ from ..models import (
 from .guidance_service import public_manifest
 from .scenario_review_state import carry_scenario_reviews
 from .audit_service import build_actor_snapshot
+from .execution_result_storage import execution_result_writes, restore_execution_results
 from .firestore_repository import get_required_firestore_collection, get_required_firestore_client
 
 QA_PROJECTS_COLLECTION = "qa_projects"
@@ -174,12 +175,14 @@ def _stream_collection(collection_ref: Any) -> list[dict[str, Any]]:
 
 def _snapshot_for(project_id: str, snapshot_id: str) -> Optional[QaProjectStageSnapshot]:
     try:
-        payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get())
+        ref = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
+        payload = _document_to_dict(ref.get())
     except Exception as exc:  # pragma: no cover - defensive around external store
         logging.warning("Project snapshot load skipped for %s: %s", snapshot_id, exc)
         return None
     if not payload:
         return None
+    restore_execution_results(ref, payload)
     return QaProjectStageSnapshot.model_validate(payload)
 
 
@@ -610,6 +613,9 @@ def append_stage_snapshot(
         from .quality_feedback import execution_finding_writes
 
         pending_writes = [*pending_writes, *execution_finding_writes(project_id, snapshot_payload)]
+        if operation == "automation.execution.run":
+            snapshot_ref = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
+            pending_writes.extend(execution_result_writes(snapshot_ref, snapshot_payload))
 
     stage_metadata = dict(metadata or {})
     if stage == "use_cases":
@@ -666,6 +672,8 @@ def append_stage_snapshot(
         pending_writes=pending_writes,
         transaction_guard=transaction_guard,
     )
+    if stage == "execution" and operation == "automation.execution.run":
+        restore_execution_results(snapshot_ref, committed)
     return QaProjectStageSnapshot.model_validate(committed)
 
 

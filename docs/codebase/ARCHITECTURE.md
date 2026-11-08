@@ -520,6 +520,16 @@ unmatched snapshot details keep their saved summary. The selected-run view
 keeps current-suite export on the ordinary Reports route. The endpoint reads
 project data and does not serve runtime files.
 
+Large execution result lists are stored as compressed parts under their
+execution snapshot. Parts, the snapshot, its findings and the project revision
+share a Firestore transaction. Reads verify the complete part set and checksum
+before restoring ordered case results. Small runs retain their inline format.
+Above 384 KiB of encoded case results, the writer stores compressed parts of
+at most 256 KiB each. A projection over 4 MiB encoded or 2 MiB compressed uses
+a shared 2 MiB text budget for saved diagnostics and marks abbreviated
+messages. Case identities, outcomes and artifact references remain intact.
+The run response and local Playwright artifacts retain their original output.
+
 Execution preview has one count/list invariant for the `executable`, `manual`,
 `unsupported`, and `invalid` buckets: every `summary` count equals the length of
 its matching candidate collection. `ExecutionPreviewResponse` derives the

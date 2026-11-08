@@ -1,4 +1,6 @@
+from base64 import b64encode
 from pathlib import Path
+from random import Random
 import sys
 import unittest
 from typing import Any
@@ -20,6 +22,8 @@ from app.services.workflow_project_service import (
     append_stage_snapshot,
     create_project,
     get_project,
+    get_project_execution_run,
+    get_project_stage_snapshot,
     list_projects,
     record_execution_run,
 )
@@ -296,6 +300,120 @@ class WorkflowProjectServiceTests(unittest.TestCase):
 
             app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="outsider", email="other@example.test", name="Outsider")
             self.assertEqual(client.get(path).status_code, 403)
+
+    def test_large_execution_parts_commit_atomically_and_restore_the_bound_run(self) -> None:
+        project = create_project(name="Large execution", description=None, actor=self.actor, request_id="create")
+        project_path = f"qa_projects/{project.project_id}"
+        results = [
+            {
+                "id": f"candidate-{index}",
+                "source_test_case_id": f"TC-{index}",
+                "title": f"Case {index}",
+                "status": "failed" if index else "passed",
+                "generated_spec_path": f"/artifacts/candidate-{index}.spec.ts",
+                "issues": [{"path": "$.results[0].error", "code": "playwright.error", "message": b64encode(Random(index).randbytes(240_000)).decode()}]
+                if index
+                else [],
+            }
+            for index in range(3)
+        ]
+        payload = {"run_id": "large-run", "status": "failed", "summary": {"passed": 1, "failed": 2}, "results": results}
+        request = {
+            "project_id": project.project_id,
+            "stage": "execution",
+            "payload": payload,
+            "operation": "automation.execution.run",
+            "actor": self.actor,
+            "request_id": "run",
+            "base_project_revision": project.current_revision,
+            "idempotency_key": "large-run",
+        }
+        before = set(self.store)
+        self.transaction_client.fail_on_create_segment = "/timeline/"
+        try:
+            with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                append_stage_snapshot(**request)
+        finally:
+            self.transaction_client.fail_on_create_segment = None
+        self.assertEqual(set(self.store), before)
+        self.assertEqual(self.store[project_path]["current_revision"], project.current_revision)
+
+        snapshot = append_stage_snapshot(**request)
+        snapshot_path = f"{project_path}/snapshots/{snapshot.snapshot_id}"
+        manifest = self.store[snapshot_path]["execution_result_parts"]
+        self.assertGreater(manifest["count"], 1)
+        self.assertNotIn("results", self.store[snapshot_path]["payload"])
+        self.assertEqual(snapshot.payload["results"], results)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).current_snapshots["execution"].payload["results"], results)
+        retry = append_stage_snapshot(**{**request, "payload": {**payload, "results": []}})
+        self.assertEqual(retry, snapshot)
+        self.assertEqual(len([path for path in self.store if "/quality_findings/" in path]), 2)
+
+        run = record_execution_run(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="run",
+            run_id="large-run",
+            target_environment="staging",
+            status_value="failed",
+            summary=payload["summary"],
+            test_case_count=len(results),
+            snapshot_id=snapshot.snapshot_id,
+            workflow_run_id=None,
+            source_event_id=None,
+            project_revision=snapshot.project_revision,
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"executable": []},
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="later-preview",
+        )
+        exact = get_project_execution_run(project.project_id, run.run_record_id, actor=self.actor)
+        self.assertEqual([row.id for row in exact.results], [row["id"] for row in results])
+        self.assertEqual(exact.results[2].issues[0].message, results[2]["issues"][0]["message"])
+
+        part_path = f"{snapshot_path}/execution_result_parts/0000"
+        part = self.store[part_path]
+        for replacement in (None, {**part, "data": b"corrupt"}):
+            with self.subTest(replacement=replacement):
+                if replacement is None:
+                    del self.store[part_path]
+                else:
+                    self.store[part_path] = replacement
+                with self.assertLogs(level="WARNING"):
+                    unavailable = get_project_execution_run(project.project_id, run.run_record_id, actor=self.actor)
+                self.assertIsNone(unavailable.results)
+                self.assertEqual(unavailable.summary, payload["summary"])
+
+    def test_exceptional_diagnostics_are_abbreviated_without_dropping_unicode_cases(self) -> None:
+        project = create_project(name="Noisy execution", description=None, actor=self.actor, request_id="create")
+        alphabet = [chr(codepoint) for codepoint in range(0x4E00, 0x9FFF)]
+        message = "Expected a confirmation receipt\n" + "".join(Random(383).choices(alphabet, k=240_000))
+        issue = {"path": "$.results[0].error", "code": "playwright.error", "message": message}
+        rows = [
+            {"id": "case-a", "source_test_case_id": "TC-1", "title": "受付", "status": "failed", "issues": [issue] * 6},
+            {"id": "case-b", "source_test_case_id": "TC-2", "title": "成功", "status": "passed", "issues": []},
+        ]
+        snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "noisy-run", "results": rows},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="noisy",
+        )
+        saved = get_project_stage_snapshot(project.project_id, snapshot.snapshot_id, actor=self.actor).payload["results"]
+        self.assertEqual([(row["title"], row["status"]) for row in saved], [("受付", "failed"), ("成功", "passed")])
+        saved_issues = saved[0]["issues"]
+        self.assertLess(len(saved_issues), len(rows[0]["issues"]))
+        self.assertTrue(saved_issues[0]["message"].startswith("Expected a confirmation receipt"))
+        self.assertIn("[Saved diagnostic shortened.]", saved_issues[0]["message"])
+        self.assertIn("[2 additional diagnostics omitted from saved evidence.]", saved_issues[-1]["message"])
+        self.assertNotIn("\ufffd", saved_issues[0]["message"])
+        self.assertEqual(rows[0]["issues"][0]["message"], message)
 
     def test_multiple_environment_execution_runs_preserve_separate_history(self) -> None:
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")
