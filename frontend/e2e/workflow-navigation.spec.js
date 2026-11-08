@@ -69,7 +69,7 @@ function requirementsParseFixture(id, text) {
 	return {
 		import_id: id,
 		project_id: PROJECT_A.project_id,
-		base_project_revision: PROJECT_A.project_revision,
+		base_project_revision: PROJECT_A.current_revision,
 		source_name: `${id.toLowerCase()}.md`,
 		status: "pending",
 		current_requirements: [],
@@ -550,7 +550,7 @@ test.describe("Route-driven application shell", () => {
 		expect(api.detailProjectIds).toEqual([PROJECT_A.project_id, PROJECT_B.project_id]);
 	});
 
-	test("keeps an older action stale across an A to B to A route round-trip", async ({ page }) => {
+	test("keeps an older action stale across an A to B to A route round-trip", { tag: "@p1" }, async ({ page }) => {
 		let releaseOldParse;
 		let releaseNewParse;
 		const oldParseGate = new Promise((resolve) => {
@@ -608,11 +608,11 @@ test.describe("Route-driven application shell", () => {
 		);
 		releaseNewParse();
 		await newParseResponse;
-		await expect(page.getByText(newRequirementText, { exact: true }).first()).toBeVisible();
-		await expect(page.getByRole("button", { name: /^Parse Requirements$/i })).toBeVisible();
+		const comparison = page.getByRole("region", { name: "Compare incoming requirements" });
+		await expect(comparison.getByRole("button", { name: `Review incoming requirement: ${newRequirementText}`, exact: true })).toBeVisible();
+		await expect(comparison.getByRole("button", { name: "Apply reviewed changes", exact: true })).toBeEnabled();
 		await expect(page.getByText(oldRequirementText, { exact: true })).toHaveCount(0);
 		await expect.poll(() => api.detailProjectIds.length).toBe(4);
-		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeVisible();
 		expect(api.detailProjectIds.at(-1)).toBe(PROJECT_A.project_id);
 	});
 });

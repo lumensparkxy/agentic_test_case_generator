@@ -112,6 +112,31 @@ The script is intentionally synthetic: it uses mocked API fixtures, a seeded
 test session, and local Vite only. It does not call Firebase, a model, a live
 backend, production, or an external integration.
 
+To run every offline browser spec, start Vite from `frontend/` with dummy
+Firebase web settings. These settings expose the anonymous provider chooser for
+the UI checks. The tests use a disposable JWT for authenticated fixtures.
+
+```bash
+VITE_API_BASE=http://127.0.0.1:8000 \
+VITE_FIREBASE_API_KEY=offline-ui-smoke-key \
+VITE_FIREBASE_AUTH_DOMAIN=offline-ui-smoke.example.test \
+VITE_FIREBASE_PROJECT_ID=demo-offline-ui-smoke \
+VITE_FIREBASE_APP_ID=1:12345:web:0000000000000000000000 \
+VITE_FIREBASE_ENABLE_GOOGLE_AUTH=true \
+VITE_FIREBASE_ENABLE_MICROSOFT_AUTH=true \
+VITE_FIREBASE_ENABLE_APPLE_AUTH=true \
+npm run dev -- --host 127.0.0.1 --strictPort
+```
+
+In another `frontend/` shell, run the complete selection with the live suites
+disabled:
+
+```bash
+JWT_SECRET_KEY=local-chromium-regression-test-secret \
+E2E_BASE_URL=http://127.0.0.1:5173 E2E_LIVE=0 E2E_LOCAL_WORKBENCH=0 \
+npm run test:e2e -- --workers=4 --retries=0
+```
+
 CI currently runs:
 
 - Backend Ruff lint check.

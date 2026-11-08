@@ -17,7 +17,9 @@ test.use({ trace: "off", video: "off" });
 
 test("anonymous portal opens provider chooser from sign-in", async ({ page }) => {
 	await page.goto("/");
-	await page.getByRole("button", { name: /^sign in$/i }).click();
+	const signIn = page.getByRole("button", { name: /^sign in$/i });
+	await expect(signIn).toBeVisible();
+	await signIn.click();
 	await expect(page.getByRole("dialog", { name: /choose a sign-in method/i })).toBeVisible();
 	for (const provider of ["google", "microsoft", "apple"])
 		await expect(page.getByRole("button", { name: new RegExp(provider, "i") })).toBeVisible();
