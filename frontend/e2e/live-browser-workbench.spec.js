@@ -469,7 +469,9 @@ test.describe("Isolated browser workbench", () => {
 						is_draft: false,
 						execution_run_ids: [old.run_id, revised.run_id],
 					});
-					expect(exported.test_cases.find((row) => row.id === sourceChange.repaired.id).steps).toEqual(sourceChange.repaired.steps);
+					expect(exported.test_cases.find((row) => row.id === sourceChange.repaired.id).steps).toEqual(
+						sourceChange.repaired.steps.map((step) => ({ ...step, test_data: step.test_data ?? null }))
+					);
 					await fixture.save("changed-source-run-evidence", { history, export: exported.audit_metadata });
 				});
 			}
