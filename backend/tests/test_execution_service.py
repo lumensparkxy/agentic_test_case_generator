@@ -453,6 +453,46 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn(r'page.getByRole("link", { name: "Go to \"Receipt\"", exact: true }).click()', generated)
         self.assertIn('page.getByRole("button", { name: "Done" }).click()', generated)
 
+    def test_exact_negative_visibility_preserves_role_and_text_without_reopening_page(self) -> None:
+        url = "https://example.test/receipt"
+        case = TestCase(
+            id="TC-HIDDEN",
+            title="Keep the receipt link out of view before saving",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action='Inspect the "Open receipt" link', expected='exact link "Open receipt" is not visible'),
+                TestStep(step=3, action=r'exact text "Receipt \"saved\"" should not be visible', expected=""),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        self.assertFalse(preview.executable[0].unsupported_steps)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "assert_hidden", "assert_hidden"])
+        self.assertEqual(steps[1]["locator"], {"strategy": "role", "role": "link", "value": "Open receipt", "exact": True})
+        self.assertEqual(steps[2]["locator"], {"strategy": "text", "value": 'Receipt "saved"', "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("link", { name: "Open receipt", exact: true, includeHidden: true }).filter({ visible: true })).toHaveCount(0)', generated)
+        self.assertIn(r'page.getByText("Receipt \"saved\"", { exact: true }).filter({ visible: true })).toHaveCount(0)', generated)
+
+    def test_negative_visibility_rejects_incomplete_and_different_expectations(self) -> None:
+        for expectation in (
+            'exact link "Open receipt" is not visible and the audit log is unchanged',
+            'exact link "Open receipt" is not visible before saving',
+            'exact link "Open receipt" is not present in the DOM',
+            'link "Open receipt" is not visible',
+            'exact text "href" is not visible',
+        ):
+            with self.subTest(expectation=expectation):
+                for action, expected in (("Inspect the receipt", expectation), (expectation, "")):
+                    case = _browser_case()
+                    case.steps[2] = TestStep(step=3, action=action, expected=expected)
+                    preview = preview_execution([case], target_base_url="https://example.test")
+                    self.assertEqual(preview.summary.executable, 0)
+                    self.assertEqual(preview.unsupported[0].unsupported_steps[0].expected, expected)
+
     def test_malformed_exact_click_does_not_fall_back_to_partial_action(self) -> None:
         for action in (
             'Click exact button "Sign in" and confirm the user has access',

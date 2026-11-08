@@ -21,6 +21,7 @@ STEP_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+(?P<body>.+)$")
 OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into (?P<exact>field )?"(?P<label>[^"]+)"$')
 EXACT_CLICK_PATTERN = re.compile(r'^I click exact (?P<role>button|link) "(?P<name>(?:\\["\\]|[^"\\])+)"$')
+EXACT_HIDDEN_PATTERN = re.compile(r'^exact (?P<kind>heading|link|button|text) "(?P<target>(?:\\["\\]|[^"\\])+)" should not be visible$')
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
 ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact )?(?P<role>heading|link|button) "(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
@@ -278,6 +279,21 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
                 "role": "button",
                 "value": name,
             },
+        }
+
+    if match := EXACT_HIDDEN_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        target = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["target"]), environment, data, path=path)
+        kind = match["kind"]
+        locator = {"strategy": "text" if kind == "text" else "role", "value": target, "exact": True}
+        if kind != "text":
+            locator["role"] = kind
+        return {
+            "id": _slug_identifier(f"assert {kind} {target} hidden"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_hidden",
+            "locator": locator,
         }
 
     if match := ROLE_VISIBLE_PATTERN.match(body):

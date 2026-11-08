@@ -359,7 +359,7 @@
           ],
           "properties": {
             "action": {
-              "const": "assert_visible"
+              "enum": ["assert_visible", "assert_hidden"]
             }
           },
           "not": {

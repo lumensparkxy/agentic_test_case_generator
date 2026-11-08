@@ -16,6 +16,7 @@ SUPPORTED_ACTIONS = {
     "fill",
     "click",
     "assert_visible",
+    "assert_hidden",
     "assert_text_equals",
     "assert_value_equals",
     "assert_value_contains",
@@ -123,6 +124,9 @@ def _render_action(step: Mapping[str, Any]) -> str:
         return f"await {_render_locator(step['locator'])}.click();"
     if action == "assert_visible":
         return f"await expect({_render_locator(step['locator'])}).toBeVisible();"
+    if action == "assert_hidden":
+        locator = _render_locator(step["locator"], include_hidden=True)
+        return f"await expect({locator}.filter({{ visible: true }})).toHaveCount(0);"
     if action == "assert_text_equals":
         return f"await expect({_render_locator(step['locator'])}).toHaveText({_js_string(_to_playwright_text(step['expected']))});"
     if action == "assert_value_equals":
@@ -152,7 +156,7 @@ def _render_action(step: Mapping[str, Any]) -> str:
     return ""
 
 
-def _render_locator(locator: Mapping[str, Any]) -> str:
+def _render_locator(locator: Mapping[str, Any], *, include_hidden: bool = False) -> str:
     strategy = locator["strategy"]
     value = _js_string(locator["value"])
     if strategy == "test_id":
@@ -160,7 +164,8 @@ def _render_locator(locator: Mapping[str, Any]) -> str:
     if strategy == "role":
         role = _js_string(locator.get("role", "button"))
         exact = ", exact: true" if locator.get("exact") else ""
-        return f"page.getByRole({role}, {{ name: {value}{exact} }})"
+        hidden = ", includeHidden: true" if include_hidden else ""
+        return f"page.getByRole({role}, {{ name: {value}{exact}{hidden} }})"
     if strategy == "label":
         exact = ", { exact: true }" if locator.get("exact") else ""
         return f"page.getByLabel({value}{exact})"

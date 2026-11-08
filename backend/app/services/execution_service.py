@@ -88,6 +88,12 @@ ROLE_VISIBLE_PATTERN = re.compile(
     r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)",
     re.IGNORECASE,
 )
+EXACT_HIDDEN_PATTERN = re.compile(
+    rf"exact\s+(?P<kind>heading|link|button|text)\s+(?P<target>{QUOTED_ASSERTION_TARGET})"
+    r"\s+(?:is\s+not|should\s+not\s+be)\s+visible\b",
+    re.IGNORECASE,
+)
+NEGATIVE_VISIBILITY_INTENT = re.compile(r"\bnot\s+(?:be\s+)?(?:visible|present)\b", re.IGNORECASE)
 QUOTED_VISIBLE_PATTERN = re.compile(
     rf"(?P<exact>exact\s+(?:visible\s+)?text\s+)?(?P<target>{QUOTED_ASSERTION_TARGET})"
     r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)",
@@ -128,6 +134,7 @@ LOCATOR_COUNT_PATTERN = re.compile(
 )
 ASSERTION_KINDS = {
     "assert_visible",
+    "assert_hidden",
     "assert_text_equals",
     "assert_value_equals",
     "assert_value_contains",
@@ -501,11 +508,16 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     converted: list[_ConvertedStep] = []
     action = _normalize_text(step.action)
     expected = _normalize_text(step.expected)
+    unquoted_action = re.sub(QUOTED_ASSERTION_TARGET, "", action)
     action_value, unsupported_action = _field_value_assertion(step.action)
     expected_value, unsupported_expected = _field_value_assertion(step.expected)
+    action_assertion = _convert_assertion(step.action)
+    expected_assertion = _convert_assertion(step.expected)
     exact_click = EXACT_CLICK_ACTION.fullmatch(step.action.strip())
     # A supported assertion's quoted locator and value are data, not operations.
-    domain_text = " ".join(("" if action_value or exact_click else step.action, "" if expected_value else step.expected, step.test_data or "")).lower()
+    action_is_literal = action_value or exact_click or (action_assertion and action_assertion.kind == "assert_hidden")
+    expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind == "assert_hidden")
+    domain_text = " ".join(("" if action_is_literal else step.action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
     if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
         return [], _unsupported_step(step, "unsupported_non_browser_domain", "manual_execution")
     if unsupported_action or unsupported_expected:
@@ -522,10 +534,15 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
             return [], _unmapped_step(step, action, is_expected=False)
         role = exact_click["role"].lower()
         converted.append(_ConvertedStep("click", f'I click exact {role} "{_escape_step_text(name)}"'))
-    elif assertion := _convert_assertion(step.action):
-        converted.append(assertion)
-    elif ASSERTION_ACTION_PATTERN.match(action) or ACTION_SEQUENCE_PATTERN.search(re.sub(QUOTED_ASSERTION_TARGET, "", action)):
+    elif action_assertion:
+        converted.append(action_assertion)
+    elif ASSERTION_ACTION_PATTERN.match(action) or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action) or ACTION_SEQUENCE_PATTERN.search(unquoted_action):
         return [], _unmapped_step(step, action, is_expected=False)
+    elif OBSERVATION_ACTION_PATTERN.match(action):
+        # The expected check represents the observation. A control name such
+        # as "Open receipt" does not turn it into a navigation.
+        if not (expected_value or expected_assertion) or _unsupported_browser_assertion_text_reason(action):
+            return [], _unmapped_step(step, action, is_expected=False)
     elif _looks_like_navigation(action):
         converted.append(_ConvertedStep("navigate", f'I open "{_resolve_step_url(action, base_url)}"'))
     elif match := FILL_PATTERN.search(action):
@@ -551,13 +568,11 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
             else:
                 converted.append(_ConvertedStep("click", f'I click "{_escape_step_text(name)}"'))
 
-    expected_assertion = expected_value or _convert_assertion(step.expected)
+    expected_assertion = expected_value or expected_assertion
     if expected and not expected_assertion:
         return [], _unmapped_step(step, expected, is_expected=True)
-    if not converted and action:
-        # An observation action can be represented by its concrete expected check.
-        if not expected_assertion or not OBSERVATION_ACTION_PATTERN.match(action) or _unsupported_browser_assertion_text_reason(action):
-            return [], _unmapped_step(step, action, is_expected=False)
+    if not converted and action and not OBSERVATION_ACTION_PATTERN.match(action):
+        return [], _unmapped_step(step, action, is_expected=False)
     if expected_assertion:
         converted.append(expected_assertion)
     if not converted:
@@ -592,6 +607,13 @@ def _assertion_statement(text: str) -> str:
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
     text = _assertion_statement(text)
+    if match := EXACT_HIDDEN_PATTERN.fullmatch(text):
+        target = _assertion_literal(match["target"])
+        kind = match["kind"].lower()
+        if not target.strip() or (kind == "text" and is_ambiguous_semantic_visible_text(target)):
+            return None
+        return _ConvertedStep("assert_hidden", f'exact {kind} "{_escape_step_text(target)}" should not be visible')
+
     if match := URL_ASSERTION_PREFIX.match(text):
         target = text[match.end() :]
         if URL_PATTERN.fullmatch(target) and (url := _extract_prose_url(target)):
