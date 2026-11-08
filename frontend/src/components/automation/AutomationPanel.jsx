@@ -126,7 +126,17 @@ const renderUnsupportedList = (candidates, emptyMessage = "No unsupported cases 
 					<List className="jira-sync-warning-list">
 						{candidate.unsupported_steps?.map((step) => (
 							<ListItem key={`${candidate.id}-${step.step}-${step.reason_code}`}>
-								Step {step.step}: {step.reason_code}. {step.suggested_next_action}
+								<strong>
+									Step {step.step}:{" "}
+									{step.reason_code === "unsupported_expected_result" ? "Expected result needs a browser check" : step.reason_code}.
+								</strong>{" "}
+								{step.suggested_next_action}
+								{typeof step.expected === "string" && step.expected.trim() && (
+									<div className="execution-source-expectation">
+										<strong>Expected result </strong>
+										<q>{step.expected}</q>
+									</div>
+								)}
 							</ListItem>
 						))}
 					</List>

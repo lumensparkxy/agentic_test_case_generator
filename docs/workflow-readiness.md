@@ -36,6 +36,14 @@ Rejections return HTTP 409 with readiness blockers; unauthorized projects retain
 their existing permission response. Selection must be nonempty and contain only
 eligible candidates. Legacy source IDs are accepted only when unambiguous.
 
+Each nonblank step expectation needs a supported browser assertion that accounts
+for the entire expectation. A successful action or a different assertion in the
+same case cannot cover an unmapped result. Automation shows the source step and
+expected result in the Unsupported bucket. Use separate steps for independent
+observations or verify outcomes outside the browser manually. Action-only steps
+can leave the expected result blank. The run endpoint rechecks the current case
+selection, including when another case in the same preview is eligible.
+
 Use an exact label, CSS selector, or test ID to assert the current value of an
 editable control.
 

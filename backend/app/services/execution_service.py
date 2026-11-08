@@ -43,8 +43,10 @@ URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 QUOTED_PATTERN = re.compile(r"['\"]([^'\"]+)['\"]")
-VISUAL_LOOKUP_PATTERN = re.compile(
-    r"\b(?:locate|find|scan|inspect|review|check|verify|confirm)\b",
+OBSERVATION_ACTION_PATTERN = re.compile(r"^(?:locate|find|scan|inspect|review|observe|look for)\b", re.IGNORECASE)
+ASSERTION_ACTION_PATTERN = re.compile(r"^(?:verify|assert|confirm|check|URL)\b", re.IGNORECASE)
+ACTION_SEQUENCE_PATTERN = re.compile(
+    r"\b(?:and|then)\s+(?:verify|assert|confirm|check|click|press|tap|select|open|navigate|enter|fill|wait|submit)\b",
     re.IGNORECASE,
 )
 FILL_PATTERN = re.compile(
@@ -60,7 +62,7 @@ TEXT_EQUALS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s+that)?\s+)?(?:the\s+)?", re.IGNORECASE)
-QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'[^']*')"""
+QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'(?:\\['\\]|[^'\\])*')"""
 QUOTED_FIELD_ASSERTION_PATTERN = re.compile(
     r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?:should\s+)?'
     r'(?P<operator>equals?|contains?|be|is)\s+(?P<expected>"(?:\\["\\]|[^"\\])*")',
@@ -76,20 +78,21 @@ FIELD_VALUE_INTENT_PATTERN = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 VISIBLE_PATTERN = re.compile(
-    r"(?P<text>.+?)\s+(?:is|are|should be)\s+(?:displayed|visible|shown|present)\b",
-    re.IGNORECASE,
-)
-HEADING_VISIBLE_PATTERN = re.compile(
-    r"\bheading\s+['\"](?P<text>[^'\"]+)['\"]\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    r"(?P<text>[\w ./'-]+?)\s+(?:is|are|should be)\s+(?:displayed|visible|shown|present)",
     re.IGNORECASE,
 )
 ROLE_VISIBLE_PATTERN = re.compile(
-    r"""\b(?P<exact>exact\s+)?(?P<role>heading|link|button)\s+(?P<quote>['"])(?P<text>.+?)(?P=quote)"""
-    r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    rf"(?P<exact>exact\s+)?(?P<role>heading|link|button)\s+(?P<target>{QUOTED_ASSERTION_TARGET})"
+    r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)",
     re.IGNORECASE,
 )
-EXACT_TEXT_PATTERN = re.compile(r"""\bexact\s+(?:visible\s+)?text\s+(?P<quote>['"])(?P<text>.+?)(?P=quote)""", re.IGNORECASE)
-EXACT_INTENT_PATTERN = re.compile(r"\b(?:exact (?:text|case|match)|(?:text|name) matches exactly)\b", re.IGNORECASE)
+QUOTED_VISIBLE_PATTERN = re.compile(
+    rf"(?P<exact>exact\s+(?:visible\s+)?text\s+)?(?P<target>{QUOTED_ASSERTION_TARGET})"
+    r"\s+(?:is|should be)\s+(?:displayed|visible|shown|present)",
+    re.IGNORECASE,
+)
+VISIBLE_SUBJECT_QUALIFIER = re.compile(r"\b(?:and|or|not|no|never|without|but|while|after|before|when)\b", re.IGNORECASE)
+URL_ASSERTION_PREFIX = re.compile(r"(?:URL\s+(?:is|should\s+be)(?:\s+exactly)?|[\w -]{1,120}\s+loads successfully at)\s+", re.IGNORECASE)
 VISIBLE_INTENT_PATTERN = re.compile(r"\b(?:displays?|displayed|visible|shown|present|appears)\b", re.IGNORECASE)
 PAGE_TITLE_EQUALS_PATTERN = re.compile(
     r"\b(?:page\s+)?title\s+(?:is|should\s+be|equals?|should\s+equal)\s+['\"](?P<title>[^'\"]*)['\"]",
@@ -121,7 +124,6 @@ LOCATOR_COUNT_PATTERN = re.compile(
     r"count\s+(?:is|should\s+be|equals?|should\s+equal)\s+(?P<count>\d+)\b",
     re.IGNORECASE,
 )
-LOADS_PATTERN = re.compile(r"(?P<text>.+?)\s+loads\s+successfully\b", re.IGNORECASE)
 ASSERTION_KINDS = {
     "assert_visible",
     "assert_text_equals",
@@ -149,6 +151,7 @@ RUNTIME_ASSERTION_TERMS = (
     "traceback",
     "typeerror",
 )
+RUNTIME_ASSERTION_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(term) for term in RUNTIME_ASSERTION_TERMS) + r")\b", re.IGNORECASE)
 STATE_ASSERTION_PATTERN = re.compile(
     r"\b(?:attribute|attr|checked|count|disabled|enabled|href|page title|return code|scopemismatch|src|stderr|stdout|title)\b",
     re.IGNORECASE,
@@ -334,7 +337,7 @@ def run_execution(
         )
 
     summary = _summarize_run(results, preview)
-    status = "passed" if summary.failed == 0 and summary.invalid == 0 else "failed"
+    status = "passed" if summary.passed and summary.failed == 0 and summary.invalid == 0 else "failed"
     playwright_report_paths = list(dict.fromkeys(item.playwright_report_path for item in results if item.playwright_report_path))
     return ExecutionRunResponse(
         status=status,
@@ -381,36 +384,14 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
 
     converted_steps: list[_ConvertedStep] = []
     unsupported_steps: list[ExecutionUnsupportedStep] = []
-    fatal_unsupported_steps: list[ExecutionUnsupportedStep] = []
     for step in test_case.steps:
-        step_conversions, fatal_unsupported = _convert_step(step, base_url=base_url)
-        if fatal_unsupported:
-            fatal_unsupported_steps.append(fatal_unsupported)
-            continue
-        if ambiguous_reason := _ambiguous_semantic_assertion_reason(step):
-            unsupported_steps.append(_unsupported_step(step, "ambiguous_semantic_assertion", ambiguous_reason))
-        if browser_assertion_reason := _unsupported_browser_assertion_reason(step):
-            unsupported_steps.append(_unsupported_step(step, "unsupported_browser_assertion", browser_assertion_reason))
-        if not step_conversions:
-            if ambiguous_reason or browser_assertion_reason:
-                continue
-            unsupported_steps.append(_unsupported_step(step, "unsupported_step", "locator_mapping_or_manual_execution"))
-            continue
-        converted_steps.extend(step_conversions)
+        step_conversions, unsupported = _convert_step(step, base_url=base_url)
+        if unsupported:
+            unsupported_steps.append(unsupported)
+        else:
+            converted_steps.extend(step_conversions)
 
-    if fatal_unsupported_steps:
-        return ExecutionCandidate(
-            id=candidate_id,
-            source_test_case_id=test_case.id,
-            title=test_case.title,
-            status="unsupported",
-            metadata=metadata,
-            unsupported_steps=fatal_unsupported_steps,
-            review_reasons=["One or more source steps cannot be represented by the current browser DSL."],
-            traceability_ids=traceability_ids,
-        )
-
-    if not converted_steps and unsupported_steps:
+    if unsupported_steps:
         return ExecutionCandidate(
             id=candidate_id,
             source_test_case_id=test_case.id,
@@ -487,7 +468,7 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
         spec=spec,
         metadata=metadata,
         unsupported_steps=unsupported_steps,
-        review_reasons=(["Some source steps were not executable and were omitted from the generated browser spec."] if unsupported_steps else []),
+        review_reasons=(["The configured target supplies the initial navigation step."] if unsupported_steps else []),
         traceability_ids=traceability_ids,
     )
 
@@ -533,6 +514,10 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
 
     if action_value:
         converted.append(action_value)
+    elif assertion := _convert_assertion(step.action):
+        converted.append(assertion)
+    elif ASSERTION_ACTION_PATTERN.match(action) or ACTION_SEQUENCE_PATTERN.search(re.sub(QUOTED_ASSERTION_TARGET, "", action)):
+        return [], _unmapped_step(step, action, is_expected=False)
     elif _looks_like_navigation(action):
         converted.append(_ConvertedStep("navigate", f'I open "{_resolve_step_url(action, base_url)}"'))
     elif match := FILL_PATTERN.search(action):
@@ -557,17 +542,18 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
                 converted.append(_ConvertedStep("click", f'I click link "{_escape_step_text(name)}"'))
             else:
                 converted.append(_ConvertedStep("click", f'I click "{_escape_step_text(name)}"'))
-    elif assertion := _convert_assertion(action):
-        converted.append(assertion)
-    elif lookup_assertion := _convert_visual_lookup(action):
-        converted.append(lookup_assertion)
 
-    if expected_value:
-        converted.append(expected_value)
-    elif expected:
-        assertion = _convert_assertion(expected)
-        if assertion:
-            converted.append(assertion)
+    expected_assertion = expected_value or _convert_assertion(step.expected)
+    if expected and not expected_assertion:
+        return [], _unmapped_step(step, expected, is_expected=True)
+    if not converted and action:
+        # An observation action can be represented by its concrete expected check.
+        if not expected_assertion or not OBSERVATION_ACTION_PATTERN.match(action) or _unsupported_browser_assertion_text_reason(action):
+            return [], _unmapped_step(step, action, is_expected=False)
+    if expected_assertion:
+        converted.append(expected_assertion)
+    if not converted:
+        return [], _unmapped_step(step, action, is_expected=False)
 
     return converted, None
 
@@ -597,93 +583,79 @@ def _assertion_statement(text: str) -> str:
 
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
-    if re.search(r"\b(?:URL|loads successfully at)\b", text, re.IGNORECASE):
-        if url := _extract_prose_url(text):
+    text = _assertion_statement(text)
+    if match := URL_ASSERTION_PREFIX.match(text):
+        target = text[match.end() :]
+        if URL_PATTERN.fullmatch(target) and (url := _extract_prose_url(target)):
             return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(url)}"')
+        return None
 
     if _contains_runtime_assertion_intent(text) or _contains_page_title_visible_assertion(text) or _contains_attribute_visible_assertion(text):
         return None
 
-    if match := PAGE_TITLE_EQUALS_PATTERN.search(text):
-        title = _clean_value(match.group("title"))
+    if match := PAGE_TITLE_EQUALS_PATTERN.fullmatch(text):
+        title = match["title"]
         return _ConvertedStep("assert_title", f'page title should be "{_escape_step_text(title)}"')
 
-    if match := ROLE_VISIBLE_PATTERN.search(text):
-        role = str(match.group("role")).lower()
-        exact = bool(match.group("exact") or EXACT_INTENT_PATTERN.search(text))
-        role_text = match.group("text") if exact else _clean_value(match.group("text"))
-        if role_text:
-            qualifier = "exact " if exact else ""
-            return _ConvertedStep("assert_visible", f'{qualifier}{role} "{_escape_step_text(role_text)}" should be visible')
+    if match := ROLE_VISIBLE_PATTERN.fullmatch(text):
+        role = match["role"].lower()
+        role_text = _assertion_literal(match["target"])
+        if not role_text.strip():
+            return None
+        qualifier = "exact " if match["exact"] else ""
+        return _ConvertedStep("assert_visible", f'{qualifier}{role} "{_escape_step_text(role_text)}" should be visible')
 
-    if (match := EXACT_TEXT_PATTERN.search(text)) and VISIBLE_INTENT_PATTERN.search(text):
-        return _ConvertedStep("assert_visible", f'exact text "{_escape_step_text(match.group("text"))}" should be visible')
-
-    if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.search(text):
+    if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.fullmatch(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
         if locator:
             attribute = _clean_value(match.group("attribute"))
-            expected = _clean_value(match.group("expected"))
+            expected = match["expected"]
             return _ConvertedStep(
                 "assert_attribute_equals",
                 f'{locator} attribute "{_escape_step_text(attribute)}" should equal "{_escape_step_text(expected)}"',
             )
 
-    if match := LOCATOR_COUNT_PATTERN.search(text):
+    if match := LOCATOR_COUNT_PATTERN.fullmatch(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
         if locator:
             return _ConvertedStep("assert_count", f"{locator} count should be {int(match.group('count'))}")
 
-    if match := LOCATOR_CHECKED_PATTERN.search(text):
+    if match := LOCATOR_CHECKED_PATTERN.fullmatch(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
         if locator:
             negation = "not " if match.group("negation") else ""
             return _ConvertedStep("assert_checked", f"{locator} should {negation}be checked")
 
-    if match := LOCATOR_ENABLED_PATTERN.search(text):
+    if match := LOCATOR_ENABLED_PATTERN.fullmatch(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
         if locator:
             state = str(match.group("state")).lower()
             return _ConvertedStep("assert_enabled", f"{locator} should be {state}")
 
-    if match := LOCATOR_VISIBLE_PATTERN.search(text):
+    if match := LOCATOR_VISIBLE_PATTERN.fullmatch(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
         if locator:
             return _ConvertedStep("assert_visible", f"{locator} should be visible")
 
-    if match := TEXT_EQUALS_PATTERN.search(text):
-        label = _clean_label(match.group("label"))
-        expected = _clean_value(match.group("expected"))
-        if label:
-            return _ConvertedStep("assert_text_equals", f'"{_escape_step_text(label)}" should equal "{_escape_step_text(expected)}"')
+    if (match := TEXT_EQUALS_PATTERN.fullmatch(text)) and match["label"].strip():
+        return _ConvertedStep("assert_text_equals", f'"{_escape_step_text(match["label"])}" should equal "{_escape_step_text(match["expected"])}"')
 
-    quoted_values = QUOTED_PATTERN.findall(text)
-    if quoted_values and VISIBLE_INTENT_PATTERN.search(text):
-        visible_text = _clean_value(quoted_values[-1])
-        if not is_ambiguous_semantic_visible_text(visible_text):
+    if match := QUOTED_VISIBLE_PATTERN.fullmatch(text):
+        visible_text = _assertion_literal(match["target"])
+        if visible_text.strip() and not is_ambiguous_semantic_visible_text(visible_text):
+            qualifier = "exact text " if match["exact"] else ""
+            return _ConvertedStep("assert_visible", f'{qualifier}"{_escape_step_text(visible_text)}" should be visible')
+
+    if (match := VISIBLE_PATTERN.fullmatch(text)) and not VISIBLE_SUBJECT_QUALIFIER.search(match["text"]):
+        visible_text = match["text"].strip()
+        if visible_text and not is_ambiguous_semantic_visible_text(visible_text):
             return _ConvertedStep("assert_visible", f'"{_escape_step_text(visible_text)}" should be visible')
-        return None
-
-    for pattern in (VISIBLE_PATTERN, LOADS_PATTERN):
-        if match := pattern.search(text):
-            visible_text = _clean_visible_text(match.group("text"))
-            if visible_text and not is_ambiguous_semantic_visible_text(visible_text):
-                return _ConvertedStep("assert_visible", f'"{_escape_step_text(visible_text)}" should be visible')
 
     return None
 
 
-def _convert_visual_lookup(text: str) -> _ConvertedStep | None:
-    if not VISUAL_LOOKUP_PATTERN.search(text):
-        return None
-    if _contains_runtime_assertion_intent(text) or _contains_page_title_visible_assertion(text) or _contains_attribute_visible_assertion(text):
-        return None
-    quoted_values = [value.strip() for value in QUOTED_PATTERN.findall(text) if value.strip()]
-    if not quoted_values:
-        return None
-    if is_ambiguous_semantic_visible_text(quoted_values[0]):
-        return None
-    return _ConvertedStep("assert_visible", f'"{_escape_step_text(quoted_values[0])}" should be visible')
+def _assertion_literal(quoted: str) -> str:
+    return re.sub(r"""\\(["'\\])""", r"\1", quoted[1:-1])
 
 
 def _render_structured_steps(steps: list[_ConvertedStep]) -> list[str]:
@@ -1005,21 +977,22 @@ def _unsupported_step(step: TestStep, reason_code: str, suggested_next_action: s
     )
 
 
-def _ambiguous_semantic_assertion_reason(step: TestStep) -> str | None:
-    for value in (step.action, step.expected):
-        if _contains_ambiguous_semantic_visible_assertion(_normalize_text(value)):
-            return (
-                'Use an exact accessible name such as heading "Dashboard" should be visible, '
-                "or keep the step manual until the role/locator can be mapped deterministically."
-            )
-    return None
-
-
-def _unsupported_browser_assertion_reason(step: TestStep) -> str | None:
-    for value in (step.action, step.expected):
-        if reason := _unsupported_browser_assertion_text_reason(_normalize_text(value)):
-            return reason
-    return None
+def _unmapped_step(step: TestStep, text: str, *, is_expected: bool) -> ExecutionUnsupportedStep:
+    if _contains_ambiguous_semantic_visible_assertion(text):
+        return _unsupported_step(
+            step,
+            "ambiguous_semantic_assertion",
+            'Use an exact accessible name such as heading "Dashboard" should be visible, or keep the step manual.',
+        )
+    if reason := _unsupported_browser_assertion_text_reason(text):
+        return _unsupported_step(step, "unsupported_browser_assertion", reason)
+    if is_expected:
+        return _unsupported_step(
+            step,
+            "unsupported_expected_result",
+            "Map the entire expected result to an observable browser assertion. Separate independent checks into steps or verify this result manually.",
+        )
+    return _unsupported_step(step, "unsupported_step", "Use a supported browser action with a grounded target, or keep the step manual.")
 
 
 def _unsupported_browser_assertion_text_reason(text: str) -> str | None:
@@ -1070,10 +1043,7 @@ def _contains_ambiguous_semantic_visible_assertion(text: str) -> bool:
 def _contains_runtime_assertion_intent(text: str) -> bool:
     if _has_supported_locator_visible_assertion(text):
         return False
-    lowered = text.lower()
-    if not any(term in lowered for term in RUNTIME_ASSERTION_TERMS):
-        return False
-    return _looks_like_assertion_statement(text)
+    return bool(RUNTIME_ASSERTION_PATTERN.search(text) and _looks_like_assertion_statement(text))
 
 
 def _contains_page_title_visible_assertion(text: str) -> bool:

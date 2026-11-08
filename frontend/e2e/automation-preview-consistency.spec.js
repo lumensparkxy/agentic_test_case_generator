@@ -389,6 +389,40 @@ test.describe("Automation preview consistency", () => {
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 	});
 
+	test("shows the unmapped expectation and runs only the verified browser case", { tag: "@p1" }, async ({ page }) => {
+		const expectation = "An immutable audit record is created in the database for this submission.";
+		const candidate = executableCandidate("candidate-checkout", "TC-001");
+		const blockedCandidate = {
+			...nonExecutableCandidate("candidate-audit", "TC-002", "unsupported"),
+			unsupported_steps: [
+				{
+					step: 2,
+					expected: expectation,
+					reason_code: "unsupported_expected_result",
+					suggested_next_action: "Map the entire expected result to an observable browser assertion or verify it manually.",
+				},
+			],
+		};
+		const preview = previewFixture([candidate], {
+			unsupported: [blockedCandidate],
+			summary: { executable: 1, manual: 0, unsupported: 1, invalid: 0 },
+		});
+		const requests = await installApi(page, {
+			project: projectFixture({ testCaseIds: ["TC-001", "TC-002"] }),
+			previews: [preview],
+			runPreview: preview,
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+
+		const unsupported = page.getByRole("heading", { name: "Unsupported", exact: true }).locator("..");
+		await expect(unsupported.getByText(expectation, { exact: true })).toBeVisible();
+		await expect(unsupported.getByText(/Step 2: Expected result needs a browser check/i)).toBeVisible();
+		await expect(page.getByRole("checkbox", { name: /Select TC-002 for execution/i })).toHaveCount(0);
+		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
+		await expect.poll(() => requests.runBodies.map((body) => body.selected_test_case_ids)).toEqual([["candidate-checkout"]]);
+	});
+
 	test("keeps repeated source IDs actionable when execution candidate IDs are unique", async ({ page }) => {
 		const candidates = [executableCandidate("candidate-checkout-1", "TC-001"), executableCandidate("candidate-checkout-2", "TC-001")];
 		const livePreview = previewFixture(candidates);

@@ -61,17 +61,12 @@ def _documentation_case(case_id: str = "TC-DOC") -> TestCase:
             TestStep(
                 step=1,
                 action="Locate the 'Playwright Test' section or pathway on the landing page.",
-                expected="The Playwright Test section is visible and clearly demarcated.",
+                expected='"Playwright Test" is visible',
             ),
             TestStep(
                 step=2,
-                action="Verify the active URL in the browser address bar.",
-                expected="The URL is exactly 'https://playwright.dev/python/' and does not redirect.",
-            ),
-            TestStep(
-                step=3,
-                action="Scan the text content and feature list within the Playwright Test section.",
-                expected="The text explicitly describes auto-waiting and assertions.",
+                action="Verify the URL is exactly 'https://playwright.dev/python/'.",
+                expected="",
             ),
         ],
     )
@@ -322,7 +317,7 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.unsupported, 0)
         candidate = response.executable[0]
         self.assertEqual(candidate.status, "executable")
-        self.assertIn("Some source steps were not executable", candidate.review_reasons[0])
+        self.assertEqual(candidate.review_reasons, ["The configured target supplies the initial navigation step."])
         self.assertIn("implicit_navigation", {step.reason_code for step in candidate.unsupported_steps})
         self.assertIn('Given I open "https://playwright.dev/python/"', candidate.spec["steps"])
         self.assertIn('Then "Playwright Test" should be visible', candidate.spec["steps"])
@@ -403,7 +398,7 @@ class ExecutionServiceTests(unittest.TestCase):
                 TestStep(step=1, action="Open https://example.test/sign-in.", expected='exact heading "Sign in" is visible'),
                 TestStep(step=2, action="Inspect the status message", expected='The exact visible text "No results" is displayed'),
                 TestStep(step=3, action="Inspect the supporting heading", expected='heading "Help" is visible'),
-                TestStep(step=4, action="Inspect the form heading", expected='heading "Account" is visible with exact text "Account"'),
+                TestStep(step=4, action="Inspect the form heading", expected='exact heading "Account" is visible'),
                 TestStep(step=5, action="Inspect confirmation", expected='exact text "You\'re signed in." is visible'),
                 TestStep(step=6, action="Inspect notice", expected="""exact text 'Select "Search".' is visible"""),
             ],
@@ -594,28 +589,14 @@ class ExecutionServiceTests(unittest.TestCase):
 
         response = preview_execution([unsupported_case], target_base_url="https://example.test")
 
-        self.assertEqual(response.summary.executable, 1)
-        candidate = response.executable[0]
+        self.assertEqual(response.summary.executable, 0)
+        candidate = response.unsupported[0]
         self.assertEqual(
             [step.reason_code for step in candidate.unsupported_steps],
             ["unsupported_browser_assertion", "unsupported_browser_assertion"],
         )
-        self.assertIn('Then "Welcome" should be visible', candidate.spec["steps"])
-        self.assertNotIn("ScopeMismatch: locator failed", "\n".join(candidate.spec["steps"]))
-        self.assertNotIn("Incorrect Page Title", "\n".join(candidate.spec["steps"]))
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            spec_path = root / "unsupported_dsl.yaml"
-            env_path = root / "environment.yaml"
-            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
-            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
-            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
-
-        generated = generate_playwright_spec(ir).contents
-        self.assertNotIn('getByText("ScopeMismatch: locator failed")', generated)
-        self.assertNotIn('getByText("Incorrect Page Title")', generated)
-        self.assertIn('getByText("Welcome")', generated)
+        self.assertEqual([step.step for step in candidate.unsupported_steps], [2, 3])
+        self.assertIsNone(candidate.spec)
 
     def test_preview_rejects_role_only_visible_assertions(self) -> None:
         role_only_case = TestCase(
@@ -638,13 +619,12 @@ class ExecutionServiceTests(unittest.TestCase):
         candidate = response.unsupported[0]
         reason_codes = {step.reason_code for step in candidate.unsupported_steps}
         self.assertIn("ambiguous_semantic_assertion", reason_codes)
-        self.assertIn("missing_assertion", reason_codes)
         self.assertIn("exact accessible name", candidate.unsupported_steps[0].suggested_next_action)
 
-    def test_preview_omits_ambiguous_semantic_assertions_from_executable_spec(self) -> None:
+    def test_preview_blocks_cases_with_ambiguous_semantic_assertions(self) -> None:
         mixed_case = TestCase(
             id="TC-MIXED-SEMANTIC",
-            title="Keep exact copy and omit role-only assertion",
+            title="An exact check cannot cover a role-only assertion",
             automation_status="Automated",
             steps=[
                 TestStep(
@@ -658,22 +638,11 @@ class ExecutionServiceTests(unittest.TestCase):
 
         response = preview_execution([mixed_case], target_base_url="https://playwright.dev/")
 
-        self.assertEqual(response.summary.executable, 1)
-        candidate = response.executable[0]
+        self.assertEqual(response.summary.executable, 0)
+        candidate = response.unsupported[0]
         self.assertIn("ambiguous_semantic_assertion", {step.reason_code for step in candidate.unsupported_steps})
-        self.assertNotIn('And "heading" should be visible', candidate.spec["steps"])
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            spec_path = root / "mixed_case.yaml"
-            env_path = root / "environment.yaml"
-            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
-            env_path.write_text(yaml.safe_dump({"baseUrl": "https://playwright.dev/"}), encoding="utf-8")
-            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
-
-        generated = generate_playwright_spec(ir).contents
-        self.assertNotIn('getByText("heading")', generated)
-        self.assertIn('page.getByText("Playwright enables reliable web automation for testing, scripting, and AI agents")', generated)
+        self.assertEqual(candidate.unsupported_steps[0].action, mixed_case.steps[1].action)
+        self.assertIsNone(candidate.spec)
 
     def test_compiler_rejects_ambiguous_semantic_visible_text_specs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -723,12 +692,11 @@ class ExecutionServiceTests(unittest.TestCase):
 
         response = preview_execution([command_case], target_base_url="https://playwright.dev/python/")
 
-        self.assertEqual(response.summary.executable, 1)
-        generated_steps = response.executable[0].spec["steps"]
-        self.assertEqual(
-            [step for step in generated_steps if 'I open "https://playwright.dev/python/"' in step],
-            ['Given I open "https://playwright.dev/python/"'],
-        )
+        self.assertEqual(response.summary.executable, 0)
+        blocked = response.unsupported[0]
+        self.assertIsNone(blocked.spec)
+        self.assertEqual(blocked.unsupported_steps[0].reason_code, "unsupported_browser_assertion")
+        self.assertEqual(blocked.unsupported_steps[0].expected, command_case.steps[1].expected)
 
     def test_preview_marks_manual_cases_as_manual_by_default(self) -> None:
         manual_case = _browser_case("TC-MANUAL")
@@ -739,6 +707,70 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.manual, 1)
         self.assertEqual(response.manual[0].status, "manual")
         self.assertIn("Automation Status is Manual", response.manual[0].review_reasons[0])
+
+    def test_required_expectation_cannot_be_omitted_after_convertible_action(self) -> None:
+        case = TestCase(
+            id="TC-AUDIT",
+            title="Verify the audit record",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test", expected='"Summary" should equal "Ready"'),
+                TestStep(step=2, action='Click the "Submit" button', expected=""),
+            ],
+        )
+        for expectation in (
+            "An immutable audit record is created in the database for this submission.",
+            'heading "Submitted" is visible and an immutable audit record is created.',
+            'heading "Submitted" is visible with exact text "Submitted".',
+            'The "Payment declined" message is not visible.',
+            'URL should be "https://example.test/confirmation" and must not redirect.',
+            '"Submitted" and "Receipt sent" are visible.',
+        ):
+            with self.subTest(expectation=expectation):
+                case.steps[-1].expected = expectation
+                response = preview_execution([case], target_base_url="https://example.test")
+
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.summary.unsupported, 1)
+                blocked = response.unsupported[0]
+                self.assertIsNone(blocked.spec)
+                self.assertEqual(len(blocked.unsupported_steps), 1)
+                gap = blocked.unsupported_steps[0]
+                self.assertEqual(gap.step, 2)
+                self.assertEqual(gap.expected, expectation)
+                self.assertEqual(gap.reason_code, "unsupported_expected_result")
+
+    def test_unmapped_assertion_in_action_cannot_turn_into_navigation_or_click(self) -> None:
+        case = _browser_case()
+        for action in (
+            'Verify URL should be "https://example.test/confirmation" and must not redirect.',
+            'Click the "Submit" button and verify the audit record.',
+        ):
+            with self.subTest(action=action):
+                case.steps[-1] = TestStep(step=3, action=action, expected="")
+                response = preview_execution([case], target_base_url="https://example.test")
+
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.unsupported[0].unsupported_steps[0].action, action)
+                self.assertIsNone(response.unsupported[0].spec)
+
+    def test_valid_action_only_steps_and_whole_assertions_remain_executable(self) -> None:
+        case = TestCase(
+            id="TC-SUBMIT",
+            title="Verify submission is shown in the browser",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test", expected=" "),
+                TestStep(step=2, action='Click the "Submit" button', expected=""),
+                TestStep(step=3, action="Inspect the status output", expected='"Summary" should equal "Submitted"'),
+            ],
+        )
+        response = preview_execution([case], target_base_url="https://example.test")
+
+        self.assertEqual(response.summary.executable, 1)
+        candidate = response.executable[0]
+        self.assertFalse(candidate.unsupported_steps)
+        self.assertEqual(candidate.spec["steps"], ['Given I open "https://example.test"', 'When I click "Submit"', 'Then "Summary" should equal "Submitted"'])
 
     def test_preview_preserves_unsupported_sap_steps_with_reasons(self) -> None:
         sap_case = TestCase(
@@ -849,6 +881,18 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual([item.status for item in response.results], ["passed", "skipped"])
         self.assertEqual(response.results[1].source_test_case_id, "TC-MANUAL")
         runner.assert_called_once()
+
+    def test_run_with_only_unmapped_expectations_cannot_report_passed(self) -> None:
+        case = _browser_case()
+        case.steps[-1].expected = "The login is recorded in the audit database."
+        with tempfile.TemporaryDirectory() as temp_dir, patch("app.services.execution_service.run_local_playwright_specs") as runner:
+            response = run_execution([case], selected_test_case_ids=[case.id], settings=_settings(Path(temp_dir)))
+
+        runner.assert_not_called()
+        self.assertEqual(response.status, "failed")
+        self.assertEqual(response.summary.passed, 0)
+        self.assertEqual(response.summary.skipped, 1)
+        self.assertEqual(response.results[0].issues[0].code, "execution.unsupported")
 
     def test_run_does_not_publish_report_paths_when_runner_fails_before_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

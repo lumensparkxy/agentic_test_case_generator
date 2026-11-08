@@ -181,6 +181,42 @@ class ExecutionAdmissionTests(unittest.TestCase):
         self.assertIn("unapproved_test_cases", [item["code"] for item in readiness["blockers"]])
         runtime.assert_not_called()
 
+    def test_run_rechecks_unsupported_expectation_even_with_other_executable_cases(self):
+        supported = case()
+        supported["steps"] = [{"step": 1, "action": "Open /checkout", "expected": 'heading "Checkout" is visible'}]
+        blocked = {
+            **supported,
+            "id": "TC-AUDIT",
+            "steps": [
+                *supported["steps"],
+                {
+                    "step": 2,
+                    "action": 'Click the "Submit" button',
+                    "expected": "An immutable audit record is created in the database for this submission.",
+                },
+            ],
+        }
+        cases = [supported, blocked]
+        persisted = type("Snapshot", (), {"project_revision": 8})()
+        with (
+            patch("app.routers.automation.get_project", return_value=project_fixture(cases)),
+            patch("app.routers.automation.append_stage_snapshot", return_value=persisted),
+            patch("app.main.run_execution") as runtime,
+            TestClient(app) as client,
+        ):
+            payload = {**request_fixture(), "test_cases": cases}
+            preview = client.post("/automation/execution/preview", json=payload)
+            self.assertEqual(preview.status_code, 200, preview.text)
+            evidence = preview.json()
+            self.assertEqual(evidence["summary"], {"executable": 1, "manual": 0, "unsupported": 1, "invalid": 0})
+            self.assertEqual(evidence["unsupported"][0]["source_test_case_id"], "TC-AUDIT")
+            self.assertTrue(evidence["readiness"]["run_allowed"])
+            for candidate_id in ("tc_audit", "TC-AUDIT"):
+                with self.subTest(candidate_id=candidate_id):
+                    response = client.post("/automation/execution/run", json={**payload, "selected_test_case_ids": ["tc_1", candidate_id]})
+                    self.assertEqual(response.status_code, 409, response.text)
+            runtime.assert_not_called()
+
     def test_disabled_execution_and_no_eligible_candidates_never_invoke_runtime(self):
         for enabled in (False, True):
             with (
