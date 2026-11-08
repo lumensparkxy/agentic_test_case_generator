@@ -10,6 +10,7 @@ export default function OrchestratorCockpitPanel({
 	isOverview = false,
 	compact = false,
 	hidden = false,
+	hidePrimary = false,
 	isLoading,
 	error,
 	authActionDisabled,
@@ -22,10 +23,11 @@ export default function OrchestratorCockpitPanel({
 		return null;
 	}
 
-	const { primaryAction, secondaryActions: originalSecondaryActions } = selectContextualTask(status, {
+	const { primaryAction: scopedPrimary, secondaryActions: originalSecondaryActions } = selectContextualTask(status, {
 		destination: currentDestination,
 		overview: isOverview,
 	});
+	const primaryAction = hidePrimary ? null : scopedPrimary;
 
 	const hasBaseline = Boolean(
 		hasTestCases || currentProject.current_snapshots?.test_cases || currentProject.stage_state?.test_cases?.current_snapshot_id

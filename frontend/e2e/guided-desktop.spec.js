@@ -3,8 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { installUseCaseReviewApi, useCaseProjectFixture, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
 
-async function fixture(page, count = 50) {
-	const project = useCaseProjectFixture();
+async function fixture(page, count = 50, project = useCaseProjectFixture()) {
 	project.current_snapshots.test_cases = {
 		snapshot_id: "guided-tests-v1",
 		stage: "test_cases",
@@ -149,6 +148,7 @@ test("pasted requirements use reviewed file import and recover without changing 
 		await route.fulfill({ status: 503, json: { detail: "Import unavailable" } });
 	});
 	await page.goto(path("requirements"));
+	await page.getByRole("button", { name: "Import requirements", exact: true }).click();
 	await page.getByRole("radio", { name: "Paste text", exact: true }).check();
 	await page.getByLabel("Requirements text").fill("Customers receive one durable receipt per order.");
 	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
@@ -156,6 +156,7 @@ test("pasted requirements use reviewed file import and recover without changing 
 	expect(body).toContain("Customers receive one durable receipt per order.");
 	expect(body).toContain('name="import_mode"\r\n\r\nreview');
 	await page.reload();
+	await page.getByRole("button", { name: "Import requirements", exact: true }).click();
 	await page.getByRole("radio", { name: "Paste text", exact: true }).check();
 	await expect(page.getByLabel("Requirements text")).toHaveValue("Customers receive one durable receipt per order.");
 });
@@ -226,4 +227,55 @@ test("clarification queue records source, deferral and scope exclusion without e
 	expect(actions.map((a) => a.action).filter(Boolean)).toEqual(["defer", "exclude"]);
 	expect(project.current_snapshots.requirements.payload.requirements[0].review_status).toBe("Approved");
 	await page.screenshot({ path: test.info().outputPath("clarification-queue.png"), fullPage: true });
+});
+
+test("saved review collections start within 240px and show at least eight rows on a laptop", { tag: "@p1" }, async ({ page }) => {
+	await page.setViewportSize({ width: 1366, height: 768 });
+	const project = useCaseProjectFixture({ reviewState: "approved" });
+	project.current_snapshots.requirements.payload.requirements = Array.from({ length: 12 }, (_, index) => ({
+		id: `REQ-${101 + index}`,
+		text: `Show inventory threshold and availability for item ${index + 1}.`,
+		review_status: "Approved",
+	}));
+	for (const group of project.current_snapshots.use_cases.payload.coverage_plan) {
+		group.scenarios = Array.from({ length: 6 }, (_, index) => ({
+			...group.scenarios[index % 2],
+			id: `${group.requirement_id}-SCN-0${index + 1}`,
+		}));
+	}
+	await fixture(page, 12, project);
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/requirement-imports`, (route) => route.fulfill({ json: [] }));
+
+	for (const [stage, selector] of [
+		["requirements", ".requirement-row"],
+		["use-cases", ".scenario-review-row"],
+		["test-cases", ".test-review-item"],
+	]) {
+		await page.goto(path(stage));
+		const rows = page.locator(selector);
+		await expect(rows).toHaveCount(12);
+		await expect.poll(async () => (await rows.first().boundingBox()).y, { message: stage }).toBeLessThanOrEqual(240);
+		for (const row of (await rows.all()).slice(0, 8)) await expect(row).toBeInViewport({ ratio: 1 });
+		await page.screenshot({ path: test.info().outputPath(`${stage}-1366.png`) });
+	}
+});
+
+test("requirements search and status filter retain access to full row detail", async ({ page }) => {
+	const project = useCaseProjectFixture();
+	project.current_snapshots.requirements.payload.requirements[0].review_status = "Draft";
+	await fixture(page, 12, project);
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/requirement-imports`, (route) => route.fulfill({ json: [] }));
+	await page.goto(path("requirements"));
+	const table = page.getByRole("region", { name: "Project requirements table" });
+	await page.getByRole("button", { name: "Review pending requirements" }).click();
+	await expect(table.locator(".requirement-row")).toHaveCount(1);
+	await expect(table).toContainText("REQ-101");
+	await page.getByRole("combobox", { name: "Filter requirements by review status" }).selectOption("");
+	await page.getByRole("searchbox", { name: "Search requirements" }).fill("high-value");
+	const detail = table.getByRole("button", { name: /^Review REQ-202:/ });
+	await detail.press("Enter");
+	await expect(detail).toHaveAttribute("aria-expanded", "true");
+	await expect(page.getByRole("combobox", { name: "Review status for REQ-202" })).toHaveValue("Approved");
+	await detail.press("Enter");
+	await expect(detail).toBeFocused();
 });

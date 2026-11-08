@@ -22,22 +22,21 @@ async function read(request, path, body, requestId) {
 	return value;
 }
 
-export function ProjectSyncStatus({ project, request, onUpdated }) {
+export function ProjectSyncStatus({ project, request, onUpdated, compact = false }) {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const sync = project?.project_sync;
 	if (!sync) return null;
-	return (
-		<Surface as="section" className="project-sync-summary" aria-label="Project update status">
-			<h3>
-				{sync.status === "ready_for_review"
-					? "Updated drafts are ready for review"
-					: sync.status === "running"
-						? "Updating project drafts"
-						: sync.status === "superseded"
-							? "Project sources have changed"
-							: "Project update needs attention"}
-			</h3>
+	const title =
+		sync.status === "ready_for_review"
+			? "Updated drafts are ready for review"
+			: sync.status === "running"
+				? "Updating project drafts"
+				: sync.status === "superseded"
+					? "Project sources have changed"
+					: "Project update needs attention";
+	const details = (
+		<>
 			<p>Accepted facts are shared across agents. Refreshed drafts still need review before approval, export or execution.</p>
 			<div className="workflow-diagnostics-pills">
 				{Object.entries(sync.stages || {}).map(([stage, state]) => (
@@ -50,6 +49,21 @@ export function ProjectSyncStatus({ project, request, onUpdated }) {
 				<p>
 					{sync.review.changed} changed · {sync.review.added} added · {sync.review.preserved} preserved
 				</p>
+			)}
+		</>
+	);
+	return (
+		<Surface as="section" className="project-sync-summary" aria-label="Project update status">
+			{compact ? (
+				<Disclosure>
+					<summary>{title}</summary>
+					{details}
+				</Disclosure>
+			) : (
+				<>
+					<h3>{title}</h3>
+					{details}
+				</>
 			)}
 			{(sync.error || error) && <p role="alert">{error || sync.error}</p>}
 			{["pending", "partial", "running"].includes(sync.status) && (

@@ -5,8 +5,11 @@ Azure DevOps are input adapters, not mutually exclusive project modes.
 
 ## Workflow
 
-1. Import or refine requirements. Extraction saves a pending comparison only.
-2. Compare current and incoming text. Exact matches preserve identity and review;
+1. Choose **Import requirements** to reopen setup in a project with saved requirements.
+   New projects open setup automatically. Extraction opens the pending comparison
+   and collapses the source form.
+2. Expand an incoming row to compare full text, inspect source evidence, or change
+   the proposed decision. Exact matches preserve identity and review;
    semantic and wording matches are suggestions. Correct a match, add independently,
    or skip. Resolve ambiguous matches before applying.
 3. Select a replacement scope only when the incoming content replaces an existing
@@ -19,8 +22,11 @@ Azure DevOps are input adapters, not mutually exclusive project modes.
    and downstream artifacts are retained; downstream stages become stale.
 
 Changed/new content needs human review. Requirement review decisions persist, so
-reopening a project or importing another source preserves them. Retired requirements
-are available below the active workbench and are excluded from generation.
+reopening a project or importing another source preserves them. Use **Review pending
+requirements** to filter the saved table, then expand a row for its status, flags,
+source evidence and version history. **Review actions** contains bulk decisions and
+the source mapping download. Retired requirements are available below the active
+workbench and are excluded from generation.
 
 ## Contracts and persistence
 

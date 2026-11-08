@@ -103,7 +103,7 @@ async function setup(page, { failure = false, gate } = {}) {
 	});
 	await seedAuthenticatedSession(page);
 	await page.goto(`${path}/test-cases`);
-	await expect(page.getByRole("heading", { name: "1 generation tasks need concrete tests" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
 	return { requests };
 }
 
@@ -124,7 +124,7 @@ test("plans and explicitly accepts repair, then keeps concrete tests and require
 	await expect(page.getByRole("button", { name: /TC-FB-001 Declined card keeps the cart/ })).toBeVisible();
 	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 	await expect(page.getByRole("button", { name: /TC-GOOD Preserved concrete test/ })).toBeVisible();
-	await expect(page.getByRole("heading", { name: "1 generation tasks need concrete tests" })).toHaveCount(0);
+	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toHaveCount(0);
 	await expect(page.getByText(/Review the changed tests before export/).first()).toBeVisible();
 });
 
@@ -138,5 +138,5 @@ test("failed repair retains concrete tests and unfinished work", { tag: "@p1" },
 	await expect(page.getByText(/Impact update failed: Project changed/)).toBeVisible();
 	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 	await expect(page.getByRole("button", { name: /TC-GOOD Preserved concrete test/ })).toBeVisible();
-	await expect(page.getByRole("heading", { name: "1 generation tasks need concrete tests" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
 });

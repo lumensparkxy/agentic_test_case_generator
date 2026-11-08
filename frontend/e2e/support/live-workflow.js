@@ -168,6 +168,8 @@ export function assertSourceMapping(requirements) {
 export async function importSource(page, fixture, source = roomSource) {
 	await page.goto(`${fixture.prefix}/requirements`);
 	await expect(page.getByRole("heading", { name: "Requirement Review Workbench" })).toBeVisible();
+	const openImport = page.getByRole("button", { name: "Import requirements", exact: true });
+	if (await openImport.isVisible()) await openImport.click();
 	await page.locator('input[type="file"]').setInputFiles(source);
 	const response = await uiResponse(page, "/requirements/parse", () =>
 		page.getByRole("button", { name: "Parse Requirements", exact: true }).click()
@@ -188,6 +190,7 @@ export async function applyImport(page, fixture, preview) {
 export async function approveRequirements(page, fixture) {
 	const project = await fixture.read();
 	if (project.current_snapshots.requirements.payload.requirements.some((r) => r.review_status !== "Approved")) {
+		await page.getByText("Review actions", { exact: true }).click();
 		await uiResponse(page, "/requirements/reviews", () => page.getByRole("button", { name: "Approve non-rejected", exact: true }).click());
 	}
 	const latest = await fixture.read();

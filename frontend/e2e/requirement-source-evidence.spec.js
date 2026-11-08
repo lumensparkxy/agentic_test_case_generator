@@ -72,15 +72,18 @@ async function setup(page) {
 
 test("verified source details and downloaded mapping preserve original and normalized identities", { tag: "@p1" }, async ({ page }) => {
 	await setup(page);
+	await page.getByRole("button", { name: /^Review REQ-001:/ }).click();
 	await page.getByText("Source evidence (2)", { exact: true }).click();
 	await expect(page.getByText("Original IDs: ROOM-101", { exact: true })).toBeVisible();
 	await expect(page.getByText("Original IDs: BOOK-205", { exact: true })).toBeVisible();
 	await expect(page.locator("blockquote").filter({ hasText: "Attendees must be a whole number from 1 to 8." })).toBeVisible();
 	await expect(page.getByText("Source version: version-one", { exact: true })).toBeVisible();
+	await page.getByRole("button", { name: /^Review REQ-002:/ }).click();
 	await page.getByText("Source evidence (1)", { exact: true }).click();
 	await expect(page.getByText(/Source excerpt unavailable/)).toBeVisible();
 	await expect(page.getByText("UNVERIFIED-999", { exact: false })).toHaveCount(0);
 	await expect(page.getByText("This reconstructed quotation", { exact: false })).toHaveCount(0);
+	await page.getByText("Review actions", { exact: true }).click();
 	const downloaded = page.waitForEvent("download");
 	await page.getByRole("button", { name: "Download source mapping (JSON)" }).click();
 	const download = await downloaded;
@@ -97,8 +100,10 @@ test("verified source details and downloaded mapping preserve original and norma
 test("source evidence remains accessible on a narrow screen", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await setup(page);
+	await page.getByRole("button", { name: /^Review REQ-001:/ }).click();
 	await page.getByText("Source evidence (2)", { exact: true }).click();
 	await expect(page.getByText("Original IDs: ROOM-101", { exact: true })).toBeVisible();
+	await page.getByText("Review actions", { exact: true }).click();
 	await expect(page.getByRole("button", { name: "Download source mapping (JSON)" })).toBeVisible();
 	const width = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: window.innerWidth }));
 	expect(width.document).toBeLessThanOrEqual(width.viewport + 2);

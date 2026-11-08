@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Button, Checkbox, Select } from "../ui/controls";
-import { Disclosure, Surface } from "../ui/surfaces";
+import { Badge, Disclosure } from "../ui/surfaces";
+import { CollectionState, Table, TableScroll } from "../ui/collections";
+import ReviewRowToggle from "../reviews/ReviewRowToggle";
 import RequirementSourceEvidence from "./RequirementSourceEvidence";
 
 const labels = {
@@ -13,8 +15,12 @@ const labels = {
 };
 const normalize = (value) => value.trim().replace(/\s+/g, " ");
 
-export default function RequirementImportReview({ preview, revision, busy, error, onAction }) {
+export default function RequirementImportReview({ preview, revision, busy, error, stalePreview, onAction }) {
 	const heading = useRef(null);
+	const actionBar = useRef(null);
+	const filterControl = useRef(null);
+	const detailId = useId();
+	const [openCandidate, setOpenCandidate] = useState(null);
 	const [filter, setFilter] = useState("all");
 	const [scope, setScope] = useState([]);
 	const [confirm, setConfirm] = useState(false);
@@ -32,7 +38,8 @@ export default function RequirementImportReview({ preview, revision, busy, error
 		)
 	);
 	useEffect(() => {
-		heading.current?.focus();
+		heading.current?.focus({ preventScroll: true });
+		heading.current?.scrollIntoView({ block: "nearest" });
 	}, []);
 	const current = new Map(preview.current_requirements.map((r) => [r.requirement_uid, r]));
 	const targets = Object.values(decisions)
@@ -55,7 +62,7 @@ export default function RequirementImportReview({ preview, revision, busy, error
 		return result;
 	}, {});
 	const activeCount = current.size + (counts.new || 0) - retiring.length;
-	const stale = revision !== preview.base_project_revision;
+	const stale = stalePreview || revision !== preview.base_project_revision;
 	const update = (candidate, value) => {
 		const choice =
 			value === "add" || value === "skip" || !value
@@ -67,23 +74,32 @@ export default function RequirementImportReview({ preview, revision, busy, error
 		setDecisions((rows) => ({ ...rows, [candidate.candidate_id]: { candidate_id: candidate.candidate_id, ...choice } }));
 		setConfirm(false);
 	};
+	const rows = preview.candidates.filter((candidate) => filter === "all" || kindOf(candidate) === filter);
+	const openCandidateVisible = rows.some((candidate) => candidate.candidate_id === openCandidate);
+	useEffect(() => {
+		if (openCandidate && !openCandidateVisible) {
+			filterControl.current?.focus();
+			setOpenCandidate(null);
+		}
+	}, [openCandidate, openCandidateVisible]);
+	const keepFocusClear = ({ target }) => {
+		const bar = actionBar.current;
+		if (!bar || bar.contains(target)) return;
+		const focused = target.getBoundingClientRect();
+		const actions = bar.getBoundingClientRect();
+		if (focused.bottom > actions.top && focused.top < actions.bottom) {
+			target.scrollIntoView({ block: "center", inline: "nearest" });
+		}
+	};
 	return (
-		<Surface as="section" className="requirement-import-review" aria-label="Compare incoming requirements">
+		<section className="requirement-import-review" aria-label="Compare incoming requirements" onFocusCapture={keepFocusClear}>
 			<div className="import-review-heading">
-				<div>
-					<p className="helper-text">
-						Import → <strong>Compare changes</strong> → Apply
-					</p>
-					<h3 ref={heading} tabIndex={-1}>
-						Compare incoming requirements
-					</h3>
-					<p>
-						{preview.source_name} · Comparing with project revision {preview.base_project_revision}
-					</p>
-				</div>
-				<Button className="secondary" onClick={() => onAction("cancel")} disabled={busy}>
-					Cancel import
-				</Button>
+				<h2 ref={heading} tabIndex={-1}>
+					Compare incoming requirements
+				</h2>
+				<p>
+					{preview.source_name} · Revision {preview.base_project_revision}
+				</p>
 			</div>
 			{preview.warnings.map((warning) => (
 				<p key={warning} className="import-notice">
@@ -104,84 +120,129 @@ export default function RequirementImportReview({ preview, revision, busy, error
 					))}
 				</Disclosure>
 			)}
-			{stale && <p role="alert">Project changed after this comparison. Compare again before applying.</p>}
-			{error && <p role="alert">{error}</p>}
+			{(stale || error) && <p role="alert">{error || "Project changed after this comparison. Compare again before applying."}</p>}
 			<div className="import-review-toolbar">
-				<label>
-					Show changes{" "}
-					<Select aria-label="Filter import changes" value={filter} onChange={(e) => setFilter(e.target.value)}>
-						<option value="all">All changes</option>
-						{Object.entries(labels).map(([key, label]) => (
-							<option key={key} value={key}>
-								{label} ({key === "retiring" ? retiring.length : counts[key] || 0})
-							</option>
-						))}
-					</Select>
-				</label>
+				<Select ref={filterControl} aria-label="Filter import changes" value={filter} onChange={(e) => setFilter(e.target.value)}>
+					<option value="all">All changes</option>
+					{Object.entries(labels).map(([key, label]) => (
+						<option key={key} value={key}>
+							{label} ({key === "retiring" ? retiring.length : counts[key] || 0})
+						</option>
+					))}
+				</Select>
 				<p role="status">
 					{counts.new || 0} added · {counts.updated || 0} updated · {retiring.length} retired · {activeCount} active requirements
 				</p>
 			</div>
-			<div className="import-comparison-list">
-				{preview.candidates
-					.filter((c) => filter === "all" || kindOf(c) === filter)
-					.map((candidate) => {
-						const decision = decisions[candidate.candidate_id];
-						const previous = current.get(decision.target_requirement_uid);
-						const kind = kindOf(candidate);
-						return (
-							<article className="import-comparison-card" key={candidate.candidate_id}>
-								<div className="import-candidate-heading">
-									<strong>{labels[kind]}</strong>
-									<span>{previous?.id || "New requirement"}</span>
-								</div>
-								<div className="import-text-comparison">
-									<div>
-										<h4>Current requirement</h4>
-										<p>{previous?.text || "Select an existing requirement to compare, or add independently."}</p>
-									</div>
-									<div>
-										<h4>Incoming requirement</h4>
-										<p>{candidate.requirement.text}</p>
-									</div>
-								</div>
-								<p className="helper-text">{candidate.reason}</p>
-								<label>
-									How should this requirement be handled?
-									<Select
-										aria-label={`Decision for ${candidate.candidate_id}`}
-										value={decision.target_requirement_uid || decision.action}
-										disabled={busy}
-										onChange={(e) => update(candidate, e.target.value)}
-									>
-										<option value="">Choose a decision</option>
-										<option value="add">Add independently</option>
-										<option value="skip">Skip this incoming requirement</option>
-										{preview.current_requirements.map((r) => (
-											<option key={r.requirement_uid} value={r.requirement_uid}>
-												{r.id} — {r.text}
-											</option>
-										))}
-									</Select>
-								</label>
-								{duplicateTargets.has(decision.target_requirement_uid) && (
-									<p role="alert">Another incoming requirement targets this same requirement. Resolve the conflict.</p>
-								)}
-								<Disclosure>
-									<summary>Source evidence and suggested matches</summary>
-									<RequirementSourceEvidence requirement={candidate.requirement} />
-									{candidate.suggestions.map((s) => (
-										<p key={s.requirement_uid}>
-											<strong>{current.get(s.requirement_uid)?.id}</strong> — {s.reason}
-											<br />
-											{current.get(s.requirement_uid)?.text}
-										</p>
-									))}
-								</Disclosure>
-							</article>
-						);
-					})}
-			</div>
+			{rows.length > 0 ? (
+				<TableScroll aria-label="Incoming requirement changes">
+					<Table density="compact" className="review-rows import-candidate-table">
+						<thead>
+							<tr>
+								<th scope="col">Incoming requirement</th>
+								<th scope="col">Change</th>
+								<th scope="col">Decision</th>
+							</tr>
+						</thead>
+						<tbody>
+							{rows.map((candidate) => {
+								const { candidate_id: id } = candidate;
+								const decision = decisions[id];
+								const previous = current.get(decision.target_requirement_uid);
+								const kind = kindOf(candidate);
+								const expanded = openCandidate === id;
+								const duplicate = duplicateTargets.has(decision.target_requirement_uid);
+								const decisionLabel = previous
+									? `${decision.action === "keep" ? "Keep" : "Update"} ${previous.id}`
+									: decision.action === "add"
+										? "Add independently"
+										: decision.action === "skip"
+											? "Skip"
+											: "Choose a decision";
+								return (
+									<Fragment key={id}>
+										<tr className="import-candidate-row" data-expanded={expanded}>
+											<th scope="row">
+												<ReviewRowToggle
+													expanded={expanded}
+													controls={expanded ? detailId : undefined}
+													onClick={() => setOpenCandidate(expanded ? null : id)}
+													label={`Review incoming requirement: ${candidate.requirement.text}`}
+												>
+													{candidate.requirement.text}
+												</ReviewRowToggle>
+											</th>
+											<td>
+												<Badge
+													className="workbench-status"
+													icon={null}
+													tone={kind === "needs_decision" ? "warning" : kind === "new" ? "success" : "neutral"}
+												>
+													{labels[kind]}
+												</Badge>
+											</td>
+											<td>{duplicate ? "Resolve duplicate match" : decisionLabel}</td>
+										</tr>
+										{expanded && (
+											<tr className="review-detail-row">
+												<td colSpan={3} id={detailId}>
+													<div className={`import-text-comparison${previous ? "" : " single"}`}>
+														{previous && (
+															<div>
+																<h3>Current requirement · {previous.id}</h3>
+																<p>{previous.text}</p>
+															</div>
+														)}
+														<div>
+															<h3>Incoming requirement</h3>
+															<p>{candidate.requirement.text}</p>
+														</div>
+													</div>
+													<p className="helper-text">{candidate.reason}</p>
+													<label className="import-decision-field">
+														Decision
+														<Select
+															aria-label={`Decision for ${id}`}
+															value={decision.target_requirement_uid || decision.action}
+															disabled={busy}
+															onChange={(event) => update(candidate, event.target.value)}
+														>
+															<option value="">Choose a decision</option>
+															<option value="add">Add independently</option>
+															<option value="skip">Skip this incoming requirement</option>
+															{preview.current_requirements.map((requirement) => (
+																<option key={requirement.requirement_uid} value={requirement.requirement_uid}>
+																	{requirement.id} — {requirement.text}
+																</option>
+															))}
+														</Select>
+													</label>
+													{duplicate && (
+														<p role="alert">Another incoming requirement targets this same requirement. Resolve the conflict.</p>
+													)}
+													<Disclosure>
+														<summary>Source evidence and suggested matches</summary>
+														<RequirementSourceEvidence requirement={candidate.requirement} />
+														{candidate.suggestions.map((suggestion) => (
+															<p key={suggestion.requirement_uid}>
+																<strong>{current.get(suggestion.requirement_uid)?.id}</strong> — {suggestion.reason}
+																<br />
+																{current.get(suggestion.requirement_uid)?.text}
+															</p>
+														))}
+													</Disclosure>
+												</td>
+											</tr>
+										)}
+									</Fragment>
+								);
+							})}
+						</tbody>
+					</Table>
+				</TableScroll>
+			) : (
+				filter !== "retiring" && <CollectionState kind="filtered">No incoming requirements match this filter.</CollectionState>
+			)}
 			<Disclosure className="import-scope">
 				<summary>Replacement scope ({scope.length} existing requirements)</summary>
 				<p>
@@ -231,10 +292,17 @@ export default function RequirementImportReview({ preview, revision, busy, error
 					</label>
 				</div>
 			)}
-			<div className="import-apply-bar">
+			<div className="import-apply-bar" ref={actionBar}>
 				<span>
-					{counts.needs_decision ? `${counts.needs_decision} requirement(s) need a decision.` : "Ready to apply the reviewed changes."}
+					{stale
+						? "Compare again before applying."
+						: counts.needs_decision
+							? `${counts.needs_decision} requirement(s) need a decision.`
+							: "Ready to apply the reviewed changes."}
 				</span>
+				<Button variant="secondary" onClick={() => onAction("cancel")} disabled={busy}>
+					Cancel import
+				</Button>
 				<Button className="secondary" disabled={busy || Boolean(preview.recovery_snapshot_ids.length)} onClick={() => onAction("compare")}>
 					Compare again
 				</Button>
@@ -252,6 +320,6 @@ export default function RequirementImportReview({ preview, revision, busy, error
 					{busy ? "Saving…" : "Apply reviewed changes"}
 				</Button>
 			</div>
-		</Surface>
+		</section>
 	);
 }

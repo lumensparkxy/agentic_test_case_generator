@@ -171,7 +171,7 @@ test("project Back and Next follow sidebar order without approving or generating
 		.getByRole("link", { name: /^Requirements,/ })
 		.click();
 	for (const destination of ["context", "use-cases", "test-cases", "automation", "reports"]) {
-		await page.getByRole("button", { name: "Next", exact: true }).click();
+		await page.getByRole("button", { name: destination === "context" ? "Continue to Context" : "Next", exact: true }).click();
 		await expect(page).toHaveURL(`/projects/${USE_CASE_PROJECT_ID}/${destination}`);
 		await expect(page.getByRole("heading", { name: "Template Setup", exact: true })).toHaveCount(0);
 	}
@@ -286,8 +286,8 @@ test("Use Cases reviews the full snapshot in a cancellable responsive dialog", a
 test("project typography uses the compact shared reading scale", async ({ page }) => {
 	await openCases(page);
 	await expect(page.locator("body")).toHaveCSS("font-size", "14px");
-	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toHaveCSS("font-size", "28px");
-	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toHaveCSS("min-height", "44px");
+	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toHaveCSS("font-size", "24px");
+	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toHaveCSS("min-height", "36px");
 });
 
 test("case summaries flow inline and wrap only when the pane narrows", async ({ page }) => {
@@ -308,14 +308,17 @@ test("case summaries flow inline and wrap only when the pane narrows", async ({ 
 	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("High priority · REQ-101");
 });
 
-test("step table aligns numbers, actions and expected results and shows every step and its test data by default", async ({ page }) => {
+test("step table shows actions and expectations with step data on demand", async ({ page }) => {
 	await openCases(page);
 	const table = page.getByRole("region", { name: "Test steps and expected results" }).getByRole("table");
 	await expect(table.getByRole("columnheader")).toHaveText(["Step", "Action", "Expected result"]);
 	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText(["TC-001 action 1", "TC-001 expectation 1"]);
 	await expect(table.getByRole("rowheader")).toHaveText(["1", "2", "3"]);
 	await expect(page.getByRole("button", { name: /Show (all .*|fewer) steps/ })).toHaveCount(0);
-	await expect(table.getByRole("row").nth(3).getByRole("cell").first()).toContainText("Step-specific data");
+	const thirdAction = table.getByRole("row").nth(3).getByRole("cell").first();
+	await expect(thirdAction.getByText("Step-specific data", { exact: true })).toBeHidden();
+	await thirdAction.getByText("Test data", { exact: true }).click();
+	await expect(thirdAction).toContainText("Step-specific data");
 	await page.setViewportSize({ width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

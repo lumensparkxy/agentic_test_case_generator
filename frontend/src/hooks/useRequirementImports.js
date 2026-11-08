@@ -10,6 +10,7 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 	const [pending, setPending] = useState([]);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
+	const [stalePreview, setStalePreview] = useState(false);
 	const [message, setMessage] = useState("");
 	useEffect(() => {
 		requester.current = request;
@@ -25,7 +26,9 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 			} catch {
 				/* Handle non-JSON gateway failures. */
 			}
-			throw new Error(typeof detail === "string" ? detail : detail?.message || `Request failed (${response.status}).`);
+			throw Object.assign(new Error(typeof detail === "string" ? detail : detail?.message || `Request failed (${response.status}).`), {
+				code: detail?.code,
+			});
 		}
 		return response.status === 204 ? null : response.json();
 	}, []);
@@ -44,6 +47,7 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 		setPreview(null);
 		setPending([]);
 		setError("");
+		setStalePreview(false);
 		setMessage("");
 		setBusy(false);
 		lock.current = false;
@@ -59,6 +63,7 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 		}
 		setPreview(value);
 		setError("");
+		setStalePreview(false);
 		setMessage("");
 		attempt.current = null;
 		setPending((rows) => [value, ...rows.filter((row) => row.import_id !== value.import_id)]);
@@ -101,8 +106,12 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 				attempt.current = null;
 			}
 			await load();
+			return scope === epoch.current;
 		} catch (e) {
-			if (scope === epoch.current) setError(e.message);
+			if (scope === epoch.current) {
+				setError(e.message);
+				if (e.code === "stale_import") setStalePreview(true);
+			}
 		} finally {
 			if (scope === epoch.current) {
 				lock.current = false;
@@ -110,5 +119,5 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 			}
 		}
 	};
-	return { preview, pending, busy, error, message, accept, mutate, load, read };
+	return { preview, pending, busy, error, stalePreview, message, accept, mutate, load, read };
 }

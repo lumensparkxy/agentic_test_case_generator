@@ -34,7 +34,7 @@ test(
 		await expect(status(page)).toHaveValue("approved");
 		await expect(row.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true })).toContainText("(2)");
 		await page.getByRole("combobox", { name: "Filter by review status", exact: true }).selectOption("approved");
-		await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
+		await expect(page.locator(".scenario-review-row")).toHaveCount(1);
 		await page.getByRole("button", { name: "Quality flag filters", exact: true }).click();
 		await page.getByRole("checkbox", { name: "Duplicate", exact: true }).check();
 		await expect(page.getByText("No scenarios match these filters.")).toBeVisible();
@@ -87,7 +87,7 @@ for (const width of [390, 1488])
 	test(`scenario controls are accessible and the table scrolls inside the page at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });
 		await open(page);
-		const region = page.getByRole("region", { name: "Use cases for REQ-101", exact: true });
+		const region = page.getByRole("region", { name: "Use case scenarios table", exact: true });
 		await expect(region).toHaveAttribute("tabindex", "0");
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 		const results = await new AxeBuilder({ page }).include(".scenario-table-scroll").analyze();
@@ -102,7 +102,7 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	const divider = dividers.first();
 	const headers = page.getByRole("columnheader", { name: /^Title \/ objective/ });
 	const header = headers.first();
-	const table = page.getByRole("table", { name: "REQ-101", exact: true });
+	const table = page.getByRole("table", { name: "Use case scenarios by requirement", exact: true });
 	await divider.scrollIntoViewIfNeeded();
 	const tableWidth = (await table.boundingBox()).width;
 	await expect(table.getByRole("separator")).toHaveCount(3);
@@ -121,8 +121,6 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	await expect(divider).toHaveAttribute("aria-valuenow", "200");
 	await page.keyboard.press("ArrowRight");
 	await expect(divider).toHaveAttribute("aria-valuenow", "210");
-	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "210");
-	expect((await headers.nth(1).boundingBox()).width).toBe((await header.boundingBox()).width);
 	await expect(status(page)).toHaveValue("approved");
 	expect((await table.boundingBox()).width).toBeCloseTo(tableWidth, 0);
 	const search = page.getByRole("searchbox", { name: "Search use cases", exact: true });
@@ -131,16 +129,13 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	await divider.focus();
 	await page.keyboard.press("ArrowRight");
 	await search.fill("");
-	await expect(dividers).toHaveCount(2);
+	await expect(dividers).toHaveCount(1);
 	await expect(dividers.first()).toHaveAttribute("aria-valuenow", "220");
-	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "220");
 	await expect(status(page)).toHaveValue("approved");
 	expect(api.requests.review).toHaveLength(0);
 	await page.getByRole("button", { name: "Discard edits", exact: true }).click();
 	await page.reload();
 	await expect(divider).toHaveAttribute("aria-valuenow", "220");
-	await expect(dividers.nth(1)).toHaveAttribute("aria-valuenow", "220");
-	expect((await headers.nth(1).boundingBox()).width).toBe((await header.boundingBox()).width);
 	await page.setViewportSize({ width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -166,18 +161,22 @@ test("quality dropdown does not expand rows and restores focus on Escape", async
 
 test("requirement headings replace repeated cells and filtering preserves cross-group drafts", async ({ page }) => {
 	const api = await open(page);
-	await expect(page.getByRole("table")).toHaveCount(2);
+	await expect(page.getByRole("table")).toHaveCount(1);
+	await expect(page.locator(".scenario-group-heading")).toHaveCount(2);
 	await expect(page.getByRole("columnheader", { name: /^Source requirement/ })).toHaveCount(0);
-	await expect(page.getByRole("heading", { name: "REQ-101", exact: true })).toHaveCount(1);
+	await expect(page.locator(".scenario-group-heading").first()).toContainText("REQ-101");
 	await expect(page.getByText("Customers can complete express checkout with a saved payment method.", { exact: true })).toHaveCount(1);
-	await expect(page.getByRole("table", { name: "REQ-101", exact: true }).getByRole("rowheader")).toHaveText([
+	await expect(page.locator(".scenario-review-row").getByRole("rowheader")).toHaveText([
 		"REQ-101-SCN-01",
 		"REQ-101-SCN-02",
+		"REQ-202-SCN-01",
+		"REQ-202-SCN-02",
 	]);
 	await status(page).selectOption("approved");
 	const search = page.getByRole("searchbox", { name: "Search use cases", exact: true });
 	await search.fill("supervisor");
-	await expect(page.getByRole("table", { name: "REQ-101", exact: true })).toHaveCount(0);
+	await expect(page.locator(".scenario-group-heading")).toHaveCount(1);
+	await expect(page.locator(".scenario-group-heading").first()).toContainText("REQ-202");
 	await page.getByRole("combobox", { name: "Review status for REQ-202-SCN-01", exact: true }).selectOption("request_changes");
 	await search.fill("");
 	await expect(status(page)).toHaveValue("approved");
@@ -205,14 +204,16 @@ test("long requirement headings and single-row groups wrap without page overflow
 	await open(page, { initialProject: project });
 	await expect(page.getByText(groups[0].requirement_text.trim(), { exact: true })).toBeVisible();
 	await expect(page.locator(".scenario-group-heading").first()).not.toContainText(/\d+ use cases?/);
-	await expect(page.getByRole("table", { name: "REQ-101", exact: true }).getByRole("columnheader")).toHaveCount(4);
+	await expect(page.getByRole("table", { name: "Use case scenarios by requirement", exact: true }).getByRole("columnheader")).toHaveCount(
+		4
+	);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("last internal divider changes Quality flags from the left without moving the outer edge", async ({ page }) => {
 	await page.setViewportSize({ width: 1488, height: 900 });
 	await open(page);
-	const table = page.getByRole("table", { name: "REQ-101", exact: true });
+	const table = page.getByRole("table", { name: "Use case scenarios by requirement", exact: true });
 	const divider = table.getByRole("separator", { name: "Resize Review status column", exact: true });
 	const flags = table.getByRole("columnheader", { name: "Quality flags", exact: true });
 	const original = await table.boundingBox();
@@ -232,8 +233,8 @@ test("older narrow saved widths still fill the table container", async ({ page }
 	await page.setViewportSize({ width: 1488, height: 900 });
 	await page.addInitScript(() => localStorage.setItem("tcg.columns.use-cases-grouped-v1", JSON.stringify([144, 336, 160, 160])));
 	await open(page);
-	const table = page.getByRole("table", { name: "REQ-101", exact: true });
-	const region = page.getByRole("region", { name: "Use cases for REQ-101", exact: true });
+	const table = page.getByRole("table", { name: "Use case scenarios by requirement", exact: true });
+	const region = page.getByRole("region", { name: "Use case scenarios table", exact: true });
 	const outer = await region.boundingBox();
 	const bounds = await table.boundingBox();
 	expect(Math.abs(outer.x + outer.width - bounds.x - bounds.width)).toBeLessThanOrEqual(2);
@@ -243,7 +244,7 @@ test("tables fit browser resizing before and after persisted column edits", asyn
 	await page.setViewportSize({ width: 1488, height: 900 });
 	await open(page);
 	const tables = page.getByRole("table");
-	const region = page.getByRole("region", { name: "Use cases for REQ-101", exact: true });
+	const region = page.getByRole("region", { name: "Use case scenarios table", exact: true });
 	const checkFit = async () => {
 		for (const table of await tables.all())
 			await expect
@@ -270,11 +271,7 @@ test("tables fit browser resizing before and after persisted column edits", asyn
 			.first()
 			.getByRole("columnheader")
 			.evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
-		const second = await tables
-			.nth(1)
-			.getByRole("columnheader")
-			.evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
-		expect(second).toEqual(first);
+
 		for (const [i, minimum] of [140, 200, 150, 150].entries()) expect(first[i]).toBeGreaterThanOrEqual(minimum - 1);
 	}
 	await page.reload();
@@ -293,9 +290,9 @@ test("requirement ID and text start inline and wrap within the group", async ({ 
 		await page.setViewportSize({ width, height: 900 });
 		await expect(heading).not.toContainText(/\d+ use cases?/);
 		const layout = await heading.evaluate((node) => {
-			const id = node.querySelector("h3").getBoundingClientRect();
+			const id = node.querySelector("strong").getBoundingClientRect();
 			const range = document.createRange();
-			range.selectNodeContents(node.querySelector("p"));
+			range.selectNodeContents(node.querySelector("span"));
 			const lines = [...range.getClientRects()];
 			const bounds = node.getBoundingClientRect();
 			return {
@@ -340,8 +337,11 @@ for (const width of [390, 1488]) {
 			};
 			const api = await open(page, { initialProject: project });
 			const row = page.getByRole("row").filter({ has: status(page) });
-			await expect(row).toContainText("Semantic findings");
-			await expect(row).toContainText("Specify the observable booking result");
+			await expect(row).toContainText("1 finding");
+			const disclosure = row.getByRole("button", { name: /^Review REQ-101-SCN-01:/ });
+			await disclosure.press("Enter");
+			await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+			await expect(page.getByLabel(`Semantic assessment for ${scenarioId}`)).toContainText("Specify the observable booking result");
 			await expect(status(page)).toHaveValue("needs_review");
 			await page.getByText("Quality, coverage and review history", { exact: true }).click();
 			const quality = page.getByRole("region", { name: "Machine quality review", exact: true });
@@ -367,7 +367,8 @@ test("legacy structural pass leaves semantic assessment unavailable", async ({ p
 		summary: "Machine quality check passed",
 	};
 	await open(page, { initialProject: project });
-	await expect(page.getByRole("row").filter({ has: status(page) })).toContainText("Semantic assessment unavailable");
+	await page.getByRole("button", { name: /^Review REQ-101-SCN-01:/ }).click();
+	await expect(page.getByLabel(`Semantic assessment for ${scenarioId}`)).toContainText("Semantic assessment unavailable");
 	await page.getByText("Quality, coverage and review history", { exact: true }).click();
 	const quality = page.getByRole("region", { name: "Machine quality review", exact: true });
 	await expect(quality).toContainText("Structural score 100");

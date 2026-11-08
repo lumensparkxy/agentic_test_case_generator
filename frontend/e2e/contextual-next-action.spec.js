@@ -773,6 +773,7 @@ test("reviewing requirements advances Overview and Home without reload and keeps
 	await expect(task.getByRole("button", { name: "Analyze Impact", exact: true })).toBeEnabled();
 	await task.getByRole("button", { name: "Open Requirements", exact: true }).click();
 	for (const id of ["REQ-001", "REQ-002"]) {
+		await page.getByRole("button", { name: new RegExp(`^Review ${id}:`) }).click();
 		await page.getByLabel(`Review status for ${id}`, { exact: true }).selectOption("Approved");
 		await expect(page.getByLabel(`Review status for ${id}`, { exact: true })).toBeEnabled();
 	}
@@ -832,6 +833,7 @@ test("late pre-review guidance cannot replace newer recommendations after leavin
 	});
 	await seedAuthenticatedSession(page);
 	await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
+	await page.getByText("Review actions", { exact: true }).click();
 	await page.getByRole("button", { name: "Approve non-rejected", exact: true }).click();
 	await expect.poll(() => heldStatus && heldSummary).toBe(true);
 	await page.getByRole("link", { name: "Home", exact: true }).click();
@@ -862,7 +864,9 @@ test("older revision responses fail visibly while committed requirement approval
 	});
 	await seedAuthenticatedSession(page);
 	await page.goto(buildProjectPath(PROJECT_ID, "requirements"));
+	await page.getByText("Review actions", { exact: true }).click();
 	await page.getByRole("button", { name: "Approve non-rejected", exact: true }).click();
+	await page.getByRole("button", { name: /^Review REQ-001:/ }).click();
 	await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Approved");
 	await page.getByRole("link", { name: "Overview", exact: true }).click();
 	await expect(

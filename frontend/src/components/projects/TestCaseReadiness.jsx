@@ -31,10 +31,10 @@ export default function TestCaseReadiness({ project, status, unavailable, caseCo
 	} else if (statusCurrent && !caseCount && (generateAction?.enabled || status.next_actions?.length === 0)) {
 		title = "Ready to generate test cases";
 	} else if (statusCurrent && caseCount) {
-		title = "Review the delivered suite";
+		return null;
 	}
 	return (
-		<div className="generation-gate-card" role="region" aria-label="Test Cases readiness">
+		<div className="generation-gate-card compact-readiness" role="region" aria-label="Test Cases readiness">
 			<div>
 				<strong>{title}</strong>
 				<p>

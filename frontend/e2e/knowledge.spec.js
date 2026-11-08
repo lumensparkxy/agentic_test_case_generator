@@ -120,6 +120,7 @@ test("failed saves keep the dialog and reuse the same idempotency key", async ({
 	await page.getByRole("button", { name: "Save proposal" }).click();
 	await expect(page.getByRole("alert")).toContainText("Temporary knowledge failure");
 	await page.getByRole("button", { name: "Save proposal" }).click();
+	await expect.poll(() => calls.length).toBe(2);
 	expect(calls[0]).toEqual(calls[1]);
 });
 

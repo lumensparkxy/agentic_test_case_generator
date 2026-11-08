@@ -2,7 +2,7 @@ import useReviewDraft from "../../hooks/useReviewDraft";
 import DraftRecoveryNotice from "./DraftRecoveryNotice";
 import ScenarioReviewTable from "./ScenarioReviewTable";
 import { Dialog } from "../ui/dialog";
-import { ListItem, List, CollectionToolbar } from "../ui/collections";
+import { ListItem, List } from "../ui/collections";
 import { Disclosure, Alert } from "../ui/surfaces";
 import { Button, Radio, Textarea, Input } from "../ui/controls";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -241,7 +241,11 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 					<Button variant="secondary" onClick={() => openDecision("request_changes")} disabled={isBusy || hasDrafts || !scenarioTotal}>
 						Request changes
 					</Button>
-					<Button onClick={() => openDecision("approve")} disabled={isBusy || approvalBlocked || hasDrafts || !scenarioTotal}>
+					<Button
+						variant={hasDrafts || humanReview?.decision === "approve" || approvalBlocked ? "secondary" : "primary"}
+						onClick={() => openDecision("approve")}
+						disabled={isBusy || approvalBlocked || hasDrafts || !scenarioTotal}
+					>
 						Approve all
 					</Button>
 				</div>
@@ -439,7 +443,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 	);
 }
 
-export default function UseCaseReviewWorkbench({ identity, project, snapshot, stageState, review }) {
+export default function UseCaseReviewWorkbench({ identity, project, snapshot, stageState, review, onContinue }) {
 	const searchId = useId();
 	const searchRef = useRef(null);
 	const recovery = useReviewDraft({
@@ -509,6 +513,37 @@ export default function UseCaseReviewWorkbench({ identity, project, snapshot, st
 		<div className="use-case-review-workbench">
 			<DraftRecoveryNotice draft={recovery} />
 			<DraftRecoveryNotice draft={review.recovery} />
+			<section className="use-case-collection" aria-labelledby="use-case-collection-title">
+				<h2 className="sr-only" id="use-case-collection-title">
+					Use case scenarios
+				</h2>
+				<ScenarioReviewTable
+					key={snapshot.snapshot_id}
+					groups={filteredGroups}
+					allGroups={coveragePlan}
+					assessment={machineReview?.semantic_assessment}
+					state={effectiveStageState}
+					snapshot={snapshot}
+					revision={project.current_revision}
+					review={review}
+					drafts={drafts}
+					recovery={recovery}
+					setDrafts={setDrafts}
+					onContinue={onContinue}
+					search={
+						<Input
+							id={searchId}
+							type="search"
+							aria-label="Search use cases"
+							value={query}
+							ref={searchRef}
+							onChange={(event) => updateQuery(event.target.value)}
+							placeholder="Search use cases"
+						/>
+					}
+				/>
+			</section>
+
 			<div className="use-case-meta-row">
 				<div className="use-case-compact-summary">
 					<strong>{scenarioTotal} scenarios</strong>
@@ -549,52 +584,6 @@ export default function UseCaseReviewWorkbench({ identity, project, snapshot, st
 					) : null}
 				</Disclosure>
 			</div>
-			<section className="use-case-collection" aria-labelledby="use-case-collection-title">
-				<CollectionToolbar as="div" className="use-case-collection-heading">
-					<div>
-						<span className="use-case-section-kicker">Review artifact</span>
-						<h2 id="use-case-collection-title">Use case scenarios</h2>
-						<p>Review individual scenarios, then save your decisions.</p>
-					</div>
-					<div className="use-case-search-field">
-						<label htmlFor={searchId}>Search use cases</label>
-						<Input
-							id={searchId}
-							type="search"
-							value={query}
-							ref={searchRef}
-							onChange={(event) => updateQuery(event.target.value)}
-							placeholder="Requirement, scenario, risk, or constraint"
-						/>
-						{query ? (
-							<Button
-								variant="plain"
-								onClick={() => {
-									updateQuery("");
-									searchRef.current?.focus();
-								}}
-							>
-								Clear search
-							</Button>
-						) : null}
-					</div>
-				</CollectionToolbar>
-
-				<ScenarioReviewTable
-					key={snapshot.snapshot_id}
-					groups={filteredGroups}
-					allGroups={coveragePlan}
-					assessment={machineReview?.semantic_assessment}
-					state={effectiveStageState}
-					snapshot={snapshot}
-					revision={project.current_revision}
-					review={review}
-					drafts={drafts}
-					recovery={recovery}
-					setDrafts={setDrafts}
-				/>
-			</section>
-
 			<Disclosure className="use-case-provenance">
 				<summary aria-label="Artifact details">Details</summary>
 				<dl>
