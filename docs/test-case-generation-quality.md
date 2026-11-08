@@ -101,17 +101,26 @@ preview eligible cases against the chosen environment before running them.
 Analysis does not call the model. Apply generates only the selected requirement
 and scenario slices, using saved context and the existing bounded generation
 pipeline. At most 40 generation recommendations can be selected per request;
-duplicate updates/additions are consolidated. Each distinct recommendation is
-generated in sequence, with bounded parallel shards inside that generation run.
+duplicate updates/additions are consolidated. Multiple independent replacements
+run with up to three workers, capped by `PARALLEL_TEST_CASE_MAX_WORKERS`.
+`PARALLEL_TEST_CASE_GENERATION_ENABLED=false` keeps replacements sequential.
+In a parallel repair batch each replacement runs its inner shards one at a time,
+so nested fan-out stays within the batch limit. A single replacement keeps
+the ordinary shard configuration. Results are assembled in the saved
+recommendation order.
 
 The apply API requires `base_project_revision`. Ownership, active status, input
 snapshot freshness, requirement approval, and snapshot-bound scenario reviews
 are checked before model generation. Rejected, incomplete, fallback, or foreign
 coverage cannot be committed. The original suite and history remain intact on
-failure. Changed artifact versions and the new project snapshot commit in one
-revision-guarded transaction. Unchanged test identities and versions are retained.
-Generation evidence, guidance references, usage, and billing consumption follow
-the targeted run. Repaired tests are saved for review, without a fabricated pass
+failure. A failed worker stops further submissions and allows already-running
+work to finish before releasing the application lease. Changed artifact versions
+and the new project snapshot commit in one revision-guarded transaction.
+Unchanged test identities and versions are retained. Generation evidence binds
+each result to its recommendation, source case, scenario scope and project
+revision. The snapshot records the worker count and batch duration.
+Usage and billing consumption follow the committed targeted run. Repaired tests
+are saved for review, without a fabricated pass
 score. Old invalid snapshot content is retained as historical evidence.
 
 ## Validation boundary

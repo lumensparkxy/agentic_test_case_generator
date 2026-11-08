@@ -1,4 +1,7 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextvars import ContextVar
+from threading import Event
 import sys
 import unittest
 from typing import Any
@@ -14,12 +17,14 @@ if str(BACKEND_DIR) not in sys.path:
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.models import AuthUser, TestCase, TestStep
+from app.config import GenerationSettings
 from copy import deepcopy
 from fastapi import HTTPException
 from app.services import impact_update_service as service
 from app.services import test_case_suite_review as suite_review
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
+from app.services.guidance_service import current_guidance
 from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 
@@ -340,6 +345,7 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(first.impact_application.changed_test_case_ids, ["TC-003"])
         self.assertEqual(first.impact_application.result_snapshot_id, first.current_snapshots["test_cases"].snapshot_id)
         self.assertEqual(self.generator.call_count, calls)
+        self.assertNotIn("max_parallel_workers", self.generator.call_args.kwargs)
         self.assertEqual(self.store, before)
         self.assertEqual(len([k for k in self.store if k.startswith("usage_events/")]), 1)
 
@@ -356,6 +362,131 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(joined[0].impact_application.status, "applying")
         self.assertEqual(result.impact_application.status, "applied")
         self.assertEqual(self.generator.call_count, 1)
+
+    def test_parallel_replacements_are_bounded_and_commit_in_selection_order(self):
+        requirement_ids = [f"REQ-{index:03d}" for index in range(1, 5)]
+        baseline = self._seed_project(modified=set(requirement_ids))
+        project = analyze_project_impact(project_id=baseline.project_id, actor=self.actor, request_id="analysis")
+        existing = project.current_snapshots["test_cases"]
+        entered = {requirement_id: Event() for requirement_id in requirement_ids}
+        release = {requirement_id: Event() for requirement_id in requirement_ids}
+        observed = {}
+        trace = ContextVar("test_parallel_trace", default="")
+
+        def generate(payload, **kwargs):
+            requirement_id = payload.requirements[0].id
+            observed[requirement_id] = (current_guidance(), trace.get(), kwargs)
+            entered[requirement_id].set()
+            if not release[requirement_id].wait(5):
+                raise AssertionError(f"Test did not release {requirement_id}")
+            result = self._generate(payload)
+            case = result["test_cases"][0]
+            case["title"] = f"Replacement for {requirement_id}"
+            result["test_cases"].append({**case, "id": f"EXTRA-{requirement_id}", "title": f"Additional check for {requirement_id}"})
+            return result
+
+        def apply():
+            trace.set("caller-trace")
+            return self._apply(project)
+
+        self.generator.side_effect = generate
+        settings = GenerationSettings(parallel_test_case_max_workers=20)
+        with patch.object(service, "get_generation_settings", return_value=settings), ThreadPoolExecutor(max_workers=1) as runner:
+            result = runner.submit(apply)
+            try:
+                self.assertTrue(all(entered[requirement_id].wait(5) for requirement_id in requirement_ids[:3]))
+                self.assertFalse(entered["REQ-004"].is_set())
+                release["REQ-002"].set()
+                self.assertTrue(entered["REQ-004"].wait(5))
+                self.assertFalse(release["REQ-001"].is_set())
+                joined = self._apply(project, request_id="duplicate")
+                self.assertEqual(joined.impact_application.status, "applying")
+                self.assertEqual(joined.current_snapshots["test_cases"], existing)
+            finally:
+                for event in release.values():
+                    event.set()
+            updated = result.result(timeout=5)
+
+        self.assertEqual(self.generator.call_count, 4)
+        self.assertEqual(updated.current_revision, project.current_revision + 1)
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertFalse(snapshot.approved)
+        self.assertEqual(snapshot.metadata["targeted_generation_worker_count"], 3)
+        saved_rows = snapshot.payload["test_cases"]
+        for index, requirement_id in enumerate(requirement_ids):
+            manifest, trace_id, kwargs = observed[requirement_id]
+            self.assertEqual(trace_id, "caller-trace")
+            self.assertEqual(kwargs["max_parallel_workers"], 1)
+            self.assertEqual(manifest.project_inputs.requirements_snapshot_id, project.current_snapshots["requirements"].snapshot_id)
+            row, old = saved_rows[index], existing.payload["test_cases"][index]
+            self.assertEqual((row["id"], row["artifact_item_id"]), (old["id"], old["artifact_item_id"]))
+            self.assertEqual(row["artifact_version_number"], old["artifact_version_number"] + 1)
+            self.assertEqual(row["title"], f"Replacement for {requirement_id}")
+            evidence = snapshot.metadata["targeted_generation_runs"][index]
+            self.assertEqual(evidence["recommendation_id"], f"impact-update-{old['id']}")
+            self.assertEqual(evidence["source_test_case_id"], old["id"])
+            self.assertEqual(evidence["source_project_revision"], project.current_revision)
+            self.assertEqual(evidence["scenario_refs"], [f"{requirement_id}-SCN-01"])
+            self.assertEqual(evidence["guidance"]["manifest_id"], manifest.manifest_id)
+        self.assertEqual(saved_rows[4:10], existing.payload["test_cases"][4:])
+        self.assertEqual([row["title"] for row in saved_rows[10:]], [f"Additional check for {requirement_id}" for requirement_id in requirement_ids])
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
+
+    def test_parallel_failure_drains_active_workers_and_does_not_start_remaining_work(self):
+        requirement_ids = [f"REQ-{index:03d}" for index in range(1, 5)]
+        baseline = self._seed_project(modified=set(requirement_ids))
+        project = analyze_project_impact(project_id=baseline.project_id, actor=self.actor, request_id="analysis")
+        before = deepcopy(self.store)
+        entered = {requirement_id: Event() for requirement_id in requirement_ids}
+        release_bad = Event()
+        release_other = Event()
+        failed_worker = Event()
+
+        def generate(payload, **kwargs):
+            requirement_id = payload.requirements[0].id
+            entered[requirement_id].set()
+            result = self._generate(payload)
+            if requirement_id == "REQ-002":
+                if not release_bad.wait(5):
+                    raise AssertionError("Test did not release the failing worker")
+                result["test_cases"][0]["scenario_refs"] = ["REQ-001-SCN-01"]
+            elif not release_other.wait(5):
+                raise AssertionError("Test did not release the other workers")
+            return result
+
+        def observe_wait(*args, **kwargs):
+            done, pending = wait(*args, **kwargs)
+            if any(future.exception() is not None for future in done):
+                failed_worker.set()
+            return done, pending
+
+        self.generator.side_effect = generate
+        with (
+            patch.object(service, "get_generation_settings", return_value=GenerationSettings()),
+            patch.object(service, "wait", side_effect=observe_wait),
+            ThreadPoolExecutor(max_workers=1) as runner,
+        ):
+            result = runner.submit(self._apply, project)
+            try:
+                self.assertTrue(all(entered[requirement_id].wait(5) for requirement_id in requirement_ids[:3]))
+                release_bad.set()
+                self.assertTrue(failed_worker.wait(5))
+                self.assertFalse(result.done())
+                self.assertEqual(self._apply(project, request_id="duplicate").impact_application.status, "applying")
+            finally:
+                release_bad.set()
+                release_other.set()
+            with self.assertRaisesRegex(service.ImpactWorkflowError, "failed quality checks"):
+                result.result(timeout=5)
+
+        self.assertFalse(entered["REQ-004"].is_set())
+        self.assertEqual(self.generator.call_count, 3)
+        self.assertEqual({key: value for key, value in self.store.items() if "/impact_applications/" not in key}, before)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        self.generator.side_effect = self._generate
+        repaired = self._apply(project)
+        self.assertEqual(repaired.impact_application.status, "applied")
+        self.assertEqual(repaired.current_revision, project.current_revision + 1)
 
     def test_expired_worker_cannot_commit_after_retry_takes_lease(self):
         from datetime import timedelta

@@ -2696,6 +2696,8 @@ def generate_test_cases(
     operation: Optional[str] = None,
     source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
     source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
+    *,
+    max_parallel_workers: Optional[int] = None,
 ) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
@@ -2712,6 +2714,10 @@ def generate_test_cases(
             _normalize_coverage_plan(_serialize_contract_items(payload.coverage_plan), payload.requirements) if payload.coverage_plan else []
         )
     generation_settings = get_generation_settings()
+    if max_parallel_workers is not None:
+        generation_settings = generation_settings.model_copy(
+            update={"parallel_test_case_max_workers": min(generation_settings.parallel_test_case_max_workers, max_parallel_workers)}
+        )
 
     if operation == "impact.update.apply":
         precomputed_coverage_plan = _serialize_contract_items(payload.coverage_plan)
