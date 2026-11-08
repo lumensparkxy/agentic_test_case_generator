@@ -1,0 +1,199 @@
+import fs from "node:fs/promises";
+import { expect, test } from "@playwright/test";
+import { applyImport, approveRequirements, approveScenarios, importSource, liveFixture, uiResponse } from "./support/live-workflow.js";
+
+const source = {
+	name: "employee-directory.md",
+	mimeType: "text/markdown",
+	buffer: Buffer.from(`# Synthetic employee directory
+
+## DIR-100 — Find the seeded employee
+When a guest enters "Alex Rivera" in the "Employee name" field and presses "Search", show the exact text "Alex Rivera".
+
+## DIR-200 — Report no matching employees
+When a guest enters "NoMatch Person" in the "Employee name" field and presses "Search", show the exact text "No employees found".
+`),
+};
+const notes =
+	'This is a public synthetic directory. The observed heading "Employee directory", field "Employee name", and button "Search" are exact accessible names. ' +
+	'Only "Alex Rivera" is seeded. "NoMatch Person" is absent. No sign-in, additional records, or setup is required.';
+
+test.describe("Isolated browser workbench", () => {
+	test.describe.configure({ retries: 0, timeout: 12 * 60 * 1000 });
+	test.skip(process.env.E2E_LOCAL_WORKBENCH !== "1", "Run via scripts/e2e_workbench_local.py with its isolated Firestore emulator.");
+
+	test("an approved generated suite retains healthy and broken browser run evidence after reload", async ({ page }, testInfo) => {
+		page.setDefaultTimeout(30_000);
+		expect(process.env.E2E_DEMO_PROJECT).toBe("demo-tcg-workbench");
+		const target = process.env.E2E_DIRECTORY_TARGET;
+		const faultMarker = process.env.E2E_DIRECTORY_FAULT;
+		expect(new URL(target).hostname).toBe("127.0.0.1");
+		expect(faultMarker).toBeTruthy();
+		const fixture = await liveFixture(page, testInfo, { namePrefix: "Synthetic directory execution" });
+		try {
+			await test.step("Import and review the real source and context", async () => {
+				const parsed = await importSource(page, fixture, source);
+				const project = await applyImport(page, fixture, parsed);
+				const requirements = project.current_snapshots.requirements.payload.requirements;
+				const sourceIds = requirements.flatMap((item) =>
+					(item.sources || []).flatMap((evidence) => evidence.original_requirement_ids || [])
+				);
+				expect(sourceIds).toEqual(expect.arrayContaining(["DIR-100", "DIR-200"]));
+				expect(requirements.every((item) => item.sources.some((evidence) => evidence.excerpt_verified))).toBe(true);
+				await approveRequirements(page, fixture);
+				await page.goto(`${fixture.prefix}/context`);
+				await page.getByPlaceholder("https://your-app").fill(target);
+				await page.getByRole("textbox", { name: "Context notes", exact: true }).fill(notes);
+				await uiResponse(page, "/requirements/enrich", () => page.getByRole("button", { name: "Analyze Context", exact: true }).click());
+				const saved = (await fixture.read()).current_snapshots.context.payload;
+				expect(saved).toMatchObject({ app_link: target, notes });
+			});
+
+			await test.step("Generate Use Cases and record the synthetic review decision", async () => {
+				await page.goto(`${fixture.prefix}/use-cases`);
+				await uiResponse(page, "/use-cases/generate", () => page.getByRole("button", { name: "Generate Use Cases", exact: true }).click(), {
+					timeout: 240_000,
+				});
+				const reviewed = await approveScenarios(page, fixture);
+				const state = reviewed.stage_state.use_cases;
+				expect(state.metadata.latest_human_review).toMatchObject({ decision: "approve", snapshot_id: state.current_snapshot_id });
+			});
+
+			const suite = await test.step("Generate the exact saved executable suite", async () => {
+				await page.goto(`${fixture.prefix}/test-cases`);
+				const generated = await (
+					await uiResponse(page, "/testcases/generate", () => page.getByRole("button", { name: "Start generation", exact: true }).click(), {
+						timeout: 360_000,
+					})
+				).json();
+				await fixture.save("generated-suite", generated);
+				expect(generated.generation_tasks).toEqual([]);
+				expect(generated.approved, JSON.stringify(generated.review)).toBe(true);
+				const saved = await fixture.read();
+				const snapshot = saved.current_snapshots.test_cases;
+				expect(snapshot.payload.test_cases.map((item) => item.id)).toEqual(generated.test_cases.map((item) => item.id));
+				expect(snapshot.metadata.source_use_case_snapshot_id).toBe(saved.stage_state.use_cases.current_snapshot_id);
+				return snapshot;
+			});
+
+			const runTarget = async (environment, expectedStatus, { verifyAdmission = false } = {}) => {
+				await page.goto(`${fixture.prefix}/automation`);
+				await page.getByPlaceholder("staging, dev, customer-a").fill(environment);
+				await page.getByRole("textbox", { name: "Target base URL", exact: true }).fill(target);
+				const previewResponse = await uiResponse(page, "/automation/execution/preview", () =>
+					page.getByRole("button", { name: "Preview Execution", exact: true }).click()
+				);
+				const preview = await previewResponse.json();
+				expect(preview.readiness).toMatchObject({ run_allowed: true, source_snapshot_id: suite.snapshot_id, target_base_url: target });
+				const candidates = preview.executable.map((item) => item.id);
+				const caseIds = suite.payload.test_cases.map((item) => item.id);
+				expect(preview.executable.every((item) => caseIds.includes(item.source_test_case_id))).toBe(true);
+				for (const outcome of ['exact text "Alex Rivera" should be visible', 'exact text "No employees found" should be visible']) {
+					expect(
+						preview.executable.some((item) => item.spec.steps.some((step) => step.endsWith(outcome))),
+						outcome
+					).toBe(true);
+				}
+				if (verifyAdmission) {
+					const input = previewResponse.request().postDataJSON();
+					const altered = input.test_cases.map((item, index) => (index === 0 ? { ...item, title: "Altered unsaved case" } : item));
+					const denied = await fixture.api("POST", "/automation/execution/run", {
+						...input,
+						base_project_revision: preview.readiness.project_revision,
+						selected_test_case_ids: candidates,
+						test_cases: altered,
+					});
+					expect(denied.status()).toBe(409);
+					expect(JSON.stringify(await denied.json())).toContain("case_snapshot_mismatch");
+					expect((await fixture.read()).execution_runs).toEqual([]);
+				}
+				const button = page.getByRole("button", { name: new RegExp(`^Run ${candidates.length} Candidate(s)?$`) });
+				const runResponse = await uiResponse(page, "/automation/execution/run", () => button.click());
+				const run = await runResponse.json();
+				expect(runResponse.request().postDataJSON()).toMatchObject({
+					target_base_url: target,
+					target_environment: environment,
+					selected_test_case_ids: candidates,
+					base_project_revision: preview.readiness.project_revision,
+				});
+				expect(run).toMatchObject({ status: expectedStatus, summary: { invalid: 0, skipped: 0 } });
+				expect(run.results.map((item) => item.id)).toEqual(candidates);
+				await fixture.save(`run-${environment}`, run);
+				return run;
+			};
+
+			const healthy = await test.step("Run the current approved suite on healthy data", () =>
+				runTarget("synthetic-healthy", "passed", { verifyAdmission: true }));
+			const broken = await test.step("Run the same saved suite with a broken empty result", async () => {
+				await fs.writeFile(faultMarker, "wrong-empty\n");
+				const run = await runTarget("synthetic-wrong-empty", "failed");
+				expect(run.summary.passed).toBeGreaterThan(0);
+				expect(
+					run.results.some((item) => item.status === "failed" && item.issues.some((issue) => issue.message.includes("No employees found")))
+				).toBe(true);
+				expect(run.run_id).not.toBe(healthy.run_id);
+				return run;
+			});
+
+			await test.step("Inspect persisted report and approved export after a reload", async () => {
+				await page.goto(`${fixture.prefix}/reports`);
+				await page.reload();
+				await expect(page.getByRole("heading", { name: "Export Test Cases" })).toBeVisible();
+				await expect(page.getByText("Approved for export", { exact: true })).toBeVisible();
+				await expect(page.getByText(`Run ${broken.run_id}`, { exact: true })).toBeVisible();
+				await expect(page.getByText(`Failed ${broken.summary.failed}`, { exact: true })).toBeVisible();
+				await expect(page.getByText(`synthetic-wrong-empty • ${target}`, { exact: true })).toBeVisible();
+				expect(broken.artifacts_root).toBeTruthy();
+				await expect(page.getByText(broken.artifacts_root, { exact: true })).toBeVisible();
+				const persisted = await fixture.read();
+				const history = persisted.execution_runs;
+				expect(history.map((item) => item.run_id)).toEqual([broken.run_id, healthy.run_id]);
+				expect(history).toMatchObject([
+					{ status: "failed", target_base_url: target, source_snapshot_id: suite.snapshot_id, target_environment: "synthetic-wrong-empty" },
+					{ status: "passed", target_base_url: target, source_snapshot_id: suite.snapshot_id, target_environment: "synthetic-healthy" },
+				]);
+				expect(persisted.current_snapshots.reports).toMatchObject({
+					source_snapshot_id: history[0].snapshot_id,
+					payload: { run_id: broken.run_id, status: "failed" },
+				});
+				await page.screenshot({ path: testInfo.outputPath("report-after-reload.png"), fullPage: true });
+				const [download] = await Promise.all([
+					page.waitForEvent("download"),
+					page.getByRole("button", { name: /JSON API\/Import ready/i }).click(),
+				]);
+				const path = testInfo.outputPath("inspected-export.json");
+				await download.saveAs(path);
+				const exported = JSON.parse(await fs.readFile(path, "utf8"));
+				expect(exported.test_cases.map((item) => item.id)).toEqual(suite.payload.test_cases.map((item) => item.id));
+				expect(exported.audit_metadata).toMatchObject({
+					snapshot_id: suite.snapshot_id,
+					human_review_status: "unavailable",
+					machine_review_status: "approved",
+					is_draft: false,
+					execution_status: "failed",
+					execution_run_ids: [broken.run_id, healthy.run_id],
+					source_snapshot_ids: {
+						use_cases: persisted.stage_state.use_cases.metadata.latest_human_review.snapshot_id,
+						test_cases: suite.snapshot_id,
+						execution: history[0].snapshot_id,
+					},
+				});
+				await fixture.save("persisted-run-and-report-evidence", {
+					history,
+					report: persisted.current_snapshots.reports,
+					export: exported.audit_metadata,
+				});
+			});
+		} finally {
+			await fs.rm(faultMarker, { force: true });
+			await fixture.close();
+			const archived = await fixture.read();
+			expect(archived).toMatchObject({ project_id: fixture.project.project_id, status: "archived" });
+			await fixture.save("archive-readback", {
+				project_id: archived.project_id,
+				status: archived.status,
+				revision: archived.current_revision,
+			});
+		}
+	});
+});

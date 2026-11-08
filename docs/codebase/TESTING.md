@@ -590,6 +590,43 @@ failures at another check, and unavailable runtime evidence separately.
 Manual audit coverage and generation approval have separate fields. A
 nonzero exit signals an unmet benchmark criterion.
 
+### Isolated live browser workbench
+
+Use the official Firestore emulator JAR, Java 21 or later, and the existing
+Python, frontend, and execution-runtime dependencies. Install Chromium for
+both Playwright packages as needed. Supply the Gemini API key through the
+environment or the local repository `.env`.
+
+Verify the emulator download against the
+[Firebase CLI emulator manifest](https://github.com/firebase/firebase-tools/blob/main/src/emulator/downloadableEmulatorInfo.json).
+For example, the manifest records this artifact and SHA-256 for version
+`1.22.0`.
+
+```bash
+mkdir -p /tmp/tcg-emulator
+jar=/tmp/tcg-emulator/cloud-firestore-emulator-v1.22.0.jar
+curl --fail --location \
+  https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.22.0.jar \
+  --output "$jar"
+printf '%s  %s\n' 9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c "$jar" | shasum -a 256 -c -
+.venv/bin/python scripts/e2e_workbench_local.py \
+  --emulator-jar "$jar" --output /tmp/tcg-live-browser-workbench
+```
+
+The runner starts the actual API and frontend against the loopback emulator
+with a demo project ID and a disposable local JWT identity. The test uses live
+Gemini for synthetic requirements, Use Cases and Test Cases. It records the
+explicit synthetic Use Cases review, verifies execution admission for the
+saved suite, runs healthy and faulty Directory responses, and inspects saved
+report and export evidence. The fixture uses supplied context notes to ground
+the loopback target. The export binds the approved Use Cases snapshot as
+source evidence and reports the separate Test Cases machine review.
+
+Choose a new output directory for each run. The runner keeps service logs,
+browser evidence and execution artifacts there, archives the exact test-owned
+project, and stops its local services when the run ends. Model quality and
+admission gates stay active throughout the test.
+
 ### Generation source snapshot regression
 
 `test_partial_shard_recovery.py` and the parallel-generation delivery regression

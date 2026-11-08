@@ -1624,6 +1624,10 @@ export default function App() {
 			setExecutionRunResult({
 				status: executionPayload.status,
 				run_id: executionPayload.run_id,
+				target_environment: executionPayload.target_environment,
+				target_base_url: executionPayload.target_base_url,
+				artifacts_root: executionPayload.artifacts_root,
+				playwright_report_paths: executionPayload.playwright_report_paths,
 				results: executionPayload.results || [],
 				warnings: executionPayload.warnings || [],
 				summary: executionPayload.summary || {},
@@ -3213,13 +3217,14 @@ export default function App() {
 		setStatus(runningMessage);
 		setApplicationLiveStatus(runningMessage);
 		try {
+			const payload = {
+				...buildExecutionPayload(testCases, { operationScope }),
+				selected_test_case_ids: executableCandidates.map((candidate) => candidate.id),
+			};
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionRun.path, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					...buildExecutionPayload(testCases, { operationScope }),
-					selected_test_case_ids: executableCandidates.map((candidate) => candidate.id),
-				}),
+				body: JSON.stringify(payload),
 			});
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to run execution candidates");
@@ -3247,7 +3252,11 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope) || executionRunRequestId !== executionRunRequestIdRef.current) {
 				return;
 			}
-			setExecutionRunResult(data);
+			setExecutionRunResult({
+				...data,
+				target_environment: payload.target_environment,
+				target_base_url: data.preview.readiness?.target_base_url ?? payload.target_base_url,
+			});
 			storeExecutionPreview(data.preview, {
 				source: "live",
 				selectedCandidateIds: executableCandidates.map((candidate) => candidate.id),
