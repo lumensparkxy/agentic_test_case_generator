@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import yaml
 
-from plain_english_test_framework.compiler import CompilerError, compile_spec_file
+from plain_english_test_framework.compiler import VALUE_EQUALS_PATTERN, CompilerError, compile_spec_file
 from plain_english_test_framework.ir_validator import IrValidationError
 from plain_english_test_framework.local_runner import (
     LocalPlaywrightRunnerError,
@@ -58,6 +58,21 @@ CLICK_PATTERN = re.compile(
 TEXT_EQUALS_PATTERN = re.compile(
     r"['\"](?P<label>[^'\"]+)['\"]\s+(?:should\s+)?(?:equal|equals|be)\s+['\"](?P<expected>[^'\"]*)['\"]",
     re.IGNORECASE,
+)
+ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s+that)?\s+)?(?:the\s+)?", re.IGNORECASE)
+QUOTED_FIELD_EQUALS_PATTERN = re.compile(
+    r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?P<comparison>.+)',
+    re.IGNORECASE,
+)
+QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'[^']*')"""
+FIELD_VALUE_INTENT_PATTERN = re.compile(
+    rf"""^(?:
+        (?:field|input|textarea|css|test\s+id)\s+{QUOTED_ASSERTION_TARGET}\s+(?:value\b|should\s+equal\b)
+        |{QUOTED_ASSERTION_TARGET}\s+(?:field|input|textarea)\s+(?:value|should|equals?|matches?|contains?)\b
+        |(?:[\w-]+\s+){{1,20}}(?:field|input|textarea)\s+(?:value\b|should\s+(?:equal|match|contain|be\s+(?:empty|blank))\b)
+        |(?:current\s+)?value\s+of\s+
+    )""",
+    re.IGNORECASE | re.VERBOSE,
 )
 VISIBLE_PATTERN = re.compile(
     r"(?P<text>.+?)\s+(?:is|are|should be)\s+(?:displayed|visible|shown|present)\b",
@@ -109,6 +124,7 @@ LOADS_PATTERN = re.compile(r"(?P<text>.+?)\s+loads\s+successfully\b", re.IGNOREC
 ASSERTION_KINDS = {
     "assert_visible",
     "assert_text_equals",
+    "assert_value_equals",
     "assert_url",
     "assert_title",
     "assert_checked",
@@ -365,12 +381,10 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
     unsupported_steps: list[ExecutionUnsupportedStep] = []
     fatal_unsupported_steps: list[ExecutionUnsupportedStep] = []
     for step in test_case.steps:
-        unsupported_reason = _unsupported_domain_reason(step)
-        if unsupported_reason is not None:
-            fatal_unsupported_steps.append(_unsupported_step(step, unsupported_reason, "manual_execution"))
+        step_conversions, fatal_unsupported = _convert_step(step, base_url=base_url)
+        if fatal_unsupported:
+            fatal_unsupported_steps.append(fatal_unsupported)
             continue
-
-        step_conversions = _convert_step(step, base_url=base_url)
         if ambiguous_reason := _ambiguous_semantic_assertion_reason(step):
             unsupported_steps.append(_unsupported_step(step, "ambiguous_semantic_assertion", ambiguous_reason))
         if browser_assertion_reason := _unsupported_browser_assertion_reason(step):
@@ -498,18 +512,41 @@ def _with_unique_candidate_id(
     return candidate.model_copy(update=updates), True
 
 
-def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:
+def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep], ExecutionUnsupportedStep | None]:
     converted: list[_ConvertedStep] = []
     action = _normalize_text(step.action)
     expected = _normalize_text(step.expected)
+    action_value, unsupported_action = _field_value_assertion(step.action)
+    expected_value, unsupported_expected = _field_value_assertion(step.expected)
+    # A supported assertion's quoted locator and value are data, not operations.
+    domain_text = " ".join(("" if action_value else step.action, "" if expected_value else step.expected, step.test_data or "")).lower()
+    if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
+        return [], _unsupported_step(step, "unsupported_non_browser_domain", "manual_execution")
+    if unsupported_action or unsupported_expected:
+        return [], _unsupported_step(
+            step,
+            "unsupported_field_value_assertion",
+            'Use field "Employee name" value should equal "Alex" with an exact label and value, or keep the check manual.',
+        )
 
-    if _looks_like_navigation(action):
+    if action_value:
+        converted.append(action_value)
+    elif _looks_like_navigation(action):
         converted.append(_ConvertedStep("navigate", f'I open "{_resolve_step_url(action, base_url)}"'))
     elif match := FILL_PATTERN.search(action):
         value = _clean_value(match.group("value"))
         label = _clean_label(match.group("label"))
         if value and label:
-            converted.append(_ConvertedStep("fill", f'I enter "{_escape_step_text(value)}" into "{_escape_step_text(label)}"'))
+            locator = f'"{_escape_step_text(label)}"'
+            field_locator = f"field {locator}"
+            if not expected_value and (equality := TEXT_EQUALS_PATTERN.fullmatch(_assertion_statement(step.expected))) and equality["label"] == label:
+                expected_value = _ConvertedStep(
+                    "assert_value_equals",
+                    f'{field_locator} value should equal "{_escape_step_text(equality["expected"])}"',
+                )
+            if expected_value and expected_value.body.startswith(f"{field_locator} value "):
+                locator = field_locator
+            converted.append(_ConvertedStep("fill", f'I enter "{_escape_step_text(value)}" into {locator}'))
     elif match := CLICK_PATTERN.search(action):
         name = _clean_label(match.group("name"))
         if name:
@@ -523,12 +560,30 @@ def _convert_step(step: TestStep, *, base_url: str) -> list[_ConvertedStep]:
     elif lookup_assertion := _convert_visual_lookup(action):
         converted.append(lookup_assertion)
 
-    if expected:
+    if expected_value:
+        converted.append(expected_value)
+    elif expected:
         assertion = _convert_assertion(expected)
         if assertion:
             converted.append(assertion)
 
-    return converted
+    return converted, None
+
+
+def _field_value_assertion(text: str) -> tuple[_ConvertedStep | None, bool]:
+    statement = _assertion_statement(text)
+    if not FIELD_VALUE_INTENT_PATTERN.match(statement):
+        return None, False
+    if quoted_field := QUOTED_FIELD_EQUALS_PATTERN.fullmatch(statement):
+        statement = f"field {quoted_field['locator']} value {quoted_field['comparison']}"
+    if (match := VALUE_EQUALS_PATTERN.fullmatch(statement)) and match["locator"].strip():
+        kind = match["kind"].lower()
+        return _ConvertedStep("assert_value_equals", f'{kind} "{match["locator"]}" value should equal "{match["expected"]}"'), False
+    return None, True
+
+
+def _assertion_statement(text: str) -> str:
+    return ASSERTION_PREFIX_PATTERN.sub("", text.strip(), count=1).removesuffix(".").rstrip()
 
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
@@ -938,14 +993,6 @@ def _unsupported_step(step: TestStep, reason_code: str, suggested_next_action: s
         reason_code=reason_code,
         suggested_next_action=suggested_next_action,
     )
-
-
-def _unsupported_domain_reason(step: TestStep) -> str | None:
-    text = f"{step.action} {step.expected} {step.test_data or ''}".lower()
-    for term in UNSUPPORTED_DOMAIN_TERMS:
-        if term in text:
-            return "unsupported_non_browser_domain"
-    return None
 
 
 def _ambiguous_semantic_assertion_reason(step: TestStep) -> str | None:

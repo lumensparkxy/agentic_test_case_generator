@@ -36,6 +36,22 @@ Rejections return HTTP 409 with readiness blockers; unauthorized projects retain
 their existing permission response. Selection must be nonempty and contain only
 eligible candidates. Legacy source IDs are accepted only when unambiguous.
 
+Use an exact label, CSS selector, or test ID to assert the current value of an
+editable control.
+
+```text
+Then field "Employee name" value should equal "Alex Rivera"
+Then css "#employee-name" value should equal "Alex Rivera"
+Then test id "employee-name" value should equal "Alex Rivera"
+```
+
+Use an empty quoted value to check a blank field. These compile to Playwright
+value assertions. Plain equality in a saved structured spec still checks text
+content. Preview treats equality against a label filled by the same source step
+as a value assertion. When the fill and check name the same field, both use its
+exact label. Preview marks unrepresentable field-value checks unsupported so the
+case cannot run with that assertion omitted.
+
 Supply `target_base_url` or explicitly configure `EXECUTION_DEFAULT_BASE_URL`.
 The runtime's implicit localhost fallback does not authorize an API run. This
 also applies to non-project API requests, which require explicit selection but

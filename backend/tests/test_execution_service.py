@@ -17,6 +17,7 @@ from app.config import ExecutionSettings
 from app.models import ExecutionCandidate, ExecutionPreviewResponse, TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
 from plain_english_test_framework.compiler import CompilerError, compile_spec_file
+from plain_english_test_framework.ir_validator import validate_ir_document
 from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
 from plain_english_test_framework.playwright_generator import generate_playwright_spec
 from plain_english_test_framework.validation import ValidationIssue
@@ -310,7 +311,8 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(candidate.traceability_ids, ["REQ-001", "SCN-001", "ctx-login"])
         self.assertEqual(candidate.spec["id"], "tc_001")
         self.assertIn('Given I open "https://example.test/login"', candidate.spec["steps"])
-        self.assertIn('When I enter "mira@example.com" into "Email"', candidate.spec["steps"])
+        self.assertIn('When I enter "mira@example.com" into field "Email"', candidate.spec["steps"])
+        self.assertIn('And field "Email" value should equal "mira@example.com"', candidate.spec["steps"])
         self.assertIn('And I click "Sign in"', candidate.spec["steps"])
 
     def test_preview_converts_documentation_checks_with_implicit_navigation(self) -> None:
@@ -475,6 +477,95 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('await expect(page.locator(".result")).toHaveCount(3);', generated)
         self.assertIn('await expect(page.getByTestId("email-input")).toBeVisible();', generated)
         self.assertIn('await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();', generated)
+
+    def test_field_value_assertions_survive_preview_compiler_and_codegen(self) -> None:
+        case = TestCase(
+            id="TC-FIELD-VALUE",
+            title="Check an editable value and ordinary text",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test/directory", expected='"Summary" should equal "Ready"'),
+                TestStep(
+                    step=2,
+                    action='Enter "Alex Rivera" into the "Employee name" field',
+                    expected='Verify that "Employee name" should equal "Alex Rivera".',
+                ),
+                TestStep(step=3, action='Verify the "Employee name" field should equal "Alex Rivera"', expected=""),
+                TestStep(step=4, action='Verify test id "empty-input" value should equal ""', expected=""),
+                TestStep(step=5, action=r'Verify css "#backup-notes" value should equal "  Keep  spacing and \"quotes\"  "', expected=""),
+                TestStep(step=6, action='Enter "Taylor" into the "Employee name" field', expected='"Summary" should equal "Ready"'),
+            ],
+        )
+
+        response = preview_execution([case], target_base_url="https://example.test")
+        self.assertEqual(response.summary.executable, 1)
+        spec = response.executable[0].spec
+        self.assertEqual(
+            spec["steps"],
+            [
+                'Given I open "https://example.test/directory"',
+                'Then "Summary" should equal "Ready"',
+                'When I enter "Alex Rivera" into field "Employee name"',
+                'And field "Employee name" value should equal "Alex Rivera"',
+                'And field "Employee name" value should equal "Alex Rivera"',
+                'And test id "empty-input" value should equal ""',
+                r'And css "#backup-notes" value should equal "  Keep  spacing and \"quotes\"  "',
+                'And I enter "Taylor" into "Employee name"',
+                'And "Summary" should equal "Ready"',
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "field_value.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        steps = ir.raw["cases"][0]["steps"]
+        value_steps = [step for step in steps if step["action"] == "assert_value_equals"]
+        self.assertEqual(len(value_steps), 4)
+        self.assertEqual(value_steps[-1]["expected"], '  Keep  spacing and "quotes"  ')
+        generated = generate_playwright_spec(ir).contents
+        self.assertEqual(generated.count('await expect(page.getByLabel("Summary")).toHaveText("Ready");'), 2)
+        self.assertIn('await page.getByLabel("Employee name", { exact: true }).fill("Alex Rivera");', generated)
+        self.assertIn('await page.getByLabel("Employee name").fill("Taylor");', generated)
+        self.assertIn('await expect(page.getByLabel("Employee name", { exact: true })).toHaveValue("Alex Rivera");', generated)
+        self.assertIn('await expect(page.getByTestId("empty-input")).toHaveValue("");', generated)
+        self.assertIn(r'await expect(page.locator("#backup-notes")).toHaveValue("  Keep  spacing and \"quotes\"  ");', generated)
+
+        value_steps[-1].pop("expected")
+        self.assertTrue(validate_ir_document(ir.raw))
+
+    def test_unrepresentable_field_value_assertion_blocks_entire_candidate(self) -> None:
+        case = TestCase(
+            id="TC-FIELD-VALUE-UNSUPPORTED",
+            title="Cannot verify editable value with an unsupported operator",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test/directory", expected='heading "Directory" is visible'),
+                TestStep(
+                    step=2,
+                    action='Enter "Alex Rivera" into the "Employee name" field',
+                    expected='Verify field "Employee name" value starts with "Alex"',
+                ),
+            ],
+        )
+
+        for statement in (
+            'Verify field "Employee name" value starts with "Alex"',
+            'The Employee name field should contain "Alex"',
+        ):
+            with self.subTest(statement=statement):
+                case.steps[1].expected = statement
+                response = preview_execution([case], target_base_url="https://example.test")
+
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.summary.unsupported, 1)
+                candidate = response.unsupported[0]
+                self.assertIsNone(candidate.spec)
+                self.assertEqual(candidate.unsupported_steps[0].reason_code, "unsupported_field_value_assertion")
+                self.assertIn('field "Employee name" value should equal "Alex"', candidate.unsupported_steps[0].suggested_next_action)
 
     def test_preview_marks_runtime_and_title_visible_assertions_unsupported(self) -> None:
         unsupported_case = TestCase(

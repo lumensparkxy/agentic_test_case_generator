@@ -123,7 +123,7 @@
         "exact": {
           "properties": {
             "strategy": {
-              "enum": ["role", "text"]
+              "enum": ["role", "text", "label"]
             }
           }
         }
@@ -172,7 +172,7 @@
                 "$ref": "#/$defs/assertVisibleStep"
               },
               {
-                "$ref": "#/$defs/assertTextEqualsStep"
+                "$ref": "#/$defs/assertLocatorEqualsStep"
               },
               {
                 "$ref": "#/$defs/assertUrlStep"
@@ -384,7 +384,7 @@
         }
       ]
     },
-    "assertTextEqualsStep": {
+    "assertLocatorEqualsStep": {
       "allOf": [
         {
           "$ref": "#/$defs/stepBase"
@@ -397,7 +397,10 @@
           ],
           "properties": {
             "action": {
-              "const": "assert_text_equals"
+              "enum": [
+                "assert_text_equals",
+                "assert_value_equals"
+              ]
             }
           },
           "not": {

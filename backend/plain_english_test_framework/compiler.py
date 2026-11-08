@@ -19,13 +19,17 @@ IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 PLACEHOLDER_PATTERN = re.compile(r"\{(?P<namespace>env|data)\.(?P<path>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\}")
 STEP_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+(?P<body>.+)$")
 OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
-ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into "(?P<label>[^"]+)"$')
+ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into (?P<exact>field )?"(?P<label>[^"]+)"$')
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
 ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact )?(?P<role>heading|link|button) "(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
 LOCATOR_VISIBLE_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be visible$')
 VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact text )?"(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
+VALUE_EQUALS_PATTERN = re.compile(
+    r'(?P<kind>field|css|test id)\s+"(?P<locator>(?:\\["\\]|[^"\\])+)"\s+value\s+should\s+equal\s+"(?P<expected>(?:\\["\\]|[^"\\])*)"',
+    re.IGNORECASE,
+)
 URL_EQUALS_PATTERN = re.compile(r'^URL should be "(?P<url>[^"]+)"$')
 TITLE_EQUALS_PATTERN = re.compile(r'^page title should be "(?P<title>[^"]*)"$')
 LOCATOR_CHECKED_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should (?P<negation>not )?be checked$')
@@ -230,6 +234,7 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "locator": {
                 "strategy": "label",
                 "value": label,
+                **({"exact": True} if match["exact"] else {}),
             },
             "value": value,
         }
@@ -381,6 +386,20 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "original": original,
             "action": "assert_url",
             "url": url,
+        }
+
+    if match := VALUE_EQUALS_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        kind = match["kind"].lower()
+        target = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["locator"]), environment, data, path=path)
+        expected = _resolve_value(re.sub(r'\\(["\\])', r"\1", match["expected"]), environment, data, path=path)
+        return {
+            "id": _slug_identifier(f"assert value {target}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "assert_value_equals",
+            "locator": {"strategy": "label", "value": target, "exact": True} if kind == "field" else _locator_for_kind(kind, target),
+            "expected": expected,
         }
 
     if match := TEXT_EQUALS_PATTERN.match(body):
