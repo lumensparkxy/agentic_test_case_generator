@@ -90,7 +90,10 @@ def authored_cases(fixture: Fixture, context: EnrichInput) -> list[TestCase]:
                 automation_status="Manual" if is_manual else "To Be Automated",
                 linked_requirement_ids=[requirement],
                 execution_prerequisites=context.execution_prerequisites if is_manual else [],
-                steps=[TestStep(step=index, action=action, expected=expected) for index, (action, expected) in enumerate(steps, start=1)],
+                steps=[
+                    TestStep(step=index, action=action.replace("{target}", str(context.app_link)), expected=expected)
+                    for index, (action, expected) in enumerate(steps, start=1)
+                ],
             )
         )
     return cases

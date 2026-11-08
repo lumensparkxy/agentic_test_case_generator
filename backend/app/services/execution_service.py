@@ -46,7 +46,7 @@ QUOTED_PATTERN = re.compile(r"['\"]([^'\"]+)['\"]")
 OBSERVATION_ACTION_PATTERN = re.compile(r"^(?:locate|find|scan|inspect|review|observe|look for)\b", re.IGNORECASE)
 ASSERTION_ACTION_PATTERN = re.compile(r"^(?:verify|assert|confirm|check|URL)\b", re.IGNORECASE)
 ACTION_SEQUENCE_PATTERN = re.compile(
-    r"\b(?:and|then)\s+(?:verify|assert|confirm|check|click|press|tap|select|open|navigate|enter|fill|wait|submit)\b",
+    r"\b(?:and|then)\s+(?:verify|assert|confirm|check|uncheck|click|press|tap|select|open|navigate|enter|fill|wait|submit)\b",
     re.IGNORECASE,
 )
 FILL_PATTERN = re.compile(
@@ -70,6 +70,14 @@ EXACT_SELECT_ACTION = re.compile(
     re.IGNORECASE,
 )
 EXACT_SELECT_INTENT = re.compile(r"^Select\s+exact\b", re.IGNORECASE)
+EXACT_CHECKBOX_ACTION = re.compile(rf"^(?P<verb>Check|Uncheck) exact checkbox\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?$", re.IGNORECASE)
+EXACT_CHECKBOX_ACTION_INTENT = re.compile(r"^(?:Check\s+exact\s+checkbox|Uncheck)\b", re.IGNORECASE)
+EXACT_CHECKBOX_ASSERTION = re.compile(
+    rf"exact\s+checkbox\s+(?P<name>{QUOTED_ASSERTION_TARGET})"
+    r"\s+(?P<state>is(?:\s+not)?|should(?:\s+not)?\s+be)\s+checked",
+    re.IGNORECASE,
+)
+EXACT_CHECKBOX_ASSERTION_INTENT = re.compile(r"^exact\s+checkbox\b", re.IGNORECASE)
 EXPLICIT_OPEN_ACTION = re.compile(r'(?:Open|Navigate to)\s+"([^"\n]+)"\.?', re.IGNORECASE)
 QUOTED_FIELD_ASSERTION_PATTERN = re.compile(
     r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?:should\s+)?'
@@ -521,9 +529,11 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     expected_assertion = _convert_assertion(step.expected)
     exact_click = EXACT_CLICK_ACTION.fullmatch(step.action.strip())
     exact_select = EXACT_SELECT_ACTION.fullmatch(step.action.strip())
+    exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(step.action.strip())
     # A supported assertion's quoted locator and value are data, not operations.
-    action_is_literal = action_value or exact_click or exact_select or (action_assertion and action_assertion.kind == "assert_hidden")
-    expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind == "assert_hidden")
+    literal_assertions = {"assert_hidden", "assert_checked"}
+    action_is_literal = action_value or exact_click or exact_select or exact_checkbox or (action_assertion and action_assertion.kind in literal_assertions)
+    expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
     domain_text = " ".join(("" if action_is_literal else step.action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
     if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
         return [], _unsupported_step(step, "unsupported_non_browser_domain", "manual_execution")
@@ -548,9 +558,19 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         if not (option.strip() and field.strip()):
             return [], _unmapped_step(step, action, is_expected=False)
         converted.append(_ConvertedStep("select_option", f'I select exact option "{_escape_step_text(option)}" in field "{_escape_step_text(field)}"'))
+    elif EXACT_CHECKBOX_ACTION_INTENT.match(action):
+        if not exact_checkbox or not (name := _assertion_literal(exact_checkbox["name"])).strip():
+            return [], _unmapped_step(step, action, is_expected=False)
+        verb = exact_checkbox["verb"].lower()
+        converted.append(_ConvertedStep("set_checked", f'I {verb} exact checkbox "{_escape_step_text(name)}"'))
     elif action_assertion:
         converted.append(action_assertion)
-    elif ASSERTION_ACTION_PATTERN.match(action) or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action) or ACTION_SEQUENCE_PATTERN.search(unquoted_action):
+    elif (
+        ASSERTION_ACTION_PATTERN.match(action)
+        or EXACT_CHECKBOX_ASSERTION_INTENT.match(_assertion_statement(step.action))
+        or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action)
+        or ACTION_SEQUENCE_PATTERN.search(unquoted_action)
+    ):
         return [], _unmapped_step(step, action, is_expected=False)
     elif OBSERVATION_ACTION_PATTERN.match(action):
         # The expected check represents the observation. A control name such
@@ -607,7 +627,7 @@ def is_complete_browser_action(action: str) -> bool:
         return bool(opening and URL_PATTERN.fullmatch(opening[1]))
     if kind == "click":
         return bool(EXACT_CLICK_ACTION.fullmatch(action))
-    return kind in {"fill", "select_option"}
+    return kind in {"fill", "select_option", "set_checked"}
 
 
 def _field_value_assertion(text: str) -> tuple[_ConvertedStep | None, bool]:
@@ -636,6 +656,13 @@ def _assertion_statement(text: str) -> str:
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
     text = _assertion_statement(text)
+    if match := EXACT_CHECKBOX_ASSERTION.fullmatch(text):
+        target = _assertion_literal(match["name"])
+        if not target.strip():
+            return None
+        negation = "not " if "not" in match["state"].lower().split() else ""
+        return _ConvertedStep("assert_checked", f'exact checkbox "{_escape_step_text(target)}" should {negation}be checked')
+
     if match := EXACT_HIDDEN_PATTERN.fullmatch(text):
         target = _assertion_literal(match["target"])
         kind = match["kind"].lower()

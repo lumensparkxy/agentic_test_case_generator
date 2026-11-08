@@ -69,6 +69,13 @@ in the supplied context. The browser verifies one available exact option
 before selecting it. Cases with unsupported or unavailable choices stay
 manual.
 
+For a grounded native checkbox, use `Check exact checkbox "Email receipt"`
+or `Uncheck exact checkbox "Email receipt"`. Use `exact checkbox "Email
+receipt" is checked` or `exact checkbox "Email receipt" is not checked` for
+the state expectation. These expectations describe definite states. Keep any
+save or persistence outcome as its own check. State-setting requires an
+available checkbox with the supplied label.
+
 For an out-of-view state, use an expectation such as
 `exact link "Open receipt" is not visible`. The browser waits for zero visible
 exact matches at that step. Hidden and absent matches both satisfy the check.

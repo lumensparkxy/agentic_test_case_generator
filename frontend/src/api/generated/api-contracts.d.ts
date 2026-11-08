@@ -460,6 +460,7 @@ export interface GroundedContext {
 }
 
 export interface GroundedUIElement {
+	checkbox_available?: boolean | null;
 	description: string;
 	element_type?: "Page" | "Heading" | "Form" | "Field" | "Button" | "Message" | "Filter" | "Navigation" | "Other";
 	href?: string | null;

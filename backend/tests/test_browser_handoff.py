@@ -73,6 +73,37 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertEqual(validate_browser_handoff([case], context(), [requirement]), [])
         self.assertEqual(case.automation_status, "To Be Automated")
 
+    def test_checkbox_handoff_requires_native_availability_for_interaction(self):
+        grounded = context()
+        field = grounded.grounded_context.ui_elements[0]
+        field.checkbox_available = True
+        case = candidate()
+        case.steps[1] = TestStep(step=2, action='Uncheck exact checkbox "Reference"', expected='exact checkbox "Reference" is not checked')
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+
+        for availability, reason in ((False, "unavailable for interaction"), (None, "exact native checkbox")):
+            with self.subTest(availability=availability):
+                field.checkbox_available = availability
+                draft = case.model_copy(deep=True)
+                self.assertIn(reason, validate_browser_handoff([draft], grounded, [REQUIREMENT])[1])
+                self.assertEqual(draft.automation_status, "Manual")
+
+        field.checkbox_available = False
+        observed = case.model_copy(deep=True)
+        observed.steps[1].action = 'Inspect the "Reference" checkbox'
+        self.assertEqual(validate_browser_handoff([observed], grounded, [REQUIREMENT]), [])
+
+    def test_checkbox_text_fill_and_dom_value_check_stay_manual(self):
+        grounded = context()
+        grounded.grounded_context.ui_elements[0].checkbox_available = True
+        for action in ('Enter "Q-17" into the "Reference" field', 'Inspect the "Reference" checkbox'):
+            with self.subTest(action=action):
+                case = candidate()
+                case.steps[1].action = action
+                warnings = validate_browser_handoff([case], grounded, [REQUIREMENT])
+                self.assertIn("known checkbox needs a checked or unchecked", warnings[1])
+                self.assertEqual(case.automation_status, "Manual")
+
     def test_dropdown_handoff_requires_the_exact_option_on_its_grounded_page(self):
         grounded = context()
         field = grounded.grounded_context.ui_elements[0]

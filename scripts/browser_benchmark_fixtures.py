@@ -71,6 +71,20 @@ document.querySelector("form").addEventListener("submit", event => {
 });
 </script></html>"""
 
+PREFERENCES = """<!doctype html><html lang="en"><title>Receipt preferences</title><h1>Receipt preferences</h1>
+<form>
+<label for="email">Email receipt</label><input id="email" type="checkbox">
+<button>Save preferences</button></form><p role="status"></p>
+<script>
+const email = document.querySelector("#email");
+email.checked = localStorage.getItem("email-receipt") === "enabled";
+document.querySelector("form").addEventListener("submit", event => {
+  event.preventDefault();
+  localStorage.setItem("email-receipt", email.checked ? "enabled" : "disabled");
+  document.querySelector("[role=status]").textContent = email.checked ? "Email receipt enabled" : "Email receipt disabled";
+});
+</script></html>"""
+
 FIXTURES = {
     "directory": Fixture(
         route="/directory",
@@ -129,6 +143,67 @@ FIXTURES = {
                 ">Closed</option>",
                 ">Closed archive</option>",
                 'I select exact option "Closed" in field "Order status"',
+            ),
+        ),
+    ),
+    "preferences": Fixture(
+        route="/preferences",
+        pages={"/preferences": PREFERENCES},
+        requirements={
+            "PREF-ENABLE": (
+                'Checking "Email receipt" and pressing "Save preferences" displays exact text "Email receipt enabled". '
+                "Reopening the same page shows the checkbox is still checked."
+            ),
+            "PREF-DISABLE": (
+                'With the preference enabled, unchecking "Email receipt" and pressing "Save preferences" displays exact text '
+                '"Email receipt disabled". Reopening the same page shows the checkbox is still unchecked.'
+            ),
+        },
+        notes=(
+            'The public form starts with "Email receipt" unchecked in a fresh browser session. For the disable case, first check '
+            'it and save using the "Save preferences" button in the same case. Then uncheck it, save, and reopen the same supplied page.'
+        ),
+        controls=(
+            (
+                "PREF-ENABLE",
+                (
+                    ('Check exact checkbox "Email receipt"', 'exact checkbox "Email receipt" is checked'),
+                    ('Click exact button "Save preferences"', 'exact text "Email receipt enabled" is visible'),
+                    ('Open "{target}"', 'exact checkbox "Email receipt" is checked'),
+                ),
+            ),
+            (
+                "PREF-DISABLE",
+                (
+                    ('Check exact checkbox "Email receipt"', 'exact checkbox "Email receipt" is checked'),
+                    ('Click exact button "Save preferences"', 'exact text "Email receipt enabled" is visible'),
+                    ('Uncheck exact checkbox "Email receipt"', 'exact checkbox "Email receipt" is not checked'),
+                    ('Click exact button "Save preferences"', 'exact text "Email receipt disabled" is visible'),
+                    ('Open "{target}"', 'exact checkbox "Email receipt" is not checked'),
+                ),
+            ),
+        ),
+        defects=(
+            Defect(
+                "lost-enabled-preference",
+                "PREF-ENABLE",
+                '? "enabled" : "disabled"',
+                '? "disabled" : "disabled"',
+                'exact checkbox "Email receipt" should be checked',
+            ),
+            Defect(
+                "lost-disabled-preference",
+                "PREF-DISABLE",
+                '? "enabled" : "disabled"',
+                '? "enabled" : "enabled"',
+                'exact checkbox "Email receipt" should not be checked',
+            ),
+            Defect(
+                "mixed-disabled-preference",
+                "PREF-DISABLE",
+                'email.checked = localStorage.getItem("email-receipt")',
+                'email.indeterminate = localStorage.getItem("email-receipt") === "disabled";\nemail.checked = localStorage.getItem("email-receipt")',
+                'exact checkbox "Email receipt" should not be checked',
             ),
         ),
     ),

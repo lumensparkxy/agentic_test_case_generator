@@ -477,6 +477,46 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('page.getByRole("link", { name: "Open receipt", exact: true, includeHidden: true }).filter({ visible: true })).toHaveCount(0)', generated)
         self.assertIn(r'page.getByText("Receipt \"saved\"", { exact: true }).filter({ visible: true })).toHaveCount(0)', generated)
 
+    def test_exact_checkbox_states_preserve_the_native_action_and_expectations(self) -> None:
+        url = "https://example.test/preferences"
+        case = TestCase(
+            id="TC-PREF",
+            title="Persist the receipt preference",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action=r'Check exact checkbox "Email \"receipt\""', expected=r'exact checkbox "Email \"receipt\"" is checked'),
+                TestStep(step=3, action=r'Uncheck exact checkbox "Email \"receipt\""', expected=r'exact checkbox "Email \"receipt\"" should not be checked'),
+                TestStep(step=4, action="Inspect the saved choice", expected='css "#email" should not be checked'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "set_checked", "assert_checked", "set_checked", "assert_checked", "assert_checked"])
+        self.assertEqual([steps[1]["value"], steps[2]["expected"], steps[3]["value"], steps[4]["expected"]], [True, True, False, False])
+        self.assertEqual(steps[1]["locator"], {"strategy": "label", "value": 'Email "receipt"', "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn("checkbox.setChecked(true)", generated)
+        self.assertIn("checkbox.setChecked(false)", generated)
+        self.assertIn('input[type="checkbox"]', generated)
+        self.assertIn('input[type="checkbox"]:not(:indeterminate)', generated)
+        self.assertIn("toBeChecked({ checked: false })", generated)
+        self.assertIn('page.locator("#email")).not.toBeChecked()', generated)
+
+        for malformed in (
+            'Check exact checkbox "Email receipt" and save preferences',
+            'Uncheck exact checkbox ""',
+            'Uncheck exact radio "Open preferences"',
+            'exact checkbox "Open preferences" is not checked after saving',
+        ):
+            with self.subTest(action=malformed):
+                case.steps[1].action = malformed
+                invalid = preview_execution([case], target_base_url=url)
+                self.assertEqual(invalid.summary.executable, 0)
+                self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
+
     def test_exact_dropdown_selection_compiles_as_a_native_option_action(self) -> None:
         url = "https://example.test/orders"
         case = TestCase(

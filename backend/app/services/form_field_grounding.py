@@ -23,6 +23,7 @@ class FormField:
     label: str
     hint: str
     select_options: tuple[str, ...] | None
+    checkbox_available: bool | None
 
 
 @dataclass
@@ -72,6 +73,7 @@ class _FormMarkup(HTMLParser):
         self.fields: list[dict[str, str]] = []
         self.labels: list[_NativeLabel] = []
         self.selects: dict[int, tuple[str, ...]] = {}
+        self.checkboxes: dict[int, bool] = {}
         self._open_label: _NativeLabel | None = None
         self._select: _NativeSelect | None = None
         self._fieldsets: list[bool] = []
@@ -119,6 +121,8 @@ class _FormMarkup(HTMLParser):
         if tag in _FIELDS and not (tag == "input" and input_type in _BUTTON_INPUTS):
             field_index = len(self.fields)
             self.fields.append(attrs)
+            if tag == "input" and input_type == "checkbox":
+                self.checkboxes[field_index] = not any(self._fieldsets) and not _unavailable(attrs)
             if tag == "select":
                 available = not any(self._fieldsets) and not _unavailable(attrs) and "multiple" not in attrs
                 self.selects[field_index] = ()
@@ -198,5 +202,12 @@ def extract_form_fields(html: str) -> list[FormField]:
         verified = name if name_counts[name] == 1 and "hidden" not in attrs else ""
         hint = _label_text(attrs.get("id") or attrs.get("name") or attrs.get("placeholder") or "")
         if verified or hint:
-            fields.append(FormField(verified, hint, markup.selects.get(index) if verified else None))
+            fields.append(
+                FormField(
+                    verified,
+                    hint,
+                    markup.selects.get(index) if verified else None,
+                    markup.checkboxes.get(index) if verified else None,
+                )
+            )
     return fields

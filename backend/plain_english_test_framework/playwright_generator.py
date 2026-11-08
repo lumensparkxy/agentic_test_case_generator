@@ -15,6 +15,7 @@ SUPPORTED_ACTIONS = {
     "navigate",
     "fill",
     "select_option",
+    "set_checked",
     "click",
     "assert_visible",
     "assert_hidden",
@@ -136,6 +137,18 @@ def _render_action(step: Mapping[str, Any]) -> str:
         )
     if action == "click":
         return f"await {_render_locator(step['locator'])}.click();"
+    if action == "set_checked":
+        locator = _render_locator(step["locator"])
+        checked = json.dumps(step["value"])
+        return "\n".join(
+            (
+                f"const checkbox = {locator}.and(page.locator('input[type=\"checkbox\"]'));",
+                "await expect(checkbox).toBeVisible();",
+                "await expect(checkbox).toBeEnabled();",
+                f"await checkbox.setChecked({checked});",
+                f'await expect(checkbox.and(page.locator(":not(:indeterminate)"))).toBeChecked({{ checked: {checked} }});',
+            )
+        )
     if action == "assert_visible":
         return f"await expect({_render_locator(step['locator'])}).toBeVisible();"
     if action == "assert_hidden":
@@ -153,6 +166,10 @@ def _render_action(step: Mapping[str, Any]) -> str:
     if action == "assert_title":
         return f"await expect(page).toHaveTitle({_js_string(_to_playwright_text(step['expected']))});"
     if action == "assert_checked":
+        if step["locator"]["strategy"] == "label" and step["locator"].get("exact"):
+            locator = _render_locator(step["locator"])
+            checked = json.dumps(_to_bool(step["expected"]))
+            return f"await expect({locator}.and(page.locator('input[type=\"checkbox\"]:not(:indeterminate)'))).toBeChecked({{ checked: {checked} }});"
         if _to_bool(step["expected"]):
             return f"await expect({_render_locator(step['locator'])}).toBeChecked();"
         return f"await expect({_render_locator(step['locator'])}).not.toBeChecked();"

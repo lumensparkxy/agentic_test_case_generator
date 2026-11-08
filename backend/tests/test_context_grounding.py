@@ -72,6 +72,24 @@ class ContextGroundingTests(unittest.TestCase):
         self.assertEqual([element.name for element in fields], ["dup", "one", "two", "referenced", "Identifier only"])
         self.assertTrue(all(element.description.startswith("Field identifier extracted from artifact:") for element in fields))
 
+    def test_checkbox_evidence_marks_available_and_disabled_native_inputs(self) -> None:
+        elements = extract_ui_elements_from_html(
+            "APP",
+            """
+            <label><input type="checkbox" value="private-id">Email receipt</label>
+            <input type="checkbox" aria-label="Blocked" disabled>
+            <fieldset disabled><input type="checkbox" aria-label="Grouped"></fieldset>
+            <input type="checkbox" aria-label="ARIA blocked" aria-disabled="true">
+            <input type="radio" aria-label="Radio">
+            <input aria-label="Text">
+            """,
+        )
+        self.assertEqual(
+            {element.name: element.checkbox_available for element in elements},
+            {"Email receipt": True, "Blocked": False, "Grouped": False, "ARIA blocked": False, "Radio": None, "Text": None},
+        )
+        self.assertNotIn("private-id", str(elements))
+
     def test_native_dropdowns_keep_exact_available_labels_and_omit_dom_values(self) -> None:
         fields = extract_ui_elements_from_html(
             "APP",

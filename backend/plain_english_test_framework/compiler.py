@@ -22,6 +22,8 @@ OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into (?P<exact>field )?"(?P<label>[^"]+)"$')
 EXACT_CLICK_PATTERN = re.compile(r'^I click exact (?P<role>button|link) "(?P<name>(?:\\["\\]|[^"\\])+)"$')
 EXACT_SELECT_PATTERN = re.compile(r'^I select exact option "(?P<option>(?:\\["\\]|[^"\\])+)" in field "(?P<field>(?:\\["\\]|[^"\\])+)"$')
+CHECKBOX_ACTION_PATTERN = re.compile(r'^I (?P<verb>check|uncheck) exact checkbox "(?P<label>(?:\\["\\]|[^"\\])+)"$')
+CHECKBOX_ASSERTION_PATTERN = re.compile(r'^exact checkbox "(?P<label>(?:\\["\\]|[^"\\])+)" should (?P<negation>not )?be checked$')
 EXACT_HIDDEN_PATTERN = re.compile(r'^exact (?P<kind>heading|link|button|text) "(?P<target>(?:\\["\\]|[^"\\])+)" should not be visible$')
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
@@ -253,6 +255,20 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "action": "select_option",
             "locator": {"strategy": "label", "value": label, "exact": True},
             "value": option,
+        }
+
+    checkbox_action = CHECKBOX_ACTION_PATTERN.fullmatch(body)
+    if match := checkbox_action or CHECKBOX_ASSERTION_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        label = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["label"]), environment, data, path=path)
+        checked = match["verb"] == "check" if checkbox_action else not bool(match["negation"])
+        return {
+            "id": _slug_identifier(f"checkbox {label} {'checked' if checked else 'unchecked'}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "set_checked" if checkbox_action else "assert_checked",
+            "locator": {"strategy": "label", "value": label, "exact": True},
+            "value" if checkbox_action else "expected": checked,
         }
 
     if match := EXACT_CLICK_PATTERN.fullmatch(body):

@@ -131,6 +131,7 @@ def extract_ui_elements_from_html(
                 element_type="Field",
                 description=description,
                 select_options=list(field.select_options) if field.select_options is not None else None,
+                checkbox_available=field.checkbox_available,
             )
         )
 

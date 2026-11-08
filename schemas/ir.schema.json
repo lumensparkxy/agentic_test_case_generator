@@ -290,12 +290,12 @@
           ],
           "properties": {
             "action": {
-              "enum": ["fill", "select_option"]
+              "enum": ["fill", "select_option", "set_checked"]
             }
           },
           "if": {
             "properties": {
-              "action": { "const": "select_option" }
+              "action": { "enum": ["select_option", "set_checked"] }
             }
           },
           "then": {
@@ -306,10 +306,19 @@
                   "strategy": { "const": "label" },
                   "exact": { "const": true }
                 }
-              },
-              "value": { "type": "string", "minLength": 1 }
+              }
             }
           },
+          "allOf": [
+            {
+              "if": { "properties": { "action": { "const": "select_option" } } },
+              "then": { "properties": { "value": { "type": "string", "minLength": 1 } } }
+            },
+            {
+              "if": { "properties": { "action": { "const": "set_checked" } } },
+              "then": { "properties": { "value": { "type": "boolean" } } }
+            }
+          ],
           "not": {
             "anyOf": [
               {
