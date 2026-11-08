@@ -94,13 +94,13 @@ test.describe("Generated Room Booking execution", () => {
 				assertSourceMapping(imported.current_snapshots.requirements.payload.requirements);
 				const approved = await approveRequirements(page, fixture);
 				const requirements = approved.current_snapshots.requirements.payload.requirements;
-				const retryRequirements = requirements.filter(
-					(row) =>
-						/\bretr(?:y|ies|ying)\b/i.test(row.text) &&
-						row.sources.some(
-							(source) =>
-								source.excerpt_verified && source.original_requirement_ids.includes("ROOM-440") && /response/i.test(source.excerpt)
-						)
+				const retryRequirements = requirements.filter((row) =>
+					row.sources.some(
+						(source) =>
+							source.excerpt_verified &&
+							source.original_requirement_ids.includes("ROOM-440") &&
+							/first successful response is interrupted,\s+retrying the same pending submission/.test(source.excerpt)
+					)
 				);
 				expect(retryRequirements.length, "Verified ROOM-440 response-loss retry requirement").toBeGreaterThan(0);
 				const proxyPage = await page.request.get(lossTarget, { timeout: 5000 });
