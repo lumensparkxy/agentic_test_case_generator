@@ -288,7 +288,15 @@ def update_finding(project_id, identity, actor, payload: QualityFindingAction, r
                     case.pop(key)
             case["status"] = "Draft"
     cases_payload["approved"] = False
-    cases_payload["review"] = {**cases_payload.get("review", {}), "approved": False, "summary": "Prerequisites changed; re-review required."}
+    review_reason = "Prerequisites changed; re-review required."
+    assessment = cases_payload.get("substantive_assessment") or {}
+    review = cases_payload.get("review") or {}
+    if assessment.get("design_status") == "assessed_complete" and assessment.get("execution_status") == "blocked":
+        review["blocking_issues"] = [issue for issue in review.get("blocking_issues", []) if issue != assessment.get("reason")]
+    cases_payload["review"] = {**review, "approved": False, "summary": review_reason}
+    cases_payload["substantive_assessment"] = {"status": "unknown", "reason": review_reason}
+    if cases_payload.get("coverage_metrics") is not None:
+        cases_payload["coverage_metrics"]["substantive_coverage_status"] = "unknown"
     revision = project.current_revision + 1
     states = {stage: value.model_dump(mode="json") for stage, value in project.stage_state.items()}
     for stage in projects.DOWNSTREAM_STAGES["context"]:

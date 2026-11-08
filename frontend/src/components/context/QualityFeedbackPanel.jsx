@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Select, Textarea } from "../ui/controls";
+import { Button, Input, Link, Select, Textarea } from "../ui/controls";
 import { Surface, Disclosure } from "../ui/surfaces";
+import { buildProjectPath } from "../../app/workflowRoutes";
 
 const categories = [
 	"unknown",
@@ -13,6 +14,14 @@ const categories = [
 	"application_defect",
 ];
 const kinds = ["test_data", "credential", "role", "environment", "setup", "cleanup"];
+const prerequisiteCategories = {
+	test_data: "missing_data",
+	credential: "access",
+	role: "access",
+	environment: "environment",
+	setup: "environment",
+	cleanup: "environment",
+};
 const words = (value) => value.replaceAll("_", " ");
 const ids = (value) =>
 	value
@@ -20,7 +29,27 @@ const ids = (value) =>
 		.map((s) => s.trim())
 		.filter(Boolean);
 
-export default function QualityFeedbackPanel({ request, projectId, onUpdated }) {
+function resolvePrerequisite(project, search) {
+	const query = new URLSearchParams(search);
+	const snapshot = project?.current_snapshots?.test_cases;
+	if (!snapshot || snapshot.snapshot_id !== query.get("snapshot") || project.stage_state?.test_cases?.stale) return null;
+	const name = query.get("prerequisite");
+	const caseId = query.get("case");
+	const assessment = snapshot.payload?.substantive_assessment;
+	if (
+		!name ||
+		!caseId ||
+		assessment?.execution_status !== "blocked" ||
+		!Array.isArray(assessment.execution_blockers) ||
+		!assessment.execution_blockers.some((row) => row.test_case_id === caseId && row.prerequisite_name === name)
+	)
+		return null;
+	const testCase = snapshot.payload.test_cases?.find((row) => row.id === caseId);
+	const prerequisite = testCase?.execution_prerequisites?.find((row) => row.name === name && row.status === "missing");
+	return prerequisite ? { snapshotId: snapshot.snapshot_id, testCase, prerequisite } : null;
+}
+
+export default function QualityFeedbackPanel({ request, projectId, prerequisiteSearch, onUpdated }) {
 	const [data, setData] = useState(null);
 	const [project, setProject] = useState(null);
 	const [error, setError] = useState("");
@@ -46,6 +75,13 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 	const alive = useRef(true);
 	const inFlight = useRef(false);
 	const attempt = useRef(null);
+	const heading = useRef(null);
+	const linkPrefilled = useRef(false);
+	const linked = prerequisiteSearch ? resolvePrerequisite(project, prerequisiteSearch) : null;
+	const projectLoaded = Boolean(project);
+	useEffect(() => {
+		if (prerequisiteSearch && projectLoaded) heading.current?.focus();
+	}, [prerequisiteSearch, projectLoaded]);
 	useEffect(() => {
 		alive.current = true;
 		return () => {
@@ -66,6 +102,22 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 		if (alive.current) {
 			setData(findings);
 			setProject(current);
+			const selection = prerequisiteSearch && !linkPrefilled.current ? resolvePrerequisite(current, prerequisiteSearch) : null;
+			if (selection) {
+				const { testCase, prerequisite } = selection;
+				linkPrefilled.current = true;
+				setForm((old) => ({
+					...old,
+					category: prerequisiteCategories[prerequisite.kind],
+					summary: `Execution prerequisite ${prerequisite.name} is missing for ${testCase.id}.`.slice(0, 1000),
+					expected_behavior: (testCase.expected_result || "").slice(0, 1000),
+					test_case_ids: testCase.id,
+					requirement_ids: (testCase.linked_requirement_ids || []).join(", "),
+					name: prerequisite.name,
+					kind: prerequisite.kind,
+					description: prerequisite.description,
+				}));
+			}
 			setSourceId((previous) =>
 				Object.values(current.current_snapshots || {}).some((snapshot) => snapshot.snapshot_id === previous) ? previous : ""
 			);
@@ -112,7 +164,9 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 		project?.current_snapshots?.requirements;
 	return (
 		<Surface as="section" className="result-section" aria-labelledby="quality-feedback-heading">
-			<h3 id="quality-feedback-heading">Quality feedback</h3>
+			<h3 id="quality-feedback-heading" ref={heading} tabIndex={-1}>
+				Quality feedback
+			</h3>
 			<p>Capture findings from any stage. Correct missing prerequisites, preserve business assertions, and verify corrections.</p>
 			{error && <p role="alert">{error}</p>}
 			{notice && <p role="status">{notice}</p>}
@@ -120,19 +174,26 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 				Refresh findings
 			</Button>
 			{data && <p>{data.findings.filter((f) => f.status !== "verified").length} findings awaiting resolution or verification</p>}
-			<Disclosure>
+			{prerequisiteSearch && projectLoaded && !linked && (
+				<p role="status">
+					This prerequisite link is no longer current. <Link href={buildProjectPath(projectId, "test-cases")}>Return to Test Cases</Link> to
+					review the latest findings.
+				</p>
+			)}
+			<Disclosure hidden={Boolean(prerequisiteSearch && !linked)} open={linked ? true : undefined}>
 				<summary>Record a quality finding</summary>
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
+						if (prerequisiteSearch && !linked) return;
 						save(`/projects/${projectId}/quality-findings`, {
 							base_project_revision: project.current_revision,
-							source_snapshot_id: sourceId || source.snapshot_id,
+							source_snapshot_id: linked?.snapshotId || sourceId || source.snapshot_id,
 							category: form.category,
 							summary: form.summary,
 							expected_behavior: form.expected_behavior,
-							test_case_ids: ids(form.test_case_ids),
-							requirement_ids: ids(form.requirement_ids),
+							test_case_ids: linked ? [linked.testCase.id] : ids(form.test_case_ids),
+							requirement_ids: linked ? linked.testCase.linked_requirement_ids || [] : ids(form.requirement_ids),
 							environment: form.environment,
 							prerequisites: form.name ? [{ name: form.name, kind: form.kind, description: form.description, status: "missing" }] : [],
 						});
@@ -142,7 +203,11 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 						<legend>Record a finding</legend>
 						<label>
 							Evidence snapshot
-							<Select value={sourceId || source?.snapshot_id || ""} onChange={(event) => setSourceId(event.target.value)}>
+							<Select
+								disabled={Boolean(linked)}
+								value={linked?.snapshotId || sourceId || source?.snapshot_id || ""}
+								onChange={(event) => setSourceId(event.target.value)}
+							>
 								{Object.entries(project?.current_snapshots || {}).map(([stage, snapshot]) => (
 									<option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
 										{words(stage)} — version {snapshot.version}
@@ -170,11 +235,21 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 						</label>
 						<label>
 							Affected test case IDs
-							<Input value={form.test_case_ids} onChange={change("test_case_ids")} placeholder="TC-001, TC-002" />
+							<Input
+								readOnly={Boolean(linked)}
+								value={form.test_case_ids}
+								onChange={change("test_case_ids")}
+								placeholder="TC-001, TC-002"
+							/>
 						</label>
 						<label>
 							Requirement IDs
-							<Input value={form.requirement_ids} onChange={change("requirement_ids")} placeholder="REQ-001, REQ-002" />
+							<Input
+								readOnly={Boolean(linked)}
+								value={form.requirement_ids}
+								onChange={change("requirement_ids")}
+								placeholder="REQ-001, REQ-002"
+							/>
 						</label>
 						<label>
 							Environment
@@ -182,11 +257,17 @@ export default function QualityFeedbackPanel({ request, projectId, onUpdated }) 
 						</label>
 						<label>
 							Missing prerequisite name
-							<Input value={form.name} onChange={change("name")} placeholder="supervisor_login" pattern="[A-Za-z][A-Za-z0-9_.-]*" />
+							<Input
+								readOnly={Boolean(linked)}
+								value={form.name}
+								onChange={change("name")}
+								placeholder="supervisor_login"
+								pattern="[A-Za-z][A-Za-z0-9_.-]*"
+							/>
 						</label>
 						<label>
 							Prerequisite kind
-							<Select value={form.kind} onChange={change("kind")}>
+							<Select disabled={Boolean(linked)} value={form.kind} onChange={change("kind")}>
 								{kinds.map((k) => (
 									<option key={k} value={k}>
 										{words(k)}

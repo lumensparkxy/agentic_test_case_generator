@@ -3789,7 +3789,10 @@ export default function App() {
 		{
 			id: "improve",
 			label: "Improve tests",
-			badge: improvementFindings(testCaseReview).length + Number(browserHandoffWarnings.length > 0),
+			badge:
+				improvementFindings(testCaseReview, substantiveAssessment).length +
+				(substantiveAssessment?.execution_blockers?.length || 0) +
+				Number(browserHandoffWarnings.length > 0),
 			variant: testCaseReview?.approved === false || browserHandoffWarnings.length > 0 ? "warning" : "muted",
 		},
 	];
@@ -5185,6 +5188,7 @@ export default function App() {
 											project={currentProject}
 											request={apiRequest}
 											projectId={navigationProjectId}
+											prerequisiteSearch={new URLSearchParams(location.search).has("prerequisite") ? location.search : ""}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
 											appLink={appLink}
 											setAppLink={setAppLink}
@@ -5351,6 +5355,9 @@ export default function App() {
 																key={sourceCaseSnapshot}
 																review={testCaseReview}
 																assessment={substantiveAssessment}
+																prerequisiteSnapshotId={
+																	projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id
+																}
 																browserHandoffWarnings={browserHandoffWarnings}
 																meta={testCaseReviewMeta}
 																testCases={testCases}

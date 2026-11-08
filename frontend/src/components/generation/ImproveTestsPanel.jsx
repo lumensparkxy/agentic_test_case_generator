@@ -1,6 +1,6 @@
 import useReviewDraft from "../../hooks/useReviewDraft";
 import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
-import BusinessCoverageSummary from "./BusinessCoverageSummary";
+import BusinessCoverageSummary, { ExecutionSetupSummary } from "./BusinessCoverageSummary";
 import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
 import { improvementFindings, findingCaseIds, improvementFeedback } from "./improvementFindings";
@@ -14,6 +14,7 @@ export default function ImproveTestsPanel({
 	onClearReport,
 	summary,
 	assessment,
+	prerequisiteSnapshotId,
 	browserHandoffWarnings,
 	meta,
 	testCases,
@@ -27,7 +28,8 @@ export default function ImproveTestsPanel({
 	onViewCase,
 	onReviewCases,
 }) {
-	const findings = improvementFindings(review);
+	const findings = improvementFindings(review, assessment);
+	const needsOnlySetup = assessment?.design_status === "assessed_complete" && assessment.execution_status === "blocked" && !findings.length;
 	const recovery = useReviewDraft({
 		identity,
 		projectId,
@@ -109,9 +111,18 @@ export default function ImproveTestsPanel({
 					</Button>
 				</div>
 			)}
-			<h2>{review?.approved ? "Machine quality check passed" : review ? "What needs fixing" : "Review your test cases"}</h2>
+			<h2>
+				{needsOnlySetup
+					? "Execution setup needed"
+					: review?.approved
+						? "Machine quality check passed"
+						: review
+							? "What needs fixing"
+							: "Review your test cases"}
+			</h2>
 			<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
 			<BusinessCoverageSummary assessment={assessment} />
+			<ExecutionSetupSummary assessment={assessment} projectId={projectId} prerequisiteSnapshotId={prerequisiteSnapshotId} />
 			{browserHandoffWarnings.length > 0 && (
 				<div>
 					<h3>Browser handoff</h3>
@@ -198,21 +209,25 @@ export default function ImproveTestsPanel({
 					))}
 				</fieldset>
 			)}
-			<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
-			<Textarea
-				id={instructionsId}
-				value={instructions}
-				onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
-				disabled={locked}
-				rows={4}
-				placeholder="Describe any details the fixes should take into account…"
-			/>
-			<div className="button-row improve-tests-actions">
-				<Button disabled={!canApply} onClick={() => void apply()}>
-					{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
-				</Button>
-				<span>{chosen.length} selected</span>
-			</div>
+			{(!needsOnlySetup || target) && (
+				<>
+					<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
+					<Textarea
+						id={instructionsId}
+						value={instructions}
+						onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
+						disabled={locked}
+						rows={4}
+						placeholder="Describe any details the fixes should take into account…"
+					/>
+					<div className="button-row improve-tests-actions">
+						<Button disabled={!canApply} onClick={() => void apply()}>
+							{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
+						</Button>
+						<span>{chosen.length} selected</span>
+					</div>
+				</>
+			)}
 		</section>
 	);
 }

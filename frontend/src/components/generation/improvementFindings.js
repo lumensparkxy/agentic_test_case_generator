@@ -1,6 +1,12 @@
-export function improvementFindings(review) {
+export function improvementFindings(review, assessment) {
+	const setupReason =
+		assessment?.design_status === "assessed_complete" && assessment.execution_status === "blocked" ? assessment.reason : null;
 	return [
-		...new Set([...(review?.blocking_issues || []), ...(review?.unmet_criteria || [])].map((item) => String(item).trim()).filter(Boolean)),
+		...new Set(
+			[...(review?.blocking_issues || []), ...(review?.unmet_criteria || [])]
+				.map((item) => String(item).trim())
+				.filter((item) => item && item !== setupReason)
+		),
 	];
 }
 export function findingCaseIds(finding, testCases) {

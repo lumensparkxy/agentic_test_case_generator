@@ -9,6 +9,12 @@ skills reinforce the same method; project facts remain scoped approved knowledge
 
 ## Product workflow
 
+In **Test Cases → Improve tests**, business coverage and execution setup appear
+separately. For a named missing prerequisite, open its link to review a finding
+prefilled from the current saved case. Check the environment and record the
+finding before applying a correction in **Context → Quality feedback**. Links
+to stale or mismatched cases require returning to the current Test Cases view.
+
 In **Context → Quality feedback**, select the evidence snapshot and record the
 observed problem, expected behavior, affected case IDs, environment and missing
 prerequisites. Execution previews and failed/invalid/skipped results also create
@@ -21,7 +27,9 @@ and choose **Apply prerequisite correction**. This atomically creates new Contex
 and Test Cases snapshots. The old evidence remains immutable; corrected cases are
 drafts, upstream scenarios and downstream execution/reports require review.
 Business assertions are preserved. Regenerate/review affected artifacts using the
-normal workflow before execution. Changed source suites reject stale corrections.
+normal workflow before execution. The new suite requires a fresh substantive
+assessment, and the previous assessment stays with its original snapshot.
+Changed source suites reject stale corrections.
 Three correction attempts are the maximum per finding.
 
 A configured reference is not a verified resource. **Verify against latest

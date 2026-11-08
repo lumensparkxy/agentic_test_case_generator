@@ -7,6 +7,7 @@ import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
 	request,
 	projectId,
+	prerequisiteSearch,
 	project,
 	onProjectUpdated,
 	appLink,
@@ -136,7 +137,13 @@ export default function ContextInputsPanel({
 				<ProjectSyncPanel key={`sync-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
 			{projectId && request && (
-				<QualityFeedbackPanel key={`feedback-${projectId}`} request={request} projectId={projectId} onUpdated={onProjectUpdated} />
+				<QualityFeedbackPanel
+					key={`feedback-${projectId}:${prerequisiteSearch}`}
+					request={request}
+					projectId={projectId}
+					prerequisiteSearch={prerequisiteSearch}
+					onUpdated={onProjectUpdated}
+				/>
 			)}
 			{projectId && request && (
 				<Disclosure className="context-knowledge-details">

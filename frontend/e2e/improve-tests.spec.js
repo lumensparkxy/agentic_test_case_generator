@@ -93,6 +93,69 @@ test("shows the saved browser handoff reason independently of business approval"
 	await expect(panel(page)).not.toContainText("Internal workflow warning");
 });
 
+test("a setup-only finding leads to the exact saved prerequisite, with no automatic write", { tag: "@p1" }, async ({ page }) => {
+	const reason = "Business test design is assessed. Resolve declared execution prerequisites before approval.";
+	const prerequisite = { name: "supervisor_login", kind: "credential", description: "Account with Supervisor role", status: "missing" };
+	const { api, project, requests } = await open(page, {
+		payload: {
+			test_cases: [cases[0], { ...cases[1], expected_result: "Checkout is saved", execution_prerequisites: [prerequisite] }],
+			review: { approved: false, score: 100, threshold: 90, summary: reason, blocking_issues: [reason] },
+			substantive_assessment: {
+				status: "incomplete",
+				design_status: "assessed_complete",
+				execution_status: "blocked",
+				execution_blockers: [{ test_case_id: "TC-002", prerequisite_name: prerequisite.name }],
+				reason,
+				obligations: [],
+				case_grounding: [],
+			},
+		},
+	});
+	const captures = [];
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/quality-findings`, (route) => {
+		if (route.request().method() === "POST") captures.push(route.request().postDataJSON());
+		return route.fulfill({ json: { project_revision: 7, findings: [] } });
+	});
+	await page.reload();
+	const coverage = page.getByRole("region", { name: "Business coverage assessment" });
+	const setup = page.getByRole("region", { name: "Execution setup" });
+	await expect(coverage).toContainText("Business coverage: assessed complete");
+	await expect(setup).toContainText("TC-002");
+	await expect(setup).toContainText(prerequisite.name);
+	await expect(panel(page).getByRole("heading", { name: "Execution setup needed" })).toBeVisible();
+	await expect(panel(page).getByRole("checkbox", { name: reason, exact: true })).toHaveCount(0);
+	await expect(panel(page).getByRole("button", { name: /^Apply / })).toHaveCount(0);
+	const link = setup.getByRole("link", { name: "Review prerequisite supervisor_login for TC-002" });
+	const href = await link.getAttribute("href");
+	await link.focus();
+	await link.press("Enter");
+	const feedback = page.getByRole("region", { name: "Quality feedback" });
+	await expect(feedback.getByRole("heading", { name: "Quality feedback" })).toBeFocused();
+	await expect(feedback.getByLabel("Evidence snapshot")).toHaveValue("cases-v1");
+	await expect(feedback.getByLabel("Finding type")).toHaveValue("access");
+	await expect(feedback.getByLabel("Affected test case IDs")).toHaveValue("TC-002");
+	await expect(feedback.getByLabel("Missing prerequisite name")).toHaveValue(prerequisite.name);
+	await expect(feedback.getByLabel("Prerequisite description")).toHaveValue(prerequisite.description);
+	await expect(feedback.getByLabel("Expected behavior")).toHaveValue("Checkout is saved");
+	expect(captures).toHaveLength(0);
+	expect(requests).toHaveLength(0);
+	await feedback.getByRole("button", { name: "Record finding", exact: true }).click();
+	await expect.poll(() => captures.length).toBe(1);
+	expect(captures[0]).toMatchObject({ source_snapshot_id: "cases-v1", test_case_ids: ["TC-002"], prerequisites: [prerequisite] });
+	const mismatched = new URL(href, page.url());
+	mismatched.searchParams.set("case", "TC-001");
+	await page.goto(mismatched.href);
+	await expect(feedback).toContainText("This prerequisite link is no longer current.");
+	await expect(feedback.getByRole("button", { name: "Record finding", exact: true })).not.toBeVisible();
+	project.current_snapshots.test_cases.snapshot_id = "cases-v2";
+	project.stage_state.test_cases.current_snapshot_id = "cases-v2";
+	api.setProject(project);
+	await page.goto(href);
+	await expect(feedback).toContainText("This prerequisite link is no longer current.");
+	await expect(feedback.getByRole("button", { name: "Record finding", exact: true })).not.toBeVisible();
+	expect(captures).toHaveLength(1);
+});
+
 test("failed review opens actionable findings; selection and instructions survive tab switches and navigate to the exact case", async ({
 	page,
 }) => {
@@ -267,6 +330,9 @@ for (const width of [390, 1488]) {
 			payload: {
 				substantive_assessment: {
 					status: "incomplete",
+					design_status: "incomplete",
+					execution_status: "blocked",
+					execution_blockers: [{ test_case_id: "TC-002", prerequisite_name: "fixture_for_supervisor" }],
 					reason: "Independent design review; no booking execution.",
 					obligations: [
 						{
@@ -275,7 +341,10 @@ for (const width of [390, 1488]) {
 							obligation: "Create at upper boundary 8",
 							status: "unmet",
 							reason: "Only entering 8 does not observe creation.",
-							evidence: [{ test_case_id: "TC-002", step: 1, action: "Enter 8", expected: "Field contains 8" }],
+							evidence: [
+								{ test_case_id: "TC-002", step: 1, action: "Enter 8", expected: "Field contains 8" },
+								{ test_case_id: "TC-002", step: 2, action: "Click Book", expected: "" },
+							],
 						},
 					],
 					case_grounding: [
@@ -300,7 +369,10 @@ for (const width of [390, 1488]) {
 		await region.getByText("Source obligations and prerequisites", { exact: true }).click();
 		await expect(region).toContainText("Create at upper boundary 8 — unmet");
 		await expect(region).toContainText("TC-002, step 1: Enter 8 → Field contains 8");
+		await expect(region.getByText("TC-002, step 2: Click Book", { exact: true })).toBeVisible();
 		await expect(region).toContainText("Provision Alice");
+		await expect(page.getByRole("region", { name: "Execution setup" })).toContainText("fixture_for_supervisor");
+		await expect(panel(page).getByRole("checkbox", { name: issue, exact: true })).toBeVisible();
 		await page.reload();
 		await expect(region).toContainText("Business coverage: incomplete");
 		await region.getByText("Source obligations and prerequisites", { exact: true }).click();

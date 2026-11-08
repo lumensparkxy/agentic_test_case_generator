@@ -242,7 +242,8 @@ export default function GeneratedTestCasesView({
 													.filter((evidence) => evidence.test_case_id === selected.id)
 													.map((evidence, i) => (
 														<p key={i}>
-															Step {evidence.step}: {evidence.action} → {evidence.expected}
+															Step {evidence.step}: {evidence.action}
+															{evidence.expected ? ` → ${evidence.expected}` : ""}
 														</p>
 													))}
 											</div>
