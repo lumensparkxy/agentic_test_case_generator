@@ -494,6 +494,11 @@ class ExecutionServiceTests(unittest.TestCase):
                 TestStep(step=4, action='Verify test id "empty-input" value should equal ""', expected=""),
                 TestStep(step=5, action=r'Verify css "#backup-notes" value should equal "  Keep  spacing and \"quotes\"  "', expected=""),
                 TestStep(step=6, action='Enter "Taylor" into the "Employee name" field', expected='"Summary" should equal "Ready"'),
+                TestStep(
+                    step=7,
+                    action='Enter "A.+ surname" into the "Employee name" field.',
+                    expected='The "Employee name" field contains "A.+".',
+                ),
             ],
         )
 
@@ -512,6 +517,8 @@ class ExecutionServiceTests(unittest.TestCase):
                 r'And css "#backup-notes" value should equal "  Keep  spacing and \"quotes\"  "',
                 'And I enter "Taylor" into "Employee name"',
                 'And "Summary" should equal "Ready"',
+                'And I enter "A.+ surname" into field "Employee name"',
+                'And field "Employee name" value should contain "A.+"',
             ],
         )
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -533,7 +540,12 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('await expect(page.getByLabel("Employee name", { exact: true })).toHaveValue("Alex Rivera");', generated)
         self.assertIn('await expect(page.getByTestId("empty-input")).toHaveValue("");', generated)
         self.assertIn(r'await expect(page.locator("#backup-notes")).toHaveValue("  Keep  spacing and \"quotes\"  ");', generated)
+        self.assertIn(r'await expect(page.getByLabel("Employee name", { exact: true })).toHaveValue(new RegExp("A\\.\\+"));', generated)
 
+        self.assertEqual(steps[-1]["action"], "assert_value_contains")
+        steps[-1]["expected"] = ""
+        self.assertTrue(validate_ir_document(ir.raw))
+        steps[-1]["expected"] = "A.+"
         value_steps[-1].pop("expected")
         self.assertTrue(validate_ir_document(ir.raw))
 
@@ -555,6 +567,7 @@ class ExecutionServiceTests(unittest.TestCase):
         for statement in (
             'Verify field "Employee name" value starts with "Alex"',
             'The Employee name field should contain "Alex"',
+            'Verify field "Employee name" value should contain ""',
         ):
             with self.subTest(statement=statement):
                 case.steps[1].expected = statement

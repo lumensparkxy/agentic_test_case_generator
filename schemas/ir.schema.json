@@ -172,7 +172,7 @@
                 "$ref": "#/$defs/assertVisibleStep"
               },
               {
-                "$ref": "#/$defs/assertLocatorEqualsStep"
+                "$ref": "#/$defs/assertLocatorContentStep"
               },
               {
                 "$ref": "#/$defs/assertUrlStep"
@@ -384,7 +384,7 @@
         }
       ]
     },
-    "assertLocatorEqualsStep": {
+    "assertLocatorContentStep": {
       "allOf": [
         {
           "$ref": "#/$defs/stepBase"
@@ -399,8 +399,24 @@
             "action": {
               "enum": [
                 "assert_text_equals",
-                "assert_value_equals"
+                "assert_value_equals",
+                "assert_value_contains"
               ]
+            }
+          },
+          "if": {
+            "properties": {
+              "action": {
+                "const": "assert_value_contains"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "expected": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "not": {

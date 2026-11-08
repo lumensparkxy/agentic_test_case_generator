@@ -18,6 +18,7 @@ SUPPORTED_ACTIONS = {
     "assert_visible",
     "assert_text_equals",
     "assert_value_equals",
+    "assert_value_contains",
     "assert_url",
     "assert_title",
     "assert_checked",
@@ -126,6 +127,9 @@ def _render_action(step: Mapping[str, Any]) -> str:
         return f"await expect({_render_locator(step['locator'])}).toHaveText({_js_string(_to_playwright_text(step['expected']))});"
     if action == "assert_value_equals":
         return f"await expect({_render_locator(step['locator'])}).toHaveValue({_js_string(_to_playwright_text(step['expected']))});"
+    if action == "assert_value_contains":
+        pattern = _js_string(re.escape(step["expected"]))
+        return f"await expect({_render_locator(step['locator'])}).toHaveValue(new RegExp({pattern}));"
     if action == "assert_url":
         return f"await expect(page).toHaveURL({_js_string(step['url'])});"
     if action == "assert_title":

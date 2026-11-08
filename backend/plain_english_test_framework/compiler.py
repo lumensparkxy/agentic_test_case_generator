@@ -26,8 +26,8 @@ ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact )?(?P<role>heading|link|but
 LOCATOR_VISIBLE_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be visible$')
 VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact text )?"(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
-VALUE_EQUALS_PATTERN = re.compile(
-    r'(?P<kind>field|css|test id)\s+"(?P<locator>(?:\\["\\]|[^"\\])+)"\s+value\s+should\s+equal\s+"(?P<expected>(?:\\["\\]|[^"\\])*)"',
+VALUE_ASSERTION_PATTERN = re.compile(
+    r'(?P<kind>field|css|test id)\s+"(?P<locator>(?:\\["\\]|[^"\\])+)"\s+value\s+should\s+(?P<operator>equal|contain)\s+"(?P<expected>(?:\\["\\]|[^"\\])*)"',
     re.IGNORECASE,
 )
 URL_EQUALS_PATTERN = re.compile(r'^URL should be "(?P<url>[^"]+)"$')
@@ -388,16 +388,17 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "url": url,
         }
 
-    if match := VALUE_EQUALS_PATTERN.fullmatch(body):
+    if match := VALUE_ASSERTION_PATTERN.fullmatch(body):
         path = f"$.steps[{source_step_index}]"
         kind = match["kind"].lower()
+        action = "assert_value_contains" if match["operator"].lower() == "contain" else "assert_value_equals"
         target = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["locator"]), environment, data, path=path)
         expected = _resolve_value(re.sub(r'\\(["\\])', r"\1", match["expected"]), environment, data, path=path)
         return {
             "id": _slug_identifier(f"assert value {target}"),
             "sourceStepIndex": source_step_index,
             "original": original,
-            "action": "assert_value_equals",
+            "action": action,
             "locator": {"strategy": "label", "value": target, "exact": True} if kind == "field" else _locator_for_kind(kind, target),
             "expected": expected,
         }

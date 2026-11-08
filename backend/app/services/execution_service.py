@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import yaml
 
-from plain_english_test_framework.compiler import VALUE_EQUALS_PATTERN, CompilerError, compile_spec_file
+from plain_english_test_framework.compiler import VALUE_ASSERTION_PATTERN, CompilerError, compile_spec_file
 from plain_english_test_framework.ir_validator import IrValidationError
 from plain_english_test_framework.local_runner import (
     LocalPlaywrightRunnerError,
@@ -60,11 +60,12 @@ TEXT_EQUALS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s+that)?\s+)?(?:the\s+)?", re.IGNORECASE)
-QUOTED_FIELD_EQUALS_PATTERN = re.compile(
-    r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?P<comparison>.+)',
+QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'[^']*')"""
+QUOTED_FIELD_ASSERTION_PATTERN = re.compile(
+    r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?:should\s+)?'
+    r'(?P<operator>equals?|contains?|be|is)\s+(?P<expected>"(?:\\["\\]|[^"\\])*")',
     re.IGNORECASE,
 )
-QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'[^']*')"""
 FIELD_VALUE_INTENT_PATTERN = re.compile(
     rf"""^(?:
         (?:field|input|textarea|css|test\s+id)\s+{QUOTED_ASSERTION_TARGET}\s+(?:value\b|should\s+equal\b)
@@ -125,6 +126,7 @@ ASSERTION_KINDS = {
     "assert_visible",
     "assert_text_equals",
     "assert_value_equals",
+    "assert_value_contains",
     "assert_url",
     "assert_title",
     "assert_checked",
@@ -574,11 +576,19 @@ def _field_value_assertion(text: str) -> tuple[_ConvertedStep | None, bool]:
     statement = _assertion_statement(text)
     if not FIELD_VALUE_INTENT_PATTERN.match(statement):
         return None, False
-    if quoted_field := QUOTED_FIELD_EQUALS_PATTERN.fullmatch(statement):
-        statement = f"field {quoted_field['locator']} value {quoted_field['comparison']}"
-    if (match := VALUE_EQUALS_PATTERN.fullmatch(statement)) and match["locator"].strip():
+    if quoted_field := QUOTED_FIELD_ASSERTION_PATTERN.fullmatch(statement):
+        operator = "contain" if quoted_field["operator"].lower() in {"contain", "contains"} else "equal"
+        statement = f"field {quoted_field['locator']} value should {operator} {quoted_field['expected']}"
+    if (match := VALUE_ASSERTION_PATTERN.fullmatch(statement)) and match["locator"].strip():
         kind = match["kind"].lower()
-        return _ConvertedStep("assert_value_equals", f'{kind} "{match["locator"]}" value should equal "{match["expected"]}"'), False
+        operator = match["operator"].lower()
+        if operator == "contain":
+            if not match["expected"]:
+                return None, True
+            action = "assert_value_contains"
+        else:
+            action = "assert_value_equals"
+        return _ConvertedStep(action, f'{kind} "{match["locator"]}" value should {operator} "{match["expected"]}"'), False
     return None, True
 
 
