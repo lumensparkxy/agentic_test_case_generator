@@ -2,6 +2,7 @@
 
 from collections import Counter
 from dataclasses import dataclass
+import json
 import re
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -23,6 +24,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Start with action 'Open "exact supplied URL"'. Leave expected as an empty string on a pure navigation or interaction step when it has no separate source outcome.
 - Use action 'Enter "literal input" into the "observed accessible label" field' and expected 'field "observed accessible label" value should equal "literal input"' when the field value matters.
 - For a native dropdown with grounded select_options, use action 'Select exact option "observed option label" in field "observed accessible label"'. Leave expected empty for a selection with no separate source outcome and verify the business result in its own check. A field-value assertion needs the supplied DOM value, which may differ from the label. Keep unavailable or unsupported options manual.
+- Context lines beginning with 'Browser page' or 'Browser dropdown' may supply observed same-origin URLs and exact native option labels on a named page. Use only the declared page and choices.
 - For an available native checkbox with grounded checkbox_available, use action 'Check exact checkbox "observed accessible label"' or 'Uncheck exact checkbox "observed accessible label"'. Assert 'exact checkbox "observed accessible label" is checked' or 'exact checkbox "observed accessible label" is not checked' for a required state. Verify saved behavior separately.
 - For an initially blank field, use action 'Inspect the "observed accessible label" field' and expected 'field "observed accessible label" value should equal ""'. Submit with no fill step. Empty fills are unsupported. Keep a required clear of a populated field manual.
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
@@ -36,6 +38,8 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 _QUOTED = re.compile(r""""([^"\n]*)"|(?<!\w)'([^'\n]*)'(?!\w)""")
 _DECLARED_LOCATOR = re.compile(r'(css(?: selector)?|test id)\s+"([^"\n]+)"', re.IGNORECASE)
 _NOTED_CONTROL = re.compile(r'\b(field|heading|button|link)\s+"([^"\n]+)"|"([^"\n]+)"\s+(field|heading|button|link)\b', re.IGNORECASE)
+_NOTED_PAGE = re.compile(r'Browser page "([^"\n]+)"', re.IGNORECASE)
+_NOTED_DROPDOWN = re.compile(r'Browser dropdown "([^"\n]+)" on "([^"\n]+)" options (.+)', re.IGNORECASE)
 _DROPDOWN_DOM_VALUE = re.compile(r'\bfield\s+"([^"\n]+)"\s+DOM value\s+(?:is\s+)?"([^"\n]*)"', re.IGNORECASE)
 _ROLE_TYPES = {"heading": "Heading", "button": "Button", "link": "Navigation"}
 _CONTROL_TYPES = {"field": "Field", **_ROLE_TYPES}
@@ -62,6 +66,19 @@ def _http_url(value: str) -> str | None:
     return str(url) if not (url.username or url.password) else None
 
 
+def _exact_option_labels(raw: str) -> set[str]:
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError, RecursionError:
+        return set()
+    if not isinstance(values, list) or not 1 <= len(values) <= 40:
+        return set()
+    if any(not isinstance(value, str) or not value.strip() or value.strip() != value or "\n" in value or "\r" in value for value in values):
+        return set()
+    labels = set(values)
+    return labels if len(labels) == len(values) else set()
+
+
 def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _BrowserEvidence | None:
     if not context:
         return None
@@ -85,6 +102,7 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
     urls = {target, *source_urls.values()}
     names_by_type: dict[str, set[str]] = {}
     select_options: dict[tuple[str, str], set[str]] = {}
+    other_native_fields: set[tuple[str, str]] = set()
     checkboxes: dict[tuple[str, str], bool] = {}
     for element in grounded.ui_elements if grounded else []:
         if element.source_id is not None and element.source_id not in source_urls:
@@ -95,6 +113,8 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
         if element.element_type == "Field" and element.select_options is not None:
             key = (source_urls.get(element.source_id, target), element.name)
             select_options[key] = set(element.select_options) if key not in select_options else set()
+        elif element.element_type == "Field" and element.source_id in source_urls:
+            other_native_fields.add((source_urls[element.source_id], element.name))
         if element.element_type == "Field" and element.checkbox_available is not None:
             key = (source_urls.get(element.source_id, target), element.name)
             checkboxes[key] = element.checkbox_available and key not in checkboxes
@@ -107,6 +127,25 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
                 urls.add(href)
 
     notes = context.notes or ""
+    lines = notes.splitlines()
+    for line in lines:
+        if match := _NOTED_PAGE.fullmatch(line.strip()):
+            page = _http_url(match[1])
+            if page and urlsplit(page)[:2] == origin:
+                urls.add(page)
+    for line in lines:
+        if match := _NOTED_DROPDOWN.fullmatch(line.strip()):
+            field, raw_page, raw_options = match.groups()
+            page = _http_url(raw_page)
+            if page not in urls:
+                continue
+            key = (page, field)
+            labels = _exact_option_labels(raw_options)
+            names_by_type.setdefault("Field", set()).add(field)
+            # Conflicting or malformed declarations cannot widen the selectable choices.
+            if key in other_native_fields or key in checkboxes or (key in select_options and select_options[key] != labels):
+                labels = set()
+            select_options[key] = labels
     for leading, name_after, name_before, trailing in _NOTED_CONTROL.findall(notes):
         names_by_type.setdefault(_CONTROL_TYPES[(leading or trailing).lower()], set()).add(name_after or name_before)
     source_text = [notes, *(text for item in requirements for text in (item.text, item.source_excerpt or ""))]

@@ -700,6 +700,22 @@ discards the committed response, reloads Automation, and checks its receipt.
 It verifies the exact saved report link and rejects a replay of the original
 request identity without adding another run.
 
+To measure fresh generated cases on the stateful Room Booking fixture, use the
+same runner with a new output directory.
+
+```bash
+.venv/bin/python scripts/e2e_workbench_local.py --fixture room-booking \
+  --emulator-jar "$jar" --output /tmp/tcg-live-room-booking
+```
+
+The test imports the existing Room Booking requirements, supplies observed
+same-origin page and dropdown declarations in Context, and reviews the exact
+saved suite. The matrix records design and setup status, admission, and browser
+eligibility separately. Each seeded fault is tried only with healthy-passing
+cases linked to its source requirement. Detection requires a matching failed
+browser assertion. The authored booking matrix separately exercises native
+double-click and response-loss controls.
+
 `test_workflow_project_service.py` covers multi-part execution snapshots,
 ordered readback, atomic rollback, retry, incomplete and corrupted parts, and
 bounded Unicode diagnostics. `test_quality_feedback.py` verifies that a passing

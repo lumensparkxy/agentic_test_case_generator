@@ -105,6 +105,23 @@ removed. Use `exact heading "Sign in" is visible` for an exact accessible name,
 or `exact text "No results" is visible` for exact displayed text. Unqualified
 visibility assertions retain their existing partial-match behavior.
 
+For a private app, enter its **Application link** and add declarations on their
+own lines in **Context notes** for any observed page or native dropdown that
+the artifact collector cannot inspect.
+
+```text
+Browser page "https://booking.example.test/bookings/B-EXISTING"
+Browser dropdown "Room" on "https://booking.example.test/" options ["Atlas", "Birch"]
+```
+
+Use an absolute URL on the same origin as the application link. The application
+link itself is already a known page. Declare an additional page before relying
+on its dropdowns. Use the exact accessible field name and a JSON list of exact,
+selectable option labels. For a field-value assertion, supply the DOM value
+separately using `field "Room" DOM value is "atlas"`. Conflicting declarations
+retain the case for manual review. These declarations record supplied evidence
+and do not cause the server to fetch the pages.
+
 Place supplied non-secret inputs directly in steps or test data. When a case
 depends on an existing user, record or setting, cite its fixture or provide a
 supported setup recipe. Record unresolved dependencies as missing. Input

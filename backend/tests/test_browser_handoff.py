@@ -155,6 +155,56 @@ class BrowserHandoffTests(unittest.TestCase):
         case.steps[1].expected = 'field "Reference" value should equal "q17"'
         self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
 
+    def test_explicit_browser_notes_ground_dropdowns_only_on_the_declared_page(self):
+        details = "https://example.test/receipt/details"
+        observed = 'The field "Reference" and button "Save request" are observed.'
+        source = EnrichInput(app_link=TARGET, requirements=[REQUIREMENT], notes=observed)
+        case = candidate()
+        case.steps[0].action = f'Open "{details}"'
+        case.steps[1].action = 'Select exact option "Q-17" in field "Reference"'
+        case.steps[1].expected = ""
+
+        self.assertIn("supplied application URL", validate_browser_handoff([case.model_copy(deep=True)], source, [REQUIREMENT])[1])
+        on_target = case.model_copy(deep=True)
+        on_target.steps[0].action = f'Open "{TARGET}"'
+        self.assertIn("exact selectable option", validate_browser_handoff([on_target.model_copy(deep=True)], source, [REQUIREMENT])[1])
+
+        route = f'Browser page "{details}"'
+        dropdown = f'Browser dropdown "Reference" on "{details}" options ["Q-17", "Q-18"]'
+        source.notes = "\n".join((observed, route, dropdown))
+        self.assertEqual(validate_browser_handoff([case.model_copy(deep=True)], source, [REQUIREMENT]), [])
+        self.assertIn("exact selectable option", validate_browser_handoff([on_target], source, [REQUIREMENT])[1])
+        wrong_label = case.model_copy(deep=True)
+        wrong_label.steps[1].action = 'Select exact option "q-17" in field "Reference"'
+        self.assertIn("exact selectable option", validate_browser_handoff([wrong_label], source, [REQUIREMENT])[1])
+
+        for declaration in (
+            dropdown.replace('["Q-17", "Q-18"]', '"Q-17"'),
+            dropdown.replace('"Q-18"', '"Q-17"'),
+            dropdown + "\n" + dropdown.replace('"Q-18"', '"Q-19"'),
+            f"Use {dropdown}",
+        ):
+            with self.subTest(declaration=declaration):
+                source.notes = "\n".join((observed, route, declaration))
+                self.assertIn("exact selectable option", validate_browser_handoff([case.model_copy(deep=True)], source, [REQUIREMENT])[1])
+
+        foreign = case.model_copy(deep=True)
+        foreign.steps[0].action = foreign.steps[0].action.replace("example.test", "elsewhere.test")
+        source.notes = "\n".join((observed, route.replace("example.test", "elsewhere.test"), dropdown.replace("example.test", "elsewhere.test")))
+        self.assertIn("execution.target_origin_mismatch", validate_browser_handoff([foreign], source, [REQUIREMENT])[1])
+
+    def test_explicit_dropdown_notes_do_not_override_conflicting_html(self):
+        source = context()
+        field = source.grounded_context.ui_elements[0]
+        field.select_options = ["Q-17"]
+        source.notes = f'Browser dropdown "Reference" on "{TARGET}" options ["Q-17", "Q-18"]'
+        case = candidate()
+        case.steps[1].action = 'Select exact option "Q-17" in field "Reference"'
+        case.steps[1].expected = ""
+        self.assertIn("exact selectable option", validate_browser_handoff([case.model_copy(deep=True)], source, [REQUIREMENT])[1])
+        source.notes = f'Browser dropdown "Reference" on "{TARGET}" options ["Q-17"]'
+        self.assertEqual(validate_browser_handoff([case], source, [REQUIREMENT]), [])
+
     def test_unsupported_expectations_and_unverified_evidence_retain_original_case(self):
         for index, changes, reason in (
             (0, {"action": 'Open "https://example.test/invented"'}, "supplied application URL"),

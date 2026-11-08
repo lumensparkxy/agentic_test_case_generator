@@ -4,6 +4,7 @@
 import argparse
 from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import secrets
@@ -19,6 +20,8 @@ from urllib.request import urlopen
 from dotenv import dotenv_values
 
 from browser_benchmark_fixtures import FIXTURES
+from response_loss_proxy import ResponseLossProxy
+from room_booking_fixture import DEFECTS, SUBMIT_PATH, booking_target
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,18 +110,33 @@ def directory_target(fault_marker: Path):
             thread.join()
 
 
-def run_workbench(jar: Path, output: Path, api_key: str) -> int:
+def workbench_fixture(stack: ExitStack, output: Path, fixture: str) -> tuple[str, dict[str, str]]:
+    if fixture == "room-booking":
+        healthy = stack.enter_context(booking_target())
+        loss = stack.enter_context(ResponseLossProxy(healthy, SUBMIT_PATH, evidence_path=output / "booking-response-loss.json"))
+        targets = {name: f"http://127.0.0.1:{stack.enter_context(booking_target(defect=name))}/" for name in DEFECTS if name != "duplicate-submission"}
+        return "e2e/live-room-booking-workbench.spec.js", {
+            "E2E_ROOM_BOOKING_WORKBENCH": "1",
+            "E2E_BOOKING_TARGET": f"http://127.0.0.1:{healthy}/",
+            "E2E_BOOKING_DEFECTS": json.dumps(targets),
+            "E2E_BOOKING_LOSS_TARGET": f"http://127.0.0.1:{loss.port}/",
+        }
+    fault_marker = output / "directory-fault"
+    target = stack.enter_context(directory_target(fault_marker))
+    return "e2e/live-browser-workbench.spec.js", {"E2E_LOCAL_WORKBENCH": "1", "E2E_DIRECTORY_TARGET": target, "E2E_DIRECTORY_FAULT": str(fault_marker)}
+
+
+def run_workbench(jar: Path, output: Path, api_key: str, *, fixture="directory") -> int:
     firestore_port, api_port, frontend_port = free_ports(3)
     firestore_host = f"127.0.0.1:{firestore_port}"
     api_base = f"http://127.0.0.1:{api_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
-    fault_marker = output / "directory-fault"
     jwt_secret = secrets.token_urlsafe(48)
     # Pass only the local runtime environment and the credentials needed by each process.
     local = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "JAVA_HOME", "PLAYWRIGHT_BROWSERS_PATH") if key in os.environ}
     auth = {"AUTH_TOKEN_MODE": "firebase-or-backend-jwt", "JWT_SECRET_KEY": jwt_secret, "JWT_ALGORITHM": "HS256"}
     with ExitStack() as stack:
-        target = stack.enter_context(directory_target(fault_marker))
+        spec, target_env = workbench_fixture(stack, output, fixture)
         firestore_log = output / "firestore.log"
         emulator = stack.enter_context(
             local_service(
@@ -179,16 +197,14 @@ def run_workbench(jar: Path, output: Path, api_key: str) -> int:
         wait_for_service(frontend, frontend_url, frontend_log)
         print(f"Isolated workbench and browser target ready. Evidence will be saved in {output}.", flush=True)
         return subprocess.run(
-            ["npm", "run", "test:e2e", "--", "e2e/live-browser-workbench.spec.js", "--workers=1", "--reporter=list", "--output", str(output / "browser")],
+            ["npm", "run", "test:e2e", "--", spec, "--workers=1", "--reporter=list", "--output", str(output / "browser")],
             cwd=ROOT / "frontend",
             env={
                 **local,
                 **auth,
-                "E2E_LOCAL_WORKBENCH": "1",
+                **target_env,
                 "E2E_BASE_URL": frontend_url,
                 "E2E_API_BASE": api_base,
-                "E2E_DIRECTORY_TARGET": target,
-                "E2E_DIRECTORY_FAULT": str(fault_marker),
                 "E2E_DEMO_PROJECT": DEMO_PROJECT,
             },
         ).returncode
@@ -197,6 +213,7 @@ def run_workbench(jar: Path, output: Path, api_key: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emulator-jar", type=Path, required=True)
+    parser.add_argument("--fixture", choices=("directory", "room-booking"), default="directory")
     parser.add_argument("--output", type=Path, required=True, help="New evidence directory outside the checkout.")
     args = parser.parse_args()
     jar, output = args.emulator_jar.resolve(), args.output.resolve()
@@ -209,7 +226,7 @@ def main() -> int:
     if not api_key:
         parser.error("the live smoke requires the configured Gemini API key")
     output.mkdir(parents=True)
-    return run_workbench(jar, output, api_key)
+    return run_workbench(jar, output, api_key, fixture=args.fixture)
 
 
 if __name__ == "__main__":
