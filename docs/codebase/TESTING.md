@@ -566,6 +566,30 @@ not prove the entire source-change path against live generation. Resume that
 live path after the upstream quality gate is resolved; do not bypass the gate
 or substitute mocked output to make this scenario green.
 
+### Browser fault-detection benchmark
+
+With the local execution runtime and Chromium installed, run the authored
+controls and an optional live comparison from the repository root.
+
+```bash
+.venv/bin/python scripts/evaluate_browser_handoff.py --output /tmp/tcg-browser-controls.json
+.venv/bin/python scripts/evaluate_browser_handoff.py --live --output /tmp/tcg-browser-live.json
+```
+
+The live command uses the configured Gemini credentials and generates one
+suite per synthetic workflow. The server binds to loopback. Use the same
+`--port` to preserve the fixture input hashes between runs. The default port
+is 58946. Both modes retain the report and Chromium artifacts outside the
+repository. The live command also saves the generation evidence beside its
+report.
+
+A defect counts as detected when a case linked to its requirement passes on
+the healthy fixture and fails at the intended check on the broken fixture.
+The report lists missing cases, healthy-target failures, surviving defects,
+failures at another check, and unavailable runtime evidence separately.
+Manual audit coverage and generation approval have separate fields. A
+nonzero exit signals an unmet benchmark criterion.
+
 ### Generation source snapshot regression
 
 `test_partial_shard_recovery.py` and the parallel-generation delivery regression
