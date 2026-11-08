@@ -218,7 +218,13 @@ function RunActivity({ run, onOpenProject }) {
 				</p>
 				<time dateTime={run.updated_at}>{formatWorkspaceDate(run.updated_at)}</time>
 			</div>
-			<ProjectOpenLink projectId={run.project_id} destination={PROJECT_DESTINATIONS.AUTOMATION} onOpenProject={onOpenProject}>
+			<ProjectOpenLink
+				projectId={run.project_id}
+				destination={PROJECT_DESTINATIONS.REPORTS}
+				runRecordId={run.run_record_id}
+				onOpenProject={onOpenProject}
+				ariaLabel={`Open evidence for run ${run.run_id || run.run_record_id}`}
+			>
 				View
 			</ProjectOpenLink>
 		</ListItem>

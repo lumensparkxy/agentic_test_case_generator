@@ -17,6 +17,7 @@ export interface ApiContractOperations {
 	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
+	projectExecutionRun: ApiOperation<ProjectExecutionRunRequest, ProjectExecutionRunResponse, "GET", "/projects/{project_id}/execution-runs/{run_record_id}">;
 	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
@@ -70,6 +71,8 @@ export type ProjectUpdateRequest = QaProjectUpdateInput;
 export type ProjectUpdateResponse = QaProjectDetail;
 export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
+export type ProjectExecutionRunRequest = undefined;
+export type ProjectExecutionRunResponse = QaProjectExecutionRunDetail;
 export type ProjectOrchestratorStatusRequest = undefined;
 export type ProjectOrchestratorStatusResponse = OrchestratorStatusResponse;
 export type ProjectOrchestratorRunsRequest = undefined;
@@ -706,6 +709,14 @@ export interface QaProjectDetail {
 	updated_at: string;
 }
 
+export interface QaProjectExecutionCaseResult {
+	id: string;
+	issues?: Array<ExecutionIssue>;
+	source_test_case_id: string;
+	status: "passed" | "failed" | "invalid" | "skipped";
+	title: string;
+}
+
 export interface QaProjectExecutionRun {
 	actor_user_id?: string | null;
 	artifacts_root?: string | null;
@@ -714,6 +725,29 @@ export interface QaProjectExecutionRun {
 	project_id: string;
 	project_revision: number;
 	request_id?: string | null;
+	run_id: string;
+	run_record_id: string;
+	selected_test_case_ids?: Array<string>;
+	snapshot_id?: string | null;
+	source_event_id?: string | null;
+	source_snapshot_id?: string | null;
+	status: string;
+	summary?: Record<string, unknown>;
+	target_base_url?: string | null;
+	target_environment: string;
+	test_case_count?: number;
+	workflow_run_id?: string | null;
+}
+
+export interface QaProjectExecutionRunDetail {
+	actor_user_id?: string | null;
+	artifacts_root?: string | null;
+	created_at: string;
+	playwright_report_paths?: Array<string>;
+	project_id: string;
+	project_revision: number;
+	request_id?: string | null;
+	results?: Array<QaProjectExecutionCaseResult> | null;
 	run_id: string;
 	run_record_id: string;
 	selected_test_case_ids?: Array<string>;

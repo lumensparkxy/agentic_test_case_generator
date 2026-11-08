@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from google.cloud.firestore_v1 import FieldFilter, Query, transactional
 
+from ..contracts.projects import QaProjectExecutionRunDetail
 from ..models import (
     AuthUser,
     ProjectStageName,
@@ -250,6 +251,29 @@ def get_project_stage_snapshot(project_id: str, snapshot_id: str, *, actor: Auth
     if snapshot is None:
         raise ProjectNotFoundError(snapshot_id)
     return snapshot
+
+
+def get_project_execution_run(project_id: str, run_record_id: str, *, actor: AuthUser) -> QaProjectExecutionRunDetail:
+    _require_owner(_get_project_payload(project_id), actor)
+    project_doc = _get_project_doc(project_id)
+    payload = _document_to_dict(project_doc.collection("execution_runs").document(run_record_id).get())
+    if not payload or payload.get("project_id") != project_id or payload.get("run_record_id") != run_record_id:
+        raise ProjectNotFoundError(run_record_id)
+    run = QaProjectExecutionRun.model_validate(payload)
+    snapshot = _snapshot_for(project_id, run.snapshot_id) if run.snapshot_id else None
+    results = None
+    if (
+        snapshot
+        and snapshot.snapshot_id == run.snapshot_id
+        and snapshot.project_id == project_id
+        and snapshot.stage == "execution"
+        and snapshot.operation == "automation.execution.run"
+        and snapshot.source_snapshot_id == run.source_snapshot_id
+        and snapshot.payload.get("run_id") == run.run_id
+        and isinstance(snapshot.payload.get("results"), list)
+    ):
+        results = snapshot.payload["results"]
+    return QaProjectExecutionRunDetail(**run.model_dump(), results=results)
 
 
 def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[QaProjectSummary]:

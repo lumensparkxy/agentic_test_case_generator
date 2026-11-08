@@ -184,6 +184,36 @@ test.describe("Isolated browser workbench", () => {
 					export: exported.audit_metadata,
 				});
 			});
+
+			await test.step("Open each exact saved run and read its case outcomes", async () => {
+				const { execution_runs: history } = await fixture.read();
+				for (const expected of [healthy, broken]) {
+					const record = history.find((item) => item.run_id === expected.run_id);
+					const savedRun = await fixture.checked("GET", `${fixture.prefix}/execution-runs/${record.run_record_id}`);
+					expect(savedRun).toMatchObject({
+						run_id: expected.run_id,
+						source_snapshot_id: suite.snapshot_id,
+						results: expected.results.map(({ id, source_test_case_id, status }) => ({ id, source_test_case_id, status })),
+					});
+					await page.goto("/runs");
+					await page.getByRole("link", { name: `Open evidence for run ${expected.run_id}` }).click();
+					await expect(page).toHaveURL(new RegExp(`\\?run=${record.run_record_id}$`));
+					await page.reload();
+					const report = page.locator(".playwright-report-card");
+					await expect(report.getByText(`Run ${expected.run_id}`, { exact: true })).toBeVisible();
+					await expect(report.getByText(suite.snapshot_id, { exact: true })).toBeVisible();
+					await report.getByText(`Case outcomes (${expected.results.length})`, { exact: true }).click();
+					for (const result of expected.results) {
+						await expect(report.getByText(result.source_test_case_id, { exact: true })).toBeVisible();
+					}
+					if (expected === broken) {
+						const assertion = report.locator("pre").filter({ hasText: "No employees found" });
+						await expect(assertion).toBeVisible();
+						expect(await assertion.textContent()).not.toContain(String.fromCharCode(27));
+						await page.screenshot({ path: testInfo.outputPath("saved-failure-details.png"), fullPage: true });
+					}
+				}
+			});
 		} finally {
 			await fs.rm(faultMarker, { force: true });
 			await fixture.close();

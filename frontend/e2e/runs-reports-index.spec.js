@@ -6,6 +6,7 @@ import { expectNoDocumentOverflow, expectVisuallyContained } from "./support/lay
 import {
 	createDeferred,
 	installWorkspaceApi,
+	projectDetailFixture,
 	workspaceProjectFixture,
 	workspaceReportFixture,
 	workspaceRunFixture,
@@ -258,15 +259,15 @@ test.describe("Global Runs and Reports indexes", () => {
 			await expect(failedRow).toContainText(/Executed\s*2/i);
 			await expect(failedRow).toContainText(/Failed\s*2/i);
 
-			for (const [project, row] of [
-				[ORBIT_PROJECT, queuedRow],
-				[MERCURY_PROJECT, runningRow],
-				[ATLAS_PROJECT, completedRow],
-				[NOVA_PROJECT, failedRow],
+			for (const [run, row] of [
+				[QUEUED_RUN, queuedRow],
+				[RUNNING_RUN, runningRow],
+				[COMPLETED_RUN, completedRow],
+				[FAILED_RUN, failedRow],
 			]) {
-				await expect(row.getByRole("link", { name: `Open automation evidence for ${project.name}` })).toHaveAttribute(
+				await expect(row.getByRole("link", { name: `Open evidence for run ${run.run_id}` })).toHaveAttribute(
 					"href",
-					buildProjectPath(project.project_id, "automation")
+					`${buildProjectPath(run.project_id, "reports")}?run=${run.run_record_id}`
 				);
 			}
 			for (const run of [QUEUED_RUN, RUNNING_RUN, COMPLETED_RUN, FAILED_RUN]) {
@@ -277,6 +278,97 @@ test.describe("Global Runs and Reports indexes", () => {
 			expect(api.requests.projectDetail).toHaveLength(0);
 		}
 	);
+
+	test("opens exact historical case outcomes through Runs and preserves selection on reload", { tag: ["@p1"] }, async ({ page }) => {
+		const projectId = NOVA_PROJECT.project_id;
+		const reportsPath = buildProjectPath(projectId, "reports");
+		const older = {
+			...FAILED_RUN,
+			target_base_url: "https://staging.example.test",
+			source_snapshot_id: "suite-before-fix",
+			summary: { failed: 1 },
+			results: [
+				{
+					id: "candidate-old",
+					source_test_case_id: "TC-OLD",
+					title: "Empty search displays a notice",
+					status: "failed",
+					issues: [
+						{ message: "Expected: No employees found", path: "$.results[0].error", code: "playwright.error" },
+						{ message: "\u001b[31mExpected: No employees found\u001b[39m", path: "$.results[0].errors[0]", code: "playwright.error" },
+						{ message: "The page also raised an error during teardown", path: "$.results[0].errors[1]", code: "playwright.error" },
+					],
+				},
+			],
+		};
+		const newer = {
+			...older,
+			run_record_id: "run-record-nova-after-fix",
+			run_id: "run-nova-after-fix",
+			target_environment: "staging",
+			source_snapshot_id: "suite-after-fix",
+			status: "passed",
+			summary: { passed: 1 },
+			results: null,
+		};
+		const summary = workspaceSummaryFixture({ projects: [NOVA_PROJECT], recent_runs: [newer, older] });
+		await installWorkspaceApi(page, {
+			summary,
+			projectDetails: {
+				[projectId]: projectDetailFixture(NOVA_PROJECT, {
+					execution_runs: [newer, older],
+					current_snapshots: {
+						execution: {
+							snapshot_id: "preview-v3",
+							stage: "execution",
+							payload: { executable: [], invalid: [], unsupported: [], manual: [] },
+						},
+					},
+				}),
+			},
+		});
+		await page.route(`**/projects/${projectId}/execution-runs/*`, async (route) => {
+			const id = new URL(route.request().url()).pathname.split("/").at(-1);
+			const run = [older, newer].find((item) => item.run_record_id === id);
+			await route.fulfill(run ? { json: run } : { status: 404, json: { detail: "Unknown run" } });
+		});
+		await seedAuthenticatedSession(page);
+		await page.goto("/runs");
+		await page.getByRole("link", { name: `Open evidence for run ${older.run_id}` }).click();
+		await expect(page).toHaveURL(new RegExp(`${reportsPath}\\?run=${older.run_record_id}$`));
+		const report = page.locator(".playwright-report-card");
+		const expectOlderEvidence = async () => {
+			await expect(report.getByText(`Run ${older.run_id}`, { exact: true })).toBeVisible();
+			await expect(report.getByText(older.source_snapshot_id, { exact: true })).toBeVisible();
+			await report.getByText("Case outcomes (1)", { exact: true }).click();
+			await expect(report.getByText("TC-OLD", { exact: true })).toBeVisible();
+			await expect(report.getByText("Empty search displays a notice", { exact: true })).toBeVisible();
+			await expect(report.getByText("Expected: No employees found", { exact: true })).toBeVisible();
+			await expect(report.getByText("The page also raised an error during teardown", { exact: true })).toBeVisible();
+		};
+		await expectOlderEvidence();
+		await page.reload();
+		await expectOlderEvidence();
+		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Export Test Cases", exact: true })).toHaveCount(0);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expectNoDocumentOverflow(page);
+		await page.setViewportSize({ width: 1280, height: 800 });
+		await page
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Reports,/i })
+			.click();
+		await expect(page).toHaveURL(new RegExp(`${reportsPath}$`));
+		await expect(page.getByRole("heading", { name: "Export Test Cases", exact: true })).toBeVisible();
+		await expect(report.getByText(`Run ${newer.run_id}`, { exact: true })).toBeVisible();
+		await expect(report.getByText("Saved case outcomes are unavailable for this run.")).toBeVisible();
+		await expect(report.getByText("Passed 1", { exact: true })).toBeVisible();
+		await expect(report.getByText("TC-OLD", { exact: true })).toHaveCount(0);
+
+		await page.goto(`${reportsPath}?run=missing`);
+		await expect(page.getByRole("status").filter({ hasText: "Saved evidence for this run is unavailable." })).toBeVisible();
+		await expect(report).toHaveCount(0);
+	});
 
 	test("renders report evidence identity with text-and-icon approval, draft, and stale states", async ({ page }) => {
 		const api = await openActivityPage(page, "/reports", { summary: POPULATED_SUMMARY });

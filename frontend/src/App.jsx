@@ -252,7 +252,7 @@ export default function App() {
 	const requirementReviewLock = useRef(false);
 	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
-	const { route, navigate } = useBrowserNavigation();
+	const { route, location, navigate } = useBrowserNavigation();
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
@@ -1624,6 +1624,7 @@ export default function App() {
 			setExecutionRunResult({
 				status: executionPayload.status,
 				run_id: executionPayload.run_id,
+				source_snapshot_id: executionSnapshot.source_snapshot_id,
 				target_environment: executionPayload.target_environment,
 				target_base_url: executionPayload.target_base_url,
 				artifacts_root: executionPayload.artifacts_root,
@@ -2025,11 +2026,11 @@ export default function App() {
 
 	const createWorkspaceProject = (name) => createProject(name, { throwOnError: true });
 
-	const openWorkspaceProject = ({ projectId, destination } = {}) => {
+	const openWorkspaceProject = ({ projectId, destination, path } = {}) => {
 		if (!projectId) {
 			return null;
 		}
-		navigate(buildProjectPath(projectId, destination));
+		navigate(path || buildProjectPath(projectId, destination));
 		return projects.find((project) => project.project_id === projectId) || { project_id: projectId };
 	};
 
@@ -3254,6 +3255,7 @@ export default function App() {
 			}
 			setExecutionRunResult({
 				...data,
+				source_snapshot_id: data.preview.readiness?.source_snapshot_id,
 				target_environment: payload.target_environment,
 				target_base_url: data.preview.readiness?.target_base_url ?? payload.target_base_url,
 			});
@@ -5430,6 +5432,8 @@ export default function App() {
 											testCaseReview={testCaseReview}
 											executionRunResult={executionRunResult}
 											currentProject={currentProject}
+											runRecordId={new URLSearchParams(location.search).get("run")}
+											request={apiRequest}
 											exportReviewApproved={exportReviewApproved}
 											exportRequiresOverride={exportRequiresOverride}
 											exportGateLocked={exportGateLocked}

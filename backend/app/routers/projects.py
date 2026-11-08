@@ -3,7 +3,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 
-from ..contracts.projects import QaProjectUseCaseGenerationInput
+from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectUseCaseGenerationInput
 from ..services.use_case_generation_service import generate_project_use_cases
 from ..auth.jwt_auth import get_current_user
 from ..models import (
@@ -29,6 +29,7 @@ from ..services.workflow_project_service import (
     append_stage_snapshot,
     create_project,
     get_project,
+    get_project_execution_run,
     list_projects,
     project_error_to_http,
     update_project,
@@ -112,6 +113,18 @@ async def get_qa_project_timeline(
     try:
         project = await run_in_threadpool(get_project, project_id, actor=current_user)
         return project.timeline
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/execution-runs/{run_record_id}", response_model=QaProjectExecutionRunDetail)
+async def get_qa_project_execution_run(
+    project_id: str,
+    run_record_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectExecutionRunDetail:
+    try:
+        return await run_in_threadpool(get_project_execution_run, project_id, run_record_id, actor=current_user)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 

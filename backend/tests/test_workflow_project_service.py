@@ -4,6 +4,9 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
@@ -11,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.models import AuthUser
+from app.routers.projects import get_current_user, router
 from app.services.workflow_project_service import (
     ProjectConflictError,
     append_stage_snapshot,
@@ -218,6 +222,80 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         self.assertEqual(loaded.execution_runs[0].source_snapshot_id, test_case_snapshot.snapshot_id)
         self.assertEqual(loaded.execution_runs[0].selected_test_case_ids, ["TC-001"])
         self.assertEqual(loaded.execution_runs[0].summary["failed"], 1)
+
+    def test_execution_run_endpoint_reads_only_the_bound_historical_case_outcomes(self) -> None:
+        project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="create")
+        other = create_project(name="Other QA", description=None, actor=self.actor, request_id="other")
+        result = {
+            "id": "candidate-1",
+            "source_test_case_id": "TC-001",
+            "title": "Checkout confirmation",
+            "status": "failed",
+            "issues": [{"path": "$.results[0].error", "code": "playwright.error", "message": "Expected receipt to be visible"}],
+        }
+        execution = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "run-1", "status": "failed", "results": [{**result, "stdout": "runtime-only"}]},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="run",
+            source_snapshot_id="suite-v1",
+        )
+        run = record_execution_run(
+            project_id=project.project_id,
+            actor=self.actor,
+            request_id="run",
+            run_id="run-1",
+            target_environment="staging",
+            target_base_url="https://staging.example.test",
+            status_value="failed",
+            summary={"passed": 0, "failed": 1},
+            test_case_count=1,
+            snapshot_id=execution.snapshot_id,
+            source_snapshot_id="suite-v1",
+            workflow_run_id=None,
+            source_event_id=None,
+            project_revision=execution.project_revision,
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"executable": []},
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="preview",
+            source_snapshot_id="suite-v2",
+        )
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: self.actor
+        path = f"/projects/{project.project_id}/execution-runs/{run.run_record_id}"
+        with TestClient(app) as client:
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200, response.text)
+            evidence = response.json()
+            self.assertEqual(evidence["run_id"], "run-1")
+            self.assertEqual(evidence["source_snapshot_id"], "suite-v1")
+            self.assertEqual(evidence["target_base_url"], "https://staging.example.test")
+            self.assertEqual(evidence["results"], [result])
+            self.assertEqual(client.get(f"/projects/{other.project_id}/execution-runs/{run.run_record_id}").status_code, 404)
+            self.assertEqual(client.get(f"/projects/{project.project_id}/execution-runs/unknown").status_code, 404)
+
+            stored = self.store[f"qa_projects/{project.project_id}/snapshots/{execution.snapshot_id}"]
+            for field, wrong_value in (("project_id", other.project_id), ("operation", "automation.execution.preview"), ("source_snapshot_id", "suite-v2")):
+                with self.subTest(field=field), patch.dict(stored, {field: wrong_value}):
+                    self.assertIsNone(client.get(path).json()["results"])
+            with patch.dict(stored["payload"], {"run_id": "different-run"}):
+                self.assertIsNone(client.get(path).json()["results"])
+            del stored["payload"]["results"]
+            summary = client.get(path).json()
+            self.assertIsNone(summary["results"])
+            self.assertEqual(summary["summary"], {"passed": 0, "failed": 1})
+
+            app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="outsider", email="other@example.test", name="Outsider")
+            self.assertEqual(client.get(path).status_code, 403)
 
     def test_multiple_environment_execution_runs_preserve_separate_history(self) -> None:
         project = create_project(name="Checkout QA", description=None, actor=self.actor, request_id="req-1")

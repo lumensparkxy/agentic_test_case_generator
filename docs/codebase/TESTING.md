@@ -621,6 +621,9 @@ saved suite, runs healthy and faulty Directory responses, and inspects saved
 report and export evidence. The fixture uses supplied context notes to ground
 the loopback target. The export binds the approved Use Cases snapshot as
 source evidence and reports the separate Test Cases machine review.
+From the Runs index the smoke opens each saved run, reloads its exact Reports
+link, and checks the case identities and recorded assertion for the seeded
+failure.
 
 Choose a new output directory for each run. The runner keeps service logs,
 browser evidence and execution artifacts there, archives the exact test-owned

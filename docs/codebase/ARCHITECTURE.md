@@ -510,6 +510,16 @@ The conversion and run path is implemented by
 `backend/plain_english_test_framework/`, with Node runtime configuration in
 `backend/execution_runtime/playwright.config.ts`.
 
+Home and Runs link to project Reports with the exact run record selected in
+`?run=<run_record_id>`. The owner-only
+`GET /projects/{project_id}/execution-runs/{run_record_id}` lookup returns the
+recorded target, result and source suite, with case outcomes from the bound
+execution snapshot. Reports can show a saved assertion after a newer preview
+or after local runtime files have been removed. Older runs with missing or
+unmatched snapshot details keep their saved summary. The selected-run view
+keeps current-suite export on the ordinary Reports route. The endpoint reads
+project data and does not serve runtime files.
+
 Execution preview has one count/list invariant for the `executable`, `manual`,
 `unsupported`, and `invalid` buckets: every `summary` count equals the length of
 its matching candidate collection. `ExecutionPreviewResponse` derives the
