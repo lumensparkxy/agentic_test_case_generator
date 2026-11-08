@@ -140,6 +140,42 @@ test("column dividers support pointer and keyboard resizing without losing draft
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test("a queued column measurement is safe after leaving Use Cases", { tag: "@p1" }, async ({ page }) => {
+	await page.addInitScript(() => {
+		const pending = [];
+		window.ResizeObserver = class extends window.ResizeObserver {
+			constructor(callback) {
+				super(callback);
+				this.deliver = () => callback([], this);
+			}
+			observe(target, options) {
+				if (target.matches("thead th")) this.measuresHeaders = true;
+				super.observe(target, options);
+			}
+			disconnect() {
+				super.disconnect();
+				if (this.measuresHeaders) pending.push(this.deliver);
+			}
+		};
+		// Simulate a notification that was already queued when the observer disconnected.
+		window.deliverDisconnectedMeasurements = () => {
+			const callbacks = pending.splice(0);
+			for (const callback of callbacks) callback();
+			return callbacks.length;
+		};
+	});
+	const errors = [];
+	page.on("pageerror", (error) => errors.push(error.message));
+	await open(page);
+	const table = page.getByRole("table", { name: "Use case scenarios by requirement", exact: true });
+	await expect(table).toBeVisible();
+	await page.getByRole("link", { name: "Home", exact: true }).click();
+	await expect(page).toHaveURL(/\/$/);
+	await expect(table).toHaveCount(0);
+	expect(await page.evaluate(() => window.deliverDisconnectedMeasurements())).toBeGreaterThan(0);
+	expect(errors).toEqual([]);
+});
+
 test("quality dropdown does not expand rows and restores focus on Escape", async ({ page }) => {
 	await open(page);
 	const trigger = page.getByRole("button", { name: `Quality flags for ${scenarioId}`, exact: true });

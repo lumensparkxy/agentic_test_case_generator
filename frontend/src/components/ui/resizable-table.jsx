@@ -49,10 +49,13 @@ export function ResizableTable({
 		return () => observer.disconnect();
 	}, [responsiveMinWidth]);
 	useEffect(() => {
-		const observer = new ResizeObserver(() =>
-			setMeasured([...table.current.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width))
-		);
-		table.current.querySelectorAll("thead th").forEach((cell) => observer.observe(cell));
+		const observedTable = table.current;
+		if (!observedTable) return;
+		const observer = new ResizeObserver(() => {
+			if (table.current !== observedTable) return;
+			setMeasured([...observedTable.querySelectorAll("thead th")].map((cell) => cell.getBoundingClientRect().width));
+		});
+		observedTable.querySelectorAll("thead th").forEach((cell) => observer.observe(cell));
 		return () => observer.disconnect();
 	}, []);
 	const [localWidths, setLocalWidths] = useTableColumnWidths(columns, controlledWidths === undefined ? storageKey : undefined);
