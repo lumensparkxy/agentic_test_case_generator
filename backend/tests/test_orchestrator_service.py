@@ -464,6 +464,75 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertTrue(execute.enabled)
         self.assertEqual(status.stages["execution"].status, "ready")
 
+    def test_current_manual_preview_recommends_report_before_and_after_export(self) -> None:
+        project = self._seed_baseline_suite()
+        test_snapshot_id = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        counts = {"executable": 0, "manual": 1, "unsupported": 0, "invalid": 0}
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={
+                "summary": counts,
+                "candidate_counts": counts,
+                "candidates": {"executable": [], "manual": [{"id": "manual-1"}], "unsupported": [], "invalid": []},
+            },
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="req-manual-preview",
+            approved=True,
+            source_snapshot_id=test_snapshot_id,
+            title="Manual-only preview",
+        )
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.current_stage, "reports")
+        self.assertEqual(status.next_actions[0].label, "Create Test Case Report")
+        self.assertTrue(self._action(status, "report").enabled)
+        self.assertNotIn("execute", [action.action for action in status.next_actions])
+
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="reports",
+            payload={"format": "json"},
+            operation="export.json",
+            actor=self.actor,
+            request_id="req-manual-export",
+            approved=True,
+            source_snapshot_id=test_snapshot_id,
+            title="JSON export",
+        )
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.next_actions[0].label, "Review Reports")
+        self.assertEqual(status.stages["reports"].status, "completed")
+
+    def test_only_consistent_current_zero_counts_change_preview_recommendation(self) -> None:
+        counts = {"executable": 0, "manual": 0, "unsupported": 0, "invalid": 0}
+        buckets = {"executable": [], "manual": [], "unsupported": [], "invalid": []}
+        project = self._seed_baseline_suite()
+        test_snapshot_id = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        for label, payload, source_id, stale, expected in (
+            ("legacy", {"summary": {}}, None, False, "execute"),
+            ("mismatch", {"summary": counts, "candidate_counts": counts, "candidates": {**buckets, "executable": [{}]}}, test_snapshot_id, False, "automate"),
+            ("outdated source", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, "older-tests", False, "automate"),
+            ("stale", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, test_snapshot_id, True, "automate"),
+        ):
+            with self.subTest(label=label):
+                append_stage_snapshot(
+                    project_id=project.project_id,
+                    stage="execution",
+                    payload=payload,
+                    operation="automation.execution.preview",
+                    actor=self.actor,
+                    request_id=f"req-preview-{label}",
+                    approved=True,
+                    source_snapshot_id=source_id,
+                    title="Execution preview",
+                )
+                detail = get_project(project.project_id, actor=self.actor)
+                detail.stage_state["execution"].stale = stale
+                status = build_orchestrator_status(detail)
+                self.assertEqual(status.next_actions[0].action, expected)
+
     def test_passed_execution_without_report_recommends_report(self) -> None:
         project = self._seed_baseline_suite()
         append_stage_snapshot(

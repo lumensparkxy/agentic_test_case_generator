@@ -20,6 +20,11 @@ target and its source, project revision and source test-case snapshot. Drafts ma
 be previewed, but Run requires current readiness and selected eligible candidates.
 Stored or older responses without readiness require a fresh preview.
 
+A saved preview for the current approved test suite that consistently reports
+zero executable candidates leads to Reports. Test-case evidence can be exported
+for manual testing. The Reports navigation shows Complete for current approved
+evidence and Needs attention for draft or stale evidence, including after reload.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

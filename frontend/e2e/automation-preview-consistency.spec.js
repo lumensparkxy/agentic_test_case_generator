@@ -434,6 +434,39 @@ test.describe("Automation preview consistency", () => {
 		expect(requests.runs).toBe(0);
 	});
 
+	test("follows the saved manual-only preview recommendation to Reports without previewing again", async ({ page }) => {
+		const executionPayload = persistedPreviewPayload();
+		executionPayload.summary.manual = 1;
+		executionPayload.candidate_counts.manual = 1;
+		executionPayload.candidates.manual = [nonExecutableCandidate("manual-checkout", "TC-001", "manual")];
+		const scenario = {
+			project: projectFixture({ executionPayload }),
+			nextActions: [
+				{
+					action: "report",
+					label: "Create Test Case Report",
+					stage: "reports",
+					enabled: true,
+					primary: true,
+					secondary: false,
+					reason: "The current preview found zero executable candidates. Open Reports for test-case export options.",
+					blockers: [],
+				},
+			],
+		};
+		const requests = await installApi(page, scenario);
+		await openAutomation(page);
+		await expect(page.getByText("Manual 1", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
+		await page.getByRole("link", { name: "Overview", exact: true }).click();
+		await page.reload();
+		await expect(page.getByRole("heading", { name: "Create Test Case Report" })).toBeVisible();
+		await page.getByRole("button", { name: "Open Reports", exact: true }).click();
+		await expect(page).toHaveURL(buildProjectPath(PROJECT_ID, "reports"));
+		expect(requests.previews).toBe(0);
+		expect(requests.runs).toBe(0);
+	});
+
 	test("does not restore an obsolete run preview after execution state is reset", async ({ page }) => {
 		const livePreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
 		const scenario = {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from .requirement_scope import approved_generation_requirements
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from ..models import (
     AuthUser,
@@ -225,6 +225,38 @@ def _execution_operation(project: QaProjectDetail) -> Optional[str]:
         return execution_state.operation
     snapshot = project.current_snapshots.get("execution")
     return snapshot.operation if snapshot else None
+
+
+def _execution_preview_action(project: QaProjectDetail, test_snapshot_id: Optional[str]) -> Literal["automate", "execute", "report"]:
+    state = _project_state(project, "execution")
+    if state and state.stale:
+        return "automate"
+    preview = project.current_snapshots.get("execution")
+    if not preview or not state:
+        return "execute"
+    if state.current_snapshot_id != preview.snapshot_id or preview.operation != "automation.execution.preview":
+        return "automate"
+    source_snapshot_id = preview.source_snapshot_id
+    if source_snapshot_id and source_snapshot_id != test_snapshot_id:
+        return "automate"
+
+    summary = preview.payload.get("summary")
+    counts = preview.payload.get("candidate_counts")
+    candidates = preview.payload.get("candidates")
+    if not isinstance(summary, dict) or not isinstance(counts, dict) or not isinstance(candidates, dict):
+        # Older previews may not retain candidate groups. Keep the existing path.
+        return "execute"
+    for bucket in ("executable", "manual", "unsupported", "invalid"):
+        items = candidates.get(bucket)
+        count = counts.get(bucket)
+        if not isinstance(items, list) or type(count) is not int or type(summary.get(bucket)) is not int:
+            return "automate"
+        if count != len(items) or summary[bucket] != count:
+            return "automate"
+
+    if source_snapshot_id and summary["executable"] == 0:
+        return "report"
+    return "execute"
 
 
 def _changed_upstream_stages(project: QaProjectDetail) -> list[OrchestratorStageName]:
@@ -636,6 +668,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
 
     execution_status = _latest_execution_status(project)
     execution_operation = _execution_operation(project)
+    preview_action = _execution_preview_action(project, test_case_state.current_snapshot_id) if execution_operation == "automation.execution.preview" else None
     report_stale = bool(reports_state and reports_state.current_snapshot_id and reports_state.stale)
     if execution_status == "failed":
         actions.append(
@@ -681,16 +714,27 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    if execution_operation == "automation.execution.preview":
-        actions.append(
-            _action(
-                "execute",
-                "Execute Approved Suite",
-                "execution",
-                reason="Automation preview is ready; execute the selected cases in the target environment.",
-                primary=True,
+    if preview_action in {"execute", "report"}:
+        if preview_action == "report":
+            actions.append(
+                _action(
+                    "report",
+                    "Review Reports" if reports_state and reports_state.current_snapshot_id and reports_state.approved else "Create Test Case Report",
+                    "reports",
+                    reason="The current preview found zero executable candidates. Open Reports for test-case export options.",
+                    primary=True,
+                )
             )
-        )
+        else:
+            actions.append(
+                _action(
+                    "execute",
+                    "Execute Approved Suite",
+                    "execution",
+                    reason="Automation preview is ready; execute the selected cases in the target environment.",
+                    primary=True,
+                )
+            )
         actions.append(
             _action(
                 "review",
@@ -725,13 +769,15 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    if not execution_state or not execution_state.current_snapshot_id:
+    if preview_action == "automate" or not execution_state or not execution_state.current_snapshot_id:
         actions.append(
             _action(
                 "automate",
                 "Preview Automation",
                 "automation",
-                reason="Approved test cases are ready for automation preview.",
+                reason="Refresh the preview to check the current test suite."
+                if preview_action == "automate"
+                else "Approved test cases are ready for automation preview.",
                 primary=True,
             )
         )

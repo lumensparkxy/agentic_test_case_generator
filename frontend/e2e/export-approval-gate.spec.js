@@ -336,19 +336,31 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 			if (pathname === "/auth/me") return jsonResponse(route, { sub: "playwright-e2e-user", name: "QA" });
 			if (pathname === "/projects") return jsonResponse(route, { projects: [project] });
 			if (pathname === `/projects/${PROJECT_ID}`) return jsonResponse(route, project);
-			if (pathname.endsWith("/orchestrator/status")) return jsonResponse(route, { ...orchestratorStatus(), project_revision: 7 });
+			if (pathname.endsWith("/orchestrator/status"))
+				return jsonResponse(route, { ...orchestratorStatus(), project_revision: project.current_revision });
 			if (pathname === "/export/json") {
 				exported = route.request().postDataJSON();
 				if (reviewState === "server-rejected" && !exported.draft_override_requested) {
 					return jsonResponse(route, { detail: { code: "draft_override_required", message: "Saved coverage is incomplete." } }, 422);
 				}
+				const draft = exported.draft_override_requested;
+				project.current_revision += 1;
+				project.stage_state.reports = { current_snapshot_id: "report-saved", approved: !draft, stale: false };
+				project.current_snapshots.reports = {
+					snapshot_id: "report-saved",
+					stage: "reports",
+					operation: "export.json",
+					approved: !draft,
+					source_snapshot_id: exported.source_snapshot_id,
+					payload: { format: "json", approved: !draft },
+				};
 				return jsonResponse(
 					route,
 					{
 						export_format: "test_cases_v1",
 						total_count: 1,
 						test_cases: cases,
-						audit_metadata: { schema_version: 1, snapshot_id: exported.source_snapshot_id, is_draft: !approved },
+						audit_metadata: { schema_version: 1, snapshot_id: exported.source_snapshot_id, is_draft: draft },
 					},
 					200,
 					{ "content-disposition": "attachment; filename=test_cases.json" }
@@ -368,6 +380,7 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 				await expectNoSeriousOrCriticalViolations(page, `Export rejection at ${width}px`);
 				await page.screenshot({ path: testInfo.outputPath(`export-recovery-${width}.png`), fullPage: true });
 			}
+			await page.setViewportSize({ width: 1366, height: 768 });
 		}
 		if (!approved || reviewState === "server-rejected") {
 			await expect(downloadButton).toBeDisabled();
@@ -387,5 +400,11 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 		expect(document.test_cases[0].id).toBe("TC-SAVED");
 		expect(exported.base_project_revision).toBe(7);
 		expect(exported.draft_override_requested).toBe(!approved || reviewState === "server-rejected");
+		expect(document.audit_metadata.is_draft).toBe(exported.draft_override_requested);
+		const reportState = exported.draft_override_requested ? "Needs attention" : "Complete";
+		const reportsLink = page.getByRole("link", { name: `Reports, ${reportState}`, exact: true });
+		await expect(reportsLink).toHaveAttribute("aria-current", "page");
+		await page.reload();
+		await expect(reportsLink).toHaveAttribute("aria-current", "page");
 	});
 }

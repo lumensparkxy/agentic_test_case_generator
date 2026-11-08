@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { openQaProjectByName } from "./support/projects.js";
+import { installWorkspaceApi } from "./support/workspace.js";
 
 function jsonResponse(route, payload, status = 200) {
 	return route.fulfill({
@@ -201,6 +203,38 @@ function statusPayload() {
 }
 
 test.describe("Report evidence", () => {
+	for (const [state, label] of [
+		["approved", "Complete"],
+		["draft", "Needs attention"],
+		["stale", "Needs attention"],
+		["missing", "Pending"],
+		["blocked", "Blocked"],
+	]) {
+		test(`Reports navigation reflects ${state} saved evidence after reload`, async ({ page }) => {
+			const project = projectDetail();
+			project.current_snapshots.test_cases.payload.generation_tasks = [];
+			if (state === "missing" || state === "blocked") {
+				delete project.stage_state.reports;
+				delete project.current_snapshots.reports;
+				project.stage_state.test_cases.approved = state !== "blocked";
+			} else {
+				project.stage_state.reports.approved = state !== "draft";
+				project.stage_state.reports.stale = state === "stale";
+				project.current_snapshots.reports.approved = state !== "draft";
+			}
+			await installWorkspaceApi(page, { projectDetails: { [project.project_id]: project } });
+			await seedAuthenticatedSession(page);
+			await page.goto(buildProjectPath(project.project_id, "reports"));
+			const reportsLink = page.getByRole("navigation", { name: "Project navigation" }).getByRole("link", {
+				name: `Reports, ${label}`,
+				exact: true,
+			});
+			await expect(reportsLink).toHaveAttribute("aria-current", "page", { timeout: 5_000 });
+			await page.reload();
+			await expect(reportsLink).toHaveAttribute("aria-current", "page");
+		});
+	}
+
 	test("stale reports show regeneration action and evidence links", async ({ page }) => {
 		const project = projectDetail();
 

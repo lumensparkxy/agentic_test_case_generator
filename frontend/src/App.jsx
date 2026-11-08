@@ -3948,13 +3948,13 @@ export default function App() {
 				? "pending"
 				: "blocked",
 		4: getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: projectStageState.execution?.stale }).status,
-		5: projectStageState.reports?.stale
-			? "attention"
-			: exportMessage
+		5: projectStageState.reports?.current_snapshot_id
+			? projectStageState.reports.approved && !projectStageState.reports.stale
 				? "complete"
-				: testCases.length && !exportGateLocked
-					? "pending"
-					: "blocked",
+				: "attention"
+			: testCases.length && !exportGateLocked
+				? "pending"
+				: "blocked",
 	};
 
 	const selectWorkflowTab = (nextTab) => {
