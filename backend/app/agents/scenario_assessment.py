@@ -9,16 +9,19 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 import re
+from urllib.parse import urlsplit
 
 from google.adk.agents import Agent
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from .adk_runtime import json_generation_config
+from ..services.browser_handoff import declared_browser_pages
 
 STATE_SCENARIO_ASSESSMENT = "scenario_semantic_assessment"
 RUBRIC_VERSION = "scenario_semantics_v3"
 CRITERIA = ("specific_trigger", "observable_outcome", "distinct_behavior", "source_grounding")
 _ROUTE = re.compile(r"(?<![\w/])/(?:[\w{}:.-]+/)*[\w{}:.-]+/?")
+_ABSOLUTE_URL = re.compile(r"""https?://[^\s"'\\]+""", re.I)
 
 
 def _routes(text):
@@ -148,12 +151,13 @@ def _generic_title(title):
     )
 
 
-def local_findings(plan, source_text):
+def local_findings(plan, source_text, *, declared_paths=()):
     """Known regression warnings only; never used as proof of semantic success."""
     findings = {}
     source = source_text.lower()
-    source_routes = _routes(source_text)
-    source_facts = _ROUTE.sub(" ", source_text)
+    relative_source = _ABSOLUTE_URL.sub(" ", source_text)
+    source_routes = _routes(relative_source) | set(declared_paths)
+    source_facts = _ROUTE.sub(" ", relative_source)
     source_values = {token.rstrip(".") for token in re.findall(r"(?<![\w.-])[A-Za-z0-9_][A-Za-z0-9_.-]*", source_facts)}
     by_objective = {}
     for group in plan:
@@ -199,7 +203,14 @@ def local_findings(plan, source_text):
 def assess_scenarios(plan, requirements, context_text, critic_rows=None):
     inputs = assessment_input(plan, requirements, context_text)
     source_text = "\n".join(r.text for r in requirements) + "\n" + context_text
-    known = local_findings(plan, source_text)
+    try:
+        context = json.loads(context_text)
+    except ValueError, RecursionError:
+        context = None
+    pages = set()
+    if isinstance(context, dict) and isinstance(context.get("notes"), str) and isinstance(context.get("app_link"), str):
+        pages = declared_browser_pages(context["notes"], context["app_link"])
+    known = local_findings(plan, source_text, declared_paths=(urlsplit(page).path for page in pages))
     indexed = {}
     for raw in critic_rows or []:
         try:

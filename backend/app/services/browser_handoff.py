@@ -66,6 +66,20 @@ def _http_url(value: str) -> str | None:
     return str(url) if not (url.username or url.password) else None
 
 
+def declared_browser_pages(notes: str, app_link: str | None) -> set[str]:
+    target = _http_url(app_link) if app_link else None
+    if not target:
+        return set()
+    origin = urlsplit(target)[:2]
+    pages = set()
+    for line in notes.splitlines():
+        if match := _NOTED_PAGE.fullmatch(line.strip()):
+            page = _http_url(match[1])
+            if page and urlsplit(page)[:2] == origin:
+                pages.add(page)
+    return pages
+
+
 def _exact_option_labels(raw: str) -> set[str]:
     try:
         values = json.loads(raw)
@@ -127,13 +141,8 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
                 urls.add(href)
 
     notes = context.notes or ""
-    lines = notes.splitlines()
-    for line in lines:
-        if match := _NOTED_PAGE.fullmatch(line.strip()):
-            page = _http_url(match[1])
-            if page and urlsplit(page)[:2] == origin:
-                urls.add(page)
-    for line in lines:
+    urls.update(declared_browser_pages(notes, str(context.app_link) if context.app_link else None))
+    for line in notes.splitlines():
         if match := _NOTED_DROPDOWN.fullmatch(line.strip()):
             field, raw_page, raw_options = match.groups()
             page = _http_url(raw_page)

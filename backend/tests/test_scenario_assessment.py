@@ -189,6 +189,21 @@ class ScenarioAssessmentTests(unittest.TestCase):
                 coverage = plan(("Inspect booking", f"Open {route}; status remains Confirmed."))
                 self.assertEqual(assess_scenarios(coverage, [REQ], context, passes(coverage, context))["status"], "needs_review")
 
+    def test_context_browser_page_grounds_only_the_observed_same_origin_route(self):
+        target = "http://127.0.0.1:8810/"
+        route = "/bookings/B-EXISTING"
+        for notes, scenario_route, expected in (
+            (f'Browser page "{target}bookings/B-EXISTING"', route, "passed"),
+            (f'Browser page "{target}bookings/B-EXISTING"', route + "/cancel", "needs_review"),
+            (f'The page is "{target}bookings/B-EXISTING".', route, "needs_review"),
+            ('Browser page "http://127.0.0.1:8811/bookings/B-EXISTING"', route, "needs_review"),
+            ('Route /bookings/{bookingId}.\nBrowser page "https://foreign.test/bookings/B-EXISTING"', route, "needs_review"),
+        ):
+            with self.subTest(notes=notes, route=scenario_route):
+                context = json.dumps({"app_link": target, "notes": notes})
+                coverage = plan(("Inspect existing booking", f"Open {scenario_route}; status remains Confirmed."))
+                self.assertEqual(assess_scenarios(coverage, [REQ], context, passes(coverage, context))["status"], expected)
+
     def test_route_instances_with_multiple_parameters_require_every_source_value(self):
         coverage = plan(("Inspect booking", "Open /rooms/Atlas/bookings/B-EXISTING; Confirmed is displayed."))
         template = "Route /rooms/{roomId}/bookings/{bookingId}. Room Atlas."
