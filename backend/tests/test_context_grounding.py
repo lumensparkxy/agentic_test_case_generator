@@ -93,7 +93,7 @@ class ContextGroundingTests(unittest.TestCase):
                 steps=[
                     TestStep(step=1, action=f'Open "{target}"', expected=""),
                     TestStep(step=2, action=f'Enter "Q-17" into the "{label}" field', expected=f'field "{label}" value should equal "Q-17"'),
-                    TestStep(step=3, action='Click the "Save request" button', expected='exact text "Request saved" is visible'),
+                    TestStep(step=3, action='Click exact button "Save request"', expected='exact text "Request saved" is visible'),
                 ],
             )
             for index, label in enumerate(("Reference", "reference-note"), start=1)

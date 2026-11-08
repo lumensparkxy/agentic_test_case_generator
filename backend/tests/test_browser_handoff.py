@@ -50,7 +50,7 @@ def candidate():
         steps=[
             TestStep(step=1, action=f'Open "{TARGET}"', expected=""),
             TestStep(step=2, action='Enter "Q-17" into the "Reference" field', expected='field "Reference" value should equal "Q-17"'),
-            TestStep(step=3, action='Click the "Save request" button', expected='exact text "Request saved" is visible'),
+            TestStep(step=3, action='Click exact button "Save request"', expected='exact text "Request saved" is visible'),
         ],
     )
 
@@ -78,7 +78,8 @@ class BrowserHandoffTests(unittest.TestCase):
             (0, {"action": 'Open "https://example.test/invented"'}, "supplied application URL"),
             (1, {"action": 'Enter "Q-17" into the "ref" field'}, "exact interface evidence"),
             (1, {"action": f'Open "{TARGET}" as an auditor'}, "each browser navigation"),
-            (2, {"action": 'Click the "Submit mock" button'}, "exact interface evidence"),
+            (2, {"action": 'Click exact button "Submit mock"'}, "exact interface evidence"),
+            (2, {"action": 'Click the "Save request" button'}, "exact button or link action"),
             (2, {"expected": 'exact text "Invented copy" is visible'}, "exact interface evidence"),
             (2, {"expected": 'exact text "Q-17" is visible'}, "exact interface evidence"),
             (2, {"expected": 'exact text "Request saved" is visible and the record is archived'}, "Source step 3"),

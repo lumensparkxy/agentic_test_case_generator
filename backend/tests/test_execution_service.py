@@ -16,10 +16,11 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import ExecutionSettings
 from app.models import ExecutionCandidate, ExecutionPreviewResponse, TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
-from plain_english_test_framework.compiler import CompilerError, compile_spec_file
+from plain_english_test_framework.compiler import CompilerError, ResolvedEnvironment, compile_parsed_spec, compile_spec_file
 from plain_english_test_framework.ir_validator import validate_ir_document
 from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
 from plain_english_test_framework.playwright_generator import generate_playwright_spec
+from plain_english_test_framework.spec_parser import parse_spec_document
 from plain_english_test_framework.validation import ValidationIssue
 
 
@@ -420,6 +421,52 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('page.getByRole("heading", { name: "Account", exact: true })', generated)
         self.assertIn('page.getByText("You\'re signed in.", { exact: true })', generated)
         self.assertIn(r'page.getByText("Select \"Search\".", { exact: true })', generated)
+
+    def test_exact_click_preserves_button_and_link_names_alongside_legacy_clicks(self) -> None:
+        url = "https://example.test"
+        case = TestCase(
+            id="TC-CLICK",
+            title="Open the request and visit the receipt",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action='Click exact button "Open database"', expected=""),
+                TestStep(step=3, action=r'Click exact link "Go to \"Receipt\""', expected=""),
+                TestStep(step=4, action='Click the "Done" button', expected='exact text "Saved" is visible'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        self.assertFalse(preview.executable[0].unsupported_steps)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        clicks = [step["locator"] for step in ir.raw["cases"][0]["steps"] if step["action"] == "click"]
+        self.assertEqual(
+            clicks,
+            [
+                {"strategy": "role", "role": "button", "value": "Open database", "exact": True},
+                {"strategy": "role", "role": "link", "value": 'Go to "Receipt"', "exact": True},
+                {"strategy": "role", "role": "button", "value": "Done"},
+            ],
+        )
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("button", { name: "Open database", exact: true }).click()', generated)
+        self.assertIn(r'page.getByRole("link", { name: "Go to \"Receipt\"", exact: true }).click()', generated)
+        self.assertIn('page.getByRole("button", { name: "Done" }).click()', generated)
+
+    def test_malformed_exact_click_does_not_fall_back_to_partial_action(self) -> None:
+        for action in (
+            'Click exact button "Sign in" and confirm the user has access',
+            'Click exact button "Sign in" before submitting another request',
+            'Click exact button "Sign in" is visible',
+            'Click exact checkbox "Sign in"',
+            'Click exact button ""',
+        ):
+            with self.subTest(action=action):
+                case = _browser_case()
+                case.steps[2].action = action
+                preview = preview_execution([case], target_base_url="https://example.test")
+                self.assertEqual(preview.summary.executable, 0)
+                self.assertEqual(preview.unsupported[0].unsupported_steps[0].action, action)
 
     def test_preview_compiler_and_generator_support_explicit_browser_assertion_dsl(self) -> None:
         semantic_case = TestCase(

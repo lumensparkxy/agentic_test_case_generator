@@ -63,6 +63,8 @@ TEXT_EQUALS_PATTERN = re.compile(
 )
 ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s+that)?\s+)?(?:the\s+)?", re.IGNORECASE)
 QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'(?:\\['\\]|[^'\\])*')"""
+EXACT_CLICK_ACTION = re.compile(rf"^Click exact (?P<role>button|link)\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?$", re.IGNORECASE)
+EXACT_CLICK_INTENT = re.compile(r"^Click\s+exact\b", re.IGNORECASE)
 QUOTED_FIELD_ASSERTION_PATTERN = re.compile(
     r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?:should\s+)?'
     r'(?P<operator>equals?|contains?|be|is)\s+(?P<expected>"(?:\\["\\]|[^"\\])*")',
@@ -501,8 +503,9 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     expected = _normalize_text(step.expected)
     action_value, unsupported_action = _field_value_assertion(step.action)
     expected_value, unsupported_expected = _field_value_assertion(step.expected)
+    exact_click = EXACT_CLICK_ACTION.fullmatch(step.action.strip())
     # A supported assertion's quoted locator and value are data, not operations.
-    domain_text = " ".join(("" if action_value else step.action, "" if expected_value else step.expected, step.test_data or "")).lower()
+    domain_text = " ".join(("" if action_value or exact_click else step.action, "" if expected_value else step.expected, step.test_data or "")).lower()
     if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
         return [], _unsupported_step(step, "unsupported_non_browser_domain", "manual_execution")
     if unsupported_action or unsupported_expected:
@@ -514,6 +517,11 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
 
     if action_value:
         converted.append(action_value)
+    elif EXACT_CLICK_INTENT.match(action):
+        if not exact_click or not (name := _assertion_literal(exact_click["name"])).strip():
+            return [], _unmapped_step(step, action, is_expected=False)
+        role = exact_click["role"].lower()
+        converted.append(_ConvertedStep("click", f'I click exact {role} "{_escape_step_text(name)}"'))
     elif assertion := _convert_assertion(step.action):
         converted.append(assertion)
     elif ASSERTION_ACTION_PATTERN.match(action) or ACTION_SEQUENCE_PATTERN.search(re.sub(QUOTED_ASSERTION_TARGET, "", action)):

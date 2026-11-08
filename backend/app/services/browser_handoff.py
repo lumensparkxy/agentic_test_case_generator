@@ -23,7 +23,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Start with action 'Open "exact supplied URL"'. Leave expected as an empty string on a pure navigation or interaction step when it has no separate source outcome.
 - Use action 'Enter "literal input" into the "observed accessible label" field' and expected 'field "observed accessible label" value should equal "literal input"' when the field value matters.
 - For an initially blank field, use action 'Inspect the "observed accessible label" field' and expected 'field "observed accessible label" value should equal ""'. Submit with no fill step. Empty fills are unsupported. Keep a required clear of a populated field manual.
-- Use action 'Click the "observed accessible name" button' or 'Click the "observed accessible name" link'.
+- Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
 - The wording above illustrates syntax. Use the actual supplied names, routes and copy. Do not add generic page-load checks or combine a result with phrases such as "and the results update". Preserve any separate source-defined transition as its own observable check.
 - Every business expectation must appear in a source step. Use expected_result to summarize those step outcomes. Keep required backend, audit, timing or unsupported checks in the case and mark it Manual. Missing interface evidence or prerequisites also means Manual.
@@ -150,6 +150,8 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
         locator = step.get("locator")
         if locator and not _locator_supported(locator, evidence):
             return "A browser locator or visible text lacks exact interface evidence."
+        if action == "click" and not locator.get("exact"):
+            return "Use a complete exact button or link action."
         if action == "fill":
             entered_values[(locator["strategy"], locator["value"])] = str(step["value"])
         if action in {"assert_text_equals", "assert_title", "assert_attribute_equals", "assert_value_equals", "assert_value_contains"}:
