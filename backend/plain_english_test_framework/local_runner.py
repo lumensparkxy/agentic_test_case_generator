@@ -56,10 +56,11 @@ def generate_local_playwright_spec(
     ir_path: str | Path,
     *,
     generated_dir: str | Path = DEFAULT_GENERATED_DIR,
+    enforce_target_origin: bool = False,
 ) -> Path:
     """Generate one TypeScript Playwright spec file from one IR file."""
 
-    generated = generate_playwright_spec_file(ir_path)
+    generated = generate_playwright_spec_file(ir_path, enforce_target_origin=enforce_target_origin)
     output_dir = Path(generated_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{generated.spec_id}.spec.ts"

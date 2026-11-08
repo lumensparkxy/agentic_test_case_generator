@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
-from urllib.parse import urljoin
 from uuid import uuid4
 
 import yaml
@@ -17,7 +16,7 @@ from plain_english_test_framework.local_runner import (
     generate_local_playwright_spec,
     run_local_playwright_specs,
 )
-from plain_english_test_framework.playwright_generator import PlaywrightGenerationError
+from plain_english_test_framework.playwright_generator import TARGET_ORIGIN_ERROR, PlaywrightGenerationError
 from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
 from plain_english_test_framework.spec_parser import SpecValidationError
 from plain_english_test_framework.validation import ValidationIssue
@@ -34,6 +33,7 @@ from ..models import (
     TestCase,
     TestStep,
 )
+from .execution_target import bind_execution_url
 
 
 URL_PATTERN = re.compile(
@@ -79,6 +79,15 @@ EXACT_CHECKBOX_ASSERTION = re.compile(
 )
 EXACT_CHECKBOX_ASSERTION_INTENT = re.compile(r"^exact\s+checkbox\b", re.IGNORECASE)
 EXPLICIT_OPEN_ACTION = re.compile(r'(?:Open|Navigate to)\s+"([^"\n]+)"\.?', re.IGNORECASE)
+QUOTED_NAVIGATION_ARGUMENT = re.compile(
+    rf"(?:\b(?:path|route|url|at)\s+|^(?:open|navigate to|go to|visit)\s+)(?P<url>{QUOTED_ASSERTION_TARGET})",
+    re.IGNORECASE,
+)
+BARE_NAVIGATION_ARGUMENT = re.compile(
+    r"(?:\b(?:path|route|url|at)\s+|^(?:open|navigate to|go to|visit)\s+)"
+    r"""(?P<url>(?:[A-Za-z][A-Za-z0-9+.-]*:|[/.?#\\])[^\s"'\x60()<>]+)""",
+    re.IGNORECASE,
+)
 QUOTED_FIELD_ASSERTION_PATTERN = re.compile(
     r'(?P<locator>"(?:\\["\\]|[^"\\])+")\s+(?:field|input|textarea)\s+(?:value\s+)?(?:should\s+)?'
     r'(?P<operator>equals?|contains?|be|is)\s+(?P<expected>"(?:\\["\\]|[^"\\])*")',
@@ -208,6 +217,7 @@ DUPLICATE_CANDIDATE_ID_WARNING = "Duplicate or colliding test case IDs were assi
 class _ConvertedStep:
     kind: str
     body: str
+    url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -230,6 +240,7 @@ def preview_execution(
     test_cases: Iterable[TestCase],
     *,
     target_base_url: str | None = None,
+    source_app_url: str | None = None,
     settings: ExecutionSettings | None = None,
 ) -> ExecutionPreviewResponse:
     settings = settings or get_execution_settings()
@@ -247,7 +258,7 @@ def preview_execution(
     base_url = _normalize_base_url(target_base_url or settings.default_base_url)
 
     for test_case in cases:
-        candidate = _candidate_for_test_case(test_case, base_url=base_url)
+        candidate = _candidate_for_test_case(test_case, base_url=base_url, source_app_url=source_app_url)
         candidate, candidate_id_changed = _with_unique_candidate_id(candidate, used_candidate_ids=used_candidate_ids)
         if candidate_id_changed and DUPLICATE_CANDIDATE_ID_WARNING not in warnings:
             warnings.append(DUPLICATE_CANDIDATE_ID_WARNING)
@@ -274,10 +285,11 @@ def run_execution(
     *,
     selected_test_case_ids: Iterable[str] = (),
     target_base_url: str | None = None,
+    source_app_url: str | None = None,
     settings: ExecutionSettings | None = None,
 ) -> ExecutionRunResponse:
     settings = settings or get_execution_settings()
-    preview = preview_execution(test_cases, target_base_url=target_base_url, settings=settings)
+    preview = preview_execution(test_cases, target_base_url=target_base_url, source_app_url=source_app_url, settings=settings)
     run_id = f"exec_{uuid4().hex[:12]}"
 
     if not settings.enabled:
@@ -374,7 +386,7 @@ def run_execution(
     )
 
 
-def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> ExecutionCandidate:
+def _candidate_for_test_case(test_case: TestCase, *, base_url: str, source_app_url: str | None) -> ExecutionCandidate:
     from .execution_prerequisites import prerequisite_blockers
 
     candidate_id = _slug_identifier(test_case.id)
@@ -409,6 +421,15 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
     unsupported_steps: list[ExecutionUnsupportedStep] = []
     for step in test_case.steps:
         step_conversions, unsupported = _convert_step(step, base_url=base_url)
+        if not unsupported:
+            try:
+                step_conversions = [_bind_url_step(item, base_url=base_url, source_app_url=source_app_url) for item in step_conversions]
+            except ValueError:
+                unsupported = _unsupported_step(
+                    step,
+                    "execution.target_origin_mismatch",
+                    "Use a relative URL or an HTTP(S) URL on the selected target or verified saved application origin.",
+                )
         if unsupported:
             unsupported_steps.append(unsupported)
         else:
@@ -438,6 +459,18 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
         )
 
     if converted_steps[0].kind != "navigate":
+        try:
+            initial_url = bind_execution_url(base_url, base_url=base_url, source_app_url=source_app_url)
+        except ValueError:
+            return ExecutionCandidate(
+                id=candidate_id,
+                source_test_case_id=test_case.id,
+                title=test_case.title,
+                status="invalid",
+                metadata=metadata,
+                review_reasons=["Use a valid HTTP(S) execution target without inline credentials."],
+                traceability_ids=traceability_ids,
+            )
         unsupported_steps.append(
             ExecutionUnsupportedStep(
                 step=test_case.steps[0].step if test_case.steps else 0,
@@ -448,7 +481,7 @@ def _candidate_for_test_case(test_case: TestCase, *, base_url: str) -> Execution
                 suggested_next_action="Target base URL was used as the deterministic browser navigation step.",
             )
         )
-        converted_steps.insert(0, _ConvertedStep("navigate", f'I open "{_escape_step_text(base_url)}"'))
+        converted_steps.insert(0, _url_step("navigate", initial_url))
 
     if not any(step.kind in ASSERTION_KINDS for step in converted_steps):
         return ExecutionCandidate(
@@ -577,8 +610,6 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         # as "Open receipt" does not turn it into a navigation.
         if not (expected_value or expected_assertion) or _unsupported_browser_assertion_text_reason(action):
             return [], _unmapped_step(step, action, is_expected=False)
-    elif _looks_like_navigation(action):
-        converted.append(_ConvertedStep("navigate", f'I open "{_resolve_step_url(action, base_url)}"'))
     elif match := FILL_PATTERN.search(action):
         value = _clean_value(match.group("value"))
         label = _clean_label(match.group("label"))
@@ -601,6 +632,8 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
                 converted.append(_ConvertedStep("click", f'I click link "{_escape_step_text(name)}"'))
             else:
                 converted.append(_ConvertedStep("click", f'I click "{_escape_step_text(name)}"'))
+    elif _looks_like_navigation(action):
+        converted.append(_url_step("navigate", _resolve_step_url(action, base_url)))
 
     expected_assertion = expected_value or expected_assertion
     if expected and not expected_assertion:
@@ -624,7 +657,7 @@ def is_complete_browser_action(action: str) -> bool:
     kind = converted[0].kind
     if kind == "navigate":
         opening = EXPLICIT_OPEN_ACTION.fullmatch(action)
-        return bool(opening and URL_PATTERN.fullmatch(opening[1]))
+        return bool(opening and (URL_PATTERN.fullmatch(opening[1]) or (opening[1].startswith("/") and not opening[1].startswith("//"))))
     if kind == "click":
         return bool(EXACT_CLICK_ACTION.fullmatch(action))
     return kind in {"fill", "select_option", "set_checked"}
@@ -673,7 +706,7 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
     if match := URL_ASSERTION_PREFIX.match(text):
         target = text[match.end() :]
         if URL_PATTERN.fullmatch(target) and (url := _extract_prose_url(target)):
-            return _ConvertedStep("assert_url", f'URL should be "{_escape_step_text(url)}"')
+            return _url_step("assert_url", url)
         return None
 
     if _contains_runtime_assertion_intent(text) or _contains_page_title_visible_assertion(text) or _contains_attribute_visible_assertion(text):
@@ -784,7 +817,7 @@ def _prepare_candidate(
             data_dir=data_dir,
         )
         ir_path.write_text(json.dumps(ir.raw, indent=2, sort_keys=True), encoding="utf-8")
-        generated_spec_path = generate_local_playwright_spec(ir_path, generated_dir=generated_dir)
+        generated_spec_path = generate_local_playwright_spec(ir_path, generated_dir=generated_dir, enforce_target_origin=True)
     except (CompilerError, SpecValidationError, IrValidationError, PlaywrightGenerationError) as exc:
         return None, _invalid_execution_item(candidate, ir_path=ir_path, artifacts_dir=artifacts_dir, issues=_issues_from_exception(exc))
 
@@ -962,11 +995,12 @@ def _annotation_description(test: dict[str, Any], annotation_type: str) -> str |
 
 def _playwright_case_result(test: dict[str, Any]) -> _PlaywrightCaseResult:
     results = list(test.get("results") or [])
+    issues = tuple(_playwright_issues(results))
     return _PlaywrightCaseResult(
-        status=_playwright_status(test),
+        status="invalid" if any(issue.code == "execution.target_origin_mismatch" for issue in issues) else _playwright_status(test),
         stdout=_playwright_stdio_text(results, "stdout"),
         stderr=_playwright_stdio_text(results, "stderr"),
-        issues=tuple(_playwright_issues(results)),
+        issues=issues,
     )
 
 
@@ -998,20 +1032,18 @@ def _playwright_stdio_text(results: list[dict[str, Any]], field: str) -> str:
 def _playwright_issues(results: list[dict[str, Any]]) -> list[ExecutionIssue]:
     issues: list[ExecutionIssue] = []
     for index, result in enumerate(results):
-        if result.get("error"):
+        errors = result.get("errors") or []
+        entries = [(f"errors[{error_index}]", error) for error_index, error in enumerate(errors)]
+        if not entries and result.get("error"):
+            entries = [("error", result["error"])]
+        for path, error in entries:
+            message = _playwright_error_message(error)
+            escaped_target = message.removeprefix("Error: ").startswith(TARGET_ORIGIN_ERROR)
             issues.append(
                 ExecutionIssue(
-                    path=f"$.results[{index}].error",
-                    message=_playwright_error_message(result["error"]),
-                    code="playwright.error",
-                )
-            )
-        for error_index, error in enumerate(result.get("errors") or []):
-            issues.append(
-                ExecutionIssue(
-                    path=f"$.results[{index}].errors[{error_index}]",
-                    message=_playwright_error_message(error),
-                    code="playwright.error",
+                    path=f"$.results[{index}].{path}",
+                    message=message,
+                    code="execution.target_origin_mismatch" if escaped_target else "playwright.error",
                 )
             )
     return issues
@@ -1184,11 +1216,24 @@ def _looks_like_navigation(text: str) -> bool:
 
 
 def _resolve_step_url(action: str, base_url: str) -> str:
+    if match := QUOTED_NAVIGATION_ARGUMENT.search(action):
+        return _assertion_literal(match["url"])
+    if match := BARE_NAVIGATION_ARGUMENT.search(action):
+        return match["url"].rstrip(".,;:!?")
     if url := _extract_prose_url(action):
         return url
-    if path_match := re.search(r"\b(?:path|route|url)\s+['\"]([^'\"]+)['\"]", action, re.IGNORECASE):
-        return urljoin(base_url.rstrip("/") + "/", path_match.group(1).lstrip("/"))
     return base_url
+
+
+def _url_step(kind: str, url: str) -> _ConvertedStep:
+    prefix = "I open" if kind == "navigate" else "URL should be"
+    return _ConvertedStep(kind, f'{prefix} "{_escape_step_text(url)}"', url)
+
+
+def _bind_url_step(step: _ConvertedStep, *, base_url: str, source_app_url: str | None) -> _ConvertedStep:
+    if step.url is None:
+        return step
+    return _url_step(step.kind, bind_execution_url(step.url, base_url=base_url, source_app_url=source_app_url))
 
 
 def _extract_prose_url(text: str) -> str | None:

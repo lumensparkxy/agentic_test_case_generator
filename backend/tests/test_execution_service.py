@@ -199,7 +199,7 @@ class ExecutionServiceTests(unittest.TestCase):
         settings = ExecutionSettings()
         cases = [_browser_case(f"TC-{index:03d}") for index in range(1, 26)]
 
-        response = preview_execution(cases, settings=settings)
+        response = preview_execution(cases, target_base_url="https://example.test", settings=settings)
 
         self.assertEqual(settings.max_cases_per_request, 9999)
         self.assertEqual(response.summary.executable, 25)
@@ -452,6 +452,60 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('page.getByRole("button", { name: "Open database", exact: true }).click()', generated)
         self.assertIn(r'page.getByRole("link", { name: "Go to \"Receipt\"", exact: true }).click()', generated)
         self.assertIn('page.getByRole("button", { name: "Done" }).click()', generated)
+
+    def test_navigation_and_url_checks_bind_to_the_selected_target_without_changing_the_suite(self) -> None:
+        selected = "https://selected.example.test/app"
+        original = "http://original.example.test:8443"
+        foreign = "https://selected.example.test:8443"
+        cases = [
+            TestCase(
+                id=identity,
+                title=identity,
+                automation_status="Automated",
+                steps=[TestStep(step=1, action=action, expected=expected)],
+            )
+            for identity, action, expected in (
+                ("rebased", f'Open "{original}/orders?q=next%2Fpage#detail"', f'URL is exactly "{original}/orders?q=next%2Fpage#detail"'),
+                ("relative", "Open /orders?next=https://example.test/a", 'exact text "Ready" is visible'),
+                ("same", 'Open "https://SELECTED.example.test:443/orders"', 'exact text "Ready" is visible'),
+                ("foreign", f'Open "{foreign}/orders"', 'exact text "Ready" is visible'),
+                ("scheme-relative", "Open the application at //unknown.example.test/orders", 'exact text "Ready" is visible'),
+                ("invalid-scheme", 'Open "javascript:void(0)"', 'exact text "Ready" is visible'),
+            )
+        ]
+        before = [case.model_dump() for case in cases]
+        preview = preview_execution(cases, target_base_url=selected, source_app_url=original)
+        self.assertEqual([case.id for case in preview.executable], ["rebased", "relative", "same"])
+        self.assertEqual([case.id for case in preview.unsupported], ["foreign", "scheme_relative", "invalid_scheme"])
+        self.assertTrue(all(case.unsupported_steps[0].reason_code == "execution.target_origin_mismatch" for case in preview.unsupported))
+        self.assertEqual(
+            preview.executable[0].spec["steps"],
+            [
+                'Given I open "https://selected.example.test/orders?q=next%2Fpage#detail"',
+                'Then URL should be "https://selected.example.test/orders?q=next%2Fpage#detail"',
+            ],
+        )
+        self.assertEqual(preview.executable[1].spec["steps"][0], 'Given I open "https://selected.example.test/orders?next=https://example.test/a"')
+        self.assertEqual(preview.executable[2].spec["steps"][0], 'Given I open "https://selected.example.test/orders"')
+        self.assertEqual([case.model_dump() for case in cases], before)
+
+    def test_a_url_field_value_does_not_become_a_navigation(self) -> None:
+        case = TestCase(
+            id="url-field",
+            title="Store an external URL as text",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action='Enter "https://external.example.test" into the "Reference URL" field',
+                    expected='field "Reference URL" value should equal "https://external.example.test"',
+                )
+            ],
+        )
+        preview = preview_execution([case], target_base_url="https://selected.example.test/form")
+        self.assertEqual(preview.summary.executable, 1)
+        self.assertEqual(preview.executable[0].spec["steps"][0], 'Given I open "https://selected.example.test/form"')
+        self.assertIn('When I enter "https://external.example.test" into field "Reference URL"', preview.executable[0].spec["steps"])
 
     def test_exact_negative_visibility_preserves_role_and_text_without_reopening_page(self) -> None:
         url = "https://example.test/receipt"
@@ -933,7 +987,7 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.executable, 1)
         candidate = response.executable[0]
         self.assertFalse(candidate.unsupported_steps)
-        self.assertEqual(candidate.spec["steps"], ['Given I open "https://example.test"', 'When I click "Submit"', 'Then "Summary" should equal "Submitted"'])
+        self.assertEqual(candidate.spec["steps"], ['Given I open "https://example.test/"', 'When I click "Submit"', 'Then "Summary" should equal "Submitted"'])
 
     def test_preview_preserves_unsupported_sap_steps_with_reasons(self) -> None:
         sap_case = TestCase(

@@ -11,6 +11,61 @@ from typing import Any, Mapping, Sequence
 from plain_english_test_framework.ir_validator import ValidatedIr, parse_ir_document, parse_ir_file
 from plain_english_test_framework.validation import ValidationIssue
 
+TARGET_ORIGIN_ERROR = "Execution target origin mismatch:"
+TARGET_ORIGIN_GUARD = """
+async function protectExecutionTarget(page: Page, baseURL: string) {
+  const selectedOrigin = new URL(baseURL).origin;
+  const context = page.context();
+  let observedOrigin: string | undefined;
+
+  const recordMismatch = (url: string) => {
+    if (url === "about:blank") return false;
+    const parsed = new URL(url);
+    if (parsed.protocol === "chrome-error:") return false;
+    if (parsed.origin === selectedOrigin) return false;
+    observedOrigin ??= parsed.origin === "null" ? parsed.protocol : parsed.origin;
+    return true;
+  };
+  const isTopLevel = (request: Request) => {
+    if (!request.isNavigationRequest()) return false;
+    try {
+      return request.frame().parentFrame() === null;
+    } catch {
+      // The browser can start a popup navigation before creating its frame.
+      return true;
+    }
+  };
+  const watchPage = (candidate: Page) => {
+    recordMismatch(candidate.url());
+    candidate.on("framenavigated", (frame) => {
+      if (frame === candidate.mainFrame()) recordMismatch(frame.url());
+    });
+  };
+
+  await context.route((url) => url.origin !== selectedOrigin, async (route) => {
+    if (isTopLevel(route.request()) && recordMismatch(route.request().url())) {
+      await route.abort("blockedbyclient");
+    } else {
+      await route.fallback();
+    }
+  });
+  // Routing may only see the initial request in a redirect chain.
+  context.on("request", (request) => {
+    if (request.redirectedFrom() && isTopLevel(request)) recordMismatch(request.url());
+  });
+  context.on("page", watchPage);
+  watchPage(page);
+
+  return (url?: string) => {
+    if (url) recordMismatch(url);
+    recordMismatch(page.url());
+    if (observedOrigin) {
+      throw new Error(`__TARGET_ORIGIN_ERROR__ expected ${selectedOrigin}, observed ${observedOrigin}`);
+    }
+  };
+}
+""".strip().replace("__TARGET_ORIGIN_ERROR__", TARGET_ORIGIN_ERROR)
+
 SUPPORTED_ACTIONS = {
     "navigate",
     "fill",
@@ -48,37 +103,36 @@ class GeneratedPlaywrightSpec:
     contents: str
 
 
-def generate_playwright_spec(ir: ValidatedIr | Mapping[str, Any]) -> GeneratedPlaywrightSpec:
+def generate_playwright_spec(ir: ValidatedIr | Mapping[str, Any], *, enforce_target_origin: bool = False) -> GeneratedPlaywrightSpec:
     """Generate a TypeScript Playwright Test spec from schema-valid IR."""
 
     validated = ir if isinstance(ir, ValidatedIr) else parse_ir_document(ir)
     document = validated.raw
-    contents = _render_document(document)
+    contents = _render_document(document, enforce_target_origin=enforce_target_origin)
     return GeneratedPlaywrightSpec(spec_id=validated.spec_id, case_count=validated.case_count, contents=contents)
 
 
-def generate_playwright_spec_file(path: str | Path) -> GeneratedPlaywrightSpec:
+def generate_playwright_spec_file(path: str | Path, *, enforce_target_origin: bool = False) -> GeneratedPlaywrightSpec:
     """Read, validate, and generate a TypeScript Playwright Test spec from a JSON IR file."""
 
-    return generate_playwright_spec(parse_ir_file(path))
+    return generate_playwright_spec(parse_ir_file(path), enforce_target_origin=enforce_target_origin)
 
 
-def _render_document(document: Mapping[str, Any]) -> str:
-    lines: list[str] = [
-        'import { expect, test } from "@playwright/test";',
-        "",
-        f"test.describe({_js_string(document['spec']['title'])}, () => {{",
-    ]
+def _render_document(document: Mapping[str, Any], *, enforce_target_origin: bool) -> str:
+    lines = ['import { expect, test } from "@playwright/test";', ""]
+    if enforce_target_origin:
+        lines.extend(['import type { Page, Request } from "@playwright/test";', "", TARGET_ORIGIN_GUARD, ""])
+    lines.append(f"test.describe({_js_string(document['spec']['title'])}, () => {{")
 
     for case in document["cases"]:
-        lines.extend(_render_case(document, case))
+        lines.extend(_render_case(document, case, enforce_target_origin=enforce_target_origin))
 
     lines.append("});")
     lines.append("")
     return "\n".join(lines)
 
 
-def _render_case(document: Mapping[str, Any], case: Mapping[str, Any]) -> list[str]:
+def _render_case(document: Mapping[str, Any], case: Mapping[str, Any], *, enforce_target_origin: bool) -> list[str]:
     lines = [
         f"  test({_js_string(case['title'])}, async ({{ page }}) => {{",
         f'    test.info().annotations.push({{ type: "specId", description: {_js_string(document["spec"]["id"])} }});',
@@ -87,15 +141,25 @@ def _render_case(document: Mapping[str, Any], case: Mapping[str, Any]) -> list[s
     if case.get("dataRowId"):
         lines.append(f'    test.info().annotations.push({{ type: "dataRowId", description: {_js_string(case["dataRowId"])} }});')
 
-    for step in case["steps"]:
-        lines.extend(_render_step(step))
+    if enforce_target_origin:
+        base_url = _js_string(document["environment"]["baseUrl"])
+        lines.append(f"    const checkTarget = await protectExecutionTarget(page, {base_url});")
+        lines.append("    try {")
+        for step in case["steps"]:
+            url_argument = _js_string(step["url"]) if step["action"] == "navigate" else ""
+            lines.append(f"      checkTarget({url_argument});")
+            lines.extend(f"  {line}" for line in _render_step(step, enforce_target_origin=True))
+        lines.extend(["    } finally {", "      checkTarget();", "    }"])
+    else:
+        for step in case["steps"]:
+            lines.extend(_render_step(step))
 
     lines.append("  });")
     lines.append("")
     return lines
 
 
-def _render_step(step: Mapping[str, Any]) -> list[str]:
+def _render_step(step: Mapping[str, Any], *, enforce_target_origin: bool = False) -> list[str]:
     action = step["action"]
     if action not in SUPPORTED_ACTIONS:
         raise PlaywrightGenerationError(
@@ -110,13 +174,13 @@ def _render_step(step: Mapping[str, Any]) -> list[str]:
 
     lines = [
         f"    await test.step({_js_string(step['original'])}, async () => {{",
-        *(f"      {line}" for line in _render_action(step).splitlines()),
+        *(f"      {line}" for line in _render_action(step, enforce_target_origin=enforce_target_origin).splitlines()),
         "    });",
     ]
     return lines
 
 
-def _render_action(step: Mapping[str, Any]) -> str:
+def _render_action(step: Mapping[str, Any], *, enforce_target_origin: bool = False) -> str:
     action = step["action"]
     if action == "navigate":
         return f"await page.goto({_js_string(step['url'])});"
@@ -132,6 +196,7 @@ def _render_action(step: Mapping[str, Any]) -> str:
                 "  options.filter(option => option instanceof HTMLOptionElement && option.label === label)",
                 """    .map(option => !option.matches(':disabled') && !option.closest('[hidden], [inert], [aria-disabled="true" i]')),""",
                 f"  {label})).toEqual([true]);",
+                *(["checkTarget();"] if enforce_target_origin else []),
                 f"await select.selectOption({{ label: {label} }});",
             )
         )
@@ -145,6 +210,7 @@ def _render_action(step: Mapping[str, Any]) -> str:
                 f"const checkbox = {locator}.and(page.locator('input[type=\"checkbox\"]'));",
                 "await expect(checkbox).toBeVisible();",
                 "await expect(checkbox).toBeEnabled();",
+                *(["checkTarget();"] if enforce_target_origin else []),
                 f"await checkbox.setChecked({checked});",
                 f'await expect(checkbox.and(page.locator(":not(:indeterminate)"))).toBeChecked({{ checked: {checked} }});',
             )

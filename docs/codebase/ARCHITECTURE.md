@@ -541,6 +541,20 @@ can recover the exact Reports link after a dropped response or reload.
 An unconfirmed outcome requires acknowledgment and a fresh preview before
 another run. The original request identity remains single-use.
 
+The selected browser origin governs both preview and launch. Relative
+navigation resolves against the selected target. An absolute URL authored
+against the approved saved application context is rebased by origin, with
+its path, query and fragment preserved. Exact URL assertions use the same
+binding. An unverified origin or a URL with inline credentials makes the
+candidate unavailable for execution. The saved suite remains unchanged.
+
+Generated portal specs check the selected origin before browser steps and
+classify an escaped top-level navigation as
+`execution.target_origin_mismatch`. They block direct off-origin navigation
+requests and detect redirect escapes before later case actions. The guard
+is scoped to browser navigation, so subresources and network activity that
+occurs while the browser follows a redirect have separate boundaries.
+
 Execution preview has one count/list invariant for the `executable`, `manual`,
 `unsupported`, and `invalid` buckets: every `summary` count equals the length of
 its matching candidate collection. `ExecutionPreviewResponse` derives the

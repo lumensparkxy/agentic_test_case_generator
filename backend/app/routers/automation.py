@@ -14,6 +14,7 @@ from ..agents.automation_agent import generate_playwright_pom
 from ..config import get_execution_settings
 from ..services.execution_readiness import assess_execution, selected_candidates
 from ..services.execution_prerequisites import execution_reference_scope
+from ..services.execution_target import saved_execution_source_url
 from ..services.execution_request_service import (
     claim_execution_request,
     execution_request_fingerprint,
@@ -278,7 +279,9 @@ def _execution_project(payload: ExecutionPreviewInput, actor: AuthUser):
         raise project_error_to_http(exc) from exc
 
 
-async def _execution_with_references(function, payload, actor, **kwargs):
+async def _execution_with_references(function, payload, actor, *, project=None, **kwargs):
+    if source_url := saved_execution_source_url(project):
+        kwargs["source_app_url"] = source_url
     with execution_reference_scope(actor.sub, payload.project_id):
         return await run_in_threadpool(function, payload.test_cases, **kwargs)
 
@@ -311,6 +314,7 @@ async def automation_execution_preview(
             _resolve_main_callable("preview_execution", preview_execution),
             payload,
             current_user,
+            project=project,
             target_base_url=target_base_url,
             settings=settings,
         )
@@ -418,6 +422,7 @@ async def automation_execution_run(
             _resolve_main_callable("preview_execution", preview_execution),
             payload,
             current_user,
+            project=project,
             target_base_url=target_base_url,
             settings=settings,
         )
@@ -448,6 +453,7 @@ async def automation_execution_run(
             _resolve_main_callable("run_execution", run_execution),
             payload,
             current_user,
+            project=project,
             selected_test_case_ids=selected_ids,
             target_base_url=target_base_url,
             settings=settings,

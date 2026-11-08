@@ -590,6 +590,22 @@ failures at another check, and unavailable runtime evidence separately.
 Manual audit coverage and generation approval have separate fields. A
 nonzero exit signals an unmet benchmark criterion.
 
+### Browser target binding
+
+Run the opt-in Chromium test with the local execution dependencies installed.
+It starts two loopback origins and compares their request logs. Relative,
+same-origin, rebased and same-origin redirect cases pass on the selected
+origin. Unverified authored URLs and direct off-origin links, including
+popups, produce no requests to the foreign target. The cross-origin redirect
+is classified as a target mismatch before a subsequent test action can post
+to either origin. A connection error on the selected origin remains a
+Playwright failure.
+
+```bash
+PETF_PLAYWRIGHT_BROWSER_CHANNEL=chromium PETF_EXECUTION_TARGET_CHROMIUM_TEST=1 \
+  .venv/bin/python -m unittest discover -s backend/tests -p test_execution_target_runtime.py -v
+```
+
 ### Isolated live browser workbench
 
 Use the official Firestore emulator JAR, Java 21 or later, and the existing

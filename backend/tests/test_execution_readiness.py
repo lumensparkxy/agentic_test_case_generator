@@ -12,6 +12,7 @@ from execution_fixtures import case, project_fixture
 
 from app.config import ExecutionSettings
 from app.contracts.execution import ExecutionCandidate, ExecutionPreviewInput, ExecutionPreviewResponse, ExecutionRunResponse
+from app.contracts.projects import QaProjectStageSnapshot, QaProjectStageState
 from app.main import app, get_current_user
 from app.models import AuthUser
 from app.services.execution_readiness import assess_execution, selected_candidates
@@ -232,6 +233,58 @@ class ExecutionAdmissionTests(unittest.TestCase):
                 expected = "no_executable_candidates" if enabled else "execution_disabled"
                 self.assertIn(expected, [item["code"] for item in response.json()["detail"]["readiness"]["blockers"]])
                 runtime.assert_not_called()
+
+    def test_origin_binding_uses_verified_saved_context_for_preview_and_launch(self):
+        source = "http://127.0.0.1:8198"
+        target = "http://127.0.0.1:8199"
+        authored = {
+            **case(),
+            "steps": [{"step": 1, "action": f'Open "{source}/checkout?order=1#confirm"', "expected": 'exact heading "Checkout" is visible'}],
+        }
+        project = project_fixture([authored])
+        project.current_snapshots["context"] = QaProjectStageSnapshot(
+            snapshot_id="saved-context",
+            project_id=project.project_id,
+            stage="context",
+            version=1,
+            project_revision=6,
+            operation="requirements.enrich",
+            approved=True,
+            payload={"app_link": source},
+            created_at=project.created_at,
+        )
+        project.stage_state["context"] = QaProjectStageState(current_snapshot_id="saved-context", approved=True)
+        snapshot = type("Snapshot", (), {"snapshot_id": "saved-execution", "project_revision": 7})()
+        response = ExecutionRunResponse(status="passed", run_id="exec-target", preview=preview_fixture())
+        payload = {**request_fixture(), "test_cases": [authored], "selected_test_case_ids": ["tc_1"]}
+
+        with (
+            patch("app.routers.automation.get_project", return_value=project),
+            patch("app.routers.automation.append_stage_snapshot", return_value=snapshot),
+            patch("app.routers.automation.record_execution_run"),
+            patch("app.main.run_execution", return_value=response) as runtime,
+            TestClient(app) as client,
+        ):
+            # Older suites can use the still-current context that preceded them.
+            for source_link in (None, "saved-context"):
+                if source_link:
+                    project.current_snapshots["test_cases"].metadata["source_context_snapshot_id"] = source_link
+                preview = client.post("/automation/execution/preview", json=payload)
+                self.assertEqual(preview.status_code, 200, preview.text)
+                self.assertEqual(preview.json()["executable"][0]["spec"]["steps"][0], f'Given I open "{target}/checkout?order=1#confirm"')
+            allowed = client.post("/automation/execution/run", json=payload)
+            self.assertEqual(allowed.status_code, 200, allowed.text)
+            runtime.assert_called_once()
+            self.assertEqual(runtime.call_args.kwargs["source_app_url"], source)
+            self.assertEqual(runtime.call_args.kwargs["target_base_url"], f"{target}/")
+            self.assertEqual(runtime.call_args.kwargs["selected_test_case_ids"], ["tc_1"])
+
+            project.stage_state["context"].approved = False
+            preview = client.post("/automation/execution/preview", json=payload)
+            self.assertEqual(preview.json()["unsupported"][0]["unsupported_steps"][0]["reason_code"], "execution.target_origin_mismatch")
+            rejected = client.post("/automation/execution/run", json=payload)
+            self.assertEqual(rejected.status_code, 409, rejected.text)
+            runtime.assert_called_once()
 
     def test_current_approved_run_uses_captured_source_and_selected_ids(self):
         project = project_fixture()
