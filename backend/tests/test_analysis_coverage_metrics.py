@@ -275,6 +275,11 @@ class BrowserAssertionReviewTests(unittest.TestCase):
             ("Inspect the result", 'css "#booking-result" is visible'),
             ("Inspect the visible result", 'css "#booking-result" text should equal "Booking cancelled"'),
             (
+                "Inspect the My bookings table",
+                'css "#bookings tr" displays exactly one row with booking ID "B-001" and '
+                'css "#bookings tr:has(a[href=\'/bookings/B-001\']) td:nth-child(5)" text should equal "Confirmed"',
+            ),
+            (
                 'Inspect data rows matching css "#bookings tr" to verify exactly one durable record exists with the recorded original ID',
                 'exact text "Birch" is visible',
             ),
