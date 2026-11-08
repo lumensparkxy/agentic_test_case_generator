@@ -187,6 +187,13 @@ class ScenarioAssessment(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class RequirementCoverageFinding(BaseModel):
+    range_id: str
+    requirement_id: str
+    source_excerpt: str
+    missing_endpoints: List[str] = Field(default_factory=list)
+
+
 class SemanticAssessment(BaseModel):
     rubric_version: str
     status: Literal["passed", "needs_review", "unavailable"]
@@ -195,6 +202,7 @@ class SemanticAssessment(BaseModel):
     flagged_count: int = 0
     summary: str = ""
     items: List[ScenarioAssessment] = Field(default_factory=list)
+    requirement_findings: List[RequirementCoverageFinding] = Field(default_factory=list)
 
 
 class ReviewResult(BaseModel):

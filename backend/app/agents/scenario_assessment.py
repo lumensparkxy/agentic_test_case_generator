@@ -6,6 +6,7 @@ critic result can pass; neither verdict grants human approval.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from hashlib import sha256
 import json
 import re
@@ -15,10 +16,11 @@ from google.adk.agents import Agent
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from .adk_runtime import json_generation_config
+from .scenario_boundary_coverage import inclusive_input_ranges, verified_boundary_endpoints
 from ..services.browser_handoff import declared_browser_pages
 
 STATE_SCENARIO_ASSESSMENT = "scenario_semantic_assessment"
-RUBRIC_VERSION = "scenario_semantics_v3"
+RUBRIC_VERSION = "scenario_semantics_v4"
 CRITERIA = ("specific_trigger", "observable_outcome", "distinct_behavior", "source_grounding")
 _ROUTE = re.compile(r"(?<![\w/])/(?:[\w{}:.-]+/)*[\w{}:.-]+/?")
 _ABSOLUTE_URL = re.compile(r"""https?://[^\s"'\\]+""", re.I)
@@ -64,6 +66,20 @@ class Criterion(BaseModel):
         return value.strip()
 
 
+class BoundaryEvidence(BaseModel):
+    range_id: str = Field(min_length=1, max_length=300)
+    endpoint: str = Field(min_length=1, max_length=40)
+    input_quote: str = Field(min_length=1, max_length=500)
+    outcome_quote: str = Field(min_length=1, max_length=500)
+
+    @field_validator("input_quote", "outcome_quote")
+    @classmethod
+    def nonblank_quote(cls, value):
+        if not value.strip():
+            raise ValueError("Boundary evidence needs an exact excerpt")
+        return value.strip()
+
+
 class CriticRow(BaseModel):
     requirement_id: str
     scenario_id: str
@@ -72,6 +88,7 @@ class CriticRow(BaseModel):
     observable_outcome: Criterion
     distinct_behavior: Criterion
     source_grounding: Criterion
+    boundary_evidence: list[BoundaryEvidence] = Field(default_factory=list, max_length=20)
 
 
 class CriticOutput(BaseModel):
@@ -95,12 +112,26 @@ def assessment_input(plan, requirements, context_text):
 
 def parse_critic_output(raw):
     try:
-        return [item.model_dump() for item in CriticOutput.model_validate_json(raw).assessments]
+        return [item.model_dump(exclude_unset=True) for item in CriticOutput.model_validate_json(raw).assessments]
     except ValueError, TypeError:
         return []
 
 
-def build_scenario_critic(model, input_provider, source_text):
+def build_scenario_critic(model, input_provider, source_text, *, input_ranges=()):
+    boundary_instructions = ""
+    if input_ranges:
+        boundary_instructions = f"""
+Also verify coverage of these explicit inclusive input ranges across the complete plan:
+{json.dumps([asdict(interval) for interval in input_ranges], ensure_ascii=False)}
+For a scenario that independently exercises one listed endpoint, add "boundary_evidence" to its assessment row. Each entry is an object with
+"range_id", "endpoint" (copy the exact string above), "input_quote", and "outcome_quote". Both quotes must be exact, short excerpts from
+the scenario title or objective. Cite only the exact value actually used for the named input, and separately quote the observable result
+that proves the product accepted it. Mentioning a range, a validation error, a data setup value, a record count, or another input is not
+evidence of acceptance. Use one scenario per endpoint. An explicitly related positive behavior in another requirement may prove acceptance
+when it submits the same input and asserts the source-defined outcome. Do not claim evidence for unsupported results or optional scenarios.
+Omit "boundary_evidence" if the scenario does not exercise one of the listed endpoints.
+"""
+
     def instruction(context):
         # Provider normalizes the final plan, including server-added scenarios.
         rows = input_provider(context.state)
@@ -118,6 +149,7 @@ For each failure identify the missing element and a useful correction without in
 Return ONLY a JSON object of this shape (one assessment per scenario, all four criteria required):
 {{"assessments": [{{"requirement_id": "REQ-001", "scenario_id": "REQ-001-SCN-01", "content_hash": "copy the provided hash", "specific_trigger": {{"passed": true, "reason": "evidence or correction"}}, "observable_outcome": {{"passed": true, "reason": "evidence or correction"}}, "distinct_behavior": {{"passed": true, "reason": "evidence or correction"}}, "source_grounding": {{"passed": true, "reason": "evidence or correction"}}}}]}}
 Do not rewrite scenarios or add requirements.
+{boundary_instructions}
 
 SOURCE FACTS (requirements and supplied context only, not generated analysis):
 {source_text}
@@ -211,24 +243,28 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
     if isinstance(context, dict) and isinstance(context.get("notes"), str) and isinstance(context.get("app_link"), str):
         pages = declared_browser_pages(context["notes"], context["app_link"])
     known = local_findings(plan, source_text, declared_paths=(urlsplit(page).path for page in pages))
+    input_ranges = {interval.range_id: interval for interval in inclusive_input_ranges(requirements)}
+    covered_endpoints = set()
     indexed = {}
     for raw in critic_rows or []:
         try:
-            row = CriticRow.model_validate(raw).model_dump()
+            row = CriticRow.model_validate(raw)
         except ValueError, TypeError:
             continue
-        indexed.setdefault((row["requirement_id"], row["scenario_id"]), []).append(row)
+        indexed.setdefault((row.requirement_id, row.scenario_id), []).append(row)
     items = []
     for entry in inputs:
         scenario = entry["scenario"]
         key = (entry["requirement_id"], scenario["id"])
         candidates = indexed.get(key, [])
-        exact = candidates[0] if len(candidates) == 1 and candidates[0]["content_hash"] == entry["content_hash"] else None
+        exact = candidates[0] if len(candidates) == 1 and candidates[0].content_hash == entry["content_hash"] else None
         warnings = list(known[key])
-        checks = {name: exact[name] for name in CRITERIA} if exact else {}
+        checks = {name: getattr(exact, name).model_dump() for name in CRITERIA} if exact else {}
         if exact:
             warnings.extend(value["reason"] for value in checks.values() if not value["passed"])
         status = "needs_review" if warnings else "passed" if exact else "unavailable"
+        if status == "passed" and input_ranges:
+            covered_endpoints.update(verified_boundary_endpoints(scenario, exact.boundary_evidence, input_ranges))
         items.append(
             {
                 "requirement_id": key[0],
@@ -242,7 +278,31 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
         )
     available = sum(item["review_available"] for item in items)
     failed = sum(item["status"] == "needs_review" for item in items)
-    status = "needs_review" if failed else "passed" if items and available == len(items) else "unavailable"
+    requirement_findings = []
+    for interval in input_ranges.values():
+        missing = [endpoint for endpoint in interval.endpoints if (interval.range_id, endpoint) not in covered_endpoints]
+        if missing:
+            requirement_findings.append(
+                {
+                    "range_id": interval.range_id,
+                    "requirement_id": interval.requirement_id,
+                    "source_excerpt": interval.source_excerpt,
+                    "missing_endpoints": missing,
+                }
+            )
+    status = "needs_review" if failed or requirement_findings else "passed" if items and available == len(items) else "unavailable"
+    summary = (
+        f"{failed} scenario(s) need attention. {available} of {len(items)} received a semantic assessment."
+        if failed
+        else "All delivered scenarios passed the advisory semantic rubric. Human review is still required."
+        if status == "passed"
+        else f"Semantic assessment unavailable for {len(items) - available} of {len(items)} scenarios. No semantic pass is established."
+        if status == "unavailable"
+        else f"{available} of {len(items)} scenarios received a semantic assessment."
+    )
+    if requirement_findings:
+        missing_count = sum(len(finding["missing_endpoints"]) for finding in requirement_findings)
+        summary += f" {missing_count} accepted boundary input(s) need verified scenario coverage."
     return {
         "rubric_version": RUBRIC_VERSION,
         "status": status,
@@ -250,13 +310,8 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
         "scenario_count": len(items),
         "flagged_count": failed,
         "items": items,
-        "summary": (
-            f"{failed} scenario(s) need attention. {available} of {len(items)} received a semantic assessment."
-            if failed
-            else "All delivered scenarios passed the advisory semantic rubric. Human review is still required."
-            if status == "passed"
-            else f"Semantic assessment unavailable for {len(items) - available} of {len(items)} scenarios. No semantic pass is established."
-        ),
+        "requirement_findings": requirement_findings,
+        "summary": summary,
     }
 
 

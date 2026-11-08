@@ -931,6 +931,13 @@ export interface RequirementCorrection {
 	text: string;
 }
 
+export interface RequirementCoverageFinding {
+	missing_endpoints?: Array<string>;
+	range_id: string;
+	requirement_id: string;
+	source_excerpt: string;
+}
+
 export interface RequirementCoveragePlan {
 	requirement_id: string;
 	requirement_text: string;
@@ -1065,6 +1072,7 @@ export interface SemanticAssessment {
 	assessed_count?: number;
 	flagged_count?: number;
 	items?: Array<ScenarioAssessment>;
+	requirement_findings?: Array<RequirementCoverageFinding>;
 	rubric_version: string;
 	scenario_count?: number;
 	status: "passed" | "needs_review" | "unavailable";

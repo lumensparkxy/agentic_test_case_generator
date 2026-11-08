@@ -16,6 +16,7 @@ from google.genai import types
 
 from .literal_instructions import literal_source_agent
 from .scenario_assessment import STATE_SCENARIO_ASSESSMENT, assessment_input, assess_scenarios, build_scenario_critic, combine_review, parse_critic_output
+from .scenario_boundary_coverage import inclusive_input_ranges
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .test_case_agent import (
     STATE_COVERAGE_PLAN,
@@ -130,7 +131,9 @@ def _use_case_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None, *, review_in_shard=True):
+def _build_use_case_pipeline(
+    model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None, *, review_in_shard=True, input_ranges=()
+):
     # Source braces (routes, JSON, artifact-like strings) are literal data. Only
     # our own templates may expand ADK session state.
     source_text = requirements_text + "\n" + context_text
@@ -142,7 +145,7 @@ def _build_use_case_pipeline(model, requirements_text, context_text, semantic_in
                 build_requirement_analysis_agent(model, requirements, context, output_key=STATE_REQUIREMENT_ANALYSIS, human_feedback=human_feedback),
                 _build_coverage_planner_agent(model, requirements, context, human_feedback=human_feedback),
             ]
-            + ([build_scenario_critic(model, semantic_input, source_text)] if review_in_shard else []),
+            + ([build_scenario_critic(model, semantic_input, source_text, input_ranges=input_ranges)] if review_in_shard else []),
             description="Plans requirement analysis and scenario coverage without generating test cases",
         )
 
@@ -170,7 +173,16 @@ async def _run_single_use_case_shard_workflow_async(
         plan, _ = _canonicalize_coverage_scenario_ids(_normalize_coverage_plan(raw_plan or [], shard.requirements))
         return assessment_input(plan, shard.requirements, context_text)
 
-    root_agent = _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard.index, human_feedback, review_in_shard=review_in_shard)
+    root_agent = _build_use_case_pipeline(
+        model,
+        requirements_text,
+        context_text,
+        semantic_input,
+        shard.index,
+        human_feedback,
+        review_in_shard=review_in_shard,
+        input_ranges=inclusive_input_ranges(shard.requirements) if review_in_shard else (),
+    )
     session_service = InMemorySessionService()
     runner = Runner(
         agent=root_agent,
@@ -335,7 +347,7 @@ async def _review_merged_use_cases_async(*, coverage_plan, requirements, context
     async def consume():
         rows = assessment_input(coverage_plan, requirements, context_text)
         source_text = json.dumps([{"id": r.id, "text": r.text} for r in requirements], ensure_ascii=False) + "\n" + context_text
-        critic = build_scenario_critic(model, lambda _state: rows, source_text)
+        critic = build_scenario_critic(model, lambda _state: rows, source_text, input_ranges=inclusive_input_ranges(requirements))
         sessions = InMemorySessionService()
         runner = Runner(agent=critic, app_name="use_case_semantic_review", session_service=sessions)
         user_id = str(actor_user_id or "use-case-review")
