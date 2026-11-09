@@ -215,6 +215,7 @@ def _append_project_generation_snapshots(
     publication_guard=None,
     refinement_source=None,
     changed_case_ids=None,
+    repair_metadata=None,
 ):
     if not project_id:
         return
@@ -302,6 +303,13 @@ def _append_project_generation_snapshots(
             "source_test_cases_snapshot_id": refinement_source.snapshot_id if refinement_source is not None else None,
             **context_selection,
         }
+        if repair_metadata is not None:
+            for key in ("source_requirement_hashes", "source_use_case_hashes", "source_context_hash"):
+                metadata[key] = refinement_source.metadata.get(key)
+            for key in ("source_context_omitted", "source_context_artifact_ids", "generation_base_project_revision"):
+                if key in refinement_source.metadata:
+                    metadata[key] = refinement_source.metadata[key]
+            metadata.update(repair_metadata, review_retry_available=True)
         proof = None
         if operation == "testcases.generate" and approved_use_case_snapshot_id is not None and response.generation_evidence.design_precheck is not None:
             proof = build_suite_design_proof(current_project, case_payload, metadata, plan_snapshot_id=approved_use_case_snapshot_id)
@@ -453,17 +461,20 @@ def _publish_bound_suite(
     refinement_source=None,
     changed_case_ids=None,
     stage_publication_guard=None,
+    repair_metadata=None,
+    billing_key=None,
 ):
     try:
         client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
     except RuntimeError as exc:
         raise project_error_to_http(exc) from exc
+    billing_key = billing_key or operation
     pending_writes = []
     refining = refinement_source is not None
     quantity = result_metadata["test_cases_modified_count"] if refining else len(response.test_cases)
     event_id = record_usage_event(
         event_type="testcases.refined" if refining else "testcases.generated",
-        billing_key=operation,
+        billing_key=billing_key,
         quantity=quantity,
         unit="test_case",
         actor=actor,
@@ -501,7 +512,7 @@ def _publish_bound_suite(
             source_event_id=event_id,
             request_id=request_id,
             workflow_run_id=run_id,
-            billing_key=operation,
+            billing_key=billing_key,
             quantity=quantity,
             unit="test_case",
             metadata={"approved": response.approved, "requirement_count": len(payload.requirements)},
@@ -534,6 +545,7 @@ def _publish_bound_suite(
             publication_guard=commit,
             refinement_source=refinement_source,
             changed_case_ids=changed_case_ids,
+            repair_metadata=repair_metadata,
         )
     except Exception:
         try:

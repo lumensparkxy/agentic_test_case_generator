@@ -27,6 +27,9 @@ export interface ApiContractOperations {
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
 	projectTestCasesReview: ApiOperation<ProjectTestCasesReviewRequest, ProjectTestCasesReviewResponse, "POST", "/projects/{project_id}/test-cases/review">;
+	selectedCaseRepairStatus: ApiOperation<SelectedCaseRepairStatusRequest, SelectedCaseRepairStatusResponse, "GET", "/projects/{project_id}/test-cases/repair">;
+	selectedCaseRepair: ApiOperation<SelectedCaseRepairRequest, SelectedCaseRepairResponse, "POST", "/projects/{project_id}/test-cases/repair">;
+	selectedCaseRepairRelease: ApiOperation<SelectedCaseRepairReleaseRequest, SelectedCaseRepairReleaseResponse, "POST", "/projects/{project_id}/test-cases/repair/{operation_id}/release">;
 	projectUseCasesGenerate: ApiOperation<ProjectUseCasesGenerateRequest, ProjectUseCasesGenerateResponse, "POST", "/projects/{project_id}/use-cases/generate">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
@@ -104,6 +107,16 @@ export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
 export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
 export type ProjectTestCasesReviewRequest = QaProjectTestCaseReviewInput;
 export type ProjectTestCasesReviewResponse = QaProjectDetail;
+export type SelectedCaseRepairStatusRequest = {
+	case_id?: string | null;
+	request_id?: string | null;
+	snapshot_id?: string | null;
+};
+export type SelectedCaseRepairStatusResponse = SelectedCaseRepairStatus;
+export type SelectedCaseRepairRequest = SelectedCaseRepairInput;
+export type SelectedCaseRepairResponse = SelectedCaseRepairResult;
+export type SelectedCaseRepairReleaseRequest = SelectedCaseRepairRelease;
+export type SelectedCaseRepairReleaseResponse = SelectedCaseRepairReleased;
 export type ProjectUseCasesGenerateRequest = QaProjectUseCaseGenerationInput;
 export type ProjectUseCasesGenerateResponse = QaProjectDetail;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
@@ -1254,6 +1267,63 @@ export interface ScenarioReviewUpdate {
 	requirement_id: string;
 	scenario_id: string;
 	status: "needs_review" | "approved" | "request_changes";
+}
+
+export interface SelectedCaseRepairAttempt {
+	case_id: string;
+	fence: number;
+	operation_id: string;
+	reason?: string | null;
+	request_id: string;
+	source_snapshot_id: string;
+	state: "running" | "interrupted";
+}
+
+export interface SelectedCaseRepairInput {
+	base_project_revision: number;
+	case_id: string;
+	case_version_id: string;
+	snapshot_id: string;
+	target_id: string;
+}
+
+export interface SelectedCaseRepairRelease {
+	fence: number;
+}
+
+export interface SelectedCaseRepairReleased {
+	released?: true;
+}
+
+export interface SelectedCaseRepairResult {
+	after_case_version_id: string;
+	before_case_version_id: string;
+	case_id: string;
+	preserved_case_count: number;
+	project_revision: number;
+	request_id: string;
+	result_snapshot_id: string;
+	source_snapshot_id: string;
+}
+
+export interface SelectedCaseRepairStatus {
+	attempt?: SelectedCaseRepairAttempt | null;
+	blocked?: boolean;
+	enabled?: boolean;
+	result?: SelectedCaseRepairResult | null;
+	targets?: Array<SelectedCaseRepairTarget>;
+}
+
+export interface SelectedCaseRepairTarget {
+	case_id: string;
+	case_version_id: string;
+	obligation: string;
+	reason: string;
+	requirement_id: string;
+	scenario_id: string;
+	source_quote: string;
+	step_numbers: Array<number>;
+	target_id: string;
 }
 
 export interface SemanticAssessment {

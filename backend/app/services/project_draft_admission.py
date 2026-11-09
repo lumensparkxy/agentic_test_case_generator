@@ -19,10 +19,12 @@ from .workflow_project_service import QA_PROJECTS_COLLECTION, ProjectNotFoundErr
 
 DEMO_PROJECT_ID = "demo-tcg-v2-continuation"
 _REVIEW_OPERATION = "test_cases.review"
+REPAIR_OPERATION = "testcases.repair"
+_REPAIR_BINDING_FIELDS = {"target_id", "case_id", "case_version_id", "case_version_number", "request_fingerprint"}
 _SOURCE_STAGES = {"requirements", "context", "use_cases", "test_cases"}
 _SYNC_SOURCE_STAGES = _SOURCE_STAGES | {"reports"}
 _SYNC_STAGES = {"project.sync.use_cases": "use_cases", "project.sync.test_cases": "test_cases"}
-_REQUEST_CAPS = {_REVIEW_OPERATION: 24, "project.sync.use_cases": 7, "project.sync.test_cases": 24}
+_REQUEST_CAPS = {_REVIEW_OPERATION: 24, REPAIR_OPERATION: 8, "project.sync.use_cases": 7, "project.sync.test_cases": 24}
 _ATTEMPTS = "project_draft_attempts"
 _KIND = "draft"
 _LEASE_SECONDS = 60
@@ -146,7 +148,7 @@ def _matches_sources(project, attempt):
     merge_inputs = {"test_cases", "reports"} if stage_to_refresh == "test_cases" else {"use_cases", "test_cases", "reports"}
     for stage, snapshot_id in attempt["source_snapshot_ids"].items():
         state = states.get(stage) or {}
-        may_review_stale_suite = stage == "test_cases" and state.get("operation") == "quality.feedback.apply"
+        may_review_stale_suite = attempt["operation"] == _REVIEW_OPERATION and stage == "test_cases" and state.get("operation") == "quality.feedback.apply"
         may_merge_stale = stage_to_refresh and stage in merge_inputs
         if state.get("current_snapshot_id") != snapshot_id or (state.get("stale") and not (may_review_stale_suite or may_merge_stale)):
             return False
@@ -183,6 +185,18 @@ def _snapshot_matches(snapshot, attempt):
         operation = "project.sync.draft"
         source_snapshot_id = sources["requirements" if sync_stage == "use_cases" else "use_cases"]
         sources_match = metadata.get("change_id") == attempt["change_id"] and _recorded_sync_sources_match(metadata.get("source_snapshot_ids"), sources)
+    elif attempt["operation"] == REPAIR_OPERATION:
+        output_stage = "test_cases"
+        operation = REPAIR_OPERATION
+        source_snapshot_id = sources["use_cases"]
+        expected_sources = {stage: sources[stage] for stage in ("requirements", "context", "use_cases")}
+        sources_match = (
+            _recorded_sync_sources_match(metadata.get("source_snapshot_ids"), expected_sources)
+            and metadata.get("selected_repair") == attempt["selected_repair"]
+            and metadata.get("source_test_cases_snapshot_id") == sources["test_cases"]
+            and metadata.get("generation_request_fingerprint") == attempt["selected_repair"]["request_fingerprint"]
+            and _repair_version_matches(snapshot, attempt["selected_repair"])
+        )
     else:
         output_stage = "test_cases"
         operation = attempt["operation"]
@@ -203,23 +217,37 @@ def _snapshot_matches(snapshot, attempt):
     )
 
 
-def _read_result(transaction, project_doc, attempt):
-    unavailable = (
-        "The saved assessment result could not be confirmed."
-        if attempt["operation"] == _REVIEW_OPERATION
-        else "The saved Project Sync draft could not be confirmed."
+def _repair_version_matches(snapshot, binding):
+    rows = (snapshot.get("payload") or {}).get("test_cases") or []
+    cases = [row for row in rows if row.get("id") == binding["case_id"]]
+    return (
+        len(cases) == 1
+        and isinstance(cases[0].get("artifact_version_id"), str)
+        and bool(cases[0]["artifact_version_id"])
+        and cases[0]["artifact_version_id"] != binding["case_version_id"]
+        and cases[0].get("artifact_version_number") == binding["case_version_number"] + 1
     )
+
+
+def _read_result(transaction, project_doc, attempt, *, include_snapshot=False):
+    unavailable = {
+        _REVIEW_OPERATION: "The saved assessment result could not be confirmed.",
+        REPAIR_OPERATION: "The saved selected-case repair could not be confirmed.",
+    }.get(attempt["operation"], "The saved Project Sync draft could not be confirmed.")
+    fields = ("snapshot_id", "project_id", "actor_user_id", "request_id", "stage", "operation", "project_revision", "source_snapshot_id", "metadata")
+    if attempt["operation"] == REPAIR_OPERATION:
+        fields += ("payload",)
     snapshot_id = attempt.get("result_snapshot_id")
     if not snapshot_id:
         raise HTTPException(503, unavailable)
     snapshot = _read(
         transaction,
         project_doc.collection("snapshots").document(snapshot_id),
-        field_paths=("snapshot_id", "project_id", "actor_user_id", "request_id", "stage", "operation", "project_revision", "source_snapshot_id", "metadata"),
+        field_paths=fields,
     )
     if not _snapshot_matches(snapshot, attempt) or snapshot["snapshot_id"] != snapshot_id:
         raise HTTPException(503, unavailable)
-    return snapshot_id
+    return snapshot if include_snapshot else snapshot_id
 
 
 def _projected_state(project, attempt, lease, now):
@@ -317,9 +345,10 @@ class DraftAttemptClaim:
         """Read the exact claim, then return a callback that only stages writes."""
         attempt, lease, _ = self._validate(transaction)
         if not _snapshot_matches(snapshot, attempt):
-            message = "The draft result does not match this saved suite and request."
-            if attempt["operation"] != _REVIEW_OPERATION:
-                message = "The draft result does not match this Project Sync stage's saved sources and request."
+            message = {
+                _REVIEW_OPERATION: "The draft result does not match this saved suite and request.",
+                REPAIR_OPERATION: "The draft result does not match this selected-case repair.",
+            }.get(attempt["operation"], "The draft result does not match this Project Sync stage's saved sources and request.")
             raise _conflict("project_draft_result_mismatch", message)
 
         def finish():
@@ -364,14 +393,16 @@ class DraftAttemptClaim:
                 or attempt.get("fence") != self.fence
                 or not _same_holder(lease, attempt)
             ):
-                return
+                return False
             if lease.get("dispatched") or attempt.get("provider_requests_reserved"):
                 transaction.update(self._attempt, {"state": "interrupted", "reason": "provider_outcome_unconfirmed"})
             else:
                 transaction.update(self._attempt, {"state": "unstarted", "reason": None})
                 transaction.set(self._lease, released_project_lease(self.fence))
 
-        stop_attempt(self._client.transaction())
+            return True
+
+        return stop_attempt(self._client.transaction())
 
 
 def _sync_stage_doc(project_doc, change_id, stage):
@@ -439,6 +470,7 @@ def claim_draft_attempt(
     deadline_seconds,
     change_id=None,
     settings_fingerprint=None,
+    selected_repair=None,
 ):
     if not demo_client_matches(client):
         raise HTTPException(503, "Project draft admission is unavailable.")
@@ -476,8 +508,24 @@ def claim_draft_attempt(
             or re.fullmatch(r"[0-9a-f]{64}", settings_fingerprint) is None
         ):
             raise ValueError("Project Sync admission requires an exact change ID and settings fingerprint")
+    elif operation == REPAIR_OPERATION:
+        if (
+            change_id is not None
+            or not isinstance(settings_fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", settings_fingerprint) is None
+            or not isinstance(selected_repair, dict)
+            or selected_repair.keys() != _REPAIR_BINDING_FIELDS
+            or any(not isinstance(selected_repair[key], str) or not selected_repair[key] for key in ("target_id", "case_id", "case_version_id"))
+            or type(selected_repair["case_version_number"]) is not int
+            or selected_repair["case_version_number"] < 1
+            or not isinstance(selected_repair["request_fingerprint"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", selected_repair["request_fingerprint"]) is None
+        ):
+            raise ValueError("Repair admission requires an exact target and settings fingerprint")
     elif change_id is not None or settings_fingerprint is not None:
         raise ValueError("Saved-suite assessment does not accept Project Sync settings")
+    if operation != REPAIR_OPERATION and selected_repair is not None:
+        raise ValueError("Only selected repair accepts a repair target")
     binding = {
         "operation_id": _operation_id(project_id, actor_id, operation, request_id, change_id),
         "operation": operation,
@@ -489,6 +537,10 @@ def claim_draft_attempt(
     }
     if sync_stage:
         binding.update(change_id=change_id, settings_fingerprint=settings_fingerprint, max_requests=max_requests, deadline_seconds=deadline_seconds)
+    if operation == REPAIR_OPERATION:
+        binding.update(
+            selected_repair=dict(selected_repair), settings_fingerprint=settings_fingerprint, max_requests=max_requests, deadline_seconds=deadline_seconds
+        )
     project_doc = _project_doc(client, project_id)
     stage_doc = _sync_stage_doc(project_doc, change_id, sync_stage) if sync_stage else None
     lease_doc = project_lease_ref(project_doc)
@@ -504,7 +556,7 @@ def claim_draft_attempt(
             attempt = _read(transaction, _attempt_doc(project_doc, binding["operation_id"]))
         if attempt is not None:
             if not _same_attempt(attempt, canonical):
-                target = "Project Sync draft" if sync_stage else "draft assessment"
+                target = {REPAIR_OPERATION: "case repair", _REVIEW_OPERATION: "draft assessment"}.get(operation, "Project Sync draft")
                 raise _conflict("project_draft_request_mismatch", f"This request ID belongs to a different {target}.")
             if attempt.get("state") == "completed":
                 return DraftAttemptClaim(client, canonical, attempt["fence"], _read_result(transaction, project_doc, attempt))
@@ -592,7 +644,28 @@ def read_draft_attempt_result(client, *, project_id, actor_id, request_id, opera
     return read(client.transaction())
 
 
-def _read_active_attempt(client, project_id, actor_id, *, project_sync):
+def read_selected_repair_result(client, *, project_id, actor_id, request_id, request_fingerprint=None):
+    """Read the exact immutable result, independently of current project revision or demo policy."""
+    operation_id = _operation_id(project_id, actor_id, REPAIR_OPERATION, request_id)
+    project_doc = _project_doc(client, project_id)
+
+    @transactional
+    def read(transaction):
+        _require_owner(_read(transaction, project_doc), project_id, actor_id)
+        attempt = _read(transaction, _attempt_doc(project_doc, operation_id))
+        identity = {"project_id": project_id, "actor_id": actor_id, "operation_id": operation_id, "request_id": request_id, "operation": REPAIR_OPERATION}
+        if not _same_attempt(attempt, identity):
+            return None
+        if request_fingerprint is not None and attempt["selected_repair"]["request_fingerprint"] != request_fingerprint:
+            raise _conflict("project_draft_request_mismatch", "This request ID belongs to a different repair target.")
+        if attempt.get("state") == "completed":
+            return _read_result(transaction, project_doc, attempt, include_snapshot=True)
+        return None
+
+    return read(client.transaction())
+
+
+def _read_active_attempt(client, project_id, actor_id, *, operations):
     project_doc = _project_doc(client, project_id)
 
     @transactional
@@ -610,7 +683,7 @@ def _read_active_attempt(client, project_id, actor_id, *, project_sync):
         if not _same_attempt(attempt, identity) or not _same_holder(lease, attempt):
             return blocked, None
         sync_stage = _SYNC_STAGES.get(attempt.get("operation"))
-        if (project_sync and not sync_stage) or (not project_sync and attempt.get("operation") != _REVIEW_OPERATION):
+        if attempt.get("operation") not in operations:
             return blocked, None
         state, reason = _projected_state(project, attempt, lease, now)
         if not state:
@@ -627,22 +700,31 @@ def _read_active_attempt(client, project_id, actor_id, *, project_sync):
             public.update(change_id=attempt["change_id"], stage=sync_stage)
         else:
             public["source_snapshot_id"] = attempt["source_snapshot_ids"]["test_cases"]
+        if attempt["operation"] == REPAIR_OPERATION:
+            public["case_id"] = attempt["selected_repair"]["case_id"]
         return blocked, public
 
     return read(client.transaction())
 
 
 def read_draft_attempt(client, project_id, actor_id):
-    _, attempt = _read_active_attempt(client, project_id, actor_id, project_sync=False)
+    _, attempt = _read_active_attempt(client, project_id, actor_id, operations={_REVIEW_OPERATION})
     return attempt
 
 
 def read_project_sync_admission(client, project_id, actor_id):
-    blocked, attempt = _read_active_attempt(client, project_id, actor_id, project_sync=True)
+    blocked, attempt = _read_active_attempt(client, project_id, actor_id, operations=_SYNC_STAGES)
     return {"blocked": blocked, "attempt": attempt}
 
 
-def release_draft_attempt(client, project_id, actor_id, operation_id, fence, *, project_sync=False):
+def read_selected_repair_admission(client, project_id, actor_id):
+    blocked, attempt = _read_active_attempt(client, project_id, actor_id, operations={REPAIR_OPERATION})
+    return {"blocked": blocked, "attempt": attempt}
+
+
+def release_draft_attempt(client, project_id, actor_id, operation_id, fence, *, project_sync=False, selected_repair=False):
+    if project_sync and selected_repair:
+        raise ValueError("Choose one draft admission operation family")
     if not _is_operation_id(operation_id) or type(fence) is not int or fence < 1:
         raise _conflict("project_draft_release_mismatch", "This draft attempt identity is unavailable. Reload its current status.")
     project_doc = _project_doc(client, project_id)
@@ -660,7 +742,7 @@ def release_draft_attempt(client, project_id, actor_id, operation_id, fence, *, 
             "operation_id": operation_id,
             "fence": fence,
         }
-        allowed_operations = _SYNC_STAGES if project_sync else {_REVIEW_OPERATION}
+        allowed_operations = _SYNC_STAGES if project_sync else {REPAIR_OPERATION if selected_repair else _REVIEW_OPERATION}
         if not _same_attempt(attempt, identity) or attempt.get("operation") not in allowed_operations:
             raise _conflict("project_draft_release_mismatch", "This draft attempt changed. Reload its current status.")
         if attempt.get("state") == "cancelled":

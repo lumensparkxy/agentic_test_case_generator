@@ -89,6 +89,8 @@ export default function GeneratedTestCasesView({
 	exactCasePath = "",
 	singleCase = false,
 	onReport,
+	onReadCase,
+	renderSelectedCaseRepair,
 	selectedId,
 	setSelectedId,
 	findingCaseId,
@@ -185,6 +187,8 @@ export default function GeneratedTestCasesView({
 		? testCases[0]
 		: priorityCase || findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
 	const selectedIndex = singleCase ? -1 : cases.indexOf(selected);
+	const visibleCaseId = selected?.id;
+	useEffect(() => onReadCase?.(visibleCaseId), [onReadCase, visibleCaseId]);
 	const resolveCasePath = useMemo(() => createSavedCasePathResolver(projectId, savedSuite), [projectId, savedSuite]);
 	const sharePath = useMemo(() => exactCasePath || resolveCasePath(selected), [exactCasePath, resolveCasePath, selected]);
 	const selectCase = (id) => {
@@ -394,6 +398,7 @@ export default function GeneratedTestCasesView({
 									</div>
 								)}
 							</div>
+							{renderSelectedCaseRepair?.(selected, sharePath)}
 							<div className="test-steps-heading">
 								<h3>Steps and expected results</h3>
 								<span>

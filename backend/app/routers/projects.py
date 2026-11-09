@@ -5,6 +5,13 @@ from fastapi.concurrency import run_in_threadpool
 
 from ..contracts.execution import ExecutionRequestReceipt
 from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
+from ..contracts.selected_case_repair import (
+    SelectedCaseRepairInput,
+    SelectedCaseRepairRelease,
+    SelectedCaseRepairReleased,
+    SelectedCaseRepairResult,
+    SelectedCaseRepairStatus,
+)
 from ..services.use_case_generation_service import generate_project_use_cases
 from ..auth.jwt_auth import get_current_user
 from ..models import (
@@ -26,6 +33,7 @@ from ..services.impact_update_service import analyze_project_impact, apply_proje
 from ..services.execution_request_service import public_execution_request, read_execution_request
 from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
+from ..services.selected_case_repair import release_selected_case_repair, repair_selected_case, selected_case_repair_status
 from ..services.test_case_suite_review import review_saved_test_cases
 from ..services.use_case_review_service import review_use_case_snapshot, use_case_review_error_to_http
 from ..services.workflow_project_service import (
@@ -224,6 +232,55 @@ async def apply_qa_project_impact_update(
         )
     except Exception as exc:
         raise impact_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/test-cases/repair", response_model=SelectedCaseRepairStatus)
+def get_selected_case_repair(
+    project_id: str,
+    snapshot_id: str | None = Query(default=None, min_length=1, max_length=160),
+    case_id: str | None = Query(default=None, min_length=1, max_length=160),
+    request_id: str | None = Query(default=None, min_length=1, max_length=160),
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        return selected_case_repair_status(project_id, actor, snapshot_id=snapshot_id, case_id=case_id, request_id=request_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/test-cases/repair", response_model=SelectedCaseRepairResult)
+def repair_project_test_case(
+    project_id: str,
+    payload: SelectedCaseRepairInput,
+    request: Request,
+    actor: AuthUser = Depends(get_current_user),
+):
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id or not request_id.strip() or len(request_id) > 160:
+        raise HTTPException(422, "A bounded X-Request-ID is required for selected-case repair.")
+    try:
+        return repair_selected_case(project_id, payload, actor, request_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/test-cases/repair/{operation_id}/release", response_model=SelectedCaseRepairReleased)
+def release_project_test_case_repair(
+    project_id: str,
+    operation_id: str,
+    payload: SelectedCaseRepairRelease,
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        return SelectedCaseRepairReleased(released=release_selected_case_repair(project_id, actor, operation_id, payload.fence))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
 
 
 @router.post("/projects/{project_id}/test-cases/review", response_model=QaProjectDetail)

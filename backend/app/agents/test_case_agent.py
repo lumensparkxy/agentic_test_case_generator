@@ -2984,6 +2984,7 @@ def refine_test_cases(
     operation: Optional[str] = None,
     source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
     source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
+    selected_obligation: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
 
@@ -3095,5 +3096,6 @@ def refine_test_cases(
         payload.context,
         settings=settings if not workflow.get("workflow_diagnostics", {}).get("used_fallback") else None,
         scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" or payload.selected_test_case_ids else None,
+        **({"selected_obligation": selected_obligation} if selected_obligation is not None else {}),
     )
     return apply_assessment(response, assessment)

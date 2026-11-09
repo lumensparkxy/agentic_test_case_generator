@@ -196,6 +196,10 @@ async function fixture(
 	});
 	await page.route(routePath(`${root}/orchestrator/status`), (route) => route.fulfill({ json: useCaseOrchestratorFixture(project) }));
 	await page.route(routePath(`${secondRoot}/orchestrator/status`), (route) => route.fulfill({ json: useCaseOrchestratorFixture(other) }));
+	await page.route(routePath(`${root}/test-cases/repair`), (route) => {
+		expect(route.request().method()).toBe("GET");
+		return route.fulfill({ json: { enabled: false, blocked: false, targets: [], attempt: null, result: null } });
+	});
 
 	await page.route(routePath(statusPath), async (route) => {
 		const request = route.request();

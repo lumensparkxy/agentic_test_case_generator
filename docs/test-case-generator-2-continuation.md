@@ -324,6 +324,25 @@ audit layouts keep their original receipt fingerprints. An exact
 committed design report can be recovered while new design delivery is
 disabled, subject to the existing current-evidence checks.
 
+### Selected repair in Review
+
+The local shared-admission demo can offer **Add missing check** in the
+current saved case reader. The server binds the offer to the current
+suite, case version, approved scenario and exact cited source obligation.
+It accepts one additional read-only observation with an independently
+verified expected result. The preceding steps and data, sibling case
+rows and sibling version identities stay exact. Setup blockers and
+recorded application defects retain their separate paths.
+
+The owner can check or release the exact attempt while a request is
+running or interrupted. The same request ID recovers a committed
+result. Read-only before and after links use the original suite and
+case versions. Repair reserves at most eight provider requests with a
+180-second deadline. Publication, the usage event, billing and the
+receipt use the same source and lease fence. The combined suite remains
+pending until the user invokes **Review saved suite**. Neither action
+starts browser execution.
+
 ## Baseline evidence
 
 [Desktop workspace sketches](test-case-generator-2-workspaces.md) show the
@@ -431,15 +450,20 @@ The browser fixture exports an exact manual design while browser setup
 is blocked. Unknown, stale and legacy evidence retains its existing
 export gate. Exact historical case and run links remain available. P7
 still owns opening the exact historical file report from its index row.
-P5a opens priority cases from the exact completed suite under
-[#473](https://github.com/lumensparkxy/agentic_test_case_generator/issues/473).
+P5a opens priority cases from the exact completed suite (commit `2df24f2`,
+[PR #474](https://github.com/lumensparkxy/agentic_test_case_generator/pull/474)).
 The desktop browser verifies a 200-case suite, saved filters, keyboard
 focus, Back and Forward, stale/replaced suites, and existing case links.
-Next is targeted repair under shared admission. Direct draft producers
-remain a release gate. P6 error analysis found prior Booking gaps covered
-by existing regression checks and no verified new prompt change. The
-next quality packet needs a credential-free rehearsal of the paired
-workbench and hard provider transport limits.
+P5b adds the bounded one-case repair and exact saved comparison under
+[#475](https://github.com/lumensparkxy/agentic_test_case_generator/issues/475).
+The loopback fixture proves one selected successor and charge, exact
+historical readback, lost acknowledgement recovery, source and cancellation
+fences, and explicit whole-suite reassessment. Next is scoped source
+refresh. Unenrolled paid draft producers remain a release gate.
+P6 error analysis found prior Booking gaps covered by existing regression
+checks and no verified new prompt change. A credential-free preflight
+verified paired intake and HTTP metering seams. Full synthetic
+generation through export remains a separate validation packet.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

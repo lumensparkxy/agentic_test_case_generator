@@ -126,7 +126,7 @@ def _dump(value):
     return value.model_dump(mode="json") if hasattr(value, "model_dump") else value
 
 
-def review_input(cases, requirements, context, *, scope_plan=None):
+def review_input(cases, requirements, context, *, scope_plan=None, selected_obligation=None):
     manifest = current_guidance()
     rows = []
     for case in cases:
@@ -143,6 +143,8 @@ def review_input(cases, requirements, context, *, scope_plan=None):
         "guidance_manifest": public_manifest(),
         "applied_guidance": _dump(manifest) if manifest else None,
     }
+    if selected_obligation is not None:
+        data["selected_obligation"] = selected_obligation
     encoded = _canonical_json(data)
     return data, sha256(encoded.encode()).hexdigest(), encoded
 
@@ -253,6 +255,12 @@ When scope=selected_scenarios assess only the behaviors of selected scenarios, a
         if case_batch
         else " Split distinct triggers, numeric boundaries or outcomes into separate obligations instead of combining evidence from different cases."
     )
+    if data.get("selected_obligation"):
+        scope_instruction += (
+            "\nAssess the exact requirement_id and obligation name in selected_obligation once, without renaming it. "
+            "Decide independently whether the appended observation and existing steps prove the stated source rule. "
+            "Mark it unmet or unknown when its observable result, source or supporting actions are insufficient."
+        )
     return (
         QUALITY_GOAL
         + TEST_CASE_BEHAVIOR_POLICY
@@ -605,6 +613,15 @@ def validate_assessment(raw, data, input_hash):
             quote = source.get(field)
             if not isinstance(quote, str) or not quote.strip():
                 raise ValueError("Source reference points to unknown or empty source")
+            selected = data.get("selected_obligation") or {}
+            target_quote = selected.get("source_quote")
+            if (
+                obligation.get("requirement_id") == selected.get("requirement_id")
+                and obligation.get("obligation") == selected.get("obligation")
+                and target_quote
+                and target_quote in quote
+            ):
+                quote = target_quote
             obligation["source_quote"] = quote
         for evidence in obligation.get("evidence", []):
             if set(evidence) == {"test_case_id", "step"}:
@@ -754,8 +771,8 @@ def _invalid_evidence_code(exc):
     }.get(str(exc), "invalid_output_schema")
 
 
-def assess_delivered_suite(cases, requirements, context, *, settings=None, scope_plan=None, progress=None):
-    data, input_hash, _ = review_input(cases, requirements, context, scope_plan=scope_plan)
+def assess_delivered_suite(cases, requirements, context, *, settings=None, scope_plan=None, progress=None, selected_obligation=None):
+    data, input_hash, _ = review_input(cases, requirements, context, scope_plan=scope_plan, selected_obligation=selected_obligation)
     reviewed_inputs = bind_reviewed_inputs({}, data)
     assessment = _assess_review_data(data, input_hash, settings, progress)
     assessment.update(reviewed_inputs)

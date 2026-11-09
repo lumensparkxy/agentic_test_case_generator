@@ -22,6 +22,8 @@ import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import ProjectWorkspaceNavigation from "./components/layout/ProjectWorkspaceNavigation";
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
+import { SavedRepairEvidence, SelectedCaseRepair, SelectedCaseRepairStatus } from "./components/generation/SelectedCaseRepair";
+import useSelectedCaseRepair from "./hooks/useSelectedCaseRepair";
 import SuiteQualitySummary, { findExactSuiteRun } from "./components/generation/SuiteQualitySummary";
 import { findActiveSavedCase, prioritySavedCases } from "./components/generation/prioritySavedCases";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -831,8 +833,10 @@ export default function App() {
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const savedSuiteReviewPending =
 		persistedTestCaseCount > 0 &&
-		(savedSuite?.metadata?.review_retry_available === true ||
-			["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation)) &&
+		(savedSuite?.operation === "testcases.repair"
+			? APPROVAL_CONTINUATION_ENABLED && !testCaseStageState.stale
+			: savedSuite?.metadata?.review_retry_available === true ||
+				["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation)) &&
 		savedSuite?.payload?.substantive_assessment?.status === "unknown";
 	const savedSuiteInputsReady =
 		currentProject?.status === "active" &&
@@ -901,6 +905,13 @@ export default function App() {
 	});
 	const [reportedCase, setReportedCase] = useState(null);
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
+	const [selectedRepairReader, setSelectedRepairReader] = useState(null);
+	const readSelectedRepairCase = useCallback(
+		(caseId) => {
+			setSelectedRepairReader({ source: sourceCaseSnapshot, identity: currentUser?.sub, caseId });
+		},
+		[sourceCaseSnapshot, currentUser?.sub]
+	);
 	const activeReviewCaseScope = reviewCaseScope?.snapshot === sourceCaseSnapshot ? reviewCaseScope : null;
 	const focusResultContent = useRef(false);
 	const [improveMountedScope, setImproveMountedScope] = useState(null);
@@ -1624,7 +1635,7 @@ export default function App() {
 			scope: knowledgeScope,
 			[stage]: { guidance: data.guidance, knowledge_suggestion: data.knowledge_suggestion },
 		}));
-	const apiRequest = async (path, options = {}, authRequired = true) => {
+	const apiRequest = async (path, options = {}, authRequired = true, { allowGuidanceRecovery = true } = {}) => {
 		const headers = ensureRequestIdHeader(options.headers || {});
 
 		if (authRequired) {
@@ -1658,7 +1669,7 @@ export default function App() {
 								.catch(() => ({}))
 						).detail
 					: null;
-			if (detail?.code !== "knowledge_unavailable" || !detail.can_bypass) return res;
+			if (!allowGuidanceRecovery || detail?.code !== "knowledge_unavailable" || !detail.can_bypass) return res;
 			const choice = await guidanceRecovery.decide(knowledgeScope);
 			if (choice === "cancel") throw new Error("Generation cancelled before model execution.");
 			if (choice === "bypass") headers["X-Knowledge-Bypass"] = "true";
@@ -2074,6 +2085,42 @@ export default function App() {
 		return openProject(operationScope.projectId, { hydrate, silent: true, operationScope });
 	};
 
+	const repairReviewRoute = Boolean(
+		APPROVAL_CONTINUATION_ENABLED &&
+		route.workspace === "review" &&
+		route.section === "tests" &&
+		!viewingSavedCase &&
+		route.projectId === currentProjectId &&
+		currentUser?.sub &&
+		currentProject?.owner_user_id === currentUser.sub &&
+		isAuthenticated &&
+		!isVerifyingSession
+	);
+	const repairSnapshotId =
+		savedSuite?.project_id === currentProjectId && testCaseStageState.current_snapshot_id === savedSuite?.snapshot_id
+			? savedSuite?.snapshot_id
+			: null;
+	const repairReaderCaseId =
+		repairSnapshotId && selectedRepairReader?.source === sourceCaseSnapshot && selectedRepairReader?.identity === currentUser?.sub
+			? selectedRepairReader.caseId
+			: null;
+	const repairReaderVersionId = repairReaderCaseId ? findActiveSavedCase(savedSuite, repairReaderCaseId)?.artifact_version_id : null;
+	const selectedRepair = useSelectedCaseRepair({
+		enabled: repairReviewRoute,
+		identity: currentUser?.sub,
+		projectId: currentProjectId,
+		snapshotId: repairSnapshotId,
+		caseId: repairReaderCaseId,
+		caseVersionId: repairReaderVersionId,
+		revision: currentProjectRevision,
+		request: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
+		readProject: () => {
+			const operationScope = captureProjectOperationScope();
+			if (operationScope?.projectId !== currentProjectId || operationScope?.userId !== currentUser?.sub) return null;
+			return refreshCurrentProject({ hydrate: "if-changed", operationScope });
+		},
+	});
+
 	const approvalContinuation = useApprovalContinuation({
 		enabled:
 			APPROVAL_CONTINUATION_ENABLED &&
@@ -2087,6 +2134,8 @@ export default function App() {
 		request: apiRequest,
 	});
 	const savedReview = approvalContinuation.savedReview;
+	const trustedRepairOnly =
+		repairReviewRoute && (savedReview.enabled || !selectedRepair.legacy || selectedRepair.attempt || selectedRepair.pending);
 	const savedReviewRecovery =
 		APPROVAL_CONTINUATION_ENABLED && currentProject?.owner_user_id === currentUser?.sub && (savedReview.enabled || !savedReview.statusRead);
 	const sharedDraftBusy =
@@ -2094,6 +2143,12 @@ export default function App() {
 		(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted");
 	const savedSuiteReviewDisabled =
 		savedSuiteReviewUnavailable ||
+		(selectedRepair.enabled &&
+			(selectedRepair.attempt ||
+				selectedRepair.pending ||
+				selectedRepair.checking ||
+				selectedRepair.submitting ||
+				selectedRepair.blocked)) ||
 		(savedReviewRecovery &&
 			(!savedReview.statusRead ||
 				savedReview.statusError ||
@@ -5973,6 +6028,16 @@ export default function App() {
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
 											{suiteQualitySummary}
+											{repairReviewRoute && <SelectedCaseRepairStatus repair={selectedRepair} currentSnapshotId={repairSnapshotId} />}
+											{repairReviewRoute && selectedRepair.result && (
+												<SavedRepairEvidence
+													key={JSON.stringify([currentUser.sub, currentProjectId, selectedRepair.result.request_id])}
+													result={selectedRepair.result}
+													projectId={currentProjectId}
+													request={apiRequest}
+													navigate={navigate}
+												/>
+											)}
 											<TestCaseReadiness
 												project={currentProject}
 												status={orchestratorStatus}
@@ -6174,6 +6239,7 @@ export default function App() {
 																	identity={currentUser?.sub}
 																	projectId={currentProjectId}
 																	snapshotId={sourceCaseSnapshot}
+																	trustedRepairOnly={trustedRepairOnly}
 																	reportedCase={reportedCase}
 																	summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
 																	onClearReport={() => setReportedCase(null)}
@@ -6255,11 +6321,39 @@ export default function App() {
 																	projectId={currentProjectId}
 																	savedSuite={savedSuite}
 																	snapshotId={sourceCaseSnapshot}
-																	onReport={(testCase) => {
-																		setReportedCase(testCase);
-																		setActiveGenerateResultTab("improve");
-																		focusResultContent.current = true;
-																	}}
+																	onReport={
+																		trustedRepairOnly
+																			? undefined
+																			: (testCase) => {
+																					setReportedCase(testCase);
+																					setActiveGenerateResultTab("improve");
+																					focusResultContent.current = true;
+																				}
+																	}
+																	onReadCase={repairReviewRoute ? readSelectedRepairCase : undefined}
+																	renderSelectedCaseRepair={(testCase, savedPath) =>
+																		repairReviewRoute &&
+																		repairSnapshotId &&
+																		savedPath &&
+																		testCase.artifact_version_id &&
+																		!testCaseStageState.stale && (
+																			<SelectedCaseRepair
+																				key={`${repairSnapshotId}:${testCase.id}`}
+																				repair={
+																					repairReaderCaseId === testCase.id
+																						? selectedRepair
+																						: { ...selectedRepair, statusFresh: false, targets: [] }
+																				}
+																				disabled={
+																					testCaseActionDisabled ||
+																					isGenerating ||
+																					savedSuiteReviewState?.busy ||
+																					savedReview.attempt ||
+																					sharedDraftBusy
+																				}
+																			/>
+																		)
+																	}
 																	key={`${sourceCaseSnapshot}:${activeReviewCaseScope?.key || (changedTestCaseIds ? "changed" : "all")}`}
 																	changedIds={changedTestCaseIds}
 																	onClearChanged={() => setChangedTestCaseIds(null)}

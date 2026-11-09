@@ -1,0 +1,72 @@
+.selected-repair-section {
+	margin-block: 0.75rem;
+	padding: 0.8rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: var(--card-bg);
+}
+
+.selected-repair-section h3,
+.selected-repair-section h4 {
+	margin-block: 0 0.4rem;
+}
+
+.selected-repair-target blockquote {
+	margin-inline: 0;
+	padding-inline-start: 0.65rem;
+	border-inline-start: 0.2rem solid var(--primary);
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+.selected-repair-option + .selected-repair-option {
+	margin-block-start: 0.55rem;
+	padding-block-start: 0.55rem;
+	border-block-start: 1px solid var(--border-color);
+}
+
+.selected-repair-evidence-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+	margin-block: var(--space-3);
+}
+
+.selected-repair-evidence-links .ui-link {
+	color: var(--primary-strong);
+	text-underline-offset: 0.15em;
+}
+
+.selected-repair-evidence-links .ui-link:hover,
+.selected-repair-evidence-links .ui-link:focus-visible {
+	background: var(--primary-tonal);
+}
+
+.selected-repair-comparison {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+	gap: 0.75rem;
+	padding-block-start: 0.5rem;
+}
+
+.selected-repair-saved-case {
+	padding: 0.65rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	overflow-wrap: anywhere;
+}
+
+.selected-repair-saved-case li + li {
+	margin-block-start: var(--space-3);
+}
+
+.selected-repair-saved-case li > p {
+	margin-block: var(--space-1);
+	white-space: pre-wrap;
+}
+
+.selected-repair-saved-case .test-step-data-value {
+	max-block-size: 12rem;
+	overflow: auto;
+	white-space: break-spaces;
+}

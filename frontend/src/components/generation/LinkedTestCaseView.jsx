@@ -1,8 +1,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
-import { buildSavedCasePath } from "../../app/savedCaseLinks";
+import { buildSavedCasePath, readExactSavedCaseEvidence } from "../../app/savedCaseLinks";
 import { buildProjectPath, PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
-import { API_CONTRACT_ENDPOINTS } from "../../api/generated/api-contracts";
 import { Button, Link } from "../ui/controls";
 import GeneratedTestCasesView from "./GeneratedTestCasesView";
 
@@ -13,29 +12,15 @@ export default function LinkedTestCaseView({ projectId, snapshotId, caseId, requ
 	useLayoutEffect(() => {
 		headingRef.current?.focus();
 	}, []);
-	const fetchCase = useEffectEvent((signal) => {
-		const path = API_CONTRACT_ENDPOINTS.projectTestCaseEvidence.path.replace("{project_id}", encodeURIComponent(projectId));
-		const query = new URLSearchParams({ snapshot_id: snapshotId, case_id: caseId });
-		return request(`${path}?${query}`, { signal });
-	});
+	const fetchCase = useEffectEvent((signal) => readExactSavedCaseEvidence({ projectId, snapshotId, caseId, request, signal }));
 
 	useEffect(() => {
 		if (!snapshotId || !caseId) return;
 		const controller = new AbortController();
 		async function load() {
 			try {
-				const response = await fetchCase(controller.signal);
-				if ([403, 404, 422].includes(response.status)) {
-					if (!controller.signal.aborted) setResult({ unavailable: true });
-					return;
-				}
-				if (!response.ok) throw new Error("Saved case lookup failed.");
-				const evidence = await response.json();
-				if (evidence?.project_id !== projectId || evidence?.snapshot_id !== snapshotId || evidence?.test_case?.id !== caseId) {
-					if (!controller.signal.aborted) setResult({ unavailable: true });
-					return;
-				}
-				if (!controller.signal.aborted) setResult({ evidence });
+				const evidence = await fetchCase(controller.signal);
+				if (!controller.signal.aborted) setResult(evidence ? { evidence } : { unavailable: true });
 			} catch {
 				if (!controller.signal.aborted) setResult({ retryable: true });
 			}

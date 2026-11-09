@@ -1,3 +1,4 @@
+import { API_CONTRACT_ENDPOINTS } from "../api/generated/api-contracts";
 import { buildProjectPath, PROJECT_DESTINATIONS } from "./workflowRoutes";
 
 export function buildSavedCasePath(projectId, snapshotId, caseId) {
@@ -12,6 +13,17 @@ export function readSavedCaseLink(search) {
 	const cases = query.getAll("case");
 	if (suites.length !== 1 || cases.length !== 1 || !suites[0] || !cases[0]) return { snapshotId: "", caseId: "" };
 	return { snapshotId: suites[0], caseId: cases[0] };
+}
+
+export async function readExactSavedCaseEvidence({ projectId, snapshotId, caseId, request, signal }) {
+	const endpoint = API_CONTRACT_ENDPOINTS.projectTestCaseEvidence;
+	const path = endpoint.path.replace("{project_id}", encodeURIComponent(projectId));
+	const query = new URLSearchParams({ snapshot_id: snapshotId, case_id: caseId });
+	const response = await request(`${path}?${query}`, { method: endpoint.method, signal });
+	if ([403, 404, 422].includes(response.status)) return null;
+	if (!response.ok) throw new Error("Saved case lookup failed.");
+	const evidence = await response.json();
+	return evidence?.project_id === projectId && evidence?.snapshot_id === snapshotId && evidence?.test_case?.id === caseId ? evidence : null;
 }
 
 function caseContent(testCase) {

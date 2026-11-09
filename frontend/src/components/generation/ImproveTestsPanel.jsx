@@ -24,6 +24,7 @@ export default function ImproveTestsPanel({
 	busy,
 	disabled,
 	blockedReason,
+	trustedRepairOnly = false,
 	stale,
 	onImpact,
 	onApply,
@@ -98,7 +99,7 @@ export default function ImproveTestsPanel({
 					{summary.changed} changed · {summary.added} added · {summary.preserved} preserved. Review changed tests before accepting.
 				</p>
 			)}
-			{target && (
+			{target && !trustedRepairOnly && (
 				<div className="selected-test-report">
 					<h3>Report a problem · {target.id}</h3>
 					<p>Only this test will be repaired. Its current evidence is included below.</p>
@@ -125,7 +126,9 @@ export default function ImproveTestsPanel({
 								? "What needs fixing"
 								: "Review your test cases"}
 			</h2>
-			<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
+			{(review?.summary || !trustedRepairOnly) && (
+				<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
+			)}
 			<BusinessCoverageSummary assessment={assessment} />
 			{reviewOnly && <p>{canReviewSavedSuite ? "Use Review saved suite to check these cases." : assessment.reason}</p>}
 			<ExecutionSetupSummary assessment={assessment} projectId={projectId} prerequisiteSnapshotId={prerequisiteSnapshotId} />
@@ -184,7 +187,23 @@ export default function ImproveTestsPanel({
 				</div>
 			)}
 			{saved && <p role="status">Test cases updated. Review the latest quality result and remaining findings.</p>}
-			{!target && findings.length > 0 && (
+			{trustedRepairOnly && findings.length > 0 && (
+				<div className="improve-tests-findings">
+					<h3>Saved findings</h3>
+					<p>Open a saved test to see if an observable check is available for selected repair.</p>
+					{findings.map((finding) => (
+						<div key={finding} className="improve-tests-finding">
+							<p>{finding}</p>
+							{findingCaseIds(finding, testCases).map((id) => (
+								<Button key={id} variant="secondary" size="compact" onClick={() => onViewCase(id)} aria-label={`View test case ${id}`}>
+									View test case {id}
+								</Button>
+							))}
+						</div>
+					))}
+				</div>
+			)}
+			{!trustedRepairOnly && !target && findings.length > 0 && (
 				<fieldset disabled={locked} className="improve-tests-findings">
 					<legend>Select findings to address</legend>
 					<div className="button-row">
@@ -215,7 +234,7 @@ export default function ImproveTestsPanel({
 					))}
 				</fieldset>
 			)}
-			{!reviewOnly && (!needsOnlySetup || target) && (
+			{!trustedRepairOnly && !reviewOnly && (!needsOnlySetup || target) && (
 				<>
 					<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
 					<Textarea
