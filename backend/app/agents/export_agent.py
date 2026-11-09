@@ -38,6 +38,21 @@ def _spreadsheet_text(value: Any) -> Any:
 
 
 def _audit_cells(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    fields = metadata or {}
+    delivery = fields.get("design_delivery")
+    if isinstance(delivery, dict) and delivery.get("delivery_kind") == "reviewed_design":
+        fields = {
+            "Delivery kind": "Reviewed design",
+            "Design assessment": delivery.get("design_status"),
+            "Source freshness": delivery.get("source_freshness"),
+            "Scenario decision": delivery.get("scenario_decision"),
+            "Human suite acceptance": delivery.get("human_acceptance"),
+            "Declared setup": delivery.get("declared_setup"),
+            "Target readiness": delivery.get("target_readiness"),
+            "Execution outcome": fields.get("execution_status"),
+            "Legacy approval": delivery.get("legacy_approved"),
+            **fields,
+        }
     return {
         "Audit " + key: json.dumps(value, ensure_ascii=False)
         if isinstance(value, (dict, list))
@@ -46,7 +61,7 @@ def _audit_cells(metadata: dict[str, Any] | None) -> dict[str, Any]:
         else str(value).lower()
         if isinstance(value, bool)
         else value
-        for key, value in (metadata or {}).items()
+        for key, value in fields.items()
     }
 
 

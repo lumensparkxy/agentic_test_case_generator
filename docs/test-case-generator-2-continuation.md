@@ -297,10 +297,32 @@ preserving the case content and versions. Sparse or malformed legacy
 evidence stays unknown. Drafts and source changes cannot inherit current
 proof from a different suite.
 
-The proof and projection leave legacy approval, export, repair and
-execution admission in force. An independently complete design can show
-declared setup as blocked. Explicit design-file delivery and its report
-classification are the next policy packet.
+The proof and projection leave legacy approval, repair and execution
+admission in force. An independently complete design can show declared
+setup as blocked.
+
+### Explicit reviewed-design export
+
+`TCG_DESIGN_DELIVERY_ENABLED=true` enables the server capability for a new
+file export request. The capability is off by default and projected in
+Project Detail. An explicit `delivery_intent: reviewed_design` request
+binds CSV, Excel or JSON output to the exact current suite and revision.
+It requires verified source freshness, complete independent design, the
+exact human-approved scenario plan and concrete saved cases.
+
+The file and report classify the delivery as a reviewed design. The
+legacy combined approval remains separate. The evidence carries exact
+case versions, source mappings, approved scope and deferred or excluded
+requirements. Historical cases stay in the file while the coverage
+denominator uses the active design. Declared setup, human acceptance and
+actual run outcomes remain separate. Target readiness remains unknown
+in the file until a matching target check can supply authoritative
+evidence. Preview and Run continue to use their existing admission.
+
+The existing reasoned draft export remains available. Legacy file and
+audit layouts keep their original receipt fingerprints. An exact
+committed design report can be recovered while new design delivery is
+disabled, subject to the existing current-evidence checks.
 
 ## Baseline evidence
 
@@ -390,11 +412,13 @@ P3e shares provider admission with saved-suite assessment (commit
 `4a76f0c`, [PR #464](https://github.com/lumensparkxy/agentic_test_case_generator/pull/464)).
 P3f enrolls bounded Project Sync refresh (commit `dbeda56`,
 [PR #466](https://github.com/lumensparkxy/agentic_test_case_generator/pull/466)).
-P4a binds independent design evidence to the exact saved suite under
-[#467](https://github.com/lumensparkxy/agentic_test_case_generator/issues/467).
-Next is explicit design-file delivery. Direct draft producers remain a
-release gate. Targeted repair will join the shared admission path when
-the Review workflow consumes it.
+P4a binds independent design evidence to the exact saved suite (commit
+`1be782c`, [PR #468](https://github.com/lumensparkxy/agentic_test_case_generator/pull/468)).
+P4b adds explicit reviewed-design file delivery under
+[#469](https://github.com/lumensparkxy/agentic_test_case_generator/issues/469).
+Next is aligning Review, Deliver and project status with the server
+evidence. Direct draft producers remain a release gate. Targeted repair
+will join shared admission when the Review workflow consumes it.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

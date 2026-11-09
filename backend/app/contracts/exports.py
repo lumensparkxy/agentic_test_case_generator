@@ -27,6 +27,27 @@ class ExportTestCasesInput(BaseModel):
     project_id: Optional[str] = None
     base_project_revision: Optional[int] = Field(default=None, ge=0)
     source_snapshot_id: Optional[str] = None
+    delivery_intent: Literal["reviewed_design"] | None = None
+
+
+class DesignDeliveryEvidence(BaseModel):
+    schema_version: Literal[1] = 1
+    delivery_kind: Literal["reviewed_design"] = "reviewed_design"
+    legacy_approved: bool
+    suite_snapshot_id: str
+    source_freshness: Literal["current"] = "current"
+    design_status: Literal["complete"] = "complete"
+    scenario_decision: Literal["approved"] = "approved"
+    scenario_snapshot_id: str
+    scenario_review_id: str
+    human_acceptance: Literal["approved", "unavailable"]
+    declared_setup: Literal["blocked", "not_assessed", "unknown"]
+    required_requirement_ids: list[str]
+    deferred_requirement_ids: list[str]
+    excluded_requirement_ids: list[str]
+    active_case_count: int = Field(ge=0)
+    deprecated_case_count: int = Field(ge=0)
+    target_readiness: Literal["unknown"] = "unknown"
 
 
 class ExportAuditMetadata(BaseModel):
@@ -56,6 +77,7 @@ class ExportAuditMetadata(BaseModel):
     execution_run_ids: List[str] = Field(default_factory=list)
     execution_runs: List[dict[str, Any]] = Field(default_factory=list)
     case_status_semantics: str = "Case Ready is a lifecycle value, not suite quality approval or execution readiness. Preview is not execution."
+    design_delivery: DesignDeliveryEvidence | None = None
 
 
 class ExportTestCasesDocument(BaseModel):
@@ -69,6 +91,7 @@ __all__ = [
     "JiraExportInput",
     "JiraExportResponse",
     "ExportTestCasesInput",
+    "DesignDeliveryEvidence",
     "ExportAuditMetadata",
     "ExportTestCasesDocument",
 ]

@@ -64,16 +64,38 @@ def _check_export_fingerprint(receipt, fingerprint):
         raise HTTPException(409, "This request already published a report for different inputs.")
 
 
+def _export_request_fingerprint(payload: ExportTestCasesInput) -> str:
+    request_data = payload.model_dump(mode="json")
+    if request_data.get("delivery_intent") is None:
+        request_data.pop("delivery_intent", None)
+    return digest(request_data)
+
+
+def _export_audit_dict(evidence):
+    audit = evidence.model_dump(mode="json")
+    if audit.get("design_delivery") is None:
+        audit.pop("design_delivery", None)
+    return audit
+
+
 def _replay_export_metadata(receipt, payload, actor, fingerprint):
     _check_export_fingerprint(receipt, fingerprint)
     project = _load_export_project(payload.project_id, actor)
     state = project.stage_state.get("reports")
     if not state or state.stale or state.current_snapshot_id != receipt.snapshot_id:
         raise HTTPException(409, "The saved export is no longer current. Reload before exporting.")
+    saved_audit = receipt.payload["audit_metadata"]
+    design = saved_audit.get("design_delivery")
+    saved_design = (
+        payload.delivery_intent == "reviewed_design"
+        and receipt.metadata.get("delivery_kind") == "reviewed_design"
+        and isinstance(design, dict)
+        and design.get("delivery_kind") == "reviewed_design"
+    )
     current = payload.model_copy(update={"base_project_revision": project.current_revision})
-    audit = build_export_evidence(current, project).model_dump(mode="json")
+    audit = _export_audit_dict(build_export_evidence(current, project, allow_saved_design=True) if saved_design else build_export_evidence(current, project))
     audit["project_revision"] = payload.base_project_revision
-    audit["exported_at"] = receipt.payload["audit_metadata"]["exported_at"]
+    audit["exported_at"] = saved_audit["exported_at"]
     if digest(audit) != receipt.metadata.get("export_audit_fingerprint"):
         raise HTTPException(409, "The saved export evidence has changed. Reload before exporting.")
     return audit
@@ -124,6 +146,9 @@ def _publish_project_export(
         complete_workflow_run(workflow_run_id, status="completed", metadata=result_metadata, pending_writes=writes, firestore_client=client)
         evidence = _project_report_evidence(result_metadata)
         audit_metadata = {key: value for key, value in result_metadata.items() if key not in {"content_length", "byte_count"}}
+        design = audit_metadata.get("design_delivery")
+        classification = {"delivery_kind": design["delivery_kind"]} if design else {}
+        legacy_approved = design["legacy_approved"] if design else not result_metadata["is_draft"]
         return append_stage_snapshot(
             project_id=payload.project_id,
             stage="reports",
@@ -131,7 +156,8 @@ def _publish_project_export(
                 "source": "export",
                 "format": export_format,
                 "test_case_count": len(payload.test_cases),
-                "approved": not result_metadata["is_draft"],
+                "approved": legacy_approved,
+                **classification,
                 "review": result_metadata["machine_review"],
                 "audit_metadata": audit_metadata,
                 "draft_override_requested": result_metadata["draft_override_used"],
@@ -144,7 +170,7 @@ def _publish_project_export(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
-            approved=not result_metadata["is_draft"],
+            approved=legacy_approved,
             source_snapshot_id=result_metadata["snapshot_id"],
             title=f"{export_format.upper()} export",
             metadata={
@@ -155,6 +181,7 @@ def _publish_project_export(
                 "evidence_count": len(evidence["evidence_refs"]),
                 "export_request_fingerprint": fingerprint,
                 "export_audit_fingerprint": digest(audit_metadata),
+                **classification,
                 **({"export_layout": export_layout} if export_layout else {}),
             },
             base_project_revision=payload.base_project_revision,
@@ -301,7 +328,7 @@ def _file_export(
     project = None
     if payload.project_id:
         key = digest(["file-export", current_user.sub, request_id])
-        fingerprint = digest(payload.model_dump(mode="json"))
+        fingerprint = _export_request_fingerprint(payload)
         receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
         if receipt:
             return response(render_saved_export(receipt))
@@ -312,7 +339,7 @@ def _file_export(
             if receipt:
                 return response(render_saved_export(receipt))
 
-    audit = build_export_evidence(payload, project).model_dump(mode="json")
+    audit = _export_audit_dict(build_export_evidence(payload, project))
     workflow_run_id = start_workflow_run(operation=operation, actor=current_user, request_id=request_id, metadata=audit)
     try:
         content = render_content(audit, export_layout)

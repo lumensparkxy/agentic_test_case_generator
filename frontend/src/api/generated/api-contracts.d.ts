@@ -509,6 +509,7 @@ export interface ExecutionUnsupportedStep {
 export interface ExportTestCasesInput {
 	approved?: boolean;
 	base_project_revision?: number | null;
+	delivery_intent?: "reviewed_design" | null;
 	draft_override_reason?: string | null;
 	draft_override_requested?: boolean;
 	project_id?: string | null;
@@ -839,6 +840,7 @@ export interface QaProjectDetail {
 	current_revision?: number;
 	current_snapshots?: Record<string, QaProjectStageSnapshot>;
 	description?: string | null;
+	design_delivery_enabled?: boolean;
 	execution_runs?: Array<QaProjectExecutionRun>;
 	impact_application?: ImpactApplication | null;
 	input_revision?: number;

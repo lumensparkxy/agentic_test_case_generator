@@ -3,6 +3,7 @@ import csv
 from datetime import datetime, timezone
 import io
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -15,11 +16,18 @@ from openpyxl import load_workbook
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.main import app, get_current_user
 from app.agents.export_agent import export_to_excel
+from app.contracts.exports import ExportTestCasesInput
 from app.models import AuthUser, TestCase
 from app.contracts.projects import QaProjectDetail
 from app.routers import export as routes
 from app.services import workflow_project_service as projects
+from app.services.export_evidence import build_export_evidence
+from app.services.requirement_reconciliation import digest
+from app.services.requirement_scope import approved_generation_requirements
+from app.services.suite_quality import build_suite_design_proof, reviewed_case_content_hash
+from app.services.test_case_quality import case_source_hash
 from app.services.workflow_project_service import ProjectPermissionError
+from test_suite_quality import fixture as suite_quality_fixture
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 
@@ -409,6 +417,366 @@ class ExportPublicationTests(unittest.TestCase):
         self.assertEqual(event["event_type"], operation)
         self.assertEqual(event["workflow_run_id"], workflow["run_id"])
         return event
+
+    def seed_reviewed_design(self):
+        source, suite_payload, metadata = suite_quality_fixture(missing_setup=True)
+        requirements_payload = deepcopy(source.current_snapshots["requirements"].payload)
+        row = requirements_payload["requirements"][0]
+        row.update(
+            original_requirement_ids=["CHECKOUT-01"],
+            sources=[
+                {
+                    "source_id": "checkout-source",
+                    "source_version": "checkout-v1",
+                    "import_id": "checkout-import",
+                    "label": "Checkout source",
+                    "excerpt": row["text"],
+                    "excerpt_verified": True,
+                    "original_requirement_ids": ["CHECKOUT-01"],
+                }
+            ],
+        )
+        requirements = self.save("requirements", requirements_payload, operation="requirements.review", approved=False)
+        plan = self.save(
+            "use_cases",
+            source.current_snapshots["use_cases"].payload,
+            operation="use_cases.generate",
+            source_snapshot_id=requirements.snapshot_id,
+            metadata={"source_requirements_snapshot_id": requirements.snapshot_id, "source_context_omitted": True},
+        )
+        self.store[f"qa_projects/{self.project_id}"]["stage_state"]["use_cases"]["metadata"]["latest_human_review"] = {
+            "snapshot_id": plan.snapshot_id,
+            "review_id": "human-review",
+            "reviewer_user_id": self.actor.sub,
+            "decision": "approve",
+        }
+        case = suite_payload["test_cases"][0]
+        case["title"] = '=HYPERLINK("https://example.test")'
+        case["steps"].extend(
+            [
+                {"step": 4, "action": "Clear the optional order note.", "expected": "The order note is empty.", "test_data": ""},
+                {"step": 7, "action": "Enter the literal note.", "expected": "The note is displayed verbatim.", "test_data": "=SUM(1,2) β\t "},
+            ]
+        )
+        suite_payload["test_cases"].append(
+            {
+                **deepcopy(case),
+                "id": "TC-0",
+                "title": "Reopen the saved checkout confirmation",
+                "artifact_item_id": "item-2",
+                "artifact_version_id": "version-2",
+            }
+        )
+        suite_payload["review"] = {"approved": False, "score": 100, "threshold": 90, "blocking_issues": ["Checkout operator role is missing."]}
+        suite_payload["approved"] = False
+        assessment = suite_payload["substantive_assessment"]
+        assessment["case_grounding"].append({"test_case_id": "TC-0", "reason": "The saved checkout displays its confirmation.", "prerequisites": []})
+        reviewed_hash = reviewed_case_content_hash(suite_payload["test_cases"])
+        suite_payload["generation_evidence"]["design_precheck"]["case_content_hash"] = reviewed_hash
+        assessment["reviewed_case_content_hash"] = reviewed_hash
+        project = self.project()
+        requirement_hashes = {row.id: case_source_hash(row.model_dump(mode="json")) for row in approved_generation_requirements(project)}
+        assessment["reviewed_source_binding"]["requirement_hashes"] = requirement_hashes
+        metadata.update(
+            source_snapshot_ids={"requirements": requirements.snapshot_id, "use_cases": plan.snapshot_id},
+            source_requirements_snapshot_id=requirements.snapshot_id,
+            source_use_case_snapshot_id=plan.snapshot_id,
+            source_requirement_hashes=requirement_hashes,
+            generation_base_project_revision=project.current_revision,
+        )
+        proof = build_suite_design_proof(project, suite_payload, metadata, plan_snapshot_id=plan.snapshot_id)
+        self.assertIsNotNone(proof)
+        self.assertEqual(proof["design_status"], "complete")
+        self.suite = self.save(
+            "test_cases",
+            suite_payload,
+            operation="testcases.generate",
+            approved=False,
+            source_snapshot_id=plan.snapshot_id,
+            metadata=metadata,
+            suite_design_proof=proof,
+        )
+        self.before = self.project()
+        self.assertEqual(self.before.suite_quality.design_status, "complete")
+        self.assertEqual(self.before.suite_quality.declared_setup, "blocked")
+        self.input.update(
+            base_project_revision=self.before.current_revision,
+            source_snapshot_id=self.suite.snapshot_id,
+            test_cases=self.suite.payload["test_cases"],
+        )
+
+    def assert_reviewed_design_file(self, fmt, response, report):
+        if fmt == "json":
+            document = response.json()
+            rendered_cases = [(case["id"], case["steps"]) for case in document["test_cases"]]
+            metadata = document["audit_metadata"]
+        elif fmt == "csv":
+            rows = list(csv.DictReader(io.StringIO(response.text)))
+            rendered_cases = [(row["ID"], json.loads(row["Exact Steps (JSON)"])) for row in rows]
+            self.assertTrue(rows[0]["Title"].startswith("'="))
+            self.assertEqual(rows[0]["Audit Delivery kind"], "Reviewed design")
+            self.assertEqual(rows[0]["Audit Declared setup"], "blocked")
+            metadata = {field: json.loads(rows[0][f"Audit {field}"]) for field in ("design_delivery", "case_versions", "source_mappings")}
+        else:
+            workbook = load_workbook(io.BytesIO(response.content))
+            sheet = workbook["Test Cases"]
+            rendered_cases = [(row[0].value, json.loads(row[-1].value)) for row in sheet.iter_rows(min_row=2)]
+            self.assertNotEqual(sheet["B2"].data_type, "f")
+            audit = {row[0].value: row[1].value for row in workbook["Audit"].iter_rows(min_row=2)}
+            self.assertEqual(audit["Delivery kind"], "Reviewed design")
+            self.assertEqual(audit["Declared setup"], "blocked")
+            metadata = {field: json.loads(audit[field]) for field in ("design_delivery", "case_versions", "source_mappings")}
+        expected_cases = [(case["id"], [{"test_data": None, **step} for step in case["steps"]]) for case in self.suite.payload["test_cases"]]
+        self.assertEqual(rendered_cases, expected_cases)
+        self.assertEqual([row["artifact_version_id"] for row in metadata["case_versions"]], ["version-1", "version-2"])
+        self.assertEqual(metadata["source_mappings"][0]["original_requirement_ids"], ["CHECKOUT-01"])
+        self.assertEqual(metadata["source_mappings"][0]["sources"][0]["source_id"], "checkout-source")
+        self.assertEqual(metadata["design_delivery"], report.payload["audit_metadata"]["design_delivery"])
+
+    def test_legacy_fingerprints_and_bytes_match_the_pre_upgrade_contract(self):
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):
+            first = self.post()
+        self.assertEqual(first.status_code, 200, first.text)
+        report = self.project().current_snapshots["reports"]
+        legacy_fields = {
+            "test_cases",
+            "approved",
+            "review",
+            "draft_override_requested",
+            "draft_override_reason",
+            "project_id",
+            "base_project_revision",
+            "source_snapshot_id",
+        }
+        pre_upgrade_request = ExportTestCasesInput.model_validate(self.input).model_dump(mode="json", include=legacy_fields)
+        self.assertIn("draft_override_reason", pre_upgrade_request)
+        self.assertIsNone(pre_upgrade_request["draft_override_reason"])
+        self.assertEqual(report.metadata["export_request_fingerprint"], digest(pre_upgrade_request))
+        legacy_audit = first.json()["audit_metadata"]
+        self.assertNotIn("design_delivery", legacy_audit)
+        self.assertIsNone(legacy_audit["artifact_version_id"])
+        pre_upgrade_audit = build_export_evidence(ExportTestCasesInput.model_validate(self.input), self.before).model_dump(
+            mode="json", exclude={"design_delivery"}
+        )
+        pre_upgrade_audit["exported_at"] = legacy_audit["exported_at"]
+        self.assertEqual(legacy_audit, pre_upgrade_audit)
+        self.assertEqual(report.metadata["export_audit_fingerprint"], digest(pre_upgrade_audit))
+        written = deepcopy(self.store)
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+            replay = self.post(delivery_intent=None)
+            changed = self.post(delivery_intent="reviewed_design")
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.content, first.content)
+        self.assertEqual(changed.status_code, 409, changed.text)
+        self.assertIn("different inputs", changed.json()["detail"])
+        self.assertEqual(self.store, written)
+        self.assert_audit("completed", 1)
+
+    def test_reviewed_design_is_default_off_and_preserves_legacy_draft_export(self):
+        self.seed_reviewed_design()
+        written = deepcopy(self.store)
+        with patch.dict(os.environ):
+            os.environ.pop("TCG_DESIGN_DELIVERY_ENABLED", None)
+            self.assertFalse(self.project().design_delivery_enabled)
+            disabled = self.post(delivery_intent="reviewed_design")
+        self.assertEqual(disabled.status_code, 409, disabled.text)
+        self.assertEqual(disabled.json()["detail"]["code"], "design_delivery_disabled")
+        self.assertEqual(self.store, written)
+        unapproved = self.post()
+        self.assertEqual(unapproved.status_code, 422, unapproved.text)
+        draft = self.post(draft_override_requested=True, draft_override_reason="Setup is missing.")
+        self.assertEqual(draft.status_code, 200, draft.text)
+        audit = draft.json()["audit_metadata"]
+        self.assertTrue(audit["is_draft"])
+        self.assertEqual(audit["draft_override_reason"], "Setup is missing.")
+        self.assertNotIn("design_delivery", audit)
+        self.assert_audit("completed", 2)
+
+    def test_reviewed_design_all_formats_replay_after_disabling_new_delivery(self):
+        self.seed_reviewed_design()
+        for index, fmt in enumerate(("json", "csv", "excel"), 1):
+            with self.subTest(format=fmt):
+                before = self.project()
+                revision = before.current_revision
+                with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+                    self.assertTrue(self.project().design_delivery_enabled)
+                    first = self.post(fmt, base_project_revision=revision, delivery_intent="reviewed_design")
+                self.assertEqual(first.status_code, 200, first.text if fmt != "excel" else first.status_code)
+                after = self.project()
+                report = after.current_snapshots["reports"]
+                self.assertEqual(after.current_revision, revision + 1)
+                self.assertEqual(after.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
+                self.assertEqual(report.source_snapshot_id, self.suite.snapshot_id)
+                self.assertEqual(report.payload["evidence"]["source_snapshot_ids"]["test_cases"], self.suite.snapshot_id)
+                self.assertEqual(report.metadata["delivery_kind"], "reviewed_design")
+                self.assertEqual(report.payload["delivery_kind"], "reviewed_design")
+                self.assertFalse(report.approved)
+                self.assertFalse(report.payload["approved"])
+                self.assertFalse(after.stage_state["reports"].approved)
+                self.assertFalse(after.stage_state["test_cases"].approved)
+                audit = report.payload["audit_metadata"]
+                self.assertFalse(audit["is_draft"])
+                self.assertFalse(audit["draft_override_used"])
+                self.assertEqual(audit["machine_review_status"], "failed")
+                self.assertEqual(audit["human_review_status"], "unavailable")
+                self.assertEqual(audit["execution_status"], "not_executed")
+                self.assertEqual(audit["execution_run_ids"], [])
+                self.assertEqual(audit["source_snapshot_ids"]["test_cases"], self.suite.snapshot_id)
+                self.assertEqual(audit["coverage"]["requirements"]["covered_ids"], ["REQ-1"])
+                self.assertEqual(audit["coverage"]["requirements"]["missing_ids"], [])
+                self.assertEqual(
+                    audit["design_delivery"],
+                    {
+                        "schema_version": 1,
+                        "delivery_kind": "reviewed_design",
+                        "legacy_approved": False,
+                        "suite_snapshot_id": self.suite.snapshot_id,
+                        "source_freshness": "current",
+                        "design_status": "complete",
+                        "scenario_decision": "approved",
+                        "scenario_snapshot_id": before.current_snapshots["use_cases"].snapshot_id,
+                        "scenario_review_id": "human-review",
+                        "human_acceptance": "unavailable",
+                        "declared_setup": "blocked",
+                        "required_requirement_ids": ["REQ-1"],
+                        "deferred_requirement_ids": ["REQ-2"],
+                        "excluded_requirement_ids": ["REQ-3"],
+                        "active_case_count": 2,
+                        "deprecated_case_count": 0,
+                        "target_readiness": "unknown",
+                    },
+                )
+                self.assert_reviewed_design_file(fmt, first, report)
+                event = next(item for item in self.audit("usage_events") if item["event_id"] == report.source_event_id)
+                self.assertEqual((event["event_type"], event["quantity"], event["status"]), (f"export.{fmt}", 2, "completed"))
+                self.assertEqual(event["workflow_run_id"], report.workflow_run_id)
+                self.assertEqual(len(self.audit("usage_events")), index)
+                self.assertEqual(len(self.audit("workflow_runs")), index)
+
+                written = deepcopy(self.store)
+                with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):
+                    replay = self.post(fmt, base_project_revision=revision, delivery_intent="reviewed_design")
+                    changed = self.post(fmt, base_project_revision=revision, delivery_intent=None)
+                    fresh = self.post(fmt, request_id="new-design", base_project_revision=after.current_revision, delivery_intent="reviewed_design")
+                self.assertEqual(replay.status_code, 200, replay.status_code)
+                self.assertEqual(changed.status_code, 409, changed.text)
+                self.assertIn("different inputs", changed.json()["detail"])
+                self.assertEqual(fresh.status_code, 409, fresh.text)
+                self.assertEqual(fresh.json()["detail"]["code"], "design_delivery_disabled")
+                self.assertEqual(replay.headers["content-disposition"], first.headers["content-disposition"])
+                if fmt == "excel":
+                    first_book, replay_book = (load_workbook(io.BytesIO(response.content)) for response in (first, replay))
+                    self.assertEqual(first_book.sheetnames, replay_book.sheetnames)
+                    for name in first_book.sheetnames:
+                        self.assertEqual(list(first_book[name].values), list(replay_book[name].values))
+                else:
+                    self.assertEqual(replay.content, first.content)
+                self.assertEqual(self.store, written)
+
+    def test_reviewed_design_lost_publication_reply_recovers_exact_receipt(self):
+        self.seed_reviewed_design()
+        publish = routes.append_stage_snapshot
+
+        def lose_reply(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic design report commit reply lost")
+
+        with (
+            patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}),
+            patch.object(routes, "append_stage_snapshot", side_effect=lose_reply) as append,
+        ):
+            first = self.post(delivery_intent="reviewed_design")
+        self.assertEqual(first.status_code, 200, first.text)
+        append.assert_called_once()
+        report = self.project().current_snapshots["reports"]
+        self.assertEqual(self.project().current_revision, self.before.current_revision + 1)
+        self.assert_reviewed_design_file("json", first, report)
+        self.assertEqual(self.assert_audit("completed", 2)["event_id"], report.source_event_id)
+        written = deepcopy(self.store)
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):
+            replay = self.post(delivery_intent="reviewed_design")
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.content, first.content)
+        self.assertEqual(self.store, written)
+
+        self.store[f"qa_projects/{self.project_id}/snapshots/{self.suite.snapshot_id}"]["metadata"].pop("suite_design_proof")
+        unverified = deepcopy(self.store)
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):
+            rejected = self.post(delivery_intent="reviewed_design")
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(rejected.json()["detail"]["code"], "design_delivery_unavailable")
+        self.assertEqual(self.store, unverified)
+
+    def test_reviewed_design_rejects_stale_or_forged_evidence_without_audit(self):
+        self.seed_reviewed_design()
+        base = deepcopy(self.store)
+        project_path = f"qa_projects/{self.project_id}"
+        suite_path = f"{project_path}/snapshots/{self.suite.snapshot_id}"
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}), patch.object(routes, "export_to_json") as render:
+            for kind in (
+                "wrong_revision",
+                "wrong_suite",
+                "modified_case",
+                "stale_source",
+                "missing_proof",
+                "partial_assessment",
+                "human_changes",
+                "placeholder",
+                "saved_placeholder",
+            ):
+                with self.subTest(kind=kind):
+                    self.store.clear()
+                    self.store.update(deepcopy(base))
+                    posted = {
+                        "delivery_intent": "reviewed_design",
+                        "approved": True,
+                        "review": {"approved": True, "score": 100, "threshold": 90},
+                        "suite_quality": self.before.suite_quality.model_dump(mode="json"),
+                        "design_delivery": {"delivery_kind": "reviewed_design", "design_status": "complete"},
+                    }
+                    expected = 409
+                    if kind == "wrong_revision":
+                        posted["base_project_revision"] = self.before.current_revision - 1
+                    elif kind == "wrong_suite":
+                        posted["source_snapshot_id"] = "older-suite"
+                    elif kind in {"modified_case", "placeholder"}:
+                        cases = deepcopy(self.input["test_cases"])
+                        if kind == "modified_case":
+                            cases[0]["steps"][0]["expected"] = "A forged outcome."
+                        else:
+                            cases[0]["steps"] = []
+                            expected = 422
+                        posted["test_cases"] = cases
+                    elif kind == "stale_source":
+                        self.save("context", {"notes": "A source changed after assessment."})
+                        posted["base_project_revision"] = self.project().current_revision
+                    elif kind == "missing_proof":
+                        self.store[suite_path]["metadata"].pop("suite_design_proof")
+                    elif kind == "partial_assessment":
+                        self.store[suite_path]["payload"]["substantive_assessment"]["diagnostics"] = {"unverified_group_count": 1}
+                    elif kind == "saved_placeholder":
+                        self.store[suite_path]["payload"]["test_cases"].append(
+                            {
+                                **_test_case(),
+                                "id": "TC-UNFINISHED",
+                                "steps": [{"step": 1, "action": "Navigate to the feature area that implements checkout.", "expected": "Checkout opens."}],
+                            }
+                        )
+                        self.assertEqual(self.project().current_snapshots["test_cases"].payload["test_cases"], self.input["test_cases"])
+                    else:
+                        self.store[project_path]["stage_state"]["test_cases"]["metadata"]["latest_human_review"] = {
+                            "snapshot_id": self.suite.snapshot_id,
+                            "review_id": "human-changes",
+                            "reviewer_user_id": self.actor.sub,
+                            "decision": "request_changes",
+                        }
+                    written = deepcopy(self.store)
+                    response = self.post(**posted)
+                    self.assertEqual(response.status_code, expected, response.text)
+                    self.assertEqual(self.store, written)
+            render.assert_not_called()
+        self.assertEqual(self.audit("usage_events"), [])
+        self.assertEqual(self.audit("workflow_runs"), [])
 
     def test_all_formats_replay_original_evidence_without_additional_publication(self):
         before = self.before

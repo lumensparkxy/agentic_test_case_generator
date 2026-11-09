@@ -1,11 +1,12 @@
 """Bind portable export evidence to the exact saved suite, never client approval."""
 
 from datetime import datetime, timezone
+import os
 
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from ..contracts.exports import ExportAuditMetadata, ExportTestCasesInput
+from ..contracts.exports import DesignDeliveryEvidence, ExportAuditMetadata, ExportTestCasesInput
 from ..contracts.projects import QaProjectDetail
 from ..contracts.requirements import Requirement, ReviewResult
 from ..contracts.test_cases import TestCase
@@ -16,8 +17,77 @@ def _conflict(message: str) -> None:
     raise HTTPException(409, message)
 
 
-def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetail | None) -> ExportAuditMetadata:
-    if any(placeholder_reason(case) for case in payload.test_cases):
+def design_delivery_enabled() -> bool:
+    return os.getenv("TCG_DESIGN_DELIVERY_ENABLED") == "true"
+
+
+def _require_design_request(payload, project, *, allow_saved_design):
+    if not allow_saved_design and not design_delivery_enabled():
+        raise HTTPException(409, {"code": "design_delivery_disabled", "message": "Reviewed design export is disabled."})
+    if payload.draft_override_requested or (payload.draft_override_reason or "").strip():
+        raise HTTPException(
+            422, {"code": "design_delivery_conflicting_intent", "message": "Choose reviewed design or a reasoned draft export for this request."}
+        )
+    if not project or payload.project_id != project.project_id or not payload.source_snapshot_id or payload.base_project_revision is None:
+        raise HTTPException(
+            422,
+            {
+                "code": "design_delivery_requires_saved_suite",
+                "message": "Reviewed design export requires the exact saved suite and current project revision.",
+            },
+        )
+
+
+def _design_delivery_evidence(project, snapshot, active_cases, case_count, source_ids, unresolved, human_status, *, legacy_approved):
+    # Project Detail derives this projection from the raw immutable suite before
+    # hiding legacy placeholders from the workbench's case rows.
+    quality = project.suite_quality
+    if (
+        not quality
+        or quality.suite_snapshot_id != snapshot.snapshot_id
+        or quality.source_freshness != "current"
+        or quality.design_status != "complete"
+        or quality.scenario_decision != "approved"
+        or quality.scenario_snapshot_id != source_ids.get("use_cases")
+        or not quality.scenario_snapshot_id
+        or not quality.scenario_review_id
+        or not source_ids.get("requirements")
+        or quality.human_acceptance == "changes_requested"
+        or human_status == "changes_requested"
+        or unresolved != 0
+        or not quality.required_requirement_ids
+        or not active_cases
+        or quality.active_case_count != len(active_cases)
+        or quality.deprecated_case_count != case_count - len(active_cases)
+    ):
+        raise HTTPException(
+            409,
+            {"code": "design_delivery_unavailable", "message": "Review the current saved suite and its approved sources before delivering this design."},
+        )
+    return DesignDeliveryEvidence(
+        legacy_approved=legacy_approved,
+        suite_snapshot_id=quality.suite_snapshot_id,
+        scenario_snapshot_id=quality.scenario_snapshot_id,
+        scenario_review_id=quality.scenario_review_id,
+        human_acceptance=quality.human_acceptance,
+        declared_setup=quality.declared_setup,
+        required_requirement_ids=quality.required_requirement_ids,
+        deferred_requirement_ids=quality.deferred_requirement_ids,
+        excluded_requirement_ids=quality.excluded_requirement_ids,
+        active_case_count=quality.active_case_count,
+        deprecated_case_count=quality.deprecated_case_count,
+    )
+
+
+def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetail | None, *, allow_saved_design: bool = False) -> ExportAuditMetadata:
+    design_requested = payload.delivery_intent == "reviewed_design"
+    if design_requested:
+        _require_design_request(payload, project, allow_saved_design=allow_saved_design)
+    if any(
+        placeholder_reason(case)
+        or (design_requested and case.status == "Deprecated" and placeholder_reason(case.model_copy(update={"status": "Draft"}), strict=False))
+        for case in payload.test_cases
+    ):
         raise HTTPException(422, "Unfinished generation instructions cannot be exported as test cases. Generate concrete tests first.")
     snapshot = None
     state = None
@@ -136,7 +206,22 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
         suite_complete = False
     approved = bool(snapshot and state.approved and review and review.approved and suite_complete is True and human_status != "changes_requested")
     reason = (payload.draft_override_reason or "").strip()
-    if not approved and not (payload.draft_override_requested and reason):
+    design_delivery = None
+    if design_requested:
+        active_cases = [case for case in payload.test_cases if case.status != "Deprecated"]
+        design_delivery = _design_delivery_evidence(
+            project, snapshot, active_cases, len(payload.test_cases), source_ids, unresolved, human_status, legacy_approved=approved
+        )
+        approved_scope = set(design_delivery.required_requirement_ids)
+        active_requirements = {ref for case in active_cases for ref in case.linked_requirement_ids}
+        active_scenarios = {ref for case in active_cases for ref in case.scenario_refs}
+        if not expected_scenarios or active_requirements != approved_scope or active_scenarios != expected_scenarios:
+            _conflict("The saved design does not cover its approved scope. Refresh and review before exporting.")
+        requirements_coverage = coverage(approved_scope, active_requirements)
+        scenarios_coverage = coverage(expected_scenarios, active_scenarios)
+        suite_complete = True
+    is_draft = not approved and design_delivery is None
+    if is_draft and not (payload.draft_override_requested and reason):
         raise HTTPException(
             422,
             {
@@ -173,12 +258,12 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
         ]
         if snapshot
         else [],
-        human_review_status=human_status,
+        human_review_status=design_delivery.human_acceptance if design_delivery else human_status,
         machine_review_status="approved" if review and review.approved else "failed" if review else "unavailable",
         machine_review=review,
-        is_draft=not approved,
-        draft_override_used=not approved,
-        draft_override_reason=reason if not approved else None,
+        is_draft=is_draft,
+        draft_override_used=is_draft,
+        draft_override_reason=reason if is_draft else None,
         suite_complete=suite_complete,
         delivered_case_count=len(payload.test_cases),
         unresolved_task_count=unresolved,
@@ -207,4 +292,5 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
             {"run_id": run.run_id, "status": run.status, "selected_test_case_ids": run.selected_test_case_ids, "source_snapshot_id": run.source_snapshot_id}
             for run in matching_runs
         ],
+        design_delivery=design_delivery,
     )
