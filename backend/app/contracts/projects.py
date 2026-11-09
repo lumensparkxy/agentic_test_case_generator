@@ -107,6 +107,7 @@ class QaProjectExecutionCaseResult(BaseModel):
 
 class QaProjectExecutionRunDetail(QaProjectExecutionRun):
     results: Optional[List[QaProjectExecutionCaseResult]] = None
+    issues: List[ExecutionIssue] = Field(default_factory=list)
 
 
 class QaProjectDetail(QaProjectSummary):

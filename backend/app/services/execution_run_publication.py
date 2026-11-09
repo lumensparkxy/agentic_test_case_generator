@@ -42,6 +42,7 @@ def _run_payload(response: ExecutionRunResponse, target: dict) -> dict:
         "playwright_report_paths": response.playwright_report_paths,
         "summary": response.summary.model_dump(mode="json"),
         "warnings": response.warnings,
+        "issues": [issue.model_dump(mode="json") for issue in response.issues],
         "results": [
             item.model_dump(
                 mode="json",

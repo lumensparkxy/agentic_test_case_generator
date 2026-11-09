@@ -1703,6 +1703,7 @@ export default function App() {
 				playwright_report_paths: executionPayload.playwright_report_paths,
 				results: executionPayload.results || [],
 				warnings: executionPayload.warnings || [],
+				issues: executionPayload.issues || [],
 				summary: executionPayload.summary || {},
 				preview: null,
 			});

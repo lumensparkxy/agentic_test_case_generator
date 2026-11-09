@@ -208,6 +208,32 @@ class QualityFeedbackTests(unittest.TestCase):
             )
         self.assertEqual(retry_only.exception.status_code, 409)
 
+        runner_failure = projects.append_stage_snapshot(
+            project_id=self.project_id,
+            stage="execution",
+            payload={
+                "results": [{"source_test_case_id": "TC-1", "status": "passed"}],
+                "issues": [{"code": "playwright.runner_error", "message": "Fixture cleanup failed"}],
+            },
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="runner-failed",
+            source_snapshot_id=source,
+            metadata={"target_environment": "staging"},
+        )
+        with self.assertRaises(HTTPException) as runner_error:
+            update_finding(
+                self.project_id,
+                finding["id"],
+                self.actor,
+                QualityFindingAction(
+                    action="verify", base_project_revision=runner_failure.project_revision, verification_snapshot_id=runner_failure.snapshot_id
+                ),
+                "verify-runner-failed",
+            )
+        self.assertEqual(runner_error.exception.status_code, 409)
+        self.assertIn("browser runner errors", runner_error.exception.detail)
+
         with patch("app.services.execution_result_storage.INLINE_RESULT_BYTES", 1):
             passed = projects.append_stage_snapshot(
                 project_id=self.project_id,

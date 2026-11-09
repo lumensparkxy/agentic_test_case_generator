@@ -127,6 +127,7 @@ class ExecutionRunResponse(BaseModel):
     results: List[ExecutionRunItem] = Field(default_factory=list)
     preview: ExecutionPreviewResponse
     warnings: List[str] = Field(default_factory=list)
+    issues: List[ExecutionIssue] = Field(default_factory=list)
     summary: ExecutionRunSummary = Field(default_factory=ExecutionRunSummary)
 
 

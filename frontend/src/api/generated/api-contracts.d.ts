@@ -384,6 +384,7 @@ export interface ExecutionRunItem {
 export interface ExecutionRunResponse {
 	artifacts_root?: string | null;
 	historical?: boolean;
+	issues?: Array<ExecutionIssue>;
 	playwright_report_paths?: Array<string>;
 	preview: ExecutionPreviewResponse;
 	results?: Array<ExecutionRunItem>;
@@ -768,6 +769,7 @@ export interface QaProjectExecutionRunDetail {
 	artifacts_root?: string | null;
 	created_at: string;
 	historical?: boolean;
+	issues?: Array<ExecutionIssue>;
 	playwright_report_paths?: Array<string>;
 	project_id: string;
 	project_revision: number;

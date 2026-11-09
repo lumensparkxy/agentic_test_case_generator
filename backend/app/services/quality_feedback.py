@@ -242,6 +242,8 @@ def update_finding(project_id, identity, actor, payload: QualityFindingAction, r
             or run.metadata.get("target_environment") != record["environment"]
         ):
             raise HTTPException(409, "Verification needs passing affected cases from the current suite in the finding's environment")
+        if run.payload.get("issues"):
+            raise HTTPException(409, "Verification requires a run without browser runner errors")
         if record["category"] == "application_defect":
             assertions = [
                 {k: row.get(k) for k in ("id", "steps", "expected_result")}

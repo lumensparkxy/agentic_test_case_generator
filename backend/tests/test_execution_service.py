@@ -1274,6 +1274,43 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.results[1].returncode, 1)
         self.assertEqual(response.results[1].stderr, "batch stderr")
         self.assertEqual(response.results[1].issues[0].message, "tc_002 assertion failed")
+        self.assertEqual(response.issues, [])
+
+    def test_runner_failure_preserves_passing_cases_without_passing_the_run(self) -> None:
+        huge_error = "Fixture cleanup failed 🧪 " * 5000
+        for returncode, errors, expected_code in (
+            (0, [{"message": huge_error}] * 20, "playwright.runner_error"),
+            (1, [], "playwright.runner_exit"),
+            (-15, [], "playwright.runner_exit"),
+        ):
+
+            def run_batch(*args, **kwargs):
+                result = _fake_batch_run({"tc_001": "passed"}, returncode=returncode)(*args, **kwargs)
+                path = result.paths.artifacts_dir / "results.json"
+                report = json.loads(path.read_text(encoding="utf-8"))
+                report["errors"] = errors
+                path.write_text(json.dumps(report), encoding="utf-8")
+                return result
+
+            with (
+                self.subTest(returncode=returncode),
+                tempfile.TemporaryDirectory() as temp_dir,
+                patch("app.services.execution_service.run_local_playwright_specs", side_effect=run_batch),
+            ):
+                response = run_execution([_browser_case()], settings=_settings(Path(temp_dir)))
+                self.assertEqual(response.status, "failed")
+                self.assertEqual((response.summary.passed, response.summary.failed), (1, 0))
+                self.assertEqual(response.results[0].status, "passed")
+                self.assertEqual(response.results[0].issues, [])
+                self.assertEqual(response.issues[0].code, expected_code)
+                if errors:
+                    self.assertEqual(response.issues[0].path, "$.errors[0]")
+                    self.assertTrue(response.issues[0].message.startswith("Fixture cleanup failed"))
+                    self.assertTrue(response.issues[0].message.endswith("[Runner diagnostic shortened.]"))
+                    self.assertEqual(response.issues[-1].code, "playwright.runner_errors_omitted")
+                    self.assertLess(sum(len(issue.message.encode("utf-8")) for issue in response.issues), 50_000)
+                else:
+                    self.assertIn(str(returncode), response.issues[0].message)
 
     def test_retry_pass_preserves_failure_evidence_across_duplicate_playwright_records(self) -> None:
         def run_batch(*args, **kwargs):

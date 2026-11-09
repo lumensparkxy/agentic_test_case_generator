@@ -412,6 +412,7 @@ def get_project_execution_run(project_id: str, run_record_id: str, *, actor: Aut
     run = QaProjectExecutionRun.model_validate(payload)
     snapshot = _snapshot_for(project_id, run.snapshot_id) if run.snapshot_id else None
     results = None
+    issues = []
     if (
         snapshot
         and snapshot.snapshot_id == run.snapshot_id
@@ -420,10 +421,12 @@ def get_project_execution_run(project_id: str, run_record_id: str, *, actor: Aut
         and snapshot.operation == "automation.execution.run"
         and snapshot.source_snapshot_id == run.source_snapshot_id
         and snapshot.payload.get("run_id") == run.run_id
-        and isinstance(snapshot.payload.get("results"), list)
     ):
-        results = snapshot.payload["results"]
-    return QaProjectExecutionRunDetail(**run.model_dump(), results=results)
+        if isinstance(snapshot.payload.get("results"), list):
+            results = snapshot.payload["results"]
+        if isinstance(snapshot.payload.get("issues"), list):
+            issues = snapshot.payload["issues"]
+    return QaProjectExecutionRunDetail(**run.model_dump(), results=results, issues=issues)
 
 
 def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[QaProjectSummary]:

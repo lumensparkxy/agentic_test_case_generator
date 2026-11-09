@@ -202,6 +202,8 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
             )
             new_project = self.project_detail()
             outcome = self.run_response(status="flaky")
+            outcome.status = "failed"
+            outcome.issues = [ExecutionIssue(code="playwright.runner_error", message="Fixture cleanup failed")]
             outcome.results[0].issues = [ExecutionIssue(code="fixture", message=diagnostic)]
             return outcome
 
@@ -216,10 +218,11 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
             self.assertEqual(detail["source_snapshot_id"], self.snapshot.snapshot_id)
             self.assertEqual(detail["project_revision"], self.body["base_project_revision"])
             self.assertTrue(detail["historical"])
-            self.assertEqual(detail["status"], "flaky")
+            self.assertEqual(detail["status"], "failed")
             self.assertEqual(detail["summary"]["flaky"], 1)
             self.assertEqual(detail["results"][0]["status"], "flaky")
             self.assertEqual(detail["results"][0]["issues"][0]["message"], diagnostic)
+            self.assertEqual(detail["issues"][0]["message"], "Fixture cleanup failed")
             self.assertEqual(client.post("/automation/execution/run", json=self.body, headers=self.headers).status_code, 409)
         runtime.assert_called_once()
         saved = self.project_detail()
@@ -229,6 +232,28 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
         self.assertFalse(any("/quality_findings/" in path for path in self.store))
         self.assertTrue(any("/execution_result_parts/" in path for path in self.store))
         self.assertEqual(self.assert_only_run_audit("completed", 1)["event_id"], saved.execution_runs[0].source_event_id)
+
+    def test_runner_error_is_saved_separately_from_the_passing_case(self):
+        outcome = self.run_response()
+        outcome.status = "failed"
+        outcome.issues = [ExecutionIssue(path="$.errors[0]", code="playwright.runner_error", message="Fixture cleanup failed")]
+        with patch("app.main.run_execution", return_value=outcome), TestClient(app) as client:
+            response = client.post("/automation/execution/run", json=self.body, headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            receipt = client.get(self.receipt_path).json()
+            self.assertEqual(receipt["status"], "completed")
+            self.assertFalse(receipt["historical"])
+            saved = client.get(f"{self.prefix}/execution-runs/{receipt['run_record_id']}").json()
+            self.assertEqual(saved["status"], "failed")
+            self.assertEqual(saved["issues"], response.json()["issues"])
+            self.assertEqual(saved["summary"]["passed"], 1)
+            self.assertEqual(saved["results"][0]["status"], "passed")
+            self.assertEqual(saved["results"][0]["issues"], [])
+        project = self.project_detail()
+        self.assertFalse(project.current_snapshots["execution"].approved)
+        self.assertFalse(project.current_snapshots["reports"].approved)
+        self.assertEqual(project.current_snapshots["execution"].payload["issues"], saved["issues"])
+        self.assertFalse(any("/quality_findings/" in path for path in self.store))
 
     def test_completed_run_after_archive_keeps_archive_and_retains_exact_result(self):
         def run(*args, **kwargs):

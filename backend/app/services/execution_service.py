@@ -37,6 +37,9 @@ from ..models import (
 from .execution_target import bind_execution_url
 
 
+MAX_PLAYWRIGHT_RUN_ERRORS = 6
+MAX_PLAYWRIGHT_RUN_ERROR_LENGTH = 2048
+
 URL_PATTERN = re.compile(
     r"""(?P<quote>["'\x60])(?P<quoted>https?://[^\s]+?)(?P=quote)"""
     r"|<(?P<angled>https?://[^\s<>]+)>"
@@ -370,14 +373,15 @@ def run_execution(
         elif prepared:
             prepared_candidates.append(prepared)
 
+    run_issues = []
     if prepared_candidates:
-        for item in _run_prepared_candidates(
+        batch_results, run_issues = _run_prepared_candidates(
             prepared_candidates,
             generated_dir=generated_dir,
             artifacts_dir=run_artifacts_dir,
             settings=settings,
-        ):
-            result_by_candidate_id[item.id] = item
+        )
+        result_by_candidate_id.update((item.id, item) for item in batch_results)
 
     results = [result_by_candidate_id[candidate.id] for candidate in executable_candidates if candidate.id in result_by_candidate_id]
 
@@ -399,7 +403,7 @@ def run_execution(
         )
 
     summary = _summarize_run(results, preview)
-    if summary.failed or summary.invalid:
+    if run_issues or summary.failed or summary.invalid:
         status = "failed"
     elif summary.flaky:
         status = "flaky"
@@ -414,6 +418,7 @@ def run_execution(
         results=results,
         preview=preview,
         warnings=preview.warnings,
+        issues=run_issues,
         summary=summary,
     )
 
@@ -953,7 +958,7 @@ def _run_prepared_candidates(
     generated_dir: Path,
     artifacts_dir: Path,
     settings: ExecutionSettings,
-) -> list[ExecutionRunItem]:
+) -> tuple[list[ExecutionRunItem], list[ExecutionIssue]]:
     try:
         run = run_local_playwright_specs(
             [prepared.generated_spec_path for prepared in prepared_candidates],
@@ -964,7 +969,7 @@ def _run_prepared_candidates(
         )
     except LocalPlaywrightRunnerError as exc:
         issues = _issues_from_exception(exc)
-        return [
+        invalid_results = [
             _invalid_execution_item(
                 prepared.candidate,
                 ir_path=prepared.ir_path,
@@ -974,12 +979,14 @@ def _run_prepared_candidates(
             )
             for prepared in prepared_candidates
         ]
+        return invalid_results, []
 
     report_json_path = run.paths.artifacts_dir / "results.json"
     html_report_dir = run.paths.html_report_dir
     report_json_path_value = str(report_json_path) if report_json_path.exists() else None
     html_report_dir_value = str(html_report_dir) if html_report_dir.exists() else None
-    case_results, report_issues = _load_playwright_case_results(report_json_path)
+    case_results, run_issues = _load_playwright_report(report_json_path)
+    report_read_issues = [issue for issue in run_issues if issue.code.startswith("playwright.report_")]
 
     results: list[ExecutionRunItem] = []
     for prepared in prepared_candidates:
@@ -995,7 +1002,7 @@ def _run_prepared_candidates(
             result_stdout = run.stdout
             result_stderr = run.stderr
             result_issues = [
-                *report_issues,
+                *report_read_issues,
                 ExecutionIssue(
                     path="$",
                     message="No matching Playwright JSON result was found for this execution candidate.",
@@ -1022,7 +1029,12 @@ def _run_prepared_candidates(
             )
         )
 
-    return results
+    failed_case = any(item.id in case_results and item.status in {"failed", "invalid"} for item in results)
+    if run.returncode != 0 and not run_issues and (run.returncode != 1 or not failed_case):
+        run_issues.append(
+            ExecutionIssue(message=f"Playwright exited with code {run.returncode}.", code="playwright.runner_exit"),
+        )
+    return results, run_issues
 
 
 def _invalid_execution_item(
@@ -1046,7 +1058,7 @@ def _invalid_execution_item(
     )
 
 
-def _load_playwright_case_results(report_json_path: Path) -> tuple[dict[str, _PlaywrightCaseResult], list[ExecutionIssue]]:
+def _load_playwright_report(report_json_path: Path) -> tuple[dict[str, _PlaywrightCaseResult], list[ExecutionIssue]]:
     if not report_json_path.exists():
         return {}, [
             ExecutionIssue(
@@ -1090,7 +1102,22 @@ def _load_playwright_case_results(report_json_path: Path) -> tuple[dict[str, _Pl
                 issues=prior.issues + result.issues,
             )
         results[case_id] = result
-    return results, []
+    return results, _playwright_run_issues(report.get("errors"))
+
+
+def _playwright_run_issues(errors: Any) -> list[ExecutionIssue]:
+    if not isinstance(errors, list):
+        return []
+    issues = []
+    for index, error in enumerate(errors[:MAX_PLAYWRIGHT_RUN_ERRORS]):
+        message = _playwright_error_message(error)
+        if len(message) > MAX_PLAYWRIGHT_RUN_ERROR_LENGTH:
+            message = message[:MAX_PLAYWRIGHT_RUN_ERROR_LENGTH] + "\n[Runner diagnostic shortened.]"
+        issues.append(ExecutionIssue(path=f"$.errors[{index}]", message=message, code="playwright.runner_error"))
+    omitted = len(errors) - len(issues)
+    if omitted:
+        issues.append(ExecutionIssue(path="$.errors", message=f"{omitted} additional runner errors omitted.", code="playwright.runner_errors_omitted"))
+    return issues
 
 
 def _iter_playwright_tests(report: dict[str, Any]) -> Iterable[dict[str, Any]]:

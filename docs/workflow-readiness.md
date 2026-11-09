@@ -128,3 +128,10 @@ or invalid cases requires review. If any case fails or is invalid, the run is
 failed and still shows its flaky cases. A retry-only pass cannot verify a
 quality finding. Runs and the saved report carry the same outcome. Earlier
 records retain the evidence available when they were saved.
+
+Playwright can report a runner error after a case completes, for example
+during global cleanup. The portal keeps the original case outcomes and marks
+the run as failed when Playwright reports a runner error or exits unsuccessfully
+without a corresponding case failure. Automation and the exact saved report
+show runner diagnostics separately. Such a run requires review and cannot
+verify a quality finding.

@@ -4,11 +4,9 @@ import { List, ListItem, CollectionState } from "../ui/collections";
 import { Button } from "../ui/controls";
 import { Disclosure } from "../ui/surfaces";
 import { formatExecutionCaseStatus } from "../automation/automationEvidence";
+import { ExecutionIssues, RunnerIssues } from "../automation/ExecutionIssues";
 
 const REPORT_PATH_LIMIT = 8;
-// Playwright saves terminal colors with its assertion messages.
-// eslint-disable-next-line no-control-regex
-const TERMINAL_COLOR = /\x1b\[[0-9;]*m/g;
 
 function latestExecutionReport(executionRunResult, currentProject) {
 	if (executionRunResult?.run_id) {
@@ -40,22 +38,6 @@ function renderSummaryPill(label, value, tone = "") {
 	);
 }
 
-function RecordedIssues({ issues = [] }) {
-	if (!issues.length) return null;
-	// Playwright's singular error aliases the first entry in its errors array.
-	const playwrightPaths = new Set(issues.filter((issue) => issue.code === "playwright.error").map((issue) => issue.path));
-	const recorded = issues.filter((issue) => issue.code !== "playwright.error" || !playwrightPaths.has(`${issue.path}s[0]`));
-	return (
-		<List className="execution-case-issues" role="list" aria-label="Recorded issues">
-			{recorded.map((issue, index) => (
-				<ListItem key={`${issue.path}:${index}`}>
-					<pre>{issue.message.replace(TERMINAL_COLOR, "")}</pre>
-				</ListItem>
-			))}
-		</List>
-	);
-}
-
 function CaseOutcomes({ results }) {
 	if (!results?.length) {
 		return <p className="helper-text">Saved case outcomes are unavailable for this run.</p>;
@@ -74,7 +56,7 @@ function CaseOutcomes({ results }) {
 							</div>
 							<span className="execution-case-status">{formatExecutionCaseStatus(result.status)}</span>
 						</div>
-						<RecordedIssues issues={result.issues} />
+						<ExecutionIssues issues={result.issues} />
 					</ListItem>
 				))}
 			</List>
@@ -127,6 +109,7 @@ function PlaywrightExecutionReport({ report, notice, onRetry }) {
 						</p>
 					)}
 					{report.historical && <p className="helper-text">Historical run from project revision {report.project_revision}.</p>}
+					<RunnerIssues issues={report.issues} />
 					{!notice && <CaseOutcomes results={report.results} />}
 					{report.artifacts_root && (
 						<p className="helper-text">

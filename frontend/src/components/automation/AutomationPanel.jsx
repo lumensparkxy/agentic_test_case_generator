@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatExecutionCaseStatus, formatExecutionRunSummary, getAutomationEvidenceStatus } from "./automationEvidence";
+import { RunnerIssues } from "./ExecutionIssues";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
 import { Checkbox, Field, Input, Button, Link } from "../ui/controls";
 import { Surface, Alert, Disclosure } from "../ui/surfaces";
@@ -180,6 +181,7 @@ const renderRunResults = (runResult) => {
 				{renderBucketCount("Invalid", summary.invalid, "warning")}
 				{renderBucketCount("Skipped", summary.skipped)}
 			</div>
+			<RunnerIssues issues={runResult.issues} />
 			{runResult.artifacts_root && (
 				<p className="helper-text">
 					Artifacts root: <code>{runResult.artifacts_root}</code>

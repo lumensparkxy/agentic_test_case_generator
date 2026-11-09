@@ -308,6 +308,38 @@ async function openAutomation(page) {
 }
 
 test.describe("Automation preview consistency", () => {
+	test("keeps runner errors separate from passing cases through reload @p1", async ({ page }) => {
+		const preview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const scenario = {
+			project: projectFixture(),
+			previews: [preview],
+			handleRun: (route, body) => {
+				const run = runResponse(preview, body.selected_test_case_ids);
+				run.status = "failed";
+				run.issues = [{ code: "playwright.runner_error", path: "$.errors[0]", message: "Fixture cleanup failed" }];
+				scenario.project = projectFixture({ executionPayload: run });
+				scenario.project.current_snapshots.execution.operation = "automation.execution.run";
+				scenario.project.current_snapshots.execution.approved = false;
+				scenario.project.stage_state.execution.approved = false;
+				return jsonResponse(route, run);
+			},
+		};
+		const requests = await installApi(page, scenario);
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		const expectRunnerEvidence = async () => {
+			await expect(page.getByLabel("Automation evidence")).toContainText("Browser runner failed");
+			await expect(page.getByRole("list", { name: "Browser runner errors" })).toContainText("Fixture cleanup failed");
+			await expect(page.getByRole("region", { name: "Execution results table" }).getByRole("cell", { name: "passed" })).toBeVisible();
+			await expect(page.getByText("Passed 1", { exact: true })).toBeVisible();
+		};
+		await expectRunnerEvidence();
+		await page.reload();
+		await expectRunnerEvidence();
+		expect(requests.runs).toBe(1);
+	});
+
 	test("shows a retry-only pass as flaky immediately after execution @p1", async ({ page }) => {
 		const preview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
 		const requests = await installApi(page, {
