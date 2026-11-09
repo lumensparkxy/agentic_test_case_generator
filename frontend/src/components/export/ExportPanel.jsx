@@ -12,7 +12,8 @@ export default function ExportPanel({
 	testCaseReview,
 	executionRunResult,
 	currentProject,
-	runRecordId,
+	location,
+	navigate,
 	request,
 	exportReviewApproved,
 	exportRequiresOverride,
@@ -28,9 +29,17 @@ export default function ExportPanel({
 	exportError,
 	goPrev,
 }) {
+	const runRecordId = new URLSearchParams(location.search).get("run");
 	const exportDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportGateLocked;
 	const executionReport = (
-		<ExecutionReport currentProject={currentProject} executionRunResult={executionRunResult} runRecordId={runRecordId} request={request} />
+		<ExecutionReport
+			currentProject={currentProject}
+			executionRunResult={executionRunResult}
+			runRecordId={runRecordId}
+			request={request}
+			location={location}
+			navigate={navigate}
+		/>
 	);
 
 	if (runRecordId) {

@@ -1,5 +1,7 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { API_CONTRACT_ENDPOINTS } from "../../api/generated/api-contracts";
+import RouteLink from "../../app/RouteLink";
+import { buildSavedCasePath } from "../../app/savedCaseLinks";
 import { List, ListItem, CollectionState } from "../ui/collections";
 import { Button } from "../ui/controls";
 import { Disclosure } from "../ui/surfaces";
@@ -24,6 +26,19 @@ function latestExecutionReport(executionRunResult, currentProject) {
 	return reportSnapshotPayload?.run_id ? reportSnapshotPayload : null;
 }
 
+function savedRecordIdForSnapshot(report, project) {
+	const snapshot = project?.current_snapshots?.execution;
+	if (!report?.run_id || !snapshot?.snapshot_id || snapshot.payload?.run_id !== report.run_id) return null;
+	const records = (project.execution_runs || []).filter(
+		(run) =>
+			run.project_id === project.project_id &&
+			run.run_id === report.run_id &&
+			run.snapshot_id === snapshot.snapshot_id &&
+			run.source_snapshot_id === snapshot.source_snapshot_id
+	);
+	return records.length === 1 ? records[0].run_record_id : null;
+}
+
 function normalizeReportPaths(report) {
 	const directPaths = Array.isArray(report?.playwright_report_paths) ? report.playwright_report_paths : [];
 	const resultPaths = Array.isArray(report?.results) ? report.results.map((result) => result?.playwright_report_path).filter(Boolean) : [];
@@ -38,33 +53,66 @@ function renderSummaryPill(label, value, tone = "") {
 	);
 }
 
-function CaseOutcomes({ results }) {
+function CaseOutcomes({ results, caseNavigation }) {
+	const disclosureRef = useRef(null);
+	const returnResultId = caseNavigation?.returnResultId;
+	useLayoutEffect(() => {
+		const disclosure = disclosureRef.current;
+		if (!disclosure || !returnResultId) return;
+		const link = Array.from(disclosure.querySelectorAll("a[data-run-case-result]")).find(
+			(item) => item.dataset.runCaseResult === returnResultId
+		);
+		if (!link) return;
+		disclosure.open = true;
+		link.focus({ preventScroll: true });
+		link.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+	}, [returnResultId]);
+
 	if (!results?.length) {
 		return <p className="helper-text">Saved case outcomes are unavailable for this run.</p>;
 	}
 
 	return (
-		<Disclosure className="execution-case-outcomes">
+		<Disclosure ref={disclosureRef} className="execution-case-outcomes">
 			<summary>Case outcomes ({results.length})</summary>
 			<List className="execution-case-outcome-list" role="list" aria-label="Recorded case outcomes">
-				{results.map((result) => (
-					<ListItem key={result.id}>
-						<div className="execution-case-heading">
-							<div>
-								<strong>{result.source_test_case_id}</strong>
-								<p>{result.title}</p>
+				{results.map((result) => {
+					const path =
+						caseNavigation && result.source_test_case_id
+							? buildSavedCasePath(caseNavigation.projectId, caseNavigation.snapshotId, result.source_test_case_id)
+							: "";
+					return (
+						<ListItem key={result.id}>
+							<div className="execution-case-heading">
+								<div>
+									<strong>
+										{path ? (
+											<RouteLink
+												to={path}
+												navigate={(to) => caseNavigation.openCase(to, result.id)}
+												aria-label={`Open saved case ${result.source_test_case_id} ${result.title}`}
+												data-run-case-result={result.id}
+											>
+												{result.source_test_case_id}
+											</RouteLink>
+										) : (
+											result.source_test_case_id
+										)}
+									</strong>
+									<p>{result.title}</p>
+								</div>
+								<span className="execution-case-status">{formatExecutionCaseStatus(result.status)}</span>
 							</div>
-							<span className="execution-case-status">{formatExecutionCaseStatus(result.status)}</span>
-						</div>
-						<ExecutionIssues issues={result.issues} />
-					</ListItem>
-				))}
+							<ExecutionIssues issues={result.issues} />
+						</ListItem>
+					);
+				})}
 			</List>
 		</Disclosure>
 	);
 }
 
-function PlaywrightExecutionReport({ report, notice, onRetry }) {
+function PlaywrightExecutionReport({ report, notice, onRetry, caseNavigation }) {
 	const summary = report?.summary || {};
 	const reportPaths = normalizeReportPaths(report);
 	const visibleReportPaths = reportPaths.slice(0, REPORT_PATH_LIMIT);
@@ -110,7 +158,7 @@ function PlaywrightExecutionReport({ report, notice, onRetry }) {
 					)}
 					{report.historical && <p className="helper-text">Historical run from project revision {report.project_revision}.</p>}
 					<RunnerIssues issues={report.issues} />
-					{!notice && <CaseOutcomes results={report.results} />}
+					{!notice && <CaseOutcomes results={report.results} caseNavigation={caseNavigation} />}
 					{report.artifacts_root && (
 						<p className="helper-text">
 							Artifacts root: <code>{report.artifacts_root}</code>
@@ -141,7 +189,7 @@ function PlaywrightExecutionReport({ report, notice, onRetry }) {
 	);
 }
 
-function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request }) {
+function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request, location, navigate }) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
 	const fetchRun = useEffectEvent((signal) => {
@@ -178,19 +226,37 @@ function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request 
 		setResult(null);
 		setAttempt((count) => count + 1);
 	};
+	const returnCase = location.state?.runCase;
+	const caseNavigation = result?.run?.source_snapshot_id
+		? {
+				projectId,
+				snapshotId: result.run.source_snapshot_id,
+				returnResultId: returnCase?.projectId === projectId && returnCase.runRecordId === runRecordId ? returnCase.resultId : null,
+				openCase: (path, resultId) => {
+					const query = new URLSearchParams(location.search);
+					query.set("run", runRecordId);
+					navigate(`${location.pathname}?${query}${location.hash}`, {
+						replace: true,
+						state: { ...location.state, runCase: { projectId, runRecordId, resultId } },
+					});
+					navigate(path);
+				},
+			}
+		: null;
 	return (
 		<PlaywrightExecutionReport
 			report={result?.run || fallbackReport}
 			notice={result ? result.notice : "Loading saved run evidence…"}
 			onRetry={result?.retryable ? retry : undefined}
+			caseNavigation={caseNavigation}
 		/>
 	);
 }
 
-export default function ExecutionReport({ currentProject, executionRunResult, runRecordId, request }) {
+export default function ExecutionReport({ currentProject, executionRunResult, runRecordId, request, location, navigate }) {
 	const projectId = currentProject?.project_id;
 	const latest = latestExecutionReport(executionRunResult, currentProject);
-	const savedRunId = runRecordId || latest?.run_record_id;
+	const savedRunId = runRecordId || latest?.run_record_id || savedRecordIdForSnapshot(latest, currentProject);
 	return savedRunId && projectId ? (
 		<SavedExecutionReport
 			key={JSON.stringify([projectId, savedRunId, Boolean(runRecordId)])}
@@ -198,6 +264,8 @@ export default function ExecutionReport({ currentProject, executionRunResult, ru
 			runRecordId={savedRunId}
 			fallbackReport={runRecordId ? null : latest}
 			request={request}
+			location={location}
+			navigate={navigate}
 		/>
 	) : (
 		<PlaywrightExecutionReport report={runRecordId ? null : latest} />

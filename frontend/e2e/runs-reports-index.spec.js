@@ -356,6 +356,10 @@ test.describe("Global Runs and Reports indexes", () => {
 			await expect(report.getByText("Flaky 1", { exact: true })).toBeVisible();
 			await report.getByText("Case outcomes (1)", { exact: true }).click();
 			await expect(report.getByText("TC-OLD", { exact: true })).toBeVisible();
+			await expect(report.getByRole("link", { name: "Open saved case TC-OLD Empty search displays a notice" })).toHaveAttribute(
+				"href",
+				`${buildProjectPath(projectId, "test-cases")}?suite=suite-before-fix&case=TC-OLD`
+			);
 			await expect(report.getByText("Flaky (passed on retry)", { exact: true })).toBeVisible();
 			await expect(report.getByText("Empty search displays a notice", { exact: true })).toBeVisible();
 			await expect(report.getByText("Expected: No employees found", { exact: true })).toBeVisible();
@@ -383,6 +387,126 @@ test.describe("Global Runs and Reports indexes", () => {
 		await page.goto(`${reportsPath}?run=missing`);
 		await expect(page.getByRole("status").filter({ hasText: "Saved evidence for this run is unavailable." })).toBeVisible();
 		await expect(report).toHaveCount(0);
+	});
+
+	test("pins the originating run when opening authored case evidence from latest Reports", { tag: "@p1" }, async ({ page }) => {
+		const projectId = NOVA_PROJECT.project_id;
+		const reportsPath = buildProjectPath(projectId, "reports");
+		const sourceCase = {
+			id: "TC + / Ω",
+			title: "Original checkout",
+			steps: [{ step: 1, action: "Place the original order", expected: "Original confirmation appears" }],
+		};
+		const original = {
+			...FAILED_RUN,
+			historical: false,
+			snapshot_id: "execution-before-fix",
+			source_snapshot_id: "suite + original",
+			results: [
+				{
+					id: "recorded-candidate",
+					source_test_case_id: sourceCase.id,
+					title: sourceCase.title,
+					status: "failed",
+					issues: [{ message: "Original confirmation did not appear", code: "playwright.error", path: "$.results[0]" }],
+				},
+				{ id: "legacy-candidate", source_test_case_id: "", title: "Legacy outcome without source ID", status: "skipped" },
+			],
+		};
+		const legacy = {
+			...original,
+			run_record_id: "run-newer-unbound",
+			run_id: "run-nova-newer-unbound",
+			snapshot_id: "execution-unbound",
+			source_snapshot_id: null,
+			results: original.results.slice(0, 1),
+		};
+		const executionSnapshot = ({ run_record_id: _recordId, ...run }) => ({
+			stage: "execution",
+			snapshot_id: run.snapshot_id,
+			source_snapshot_id: run.source_snapshot_id,
+			payload: run,
+		});
+		const detail = projectDetailFixture(NOVA_PROJECT, {
+			execution_runs: [original],
+			current_snapshots: { execution: executionSnapshot(original) },
+		});
+		await installWorkspaceApi(page, { projectDetails: { [projectId]: detail } });
+		await page.route(`**/projects/${projectId}/execution-runs/*`, async (route) => {
+			const id = new URL(route.request().url()).pathname.split("/").at(-1);
+			const run = [original, legacy].find((item) => item.run_record_id === id);
+			await route.fulfill(run ? { json: run } : { status: 404, json: { detail: "Unknown run" } });
+		});
+		const caseLookups = [];
+		await page.route(`**/projects/${projectId}/test-case-evidence?*`, async (route) => {
+			caseLookups.push(Object.fromEntries(new URL(route.request().url()).searchParams));
+			await route.fulfill({
+				json: {
+					project_id: projectId,
+					snapshot_id: original.source_snapshot_id,
+					suite_version: 1,
+					project_revision: 7,
+					historical: true,
+					test_case: sourceCase,
+					requirements: [{ id: "REQ-001", text: "Original requirement for checkout" }],
+					obligations: [],
+				},
+			});
+		});
+		const writes = [];
+		page.on("request", (request) => {
+			if (request.method() !== "GET" && /\/(projects|automation|export)\b/.test(new URL(request.url()).pathname)) {
+				writes.push(request.url());
+			}
+		});
+		await seedAuthenticatedSession(page);
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(reportsPath);
+		await expect(page.getByRole("heading", { name: "Export Test Cases", exact: true })).toBeVisible();
+		const report = page.locator(".playwright-report-card");
+		const outcomes = report.getByRole("list", { name: "Recorded case outcomes" });
+		await report.getByText("Case outcomes (2)", { exact: true }).press("Enter");
+		const link = outcomes.getByRole("link", { name: `Open saved case ${sourceCase.id} ${sourceCase.title}`, exact: true });
+		await expect(outcomes.getByText("Legacy outcome without source ID")).toBeVisible();
+		await expect(outcomes.getByRole("link")).toHaveCount(1);
+		const href = new URL(await link.getAttribute("href"), page.url());
+		expect(Object.fromEntries(href.searchParams)).toEqual({ suite: original.source_snapshot_id, case: sourceCase.id });
+		await link.press("Enter");
+		await expect(page).toHaveURL(href.href);
+		const reader = page.getByRole("region", { name: "Saved test case", exact: true });
+		await expect(reader.getByRole("heading", { name: sourceCase.title, exact: true })).toBeVisible();
+		await expect(reader.getByRole("heading", { name: "Saved test case", exact: true })).toBeFocused();
+		await expect(reader).toContainText("Original confirmation appears");
+		expect(caseLookups).toEqual([{ snapshot_id: original.source_snapshot_id, case_id: sourceCase.id }]);
+
+		detail.current_revision += 1;
+		detail.execution_runs.unshift(legacy);
+		detail.current_snapshots.execution = executionSnapshot(legacy);
+		await page.goBack();
+		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();
+		expect(new URL(page.url()).searchParams.get("run")).toBe(original.run_record_id);
+		await expect(report).toContainText(`Run ${original.run_id}`);
+		await expect(outcomes).toContainText("Original confirmation did not appear");
+		await expect(link).toBeFocused();
+		await expectNoDocumentOverflow(page);
+		await page.goForward();
+		await expect(reader.getByRole("heading", { name: sourceCase.title, exact: true })).toBeVisible();
+		await page.goBack();
+		await expect(link).toBeFocused();
+
+		await page.goto(reportsPath);
+		await expect(report).toContainText(`Run ${legacy.run_id}`);
+		await report.getByText("Case outcomes (1)", { exact: true }).press("Enter");
+		await expect(outcomes.getByText(sourceCase.id, { exact: true })).toBeVisible();
+		await expect(outcomes.getByRole("link")).toHaveCount(0);
+
+		detail.current_snapshots.execution = { ...executionSnapshot(original), snapshot_id: "unmatched-execution-snapshot" };
+		await page.reload();
+		await expect(report).toContainText(`Run ${original.run_id}`);
+		await report.getByText("Case outcomes (2)", { exact: true }).press("Enter");
+		await expect(outcomes.getByText(sourceCase.id, { exact: true })).toBeVisible();
+		await expect(outcomes.getByRole("link")).toHaveCount(0);
+		expect(writes).toEqual([]);
 	});
 
 	test("renders report evidence identity with text-and-icon approval, draft, and stale states", async ({ page }) => {

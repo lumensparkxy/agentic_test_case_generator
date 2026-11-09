@@ -5872,7 +5872,8 @@ export default function App() {
 											testCaseReview={testCaseReview}
 											executionRunResult={executionRunResult}
 											currentProject={currentProject}
-											runRecordId={new URLSearchParams(location.search).get("run")}
+											location={location}
+											navigate={navigate}
 											request={apiRequest}
 											exportReviewApproved={exportReviewApproved}
 											exportRequiresOverride={exportRequiresOverride}

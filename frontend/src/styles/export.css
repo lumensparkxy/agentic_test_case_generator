@@ -107,6 +107,13 @@
 	font-size: 0.9rem;
 }
 
+.playwright-report-header .review-banner {
+	flex: none;
+	max-inline-size: 50%;
+	margin: 0;
+	padding: 0.375rem 0.625rem;
+}
+
 .execution-case-outcomes {
 	margin-top: 1rem;
 }
