@@ -112,6 +112,42 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
         self.assertEqual(metrics["risk_signals_covered"], 1)
         self.assertEqual(metrics["high_risk_items_without_tests"], [])
 
+    def test_rendered_whitespace_risk_needs_exact_linked_output_evidence(self) -> None:
+        requirements = [Requirement(id="JSON-VALID", text="Show the accepted JSON with original spacing.")]
+        title = "Whitespace and indentation collapsing in rendered view"
+        analysis = [
+            {
+                "requirement_id": "JSON-VALID",
+                "risk_signals": [
+                    {
+                        "id": "JSON-VALID-RS-01",
+                        "requirement_id": "JSON-VALID",
+                        "title": title,
+                        "rationale": "Rendering engines may trim or collapse multiline indentations.",
+                        "category": "Data Integrity",
+                        "severity": "High",
+                    }
+                ],
+            }
+        ]
+        payload = '{\n  "enabled": false,\n  "label": "  Launch into β  "\n}'
+        fill = {"action": 'Enter step data into field "Payload"', "test_data": payload}
+        output = {"expected": 'test id "saved-payload" text should equal step data', "test_data": payload}
+        for label, steps, linked, covered in (
+            ("exact output", [fill, output], "JSON-VALID", True),
+            ("fill only", [fill], "JSON-VALID", False),
+            ("input value", [fill, {**output, "expected": 'field "Payload" value should equal step data'}], "JSON-VALID", False),
+            ("single spaces", [fill, {**output, "test_data": "Ordinary text"}], "JSON-VALID", False),
+            ("unlinked case", [fill, output], "JSON-OTHER", False),
+            ("partial assertion", [fill, {**output, "expected": output["expected"] + " and page title is correct"}], "JSON-VALID", False),
+        ):
+            for tag in ("scenario:happy-path", "scenario:data-variation"):
+                with self.subTest(label=label, tag=tag):
+                    cases = [{"id": "TC-JSON-VALID", "linked_requirement_ids": [linked], "tags": [tag], "steps": steps}]
+                    metrics = _compute_requirement_analysis_metrics(analysis, cases, requirements)
+                    self.assertEqual(metrics["risk_signals_covered"], int(covered))
+                    self.assertEqual(metrics["high_risk_items_without_tests"], [] if covered else [f"JSON-VALID - {title}"])
+
     def test_high_risk_gaps_block_review(self) -> None:
         weak_test_cases = [
             {

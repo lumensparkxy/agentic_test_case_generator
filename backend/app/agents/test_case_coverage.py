@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from .analysis_agent import fallback_requirement_analysis, normalize_requirement_analysis
 from ..models import Requirement
+from ..services.execution_service import _step_data_assertion
 
 ALLOWED_TEST_CASE_TYPES = {
     "Functional",
@@ -193,6 +194,9 @@ RISK_SCENARIO_HINTS = {
     "Integration": {"Integration", "Error Handling"},
     "Other": {"Happy Path", "Negative"},
 }
+
+_WHITESPACE_RISK_PATTERN = re.compile(r"\b(?:white\s*space|indentations?|line breaks?|newlines?)\b", re.IGNORECASE)
+_RENDERED_OUTPUT_RISK_PATTERN = re.compile(r"\b(?:render\w*|display\w*|outputs?|echo\w*)\b", re.IGNORECASE)
 
 MATCH_STOP_WORDS = {
     "the",
@@ -765,6 +769,25 @@ def _analysis_item_is_covered(item_text: str, linked_case_texts: List[str], link
     return False
 
 
+def _checks_exact_rendered_whitespace(test_case: Dict[str, Any]) -> bool:
+    steps = test_case.get("steps")
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        value = step.get("test_data")
+        if not isinstance(value, str) or value == " ".join(value.split()):
+            continue
+        for instruction in (step.get("expected"), step.get("action")):
+            if not isinstance(instruction, str):
+                continue
+            assertion, _ = _step_data_assertion(instruction, value)
+            if assertion and assertion.kind == "assert_scoped_text_equals":
+                return True
+    return False
+
+
 def _compute_requirement_analysis_metrics(
     requirement_analysis: List[Dict[str, Any]],
     test_cases: List[Dict[str, Any]],
@@ -894,8 +917,15 @@ def _compute_requirement_analysis_metrics(
         for risk in item.get("risk_signals") or []:
             risk_signals_total += 1
             risk_text = f"{risk.get('title', '')} {risk.get('rationale', '')}"
-            hinted_scenarios = RISK_SCENARIO_HINTS.get(str(risk.get("category") or "Other"), {"Happy Path", "Negative"})
+            category = str(risk.get("category") or "Other")
+            rendered_whitespace_risk = (
+                category == "Data Integrity" and _WHITESPACE_RISK_PATTERN.search(risk_text) and _RENDERED_OUTPUT_RISK_PATTERN.search(risk_text)
+            )
+            # Data Variation or Negative alone says nothing about the rendered output.
+            hinted_scenarios = set() if rendered_whitespace_risk else RISK_SCENARIO_HINTS.get(category, {"Happy Path", "Negative"})
             covered = _analysis_item_is_covered(risk_text, linked_case_texts, linked_scenarios, hinted_scenarios)
+            if not covered and rendered_whitespace_risk:
+                covered = any(_checks_exact_rendered_whitespace(test_case) for test_case in linked_cases)
             if covered:
                 risk_signals_covered += 1
                 risk_hits += 1

@@ -70,6 +70,9 @@ and `field "Payload" value should equal step data`. For a saved text check,
 put the expected literal in that observation step's own data and use
 `css "#saved" text should equal step data`. Ground the field and result locator
 in Context and use synthetic data for the payload.
+When the linked requirement has a rendered-whitespace risk, an exact text
+comparison with whitespace-sensitive step data provides coverage evidence.
+A scenario label alone leaves this risk uncovered.
 
 To reuse exact test data across generated cases, declare a named sample in
 Context notes on one line. The value is a JSON string, so `\n` preserves a
