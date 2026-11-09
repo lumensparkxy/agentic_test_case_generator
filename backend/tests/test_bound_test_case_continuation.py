@@ -3,11 +3,14 @@
 from copy import deepcopy
 from dataclasses import replace
 from datetime import timedelta
+import json
 import unittest
 from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
+from app.agents.substantive_review import apply_assessment, bind_reviewed_inputs, review_input, validate_assessment
+from app.contracts.quality_feedback import ExecutionPrerequisite
 from app.models import AuthUser
 from app.routers import testcases as routes
 from app.services import approval_continuation as continuation
@@ -158,6 +161,74 @@ class BoundTestCaseContinuationTests(unittest.TestCase):
         for collection in ("billing_consumption", "billing_wallet_ledger"):
             self.assertEqual(self._record_values(collection), [])
         self.assertFalse(any(item["quantity"] for item in self._record_values("usage_events")))
+
+    def _generate_with_setup_blocked(self, payload, *, reviewed_context):
+        case = self.result.test_cases[0].model_copy(
+            update={"execution_prerequisites": [ExecutionPrerequisite(name="orderAccount", kind="credential", description="Provision an order account")]}
+        )
+        data, digest, _ = review_input([case], payload.requirements, reviewed_context)
+        output = json.dumps(
+            {
+                "input_hash": digest,
+                "obligations": [
+                    {
+                        "requirement_id": payload.requirements[0].id,
+                        "source_quote": "Save the confirmed order",
+                        "obligation": "Save the confirmed order",
+                        "status": "covered",
+                        "reason": "The action submits the order and the step checks for confirmation.",
+                        "evidence": [{"test_case_id": case.id, **case.steps[0].model_dump(include={"step", "action", "expected"})}],
+                    }
+                ],
+                "case_grounding": [{"test_case_id": case.id, "reason": "Use the declared account prerequisite.", "prerequisites": []}],
+            }
+        )
+        assessment = bind_reviewed_inputs(validate_assessment(output, data, digest), data)
+        self.assertEqual(assessment["design_status"], "assessed_complete")
+        self.assertEqual(assessment["execution_status"], "blocked")
+        return apply_assessment(
+            {
+                **self.result.model_dump(mode="json"),
+                "test_cases": [case],
+                "requirement_analysis": [item.model_dump(mode="json") for item in payload.requirement_analysis],
+            },
+            assessment,
+        )
+
+    def test_bound_generation_records_exact_design_proof_without_promoting_legacy_approval(self):
+        self._bind_worker()
+        self.generate.side_effect = lambda payload, **kwargs: self._generate_with_setup_blocked(payload, reviewed_context=payload.context)
+        generated = self._generate()
+        current = self._current_project()
+        suite = current.current_snapshots["test_cases"]
+        self.assertFalse(generated.approved)
+        self.assertFalse(current.stage_state["test_cases"].approved)
+        self.assertEqual(suite.payload["substantive_assessment"]["design_status"], "assessed_complete")
+        self.assertTrue(suite.payload["generation_evidence"]["design_precheck"]["passed"])
+        saved = self.store[f"{self.project_path}/snapshots/{suite.snapshot_id}"]
+        self.assertEqual(saved["metadata"]["suite_design_proof"]["suite_snapshot_id"], suite.snapshot_id)
+        self.assertEqual(current.suite_quality.design_status, "complete")
+        self.assertEqual(current.suite_quality.declared_setup, "blocked")
+        self.assertEqual(current.suite_quality.human_acceptance, "unavailable")
+        self.assertTrue(suite.payload["test_cases"][0]["artifact_version_id"])
+        self.assertEqual(suite.payload["test_cases"][0]["steps"][0]["test_data"], "  Order–01  ")
+        self.assertEqual(self._generate(), generated)
+        self.generate.assert_called_once()
+        self.assertEqual(len(self._record_values("billing_consumption")), 1)
+
+    def test_bound_generation_cannot_reuse_assessment_of_different_context(self):
+        self._bind_worker()
+        self.generate.side_effect = lambda payload, **kwargs: self._generate_with_setup_blocked(
+            payload, reviewed_context=payload.context.model_copy(update={"notes": "Different Context provided to assessment."})
+        )
+        generated = self._generate()
+        current = self._current_project()
+        suite = current.current_snapshots["test_cases"]
+        self.assertEqual(generated.substantive_assessment["design_status"], "assessed_complete")
+        self.assertTrue(generated.generation_evidence.design_precheck.passed)
+        self.assertNotEqual(generated.substantive_assessment["reviewed_source_binding"]["context_hash"], suite.metadata["source_context_hash"])
+        self.assertNotIn("suite_design_proof", self.store[f"{self.project_path}/snapshots/{suite.snapshot_id}"]["metadata"])
+        self.assertEqual(current.suite_quality.design_status, "unknown")
 
     def test_strict_path_refuses_unbound_fallback_before_generation_or_billing(self):
         self._bind_worker()

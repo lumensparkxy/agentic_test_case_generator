@@ -335,6 +335,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
     _require_owner(payload, actor)
     summary = _summary_from_payload(payload)
     current_snapshots: dict[ProjectStageName, QaProjectStageSnapshot] = {}
+    raw_test_suite = None
     for stage, state in summary.stage_state.items():
         if state.current_snapshot_id:
             snapshot = _snapshot_for(project_id, state.current_snapshot_id)
@@ -351,6 +352,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
                 if stage == "test_cases":
                     from .test_case_quality import generated_suite_review_retryable, project_test_case_view
 
+                    raw_test_suite = snapshot.model_copy()
                     snapshot.payload = project_test_case_view(snapshot.payload)
                     if generated_suite_review_retryable(snapshot):
                         snapshot.metadata = {**snapshot.metadata, "review_retry_available": True}
@@ -385,7 +387,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
 
         if sync.get("input_manifest") != manifest_from_payload(payload).model_dump(mode="json"):
             sync = {**sync, "status": "superseded", "error": "Project sources changed. Review the current sources before starting another update."}
-    return QaProjectDetail(
+    detail = QaProjectDetail(
         input_revision=payload.get("input_revision", 0),
         testing_intent=payload.get("testing_intent"),
         project_sync=sync,
@@ -396,6 +398,11 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
         timeline=timeline[:100],
         execution_runs=execution_runs[:100],
     )
+    if raw_test_suite is not None:
+        from .suite_quality import resolve_suite_quality
+
+        detail.suite_quality = resolve_suite_quality(detail, raw_suite=raw_test_suite)
+    return detail
 
 
 def get_project_stage_snapshot(project_id: str, snapshot_id: str, *, actor: AuthUser) -> QaProjectStageSnapshot:
@@ -954,6 +961,7 @@ def append_stage_snapshot(
     pending_writes: tuple | list = (),
     transaction_guard=None,
     use_case_draft_payload: Optional[dict[str, Any]] = None,
+    suite_design_proof: Optional[dict[str, Any]] = None,
 ) -> QaProjectStageSnapshot:
     project_payload = _get_project_payload(project_id)
     _require_owner(project_payload, actor)
@@ -963,6 +971,15 @@ def append_stage_snapshot(
         if existing_snapshot is not None:
             return existing_snapshot
     _check_revision(project_payload, base_project_revision)
+    if stage == "test_cases" and metadata and "suite_design_proof" in metadata:
+        metadata = {key: value for key, value in metadata.items() if key != "suite_design_proof"}
+    if suite_design_proof is not None:
+        if stage != "test_cases" or operation not in {"testcases.generate", "test_cases.review"}:
+            raise ValueError("Only saved generation or assessment can record exact suite design proof.")
+        metadata = {
+            **(metadata or {}),
+            "suite_design_proof": {**suite_design_proof, "suite_snapshot_id": snapshot_id},
+        }
 
     now = _utcnow()
     current_revision = int(project_payload.get("current_revision") or 0)

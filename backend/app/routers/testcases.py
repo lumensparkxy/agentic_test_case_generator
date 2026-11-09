@@ -23,6 +23,7 @@ from ..services.firestore_repository import get_required_firestore_client
 from ..services.orchestrator_service import _use_cases_human_approved
 from ..services.project_draft_admission import draft_admission_client, draft_refresh_deferred
 from ..services.requirement_import_service import validate_generation_baseline
+from ..services.suite_quality import build_suite_design_proof
 from ..services.test_case_quality import case_source_hash, placeholder_reason
 from ..services.test_case_review_progress import GenerationReviewProgress
 from ..services.versioning_service import persist_test_case_versions
@@ -287,6 +288,23 @@ def _append_project_generation_snapshots(
         if refinement_source is not None:
             original = {case["id"]: case for case in refinement_source.payload["test_cases"]}
             case_payload["test_cases"] = [case if case["id"] in changed_case_ids else original[case["id"]] for case in case_payload["test_cases"]]
+        metadata = {
+            "test_case_count": len(response.test_cases),
+            "approved": response.approved,
+            "source_snapshot_ids": source_snapshot_ids,
+            "source_requirements_snapshot_id": source_snapshot_ids["requirements"],
+            "source_context_snapshot_id": source_snapshot_ids["context"],
+            "source_use_case_snapshot_id": source_snapshot_ids["use_cases"],
+            "source_requirement_hashes": _hash_map(source_requirements or [], id_key="id"),
+            "source_use_case_hashes": _scenario_hash_map(response.coverage_plan),
+            "source_context_hash": _content_hash(source_context) if source_context is not None else None,
+            "generation_request_fingerprint": request_fingerprint,
+            "source_test_cases_snapshot_id": refinement_source.snapshot_id if refinement_source is not None else None,
+            **context_selection,
+        }
+        proof = None
+        if operation == "testcases.generate" and approved_use_case_snapshot_id is not None and response.generation_evidence.design_precheck is not None:
+            proof = build_suite_design_proof(current_project, case_payload, metadata, plan_snapshot_id=approved_use_case_snapshot_id)
         return append_stage_snapshot(
             project_id=project_id,
             stage="test_cases",
@@ -304,20 +322,8 @@ def _append_project_generation_snapshots(
             pending_writes=pending_writes,
             transaction_guard=commit if publication_guard is not None or review_progress is not None else None,
             title="Test cases updated",
-            metadata={
-                "test_case_count": len(response.test_cases),
-                "approved": response.approved,
-                "source_snapshot_ids": source_snapshot_ids,
-                "source_requirements_snapshot_id": source_snapshot_ids["requirements"],
-                "source_context_snapshot_id": source_snapshot_ids["context"],
-                "source_use_case_snapshot_id": source_snapshot_ids["use_cases"],
-                "source_requirement_hashes": _hash_map(source_requirements or [], id_key="id"),
-                "source_use_case_hashes": _scenario_hash_map(response.coverage_plan),
-                "source_context_hash": _content_hash(source_context) if source_context is not None else None,
-                "generation_request_fingerprint": request_fingerprint,
-                "source_test_cases_snapshot_id": refinement_source.snapshot_id if refinement_source is not None else None,
-                **context_selection,
-            },
+            metadata=metadata,
+            **({"suite_design_proof": proof} if proof is not None else {}),
         )
     except HTTPException:
         raise

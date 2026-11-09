@@ -130,6 +130,16 @@ class TestCaseGenerationPassEvidence(BaseModel):
     shards: List[TestCaseGenerationShardEvidence] = Field(default_factory=list)
 
 
+class TestCaseDesignPrecheck(BaseModel):
+    """Structural verdict recorded before independent review merges design and setup."""
+
+    model_config = {"extra": "forbid"}
+
+    passed: bool = Field(strict=True)
+    case_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    assessment_input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class TestCaseGenerationEvidence(BaseModel):
     evidence_id: str = Field(default_factory=lambda: str(uuid4()))
     request_id: Optional[str] = None
@@ -144,6 +154,7 @@ class TestCaseGenerationEvidence(BaseModel):
     model_case_count_before_review: int = 0
     model_case_count_after_merge: int = 0
     final_test_case_count: int = 0
+    design_precheck: Optional[TestCaseDesignPrecheck] = None
     deterministic_additions_total: int = 0
     deterministic_total_additions: int = 0
     deterministic_must_have_additions: int = 0
@@ -210,6 +221,7 @@ __all__ = [
     "TestCaseTemplate",
     "TestCaseGenerationShardEvidence",
     "TestCaseGenerationPassEvidence",
+    "TestCaseDesignPrecheck",
     "TestCaseGenerationEvidence",
     "GenerateTestCasesInput",
     "RefineTestCasesInput",

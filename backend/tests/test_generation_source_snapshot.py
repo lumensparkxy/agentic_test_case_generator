@@ -366,8 +366,15 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_draft_generation_publishes_both_stages_once_without_human_approval(self):
         prior_use_cases = self.store[self.project_path]["stage_state"].pop("use_cases")
-        saved = await self._request()
-        self.assertEqual((await self._request()).model_dump(), saved.model_dump())
+        self.generate.return_value["generation_evidence"]["design_precheck"] = {
+            "passed": True,
+            "case_content_hash": "a" * 64,
+            "assessment_input_hash": "b" * 64,
+        }
+        with patch.object(routes, "build_suite_design_proof") as proof:
+            saved = await self._request()
+            self.assertEqual((await self._request()).model_dump(), saved.model_dump())
+        proof.assert_not_called()
         self.generate.assert_called_once()
         self.assertNotIn("source_coverage_plan", self.generate.call_args.kwargs)
         self.billing.assert_called_once()
@@ -384,6 +391,7 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(suite.metadata["generation_base_project_revision"], self.payload.base_project_revision)
         self.assertEqual(suite.payload["coverage_plan"], use_cases.payload["coverage_plan"])
         self.assertEqual(suite.payload["test_cases"][0]["artifact_version_id"], saved.test_cases[0].artifact_version_id)
+        self.assertNotIn("suite_design_proof", suite.metadata)
         self.assertNotEqual(use_cases.snapshot_id, prior_use_cases["current_snapshot_id"])
         self.assertFalse(use_cases.approved)
         self.assertFalse(project.stage_state["use_cases"].approved)

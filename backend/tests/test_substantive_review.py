@@ -17,6 +17,8 @@ from app.agents.substantive_review import (
 from app.contracts.guidance import GuidanceManifest, MemoryGuidance, SkillGuidance
 from app.models import Requirement, TestCase
 from app.services.guidance_service import guidance_scope
+from app.services.suite_quality import reviewed_case_content_hash
+from app.services.test_case_quality import case_source_hash
 
 
 def fixture(*, retry=True):
@@ -340,6 +342,7 @@ class SubstantiveReviewTests(unittest.TestCase):
         from app.contracts.quality_feedback import ExecutionPrerequisite
 
         case.execution_prerequisites = [ExecutionPrerequisite(name="bookingAccount", kind="credential", description="Provision the booking account")]
+        case.steps[0].test_data = "  Café–01\t "
         data, digest, _ = review_input([case], [req], None)
         output["input_hash"] = digest
         blocker = {"test_case_id": case.id, "prerequisite_name": "bookingAccount"}
@@ -352,7 +355,8 @@ class SubstantiveReviewTests(unittest.TestCase):
         }
         for findings in ([], [gap]):
             output["case_grounding"][0]["prerequisites"] = findings
-            assessment = validate_assessment(json.dumps(output), data, digest)
+            with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)):
+                assessment = assess_delivered_suite([case], [req], None, settings=object())
             self.assertEqual(assessment["status"], "incomplete")
             self.assertEqual(assessment["design_status"], "assessed_complete")
             self.assertEqual(assessment["execution_status"], "blocked")
@@ -361,7 +365,7 @@ class SubstantiveReviewTests(unittest.TestCase):
                 {
                     "test_cases": [case],
                     "approved": True,
-                    "review": {"approved": True},
+                    "review": {"approved": True, "score": 100, "threshold": 90},
                     "workflow_diagnostics": {"status": "completed"},
                     "generation_evidence": {},
                     "coverage_metrics": {},
@@ -370,6 +374,11 @@ class SubstantiveReviewTests(unittest.TestCase):
             )
             self.assertFalse(result["approved"])
             self.assertEqual(result["generation_tasks"], [])
+            self.assertEqual(
+                result["generation_evidence"]["design_precheck"],
+                {"passed": True, "case_content_hash": reviewed_case_content_hash([case]), "assessment_input_hash": digest},
+            )
+            self.assertEqual(case.steps[0].test_data, "  Café–01\t ")
         output["case_grounding"][0]["prerequisites"] = [{**gap, "execution_prerequisite_name": "invented"}]
         with self.assertRaisesRegex(ValueError, "declared missing prerequisite"):
             validate_assessment(json.dumps(output), data, digest)
@@ -420,20 +429,52 @@ class SubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(result["test_cases"], [case])
 
     def test_complete_assessment_does_not_override_other_rejection(self):
-        _, case, data, digest, output = fixture(retry=False)
+        req, case, _, digest, output = fixture(retry=False)
         output["obligations"] = output["obligations"][:1]
-        assessment = validate_assessment(json.dumps(output), data, digest)
+        with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)):
+            assessment = assess_delivered_suite([case], [req], None, settings=object())
         self.assertEqual(assessment["status"], "assessed_complete")
         response = {
             "test_cases": [case],
             "generation_tasks": [],
             "approved": False,
-            "review": {"approved": False},
+            "review": {"approved": False, "score": 87, "threshold": 90},
             "workflow_diagnostics": {},
-            "generation_evidence": {},
+            "generation_evidence": {"design_precheck": {"passed": True, "case_content_hash": "a" * 64, "assessment_input_hash": "b" * 64}},
             "coverage_metrics": {},
         }
-        self.assertFalse(apply_assessment(response, assessment)["approved"])
+        result = apply_assessment(response, assessment)
+        self.assertFalse(result["approved"])
+        self.assertEqual(
+            result["generation_evidence"]["design_precheck"],
+            {"passed": False, "case_content_hash": reviewed_case_content_hash([case]), "assessment_input_hash": digest},
+        )
+
+    def test_assessment_cannot_bind_to_changed_literal_case_content(self):
+        req, case, _, _, output = fixture(retry=False)
+        case.steps[0].test_data = "  Order–01  "
+        _, output["input_hash"], _ = review_input([case], [req], None)
+        with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)):
+            assessment = assess_delivered_suite([case], [req], None, settings=object())
+        self.assertEqual(assessment["design_status"], "assessed_complete")
+        self.assertEqual(assessment["reviewed_case_content_hash"], reviewed_case_content_hash([case]))
+        self.assertEqual(
+            assessment["reviewed_source_binding"],
+            {"requirement_hashes": {req.id: case_source_hash(req.model_dump(mode="json"))}, "context": "absent"},
+        )
+        changed = case.model_copy(deep=True)
+        changed.steps[0].test_data = "Order–01"
+        result = apply_assessment(
+            {
+                "test_cases": [changed],
+                "approved": True,
+                "review": {"approved": True, "score": 100, "threshold": 90},
+                "generation_evidence": {},
+                "coverage_metrics": {},
+            },
+            assessment,
+        )
+        self.assertNotIn("design_precheck", result["generation_evidence"])
 
     def test_stale_or_fabricated_or_missing_citations_fail_closed(self):
         _, _, data, digest, output = fixture()

@@ -19,9 +19,11 @@ from .adk_runtime import generate_direct_content, json_generation_config
 from .evaluation_limits import current_evaluation_limits
 from .quality_goal import QUALITY_GOAL
 from .prompting import TEST_CASE_BEHAVIOR_POLICY
-from ..contracts.test_cases import TestCase
+from ..contracts.grounding import EnrichInput
+from ..contracts.requirements import Requirement
+from ..contracts.test_cases import TestCase, TestCaseDesignPrecheck
 from ..services.browser_handoff import declared_rejection_readbacks, missing_rejection_readbacks
-from ..services.test_case_quality import project_test_case_view
+from ..services.test_case_quality import case_source_hash, placeholder_reason, project_test_case_view
 from ..services.guidance_service import current_guidance, public_manifest, submit_with_guidance
 
 RUBRIC = "delivered_business_coverage_v6"
@@ -754,15 +756,44 @@ def _invalid_evidence_code(exc):
 
 def assess_delivered_suite(cases, requirements, context, *, settings=None, scope_plan=None, progress=None):
     data, input_hash, _ = review_input(cases, requirements, context, scope_plan=scope_plan)
-    if not cases or not requirements or settings is None:
+    reviewed_inputs = bind_reviewed_inputs({}, data)
+    assessment = _assess_review_data(data, input_hash, settings, progress)
+    assessment.update(reviewed_inputs)
+    return assessment
+
+
+def bind_reviewed_inputs(assessment, data):
+    """Record server-derived input hashes without adding fields to the critic prompt."""
+    reviewed_hash = _reviewed_case_hash(data["test_cases"])
+    if reviewed_hash is not None:
+        assessment["reviewed_case_content_hash"] = reviewed_hash
+    try:
+        requirements = [Requirement.model_validate(row, extra="forbid") for row in data["requirements"]]
+        requirement_hashes = {row.id: case_source_hash(row.model_dump(mode="json")) for row in requirements}
+        if len(requirement_hashes) != len(requirements):
+            return assessment
+        binding = {"requirement_hashes": requirement_hashes, "context": "absent"}
+        if data["context"] is not None:
+            context = EnrichInput.model_validate(data["context"], extra="forbid")
+            binding.update(context="applied", context_hash=case_source_hash(context.model_dump(mode="json")))
+    except TypeError, ValueError:
+        return assessment
+    assessment["reviewed_source_binding"] = binding
+    return assessment
+
+
+def _assess_review_data(data, input_hash, settings, progress):
+    case_count = len(data["test_cases"])
+    if not case_count or not data["requirements"] or settings is None:
         return unknown_assessment(data, input_hash, "No independent model assessment is available for this delivered suite.")
     budget = current_evaluation_limits.get().review_bytes or MAX_INPUT_BYTES
-    if scope_plan is None and len(cases) >= GROUP_REVIEW_MIN_CASES:
+    can_group = data["scope"] == "whole_requirements" and case_count >= GROUP_REVIEW_MIN_CASES
+    if can_group:
         groups = _plan_review_groups(data, input_hash, budget)
         if groups:
             return _assess_review_groups(data, input_hash, settings, groups, budget, progress)
     prompt = review_prompt(data, input_hash)
-    if scope_plan is None and len(cases) >= GROUP_REVIEW_MIN_CASES and (len(cases) > GROUP_REVIEW_MAX_CASES or len(prompt.encode()) > budget):
+    if can_group and (case_count > GROUP_REVIEW_MAX_CASES or len(prompt.encode()) > budget):
         assessment = _assess_batched_scope(data, input_hash, settings, budget, progress)
         if assessment is not None:
             return assessment
@@ -1100,7 +1131,48 @@ def assessment_tasks(assessment, cases):
     return tasks
 
 
+def _reviewed_case_hash(cases):
+    from ..services.suite_quality import reviewed_case_content_hash
+
+    try:
+        return reviewed_case_content_hash(cases)
+    except TypeError, ValueError:
+        return None
+
+
+def _capture_design_precheck(response, assessment):
+    evidence = response.setdefault("generation_evidence", {})
+    evidence.pop("design_precheck", None)
+    input_hash = assessment.get("input_hash")
+    if not isinstance(input_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", input_hash):
+        return
+    cases = response["test_cases"]
+    review = response.get("review") or {}
+    score, threshold = review.get("score"), review.get("threshold")
+    if type(score) is not int or type(threshold) is not int or type(review.get("approved")) is not bool:
+        return
+    content_hash = _reviewed_case_hash(cases)
+    if content_hash is None or content_hash != assessment.get("reviewed_case_content_hash"):
+        return
+    precheck = TestCaseDesignPrecheck(
+        passed=bool(
+            cases
+            and response.get("approved") is True
+            and review.get("approved") is True
+            and 0 <= threshold <= score <= 100
+            and not review.get("blocking_issues")
+            and not review.get("unmet_criteria")
+            and not response.get("generation_tasks")
+            and not any(placeholder_reason(case) for case in cases)
+        ),
+        case_content_hash=content_hash,
+        assessment_input_hash=input_hash,
+    )
+    evidence["design_precheck"] = precheck.model_dump(mode="json")
+
+
 def apply_assessment(response, assessment):
+    _capture_design_precheck(response, assessment)
     response["substantive_assessment"] = assessment
     tasks = assessment_tasks(assessment, response["test_cases"])
     response["generation_tasks"] = response.get("generation_tasks", []) + tasks

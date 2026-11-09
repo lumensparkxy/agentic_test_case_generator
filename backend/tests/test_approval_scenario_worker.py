@@ -223,6 +223,21 @@ class ScenarioWorkerTests(TestCase):
         self.assertEqual((intent["state"], intent["reason"]), ("failed", "settings_changed"))
         self.assert_no_plan()
 
+    def test_behaviour_change_preserves_saved_approval_and_stops_before_model_dispatch(self):
+        before = projects.get_project(self.project_id, actor=self.actor)
+        requirements = before.current_snapshots["requirements"]
+        self.assertTrue(before.stage_state["requirements"].approved)
+        with patch.object(worker, "behavioural_version", return_value="new-test-design-evidence"):
+            self.assertTrue(self.handle())
+        self.generate.assert_not_called()
+        intent = self.saved_run()["continuation"]
+        self.assertEqual((intent["state"], intent["reason"]), ("failed", "settings_changed"))
+        self.assertEqual(intent["provider_requests_reserved"], 0)
+        saved = projects.get_project(self.project_id, actor=self.actor)
+        self.assertEqual(saved.current_revision, before.current_revision)
+        self.assertEqual(saved.current_snapshots["requirements"].snapshot_id, requirements.snapshot_id)
+        self.assertTrue(saved.stage_state["requirements"].approved)
+
     def test_budget_is_shared_across_shard_contexts_and_does_not_exceed_seven(self):
         def generate_in_shards(payload, **_):
             with ThreadPoolExecutor(max_workers=3) as executor:

@@ -849,6 +849,7 @@ export interface QaProjectDetail {
 	project_sync?: Record<string, unknown> | null;
 	stage_state?: Record<string, QaProjectStageState>;
 	status?: "active" | "archived";
+	suite_quality?: SuiteQualityProjection | null;
 	testing_intent?: QaProjectTestingIntent | null;
 	timeline?: Array<QaProjectTimelineEvent>;
 	updated_at: string;
@@ -1282,6 +1283,23 @@ export interface StructuralChecks {
 	unmet_criteria?: Array<string>;
 }
 
+export interface SuiteQualityProjection {
+	active_case_count?: number;
+	declared_setup?: "blocked" | "not_assessed" | "unknown";
+	deferred_requirement_ids?: Array<string>;
+	deprecated_case_count?: number;
+	design_status?: "complete" | "incomplete" | "unknown";
+	excluded_requirement_ids?: Array<string>;
+	human_acceptance?: "approved" | "changes_requested" | "unavailable";
+	reason_codes?: Array<string>;
+	required_requirement_ids?: Array<string>;
+	scenario_decision?: "approved" | "changes_requested" | "unavailable";
+	scenario_review_id?: string | null;
+	scenario_snapshot_id?: string | null;
+	source_freshness?: "current" | "stale" | "unknown";
+	suite_snapshot_id: string;
+}
+
 export interface TestCase {
 	artifact_item_id?: string | null;
 	artifact_set_id?: string | null;
@@ -1312,10 +1330,17 @@ export interface TestCase {
 	type?: "Functional" | "Integration" | "E2E" | "Regression" | "Smoke" | "Security" | "Performance" | "Usability" | "UAT";
 }
 
+export interface TestCaseDesignPrecheck {
+	assessment_input_hash: string;
+	case_content_hash: string;
+	passed: boolean;
+}
+
 export interface TestCaseGenerationEvidence {
 	completion_source?: "coverage_completion" | "full_fallback" | null;
 	coverage_plan_count?: number;
 	created_at?: string;
+	design_precheck?: TestCaseDesignPrecheck | null;
 	deterministic_additions_total?: number;
 	deterministic_must_have_additions?: number;
 	deterministic_optional_additions?: number;

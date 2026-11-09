@@ -12,6 +12,7 @@ from .requirements import (
     WorkflowDiagnostics,
     WorkflowSettings,
 )
+from .suite_quality import SuiteQualityProjection
 from .test_cases import TestCase
 
 
@@ -137,6 +138,7 @@ class QaProjectTestingIntent(BaseModel):
 
 class QaProjectDetail(QaProjectSummary):
     input_revision: int = 0
+    suite_quality: SuiteQualityProjection | None = None
     testing_intent: Optional[QaProjectTestingIntent] = None
     project_sync: Optional[Dict[str, Any]] = None
     project_decisions: List[Dict[str, Any]] = Field(default_factory=list)

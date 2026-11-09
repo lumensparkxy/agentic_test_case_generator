@@ -181,6 +181,48 @@ class WorkflowProjectServiceTests(unittest.TestCase):
         loaded = get_project(project.project_id, actor=self.actor)
         self.assertEqual(loaded.description, "Regression scope")
 
+    def test_suite_design_proof_is_stamped_once_and_never_copied_to_a_new_draft(self):
+        project = create_project(name="Exact saved suite", description=None, actor=self.actor, request_id="create")
+        self.assertIsNone(get_project(project.project_id, actor=self.actor).suite_quality)
+        payload = {
+            "test_cases": [
+                {
+                    "id": "TC-1",
+                    "title": "Read the confirmed order",
+                    "steps": [{"step": 1, "action": "Open the order", "expected": "Order ID appears", "test_data": "  β-01  "}],
+                }
+            ]
+        }
+        generated = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload=payload,
+            operation="testcases.generate",
+            actor=self.actor,
+            request_id="generate",
+            approved=True,
+            suite_design_proof={"schema_version": 1, "suite_snapshot_id": "old-suite"},
+        )
+        self.assertEqual(generated.metadata["suite_design_proof"]["suite_snapshot_id"], generated.snapshot_id)
+        projected = get_project(project.project_id, actor=self.actor).suite_quality
+        self.assertEqual(projected.suite_snapshot_id, generated.snapshot_id)
+        self.assertEqual(projected.design_status, "unknown")
+        self.assertEqual(projected.human_acceptance, "unavailable")
+
+        draft = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload=payload,
+            operation="testcases.refine",
+            actor=self.actor,
+            request_id="repair",
+            metadata=generated.metadata,
+        )
+        self.assertNotIn("suite_design_proof", draft.metadata)
+        historical = get_project_stage_snapshot(project.project_id, generated.snapshot_id, actor=self.actor)
+        self.assertEqual(historical.metadata["suite_design_proof"], generated.metadata["suite_design_proof"])
+        self.assertEqual(historical.payload["test_cases"][0]["steps"][0]["test_data"], "  β-01  ")
+
     def test_use_case_regeneration_carries_only_unchanged_reviewed_rows(self):
         project = create_project(name="Review carry", description=None, actor=self.actor, request_id="create")
         payload = {"coverage_plan": [{"requirement_id": "R1", "scenarios": [{"id": "S1", "title": "Original"}]}]}

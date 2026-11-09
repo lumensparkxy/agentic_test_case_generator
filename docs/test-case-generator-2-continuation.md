@@ -278,6 +278,30 @@ Stale current exports and placeholder pseudo-tests remain blocked. Execution
 keeps its existing server gates. Runtime project corrections remain scoped to
 project data and dependent drafts.
 
+### Exact suite design evidence
+
+Project Detail exposes `suite_quality` for its saved Test Cases snapshot.
+It reports source freshness, independent design status, the exact human
+scenario decision, any human suite acceptance, and declared setup
+separately. The scoped required, deferred and excluded requirement IDs
+remain visible. Declared setup comes from the saved cases. Target
+readiness and run results use their existing evidence and admission.
+
+Before legacy combined assessment, the server records whether the exact
+delivered cases passed structural review. It checks that the independent
+assessor saw those ordered cases and the same applied source inputs. The
+binding preserves literal data and expected outcomes. A saved proof binds the immutable suite and case versions to the canonical
+approved scope, current exact scenario approval, applied Context and
+independent assessment. A saved reassessment can add new evidence while
+preserving the case content and versions. Sparse or malformed legacy
+evidence stays unknown. Drafts and source changes cannot inherit current
+proof from a different suite.
+
+The proof and projection leave legacy approval, export, repair and
+execution admission in force. An independently complete design can show
+declared setup as blocked. Explicit design-file delivery and its report
+classification are the next policy packet.
+
 ## Baseline evidence
 
 [Desktop workspace sketches](test-case-generator-2-workspaces.md) show the
@@ -364,11 +388,13 @@ P3d connects the second named approval, budget and Review recovery (commit
 `2864d34`, [PR #462](https://github.com/lumensparkxy/agentic_test_case_generator/pull/462)).
 P3e shares provider admission with saved-suite assessment (commit
 `4a76f0c`, [PR #464](https://github.com/lumensparkxy/agentic_test_case_generator/pull/464)).
-P3f enrolls bounded Project Sync refresh under
-[#465](https://github.com/lumensparkxy/agentic_test_case_generator/issues/465).
-Next is exact saved-suite quality evidence for P4. Direct draft producers
-remain a release gate. Targeted repair will join the shared admission path
-when the Review workflow consumes it.
+P3f enrolls bounded Project Sync refresh (commit `dbeda56`,
+[PR #466](https://github.com/lumensparkxy/agentic_test_case_generator/pull/466)).
+P4a binds independent design evidence to the exact saved suite under
+[#467](https://github.com/lumensparkxy/agentic_test_case_generator/issues/467).
+Next is explicit design-file delivery. Direct draft producers remain a
+release gate. Targeted repair will join the shared admission path when
+the Review workflow consumes it.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

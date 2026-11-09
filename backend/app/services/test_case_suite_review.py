@@ -21,6 +21,7 @@ from .guidance_service import enabled, guidance_scope, public_manifest
 from .orchestrator_service import _use_cases_human_approved
 from .project_draft_admission import claim_draft_attempt, draft_admission_client, read_draft_attempt_result
 from .requirement_scope import approved_generation_requirements
+from .suite_quality import build_suite_design_proof
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
 from .test_case_review_progress import SavedReviewProgress
 from .workflow_project_service import ProjectConflictError, _serialize_value, append_stage_snapshot, get_project, get_project_stage_snapshot
@@ -29,6 +30,21 @@ REVIEW_OPERATION = "test_cases.review"
 REVIEWABLE_OPERATIONS = {"impact.update.apply", "testcases.refine", "quality.feedback.apply"}
 _MAX_REVIEW_PROVIDER_REQUESTS = 24
 _REVIEW_DEADLINE_SECONDS = 240
+_SOURCE_SNAPSHOT_KEYS = {
+    "requirements": "source_requirements_snapshot_id",
+    "context": "source_context_snapshot_id",
+    "use_cases": "source_use_case_snapshot_id",
+}
+_RECORDED_SOURCE_FIELDS = {
+    *_SOURCE_SNAPSHOT_KEYS.values(),
+    "source_snapshot_ids",
+    "source_requirement_hashes",
+    "source_use_case_hashes",
+    "source_context_hash",
+    "source_context_omitted",
+    "source_context_artifact_ids",
+    "generation_base_project_revision",
+}
 
 
 def _current_review_inputs(project, suite):
@@ -71,6 +87,51 @@ def _current_review_inputs(project, suite):
         raise HTTPException(409, "The current approved Use Cases plan does not cover the requirement scope.")
     analysis = [row for row in use_cases.payload.get("requirement_analysis", []) if row.get("requirement_id") in required_ids]
     return requirements, plans, analysis, enriched, sources
+
+
+def _require_recorded_scope(suite, requirements):
+    required_ids = {row.id for row in requirements}
+    hashes = suite.metadata.get("source_requirement_hashes")
+    saved_plan = suite.payload.get("coverage_plan")
+    plan_ids = {
+        group["requirement_id"]
+        for group in (saved_plan if isinstance(saved_plan, list) else [])
+        if isinstance(group, dict) and isinstance(group.get("requirement_id"), str)
+    }
+    if (isinstance(hashes, dict) and hashes and not required_ids.issubset(hashes)) or (plan_ids and not required_ids.issubset(plan_ids)):
+        raise HTTPException(409, "The saved suite covers a narrower requirement scope. Refresh the affected tests before reviewing.")
+
+
+def _recorded_sources_match(metadata, sources):
+    recorded_ids = metadata.get("source_snapshot_ids", {})
+    if not isinstance(recorded_ids, dict):
+        return False
+    for stage, key in _SOURCE_SNAPSHOT_KEYS.items():
+        expected = sources.get(stage)
+        recorded = [value for value in (recorded_ids.get(stage), metadata.get(key)) if value is not None]
+        if (expected is not None and not recorded) or any(value != expected for value in recorded):
+            return False
+    context_hash = metadata.get("source_context_hash")
+    if sources.get("context") is None:
+        return metadata.get("source_context_omitted") is True and context_hash is None and "source_context_artifact_ids" not in metadata
+    return metadata.get("source_context_omitted") is not True and isinstance(context_hash, str) and bool(context_hash)
+
+
+def _review_publication(project, reviewed, sources, recorded, exact_sources, parent_snapshot_id):
+    metadata = {
+        "source_snapshot_ids": sources,
+        **{key: sources.get(stage) for stage, key in _SOURCE_SNAPSHOT_KEYS.items()},
+        "source_test_cases_snapshot_id": parent_snapshot_id,
+        "approved": reviewed["approved"],
+    }
+    if exact_sources:
+        matched_metadata = {**recorded, **metadata}
+        proof = build_suite_design_proof(project, reviewed, matched_metadata, plan_snapshot_id=sources["use_cases"])
+        if proof is not None:
+            return matched_metadata, proof
+    if recorded:
+        metadata["reviewed_suite_source_provenance"] = recorded
+    return metadata, None
 
 
 def _review_payload(payload, requirements, plans, analysis, context, *, progress):
@@ -149,6 +210,8 @@ def _generated_review_context(suite, context):
         artifact_ids = suite.metadata.get("source_context_artifact_ids")
         grounded = context.grounded_context
         if grounded and artifact_ids is not None:
+            if not isinstance(artifact_ids, list) or not all(isinstance(item, str) for item in artifact_ids):
+                raise HTTPException(409, "The original generation Context cannot be matched to the saved sources. Analyze their impact before reviewing.")
             selected = set(artifact_ids)
             grounded = grounded.model_copy(
                 update={
@@ -246,6 +309,9 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
 
     requirements, plans, analysis, context, sources = _current_review_inputs(project, current)
     original = get_project_stage_snapshot(project_id, snapshot_id, actor=actor)
+    _require_recorded_scope(original, requirements)
+    recorded = {key: original.metadata[key] for key in _RECORDED_SOURCE_FIELDS if key in original.metadata}
+    exact_sources = _recorded_sources_match(recorded, sources)
     admission = None
     if client is not None:
         if enabled("skills", "test_cases") or enabled("memory", "test_cases"):
@@ -276,10 +342,17 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         review_scope = nullcontext()
         if generated_retry:
             review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id, memory_bypass=admission is not None)
+        elif exact_sources:
+            try:
+                context = _generated_review_context(original, context)
+            except HTTPException:
+                # Older supported operations can still use the existing assessment path.
+                exact_sources = False
         run_id = start_workflow_run(operation=REVIEW_OPERATION, actor=actor, request_id=request_id, metadata={"source_snapshot_id": snapshot_id})
         model_scope = bounded_model_requests(admission.reserve) if admission is not None else nullcontext()
         with review_scope, model_scope:
             reviewed = _review_payload(original.payload, requirements, plans, analysis, context, progress=progress)
+            metadata, proof = _review_publication(project, reviewed, sources, recorded, exact_sources, original.snapshot_id)
             append_stage_snapshot(
                 project_id=project_id,
                 stage="test_cases",
@@ -291,16 +364,11 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
                 approved=reviewed["approved"],
                 source_snapshot_id=snapshot_id,
                 title="Saved test suite reviewed",
-                metadata={
-                    "source_snapshot_ids": sources,
-                    "source_requirements_snapshot_id": sources["requirements"],
-                    "source_context_snapshot_id": sources.get("context"),
-                    "source_use_case_snapshot_id": sources["use_cases"],
-                    "approved": reviewed["approved"],
-                },
+                metadata=metadata,
                 base_project_revision=base_project_revision,
                 idempotency_key=admission.operation_id if admission is not None else None,
                 transaction_guard=publish_review,
+                suite_design_proof=proof,
             )
     except Exception:
         if admission is not None:

@@ -22,6 +22,7 @@ from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.models import AuthUser, EnrichInput, GenerateTestCasesResponse, TestCase, TestStep
 from app.config import GenerationSettings, Settings
+from app.contracts.requirements import RequirementCoveragePlan
 from copy import deepcopy
 from fastapi import HTTPException
 import httpx
@@ -898,18 +899,109 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             request_id="review-test",
         )
 
-    def _generated_suite_pending_review(self):
+    def _generated_suite_pending_review(self, *, provenance=None):
         project = self._seed_project()
         project_path = f"qa_projects/{project.project_id}"
         use_cases = project.current_snapshots["use_cases"]
-        self.store[project_path]["stage_state"]["use_cases"]["metadata"]["latest_human_review"] = {
+        context_snapshot = None
+        if provenance == "selected":
+            context_snapshot = append_stage_snapshot(
+                project_id=project.project_id,
+                stage="context",
+                payload={
+                    "notes": "Review saved checkout behavior.",
+                    "diagram_links": [],
+                    "image_links": [],
+                    "grounded_context": {
+                        "artifact_sources": [{"id": "kept", "label": "Checkout"}, {"id": "removed", "label": "Admin"}],
+                        "ui_elements": [
+                            {"id": "checkout", "source_id": "kept", "name": "Checkout", "description": "Submit an order"},
+                            {"id": "settings", "source_id": "removed", "name": "Settings", "description": "Open admin settings"},
+                        ],
+                    },
+                },
+                operation="requirements.enrich",
+                actor=self.actor,
+                request_id="proof-context",
+                approved=True,
+            )
+        if provenance:
+            requirements_id = project.current_snapshots["requirements"].snapshot_id
+            use_cases = append_stage_snapshot(
+                project_id=project.project_id,
+                stage="use_cases",
+                payload=use_cases.payload,
+                operation="use_cases.generate",
+                actor=self.actor,
+                request_id="proof-plan",
+                approved=True,
+                source_snapshot_id=requirements_id,
+                metadata={
+                    "source_requirements_snapshot_id": requirements_id,
+                    **({"source_context_snapshot_id": context_snapshot.snapshot_id} if context_snapshot else {"source_context_omitted": True}),
+                },
+            )
+        human_review = {
             "snapshot_id": use_cases.snapshot_id,
             "decision": "approve",
         }
+        if provenance:
+            human_review.update(review_id="proof-scenario-review", reviewer_user_id=self.actor.sub, resulting_project_revision=use_cases.project_revision)
+        self.store[project_path]["stage_state"]["use_cases"]["metadata"]["latest_human_review"] = human_review
+        project = get_project(project.project_id, actor=self.actor)
+        requirements = approved_generation_requirements(project)
         reason = "Independent assessment provider unavailable; review is required."
         rows = deepcopy(project.current_snapshots["test_cases"].payload["test_cases"])
         for row in rows:
             row.update(preconditions="Open the provisioned fixture.", expected_result="The recorded result is displayed.")
+        metadata = {
+            "source_snapshot_ids": {stage: project.current_snapshots[stage].snapshot_id for stage in ("requirements", "use_cases")},
+            "source_requirement_hashes": {row.id: case_source_hash(row.model_dump(mode="json")) for row in requirements},
+            "source_context_hash": None,
+        }
+        if provenance:
+            rows[0]["steps"][0]["test_data"] = "  QA–ß  "
+            rows[1]["steps"][0]["test_data"] = ""
+            rows.append(
+                {
+                    **deepcopy(rows[0]),
+                    "id": "TC-RETIRED",
+                    "status": "Deprecated",
+                    "artifact_item_id": "tc-item-retired",
+                    "artifact_version_id": "tc-version-retired",
+                }
+            )
+            metadata.update(
+                source_requirements_snapshot_id=requirements_id,
+                source_use_case_snapshot_id=use_cases.snapshot_id,
+                generation_base_project_revision=project.current_revision,
+                source_use_case_hashes={
+                    scenario.id: case_source_hash(scenario.model_dump(mode="json"))
+                    for group in use_cases.payload["coverage_plan"]
+                    for scenario in RequirementCoveragePlan.model_validate(group).scenarios
+                },
+            )
+            if context_snapshot:
+                context = EnrichInput.model_validate(
+                    {
+                        **context_snapshot.payload,
+                        "requirements": requirements,
+                        "project_id": project.project_id,
+                        "base_project_revision": project.current_revision,
+                        "diagram_links": None,
+                        "image_links": None,
+                    }
+                )
+                context.grounded_context.artifact_sources = context.grounded_context.artifact_sources[:1]
+                context.grounded_context.ui_elements = context.grounded_context.ui_elements[:1]
+                metadata["source_snapshot_ids"]["context"] = context_snapshot.snapshot_id
+                metadata.update(
+                    source_context_snapshot_id=context_snapshot.snapshot_id,
+                    source_context_hash=case_source_hash(context.model_dump(mode="json")),
+                    source_context_artifact_ids=["kept"],
+                )
+            else:
+                metadata["source_context_omitted"] = True
         snapshot = append_stage_snapshot(
             project_id=project.project_id,
             stage="test_cases",
@@ -926,11 +1018,7 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             actor=self.actor,
             request_id="original-generation",
             source_snapshot_id=use_cases.snapshot_id,
-            metadata={
-                "source_snapshot_ids": {stage: project.current_snapshots[stage].snapshot_id for stage in ("requirements", "use_cases")},
-                "source_requirement_hashes": {row.id: case_source_hash(row.model_dump(mode="json")) for row in approved_generation_requirements(project)},
-                "source_context_hash": None,
-            },
+            metadata=metadata,
             base_project_revision=project.current_revision,
         )
         return get_project(project.project_id, actor=self.actor), f"{project_path}/snapshots/{snapshot.snapshot_id}"
@@ -1041,6 +1129,57 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             patch.object(suite_review, "get_settings", return_value=self.model_settings) as settings,
         ):
             yield settings
+
+    def test_saved_suite_reassessment_publishes_exact_proof_without_rewriting_cases(self):
+        for provenance in ("absent", "selected"):
+            with self.subTest(provenance=provenance):
+                project, original_path = self._generated_suite_pending_review(provenance=provenance)
+                original = deepcopy(self.store[original_path])
+                assessments = []
+
+                def critic(settings, prompt, **kwargs):
+                    data, output = critic_output(prompt)
+                    assessments.append(data)
+                    return json.dumps(output)
+
+                with self._mock_grouped_suite_review(critic):
+                    result = self._review_saved_suite(project)
+                    count = len(assessments)
+                    self.assertEqual(self._review_saved_suite(project).current_revision, result.current_revision)
+                    self.assertEqual(len(assessments), count)
+
+                self.assertGreater(count, 0)
+                for assessed in assessments:
+                    self.assertNotIn("TC-RETIRED", {row["id"] for row in assessed["test_cases"]})
+                    if provenance == "selected":
+                        self.assertEqual([source["id"] for source in assessed["context"]["grounded_context"]["artifact_sources"]], ["kept"])
+                    else:
+                        self.assertIsNone(assessed.get("context"))
+                snapshot = result.current_snapshots["test_cases"]
+                published = self.store[f"qa_projects/{project.project_id}/snapshots/{snapshot.snapshot_id}"]
+                proof = published["metadata"]["suite_design_proof"]
+                self.assertEqual(proof["suite_snapshot_id"], snapshot.snapshot_id)
+                self.assertEqual(proof["scenario_snapshot_id"], project.current_snapshots["use_cases"].snapshot_id)
+                self.assertEqual(proof["scenario_review_id"], "proof-scenario-review")
+                self.assertEqual(result.suite_quality.source_freshness, "current")
+                self.assertEqual(result.suite_quality.design_status, "complete")
+                self.assertEqual(result.suite_quality.human_acceptance, "unavailable")
+                self.assertEqual(result.suite_quality.deprecated_case_count, 1)
+                self.assertEqual(snapshot.source_snapshot_id, original["snapshot_id"])
+                self.assertEqual(snapshot.metadata["source_test_cases_snapshot_id"], original["snapshot_id"])
+                for key in (
+                    "source_requirement_hashes",
+                    "source_use_case_hashes",
+                    "source_context_hash",
+                    "source_context_artifact_ids",
+                    "source_context_omitted",
+                ):
+                    self.assertEqual(snapshot.metadata.get(key), original["metadata"].get(key))
+                self.assertEqual(published["payload"]["test_cases"], original["payload"]["test_cases"])
+                self.assertEqual(published["payload"]["test_cases"][0]["steps"][0]["test_data"], "  QA–ß  ")
+                self.assertEqual(published["payload"]["test_cases"][1]["steps"][0]["test_data"], "")
+                self.assertEqual(self.store[original_path], original)
+        self.generator.assert_not_called()
 
     def test_saved_suite_grouped_review_publishes_verified_gaps_but_not_an_unavailable_review(self):
         project, path = self._generated_suite_pending_review()
@@ -1302,7 +1441,11 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                     self.assertTrue(snapshot.approved)
                     self.assertEqual(snapshot.source_snapshot_id, draft.snapshot_id)
                     self.assertEqual(snapshot.payload["test_cases"], draft.payload["test_cases"])
-                    self.assertEqual(snapshot.payload["generation_evidence"], draft.payload["generation_evidence"])
+                    evidence = dict(snapshot.payload["generation_evidence"])
+                    precheck = evidence.pop("design_precheck")
+                    self.assertTrue(precheck["passed"])
+                    self.assertEqual(precheck["assessment_input_hash"], snapshot.payload["substantive_assessment"]["input_hash"])
+                    self.assertEqual(evidence, {key: value for key, value in draft.payload["generation_evidence"].items() if key != "design_precheck"})
                     self.assertNotIn(progress_path, self.store)
                     self.assertFalse(any(key.startswith(("test_case_sets/", "usage_events/")) for key in self.store))
 
@@ -1458,6 +1601,17 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(self.store[path], saved)
         self.assertEqual(get_project(project.project_id, actor=self.actor).current_snapshots["test_cases"].snapshot_id, saved["snapshot_id"])
 
+    def test_saved_suite_review_rejects_recorded_narrower_scope_before_independent_review(self):
+        project, path = self._suite_pending_review()
+        self.store[path]["payload"]["coverage_plan"].pop()
+        with patch.object(suite_review, "assess_delivered_suite") as critic:
+            with self.assertRaises(HTTPException) as rejected:
+                self._review_saved_suite(project)
+        self.assertEqual(rejected.exception.status_code, 409)
+        self.assertIn("narrower requirement scope", rejected.exception.detail)
+        critic.assert_not_called()
+        self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+
     def test_corrected_suite_can_be_reviewed_after_current_use_cases_are_approved(self):
         project, _ = self._suite_pending_review()
         context = append_stage_snapshot(
@@ -1475,7 +1629,11 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             operation="quality.feedback.apply",
             actor=self.actor,
             request_id="correction",
-            metadata={"source_context_snapshot_id": context.snapshot_id},
+            metadata={
+                "source_context_snapshot_id": context.snapshot_id,
+                "source_use_case_snapshot_id": project.current_snapshots["use_cases"].snapshot_id,
+                "source_context_hash": "older-generation-context",
+            },
         )
         with patch.object(suite_review, "assess_delivered_suite") as critic:
             with self.assertRaises(HTTPException) as upstream:
@@ -1505,7 +1663,13 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(critic.call_args.args[2].notes, "The test fixture has been provisioned.")
         self.assertTrue(updated.stage_state["test_cases"].approved)
         self.assertFalse(updated.stage_state["test_cases"].stale)
-        self.assertEqual(updated.current_snapshots["test_cases"].payload["test_cases"], corrected.payload["test_cases"])
+        reassessed = updated.current_snapshots["test_cases"]
+        self.assertEqual(reassessed.payload["test_cases"], corrected.payload["test_cases"])
+        self.assertEqual(reassessed.metadata["source_use_case_snapshot_id"], plan.snapshot_id)
+        self.assertEqual(reassessed.metadata["source_context_snapshot_id"], context.snapshot_id)
+        self.assertEqual(reassessed.metadata["reviewed_suite_source_provenance"], corrected.metadata)
+        self.assertNotIn("source_context_hash", reassessed.metadata)
+        self.assertNotIn("suite_design_proof", reassessed.metadata)
 
     def test_owner_archived_unapproved_and_stale_inputs_stop_before_generation(self):
         project = self._seed_project(modified={"REQ-003"})
