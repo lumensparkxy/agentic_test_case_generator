@@ -19,6 +19,7 @@ import {
 	matchesWorkspaceQuery,
 	normalizeWorkspaceList,
 } from "../components/workspace/workspacePresentation";
+import { getSavedFileReportId } from "../app/savedFileReportLinks";
 
 const optionFromValue = (value, formatter = (item) => item) => ({ value, label: formatter(value) });
 const formatReportFormat = (value) => (/^[a-z0-9]{1,8}$/i.test(`${value || ""}`) ? `${value}`.toUpperCase() : value);
@@ -60,6 +61,7 @@ function ReportRow({ report, onOpenProject }) {
 			<ProjectOpenLink
 				projectId={report.project_id}
 				destination={PROJECT_DESTINATIONS.REPORTS}
+				fileReportId={getSavedFileReportId(report.operation, report.report_id)}
 				onOpenProject={onOpenProject}
 				className="workspace-open-link activity-index-open-link"
 				ariaLabel={`Open report evidence for ${report.project_name || "project"}`}

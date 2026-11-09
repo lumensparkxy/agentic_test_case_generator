@@ -65,6 +65,13 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "ProjectExecutionRunResponse",
     ),
     SelectedOperation(
+        "projectSavedFileReport",
+        "get",
+        "/projects/{project_id}/reports/{report_id}",
+        "ProjectSavedFileReportRequest",
+        "ProjectSavedFileReportResponse",
+    ),
+    SelectedOperation(
         "projectExecutionRequest",
         "get",
         "/projects/{project_id}/execution-requests/{request_id}",

@@ -22,6 +22,7 @@ export interface ApiContractOperations {
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
 	projectTestCaseEvidence: ApiOperation<ProjectTestCaseEvidenceRequest, ProjectTestCaseEvidenceResponse, "GET", "/projects/{project_id}/test-case-evidence">;
 	projectExecutionRun: ApiOperation<ProjectExecutionRunRequest, ProjectExecutionRunResponse, "GET", "/projects/{project_id}/execution-runs/{run_record_id}">;
+	projectSavedFileReport: ApiOperation<ProjectSavedFileReportRequest, ProjectSavedFileReportResponse, "GET", "/projects/{project_id}/reports/{report_id}">;
 	projectExecutionRequest: ApiOperation<ProjectExecutionRequest, ProjectExecutionRequestResponse, "GET", "/projects/{project_id}/execution-requests/{request_id}">;
 	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
@@ -104,6 +105,8 @@ export type ProjectTestCaseEvidenceRequest = {
 export type ProjectTestCaseEvidenceResponse = QaProjectTestCaseEvidence;
 export type ProjectExecutionRunRequest = undefined;
 export type ProjectExecutionRunResponse = QaProjectExecutionRunDetail;
+export type ProjectSavedFileReportRequest = undefined;
+export type ProjectSavedFileReportResponse = SavedFileReport;
 export type ProjectExecutionRequest = undefined;
 export type ProjectExecutionRequestResponse = ExecutionRequestReceipt;
 export type ProjectOrchestratorStatusRequest = undefined;
@@ -374,6 +377,26 @@ export interface BusinessRule {
 	requirement_id: string;
 	rule_type?: "Business" | "Validation" | "Authorization" | "State Transition" | "Integration" | "Notification" | "Data" | "Constraint" | "Other";
 	title: string;
+}
+
+export interface DesignDeliveryEvidence {
+	active_case_count: number;
+	declared_setup: "blocked" | "not_assessed" | "unknown";
+	deferred_requirement_ids: Array<string>;
+	delivery_kind?: "reviewed_design";
+	deprecated_case_count: number;
+	design_status?: "complete";
+	excluded_requirement_ids: Array<string>;
+	human_acceptance: "approved" | "unavailable";
+	legacy_approved: boolean;
+	required_requirement_ids: Array<string>;
+	scenario_decision?: "approved";
+	scenario_review_id: string;
+	scenario_snapshot_id: string;
+	schema_version?: 1;
+	source_freshness?: "current";
+	suite_snapshot_id: string;
+	target_readiness?: "unknown";
 }
 
 export interface EnrichInput {
@@ -1259,6 +1282,39 @@ export interface RolePermission {
 	id: string;
 	requirement_id: string;
 	role: string;
+}
+
+export interface SavedFileReport {
+	created_at: string;
+	delivery_kind: "reviewed_design" | "approved" | "draft" | "unknown";
+	evidence: SavedFileReportEvidence | null;
+	format: "json" | "csv" | "excel";
+	historical: boolean;
+	legacy_approved: boolean | null;
+	project_id: string;
+	project_revision: number;
+	report_id: string;
+	stale: boolean;
+}
+
+export interface SavedFileReportCaseVersion {
+	case_id: string;
+	case_version_id: string;
+	case_version_number: number;
+}
+
+export interface SavedFileReportEvidence {
+	case_versions: Array<SavedFileReportCaseVersion>;
+	design_delivery: DesignDeliveryEvidence | null;
+	draft_override_reason: string | null;
+	execution_run_ids: Array<string>;
+	execution_status: string;
+	exported_at: string;
+	human_review_status: "approved" | "changes_requested" | "unavailable";
+	machine_review_status: "approved" | "failed" | "unavailable";
+	requirement_ids: Array<string>;
+	source_snapshot_ids: Record<string, string>;
+	suite_snapshot_id: string | null;
 }
 
 export interface SavedReviewAdmissionView {

@@ -52,6 +52,7 @@ import {
 	UseCaseReviewPage,
 } from "./app/workspaceModules";
 import { readSavedCaseLink, readSavedCaseStep } from "./app/savedCaseLinks";
+import { readSavedFileReportLink } from "./app/savedFileReportLinks";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -318,6 +319,8 @@ export default function App() {
 	const savedCaseLink =
 		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.TEST_CASES ? readSavedCaseLink(location.search) : null;
 	const viewingSavedCase = Boolean(savedCaseLink);
+	const savedFileReportLink =
+		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.REPORTS ? readSavedFileReportLink(location.search) : null;
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
@@ -1797,7 +1800,8 @@ export default function App() {
 		if (!main || main.dataset.workspaceModulePending) return;
 		const active = document.activeElement;
 		const caseFocus = keepPriorityCaseFocus.current && active?.closest("#selected-test-case");
-		const evidenceFocus = active?.matches("[id^='saved-case-step-'], #quality-feedback-heading") && main.contains(active);
+		const evidenceFocus =
+			active?.matches("[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading") && main.contains(active);
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
 			if (document.activeElement === main) main.blur();
@@ -5437,32 +5441,34 @@ export default function App() {
 										/>
 									)}
 
-								<OrchestratorCockpitPanel
-									currentProject={currentProject}
-									status={orchestratorStatus}
-									currentDestination={route.destination}
-									hasTestCases={hasExistingTestCaseBaseline}
-									hidden={
-										viewingSavedCase ||
-										(route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2) ||
-										(requirementsRoute && Boolean(imports.preview)) ||
-										inputsSources
-									}
-									compact={compactReview}
-									hidePrimary={Boolean(
-										reviewPendingRequirementCount &&
-										requirementReviewTask?.action === "approve" &&
-										requirementReviewTask.enabled &&
-										!requirementReviewTask.blockers?.length
-									)}
-									isLoading={isLoadingOrchestrator}
-									error={orchestratorError}
-									authActionDisabled={authActionDisabled}
-									actionBusy={orchestratorActionBusy}
-									actionDisabled={orchestratorActionDisabled}
-									focusFallbackRef={workflowMainRef}
-									onAction={handleOrchestratorAction}
-								/>
+								{!savedFileReportLink && (
+									<OrchestratorCockpitPanel
+										currentProject={currentProject}
+										status={orchestratorStatus}
+										currentDestination={route.destination}
+										hasTestCases={hasExistingTestCaseBaseline}
+										hidden={
+											viewingSavedCase ||
+											(route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2) ||
+											(requirementsRoute && Boolean(imports.preview)) ||
+											inputsSources
+										}
+										compact={compactReview}
+										hidePrimary={Boolean(
+											reviewPendingRequirementCount &&
+											requirementReviewTask?.action === "approve" &&
+											requirementReviewTask.enabled &&
+											!requirementReviewTask.blockers?.length
+										)}
+										isLoading={isLoadingOrchestrator}
+										error={orchestratorError}
+										authActionDisabled={authActionDisabled}
+										actionBusy={orchestratorActionBusy}
+										actionDisabled={orchestratorActionDisabled}
+										focusFallbackRef={workflowMainRef}
+										onAction={handleOrchestratorAction}
+									/>
+								)}
 
 								<div className={inputsSources && !imports.preview ? "tab-content project-intake" : "tab-content"}>
 									{activeTab === 0 && !reviewScope && (
@@ -6761,6 +6767,8 @@ export default function App() {
 											suiteQualitySummary={suiteQualitySummary}
 											reviewedDesignAvailable={reviewedDesignAvailable}
 											currentProject={currentProject}
+											accountId={currentUser?.sub || ""}
+											savedFileReportLink={savedFileReportLink}
 											location={location}
 											navigate={navigate}
 											request={apiRequest}

@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from google.api_core.exceptions import ServiceUnavailable
 from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -28,7 +29,7 @@ from app.services.suite_quality import build_suite_design_proof, reviewed_case_c
 from app.services.test_case_quality import case_source_hash
 from app.services.workflow_project_service import ProjectPermissionError
 from test_suite_quality import fixture as suite_quality_fixture
-from test_use_case_review_service import FakeFirestoreClient, _run_transaction
+from test_use_case_review_service import FakeDocument, FakeFirestoreClient, _run_transaction
 
 
 def _test_case():
@@ -406,6 +407,9 @@ class ExportPublicationTests(unittest.TestCase):
 
     def post(self, fmt="json", *, request_id="export", **changes):
         return self.http.post(f"/export/{fmt}", headers={"X-Request-ID": request_id}, json={**self.input, **changes})
+
+    def read_report(self, report_id):
+        return self.http.get(f"/projects/{self.project_id}/reports/{report_id}")
 
     def audit(self, collection):
         return [value for path, value in self.store.items() if path.startswith(f"{collection}/")]
@@ -961,6 +965,175 @@ class ExportPublicationTests(unittest.TestCase):
             render.assert_not_called()
         self.assertFalse(self.audit("usage_events"))
         self.assertFalse(self.audit("workflow_runs"))
+
+    def test_saved_reports_keep_original_decisions_and_case_versions_after_archive(self):
+        self.seed_reviewed_design()
+        original_suite = self.suite
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+            result = self.post("excel", request_id="original-design", delivery_intent="reviewed_design")
+        self.assertEqual(result.status_code, 200, result.text)
+        original_report = self.project().current_snapshots["reports"]
+        first_read = self.read_report(original_report.snapshot_id)
+        self.assertEqual(first_read.status_code, 200, first_read.text)
+        original = first_read.json()
+        evidence = original["evidence"]
+        self.assertEqual((original["format"], original["delivery_kind"], original["legacy_approved"]), ("excel", "reviewed_design", False))
+        self.assertEqual(original["project_revision"], original_report.project_revision)
+        self.assertEqual(evidence["suite_snapshot_id"], original_suite.snapshot_id)
+        self.assertEqual(evidence["requirement_ids"], ["REQ-1", "REQ-2", "REQ-3"])
+        self.assertEqual(evidence["design_delivery"]["scenario_decision"], "approved")
+        self.assertEqual(evidence["design_delivery"]["declared_setup"], "blocked")
+        self.assertEqual(evidence["execution_status"], "not_executed")
+        self.assertEqual(evidence["case_versions"][0], {"case_id": "TC-1", "case_version_id": "version-1", "case_version_number": 1})
+
+        payload = deepcopy(original_suite.payload)
+        payload["test_cases"][0].update(artifact_version_id="later-version", artifact_version_number=2, title="Updated checkout case")
+        later_suite = self.save("test_cases", payload, approved=False, metadata=original_suite.metadata)
+        self.assertTrue(self.read_report(original_report.snapshot_id).json()["stale"])
+        reason = "Checkout operator account is pending."
+        result = self.post(
+            "csv",
+            request_id="newer-draft",
+            base_project_revision=self.project().current_revision,
+            test_cases=later_suite.payload["test_cases"],
+            source_snapshot_id=later_suite.snapshot_id,
+            draft_override_requested=True,
+            draft_override_reason=reason,
+        )
+        self.assertEqual(result.status_code, 200, result.text)
+        later_report = self.project().current_snapshots["reports"]
+        self.save("requirements", {"requirements": [{"id": "REQ-OTHER", "text": "Later source"}]}, approved=False)
+        projects.update_project(project_id=self.project_id, actor=self.actor, request_id="archive", status_value="archived")
+        before = deepcopy(self.store)
+        transactions = len(self.firestore.transactions)
+        with (
+            patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}),
+            patch.object(routes, "build_export_evidence", side_effect=AssertionError("Historical read cannot rebuild an export")),
+            patch.object(routes, "export_to_excel", side_effect=AssertionError("Historical read cannot render a file")),
+        ):
+            for _ in range(2):
+                response = self.read_report(original_report.snapshot_id)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), {**original, "historical": True, "stale": False})
+            draft_response = self.read_report(later_report.snapshot_id)
+            self.assertEqual(draft_response.status_code, 200, draft_response.text)
+            draft = draft_response.json()
+            self.assertEqual((draft["delivery_kind"], draft["historical"], draft["stale"]), ("draft", False, True))
+            self.assertEqual(draft["evidence"]["draft_override_reason"], reason)
+            self.assertEqual(draft["evidence"]["case_versions"][0]["case_version_id"], "later-version")
+            case = self.http.get(
+                f"/projects/{self.project_id}/test-case-evidence",
+                params={"snapshot_id": evidence["suite_snapshot_id"], "case_id": evidence["case_versions"][0]["case_id"]},
+            )
+            self.assertEqual(case.status_code, 200, case.text)
+            self.assertEqual(case.json()["test_case"]["artifact_version_id"], "version-1")
+        self.assertEqual(self.store, before)
+        self.assertEqual(len(self.firestore.transactions), transactions)
+
+    def test_saved_report_sparse_header_and_exact_operation_identity(self):
+        report = self.save("reports", {}, operation="export.csv")
+        path = f"qa_projects/{self.project_id}/snapshots/{report.snapshot_id}"
+        self.store[path].pop("approved")
+        original = deepcopy(self.store[path])
+        sparse = self.read_report(report.snapshot_id)
+        self.assertEqual(sparse.status_code, 200, sparse.text)
+        data = sparse.json()
+        self.assertEqual((data["format"], data["delivery_kind"], data["legacy_approved"], data["evidence"]), ("csv", "unknown", None, None))
+        self.assertEqual(self.read_report("missing-report").status_code, 404)
+        self.assertEqual(self.read_report(self.suite.snapshot_id).status_code, 404)
+        self.assertEqual(self.read_report("a" * 161).status_code, 422)
+        for mismatch in (
+            {"operation": "reports.execution_summary"},
+            {"operation": "export.jira"},
+            {"project_id": "different-project"},
+            {"snapshot_id": "different-snapshot"},
+            {"payload": {"source": "execution"}},
+            {"payload": {"format": "json"}},
+            {"metadata": {"format": "excel"}},
+        ):
+            with self.subTest(mismatch=mismatch):
+                self.store[path] = {**original, **mismatch}
+                self.assertEqual(self.read_report(report.snapshot_id).status_code, 404)
+        self.store[path] = original
+        self.actor = AuthUser(sub="foreign-report-reader", name="Foreign user")
+        self.assertEqual(self.read_report(report.snapshot_id).status_code, 403)
+
+    def test_saved_report_fails_closed_on_conflicting_sources_and_case_versions(self):
+        self.seed_reviewed_design()
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+            published = self.post(delivery_intent="reviewed_design")
+        self.assertEqual(published.status_code, 200, published.text)
+        report = self.project().current_snapshots["reports"]
+        report_path = f"qa_projects/{self.project_id}/snapshots/{report.snapshot_id}"
+        suite_path = f"qa_projects/{self.project_id}/snapshots/{self.suite.snapshot_id}"
+        source_id = self.suite.metadata["source_requirements_snapshot_id"]
+        source_path = f"qa_projects/{self.project_id}/snapshots/{source_id}"
+
+        saved_suite = deepcopy(self.store[suite_path])
+        self.store[suite_path]["payload"]["test_cases"][0]["artifact_version_number"] = 2
+        mismatched = self.read_report(report.snapshot_id).json()
+        self.assertEqual(mismatched["evidence"]["case_versions"], [])
+        self.store[suite_path] = saved_suite
+        original_source = self.store.pop(source_path)
+        self.assertIsNone(self.read_report(report.snapshot_id).json()["evidence"])
+        self.store[source_path] = {**original_source, "project_id": "foreign-project"}
+        self.assertIsNone(self.read_report(report.snapshot_id).json()["evidence"])
+        self.store[source_path] = original_source
+
+        self.store[report_path]["payload"]["audit_metadata"]["case_versions"][0]["artifact_version_id"] = "unverified-version"
+        bad_audit = self.read_report(report.snapshot_id)
+        self.assertEqual(bad_audit.status_code, 200, bad_audit.text)
+        self.assertIsNone(bad_audit.json()["evidence"])
+
+    def test_saved_report_read_outage_is_retryable_and_approved_files_remain_distinct(self):
+        execution = self.save(
+            "execution",
+            {"run_id": "browser-run-original", "results": []},
+            operation="automation.execution.run",
+            source_snapshot_id=self.suite.snapshot_id,
+        )
+        run = projects.record_execution_run(
+            project_id=self.project_id,
+            actor=self.actor,
+            request_id="browser-run-request",
+            run_id=execution.payload["run_id"],
+            target_environment="local",
+            status_value="failed",
+            summary={},
+            test_case_count=1,
+            snapshot_id=execution.snapshot_id,
+            workflow_run_id=None,
+            source_event_id=None,
+            source_snapshot_id=self.suite.snapshot_id,
+            project_revision=execution.project_revision,
+        )
+        result = self.post(base_project_revision=execution.project_revision)
+        self.assertEqual(result.status_code, 200, result.text)
+        report = self.project().current_snapshots["reports"]
+        normal_get = FakeDocument.get
+        for affected in (report.snapshot_id, self.suite.snapshot_id):
+
+            def unavailable(document, **kwargs):
+                if document.id == affected:
+                    raise ServiceUnavailable("Temporary report storage outage")
+                return normal_get(document, **kwargs)
+
+            with self.subTest(affected=affected), patch.object(FakeDocument, "get", unavailable):
+                failed = self.read_report(report.snapshot_id)
+                self.assertEqual(failed.status_code, 503, failed.text)
+        recovered = self.read_report(report.snapshot_id)
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        self.assertEqual(recovered.json()["delivery_kind"], "approved")
+        self.assertIs(recovered.json()["legacy_approved"], True)
+        evidence = recovered.json()["evidence"]
+        self.assertEqual(evidence["requirement_ids"], ["REQ-001"])
+        self.assertEqual(evidence["case_versions"], [])
+        self.assertEqual(evidence["execution_status"], "failed")
+        self.assertEqual(evidence["execution_run_ids"], [run.run_id])
+        self.assertEqual(evidence["source_snapshot_ids"]["execution"], execution.snapshot_id)
+        linked_run = self.http.get(f"/projects/{self.project_id}/execution-runs/{run.run_record_id}")
+        self.assertEqual(linked_run.status_code, 200, linked_run.text)
+        self.assertEqual(linked_run.json()["run_id"], run.run_id)
 
 
 class ExcelExportValueTests(unittest.TestCase):

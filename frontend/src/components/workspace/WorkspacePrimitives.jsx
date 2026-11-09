@@ -4,6 +4,7 @@ import { CollectionState } from "../ui/collections";
 import { AlertCircle, ArrowRight, RotateCcw, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
 
+import { buildSavedFileReportPath } from "../../app/savedFileReportLinks";
 import { formatWorkspaceStatus, getProjectPath, getWorkspaceStatusTone } from "./workspacePresentation";
 
 const isPlainPrimaryClick = (event) =>
@@ -84,6 +85,7 @@ export function ProjectOpenLink({
 	projectId,
 	destination,
 	runRecordId,
+	fileReportId,
 	onOpenProject,
 	children,
 	className = "workspace-open-link",
@@ -97,7 +99,11 @@ export function ProjectOpenLink({
 		);
 	}
 	const projectPath = getProjectPath(projectId, destination);
-	const path = runRecordId ? `${projectPath}?run=${encodeURIComponent(runRecordId)}` : projectPath;
+	const path = runRecordId
+		? `${projectPath}?run=${encodeURIComponent(runRecordId)}`
+		: fileReportId
+			? buildSavedFileReportPath(projectId, fileReportId)
+			: projectPath;
 	return (
 		<Link
 			href={path}

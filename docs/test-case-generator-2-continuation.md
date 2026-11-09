@@ -525,8 +525,8 @@ scenario snapshot. The original drafts and versions remain readable.
 Rebind publishes both successors and one receipt in the same transaction
 and uses no provider. A separate saved review uses the accepted decision
 and verifies both the rebind and original stage receipts. P5f groups exact
-saved findings by requirement and behavior under
-[#485](https://github.com/lumensparkxy/agentic_test_case_generator/issues/485).
+saved findings by requirement and behavior (head `117ede9`,
+[PR #486](https://github.com/lumensparkxy/agentic_test_case_generator/pull/486)).
 Separate source quotes and case steps stay visible. Verified citations
 open and focus the exact saved step. Unverified evidence, structural
 blockers, setup and classified project findings retain distinct paths.
@@ -549,8 +549,18 @@ remain open. Controlled local Deliver rehearsal at `acc6dfd` also ran
 one selected authored case against healthy and seeded-fault targets
 through the rendered app and actual Chromium, inspected its exact saved
 case link, and kept Run disabled for zero candidates. That proof is
-separate from model and practitioner gates. Next is opening exact saved file
-reports from Deliver and the activity indexes.
+separate from model and practitioner gates.
+
+P7a opens exact saved file reports under
+[#487](https://github.com/lumensparkxy/agentic_test_case_generator/issues/487).
+Deliver, Reports and Home link to the selected immutable file report.
+Both `/deliver?report=ID` and `/reports?report=ID` resolve the same evidence.
+The owner can inspect recorded decisions and original case versions after
+a newer export, a source edit, archive or a client rollback. The saved
+record retains audit evidence. Exact current file replay remains an export
+operation with its existing policy. Older sparse reports retain their
+recorded header. Next is linking browser setup and failed-run findings
+from the current Deliver task.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

@@ -5,6 +5,7 @@ import { getWorkbenchNavigationLabel } from "../../app/workflowRoutes";
 import { Activity, ClipboardCheck, FileText, FolderKanban, PlayCircle } from "lucide-react";
 
 import { PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
+import { getSavedFileReportId } from "../../app/savedFileReportLinks";
 import {
 	formatWorkItemCount,
 	formatWorkspaceDate,
@@ -245,7 +246,12 @@ function ReportActivity({ report, onOpenProject }) {
 				<p>{report.count == null ? "Report activity" : `${report.count} items included`}</p>
 				<time dateTime={report.updated_at}>{formatWorkspaceDate(report.updated_at)}</time>
 			</div>
-			<ProjectOpenLink projectId={report.project_id} destination={PROJECT_DESTINATIONS.REPORTS} onOpenProject={onOpenProject}>
+			<ProjectOpenLink
+				projectId={report.project_id}
+				destination={PROJECT_DESTINATIONS.REPORTS}
+				fileReportId={getSavedFileReportId(report.operation, report.report_id)}
+				onOpenProject={onOpenProject}
+			>
 				View
 			</ProjectOpenLink>
 		</ListItem>

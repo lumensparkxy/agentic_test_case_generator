@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
 from ..contracts.execution import ExecutionRequestReceipt
+from ..contracts.exports import SavedFileReport
 from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
 from ..contracts.scenario_refresh import ScenarioRefreshRelease, ScenarioRefreshReleased, ScenarioRefreshStatus
 from ..contracts.scoped_impact import ScopedImpactRelease, ScopedImpactReleased, ScopedImpactStatus
@@ -35,6 +36,7 @@ from ..services.impact_update_service import analyze_project_impact, apply_proje
 from ..services.execution_request_service import public_execution_request, read_execution_request
 from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
+from ..services.saved_file_report import REPORT_ID_PATTERN, read_saved_file_report
 from ..services.scoped_impact import release_scoped_impact, scoped_impact_status
 from ..services.selected_case_repair import release_selected_case_repair, repair_selected_case, selected_case_repair_status
 from ..services.test_case_suite_review import review_saved_test_cases
@@ -156,6 +158,18 @@ async def get_qa_project_test_case_evidence(
 ) -> QaProjectTestCaseEvidence:
     try:
         return await run_in_threadpool(get_project_test_case_evidence, project_id, snapshot_id, case_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/reports/{report_id}", response_model=SavedFileReport)
+async def get_qa_project_saved_file_report(
+    project_id: str,
+    report_id: str = Path(pattern=REPORT_ID_PATTERN),
+    current_user: AuthUser = Depends(get_current_user),
+) -> SavedFileReport:
+    try:
+        return await run_in_threadpool(read_saved_file_report, project_id, report_id, actor=current_user)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 

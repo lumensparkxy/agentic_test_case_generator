@@ -87,6 +87,43 @@ class ExportTestCasesDocument(BaseModel):
     audit_metadata: ExportAuditMetadata
 
 
+FileReportFormat = Literal["json", "csv", "excel"]
+FileReportDeliveryKind = Literal["reviewed_design", "approved", "draft", "unknown"]
+
+
+class SavedFileReportCaseVersion(BaseModel):
+    case_id: str
+    case_version_id: str
+    case_version_number: int
+
+
+class SavedFileReportEvidence(BaseModel):
+    source_snapshot_ids: dict[str, str]
+    suite_snapshot_id: str | None
+    exported_at: datetime
+    design_delivery: DesignDeliveryEvidence | None
+    human_review_status: Literal["approved", "changes_requested", "unavailable"]
+    machine_review_status: Literal["approved", "failed", "unavailable"]
+    draft_override_reason: str | None
+    execution_status: str
+    execution_run_ids: list[str]
+    requirement_ids: list[str]
+    case_versions: list[SavedFileReportCaseVersion]
+
+
+class SavedFileReport(BaseModel):
+    project_id: str
+    report_id: str
+    format: FileReportFormat
+    created_at: datetime
+    project_revision: int = Field(strict=True, ge=0)
+    legacy_approved: bool | None
+    delivery_kind: FileReportDeliveryKind
+    historical: bool
+    stale: bool
+    evidence: SavedFileReportEvidence | None
+
+
 __all__ = [
     "JiraExportInput",
     "JiraExportResponse",
@@ -94,4 +131,7 @@ __all__ = [
     "DesignDeliveryEvidence",
     "ExportAuditMetadata",
     "ExportTestCasesDocument",
+    "SavedFileReport",
+    "SavedFileReportEvidence",
+    "SavedFileReportCaseVersion",
 ]

@@ -255,7 +255,7 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(row.getByText(reportId, { exact: true })).toBeVisible();
 		await expect(row.getByRole("link", { name: /Open report evidence for Verified checkout design/i })).toHaveAttribute(
 			"href",
-			/\/projects\/project-use-case-review\/(reports|deliver)$/
+			new RegExp(`/projects/project-use-case-review/(reports|deliver)\\?report=${reportId}$`)
 		);
 		expect(writes).toEqual(["POST /export/json"]);
 		expect(errors).toEqual([]);

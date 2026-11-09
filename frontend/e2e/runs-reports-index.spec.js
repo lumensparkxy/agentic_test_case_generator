@@ -536,7 +536,9 @@ test.describe("Global Runs and Reports indexes", () => {
 			await expect(row).toContainText(new RegExp(`Evidence items\\s*${report.count}`, "i"));
 			await expect(row.getByRole("link", { name: `Open report evidence for ${project.name}` })).toHaveAttribute(
 				"href",
-				buildProjectPath(project.project_id, "reports")
+				report.operation === "export.csv"
+					? `${buildProjectPath(project.project_id, "reports")}?report=${report.report_id}`
+					: buildProjectPath(project.project_id, "reports")
 			);
 			await expect(row.getByRole("time")).toHaveAttribute("datetime", report.updated_at);
 		}

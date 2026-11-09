@@ -1,4 +1,7 @@
 import ExecutionReport from "./ExecutionReport";
+import SavedFileReport from "./SavedFileReport";
+import RouteLink from "../../app/RouteLink";
+import { buildSavedFileReportPath, getSavedFileReportId } from "../../app/savedFileReportLinks";
 import { Surface } from "../ui/surfaces";
 import { Checkbox, Textarea, Button } from "../ui/controls";
 const EXPORT_FORMATS = [
@@ -15,6 +18,8 @@ export default function ExportPanel({
 	suiteQualitySummary,
 	reviewedDesignAvailable,
 	currentProject,
+	accountId,
+	savedFileReportLink,
 	location,
 	navigate,
 	request,
@@ -32,7 +37,20 @@ export default function ExportPanel({
 	exportError,
 	goPrev,
 }) {
-	const runRecordId = new URLSearchParams(location.search).get("run");
+	const projectId = currentProject?.project_id;
+	if (savedFileReportLink && projectId) {
+		return (
+			<SavedFileReport
+				key={JSON.stringify([accountId, projectId, savedFileReportLink.reportId])}
+				projectId={projectId}
+				reportId={savedFileReportLink.reportId}
+				request={request}
+				navigate={navigate}
+			/>
+		);
+	}
+	const runIds = new URLSearchParams(location.search).getAll("run");
+	const runRecordId = runIds.length === 1 ? runIds[0] : "";
 	const exportDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportGateLocked;
 	const executionReport = (
 		<ExecutionReport
@@ -46,19 +64,28 @@ export default function ExportPanel({
 		/>
 	);
 
-	if (runRecordId) {
+	if (runIds.length > 0) {
 		return (
 			<Surface as="section" className="panel">
 				<h2 className="panel-title">Saved execution</h2>
-				{executionReport}
+				{runRecordId ? executionReport : <p role="status">This saved execution is unavailable.</p>}
 			</Surface>
 		);
 	}
+	const reportSnapshot = currentProject?.current_snapshots?.reports;
+	const latestFileReportId = getSavedFileReportId(reportSnapshot?.operation, reportSnapshot?.snapshot_id);
 
 	return (
 		<Surface as="section" className="panel">
 			<h2 className="panel-title">Export Test Cases</h2>
 			<p className="panel-description">Download your generated test cases as CSV, Excel, or JSON.</p>
+			{projectId && latestFileReportId && (
+				<p>
+					<RouteLink to={buildSavedFileReportPath(projectId, latestFileReportId)} navigate={navigate}>
+						Open latest saved file report
+					</RouteLink>
+				</p>
+			)}
 			{suiteQualitySummary}
 			{testCases.length > 0 && (
 				<div className={`export-readiness-card ${exportRequiresOverride ? "locked" : exportReviewApproved ? "approved" : ""}`}>

@@ -1,0 +1,90 @@
+.saved-file-report {
+	max-width: 900px;
+	overflow-wrap: anywhere;
+}
+
+.saved-file-report .ui-link {
+	color: var(--primary-strong);
+}
+
+.saved-file-report-header,
+.saved-file-report-status {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.saved-file-report-header {
+	justify-content: space-between;
+}
+
+.saved-file-report-header .panel-title {
+	margin: 0;
+}
+
+.saved-file-report-header .panel-title:focus-visible {
+	outline: var(--focus-outline);
+	outline-offset: 3px;
+}
+
+.saved-file-report-status {
+	margin-block: 0.75rem;
+}
+
+.saved-file-report-facts {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+	gap: 0.6rem 1rem;
+	margin: 0;
+}
+
+.saved-file-report-facts dt,
+.saved-file-report-cases span {
+	color: var(--text-muted);
+	font-size: var(--font-secondary);
+}
+
+.saved-file-report-facts dd {
+	margin: 0;
+}
+
+.saved-file-report-evidence {
+	border-block-start: 1px solid var(--border-color);
+	margin-block-start: 1rem;
+	padding-block-start: 0.75rem;
+}
+
+.saved-file-report-evidence details {
+	margin-block-start: 0.75rem;
+}
+
+.saved-file-report-evidence summary {
+	cursor: pointer;
+}
+
+.saved-file-report-evidence details > dl {
+	margin-block-start: 0.5rem;
+}
+
+.saved-file-report-reason strong,
+.saved-file-report-reason span {
+	display: block;
+}
+
+.saved-file-report-reason span {
+	white-space: pre-wrap;
+}
+
+.saved-file-report-cases {
+	margin: 0.5rem 0 0;
+	padding-inline-start: 1.2rem;
+}
+
+.saved-file-report-cases li {
+	margin-block: 0.25rem;
+}
+
+.saved-file-report-cases span {
+	margin-inline-start: 0.5rem;
+}
