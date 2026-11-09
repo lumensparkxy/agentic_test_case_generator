@@ -13,7 +13,10 @@ const concrete = {
 	scenario_refs: ["REQ-101-SCN-01"],
 	status: "Ready",
 };
-async function setup(page, { failure = false, gate, reviewGate, reviewUnavailableOnce = false, repeatedTitle = false } = {}) {
+async function setup(
+	page,
+	{ failure = false, gate, reviewGate, reviewUnavailableOnce = false, repeatedTitle = false, generationOutage = false } = {}
+) {
 	let project = useCaseProjectFixture({ reviewState: "approved" });
 	project.current_snapshots.test_cases = {
 		snapshot_id: "tests-old",
@@ -33,6 +36,13 @@ async function setup(page, { failure = false, gate, reviewGate, reviewUnavailabl
 			],
 		},
 	};
+	if (generationOutage) {
+		const snapshot = project.current_snapshots.test_cases;
+		snapshot.operation = "testcases.generate";
+		snapshot.metadata = { review_retry_available: true };
+		snapshot.payload.generation_tasks = [];
+		snapshot.payload.substantive_assessment = { status: "unknown", diagnostics: { failure_reason: "provider_unavailable" } };
+	}
 	project.stage_state.test_cases = { current_snapshot_id: "tests-old", approved: false, stale: false };
 	const api = await installUseCaseReviewApi(page, { initialProject: project });
 	const requests = [];
@@ -119,8 +129,10 @@ async function setup(page, { failure = false, gate, reviewGate, reviewUnavailabl
 		project = structuredClone(project);
 		project.current_revision++;
 		const suite = project.current_snapshots.test_cases;
+		suite.source_snapshot_id = suite.snapshot_id;
 		suite.snapshot_id = "tests-reviewed";
 		suite.operation = "test_cases.review";
+		delete suite.metadata?.review_retry_available;
 		suite.approved = true;
 		suite.payload.approved = true;
 		suite.payload.substantive_assessment = { status: "assessed_complete", design_status: "assessed_complete" };
@@ -131,7 +143,7 @@ async function setup(page, { failure = false, gate, reviewGate, reviewUnavailabl
 	});
 	await seedAuthenticatedSession(page);
 	await page.goto(`${path}/test-cases`);
-	await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
+	if (!generationOutage) await expect(page.getByRole("heading", { name: "1 generation task needs concrete tests" })).toBeVisible();
 	return { requests, reviewRequests, currentRevision: () => project.current_revision };
 }
 
@@ -144,6 +156,29 @@ test("distinguishes repair recommendations with the same title by case ID", { ta
 	await expect(second).not.toBeChecked();
 	await page.getByRole("button", { name: "Apply 1 recommendation", exact: true }).click();
 	await expect.poll(() => requests.map((request) => request.accepted_recommendation_ids)).toEqual([["repair-1"]]);
+});
+
+test("retries a generated suite's unavailable review after reload without regeneration", { tag: "@p1" }, async ({ page }) => {
+	const { requests, reviewRequests, currentRevision } = await setup(page, { generationOutage: true, reviewUnavailableOnce: true });
+	const generationRequests = [];
+	await page.route("**/testcases/generate", (route) => {
+		generationRequests.push(route.request().postDataJSON());
+		return route.abort();
+	});
+	const review = page.getByRole("button", { name: "Review saved suite", exact: true });
+	await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
+	const revision = currentRevision();
+	await review.click();
+	await expect(page.getByRole("alert").filter({ hasText: "The saved suite is unchanged." })).toBeVisible();
+	await page.reload();
+	await expect(review).toBeEnabled();
+	await review.click();
+	await expect(page.getByText("Saved suite review passed.", { exact: true })).toBeVisible();
+	await expect(page.getByText("Export blocked", { exact: true })).toHaveCount(0);
+	await expect(page.getByRole("button", { name: /TC-GOOD Preserved concrete test/ })).toBeVisible();
+	expect(reviewRequests).toEqual(Array(2).fill({ snapshot_id: "tests-old", base_project_revision: revision }));
+	expect(generationRequests).toEqual([]);
+	expect(requests).toEqual([]);
 });
 
 test("plans and explicitly accepts repair, then keeps concrete tests and requires review", { tag: "@p1" }, async ({ page }) => {

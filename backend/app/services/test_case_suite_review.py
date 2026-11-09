@@ -1,4 +1,6 @@
-"""Assess immutable saved tests after targeted changes, without a generation pass."""
+"""Assess immutable saved tests without a generation pass."""
+
+from contextlib import nullcontext
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -12,9 +14,11 @@ from ..contracts.requirements import RequirementCoveragePlan, WorkflowSettings
 from ..contracts.test_cases import TestCase
 from ..models import AuthUser
 from .audit_service import complete_workflow_run, start_workflow_run
+from .guidance_runtime import prepare_run
+from .guidance_service import guidance_scope
 from .orchestrator_service import _use_cases_human_approved
 from .requirement_scope import approved_generation_requirements
-from .test_case_quality import delivered_coverage, separate_generation_work
+from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
 from .workflow_project_service import ProjectConflictError, append_stage_snapshot, get_project, get_project_stage_snapshot
 
 REVIEW_OPERATION = "test_cases.review"
@@ -119,6 +123,65 @@ def _review_payload(payload, requirements, plans, analysis, context):
     return {**reviewed, "test_cases": payload["test_cases"]}
 
 
+def _generated_review_context(suite, context):
+    expected = suite.metadata.get("source_context_hash")
+    if expected is None and (context is None or suite.metadata.get("source_context_omitted") is True):
+        return None  # Generation had no Context in its input.
+    if context and expected:
+        artifact_ids = suite.metadata.get("source_context_artifact_ids")
+        grounded = context.grounded_context
+        if grounded and artifact_ids is not None:
+            selected = set(artifact_ids)
+            grounded = grounded.model_copy(
+                update={
+                    "artifact_sources": [source for source in grounded.artifact_sources if source.id in selected],
+                    "ui_elements": [element for element in grounded.ui_elements if not element.source_id or element.source_id in selected],
+                }
+            )
+            context = context.model_copy(update={"grounded_context": grounded})
+
+        # The workbench sends empty link lists as null and adds the originating
+        # project revision. Older drafts have the full request hash only.
+        workbench_context = context.model_copy(
+            update={
+                "diagram_links": context.diagram_links or None,
+                "image_links": context.image_links or None,
+                "project_id": suite.project_id,
+                "base_project_revision": suite.project_revision - 1,
+            }
+        )
+        for candidate in (context, workbench_context):
+            if case_source_hash(candidate.model_dump(mode="json")) == expected:
+                return candidate
+    raise HTTPException(409, "The original generation Context cannot be matched to the saved sources. Analyze their impact before reviewing.")
+
+
+def _prepare_generated_review(suite, sources, requirements, context, actor, request_id):
+    recorded = suite.metadata.get("source_snapshot_ids") or {}
+    expected_requirements = {requirement.id: case_source_hash(requirement.model_dump(mode="json")) for requirement in requirements}
+    if (
+        suite.source_snapshot_id != sources["use_cases"]
+        or any(recorded.get(stage) != sources.get(stage) for stage in ("requirements", "context", "use_cases"))
+        or suite.metadata.get("source_requirement_hashes") != expected_requirements
+    ):
+        raise HTTPException(409, "The saved suite was generated from different sources. Analyze their impact before reviewing.")
+    context = _generated_review_context(suite, context)
+    manifest = prepare_run(
+        "test_cases",
+        actor,
+        suite.project_id,
+        f"saved-review:{request_id}",
+        requirement_ids=[requirement.id for requirement in requirements],
+        input_fingerprint=suite.snapshot_id,
+    )
+    if manifest.project_inputs:
+        recorded_inputs = (suite.metadata.get("guidance") or {}).get("project_inputs")
+        current_inputs = manifest.project_inputs.model_dump(mode="json", exclude_none=True)
+        if (recorded_inputs and current_inputs != recorded_inputs) or (not recorded_inputs and manifest.project_inputs.decisions):
+            raise HTTPException(409, "Project decisions or sources changed after generation. Analyze their impact before reviewing.")
+    return guidance_scope(manifest), context
+
+
 def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_revision: int, actor: AuthUser, request_id: str) -> QaProjectDetail:
     project = get_project(project_id, actor=actor)
     current = project.current_snapshots.get("test_cases")
@@ -135,36 +198,42 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         raise ProjectConflictError(project.current_revision)
     if not current or current.snapshot_id != snapshot_id:
         raise HTTPException(409, "The saved test suite changed. Reload the current suite before reviewing.")
-    if current.operation not in REVIEWABLE_OPERATIONS or (current.payload.get("substantive_assessment") or {}).get("status") != "unknown":
-        raise HTTPException(409, "The current suite has no pending post-change assessment.")
+    generated_retry = generated_suite_review_retryable(current)
+    pending_review = (current.payload.get("substantive_assessment") or {}).get("status") == "unknown"
+    if not generated_retry and (current.operation not in REVIEWABLE_OPERATIONS or not pending_review):
+        raise HTTPException(409, "The current suite has no pending saved-suite assessment.")
     if project.stage_state["test_cases"].stale and current.operation != "quality.feedback.apply":
         raise HTTPException(409, "Upstream inputs changed. Analyze their impact before reviewing the saved suite.")
 
     requirements, plans, analysis, context, sources = _current_review_inputs(project, current)
     original = get_project_stage_snapshot(project_id, snapshot_id, actor=actor)
+    review_scope = nullcontext()
+    if generated_retry:
+        review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id)
     run_id = start_workflow_run(operation=REVIEW_OPERATION, actor=actor, request_id=request_id, metadata={"source_snapshot_id": snapshot_id})
     try:
-        reviewed = _review_payload(original.payload, requirements, plans, analysis, context)
-        append_stage_snapshot(
-            project_id=project_id,
-            stage="test_cases",
-            payload=reviewed,
-            operation=REVIEW_OPERATION,
-            actor=actor,
-            request_id=request_id,
-            workflow_run_id=run_id,
-            approved=reviewed["approved"],
-            source_snapshot_id=snapshot_id,
-            title="Saved test suite reviewed",
-            metadata={
-                "source_snapshot_ids": sources,
-                "source_requirements_snapshot_id": sources["requirements"],
-                "source_context_snapshot_id": sources.get("context"),
-                "source_use_case_snapshot_id": sources["use_cases"],
-                "approved": reviewed["approved"],
-            },
-            base_project_revision=base_project_revision,
-        )
+        with review_scope:
+            reviewed = _review_payload(original.payload, requirements, plans, analysis, context)
+            append_stage_snapshot(
+                project_id=project_id,
+                stage="test_cases",
+                payload=reviewed,
+                operation=REVIEW_OPERATION,
+                actor=actor,
+                request_id=request_id,
+                workflow_run_id=run_id,
+                approved=reviewed["approved"],
+                source_snapshot_id=snapshot_id,
+                title="Saved test suite reviewed",
+                metadata={
+                    "source_snapshot_ids": sources,
+                    "source_requirements_snapshot_id": sources["requirements"],
+                    "source_context_snapshot_id": sources.get("context"),
+                    "source_use_case_snapshot_id": sources["use_cases"],
+                    "approved": reviewed["approved"],
+                },
+                base_project_revision=base_project_revision,
+            )
     except Exception:
         complete_workflow_run(run_id, status="failed", error_message="Saved suite review was not published")
         raise

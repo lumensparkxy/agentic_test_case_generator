@@ -708,7 +708,8 @@ export default function App() {
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const savedSuiteReviewPending =
 		persistedTestCaseCount > 0 &&
-		["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation) &&
+		(savedSuite?.metadata?.review_retry_available === true ||
+			["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation)) &&
 		savedSuite?.payload?.substantive_assessment?.status === "unknown";
 	const savedSuiteInputsReady =
 		currentProject?.status === "active" &&

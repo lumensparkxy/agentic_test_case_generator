@@ -205,9 +205,11 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
                         "retired_requirements": [r.model_dump(mode="json") for r in retired],
                     }
                 if stage == "test_cases":
-                    from .test_case_quality import project_test_case_view
+                    from .test_case_quality import generated_suite_review_retryable, project_test_case_view
 
                     snapshot.payload = project_test_case_view(snapshot.payload)
+                    if generated_suite_review_retryable(snapshot):
+                        snapshot.metadata = {**snapshot.metadata, "review_retry_available": True}
                     if snapshot.payload.get("generation_tasks"):
                         snapshot.approved = False
                         summary.stage_state[stage].approved = False

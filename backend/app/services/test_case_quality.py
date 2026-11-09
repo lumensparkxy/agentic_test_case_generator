@@ -1,5 +1,7 @@
 """Keep unfinished generation instructions out of deliverable test suites."""
 
+from hashlib import sha256
+import json
 import re
 
 from .execution_service import is_complete_browser_action
@@ -103,6 +105,53 @@ def project_test_case_view(payload):
             "unresolved_generation_task_count": len(tasks),
         },
     }
+
+
+def generated_suite_review_retryable(snapshot):
+    if snapshot.operation != "testcases.generate" or snapshot.approved:
+        return False
+    payload = snapshot.payload
+    assessment = payload.get("substantive_assessment") or {}
+    generation = payload.get("workflow_diagnostics") or {}
+    review = payload.get("review") or {}
+    score, threshold = review.get("score"), review.get("threshold")
+    reason = assessment.get("reason")
+    return bool(
+        payload.get("test_cases")
+        and not payload.get("approved")
+        and not payload.get("generation_tasks")
+        and assessment.get("status") == "unknown"
+        and (assessment.get("diagnostics") or {}).get("failure_reason") == "provider_unavailable"
+        and assessment.get("execution_status") != "blocked"
+        and reason
+        and review.get("blocking_issues") == [reason]
+        and not review.get("unmet_criteria")
+        and isinstance(score, int)
+        and isinstance(threshold, int)
+        and 0 < threshold <= score
+        and generation.get("status") == "partial"
+        and not any(
+            generation.get(key)
+            for key in (
+                "failure_reason",
+                "used_fallback",
+                "timed_out",
+                "stalled",
+                "max_iterations_reached",
+                "failed_shard_count",
+                "fallback_shard_count",
+                "deterministic_total_additions",
+                "scenario_ref_coverage_degraded",
+                "missing_requirements_count",
+                "missing_must_have_scenario_count",
+            )
+        )
+    )
+
+
+def case_source_hash(payload):
+    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def delivered_coverage(cases, plans):

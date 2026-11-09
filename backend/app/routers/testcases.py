@@ -3,7 +3,6 @@ from ..services.knowledge_feedback import finish_generation
 from ..services.guidance_dependency import generation_guidance
 import json
 import logging
-import hashlib
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -19,6 +18,7 @@ from ..services.audit_service import complete_workflow_run, record_usage_event, 
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.orchestrator_service import _use_cases_human_approved
 from ..services.requirement_import_service import validate_generation_baseline
+from ..services.test_case_quality import case_source_hash
 from ..services.versioning_service import persist_test_case_versions
 from ..services.workflow_project_service import ProjectConflictError, append_stage_snapshot, get_project, project_error_to_http
 
@@ -56,8 +56,7 @@ def _model_payload(value: Any) -> Any:
 
 
 def _content_hash(value: Any) -> str:
-    encoded = json.dumps(_model_payload(value), sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return case_source_hash(_model_payload(value))
 
 
 def _hash_map(items: list[Any], *, id_key: str = "id") -> dict[str, str]:
@@ -256,6 +255,12 @@ def _append_project_generation_snapshots(
             "context": current_context_snapshot.snapshot_id if current_context_snapshot else None,
             "use_cases": use_case_snapshot.snapshot_id,
         }
+        context_selection = {}
+        if operation == "testcases.generate":
+            if source_context is None:
+                context_selection["source_context_omitted"] = True
+            elif source_context.grounded_context:
+                context_selection["source_context_artifact_ids"] = [source.id for source in source_context.grounded_context.artifact_sources]
         append_stage_snapshot(
             project_id=project_id,
             stage="test_cases",
@@ -279,6 +284,7 @@ def _append_project_generation_snapshots(
                 "source_requirement_hashes": _hash_map(source_requirements or [], id_key="id"),
                 "source_use_case_hashes": _scenario_hash_map(response.coverage_plan),
                 "source_context_hash": _content_hash(source_context) if source_context is not None else None,
+                **context_selection,
             },
         )
     except HTTPException:

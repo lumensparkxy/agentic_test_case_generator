@@ -130,6 +130,13 @@ guidance. Missing or invalid results go through generation and review again.
 The completed draft records how many replacements were reused and retains their
 original generation evidence. It still needs combined-suite review.
 
+If a provider outage was the sole blocker after complete generation, use
+**Review saved suite** in Test Cases. Review retries the saved cases with the
+same approved Requirements, Use Cases and generation Context. It writes a
+review successor with the original case versions and generation evidence.
+Changed inputs require impact analysis. A repeated outage leaves the saved
+suite in place, while verified gaps are saved for repair.
+
 Recovery keeps one private Firestore record per project, capped at 512 KiB of
 checkpoint data. A record is eligible for reuse for 24 hours after its latest
 checkpoint. A successful apply deletes it in the draft transaction. A subsequent
