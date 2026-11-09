@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 import unittest
 
@@ -9,9 +10,50 @@ if str(BACKEND_DIR) not in sys.path:
 from app.agents.test_case_coverage import _compute_test_case_coverage_metrics, _normalize_test_case_type
 from app.agents.test_case_hydration import _hydrate_test_cases
 from app.models import Requirement
+from app.services.browser_samples import declared_browser_samples
 
 
 class TestCaseHydrationTests(unittest.TestCase):
+    def test_named_sample_declarations_preserve_only_unambiguous_literal_strings(self) -> None:
+        payload = '{\n  "value": "  β  "\n'
+        notes = "\n".join(
+            (
+                f'Browser sample "payload" is {json.dumps(payload)}',
+                'Browser sample "empty" is ""',
+                'Browser sample "repeated" is "first"',
+                'Browser sample "REPEATED" is',
+                'Browser sample "invalid" is {"looks": "structured"}',
+                'Browser sample "sensitive" is "token=synthetic-secret-like"',
+                'Browser sample "surrogate" is "\\ud800"',
+                f'Browser sample "oversize" is {json.dumps("β" * 8_001)}',
+            )
+        )
+        self.assertEqual(declared_browser_samples(notes), {"payload": payload, "empty": ""})
+
+    def test_named_sample_rejections_do_not_leak_data_and_literal_steps_stay_literal(self) -> None:
+        samples = {"good": "source\n", "other": "other"}
+        for action, expected in (
+            ('Enter browser sample "missing" into field "Payload"', ""),
+            ('Enter browser sample "good" into field "Payload" and click Apply', ""),
+            ('Enter browser sample good into field "Payload"', ""),
+            ('Enter browser sample "good" into field "Payload"', 'field "Payload" value should equal browser sample "other"'),
+        ):
+            with self.subTest(action=action, expected=expected):
+                row = {
+                    "id": "TC-SAMPLE",
+                    "steps": [{"action": action, "expected": expected, "test_data": "raw-value-must-not-be-reported"}],
+                }
+                rejected = []
+                with self.assertLogs(level="WARNING") as logs:
+                    self.assertEqual(_hydrate_test_cases([row], browser_samples=samples, rejections=rejected), [])
+                self.assertEqual(rejected[0]["source_test_case_id"], "TC-SAMPLE")
+                self.assertIn("step 1", rejected[0]["reason"])
+                self.assertNotIn("raw-value-must-not-be-reported", str(rejected) + str(logs.output))
+
+        literal = 'browser sample "good"'
+        row = {"steps": [{"action": 'Enter step data into field "Payload"', "expected": "", "test_data": literal}]}
+        self.assertEqual(_hydrate_test_cases([row], browser_samples=samples)[0].steps[0].test_data, literal)
+
     def test_normalize_test_case_type_maps_scenario_like_labels(self) -> None:
         self.assertEqual(_normalize_test_case_type("Validation"), "Functional")
         self.assertEqual(_normalize_test_case_type("Boundary"), "Functional")

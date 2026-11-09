@@ -662,6 +662,8 @@ named submit action to match the supplied string exactly. That includes the
 malformed sample's final line feed. The evaluator records
 `exact_payload_unverified` when a linked case lacks this proof. Use
 `--fixture` to run a single workflow.
+The JSON editor supplies both payloads as named Context samples. Authored
+controls and live generation materialize the same exact values before run.
 The report lists missing cases, healthy-target failures, surviving defects,
 failures at another check, and unavailable runtime evidence separately.
 Manual audit coverage and generation approval have separate fields. A

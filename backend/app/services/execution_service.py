@@ -71,7 +71,7 @@ QUOTED_FILL_ACTION = re.compile(
     rf"""|(?:the\s+)?(?P<label>{QUOTED_FILL_LITERAL}|[^"'\r\n]+?)(?:\s+field)?)\.?""",
     re.IGNORECASE,
 )
-STEP_DATA_FILL_INTENT = re.compile(r"\b(?:enter|fill|type|input)\s+step\s+data\b", re.IGNORECASE)
+STEP_DATA_FILL_INTENT = re.compile(r"\b(?:enter|fill|type|input)\s+(?:step\s+data|browser\s+sample)\b", re.IGNORECASE)
 STEP_DATA_FILL_ACTION = re.compile(rf"(?:enter|fill|type|input)\s+step\s+data\s+into\s+field\s+(?P<label>{QUOTED_FILL_LITERAL})\.?", re.IGNORECASE)
 STEP_DATA_ASSERTION = re.compile(
     rf"(?P<kind>field|css|test\s+id)\s+(?P<target>{QUOTED_FILL_LITERAL})\s+"

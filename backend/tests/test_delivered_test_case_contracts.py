@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.agents.test_case_agent import _build_response, generate_test_cases, refine_test_cases
+from app.agents.test_case_agent import _build_response, _usable_shard_cases, generate_test_cases, refine_test_cases
 from app.agents.test_case_hydration import (
     MAX_STRUCTURED_TEST_DATA_CHARS,
     MAX_STRUCTURED_TEST_DATA_NODES,
@@ -240,3 +240,71 @@ class DeliveredTestCaseContractTests(unittest.TestCase):
                     self.assertEqual(json.loads(response.test_cases[0].steps[0].test_data), [1, 8])
                     self.assertEqual(response.approved, not invalid)
                     self.assertEqual(bool(response.generation_tasks), invalid)
+
+    def test_generate_refine_and_shard_recovery_bind_named_sample_before_review(self):
+        target = "https://example.test/"
+        value = '{\n  "label": "  β  ",\n  "template": "{env.example}"\n'
+        common = {
+            "requirements": [
+                Requirement(id="REQ-1", text='Apply the malformed sample. Show "Invalid JSON rejected" and preserve the entered text.'),
+                Requirement(id="REQ-2", text="Check the other sample."),
+            ],
+            "context": {
+                "app_link": target,
+                "requirements": [],
+                "notes": (
+                    'Observed field "Payload" and button "Apply".\n'
+                    f'Browser result test id "saved" on "{target}" shows field "Payload" after button "Apply"\n'
+                    f'Browser sample "malformed-json" is {json.dumps(value)}'
+                ),
+            },
+            "template": {"name": "minimal", "format": "json", "fields": ["id", "title"]},
+        }
+        for refine in (False, True):
+            with self.subTest(refine=refine):
+                valid = case()
+                valid["automation_status"] = "To Be Automated"
+                valid["steps"] = [
+                    {"step": 1, "action": f'Open "{target}"', "expected": ""},
+                    {"step": 2, "action": 'Enter browser sample "malformed-json" into field "Payload"', "expected": "", "test_data": 42},
+                    {"step": 3, "action": 'Click exact button "Apply"', "expected": 'exact text "Invalid JSON rejected" is visible'},
+                    {
+                        "step": 4,
+                        "action": "Inspect the saved payload",
+                        "expected": 'test id "saved" text should equal browser sample "malformed-json"',
+                        "test_data": "model guessed a shorter string",
+                    },
+                ]
+                invalid = case("TC-missing", "REQ-2", "SCN-2")
+                invalid["steps"][0]["action"] = 'Enter browser sample "unknown" into field "Payload"'
+                raw = [valid, invalid]
+                payload = (
+                    RefineTestCasesInput(**common, test_cases=[TestCase(**case())], feedback="Check exact malformed input")
+                    if refine
+                    else GenerateTestCasesInput(**common)
+                )
+                with self.assertLogs(level="WARNING"):
+                    self.assertEqual(_usable_shard_cases(raw, workflow(raw)["coverage_plan"], context=payload.context), [valid])
+                with (
+                    patch("app.agents.test_case_agent._get_model_settings_or_none", return_value=SimpleNamespace(model_name="mock")),
+                    patch("app.agents.test_case_agent._run_workflow_sync", return_value=workflow(raw)),
+                    patch("app.agents.test_case_agent._should_use_parallel_test_case_generation", return_value=False),
+                    patch(
+                        "app.agents.test_case_agent.assess_delivered_suite",
+                        return_value={"status": "assessed_complete", "obligations": [], "case_grounding": []},
+                    ) as assess,
+                    self.assertLogs(level="WARNING"),
+                ):
+                    result = (refine_test_cases if refine else generate_test_cases)(payload)
+                response = GenerateTestCasesResponse(**result)
+                self.assertEqual([c.id for c in response.test_cases], ["TC-1"])
+                saved = response.test_cases[0]
+                self.assertEqual(saved.automation_status, "To Be Automated")
+                self.assertEqual(saved.steps[1].action, 'Enter step data into field "Payload"')
+                self.assertEqual(saved.steps[3].expected, 'test id "saved" text should equal step data')
+                self.assertEqual(saved.steps[1].test_data, value)
+                self.assertEqual(saved.steps[3].test_data, value)
+                self.assertEqual(assess.call_args.args[0][0].steps[1].test_data, value)
+                self.assertFalse(response.approved)
+                task = next(t for t in response.generation_tasks if t["source_test_case_id"] == "TC-missing")
+                self.assertIn('step 1: Browser sample "unknown" is missing', task["reason"])

@@ -20,6 +20,7 @@ from app.contracts.grounding import EnrichInput
 from app.contracts.quality_feedback import ExecutionPrerequisite
 from app.contracts.test_cases import TestCase, TestStep
 from app.services.browser_handoff import _compiled_steps, validate_browser_handoff
+from app.services.browser_samples import declared_browser_samples, materialize_browser_sample
 from app.services.context_grounding import build_grounded_context
 from app.services.execution_service import _annotation_description, _iter_playwright_tests, preview_execution, run_execution
 from plain_english_test_framework.compiler import CompilerError
@@ -82,10 +83,16 @@ def fixture_context(fixture: Fixture, target: str) -> EnrichInput:
 
 def authored_cases(fixture: Fixture, context: EnrichInput) -> list[TestCase]:
     cases = []
+    samples = declared_browser_samples(context.notes)
     for requirement, steps in fixture.controls:
         is_manual = requirement == fixture.manual_requirement
         if not is_manual:
             steps = ((f'Open "{context.app_link}"', ""), *steps)
+        authored_steps = []
+        for index, (action, expected) in enumerate(steps, start=1):
+            action = action.replace("{target}", str(context.app_link))
+            action, expected, value = materialize_browser_sample(action, expected, samples) or (action, expected, None)
+            authored_steps.append(TestStep(step=index, action=action, expected=expected, test_data=value))
         cases.append(
             TestCase(
                 id=f"CONTROL-{requirement}",
@@ -93,15 +100,7 @@ def authored_cases(fixture: Fixture, context: EnrichInput) -> list[TestCase]:
                 automation_status="Manual" if is_manual else "To Be Automated",
                 linked_requirement_ids=[requirement],
                 execution_prerequisites=context.execution_prerequisites if is_manual else [],
-                steps=[
-                    TestStep(
-                        step=index,
-                        action=action.replace("{target}", str(context.app_link)),
-                        expected=expected,
-                        test_data=data[0] if data else None,
-                    )
-                    for index, (action, expected, *data) in enumerate(steps, start=1)
-                ],
+                steps=authored_steps,
             )
         )
     return cases

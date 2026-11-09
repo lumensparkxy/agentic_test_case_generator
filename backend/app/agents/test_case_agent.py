@@ -63,6 +63,7 @@ from .test_case_coverage import (
 )
 from .test_case_fallback import _fallback_raw_test_cases
 from ..services.browser_handoff import BROWSER_AUTHORING_GUIDE, validate_browser_handoff
+from ..services.browser_samples import declared_browser_samples
 from ..services.test_case_quality import placeholder_reason, separate_generation_work
 from ..contracts.requirements import RequirementCoveragePlan, StructuralChecks
 from .test_case_hydration import (
@@ -1979,12 +1980,13 @@ def _fallback_parallel_test_case_shard(
     )
 
 
-def _usable_shard_cases(test_cases: List[Dict[str, Any]], coverage_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _usable_shard_cases(test_cases: List[Dict[str, Any]], coverage_plan: List[Dict[str, Any]], *, context: Optional[Any] = None) -> List[Dict[str, Any]]:
     """Count concrete, contract-valid cases with exact in-scope scenario identity."""
     scenario_by_id = _scenario_lookup(coverage_plan)
+    samples = declared_browser_samples(getattr(context, "notes", None))
     usable = []
     for row in test_cases:
-        hydrated = _hydrate_test_cases([row])
+        hydrated = _hydrate_test_cases([row], browser_samples=samples)
         if not hydrated or hydrated[0].status == "Deprecated" or placeholder_reason(hydrated[0]):
             continue
         refs = set(hydrated[0].scenario_refs)
@@ -2013,7 +2015,7 @@ def _recover_incomplete_test_case_shard(
     diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
     if diagnostics.get("used_fallback"):
         return workflow
-    retained = _usable_shard_cases(list(workflow.get("test_cases") or []), shard.coverage_plan)
+    retained = _usable_shard_cases(list(workflow.get("test_cases") or []), shard.coverage_plan, context=context)
     covered = {ref for row in retained for ref in _extract_scenario_refs_from_test_case(row)}
     missing = set(_scenario_lookup(shard.coverage_plan)) - covered
     if not missing:
@@ -2052,7 +2054,7 @@ def _recover_incomplete_test_case_shard(
         for key in ("parser_failures", "parser_recoveries", "warnings"):
             diagnostics[key] = _dedupe_preserve(diagnostics[key] + list(recovery_diagnostics.get(key) or []))
         diagnostics["timed_out"] = bool(diagnostics.get("timed_out") or recovery_diagnostics.get("timed_out"))
-        candidates = [] if recovery_diagnostics.get("used_fallback") else _usable_shard_cases(recovery.get("test_cases") or [], plan)
+        candidates = [] if recovery_diagnostics.get("used_fallback") else _usable_shard_cases(recovery.get("test_cases") or [], plan, context=context)
     except Exception as exc:
         # Keep recovered sibling cases; do not replace the whole shard with fallback.
         candidates = []
@@ -2959,7 +2961,8 @@ def generate_test_cases(
         generation_settings=generation_settings,
     )
     contract_rejections = []
-    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
+    samples = declared_browser_samples(payload.context.notes if payload.context else None)
+    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections, browser_samples=samples)
     response = _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
     assessment = assess_delivered_suite(
         response["test_cases"],
@@ -3082,7 +3085,8 @@ def refine_test_cases(
         workflow["strict_coverage_plan"] = True
 
     contract_rejections = []
-    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
+    samples = declared_browser_samples(payload.context.notes if payload.context else None)
+    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections, browser_samples=samples)
     response = _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
     assessment = assess_delivered_suite(
         response["test_cases"],

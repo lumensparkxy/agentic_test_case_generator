@@ -71,6 +71,20 @@ put the expected literal in that observation step's own data and use
 `css "#saved" text should equal step data`. Ground the field and result locator
 in Context and use synthetic data for the payload.
 
+To reuse exact test data across generated cases, declare a named sample in
+Context notes on one line. The value is a JSON string, so `\n` preserves a
+line break and `\"` represents a double quote.
+
+```text
+Browser sample "malformed-json" is "{\n  \"enabled\": false\n"
+```
+
+Generation and refinement can refer to `browser sample "malformed-json"` in
+a fill or exact value or text check. Delivery resolves the name to ordinary
+step data before review. Use a unique name and up to 16,000 UTF-8 bytes per
+sample. Missing, ambiguous, malformed, or credential-looking samples leave
+unfinished work with a case and step reference.
+
 For a grounded native single-choice dropdown, use
 `Select exact option "Closed" in field "Order status"`. Linked HTML supplies
 the selectable labels. A separate field-value check needs an explicit

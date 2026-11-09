@@ -27,7 +27,7 @@ class Fixture:
     pages: dict[str, str]
     requirements: dict[str, str]
     notes: str
-    controls: tuple[tuple[str, tuple[tuple[str, str] | tuple[str, str, str], ...]], ...]
+    controls: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     defects: tuple[Defect, ...]
     manual_requirement: str | None = None
 
@@ -288,35 +288,33 @@ FIXTURES = {
         pages={"/payload-editor": PAYLOAD_EDITOR},
         requirements={
             "JSON-VALID": (
-                'Submit the exact supplied valid JSON in "Payload" using "Apply payload". '
+                'Submit the exact named browser sample "valid-json" in "Payload" using "Apply payload". '
                 'Show "Valid JSON accepted" and the submitted text with its original line breaks, indentation and spaces. '
-                "The exact test data is this JSON-encoded string. Decode the string once before entering it.\n"
-                f"{json.dumps(VALID_PAYLOAD, ensure_ascii=False)}"
             ),
             "JSON-INVALID": (
-                'Submit the exact supplied malformed JSON in "Payload" using "Apply payload". '
+                'Submit the exact named browser sample "malformed-json" in "Payload" using "Apply payload". '
                 'Show "Invalid JSON rejected" and the attempted payload as entered. The input has no closing brace. '
-                "The final line feed is part of the input. The exact test data is this JSON-encoded string. "
-                "Decode the string once before entering it.\n"
-                f"{json.dumps(INVALID_PAYLOAD)}"
+                "The final line feed is part of the sample."
             ),
         },
         notes=(
             'The public editor starts with an empty native multiline "Payload" field and requires no account or setup.\n'
-            'Browser result test id "saved-payload" on "{target}" shows field "Payload" after button "Apply payload"'
+            'Browser result test id "saved-payload" on "{target}" shows field "Payload" after button "Apply payload"\n'
+            f'Browser sample "valid-json" is {json.dumps(VALID_PAYLOAD, ensure_ascii=False)}\n'
+            f'Browser sample "malformed-json" is {json.dumps(INVALID_PAYLOAD)}'
         ),
         controls=tuple(
             (
                 requirement,
                 (
-                    ('Enter step data into field "Payload"', 'field "Payload" value should equal step data', data),
+                    (f'Enter browser sample "{sample}" into field "Payload"', f'field "Payload" value should equal browser sample "{sample}"'),
                     ('Click exact button "Apply payload"', f'exact text "{status}" is visible'),
-                    ("Inspect the saved payload", 'test id "saved-payload" text should equal step data', data),
+                    ("Inspect the saved payload", f'test id "saved-payload" text should equal browser sample "{sample}"'),
                 ),
             )
-            for requirement, data, status in (
-                ("JSON-VALID", VALID_PAYLOAD, "Valid JSON accepted"),
-                ("JSON-INVALID", INVALID_PAYLOAD, "Invalid JSON rejected"),
+            for requirement, sample, status in (
+                ("JSON-VALID", "valid-json", "Valid JSON accepted"),
+                ("JSON-INVALID", "malformed-json", "Invalid JSON rejected"),
             )
         ),
         defects=(

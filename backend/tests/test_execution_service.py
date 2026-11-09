@@ -890,6 +890,7 @@ class ExecutionServiceTests(unittest.TestCase):
     def test_incomplete_or_sensitive_step_data_cannot_become_executable(self) -> None:
         for action, expected, data, reason in (
             ('Enter step data into field "Email"', '"Email" is visible', None, "step_data_missing"),
+            ('Enter browser sample "unresolved" into field "Email"', '"Email" is visible', "untrusted", "unsupported_step_data_instruction"),
             ("Inspect the field", 'field "Email" value should equal step data', None, "step_data_missing"),
             ('Enter step data into field "Email" then submit', '"Email" is visible', "[]", "unsupported_step_data_instruction"),
             ('On the current page, enter step data into field "Email"', '"Email" is visible', "[]", "unsupported_step_data_instruction"),
