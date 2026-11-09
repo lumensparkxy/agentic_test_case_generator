@@ -157,6 +157,26 @@ provider does not return usage. The emulator validation uses a synthetic
 provider. Shared admission with legacy and Project Sync work remains a
 release gate before enabling a hosted worker.
 
+### Exact-plan Test Cases worker
+
+The Test Cases worker uses the saved requirements, current Context or
+explicit Context absence, exact scenario plan and latest matching human
+approval. It rejects an unbound plan before generation. The existing
+project-bound HTTP entry point uses the same generation and publication
+path, retaining its legacy admission.
+
+The worker shares a 24-request reservation across the writers and the
+independent critic. The publication transaction reads the active worker
+fence before staging billing, case versions, review progress, suite and run
+advancement. The exact receipt remains recoverable after a newer revision.
+An incomplete replacement preserves the existing suite. A recoverable
+assessment outage retains valid saved cases for saved-suite review. A saved
+run result proves publication of that exact suite. Design and human
+acceptance are separate evidence.
+
+The second named approval and cumulative journey budget are the next
+packet. The worker path is still limited to the local emulator.
+
 ## Quality and delivery policy
 
 Use the existing [saved suite review](../backend/app/services/test_case_suite_review.py),
@@ -254,10 +274,12 @@ P2 adds unified intake and scoped decisions (commit `750fa78`,
 P3a adds the internal transactional approval, intent outbox and fenced
 stage claim (commit `ca554da`,
 [PR #456](https://github.com/lumensparkxy/agentic_test_case_generator/pull/456)).
-P3b connects scenario preparation and Review status under
-[#457](https://github.com/lumensparkxy/agentic_test_case_generator/issues/457).
-Next is the exact-plan approval continuation into saved Test Cases
-generation and assessment.
+P3b connects scenario preparation and Review status (commit `2bf1cef`,
+[PR #458](https://github.com/lumensparkxy/agentic_test_case_generator/pull/458)).
+P3c adds the exact-plan Test Cases worker under
+[#459](https://github.com/lumensparkxy/agentic_test_case_generator/issues/459).
+Next is the named scenario approval, cumulative budget and Review
+recovery for the second stage.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

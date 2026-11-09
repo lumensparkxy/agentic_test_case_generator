@@ -15,7 +15,7 @@ from google.genai import errors as genai_errors
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
-from .adk_runtime import json_generation_config
+from .adk_runtime import generate_direct_content, json_generation_config
 from .evaluation_limits import current_evaluation_limits
 from .quality_goal import QUALITY_GOAL
 from .prompting import TEST_CASE_BEHAVIOR_POLICY
@@ -711,8 +711,14 @@ def _call_critic(settings, prompt, *, timeout_seconds=ASSESSMENT_ATTEMPT_SECONDS
     config.response_schema = _provider_schema(CriticReferenceOutput.model_json_schema())
     config.http_options.timeout = max(1, int(timeout_seconds * 1000))
     config.http_options.retry_options.attempts = 1
-    with genai.Client(api_key=settings.gemini_api_key) as client:
-        response = client.models.generate_content(model=settings.model_name, contents=prompt, config=config)
+    response = generate_direct_content(
+        genai.Client,
+        api_key=settings.gemini_api_key,
+        model=settings.model_name,
+        contents=prompt,
+        config=config,
+        timeout_seconds=timeout_seconds,
+    )
     if response.candidates and response.candidates[0].finish_reason not in (None, "STOP"):
         raise IncompleteCriticResponse
     return response.text or ""

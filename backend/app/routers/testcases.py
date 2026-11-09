@@ -1,6 +1,7 @@
 from ..services.scoped_refinement import bind_suite_refinement, merge_scoped_refinement, prepare_scoped_refinement, prepare_suite_refinement
 from ..services.knowledge_feedback import finish_generation, suggest_feedback
 from ..services.guidance_dependency import generation_guidance
+from dataclasses import asdict
 import json
 import logging
 from typing import Any, Optional
@@ -15,12 +16,13 @@ from ..auth.jwt_auth import get_current_user
 from ..contracts.requirements import RequirementCoveragePlan
 from ..models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse, RefineTestCasesInput
 from ..observability.metrics import record_workflow_completed
+from ..services.approved_test_case_source import ApprovedTestCaseSource, prepare_approved_test_case_payload
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.firestore_repository import get_required_firestore_client
 from ..services.orchestrator_service import _use_cases_human_approved
 from ..services.requirement_import_service import validate_generation_baseline
-from ..services.test_case_quality import case_source_hash
+from ..services.test_case_quality import case_source_hash, placeholder_reason
 from ..services.test_case_review_progress import GenerationReviewProgress
 from ..services.versioning_service import persist_test_case_versions
 from ..services.workflow_project_service import ProjectConflictError, append_stage_snapshot, find_idempotent_stage_snapshot, get_project, project_error_to_http
@@ -276,7 +278,7 @@ def _append_project_generation_snapshots(
 
         def commit(transaction, snapshot):
             if publication_guard is not None:
-                publication_guard(transaction)
+                publication_guard(transaction, snapshot)
             if review_progress is not None and approved_use_case_snapshot_id is not None:
                 review_progress.publish_on_commit(transaction, snapshot)
 
@@ -352,7 +354,7 @@ def _log_success(
 def _log_failure(
     *,
     current_user: AuthUser,
-    request: Request,
+    request_id: str,
     workflow_run_id: str,
     operation: str,
     event_type: str,
@@ -360,7 +362,6 @@ def _log_failure(
     error_message: str,
     metadata: Optional[dict[str, Any]] = None,
 ) -> None:
-    request_id = _get_request_id(request)
     failure_metadata = {"operation": operation, **(metadata or {})}
     complete_workflow_run(
         workflow_run_id,
@@ -409,10 +410,10 @@ def _record_billing_consumption_safe(
         logging.warning("Billing consumption recording failed for %s: %s", billing_key, exc)
 
 
-def _test_case_publication_receipt(project_id, request_id, actor, operation):
+def _test_case_publication_receipt(project_id, request_id, actor, operation, *, require_current=True):
     try:
         key = case_source_hash([actor.sub, request_id])
-        return find_idempotent_stage_snapshot(project_id, "test_cases", operation, key, actor=actor)
+        return find_idempotent_stage_snapshot(project_id, "test_cases", operation, key, actor=actor, require_current=require_current)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 
@@ -444,6 +445,7 @@ def _publish_bound_suite(
     progress=None,
     refinement_source=None,
     changed_case_ids=None,
+    stage_publication_guard=None,
 ):
     try:
         client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
@@ -484,7 +486,8 @@ def _publish_bound_suite(
     )
     complete_workflow_run(run_id, status="completed", metadata=result_metadata, pending_writes=pending_writes, firestore_client=client)
 
-    def bill(transaction):
+    def commit(transaction, snapshot):
+        advance = stage_publication_guard(transaction, client, snapshot) if stage_publication_guard is not None else None
         record_billing_consumption(
             current_user=actor,
             billing_context=billing_context,
@@ -498,6 +501,11 @@ def _publish_bound_suite(
             transaction=transaction,
             firestore_client=client,
         )
+        if advance is not None:
+            advance()
+
+    def lookup_receipt():
+        return _test_case_publication_receipt(payload.project_id, request_id, actor, operation, require_current=stage_publication_guard is None)
 
     try:
         receipt = _append_project_generation_snapshots(
@@ -516,13 +524,13 @@ def _publish_bound_suite(
             idempotency_key=case_source_hash([actor.sub, request_id]),
             request_fingerprint=fingerprint,
             pending_writes=pending_writes,
-            publication_guard=bill,
+            publication_guard=commit,
             refinement_source=refinement_source,
             changed_case_ids=changed_case_ids,
         )
     except Exception:
         try:
-            receipt = _test_case_publication_receipt(payload.project_id, request_id, actor, operation)
+            receipt = lookup_receipt()
         except HTTPException as lookup_error:
             if lookup_error.status_code == 503:
                 raise _UnconfirmedTestCasePublication() from lookup_error
@@ -530,7 +538,7 @@ def _publish_bound_suite(
         if receipt is None:
             raise
     if receipt.workflow_run_id != run_id:
-        receipt = _test_case_publication_receipt(payload.project_id, request_id, actor, operation)
+        receipt = lookup_receipt()
         if receipt is None:
             raise _UnconfirmedTestCasePublication()
     published = _test_case_receipt_response(receipt, fingerprint)
@@ -541,6 +549,103 @@ def _publish_bound_suite(
     return published, receipt.workflow_run_id == run_id
 
 
+def generate_bound_test_cases(
+    payload: GenerateTestCasesInput,
+    *,
+    actor: AuthUser,
+    request_id: str,
+    approved_source: ApprovedTestCaseSource | None = None,
+    stage_publication_guard=None,
+) -> GenerateTestCasesResponse:
+    """Generate and publish through the same project path for HTTP and worker callers."""
+    if not payload.project_id:
+        raise ValueError("A project is required for bound Test Cases generation.")
+    if approved_source is not None and stage_publication_guard is None:
+        raise ValueError("Approved continuation requires a publication guard.")
+    fingerprint = (
+        _content_hash(payload)
+        if approved_source is None
+        else _content_hash([payload.project_id, payload.base_project_revision, asdict(approved_source), payload.template, payload.workflow_settings])
+    )
+    receipt = _test_case_publication_receipt(payload.project_id, request_id, actor, "testcases.generate", require_current=approved_source is None)
+    if receipt is not None:
+        return _test_case_receipt_response(receipt, fingerprint)
+
+    if approved_source is None:
+        validate_generation_baseline(payload.project_id, actor, payload.base_project_revision, payload.requirements)
+        base_revision, plan_id, source_inputs = _project_generation_source(payload, actor)
+    else:
+        payload = prepare_approved_test_case_payload(payload, actor, approved_source)
+        base_revision, plan_id = payload.base_project_revision, approved_source.use_case_snapshot_id
+        source_inputs = {
+            "source_coverage_plan": _model_payload(payload.coverage_plan),
+            "source_requirement_analysis": _model_payload(payload.requirement_analysis),
+        }
+    progress = GenerationReviewProgress() if plan_id is not None else None
+    billing_context = enforce_billing_access(current_user=actor, billing_key="testcases.generate")
+    workflow_run_id = start_workflow_run(
+        operation="testcases.generate",
+        actor=actor,
+        request_id=request_id,
+        metadata={"requirement_count": len(payload.requirements)},
+    )
+    published = False
+    try:
+        response = GenerateTestCasesResponse(
+            **generate_test_cases(
+                payload,
+                actor_user_id=actor.sub,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                operation="testcases.generate",
+                review_progress=progress,
+                **source_inputs,
+            )
+        )
+        if source_inputs and _model_payload(response.coverage_plan) != source_inputs["source_coverage_plan"]:
+            raise HTTPException(409, "Generated Test Cases did not match the approved Use Cases plan. Retry generation.")
+        if approved_source is not None and (not response.test_cases or any(placeholder_reason(case, strict=False) for case in response.test_cases)):
+            raise HTTPException(422, "No concrete Test Cases suite was produced from the approved plan.")
+        if response.generation_tasks and get_project(payload.project_id, actor=actor).current_snapshots.get("test_cases"):
+            raise HTTPException(422, _incomplete_generation_message(response))
+        response, own_publication = _publish_bound_suite(
+            payload,
+            response,
+            operation="testcases.generate",
+            actor=actor,
+            request_id=request_id,
+            fingerprint=fingerprint,
+            run_id=workflow_run_id,
+            billing_context=billing_context,
+            base_revision=base_revision,
+            source_snapshot_id=plan_id,
+            progress=progress,
+            stage_publication_guard=stage_publication_guard,
+            result_metadata={
+                "test_cases_generated_count": len(response.test_cases),
+                "requirement_count": len(payload.requirements),
+                "approved": response.approved,
+            },
+        )
+        published = True
+        if own_publication and approved_source is None:
+            response.knowledge_suggestion = suggest_feedback(actor, payload.project_id, "test_cases", payload.feedback, request_id)
+        return response
+    except Exception as exc:
+        if not published and not isinstance(exc, _UnconfirmedTestCasePublication):
+            _log_failure(
+                current_user=actor,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                operation="testcases.generate",
+                event_type="testcases.generated",
+                billing_key="testcases.generate",
+                error_message=str(exc) if approved_source is None else "Bound Test Cases generation or publication failed.",
+                metadata={"requirement_count": len(payload.requirements)},
+            )
+        raise
+
+
 @router.post("/testcases/generate", response_model=GenerateTestCasesResponse, dependencies=[Depends(generation_guidance("test_cases"))])
 async def generate_test_cases_endpoint(
     request: Request,
@@ -548,26 +653,15 @@ async def generate_test_cases_endpoint(
     current_user: AuthUser = Depends(get_current_user),
 ) -> GenerateTestCasesResponse:
     request_id = _get_request_id(request)
-    fingerprint = _content_hash(payload) if payload.project_id else None
     if payload.project_id:
-        receipt = await run_in_threadpool(_test_case_publication_receipt, payload.project_id, request_id, current_user, "testcases.generate")
-        if receipt is not None:
-            return _test_case_receipt_response(receipt, fingerprint)
-    await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
-    base_revision, approved_use_case_snapshot_id, source_inputs = await run_in_threadpool(_project_generation_source, payload, current_user)
-    review_progress = GenerationReviewProgress() if approved_use_case_snapshot_id is not None else None
-    billing_context = await run_in_threadpool(
-        enforce_billing_access,
-        current_user=current_user,
-        billing_key="testcases.generate",
-    )
+        return await run_in_threadpool(generate_bound_test_cases, payload, actor=current_user, request_id=request_id)
+    billing_context = await run_in_threadpool(enforce_billing_access, current_user=current_user, billing_key="testcases.generate")
     workflow_run_id = start_workflow_run(
         operation="testcases.generate",
         actor=current_user,
         request_id=request_id,
         metadata={"requirement_count": len(payload.requirements)},
     )
-    published = False
     try:
         result = await run_in_threadpool(
             generate_test_cases,
@@ -576,41 +670,14 @@ async def generate_test_cases_endpoint(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation="testcases.generate",
-            review_progress=review_progress,
-            **source_inputs,
+            review_progress=None,
         )
         response = GenerateTestCasesResponse(**result)
-        if source_inputs and _model_payload(response.coverage_plan) != source_inputs["source_coverage_plan"]:
-            raise HTTPException(409, "Generated Test Cases did not match the approved Use Cases plan. Retry generation.")
-        if response.generation_tasks and payload.project_id:
-            existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
-            if existing.current_snapshots.get("test_cases"):
-                raise HTTPException(422, _incomplete_generation_message(response))
         result_metadata = {
             "test_cases_generated_count": len(response.test_cases),
             "requirement_count": len(payload.requirements),
             "approved": response.approved,
         }
-        if payload.project_id:
-            response, own_publication = await run_in_threadpool(
-                _publish_bound_suite,
-                payload,
-                response,
-                operation="testcases.generate",
-                actor=current_user,
-                request_id=request_id,
-                fingerprint=fingerprint,
-                run_id=workflow_run_id,
-                billing_context=billing_context,
-                base_revision=base_revision,
-                source_snapshot_id=approved_use_case_snapshot_id,
-                progress=review_progress,
-                result_metadata=result_metadata,
-            )
-            published = True
-            if own_publication:
-                response.knowledge_suggestion = suggest_feedback(current_user, payload.project_id, "test_cases", payload.feedback, request_id)
-            return response
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -644,17 +711,16 @@ async def generate_test_cases_endpoint(
         )
         return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:
-        if not published and not isinstance(exc, _UnconfirmedTestCasePublication):
-            _log_failure(
-                current_user=current_user,
-                request=request,
-                workflow_run_id=workflow_run_id,
-                operation="testcases.generate",
-                event_type="testcases.generated",
-                billing_key="testcases.generate",
-                error_message=str(exc),
-                metadata={"requirement_count": len(payload.requirements)},
-            )
+        _log_failure(
+            current_user=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            operation="testcases.generate",
+            event_type="testcases.generated",
+            billing_key="testcases.generate",
+            error_message=str(exc),
+            metadata={"requirement_count": len(payload.requirements)},
+        )
         raise
 
 
@@ -798,7 +864,7 @@ async def refine_test_cases_endpoint(
         if not published and not isinstance(exc, _UnconfirmedTestCasePublication):
             _log_failure(
                 current_user=current_user,
-                request=request,
+                request_id=request_id,
                 workflow_run_id=workflow_run_id,
                 operation="testcases.refine",
                 event_type="testcases.refined",

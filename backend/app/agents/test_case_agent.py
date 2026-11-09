@@ -23,7 +23,7 @@ from google.genai import types
 
 from .literal_instructions import literal_source_agent
 from .substantive_review import assess_delivered_suite, apply_assessment
-from .adk_runtime import json_generation_config, tool_generation_config
+from .adk_runtime import bounded_adk_model, json_generation_config, tool_generation_config
 from .evaluation_limits import current_evaluation_limits
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .prompting import REAL_WORLD_QA_POLICY, TEST_CASE_BEHAVIOR_POLICY, TEST_DESIGN_PROMPT_GUARDRAILS, human_feedback_section
@@ -1198,6 +1198,7 @@ async def _run_test_case_workflow_async(
     stall_iteration_limit = int(resolved_settings["stall_iteration_limit"] or DEFAULT_TEST_CASE_STALL_ITERATION_LIMIT)
     diagnostics = _new_workflow_diagnostics()
     is_refinement = existing_test_cases is not None
+    model = bounded_adk_model(model)
 
     if is_refinement:
         root_agent = literal_source_agent(
@@ -1820,7 +1821,7 @@ async def _run_parallel_test_case_shard_workflow_async(
 
     root_agent = literal_source_agent(
         _build_test_case_generator_agent,
-        model,
+        bounded_adk_model(model),
         requirements_text,
         context_text,
         template_text,

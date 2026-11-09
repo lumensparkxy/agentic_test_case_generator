@@ -339,6 +339,7 @@ def generate_project_use_cases(
                     metadata={
                         **metadata,
                         "source_context_snapshot_id": context_snapshot.snapshot_id if context_snapshot else None,
+                        **({"source_context_omitted": True} if context_snapshot is None else {}),
                         "source_requirement_identities": {row.id: _requirement_identity(row) for row in active},
                         "generation_request_fingerprint": fingerprint,
                     },

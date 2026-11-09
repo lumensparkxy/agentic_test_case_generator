@@ -313,7 +313,7 @@ def mark_dispatched(client, claim, *, provider_requests=1):
 
 def stop_stage(client, claim, *, reason):
     """Close an admitted worker failure without releasing uncertain provider work."""
-    if reason not in {"settings_changed", "actor_unavailable", "scenario_preparation_failed", "publication_unconfirmed"}:
+    if reason not in {"settings_changed", "actor_unavailable", "scenario_preparation_failed", "test_case_generation_failed", "publication_unconfirmed"}:
         raise ValueError("Unsupported continuation failure reason")
     refs = _documents(client, claim.project_id, claim.run_id)
 

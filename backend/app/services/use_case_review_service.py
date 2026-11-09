@@ -99,6 +99,16 @@ def _current_source(transaction, project_doc, stage, state, *, field_paths=None)
     return snapshot
 
 
+def recorded_use_case_context_matches(metadata: dict[str, Any], context_snapshot_id: str | None) -> bool:
+    """Check exact saved Context lineage, including explicit absence."""
+    if metadata.get("source_context_snapshot_id") != context_snapshot_id:
+        return False
+    omitted = metadata.get("source_context_omitted") is True
+    if context_snapshot_id is None:
+        return omitted or "source_context_snapshot_id" in metadata
+    return not omitted
+
+
 def _test_generation_intent(
     transaction,
     project_doc,
@@ -138,8 +148,7 @@ def _test_generation_intent(
     if (
         plan_snapshot.get("source_snapshot_id") != requirements_id
         or metadata.get("source_requirements_snapshot_id") != requirements_id
-        or "source_context_snapshot_id" not in metadata
-        or metadata["source_context_snapshot_id"] != context_id
+        or not recorded_use_case_context_matches(metadata, context_id)
     ):
         return {"continuation_blocked_reason": "use_cases_source_mismatch"}
     groups = plan_snapshot["payload"].get("coverage_plan") or []

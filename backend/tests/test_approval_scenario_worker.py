@@ -2,8 +2,9 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from os import environ
+from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from google.adk.models import Gemini, LlmRequest
 from google.genai import types
@@ -11,10 +12,13 @@ from test_approval_continuation import _Client
 from test_use_case_generation import generated
 from test_use_case_review_service import _run_transaction
 
-from app.agents.adk_runtime import scenario_model
+from app.agents import substantive_review
+from app.agents.adk_runtime import bounded_adk_model
 from app.config import DEFAULT_MODEL_NAME
 from app.models import AuthUser
+from app.routers import testcases as test_case_routes
 from app.services import approval_continuation as runs, approval_scenario_worker as worker, use_case_generation_service as generation
+from app.services import use_case_review_service as reviews
 from app.services import workflow_project_service as projects
 from app.services.guidance_service import submit_with_guidance
 
@@ -83,13 +87,14 @@ class ScenarioWorkerTests(TestCase):
         transaction.commit()
         self.requests = []
         self.after_request = None
+        self.expected_reservation = 7
 
         async def mock_request(model, request, stream=False):
             del stream
             self.requests.append(request.config)
             self.assertFalse(model.client_kwargs["vertexai"])
             self.assertEqual(model.client_kwargs["http_options"].async_client_args, {"follow_redirects": False, "allow_redirects": False})
-            self.assertEqual(self.saved_run()["continuation"]["provider_requests_reserved"], 7)
+            self.assertEqual(self.saved_run()["continuation"]["provider_requests_reserved"], self.expected_reservation)
             if self.after_request is not None:
                 self.after_request()
             yield object()
@@ -105,7 +110,7 @@ class ScenarioWorkerTests(TestCase):
 
     def request_model(self):
         async def run():
-            model = scenario_model(DEFAULT_MODEL_NAME)
+            model = bounded_adk_model(DEFAULT_MODEL_NAME)
             request = LlmRequest(config=types.GenerateContentConfig(http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=5))))
             return [response async for response in model.generate_content_async(request)]
 
@@ -118,6 +123,30 @@ class ScenarioWorkerTests(TestCase):
     def assert_no_plan(self):
         project = projects.get_project(self.project_id, actor=self.actor)
         self.assertNotIn("use_cases", project.current_snapshots)
+
+    def approve_saved_plan_for_tests(self):
+        self.assertTrue(self.handle())
+        project = projects.get_project(self.project_id, actor=self.actor)
+        plan = project.current_snapshots["use_cases"]
+        self.assertTrue(plan.metadata["source_context_omitted"])
+        with (
+            patch.object(reviews, "get_required_firestore_client", return_value=self.client),
+            patch.object(reviews, "transactional", side_effect=_run_transaction),
+        ):
+            result = reviews.review_use_case_snapshot(
+                project_id=self.project_id,
+                snapshot_id=plan.snapshot_id,
+                base_project_revision=project.current_revision,
+                decision="approve",
+                comment=None,
+                actor=self.actor,
+                request_id="approve-scenarios",
+                continuation=worker.test_case_continuation_options(),
+            )
+        self.run_id = runs.continuation_run_id(self.project_id, self.actor.sub, "generate_tests", result.review.review_id)
+        self.expected_reservation = 24
+        self.requests.clear()
+        return plan
 
     def test_gate_requires_approved_emulator_transport_and_provider_configuration(self):
         self.assertTrue(worker.approval_scenario_client_allowed(self.client))
@@ -238,3 +267,78 @@ class ScenarioWorkerTests(TestCase):
         intent = self.saved_run()["continuation"]
         self.assertEqual((intent["state"], intent["reason"]), ("interrupted", "sources_changed_provider_outcome_unconfirmed"))
         self.assert_no_plan()
+
+    def test_test_case_worker_declines_held_guidance_without_claiming(self):
+        self.approve_saved_plan_for_tests()
+        with (
+            patch.dict(environ, {"ADK_SKILLS_ENABLED": "true", "ADK_GUIDANCE_STAGES": "test_cases"}),
+            patch.object(test_case_routes, "generate_bound_test_cases") as generate_tests,
+        ):
+            self.assertFalse(self.handle())
+        generate_tests.assert_not_called()
+        self.assertEqual(self.saved_run()["continuation"]["state"], "queued")
+
+    def test_test_case_generation_and_direct_critic_share_one_durable_request_budget(self):
+        plan = self.approve_saved_plan_for_tests()
+        critic_settings = SimpleNamespace(gemini_api_key="offline-fixture", model_name=DEFAULT_MODEL_NAME)
+
+        def request_critic():
+            return substantive_review._call_critic(critic_settings, "synthetic reviewer prompt")
+
+        async def send_critic(**kwargs):
+            self.assertEqual(self.saved_run()["continuation"]["provider_requests_reserved"], 24)
+            self.assertEqual(kwargs["config"].http_options.retry_options.attempts, 1)
+            return SimpleNamespace(candidates=[], text="{}")
+
+        def produce_tests(payload, **sources):
+            self.assertIsNone(payload.context)
+            self.assertEqual([row.id for row in payload.requirements], ["REQ-1"])
+            self.assertEqual(sources["source_coverage_plan"], plan.payload["coverage_plan"])
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                requests = [submit_with_guidance(executor, self.request_model if index % 2 else request_critic) for index in range(24)]
+                for result in requests:
+                    result.result()
+            case = {
+                "id": "TC-1",
+                "title": "Reject an occupied-slot booking",
+                "steps": [{"step": 1, "action": "Submit a booking for an occupied slot", "expected": "The booking is rejected"}],
+                "linked_requirement_ids": ["REQ-1"],
+                "scenario_refs": ["REQ-1-SCN-01"],
+            }
+            assessment = substantive_review.assess_delivered_suite([case], payload.requirements, None, settings=critic_settings)
+            self.assertEqual(assessment["diagnostics"]["failure_reason"], "provider_unavailable")
+            return substantive_review.apply_assessment(
+                {
+                    "test_cases": [case],
+                    "coverage_plan": sources["source_coverage_plan"],
+                    "requirement_analysis": sources["source_requirement_analysis"],
+                    "approved": True,
+                    "review": {"approved": True, "score": 95, "threshold": 90, "blocking_issues": []},
+                    "workflow_diagnostics": {"status": "completed"},
+                    "generation_evidence": {},
+                    "coverage_metrics": {},
+                },
+                assessment,
+            )
+
+        with (
+            patch.object(substantive_review.genai, "Client") as critic_client,
+            patch.object(test_case_routes, "generate_test_cases", side_effect=produce_tests) as model,
+            patch.object(test_case_routes, "get_required_firestore_client", return_value=self.client),
+            patch.object(test_case_routes, "enforce_billing_access"),
+            patch.object(test_case_routes, "record_billing_consumption") as bill,
+        ):
+            send = AsyncMock(side_effect=send_critic)
+            critic_client.return_value.__enter__.return_value.aio.__aenter__.return_value.models.generate_content = send
+            self.assertTrue(self.handle())
+            self.assertFalse(self.handle())
+        self.assertEqual((len(self.requests), send.await_count), (12, 12))
+        self.assertFalse(critic_client.call_args.kwargs["vertexai"])
+        self.assertFalse(critic_client.call_args.kwargs["http_options"].async_client_args["allow_redirects"])
+        model.assert_called_once()
+        bill.assert_called_once()
+        project = projects.get_project(self.project_id, actor=self.actor)
+        suite = project.current_snapshots["test_cases"]
+        self.assertEqual(suite.source_snapshot_id, plan.snapshot_id)
+        self.assertTrue(suite.metadata["review_retry_available"])
+        self.assertEqual(self.saved_run()["produced_snapshot_ids"], {"test_cases": suite.snapshot_id})

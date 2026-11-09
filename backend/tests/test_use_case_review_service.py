@@ -515,6 +515,34 @@ class UseCaseReviewServiceTests(unittest.TestCase):
                     self._review(continuation=changed)
                 self.assertEqual(self.store, committed)
 
+    def test_scenario_approval_verifies_explicit_context_absence_before_enqueueing(self):
+        self._continuation_plan()
+        del self.project["stage_state"]["context"]
+        initial = deepcopy(self.store)
+        plan_path = f"qa_projects/{PROJECT_ID}/snapshots/{SNAPSHOT_ID}"
+        options = ContinuationOptions(settings_fingerprint="a" * 64)
+        for lineage, eligible in (
+            ({"source_context_omitted": True}, True),
+            ({"source_context_snapshot_id": None}, True),
+            ({}, False),
+            ({"source_context_omitted": True, "source_context_snapshot_id": "contradictory"}, False),
+        ):
+            with self.subTest(lineage=lineage):
+                self.store.clear()
+                self.store.update(deepcopy(initial))
+                metadata = self.store[plan_path]["metadata"]
+                del metadata["source_context_snapshot_id"]
+                metadata.update(lineage)
+                response = self._review(continuation=options)
+                self.assertTrue(response.use_cases_state.approved)
+                receipt = self.store[self._paths_containing("/use_case_reviews/")[0]]
+                if eligible:
+                    run = self.store[f"qa_projects/{PROJECT_ID}/orchestrator_runs/{receipt['continuation_run_id']}"]
+                    self.assertIsNone(run["continuation"]["source_snapshot_ids"]["context"])
+                else:
+                    self.assertEqual(receipt["continuation_blocked_reason"], "use_cases_source_mismatch")
+                    self.assertNotIn("continuation_run_id", receipt)
+
     def test_legacy_scenario_approval_never_enqueues_for_an_eligible_plan(self):
         self._continuation_plan()
         response = self._review()

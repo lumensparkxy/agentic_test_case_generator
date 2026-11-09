@@ -33,34 +33,59 @@ class _BoundedGemini(Gemini):
         if reserve is None:
             raise RuntimeError("The bounded model requires a request reservation")
         timeout = await asyncio.to_thread(reserve)
-        config = llm_request.config or types.GenerateContentConfig()
-        http_options = config.http_options or types.HttpOptions()
-        llm_request.config = config.model_copy(
-            update={
-                "http_options": http_options.model_copy(update={"timeout": max(1, int(timeout * 1000)), "retry_options": types.HttpRetryOptions(attempts=1)}),
-                "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
-            }
-        )
+        llm_request.config = _bounded_request_config(llm_request.config or types.GenerateContentConfig(), timeout)
         llm_request.cache_config = None
         async with asyncio.timeout(timeout):
             async for response in super().generate_content_async(llm_request, stream):
                 yield response
 
 
-def scenario_model(model: str) -> str | Gemini:
+def _single_attempt_client_options():
+    return {
+        "vertexai": False,
+        "http_options": types.HttpOptions(
+            retry_options=types.HttpRetryOptions(attempts=1),
+            client_args={"follow_redirects": False},
+            async_client_args={"follow_redirects": False, "allow_redirects": False},
+        ),
+    }
+
+
+def _bounded_request_config(config, timeout):
+    http_options = config.http_options or types.HttpOptions()
+    return config.model_copy(
+        update={
+            "http_options": http_options.model_copy(update={"timeout": max(1, int(timeout * 1000)), "retry_options": types.HttpRetryOptions(attempts=1)}),
+            "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
+        }
+    )
+
+
+def bounded_adk_model(model: str) -> str | Gemini:
     if _model_reservation.get() is None:
         return model
-    return _BoundedGemini(
-        model=model,
-        client_kwargs={
-            "vertexai": False,
-            "http_options": types.HttpOptions(
-                retry_options=types.HttpRetryOptions(attempts=1),
-                client_args={"follow_redirects": False},
-                async_client_args={"follow_redirects": False, "allow_redirects": False},
-            ),
-        },
-    )
+    return _BoundedGemini(model=model, client_kwargs=_single_attempt_client_options())
+
+
+scenario_model = bounded_adk_model
+
+
+def generate_direct_content(client_factory, *, api_key, model, contents, config, timeout_seconds):
+    """Preserve direct SDK calls, sharing the lease and limit when run by a worker."""
+    reserve = _model_reservation.get()
+    if reserve is None:
+        with client_factory(api_key=api_key) as client:
+            return client.models.generate_content(model=model, contents=contents, config=config)
+
+    timeout = min(timeout_seconds, reserve())
+    request_config = _bounded_request_config(config, timeout)
+
+    async def call(client):
+        async with asyncio.timeout(timeout), client.aio as transport:
+            return await transport.models.generate_content(model=model, contents=contents, config=request_config)
+
+    with client_factory(api_key=api_key, **_single_attempt_client_options()) as client:
+        return asyncio.run(call(client))
 
 
 def _http_options() -> types.HttpOptions:
