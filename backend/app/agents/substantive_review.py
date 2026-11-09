@@ -157,10 +157,10 @@ def _without_null_fields(value):
 def _critic_data(data):
     # The provider sees behavioral evidence. The full canonical data stays
     # bound to input_hash and is used for citation and regression validation.
-    projected = {
-        **data,
-        "test_cases": [{key: value for key, value in case.items() if key not in _CASE_GENERATION_FIELDS} for case in data["test_cases"]],
-    }
+    projected = dict(data)
+    for field in ("test_cases", "reference_cases"):
+        if field in data:
+            projected[field] = [{key: value for key, value in case.items() if key not in _CASE_GENERATION_FIELDS} for case in data[field]]
     context = data["context"]
     if context is not None and context.get("requirements") == data["requirements"]:
         projected["context"] = {key: value for key, value in context.items() if key != "requirements"}
@@ -173,22 +173,25 @@ def _critic_data(data):
 def _share_review_steps(data):
     # Cases retain their own numbered steps. Reuse only identical step bodies
     # in the provider representation, never in the full citation input.
-    case_steps = [
-        [(step, _canonical_json({key: value for key, value in step.items() if key != "step"})) for step in case["steps"]] for case in data["test_cases"]
-    ]
+    cases = data["test_cases"] + data.get("reference_cases", [])
+    case_steps = [[(step, _canonical_json({key: value for key, value in step.items() if key != "step"})) for step in case["steps"]] for case in cases]
     counts = Counter(body for steps in case_steps for _, body in steps)
     repeated = [body for body, count in counts.items() if count > 1 and len(body.encode("utf-8")) >= 64]
     references = {body: f"s{index}" for index, body in enumerate(repeated, start=1)}
     if not references:
         return data
+    compact_cases = [
+        {**case, "steps": [{"step": step["step"], "step_ref": references[body]} if body in references else step for step, body in steps]}
+        for case, steps in zip(cases, case_steps, strict=True)
+    ]
+    primary_count = len(data["test_cases"])
     projected = {
         **data,
-        "test_cases": [
-            {**case, "steps": [{"step": step["step"], "step_ref": references[body]} if body in references else step for step, body in steps]}
-            for case, steps in zip(data["test_cases"], case_steps, strict=True)
-        ],
+        "test_cases": compact_cases[:primary_count],
         "shared_steps": {reference: json.loads(body) for body, reference in references.items()},
     }
+    if data.get("reference_cases"):
+        projected["reference_cases"] = compact_cases[primary_count:]
     if len(_canonical_json(projected).encode("utf-8")) < len(_canonical_json(data).encode("utf-8")):
         return projected
     return data
@@ -198,7 +201,8 @@ def review_prompt(data, input_hash, correction=""):
     source_scope = "assigned source" if data.get("review_group") else "source"
     group_instruction = (
         "This is a group review. Enumerate obligations only for review_group.requirement_ids. Use other source requirements as reference "
-        "when interpreting the assigned requirements and grounding the cases. Review every provided case and use its exact ID. "
+        "when interpreting the assigned requirements and grounding the cases. Ground every case in test_cases and only those cases. "
+        "reference_cases are delivered cases from related requirements. You may cite their exact steps for coverage, while their own group handles grounding. "
         "For a step with step_ref, read its action, expected result and test data from shared_steps. Cite the case ID and its step number. "
         "Keep grounding reasons short. Echo the requested input_hash for this group, not the enclosing suite hash.\n"
         if data.get("review_group")
@@ -227,12 +231,16 @@ DATA:
     )
 
 
-def _review_slice(data, suite_hash, requirement_ids, cases):
+def _review_slice(data, suite_hash, requirement_ids, cases, related=None):
     sliced = {
         **data,
         "test_cases": cases,
         "review_group": {"suite_input_hash": suite_hash, "requirement_ids": requirement_ids},
     }
+    if related:
+        reference_cases = _reference_cases(data["test_cases"], requirement_ids, related)
+        if reference_cases:
+            sliced["reference_cases"] = reference_cases
     digest = sha256(_canonical_json(sliced).encode("utf-8")).hexdigest()
     prompt = review_prompt(sliced, digest)
     return _ReviewSlice(sliced, digest, prompt, len(prompt.encode("utf-8")))
@@ -266,10 +274,41 @@ def _linked_review_components(data):
     return list(components.values())
 
 
+def _same_source_requirements(requirements):
+    owners = {}
+    for requirement in requirements:
+        for source in requirement.get("sources") or []:
+            if not (source.get("excerpt_verified") and source.get("source_id") and source.get("source_version") and (source.get("excerpt") or "").strip()):
+                continue
+            for original in source.get("original_requirement_ids") or []:
+                if original:
+                    key = (source["source_id"], source["source_version"], original)
+                    owners.setdefault(key, set()).add(requirement["id"])
+    related = {}
+    for keys in owners.values():
+        if len(keys) > 1:
+            for key in keys:
+                related.setdefault(key, set()).update(keys - {key})
+    return related
+
+
+def _reference_cases(cases, requirement_ids, related):
+    primary = set(requirement_ids)
+    other_ids = set().union(*(related.get(key, ()) for key in requirement_ids)) - primary
+    distinct = {}
+    for case in cases:
+        links = set(case["linked_requirement_ids"])
+        if links & other_ids and not links & primary:
+            content = _canonical_json({key: value for key, value in case.items() if key != "id" and key not in _CASE_GENERATION_FIELDS})
+            distinct.setdefault(content, case)
+    return list(distinct.values())
+
+
 def _plan_review_groups(data, suite_hash, budget):
     components = _linked_review_components(data)
     if len(components) < 2:
         return []
+    related = _same_source_requirements(data["requirements"])
     groups = []
     current = None
     hard_bytes = min(budget, GROUP_REVIEW_MAX_BYTES)
@@ -279,12 +318,12 @@ def _plan_review_groups(data, suite_hash, budget):
             merged_ids = current.data["review_group"]["requirement_ids"] + requirement_ids
             merged_cases = current.data["test_cases"] + cases
             if len(merged_cases) <= GROUP_REVIEW_TARGET_CASES:
-                merged = _review_slice(data, suite_hash, merged_ids, merged_cases)
+                merged = _review_slice(data, suite_hash, merged_ids, merged_cases, related)
                 if merged.prompt_bytes <= target_bytes:
                     current = merged
                     continue
             groups.append(current)
-        current = _review_slice(data, suite_hash, requirement_ids, cases)
+        current = _review_slice(data, suite_hash, requirement_ids, cases, related)
         if len(groups) >= GROUP_REVIEW_MAX_GROUPS or len(cases) > GROUP_REVIEW_MAX_CASES or current.prompt_bytes > hard_bytes:
             return []
     return [*groups, current] if groups else []
@@ -451,8 +490,10 @@ def validate_assessment(raw, data, input_hash):
     if not isinstance(payload, dict) or payload.get("input_hash") != input_hash:
         raise ValueError("Assessment does not match delivered content")
     requirements = {r["id"]: r for r in data["requirements"]}
-    cases = {c["id"]: c for c in data["test_cases"]}
-    if len(requirements) != len(data["requirements"]) or len(cases) != len(data["test_cases"]):
+    assigned = data["test_cases"]
+    reference = data.get("reference_cases", [])
+    cases = {c["id"]: c for c in [*assigned, *reference]}
+    if len(requirements) != len(data["requirements"]) or len(cases) != len(assigned) + len(reference):
         raise ValueError("Ambiguous input identities")
     # Compact wire references avoid asking the reviewer to reproduce long steps
     # for every obligation. Public evidence remains exact delivered text. Full
@@ -484,7 +525,7 @@ def validate_assessment(raw, data, input_hash):
     if group and len({_canonical_json(o.model_dump()) for o in output.obligations}) != len(output.obligations):
         raise ValueError("Assessment contains duplicate obligations")
     grounded_ids = [c.test_case_id for c in output.case_grounding]
-    if len(grounded_ids) != len(set(grounded_ids)) or set(grounded_ids) != set(cases):
+    if len(grounded_ids) != len(set(grounded_ids)) or set(grounded_ids) != {case["id"] for case in assigned}:
         raise ValueError("Assessment must assess every delivered case exactly once")
     for obligation in output.obligations:
         source = requirements[obligation.requirement_id]
@@ -704,6 +745,7 @@ def _combine_review_groups(data, input_hash, groups, results, workers):
                 "input_hash": group.input_hash,
                 "requirement_ids": group.data["review_group"]["requirement_ids"],
                 "case_ids": [row["id"] for row in group.data["test_cases"]],
+                "reference_case_ids": [row["id"] for row in group.data.get("reference_cases", [])],
                 "status": result["status"],
                 "prompt_bytes": group.prompt_bytes,
                 **result["diagnostics"],

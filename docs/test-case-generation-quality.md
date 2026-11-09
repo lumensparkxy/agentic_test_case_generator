@@ -202,6 +202,9 @@ evidence bound to that group's input. The combined assessment keeps the full
 suite hash and requires every group to verify its coverage before approval.
 Grouped prompts can share identical step bodies while preserving each case's
 step numbers and full evidence for citation checks.
+Requirements derived from the same verified source version and original ID
+can cite related cases across groups. Exact duplicate reference cases share
+one representative, while each original case is grounded in its own group.
 Indivisible or unpartitionable inputs use the bounded whole-suite reviewer.
 Selected-repair review keeps its existing scope and limits.
 

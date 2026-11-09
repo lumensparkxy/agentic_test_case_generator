@@ -180,6 +180,57 @@ class GroupedSubstantiveReviewTests(unittest.TestCase):
         )
         self.assertNotIn("shared_steps", review.review_prompt(data, digest))
 
+    def test_shared_verified_source_allows_cross_group_citations_without_double_grounding(self):
+        source = {
+            "source_id": "source-doc",
+            "source_version": "version-1",
+            "import_id": "source-import",
+            "label": "rules",
+            "excerpt": "Verify the receipt after submission.",
+            "excerpt_verified": True,
+            "original_requirement_ids": ["RULE-001"],
+        }
+        by_requirement = {
+            "D": source,
+            "E": source,
+            "F": {**source, "source_version": "version-2"},
+            "G": {**source, "excerpt_verified": False},
+        }
+        self.requirements = [
+            Requirement.model_validate({**req.model_dump(), "sources": [by_requirement[req.id]]}) if req.id in by_requirement else req
+            for req in self.requirements
+        ]
+        original = next(case for case in self.cases if case.id == "TC-E")
+        self.cases.append(original.model_copy(update={"id": "TC-E-DUPLICATE", "generation_pass_id": "another-generation"}))
+        unavailable = False
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            target = data["review_group"]["requirement_ids"]
+            reference = [row["id"] for row in data.get("reference_cases", [])]
+            if target == ["D"]:
+                self.assertEqual(reference, ["TC-E"])
+                output["obligations"][0]["evidence"] = [{"test_case_id": "TC-E", "step": 1}]
+            elif target == ["E"]:
+                self.assertEqual(reference, ["TC-D"])
+                if unavailable:
+                    raise httpx.ReadTimeout("synthetic unavailable primary group")
+            else:
+                self.assertEqual(reference, [])
+            return json.dumps(output)
+
+        result = self.assess(critic)
+        self.assertEqual(result["status"], "assessed_complete")
+        self.assertEqual([row["test_case_id"] for row in result["case_grounding"]], [case.id for case in self.cases])
+        self.assertEqual(result["diagnostics"]["groups"][1]["reference_case_ids"], ["TC-E"])
+        proof = next(row["evidence"][0] for row in result["obligations"] if row["requirement_id"] == "D")
+        self.assertEqual(proof["action"], original.steps[0].action)
+        unavailable = True
+        incomplete = self.assess(critic)
+        self.assertEqual(incomplete["status"], "unknown")
+        self.assertEqual(incomplete["diagnostics"]["unverified_group_count"], 1)
+        self.assertNotIn("TC-E", {row["test_case_id"] for row in incomplete["case_grounding"]})
+
     def test_wrong_group_hash_and_duplicate_or_missing_evidence_fail_closed(self):
         for defect, code in (
             ("stale", "content_binding_mismatch"),
