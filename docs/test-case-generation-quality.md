@@ -240,6 +240,13 @@ progress with an eligible outage-only draft. The draft and progress commit
 together. The first saved review can reuse it when the current inputs, reviewer
 and effective guidance match the original review.
 
+Project generation against approved Use Cases commits the Test Cases snapshot,
+case versions, completed usage, applicable billing and review progress together.
+The commit checks the owning project and the active revision. If delivery is
+interrupted, the workbench retries the exact payload and request ID once. A
+matching receipt for the current suite returns its saved cases and versions.
+An ID used for different inputs or an earlier suite returns a conflict.
+
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and
 explicitly needing review. Saved-suite review reports an input limit separately

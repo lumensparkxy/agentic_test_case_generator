@@ -60,6 +60,12 @@ class FakeDocument:
         del transaction, field_paths
         return FakeSnapshot(self.store.get(self.path))
 
+    def set(self, payload: dict[str, Any], merge: bool = False) -> None:
+        self.store[self.path] = {**self.store.get(self.path, {}), **deepcopy(payload)} if merge else deepcopy(payload)
+
+    def update(self, payload: dict[str, Any]) -> None:
+        self.store[self.path].update(deepcopy(payload))
+
     def collection(self, name: str) -> "FakeCollection":
         return FakeCollection(f"{self.path}/{name}", self.store)
 

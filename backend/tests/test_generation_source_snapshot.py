@@ -15,8 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse
 from app.routers import testcases as routes
 from app.routers.testcases import _append_project_generation_snapshots, _refinement_source_inputs
+from app.contracts.billing import BillingAccount, BillingAllocation, BillingUserProfile
+from app.services.billing_repository import build_allocation_id
+from app.services.billing_service import BillingAccessContext
 from app.services.test_case_review_progress import GenerationReviewProgress
-from app.services.workflow_project_service import ProjectConflictError
+from app.services.workflow_project_service import ProjectConflictError, append_stage_snapshot, create_project, get_project, update_project
+from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 
 class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
@@ -47,7 +51,7 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
             approved=True,
             metadata={"latest_human_review": {"decision": "approve", "snapshot_id": self.source.snapshot_id}},
         )
-        self.project = SimpleNamespace(current_revision=7, current_snapshots={"use_cases": self.source}, stage_state={"use_cases": self.state})
+        self.project = SimpleNamespace(status="active", current_revision=7, current_snapshots={"use_cases": self.source}, stage_state={"use_cases": self.state})
         self.actor = AuthUser(sub="tester", name="Synthetic tester")
         self.payload = GenerateTestCasesInput(
             project_id="project-1",
@@ -83,12 +87,26 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.payload.coverage_plan = [p.model_copy(update={"requirement_text": "Obsolete client input"}) for p in self.response.coverage_plan]
         before = deepcopy(self.project)
         with ExitStack() as stack:
-            for name in ("validate_generation_baseline", "enforce_billing_access", "start_workflow_run", "_log_success", "_record_billing_consumption_safe"):
+            for name in (
+                "validate_generation_baseline",
+                "enforce_billing_access",
+                "get_required_firestore_client",
+                "complete_workflow_run",
+                "record_usage_event",
+            ):
                 stack.enter_context(patch.object(routes, name))
+            stack.enter_context(patch.object(routes, "_bound_generation_receipt", return_value=None))
+            stack.enter_context(patch.object(routes, "start_workflow_run", return_value="generation-run"))
             stack.enter_context(patch.object(routes, "get_project", return_value=self.project))
             generate = stack.enter_context(patch.object(routes, "generate_test_cases", return_value=self.response.model_dump()))
             versions = stack.enter_context(patch.object(routes, "persist_test_case_versions", return_value=[]))
-            append = stack.enter_context(patch.object(routes, "append_stage_snapshot"))
+            append = stack.enter_context(
+                patch.object(
+                    routes,
+                    "append_stage_snapshot",
+                    side_effect=lambda **kw: SimpleNamespace(payload=kw["payload"], metadata=kw["metadata"], workflow_run_id=kw["workflow_run_id"]),
+                )
+            )
             stack.enter_context(patch.object(routes, "finish_generation", side_effect=lambda response, *_: response))
             failure = stack.enter_context(patch.object(routes, "_log_failure"))
 
@@ -101,7 +119,8 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(append.call_args.kwargs["stage"], "test_cases")
             self.assertEqual(append.call_args.kwargs["source_snapshot_id"], self.source.snapshot_id)
             self.assertEqual(append.call_args.kwargs["base_project_revision"], 7)
-            self.assertEqual(append.call_args.kwargs["transaction_guard"], generate.call_args.kwargs["review_progress"].publish_on_commit)
+            self.assertTrue(callable(append.call_args.kwargs["transaction_guard"]))
+            self.assertTrue(append.call_args.kwargs["idempotency_key"])
             self.assertEqual(self.project, before)
 
             append.reset_mock()
@@ -224,6 +243,205 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
             self.persist(operation="testcases.refine")
         self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(_refinement_source_inputs(None, AuthUser(sub="tester", name="Synthetic tester")), {})
+
+
+class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.store = {}
+        self.client = FakeFirestoreClient(self.store)
+        stack = self.enterContext(ExitStack())
+        for target in ("app.services.workflow_project_service", "app.routers.testcases"):
+            stack.enter_context(patch(f"{target}.get_required_firestore_client", return_value=self.client))
+        for target, adapter in (
+            ("workflow_project_service", "get_required_firestore_collection"),
+            ("versioning_service", "get_optional_firestore_collection"),
+            ("audit_repository", "get_optional_firestore_collection"),
+        ):
+            stack.enter_context(patch(f"app.services.{target}.{adapter}", side_effect=lambda name, **kwargs: self.client.collection(name)))
+        stack.enter_context(patch("app.services.workflow_project_service.transactional", side_effect=_run_transaction))
+        stack.enter_context(patch("app.services.billing_service.calculate_units_for_quantity", return_value=7))
+        stack.enter_context(patch.object(routes, "validate_generation_baseline"))
+
+        self.actor = AuthUser(sub="generation-tester", name="Synthetic tester")
+        self.project = create_project(name="Atomic generation", description=None, actor=self.actor, request_id="project-setup")
+        self.project_path = f"qa_projects/{self.project.project_id}"
+        req = {"id": "REQ-1", "text": "Save the confirmed order", "review_status": "Approved"}
+        append_stage_snapshot(
+            project_id=self.project.project_id, stage="requirements", payload={"requirements": [req]}, operation="test-seed", actor=self.actor, request_id="req"
+        )
+        plan = [
+            {
+                "requirement_id": req["id"],
+                "requirement_text": req["text"],
+                "scenarios": [{"id": "SCN-1", "requirement_id": req["id"], "title": "Order", "objective": "Save confirmation"}],
+            }
+        ]
+        source = append_stage_snapshot(
+            project_id=self.project.project_id,
+            stage="use_cases",
+            payload={"coverage_plan": plan},
+            operation="test-seed",
+            actor=self.actor,
+            request_id="use-cases",
+            approved=True,
+        )
+        self.store[self.project_path]["stage_state"]["use_cases"]["metadata"]["latest_human_review"] = {
+            "decision": "approve",
+            "snapshot_id": source.snapshot_id,
+        }
+        self.payload = GenerateTestCasesInput(
+            project_id=self.project.project_id,
+            base_project_revision=source.project_revision,
+            requirements=[req],
+            template={"name": "QA", "format": "json", "fields": ["steps"]},
+        )
+        self.result = GenerateTestCasesResponse.model_validate(
+            {
+                "approved": True,
+                "review": {"approved": True, "score": 100, "threshold": 90},
+                "coverage_plan": plan,
+                "test_cases": [
+                    {
+                        "id": "TC-1",
+                        "title": "Save the order",
+                        "steps": [{"step": 1, "action": "Submit the order", "expected": "A confirmed order is displayed"}],
+                        "linked_requirement_ids": [req["id"]],
+                        "scenario_refs": ["SCN-1"],
+                        "artifact_set_id": "another-artifact-set",
+                        "artifact_item_id": "another-item",
+                    }
+                ],
+            }
+        )
+        self.generate = stack.enter_context(patch.object(routes, "generate_test_cases", return_value=self.result.model_dump()))
+        account = BillingAccount(account_id="enterprise-account", scope_key="org:fixture", scope_type="organization", plan_tier="enterprise", balance_units=100)
+        allocation = BillingAllocation(
+            allocation_id=build_allocation_id(account.account_id, self.actor.sub), account_id=account.account_id, user_id=self.actor.sub, allocated_units=100
+        )
+        self.account_path = f"billing_accounts/{account.account_id}"
+        self.allocation_path = f"billing_allocations/{allocation.allocation_id}"
+        self.store[self.account_path] = account.model_copy(update={"balance_units": 80}).model_dump()
+        self.store[self.allocation_path] = allocation.model_copy(update={"consumed_units": 9}).model_dump()
+        self.billing = stack.enter_context(
+            patch.object(
+                routes,
+                "enforce_billing_access",
+                return_value=BillingAccessContext(
+                    account=account, profile=BillingUserProfile(user_id=self.actor.sub), pricing_entry=None, allocation=allocation, shadow_mode=False
+                ),
+            )
+        )
+
+    async def _request(self, payload=None, *, request_id="publish-once", actor=None):
+        request = Request({"type": "http"})
+        request.state.request_id = request_id
+        return await routes.generate_test_cases_endpoint(request, payload or self.payload, actor or self.actor)
+
+    def _records(self, collection):
+        return [value for key, value in self.store.items() if key.startswith(collection + "/")]
+
+    async def test_commit_reply_loss_and_replay_preserve_one_publication_and_paid_debit(self):
+        publish = routes._append_project_generation_snapshots
+
+        def drop_reply(**kwargs):
+            publish(**kwargs)
+            raise HTTPException(503, "Synthetic commit response lost")
+
+        with patch.object(routes, "_append_project_generation_snapshots", side_effect=drop_reply):
+            generated = await self._request()
+        self.assertEqual((await self._request()).model_dump(), generated.model_dump())
+        self.generate.assert_called_once()
+        self.billing.assert_called_once()
+        final = get_project(self.project.project_id, actor=self.actor)
+        self.assertEqual(final.current_revision, self.payload.base_project_revision + 1)
+        snapshot = final.current_snapshots["test_cases"]
+        case = generated.test_cases[0]
+        self.assertNotEqual(case.artifact_set_id, "another-artifact-set")
+        self.assertEqual(snapshot.payload["test_cases"][0]["artifact_version_id"], case.artifact_version_id)
+        self.assertEqual(len(self._records("test_case_sets")), 3)
+        self.assertEqual(self.store[self.account_path]["balance_units"], 73)
+        self.assertEqual(self.store[self.allocation_path]["consumed_units"], 16)
+        [usage] = self._records("usage_events")
+        [ledger] = self._records("billing_wallet_ledger")
+        [consumption] = self._records("billing_consumption")
+        [workflow] = self._records("workflow_runs")
+        self.assertEqual((usage["status"], usage["quantity"], workflow["status"]), ("completed", 1, "completed"))
+        self.assertEqual(ledger["units_delta"], -7)
+        self.assertEqual(consumption["source_event_id"], usage["event_id"])
+        self.assertEqual(snapshot.source_event_id, usage["event_id"])
+        self.assertTrue(consumption["applied"])
+
+        before = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as changed:
+            await self._request(self.payload.model_copy(update={"feedback": "Different requested behavior"}))
+        self.assertEqual(changed.exception.status_code, 409)
+        with self.assertRaises(HTTPException) as forbidden:
+            await self._request(actor=AuthUser(sub="another-user", name="Another user"))
+        self.assertEqual(forbidden.exception.status_code, 403)
+        self.assertEqual(self.store, before)
+
+        append_stage_snapshot(
+            project_id=self.project.project_id,
+            stage="test_cases",
+            payload=snapshot.payload,
+            operation="test_cases.review",
+            actor=self.actor,
+            request_id="later-review",
+        )
+        before_superseded_replay = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as superseded:
+            await self._request()
+        self.assertEqual(superseded.exception.status_code, 409)
+        self.assertEqual(self.store, before_superseded_replay)
+
+    async def test_failed_and_stale_publications_leave_only_failed_usage(self):
+        def change_project(*args, **kwargs):
+            update_project(project_id=self.project.project_id, actor=self.actor, request_id="change", name="Other revision")
+            return self.result.model_dump()
+
+        self.client.fail_on_create_segment = "/snapshots/"
+        with self.assertRaises(HTTPException) as failed:
+            await self._request()
+        self.assertEqual(failed.exception.status_code, 503)
+        self.client.fail_on_create_segment = None
+        self.generate.side_effect = change_project
+        with self.assertRaises(HTTPException) as stale:
+            await self._request(request_id="stale-generation")
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertNotIn("test_cases", get_project(self.project.project_id, actor=self.actor).current_snapshots)
+        self.assertEqual(self.store[self.account_path]["balance_units"], 80)
+        self.assertEqual(self.store[self.allocation_path]["consumed_units"], 9)
+        for collection in ("test_case_sets", "billing_consumption", "billing_wallet_ledger"):
+            self.assertEqual(self._records(collection), [])
+        self.assertEqual([(row["status"], row["quantity"]) for row in self._records("usage_events")], [("failed", 0), ("failed", 0)])
+
+    async def test_unconfirmed_publication_does_not_log_a_failed_commit(self):
+        publish = routes._append_project_generation_snapshots
+
+        def drop_reply(**kwargs):
+            publish(**kwargs)
+            raise HTTPException(503, "Synthetic commit response lost")
+
+        with (
+            patch.object(routes, "_append_project_generation_snapshots", side_effect=drop_reply),
+            patch.object(routes, "_bound_generation_receipt", side_effect=[None, HTTPException(503, "Synthetic receipt read unavailable")]),
+        ):
+            with self.assertRaises(HTTPException) as unavailable:
+                await self._request()
+        self.assertEqual(unavailable.exception.detail["code"], "generation_publication_unconfirmed")
+        saved = await self._request()
+        self.assertEqual(len(saved.test_cases), 1)
+        self.generate.assert_called_once()
+        self.assertEqual([(row["status"], row["quantity"]) for row in self._records("usage_events")], [("completed", 1)])
+
+    async def test_archived_project_is_rejected_before_generation(self):
+        archived = update_project(project_id=self.project.project_id, actor=self.actor, request_id="archive", status_value="archived")
+        with self.assertRaises(HTTPException) as stopped:
+            await self._request(self.payload.model_copy(update={"base_project_revision": archived.current_revision}))
+        self.assertEqual(stopped.exception.status_code, 409)
+        self.generate.assert_not_called()
+        self.billing.assert_not_called()
+        self.assertEqual(self._records("usage_events"), [])
 
 
 if __name__ == "__main__":

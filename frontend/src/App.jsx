@@ -3469,16 +3469,38 @@ export default function App() {
 			const testCaseGenerationPath = useRefineEndpoint
 				? API_CONTRACT_ENDPOINTS.testCasesRefine.path
 				: API_CONTRACT_ENDPOINTS.testCasesGenerate.path;
-			const res = await apiRequest(testCaseGenerationPath, {
+			const options = {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
 				body: JSON.stringify(payload),
+			};
+			const send = async () => {
+				const res = await apiRequest(testCaseGenerationPath, options);
+				return { res, data: res.ok ? await res.json() : null };
+			};
+			const canRecover = !useRefineEndpoint && useCasesHumanApproved;
+			let reply = await send().catch((error) => {
+				if (canRecover && (error instanceof TypeError || error instanceof SyntaxError)) return null;
+				throw error;
 			});
+			const unconfirmed =
+				canRecover &&
+				reply?.res.status === 503 &&
+				(
+					await reply.res
+						.clone()
+						.json()
+						.catch(() => null)
+				)?.detail?.code === "generation_publication_unconfirmed";
+			if (!reply || unconfirmed) {
+				if (!isProjectOperationCurrent(operationScope)) return false;
+				reply = await send();
+			}
+			const { res, data } = reply;
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to generate test cases");
 				throw Object.assign(new Error(errorMessage), { status: res.status });
 			}
-			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) {
 				return false;
 			}
