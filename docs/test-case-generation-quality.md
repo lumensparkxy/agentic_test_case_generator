@@ -240,12 +240,20 @@ progress with an eligible outage-only draft. The draft and progress commit
 together. The first saved review can reuse it when the current inputs, reviewer
 and effective guidance match the original review.
 
-Project generation against approved Use Cases commits the Test Cases snapshot,
-case versions, completed usage, applicable billing and review progress together.
-The commit checks the owning project and the active revision. If delivery is
-interrupted, the workbench retries the exact payload and request ID once. A
-matching receipt for the current suite returns its saved cases and versions.
-An ID used for different inputs or an earlier suite returns a conflict.
+Project generation commits the Test Cases snapshot, case versions, completed
+usage, applicable billing and eligible review progress together. When planning
+produces a new Use Cases draft, the same transaction saves both stages with
+successive revisions and a timeline entry for each. Test Cases link to that
+exact draft, which still requires human approval. An unchanged current plan
+keeps its snapshot and review history.
+
+The commit checks project ownership, active status and the originating
+revision. A rejected publication leaves the prior stages and case versions
+intact and records zero-quantity failure usage. If delivery is interrupted,
+the workbench retries the exact payload and request ID once. A matching receipt
+for the current suite returns its saved cases and versions. An ID used for
+different inputs or an earlier suite returns a conflict. Standalone generation
+keeps its existing response and artifact workflow.
 
 Selected repair uses the same publication and request recovery flow. It versions
 only selected tests whose content changed, and preserves the other case records

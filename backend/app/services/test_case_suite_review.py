@@ -160,7 +160,7 @@ def _generated_review_context(suite, context):
                 "diagram_links": context.diagram_links or None,
                 "image_links": context.image_links or None,
                 "project_id": suite.project_id,
-                "base_project_revision": suite.project_revision - 1,
+                "base_project_revision": suite.metadata.get("generation_base_project_revision", suite.project_revision - 1),
             }
         )
         for candidate in (context, workbench_context):

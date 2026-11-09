@@ -3478,7 +3478,7 @@ export default function App() {
 				const res = await apiRequest(testCaseGenerationPath, options);
 				return { res, data: res.ok ? await res.json() : null };
 			};
-			const canRecover = useRefineEndpoint ? selectedTestCaseIds.length > 0 : useCasesHumanApproved;
+			const canRecover = !useRefineEndpoint || selectedTestCaseIds.length > 0;
 			let reply = await send().catch((error) => {
 				if (canRecover && (error instanceof TypeError || error instanceof SyntaxError)) return null;
 				throw error;

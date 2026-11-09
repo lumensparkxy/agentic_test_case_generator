@@ -219,19 +219,20 @@ def _append_project_generation_snapshots(
         current_context_snapshot = current_project.current_snapshots.get("context")
         use_case_snapshot = current_project.current_snapshots.get("use_cases")
         use_case_state = getattr(current_project, "stage_state", {}).get("use_cases")
-        if (approved_use_case_snapshot_id is not None or repair_source is not None) and current_project.status != "active":
+        if (operation == "testcases.generate" or repair_source is not None) and current_project.status != "active":
             raise HTTPException(409, "Restore the project before publishing test cases.")
+        if base_project_revision is not None and current_project.current_revision != base_project_revision:
+            raise ProjectConflictError(current_project.current_revision)
         if repair_source is not None:
             suite_state = current_project.stage_state.get("test_cases")
             if not suite_state or suite_state.stale or suite_state.current_snapshot_id != repair_source.snapshot_id:
                 raise HTTPException(409, "The source suite changed. Reload before repairing selected tests.")
-        reuse_use_cases = bool(
+        current_plan_available = bool(
             use_case_snapshot
             and use_case_state
             and not use_case_state.stale
             and use_case_state.current_snapshot_id == use_case_snapshot.snapshot_id
             and response.coverage_plan
-            and use_case_snapshot.payload.get("coverage_plan") == _model_payload(response.coverage_plan)
         )
         # Bound generation and selected repair keep the exact source plan
         # verified before the model ran, including older sparse snapshots.
@@ -245,38 +246,31 @@ def _append_project_generation_snapshots(
             ):
                 raise HTTPException(409, "Use Cases changed during generation. Reload and retry against the current source plan.")
             reuse_use_cases = True
+        else:
+            reuse_use_cases = False
+            if current_plan_available:
+                saved_plan = use_case_snapshot.payload.get("coverage_plan") or []
+                if operation == "testcases.generate":
+                    try:
+                        reuse_use_cases = [RequirementCoveragePlan.model_validate(group) for group in saved_plan] == response.coverage_plan
+                    except TypeError, ValidationError:
+                        pass
+                else:
+                    reuse_use_cases = saved_plan == _model_payload(response.coverage_plan)
 
         # Test Case review/analysis belongs to the downstream artifact. Reusing a
         # plan must retain its exact source assessment and human review record.
         if operation == "testcases.refine" and not reuse_use_cases:
             raise HTTPException(409, "Use Cases changed during refinement. Reload and retry against the current source plan.")
-        if not reuse_use_cases:
-            use_case_snapshot = append_stage_snapshot(
-                project_id=project_id,
-                stage="use_cases",
-                payload=_use_case_project_payload(response),
-                operation=f"{operation}.use_cases",
-                actor=actor,
-                request_id=request_id,
-                workflow_run_id=workflow_run_id,
-                source_event_id=source_event_id,
-                # Automated quality approval stays in payload.review. Advancing the
-                # durable Use Cases stage requires an explicit human review record.
-                approved=False,
-                title="Use cases updated",
-                metadata={
-                    "requirement_analysis_count": len(response.requirement_analysis),
-                    "coverage_plan_count": len(response.coverage_plan),
-                },
-                base_project_revision=base_project_revision,
-            )
+        use_case_snapshot_id = use_case_snapshot.snapshot_id if reuse_use_cases else str(uuid4())
         source_snapshot_ids = {
             "requirements": current_requirements_snapshot.snapshot_id if current_requirements_snapshot else None,
             "context": current_context_snapshot.snapshot_id if current_context_snapshot else None,
-            "use_cases": use_case_snapshot.snapshot_id,
+            "use_cases": use_case_snapshot_id,
         }
         context_selection = {}
         if operation == "testcases.generate":
+            context_selection["generation_base_project_revision"] = base_project_revision
             if source_context is None:
                 context_selection["source_context_omitted"] = True
             elif source_context.grounded_context:
@@ -304,8 +298,9 @@ def _append_project_generation_snapshots(
             workflow_run_id=workflow_run_id,
             source_event_id=source_event_id,
             approved=response.approved,
-            source_snapshot_id=use_case_snapshot.snapshot_id,
-            base_project_revision=base_project_revision if reuse_use_cases else None,
+            source_snapshot_id=use_case_snapshot_id,
+            base_project_revision=base_project_revision,
+            use_case_draft_payload=None if reuse_use_cases else _use_case_project_payload(response),
             idempotency_key=idempotency_key,
             pending_writes=pending_writes,
             transaction_guard=commit if publication_guard is not None or review_progress is not None else None,
@@ -600,7 +595,7 @@ async def generate_test_cases_endpoint(
             "requirement_count": len(payload.requirements),
             "approved": response.approved,
         }
-        if approved_use_case_snapshot_id is not None:
+        if payload.project_id:
             response, own_publication = await run_in_threadpool(
                 _publish_bound_suite,
                 payload,
@@ -650,20 +645,6 @@ async def generate_test_cases_endpoint(
             source_event_id=event_id,
             operation="testcases.generate",
             approved=response.approved,
-        )
-        _append_project_generation_snapshots(
-            project_id=payload.project_id,
-            response=response,
-            operation="testcases.generate",
-            actor=current_user,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=event_id,
-            base_project_revision=base_revision,
-            source_requirements=payload.requirements,
-            source_context=payload.context,
-            approved_use_case_snapshot_id=approved_use_case_snapshot_id,
-            review_progress=review_progress,
         )
         return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:

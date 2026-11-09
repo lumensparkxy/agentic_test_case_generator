@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { seedAuthenticatedSession } from "./support/auth.js";
-import { installUseCaseReviewApi, useCaseProjectFixture, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
+import { installUseCaseReviewApi, useCaseProjectFixture, useCaseSnapshotFixture, USE_CASE_PROJECT_ID } from "./support/use-case-review.js";
 import { createDeferred } from "./support/workspace.js";
 
 const path = `/projects/${USE_CASE_PROJECT_ID}`;
@@ -158,41 +158,65 @@ test("distinguishes repair recommendations with the same title by case ID", { ta
 	await expect.poll(() => requests.map((request) => request.accepted_recommendation_ids)).toEqual([["repair-1"]]);
 });
 
-for (const interruption of ["transport", "unconfirmed"]) {
-	test(`recovers ${interruption} generation with the same request identity`, { tag: "@p1" }, async ({ page }) => {
-		const project = useCaseProjectFixture({ reviewState: "approved" });
-		const api = await installUseCaseReviewApi(page, { initialProject: project });
-		const attempts = [];
-		const source = project.current_snapshots.use_cases;
-		const payload = {
-			test_cases: [concrete],
-			approved: true,
-			review: { approved: true, score: 100, threshold: 90 },
-			coverage_plan: source.payload.coverage_plan,
-			requirement_analysis: source.payload.requirement_analysis,
-		};
-		await page.route("**/testcases/generate", async (route) => {
-			const request = route.request();
-			attempts.push({ id: request.headers()["x-request-id"], payload: request.postDataJSON() });
-			if (attempts.length === 1) {
-				const saved = structuredClone(project);
-				saved.current_revision++;
-				saved.current_snapshots.test_cases = { snapshot_id: "tests-published", operation: "testcases.generate", approved: true, payload };
-				saved.stage_state.test_cases = { current_snapshot_id: "tests-published", approved: true, stale: false };
-				api.setProject(saved);
-				if (interruption === "transport") return route.abort("failed");
-				return route.fulfill({ status: 503, json: { detail: { code: "generation_publication_unconfirmed" } } });
+for (const [interruption, draft] of [
+	["transport", false],
+	["unconfirmed", false],
+	["transport", true],
+]) {
+	test(
+		`recovers ${interruption} ${draft ? "draft" : "approved-plan"} generation with the same request identity`,
+		{ tag: "@p1" },
+		async ({ page }) => {
+			const project = draft ? useCaseProjectFixture({ snapshot: null }) : useCaseProjectFixture({ reviewState: "approved" });
+			const api = await installUseCaseReviewApi(page, { initialProject: project });
+			const attempts = [];
+			const source = draft ? useCaseSnapshotFixture() : project.current_snapshots.use_cases;
+			const payload = {
+				test_cases: [concrete],
+				approved: !draft,
+				review: { approved: !draft, score: draft ? 72 : 100, threshold: 90 },
+				coverage_plan: source.payload.coverage_plan,
+				requirement_analysis: source.payload.requirement_analysis,
+			};
+			await page.route("**/testcases/generate", async (route) => {
+				const request = route.request();
+				attempts.push({ id: request.headers()["x-request-id"], payload: request.postDataJSON() });
+				if (attempts.length === 1) {
+					const saved = structuredClone(project);
+					if (draft) {
+						saved.current_revision++;
+						saved.current_snapshots.use_cases = { ...source, project_revision: saved.current_revision };
+						saved.stage_state.use_cases = { current_snapshot_id: source.snapshot_id, approved: false, stale: false };
+					}
+					saved.current_revision++;
+					saved.current_snapshots.test_cases = {
+						snapshot_id: "tests-published",
+						source_snapshot_id: source.snapshot_id,
+						operation: "testcases.generate",
+						approved: !draft,
+						payload,
+					};
+					saved.stage_state.test_cases = { current_snapshot_id: "tests-published", approved: !draft, stale: false };
+					api.setProject(saved);
+					if (interruption === "transport") return route.abort("failed");
+					return route.fulfill({ status: 503, json: { detail: { code: "generation_publication_unconfirmed" } } });
+				}
+				await route.fulfill({ json: payload });
+			});
+			await seedAuthenticatedSession(page);
+			await page.goto(`${path}/test-cases`);
+			await page.getByRole("button", { name: /^start generation$|^generate from \d+ approved$/i }).click();
+			await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
+			await expect(page.getByText(concrete.title).first()).toBeVisible();
+			if (draft) {
+				await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
+				await expect(page.getByLabel("Test Cases readiness")).toContainText("Awaiting Use Cases review");
 			}
-			await route.fulfill({ json: payload });
-		});
-		await seedAuthenticatedSession(page);
-		await page.goto(`${path}/test-cases`);
-		await page.getByRole("button", { name: /^start generation$|^generate from \d+ approved$/i }).click();
-		await expect(page.getByText(concrete.title).first()).toBeVisible();
-		expect(attempts).toHaveLength(2);
-		expect(attempts[0].id).toBeTruthy();
-		expect(attempts[1]).toEqual(attempts[0]);
-	});
+			expect(attempts).toHaveLength(2);
+			expect(attempts[0].id).toBeTruthy();
+			expect(attempts[1]).toEqual(attempts[0]);
+		}
+	);
 }
 
 test("retries a generated suite's unavailable review after reload without regeneration", { tag: "@p1" }, async ({ page }) => {

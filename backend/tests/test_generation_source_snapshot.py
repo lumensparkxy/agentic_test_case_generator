@@ -20,7 +20,7 @@ from app.services.billing_repository import build_allocation_id
 from app.services.billing_service import BillingAccessContext
 from app.services.test_case_review_progress import GenerationReviewProgress
 from app.services.workflow_project_service import ProjectConflictError, append_stage_snapshot, create_project, get_project, update_project
-from test_use_case_review_service import FakeFirestoreClient, _run_transaction
+from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
 
 
 class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
@@ -133,7 +133,7 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
             append.assert_not_called()
             versions.assert_not_called()
 
-    def test_generation_keeps_legacy_path_without_a_current_approval(self):
+    def test_generation_leaves_draft_planning_to_the_model_without_a_current_approval(self):
         with patch.object(routes, "get_project", return_value=self.project):
             for stale, approved, review_id in [(True, True, self.source.snapshot_id), (False, False, self.source.snapshot_id), (False, True, "old")]:
                 with self.subTest(stale=stale, approved=approved, review_id=review_id):
@@ -174,14 +174,17 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
     def test_reusing_unapproved_source_does_not_create_human_approval(self):
         self.state.approved = False
         self.state.metadata = {}
+        self.source.payload["coverage_plan"] = [plan.model_dump(mode="json", exclude_none=True, exclude_defaults=True) for plan in self.response.coverage_plan]
         append = self.persist()
         append.assert_called_once()
+        self.assertEqual(append.call_args.kwargs["source_snapshot_id"], "reviewed-source")
+        self.assertIsNone(append.call_args.kwargs["use_case_draft_payload"])
         self.assertFalse(self.state.approved)
         self.assertEqual(self.state.metadata, {})
 
     def test_changed_stale_empty_or_missing_source_requires_new_unapproved_snapshot(self):
         original = deepcopy(self.project)
-        for condition in ("changed", "stale", "empty", "missing", "missing-state", "different-state-id"):
+        for condition in ("changed", "stale", "empty", "malformed", "missing", "missing-state", "different-state-id"):
             with self.subTest(condition=condition):
                 self.project = deepcopy(original)
                 if condition == "changed":
@@ -190,6 +193,8 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
                     self.project.stage_state["use_cases"].stale = True
                 elif condition == "empty":
                     self.project.current_snapshots["use_cases"].payload["coverage_plan"] = []
+                elif condition == "malformed":
+                    self.project.current_snapshots["use_cases"].payload["coverage_plan"] = [{}]
                 elif condition == "missing":
                     self.project.current_snapshots = {}
                 elif condition == "missing-state":
@@ -197,17 +202,18 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.project.stage_state["use_cases"].current_snapshot_id = "different-source"
                 append = self.persist()
-                self.assertEqual(append.call_count, 2)
-                use_cases, tests = append.call_args_list
-                self.assertEqual(use_cases.kwargs["stage"], "use_cases")
-                self.assertFalse(use_cases.kwargs["approved"])
-                self.assertEqual(use_cases.kwargs["base_project_revision"], 7)
-                self.assertEqual(tests.kwargs["source_snapshot_id"], "new-snapshot")
+                append.assert_called_once()
+                args = append.call_args.kwargs
+                self.assertEqual(args["stage"], "test_cases")
+                self.assertEqual(args["base_project_revision"], 7)
+                self.assertNotEqual(args["source_snapshot_id"], self.source.snapshot_id)
+                self.assertEqual(args["metadata"]["source_use_case_snapshot_id"], args["source_snapshot_id"])
+                self.assertEqual(args["use_case_draft_payload"]["coverage_plan"], [p.model_dump(mode="json") for p in self.response.coverage_plan])
 
     def test_empty_plans_do_not_reuse_source_approval(self):
         self.response.coverage_plan = []
         self.source.payload["coverage_plan"] = []
-        self.assertEqual(self.persist().call_count, 2)
+        self.assertEqual(self.persist().call_args.kwargs["use_case_draft_payload"]["coverage_plan"], [])
 
     def test_reused_source_still_enforces_client_revision(self):
         def concurrent_write(**kwargs):
@@ -339,6 +345,87 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
 
     def _records(self, collection):
         return [value for key, value in self.store.items() if key.startswith(collection + "/")]
+
+    async def test_draft_generation_publishes_both_stages_once_without_human_approval(self):
+        prior_use_cases = self.store[self.project_path]["stage_state"].pop("use_cases")
+        saved = await self._request()
+        self.assertEqual((await self._request()).model_dump(), saved.model_dump())
+        self.generate.assert_called_once()
+        self.assertNotIn("source_coverage_plan", self.generate.call_args.kwargs)
+        self.billing.assert_called_once()
+
+        project = get_project(self.project.project_id, actor=self.actor)
+        use_cases = project.current_snapshots["use_cases"]
+        suite = project.current_snapshots["test_cases"]
+        self.assertEqual(project.current_revision, self.payload.base_project_revision + 2)
+        self.assertEqual((use_cases.project_revision, suite.project_revision), (project.current_revision - 1, project.current_revision))
+        self.assertEqual([event.snapshot_id for event in project.timeline[:2]], [suite.snapshot_id, use_cases.snapshot_id])
+        self.assertEqual(suite.source_snapshot_id, use_cases.snapshot_id)
+        self.assertEqual(suite.metadata["source_snapshot_ids"]["use_cases"], use_cases.snapshot_id)
+        self.assertEqual(suite.metadata["source_snapshot_ids"]["requirements"], project.current_snapshots["requirements"].snapshot_id)
+        self.assertEqual(suite.metadata["generation_base_project_revision"], self.payload.base_project_revision)
+        self.assertEqual(suite.payload["coverage_plan"], use_cases.payload["coverage_plan"])
+        self.assertEqual(suite.payload["test_cases"][0]["artifact_version_id"], saved.test_cases[0].artifact_version_id)
+        self.assertNotEqual(use_cases.snapshot_id, prior_use_cases["current_snapshot_id"])
+        self.assertFalse(use_cases.approved)
+        self.assertFalse(project.stage_state["use_cases"].approved)
+        self.assertNotIn("latest_human_review", project.stage_state["use_cases"].metadata)
+        self.assertTrue(use_cases.payload["review"]["approved"])
+
+        [usage] = self._records("usage_events")
+        [consumption] = self._records("billing_consumption")
+        [ledger] = self._records("billing_wallet_ledger")
+        self.assertEqual((usage["status"], usage["quantity"]), ("completed", 1))
+        self.assertEqual({use_cases.source_event_id, suite.source_event_id, consumption["source_event_id"]}, {usage["event_id"]})
+        self.assertEqual(ledger["units_delta"], -7)
+        self.assertEqual(self.store[self.account_path]["balance_units"], 73)
+        self.assertEqual(len(self._records("test_case_sets")), 3)
+
+        before_mismatch = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as mismatch:
+            await self._request(self.payload.model_copy(update={"feedback": "Different input"}))
+        self.assertEqual(mismatch.exception.status_code, 409)
+        self.assertEqual(self.store, before_mismatch)
+
+        append_stage_snapshot(
+            project_id=self.project.project_id,
+            stage="context",
+            payload={},
+            operation="test-seed",
+            actor=self.actor,
+            request_id="updated-context",
+        )
+        self.assertTrue(get_project(self.project.project_id, actor=self.actor).stage_state["test_cases"].stale)
+        before_stale_replay = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as stale_replay:
+            await self._request()
+        self.assertEqual(stale_replay.exception.status_code, 409)
+        self.assertEqual(self.store, before_stale_replay)
+
+    async def test_draft_generation_failure_after_staging_use_cases_rolls_back_both_stages(self):
+        self.store[self.project_path]["stage_state"]["use_cases"]["stale"] = True
+        prior = get_project(self.project.project_id, actor=self.actor)
+        create = FakeTransaction.create
+        staged = []
+
+        def reject_suite(transaction, document, payload):
+            if "/snapshots/" in document.path and payload.get("stage") == "test_cases":
+                staged.extend(value for operation, ref, value in transaction.pending if operation == "create" and "/snapshots/" in ref.path)
+                raise RuntimeError("Synthetic final Test Cases snapshot write failure")
+            return create(transaction, document, payload)
+
+        with patch.object(FakeTransaction, "create", reject_suite), self.assertRaises(HTTPException) as failure:
+            await self._request()
+        self.assertEqual(failure.exception.status_code, 503)
+        [uncommitted] = staged
+        self.assertEqual(uncommitted["stage"], "use_cases")
+        self.assertNotEqual(uncommitted["snapshot_id"], prior.current_snapshots["use_cases"].snapshot_id)
+        self.assertEqual(get_project(self.project.project_id, actor=self.actor), prior)
+        for collection in ("test_case_sets", "billing_consumption", "billing_wallet_ledger"):
+            self.assertEqual(self._records(collection), [])
+        self.assertEqual(self.store[self.account_path]["balance_units"], 80)
+        self.assertEqual(self.store[self.allocation_path]["consumed_units"], 9)
+        self.assertEqual([(event["status"], event["quantity"]) for event in self._records("usage_events")], [("failed", 0)])
 
     async def test_commit_reply_loss_and_replay_preserve_one_publication_and_paid_debit(self):
         publish = routes._append_project_generation_snapshots

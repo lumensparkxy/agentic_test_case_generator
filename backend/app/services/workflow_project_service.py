@@ -204,7 +204,7 @@ def find_idempotent_stage_snapshot(project_id, stage, operation, key, *, actor):
         raise ProjectNotFoundError(project_id)
     _require_owner(current, actor)
     state = _stage_state_from_payload(current).get(stage) or {}
-    if (current.get("status") or "active") != "active" or state.get("current_snapshot_id") != snapshot_id:
+    if (current.get("status") or "active") != "active" or state.get("current_snapshot_id") != snapshot_id or state.get("stale"):
         raise ProjectConflictError(int(current.get("current_revision") or 0))
     return QaProjectStageSnapshot.model_validate(value)
 
@@ -240,7 +240,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
 
     project_doc = _get_project_doc(project_id)
     timeline = [QaProjectTimelineEvent.model_validate(item) for item in _stream_collection(project_doc.collection("timeline")) if item.get("event_id")]
-    timeline.sort(key=lambda item: item.occurred_at, reverse=True)
+    timeline.sort(key=lambda item: (item.occurred_at, item.project_revision), reverse=True)
     execution_runs = [
         QaProjectExecutionRun.model_validate(item) for item in _stream_collection(project_doc.collection("execution_runs")) if item.get("run_record_id")
     ]
@@ -494,7 +494,9 @@ def create_project(*, name: str, description: Optional[str], actor: AuthUser, re
     return get_project(project_id, actor=actor)
 
 
-def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=(), transaction_guard=None):
+def _commit_project_revision(
+    project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=(), transaction_guard=None, preceding_snapshots=()
+):
     """Serialize every revision writer with reviewed imports; publish all evidence or none."""
     client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
     doc = client.collection(QA_PROJECTS_COLLECTION).document(project_id)
@@ -523,6 +525,9 @@ def _commit_project_revision(project_id, actor, expected_revision, update, event
             transaction_guard(transaction, snapshot)
         for reference, value, merge in pending_writes:
             transaction.set(reference, value, merge=merge)
+        for preceding, preceding_event in preceding_snapshots:
+            transaction.create(doc.collection("snapshots").document(preceding["snapshot_id"]), preceding)
+            transaction.create(doc.collection("timeline").document(preceding_event["event_id"]), preceding_event)
         if snapshot:
             transaction.create(snapshot_ref, snapshot)
         transaction.update(doc, update)
@@ -577,38 +582,27 @@ def update_project(
     return get_project(project_id, actor=actor)
 
 
-def append_stage_snapshot(
+def _stage_snapshot_change(
+    stage_state,
     *,
-    project_id: str,
-    stage: ProjectStageName,
-    payload: dict[str, Any],
-    operation: str,
-    actor: AuthUser,
-    request_id: str,
-    workflow_run_id: Optional[str] = None,
-    source_event_id: Optional[str] = None,
-    approved: bool = False,
-    source_snapshot_id: Optional[str] = None,
-    title: Optional[str] = None,
-    metadata: Optional[dict[str, Any]] = None,
-    base_project_revision: Optional[int] = None,
-    idempotency_key: Optional[str] = None,
-    pending_writes: tuple | list = (),
-    transaction_guard=None,
-) -> QaProjectStageSnapshot:
-    project_payload = _get_project_payload(project_id)
-    _require_owner(project_payload, actor)
-    snapshot_id = _stable_document_id("snapshot", project_id, stage, operation, idempotency_key) if idempotency_key else str(uuid4())
-    if idempotency_key:
-        existing_snapshot = _snapshot_for(project_id, snapshot_id)
-        if existing_snapshot is not None:
-            return existing_snapshot
-    _check_revision(project_payload, base_project_revision)
-
-    now = _utcnow()
-    current_revision = int(project_payload.get("current_revision") or 0)
-    next_revision = current_revision + 1
-    stage_state = _stage_state_from_payload(project_payload)
+    project_id,
+    stage,
+    snapshot_id,
+    payload,
+    operation,
+    actor,
+    request_id,
+    workflow_run_id,
+    source_event_id,
+    approved,
+    source_snapshot_id,
+    title,
+    metadata,
+    next_revision,
+    now,
+    idempotency_key=None,
+):
+    """Prepare a snapshot and its timeline event against a prospective stage state."""
     previous_state = stage_state.get(stage) or {}
     version = int(previous_state.get("version") or 0) + 1
     guidance = public_manifest()
@@ -633,14 +627,6 @@ def append_stage_snapshot(
         "idempotency_key": idempotency_key,
         "created_at": now,
     }
-
-    if stage == "execution":
-        from .quality_feedback import execution_finding_writes
-
-        pending_writes = [*pending_writes, *execution_finding_writes(project_id, snapshot_payload)]
-        if operation == "automation.execution.run":
-            snapshot_ref = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
-            pending_writes.extend(execution_result_writes(snapshot_ref, snapshot_payload))
 
     stage_metadata = dict(metadata or {})
     if stage == "use_cases":
@@ -671,6 +657,110 @@ def append_stage_snapshot(
         downstream["stale_reason"] = f"{stage} changed in project revision {next_revision}"
         stage_state[downstream_stage] = downstream
 
+    event = {
+        "event_id": str(uuid4()),
+        "project_id": project_id,
+        "event_type": "stage.snapshot_created",
+        "stage": stage,
+        "summary": title or f"{stage.replace('_', ' ').title()} v{version} saved",
+        "project_revision": next_revision,
+        "snapshot_id": snapshot_id,
+        "actor_user_id": actor.sub,
+        "metadata": {"operation": operation, **_serialize_value(metadata or {})},
+        "occurred_at": now,
+    }
+    return snapshot_payload, event
+
+
+def append_stage_snapshot(
+    *,
+    project_id: str,
+    stage: ProjectStageName,
+    payload: dict[str, Any],
+    operation: str,
+    actor: AuthUser,
+    request_id: str,
+    workflow_run_id: Optional[str] = None,
+    source_event_id: Optional[str] = None,
+    approved: bool = False,
+    source_snapshot_id: Optional[str] = None,
+    title: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
+    base_project_revision: Optional[int] = None,
+    idempotency_key: Optional[str] = None,
+    pending_writes: tuple | list = (),
+    transaction_guard=None,
+    use_case_draft_payload: Optional[dict[str, Any]] = None,
+) -> QaProjectStageSnapshot:
+    project_payload = _get_project_payload(project_id)
+    _require_owner(project_payload, actor)
+    snapshot_id = _stable_document_id("snapshot", project_id, stage, operation, idempotency_key) if idempotency_key else str(uuid4())
+    if idempotency_key:
+        existing_snapshot = _snapshot_for(project_id, snapshot_id)
+        if existing_snapshot is not None:
+            return existing_snapshot
+    _check_revision(project_payload, base_project_revision)
+
+    now = _utcnow()
+    current_revision = int(project_payload.get("current_revision") or 0)
+    next_revision = current_revision + 1
+    stage_state = _stage_state_from_payload(project_payload)
+    preceding_snapshots = ()
+    if use_case_draft_payload is not None:
+        if stage != "test_cases" or not source_snapshot_id:
+            raise ValueError("A Use Cases draft must be linked to its Test Cases snapshot")
+        preceding_snapshots = (
+            _stage_snapshot_change(
+                stage_state,
+                project_id=project_id,
+                stage="use_cases",
+                snapshot_id=source_snapshot_id,
+                payload=use_case_draft_payload,
+                operation=f"{operation}.use_cases",
+                actor=actor,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                source_event_id=source_event_id,
+                approved=False,
+                source_snapshot_id=None,
+                title="Use cases updated",
+                metadata={
+                    "requirement_analysis_count": len(use_case_draft_payload.get("requirement_analysis") or []),
+                    "coverage_plan_count": len(use_case_draft_payload.get("coverage_plan") or []),
+                },
+                next_revision=next_revision,
+                now=now,
+            ),
+        )
+        next_revision += 1
+
+    snapshot_payload, event = _stage_snapshot_change(
+        stage_state,
+        project_id=project_id,
+        stage=stage,
+        snapshot_id=snapshot_id,
+        payload=payload,
+        operation=operation,
+        actor=actor,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        source_event_id=source_event_id,
+        approved=approved,
+        source_snapshot_id=source_snapshot_id,
+        title=title,
+        metadata=metadata,
+        next_revision=next_revision,
+        now=now,
+        idempotency_key=idempotency_key,
+    )
+    if stage == "execution":
+        from .quality_feedback import execution_finding_writes
+
+        pending_writes = [*pending_writes, *execution_finding_writes(project_id, snapshot_payload)]
+        if operation == "automation.execution.run":
+            snapshot_ref = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
+            pending_writes.extend(execution_result_writes(snapshot_ref, snapshot_payload))
+
     committed = _commit_project_revision(
         project_id,
         actor,
@@ -681,21 +771,11 @@ def append_stage_snapshot(
             "stage_state": stage_state,
             "latest_stage": stage,
         },
-        {
-            "event_id": str(uuid4()),
-            "project_id": project_id,
-            "event_type": "stage.snapshot_created",
-            "stage": stage,
-            "summary": title or f"{stage.replace('_', ' ').title()} v{version} saved",
-            "project_revision": next_revision,
-            "snapshot_id": snapshot_id,
-            "actor_user_id": actor.sub,
-            "metadata": {"operation": operation, **_serialize_value(metadata or {})},
-            "occurred_at": now,
-        },
+        event,
         snapshot=snapshot_payload,
         pending_writes=pending_writes,
         transaction_guard=transaction_guard,
+        preceding_snapshots=preceding_snapshots,
     )
     if stage == "execution" and operation == "automation.execution.run":
         restore_execution_results(snapshot_ref, committed)

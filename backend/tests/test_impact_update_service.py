@@ -1341,6 +1341,12 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         )
         suite.metadata.update(source_context_hash=case_source_hash(expected.model_dump(mode="json")), source_context_artifact_ids=["kept"])
         self.assertEqual(suite_review._generated_review_context(suite, context), expected)
+        # Draft generation may publish Use Cases in the preceding revision.
+        paired = expected.model_copy(update={"base_project_revision": suite.project_revision - 2})
+        suite.metadata.update(
+            generation_base_project_revision=paired.base_project_revision, source_context_hash=case_source_hash(paired.model_dump(mode="json"))
+        )
+        self.assertEqual(suite_review._generated_review_context(suite, context), paired)
         suite.metadata.pop("source_context_artifact_ids")
         with self.assertRaises(HTTPException) as mismatch:
             suite_review._generated_review_context(suite, context)
