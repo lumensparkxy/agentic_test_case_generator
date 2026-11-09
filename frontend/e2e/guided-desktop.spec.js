@@ -60,6 +60,8 @@ for (const width of [1366, 1440, 1920])
 			await page.keyboard.press("Tab");
 			await expect(page.getByRole("combobox", { name: "Automation intent", exact: true })).toBeFocused();
 			await page.keyboard.press("Tab");
+			await expect(page.getByRole("button", { name: "Go to selected case", exact: true })).toBeFocused();
+			await page.keyboard.press("Tab");
 			await expect(page.locator(":focus")).toHaveAttribute("data-ui", "selectable-item");
 			expect(
 				(await new AxeBuilder({ page }).include(".test-review-workspace").withTags(["wcag2a", "wcag2aa"]).analyze()).violations

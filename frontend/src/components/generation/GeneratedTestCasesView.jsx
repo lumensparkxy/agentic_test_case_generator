@@ -244,7 +244,13 @@ export default function GeneratedTestCasesView({
 							</Button>
 						)}
 						{selected && (
-							<Button variant="secondary" size="compact" aria-controls="selected-test-case" onClick={focusSelectedCase}>
+							<Button
+								variant="secondary"
+								size="compact"
+								className="test-case-jump"
+								aria-controls="selected-test-case"
+								onClick={focusSelectedCase}
+							>
 								Go to selected case
 							</Button>
 						)}
