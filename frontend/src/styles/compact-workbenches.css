@@ -14,6 +14,15 @@
 	gap: 8px;
 	margin: 0;
 	font-size: var(--font-secondary);
+}
+
+.compact-workbench-header .project-breadcrumb > :is(a, [aria-hidden="true"]) {
+	flex: none;
+	white-space: nowrap;
+}
+
+.compact-workbench-header .project-breadcrumb > span:last-child {
+	min-inline-size: 0;
 	overflow-wrap: anywhere;
 }
 

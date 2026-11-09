@@ -397,6 +397,30 @@ test.describe("Responsive project shell", () => {
 		await expectNoDocumentOverflow(page, "320px unbroken project name");
 	});
 
+	test("keeps the Projects breadcrumb intact beside a long name in compact workbenches", { tag: "@p1" }, async ({ page }) => {
+		await openResponsiveProject(page, { width: 1440, height: 900 }, { destination: "requirements" });
+		for (const stage of ["requirements", "use-cases", "test-cases"]) {
+			await page.goto(buildProjectPath(PROJECT_ID, stage));
+			const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb", exact: true });
+			const projects = breadcrumb.getByRole("link", { name: "Projects", exact: true });
+			await expect(projects).toHaveAttribute("href", "/projects");
+			await expect(breadcrumb).toContainText(`${PROJECT_NAME} · Revision 12`);
+			for (const width of [320, 1440]) {
+				await page.setViewportSize({ width, height: 900 });
+				await settleLayout(page);
+				await expectVisuallyContained(breadcrumb, page.locator(".project-page-header"));
+				await expectVisuallyContained(projects, breadcrumb);
+				expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+				const lineCount = await projects.evaluate((link) => {
+					const range = document.createRange();
+					range.selectNodeContents(link);
+					return range.getClientRects().length;
+				});
+				expect(lineCount, `${width}px ${stage} Projects link`).toBe(1);
+			}
+		}
+	});
+
 	test("preserves the desktop navigation preference across compact transitions and reload", async ({ page }) => {
 		await openResponsiveProject(page, { width: 1280, height: 900 });
 		const projectNavigation = page.getByRole("navigation", { name: "Project navigation" });
