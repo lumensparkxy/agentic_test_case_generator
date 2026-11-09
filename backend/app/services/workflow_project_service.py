@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 from google.api_core.exceptions import GoogleAPICallError
-from google.cloud.firestore_v1 import FieldFilter, Query, transactional
+from google.cloud.firestore_v1 import Client, CollectionReference, DocumentReference, FieldFilter, Query, transactional
 
 from ..contracts.projects import QaProjectExecutionRunDetail
 from ..models import (
@@ -438,7 +438,7 @@ def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[Qa
     return projects
 
 
-def _workspace_snapshot_for(project_id: str, snapshot_id: str, stage: ProjectStageName) -> Optional[QaProjectStageSnapshot]:
+def _workspace_snapshot_fields(stage: ProjectStageName) -> tuple[str, ...]:
     # Coverage plans are arrays, so Firestore cannot project just nested scenario IDs.
     # Read the current use-case plan to count legacy artifacts without rewriting them.
     fields = WORKSPACE_SNAPSHOT_FIELDS
@@ -446,18 +446,55 @@ def _workspace_snapshot_for(project_id: str, snapshot_id: str, stage: ProjectSta
         fields += ("payload.coverage_plan",)
     if stage == "execution":
         fields += ("payload.candidate_counts", "payload.readiness", "payload.reviewed_full_suite", "payload.warnings")
-    reference = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
-    payload = _document_to_dict(reference.get(field_paths=fields))
-    if not payload:
-        return None
-    snapshot = QaProjectStageSnapshot.model_validate(payload)
-    if snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id:
-        return None
-    if snapshot.operation == _EXECUTION_PREVIEW_OPERATION and "candidate_counts" in snapshot.payload and not preview_has_verified_receipt(snapshot.metadata):
+    return fields
+
+
+def _workspace_snapshots(
+    client: Client,
+    projects: CollectionReference,
+    summaries: list[QaProjectSummary],
+) -> dict[tuple[str, str, ProjectStageName], QaProjectStageSnapshot]:
+    batches: dict[tuple[str, ...], dict[tuple[str, str, ProjectStageName], DocumentReference]] = {}
+    for summary in summaries:
+        collection = projects.document(summary.project_id).collection("snapshots")
+        for stage, state in summary.stage_state.items():
+            if state.current_snapshot_id:
+                pointer = (summary.project_id, state.current_snapshot_id, stage)
+                batches.setdefault(_workspace_snapshot_fields(stage), {})[pointer] = collection.document(state.current_snapshot_id)
+
+    snapshots = {}
+    legacy_previews: dict[str, tuple[DocumentReference, QaProjectStageSnapshot]] = {}
+    for fields, pointers in batches.items():
+        references = {reference.path: reference for reference in pointers.values()}
+        payloads = {
+            document.reference.path: payload
+            for document in client.get_all(list(references.values()), field_paths=fields)
+            if (payload := _document_to_dict(document))
+        }
+        for pointer, reference in pointers.items():
+            payload = payloads.get(reference.path)
+            if not payload:
+                continue
+            snapshot = QaProjectStageSnapshot.model_validate(payload)
+            if (snapshot.project_id, snapshot.snapshot_id, snapshot.stage) != pointer:
+                continue
+            snapshots[pointer] = snapshot
+            if (
+                snapshot.operation == _EXECUTION_PREVIEW_OPERATION
+                and "candidate_counts" in snapshot.payload
+                and not preview_has_verified_receipt(snapshot.metadata)
+            ):
+                legacy_previews[reference.path] = (reference, snapshot)
+
+    if legacy_previews:
         # Legacy counts need their compact bucket lists to establish a complete preview.
-        buckets = _document_to_dict(reference.get(field_paths=("payload.candidates",))) or {}
-        snapshot.payload.update(buckets.get("payload") or {})
-    return snapshot
+        references = [reference for reference, _ in legacy_previews.values()]
+        for document in client.get_all(references, field_paths=("payload.candidates",)):
+            entry = legacy_previews.get(document.reference.path)
+            if entry and (buckets := _document_to_dict(document)):
+                _, preview = entry
+                preview.payload.update(buckets.get("payload") or {})
+    return snapshots
 
 
 def _workspace_execution_runs(
@@ -521,7 +558,9 @@ def list_workspace_projects(
     unbounded collection scan.
     """
 
-    query = _collection().where(filter=FieldFilter("owner_user_id", "==", actor.sub))
+    client = get_required_firestore_client(unavailable_message=f"Firestore client unavailable for {QA_PROJECTS_COLLECTION} persistence")
+    collection = client.collection(QA_PROJECTS_COLLECTION)
+    query = collection.where(filter=FieldFilter("owner_user_id", "==", actor.sub))
     if not include_archived:
         query = query.where(filter=FieldFilter("status", "==", "active"))
     query = (
@@ -542,7 +581,7 @@ def list_workspace_projects(
         .limit(project_limit)
     )
 
-    projects: list[QaProjectDetail] = []
+    summaries: list[QaProjectSummary] = []
     for snapshot in query.stream():
         payload = dict(snapshot.to_dict() or {})
         if not payload or payload.get("owner_user_id") != actor.sub:
@@ -550,13 +589,17 @@ def list_workspace_projects(
         if not include_archived and payload.get("status") == "archived":
             continue
 
-        summary = _summary_from_payload(payload)
+        summaries.append(_summary_from_payload(payload))
+
+    snapshots = _workspace_snapshots(client, collection, summaries)
+    projects: list[QaProjectDetail] = []
+    for summary in summaries:
         current_snapshots: dict[ProjectStageName, QaProjectStageSnapshot] = {}
         for stage, state in summary.stage_state.items():
             if not state.current_snapshot_id:
                 continue
-            current_snapshot = _workspace_snapshot_for(summary.project_id, state.current_snapshot_id, stage)
-            if current_snapshot is not None and current_snapshot.stage == stage:
+            current_snapshot = snapshots.get((summary.project_id, state.current_snapshot_id, stage))
+            if current_snapshot is not None:
                 if stage == "test_cases":
                     from .test_case_quality import project_test_case_view
 
@@ -566,7 +609,7 @@ def list_workspace_projects(
                         summary.stage_state[stage].approved = False
                 current_snapshots[stage] = current_snapshot
 
-        project_doc = _get_project_doc(summary.project_id)
+        project_doc = collection.document(summary.project_id)
         execution_runs = _workspace_execution_runs(
             project_doc,
             actor=actor,

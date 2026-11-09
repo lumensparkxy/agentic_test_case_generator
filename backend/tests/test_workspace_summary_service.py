@@ -122,9 +122,10 @@ def _status(
 
 
 class FakeSnapshot:
-    def __init__(self, payload: Optional[dict[str, Any]], document_id: str = "") -> None:
+    def __init__(self, payload: Optional[dict[str, Any]], reference: FakeDocument) -> None:
         self._payload = payload
-        self.id = document_id
+        self.reference = reference
+        self.id = reference.path.rsplit("/", 1)[-1]
         self.exists = payload is not None
 
     def to_dict(self) -> Optional[dict[str, Any]]:
@@ -137,8 +138,7 @@ class FakeDocument:
         self.store = store
         self.query_log = query_log
 
-    def get(self, field_paths: Optional[tuple[str, ...]] = None) -> FakeSnapshot:
-        self.query_log.append(("get", self.path, field_paths))
+    def snapshot(self, field_paths: Optional[tuple[str, ...]] = None) -> FakeSnapshot:
         payload = self.store.get(self.path)
         if payload is not None and field_paths is not None:
             projected = {}
@@ -155,7 +155,7 @@ class FakeDocument:
                         target = target.setdefault(part, {})
                     target[parts[-1]] = source
             payload = projected
-        return FakeSnapshot(payload, self.path.rsplit("/", 1)[-1])
+        return FakeSnapshot(payload, self)
 
     def collection(self, name: str) -> "FakeCollection":
         return FakeCollection(f"{self.path}/{name}", self.store, self.query_log)
@@ -234,7 +234,20 @@ class FakeCollection:
             rows = rows[: self.max_items]
         self.query_log.append(("stream", self.path, len(rows)))
         for document_id, payload in rows:
-            yield FakeSnapshot(payload, document_id)
+            yield FakeSnapshot(payload, self.document(document_id))
+
+
+class FakeFirestoreClient:
+    def __init__(self, store: dict[str, dict[str, Any]], query_log: list[tuple[Any, ...]]) -> None:
+        self.store = store
+        self.query_log = query_log
+
+    def collection(self, name: str) -> FakeCollection:
+        return FakeCollection(name, self.store, self.query_log)
+
+    def get_all(self, references: list[FakeDocument], field_paths: tuple[str, ...]):
+        self.query_log.append(("get_all", tuple(reference.path for reference in references), field_paths))
+        return (reference.snapshot(field_paths) for reference in reversed(references))
 
 
 class WorkspaceSummaryServiceTests(unittest.TestCase):
@@ -329,8 +342,8 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
             "qa_projects/counts": project_data,
             "qa_projects/counts/snapshots/use-cases-1": snapshot.model_dump(),
         }
-        collection = FakeCollection("qa_projects", store, [])
-        with patch("app.services.workflow_project_service.get_required_firestore_collection", return_value=collection):
+        client = FakeFirestoreClient(store, [])
+        with patch("app.services.workflow_project_service.get_required_firestore_client", return_value=client):
             for version, payload, expected_count, expected_groups in [
                 (1, {"coverage_plan": plan}, 28, 8),
                 (2, {"coverage_plan": [{"scenarios": [{"id": "new"}]}]}, 1, 1),
@@ -368,9 +381,9 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
         preview_path = "qa_projects/preview/snapshots/preview-1"
         store = {"qa_projects/preview": project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"})}
         query_log = []
-        collection = FakeCollection("qa_projects", store, query_log)
+        client = FakeFirestoreClient(store, query_log)
 
-        with patch("app.services.workflow_project_service.get_required_firestore_collection", return_value=collection):
+        with patch("app.services.workflow_project_service.get_required_firestore_client", return_value=client):
             for verified, executable, readiness, expected in (
                 (True, 0, False, "report"),
                 (False, 0, False, "report"),
@@ -409,10 +422,67 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
                     self.assertNotIn("specs", compact)
                     self.assertNotIn("results", compact)
                     self.assertEqual("candidates" in compact, not verified)
-                    reads = [fields for op, path, *args in query_log if op == "get" and path == preview_path for fields in args]
+                    reads = [entry[2] for entry in query_log if entry[0] == "get_all" and preview_path in entry[1]]
                     self.assertEqual(len(reads), 1 if verified else 2)
                     if not verified:
                         self.assertEqual(reads[-1], ("payload.candidates",))
+
+    def test_workspace_batches_projected_snapshots_by_mask_and_matches_exact_pointers(self) -> None:
+        actor = AuthUser(sub="user-1", email="user@example.com", name="User")
+        store: dict[str, dict[str, Any]] = {}
+        stage_state = {
+            "requirements": _stage_state("shared-id", updated_at=BASE_TIME),
+            "context": _stage_state("shared-id", updated_at=BASE_TIME),
+            "use_cases": _stage_state("plan", updated_at=BASE_TIME),
+            "impact_analysis": _stage_state("missing", updated_at=BASE_TIME),
+            "test_cases": _stage_state("wrong-id", updated_at=BASE_TIME),
+            "execution": _stage_state("preview", updated_at=BASE_TIME),
+            "reports": _stage_state("wrong-owner", updated_at=BASE_TIME),
+        }
+        for project_id, owner, status in (
+            ("a", actor.sub, "active"),
+            ("b", actor.sub, "active"),
+            ("archived", actor.sub, "archived"),
+            ("foreign", "user-2", "active"),
+        ):
+            project = _project(project_id, owner_user_id=owner, status=status, stage_state=stage_state)
+            project_path = f"qa_projects/{project_id}"
+            store[project_path] = project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"})
+            snapshots = {
+                "shared-id": _snapshot(project_id=project_id, stage="requirements", snapshot_id="shared-id", created_at=BASE_TIME),
+                "plan": _snapshot(project_id=project_id, stage="use_cases", snapshot_id="plan", created_at=BASE_TIME),
+                "wrong-id": _snapshot(project_id=project_id, stage="test_cases", snapshot_id="other", created_at=BASE_TIME),
+                "wrong-owner": _snapshot(project_id="foreign", stage="reports", snapshot_id="wrong-owner", created_at=BASE_TIME),
+                "preview": _snapshot(
+                    project_id=project_id,
+                    stage="execution",
+                    snapshot_id="preview",
+                    created_at=BASE_TIME,
+                    operation="automation.execution.preview",
+                    payload={"candidate_counts": {"manual": 1}, "candidates": {"manual": [{"id": project_id}]}},
+                ),
+            }
+            store.update({f"{project_path}/snapshots/{document_id}": snapshot.model_dump() for document_id, snapshot in snapshots.items()})
+
+        query_log: list[tuple[Any, ...]] = []
+        client = FakeFirestoreClient(store, query_log)
+        with patch("app.services.workflow_project_service.get_required_firestore_client", return_value=client):
+            projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=20, execution_run_limit=20)
+
+        self.assertEqual([project.project_id for project in projects], ["a", "b"])
+        for project in projects:
+            self.assertEqual(set(project.current_snapshots), {"requirements", "use_cases", "execution"})
+            self.assertEqual(project.current_snapshots["execution"].payload["candidates"]["manual"], [{"id": project.project_id}])
+
+        batches = [entry[1:] for entry in query_log if entry[0] == "get_all"]
+        self.assertEqual(len(batches), 4)
+        self.assertEqual(sorted(len(paths) for paths, _ in batches), [2, 2, 2, 8])
+        for paths, fields in batches:
+            self.assertEqual({path.split("/")[1] for path in paths}, {"a", "b"})
+            self.assertEqual(len(set(paths)), len(paths))
+            self.assertEqual("payload.coverage_plan" in fields, all(path.endswith("/plan") for path in paths))
+            self.assertTrue({"payload.specs", "payload.results"}.isdisjoint(fields))
+        self.assertEqual(batches[-1][1], ("payload.candidates",))
 
     def test_workspace_recovers_only_verified_legacy_preview_report_staleness(self) -> None:
         actor = AuthUser(sub="user-1", email="user@example.com", name="User")
@@ -469,9 +539,9 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
             f"{path}/execution_runs/{run.run_record_id}": run.model_dump(),
         }
         query_log = []
-        collection = FakeCollection("qa_projects", store, query_log)
+        client = FakeFirestoreClient(store, query_log)
         earlier_path = f"{path}/snapshots/{earlier_preview.snapshot_id}"
-        with patch("app.services.workflow_project_service.get_required_firestore_collection", return_value=collection):
+        with patch("app.services.workflow_project_service.get_required_firestore_client", return_value=client):
             projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=1, execution_run_limit=1)
             summary = build_workspace_summary(projects, work_items_limit=10, runs_limit=1, reports_limit=1)
             self.assertEqual(summary.recent_reports[0].status, "approved")
@@ -779,12 +849,12 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
             },
         }
         query_log: list[tuple[Any, ...]] = []
-        collection = FakeCollection("qa_projects", store, query_log)
+        client = FakeFirestoreClient(store, query_log)
         actor = AuthUser(sub="user-1", email="user@example.com", name="User")
 
         with patch(
-            "app.services.workflow_project_service.get_required_firestore_collection",
-            return_value=collection,
+            "app.services.workflow_project_service.get_required_firestore_client",
+            return_value=client,
         ):
             active = list_workspace_projects(
                 actor=actor,
