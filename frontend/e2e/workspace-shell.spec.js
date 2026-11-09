@@ -235,6 +235,8 @@ test.describe("Opt-in project workspaces", () => {
 		await expect(page).toHaveURL(projectPath("review/tests"));
 		await page.goForward();
 		await expect(page).toHaveURL(projectPath("deliver"));
+		await expect(heading(page, "Export Test Cases")).toBeVisible();
+		await expect(page.locator("#main-content")).toBeFocused();
 		await section(page, "Browser tests").press("Enter");
 		await expect(page).toHaveURL(projectPath("deliver/browser-tests"));
 		await expect(heading(page, "Execution setup")).toBeVisible();
