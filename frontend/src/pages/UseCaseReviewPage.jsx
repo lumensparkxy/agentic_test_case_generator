@@ -223,7 +223,7 @@ export default function UseCaseReviewPage({
 				<Button variant="secondary" onClick={onBack} title="Back to Context">
 					Back
 				</Button>
-				<Button variant="secondary" onClick={onNext} title="Next to Test Cases">
+				<Button onClick={onNext} title="Next to Test Cases">
 					Next
 				</Button>
 			</nav>

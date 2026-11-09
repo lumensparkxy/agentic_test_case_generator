@@ -11,6 +11,10 @@
 	box-shadow: var(--shadow-md);
 }
 
+.use-case-review-page > .panel-nav {
+	align-self: start;
+}
+
 .use-case-review-page-header {
 	display: flex;
 	align-items: flex-start;
