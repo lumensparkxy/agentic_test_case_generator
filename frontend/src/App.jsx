@@ -3379,6 +3379,16 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope) || executionRunRequestId !== executionRunRequestIdRef.current) {
 				return;
 			}
+			if (data.historical) {
+				if (typeof data.run_record_id !== "string" || !data.run_record_id.trim()) {
+					throw new Error("The historical execution response did not include its saved run identity.");
+				}
+				saveExecutionRecovery({ requestId, status: "completed", runId: data.run_id, runRecordId: data.run_record_id, historical: true });
+				setApplicationLiveStatus("");
+				setStatus("Execution saved to history for its starting project revision.");
+				await refreshCurrentProject({ hydrate: true, operationScope });
+				return;
+			}
 			saveExecutionRecovery(null);
 			setExecutionRunResult({
 				...data,
@@ -3434,7 +3444,13 @@ export default function App() {
 			) {
 				throw new Error("The saved execution receipt could not be verified. Check again.");
 			}
-			saveExecutionRecovery({ requestId, status: receipt.status, runId: receipt.run_id, runRecordId: receipt.run_record_id });
+			saveExecutionRecovery({
+				requestId,
+				status: receipt.status,
+				runId: receipt.run_id,
+				runRecordId: receipt.run_record_id,
+				historical: receipt.historical === true,
+			});
 			setExecutionError("");
 			if (receipt.status === "completed") await refreshCurrentProject({ hydrate: true, operationScope: scope });
 		} catch (error) {

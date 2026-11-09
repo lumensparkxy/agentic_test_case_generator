@@ -331,7 +331,13 @@ export default function AutomationPanel({
 			) : null}
 			{executionRecovery && !isRunningExecution && (
 				<div className="workflow-result-notice" role="region" aria-label="Execution request recovery">
-					<strong>{recoveredReportPath ? "Saved execution recovered" : "Check the previous browser request"}</strong>
+					<strong>
+						{recoveredReportPath
+							? executionRecovery.historical
+								? "Execution saved to history"
+								: "Saved execution recovered"
+							: "Check the previous browser request"}
+					</strong>
 					{recoveredReportPath ? (
 						<p>
 							<Link href={recoveredReportPath}>Open saved run {executionRecovery.runId}</Link>

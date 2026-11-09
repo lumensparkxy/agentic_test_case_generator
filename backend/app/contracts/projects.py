@@ -83,6 +83,7 @@ class QaProjectExecutionRun(BaseModel):
     artifacts_root: Optional[str] = None
     playwright_report_paths: List[str] = Field(default_factory=list)
     project_revision: int
+    historical: bool = False
     test_case_count: int = 0
     status: str
     summary: Dict[str, Any] = Field(default_factory=dict)

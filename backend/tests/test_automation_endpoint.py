@@ -11,9 +11,11 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from execution_fixtures import project_fixture
+from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.main import app, get_current_user
 from app.models import AuthUser, AutomationResponse, ExecutionCandidate, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
+from app.services import workflow_project_service as projects
 
 
 class AutomationEndpointTests(unittest.TestCase):
@@ -342,45 +344,47 @@ class AutomationEndpointTests(unittest.TestCase):
             summary=ExecutionRunSummary(passed=0, failed=1),
         )
         project = project_fixture(payload["test_cases"], owner="automation-user", snapshot_id="snap-test-v1")
-        execution_snapshot = SimpleNamespace(snapshot_id="snap-exec-v1", project_revision=8)
-        report_snapshot = SimpleNamespace(snapshot_id="snap-report-v1", project_revision=9)
-
-        with patch("app.main.start_workflow_run", return_value="run-execution-run-1"):
-            with patch("app.main.complete_workflow_run"):
-                with patch("app.main.record_usage_event", return_value="event-execution-run-1"):
-                    with patch("app.main.run_execution", return_value=service_response):
-                        with patch("app.routers.automation.get_project", return_value=project):
-                            with patch(
-                                "app.routers.automation.append_stage_snapshot",
-                                side_effect=[execution_snapshot, report_snapshot],
-                            ) as append_snapshot:
-                                with patch("app.routers.automation.record_execution_run") as record_run:
-                                    with TestClient(app) as client:
-                                        response = client.post(
-                                            "/automation/execution/run",
-                                            json=payload,
-                                        )
-
-        self.assertEqual(response.status_code, 200)
+        store = {}
+        firestore = FakeFirestoreClient(store)
+        collection = firestore.collection("qa_projects")
+        root = collection.document(project.project_id)
+        root.set(project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"}))
+        suite = project.current_snapshots["test_cases"]
+        root.collection("snapshots").document(suite.snapshot_id).set(suite.model_dump())
+        candidate = ExecutionCandidate(id="tc_001", source_test_case_id="TC-001", title="Checkout", status="executable")
+        with (
+            patch.object(projects, "get_required_firestore_client", return_value=firestore),
+            patch.object(projects, "get_required_firestore_collection", return_value=collection),
+            patch.object(projects, "transactional", side_effect=_run_transaction),
+            patch("app.services.audit_repository.get_optional_firestore_collection", side_effect=lambda name, **kw: firestore.collection(name)),
+            patch("app.main.preview_execution", return_value=ExecutionPreviewResponse(executable=[candidate])),
+            patch("app.main.run_execution", return_value=service_response),
+            TestClient(app) as client,
+        ):
+            response = client.post("/automation/execution/run", json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+            detail = client.get(f"/projects/{project.project_id}").json()
         request_id = response.headers["X-Request-ID"]
-        execution_call = append_snapshot.call_args_list[0].kwargs
-        report_call = append_snapshot.call_args_list[1].kwargs
-        record_call = record_run.call_args.kwargs
-        self.assertEqual(execution_call["source_snapshot_id"], "snap-test-v1")
-        self.assertEqual(execution_call["metadata"]["target_environment"], "staging")
-        self.assertEqual(execution_call["metadata"]["source_snapshot_id"], "snap-test-v1")
-        self.assertEqual(execution_call["idempotency_key"], f"automation.execution.run:{request_id}:staging")
-        self.assertEqual(report_call["source_snapshot_id"], "snap-exec-v1")
-        self.assertEqual(report_call["idempotency_key"], f"reports.execution_summary:{request_id}:staging")
-        self.assertEqual(report_call["payload"]["artifacts_root"], "/tmp/exec_staging")
-        self.assertEqual(report_call["payload"]["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
-        self.assertEqual(record_call["target_environment"], "staging")
-        self.assertEqual(record_call["target_base_url"], "https://staging.example.test/app")
-        self.assertEqual(record_call["artifacts_root"], "/tmp/exec_staging")
-        self.assertEqual(record_call["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
-        self.assertEqual(record_call["source_snapshot_id"], "snap-test-v1")
-        self.assertEqual(record_call["selected_test_case_ids"], ["TC-001"])
-        self.assertEqual(record_call["idempotency_key"], f"automation.execution.run_record:{request_id}:staging")
+        run_id = response.json()["run_record_id"]
+        self.assertFalse(response.json()["historical"])
+        self.assertEqual(detail["current_revision"], 9)
+        execution = detail["current_snapshots"]["execution"]
+        report = detail["current_snapshots"]["reports"]
+        self.assertEqual(execution["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(execution["metadata"]["target_environment"], "staging")
+        self.assertEqual(execution["metadata"]["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(report["source_snapshot_id"], execution["snapshot_id"])
+        self.assertEqual(report["payload"]["artifacts_root"], "/tmp/exec_staging")
+        self.assertEqual(report["payload"]["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
+        run = store[f"qa_projects/{project.project_id}/execution_runs/{run_id}"]
+        self.assertEqual(run["target_environment"], "staging")
+        self.assertEqual(run["target_base_url"], "https://staging.example.test/app")
+        self.assertEqual(run["artifacts_root"], "/tmp/exec_staging")
+        self.assertEqual(run["playwright_report_paths"], ["/tmp/exec_staging/artifacts/playwright/run/html-report"])
+        self.assertEqual(run["source_snapshot_id"], "snap-test-v1")
+        self.assertEqual(run["selected_test_case_ids"], ["tc_001"])
+        self.assertEqual(run["idempotency_key"], f"automation.execution.run_record:{request_id}:staging")
+        self.assertFalse(any("/execution_requests/" in path for path in store))
 
 
 if __name__ == "__main__":

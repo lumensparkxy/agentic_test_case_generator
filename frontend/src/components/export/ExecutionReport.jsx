@@ -17,7 +17,7 @@ function latestExecutionReport(executionRunResult, currentProject) {
 	if (executionSnapshotPayload?.run_id) {
 		return { ...executionSnapshotPayload, source_snapshot_id: currentProject.current_snapshots.execution.source_snapshot_id };
 	}
-	const projectRun = currentProject?.execution_runs?.[0];
+	const projectRun = currentProject?.execution_runs?.find((run) => !run.historical);
 	if (projectRun?.run_id) {
 		return projectRun;
 	}
@@ -124,6 +124,7 @@ function PlaywrightExecutionReport({ report, notice, onRetry }) {
 							Source suite snapshot <code>{report.source_snapshot_id}</code>
 						</p>
 					)}
+					{report.historical && <p className="helper-text">Historical run from project revision {report.project_revision}.</p>}
 					{!notice && <CaseOutcomes results={report.results} />}
 					{report.artifacts_root && (
 						<p className="helper-text">

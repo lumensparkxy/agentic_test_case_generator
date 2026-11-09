@@ -344,6 +344,7 @@ export interface ExecutionReadinessBlocker {
 }
 
 export interface ExecutionRequestReceipt {
+	historical?: boolean;
 	project_id: string;
 	request_id: string;
 	run_id?: string | null;
@@ -382,10 +383,12 @@ export interface ExecutionRunItem {
 
 export interface ExecutionRunResponse {
 	artifacts_root?: string | null;
+	historical?: boolean;
 	playwright_report_paths?: Array<string>;
 	preview: ExecutionPreviewResponse;
 	results?: Array<ExecutionRunItem>;
 	run_id: string;
+	run_record_id?: string | null;
 	status: "passed" | "failed" | "disabled";
 	summary?: ExecutionRunSummary;
 	warnings?: Array<string>;
@@ -739,6 +742,7 @@ export interface QaProjectExecutionRun {
 	actor_user_id?: string | null;
 	artifacts_root?: string | null;
 	created_at: string;
+	historical?: boolean;
 	playwright_report_paths?: Array<string>;
 	project_id: string;
 	project_revision: number;
@@ -761,6 +765,7 @@ export interface QaProjectExecutionRunDetail {
 	actor_user_id?: string | null;
 	artifacts_root?: string | null;
 	created_at: string;
+	historical?: boolean;
 	playwright_report_paths?: Array<string>;
 	project_id: string;
 	project_revision: number;

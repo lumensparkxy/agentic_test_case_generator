@@ -116,6 +116,8 @@ class ExecutionRunSummary(BaseModel):
 class ExecutionRunResponse(BaseModel):
     status: Literal["passed", "failed", "disabled"]
     run_id: str
+    run_record_id: Optional[str] = None
+    historical: bool = False
     artifacts_root: Optional[str] = None
     playwright_report_paths: List[str] = Field(default_factory=list)
     results: List[ExecutionRunItem] = Field(default_factory=list)
@@ -133,6 +135,7 @@ class ExecutionRequestReceipt(BaseModel):
     started_at: datetime
     run_id: Optional[str] = None
     run_record_id: Optional[str] = None
+    historical: bool = False
 
 
 __all__ = [

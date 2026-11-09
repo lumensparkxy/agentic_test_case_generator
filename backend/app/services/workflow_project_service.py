@@ -804,6 +804,7 @@ def record_execution_run(
     workflow_run_id: Optional[str],
     source_event_id: Optional[str],
     project_revision: int,
+    historical: bool = False,
     target_base_url: Optional[str] = None,
     source_snapshot_id: Optional[str] = None,
     selected_test_case_ids: Optional[list[str]] = None,
@@ -827,6 +828,7 @@ def record_execution_run(
         "artifacts_root": artifacts_root,
         "playwright_report_paths": _serialize_value(playwright_report_paths or []),
         "project_revision": project_revision,
+        "historical": historical,
         "test_case_count": test_case_count,
         "status": status_value,
         "summary": _serialize_value(summary),
@@ -854,6 +856,7 @@ def record_execution_run(
         "actor_user_id": actor.sub,
         "metadata": {
             "summary": _serialize_value(summary),
+            "historical": historical,
             "target_environment": target_environment,
             "target_base_url": target_base_url,
             "artifacts_root": artifacts_root,

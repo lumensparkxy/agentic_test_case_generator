@@ -272,6 +272,9 @@ async function installApi(page, scenario) {
 		if (pathname === `/projects/${PROJECT_ID}/orchestrator/runs`) {
 			return jsonResponse(route, { runs: [], events: [], checkpoints: [] });
 		}
+		if (pathname.startsWith(`/projects/${PROJECT_ID}/execution-runs/`) && scenario.runDetails) {
+			return jsonResponse(route, scenario.runDetails);
+		}
 		if (pathname === "/automation/execution/preview" && method === "POST") {
 			const previewIndex = requests.previews;
 			requests.previews += 1;
@@ -305,6 +308,46 @@ async function openAutomation(page) {
 }
 
 test.describe("Automation preview consistency", () => {
+	test("opens the exact historical run after a project edit without replacing current evidence @p1", async ({ page }) => {
+		const project = projectFixture();
+		const priorPreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const historical = {
+			project_id: PROJECT_ID,
+			run_record_id: "history-run-record",
+			run_id: "exec-history",
+			target_environment: "staging",
+			target_base_url: "https://staging.example.test/app",
+			project_revision: project.current_revision,
+			source_snapshot_id: TEST_CASE_SNAPSHOT_ID,
+			status: "passed",
+			historical: true,
+			summary: { passed: 1 },
+			results: [{ id: "candidate-checkout", source_test_case_id: "TC-001", title: "Checkout passed", status: "passed" }],
+		};
+		const requests = await installApi(page, {
+			project,
+			previews: [priorPreview],
+			runDetails: historical,
+			handleRun: (route) => {
+				project.current_revision += 1;
+				project.stage_state.test_cases.stale = true;
+				project.execution_runs = [historical];
+				return jsonResponse(route, { ...historical, preview: priorPreview });
+			},
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		const recovery = page.getByRole("region", { name: "Execution request recovery" });
+		await expect(recovery).toContainText("Execution saved to history");
+		await expect(page.getByRole("heading", { name: "Execution Results", exact: true })).toHaveCount(0);
+		await recovery.getByRole("link", { name: "Open saved run exec-history" }).click();
+		await expect(page.getByText("Historical run from project revision 4.", { exact: true })).toBeVisible();
+		await expect(page.getByText("Run exec-history", { exact: true })).toBeVisible();
+		await expect(page.getByText(TEST_CASE_SNAPSHOT_ID, { exact: true })).toBeVisible();
+		expect(requests.runs).toBe(1);
+	});
+
 	test("recovers a lost preview with the original request and keeps the prior candidates visible @p1", async ({ page }) => {
 		const one = executableCandidate("candidate-checkout", "TC-001");
 		const two = executableCandidate("candidate-refund", "TC-002");

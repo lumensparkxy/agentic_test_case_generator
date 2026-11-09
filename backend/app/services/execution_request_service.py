@@ -80,6 +80,7 @@ def claim_execution_request(
                 "fingerprint": fingerprint,
                 "status": "pending",
                 "source_snapshot_id": source_snapshot_id,
+                "source_project_revision": revision,
                 "target_environment": target_environment,
                 "started_at": projects._utcnow(),
             },

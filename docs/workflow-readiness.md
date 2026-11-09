@@ -78,10 +78,11 @@ have no project approval evidence to validate. Direct runtime callers retain
 their existing defaults. A configured target identifies where to execute; it
 does not prove the target implements the intended business behavior.
 
-Run receipts retain the source snapshot verified before execution. Existing
-persistence revision and idempotency checks remain. This preflight is not a
-durable execution reservation: concurrent requests or edits during execution can
-still lead to persistence conflicts after a runtime has started. It does not
-provide exactly-once external effects. Completeness here means no recorded
-generation tasks, not independently proven semantic coverage. No Room Booking
-application target was supplied for the original audit.
+An explicit execution request ID is claimed before browser launch and fences
+repeated delivery. A current run commits its execution, report, result parts,
+findings, completed receipt and audit together. When the project changes during
+execution, the completed run is saved in history with its original revision and
+suite. The existing current snapshots retain their status, and the workbench
+links directly to the historical run. An unconfirmed request remains fenced.
+The request claim protects portal replay. External systems still control the
+effects of each browser action.

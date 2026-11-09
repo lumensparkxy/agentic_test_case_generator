@@ -22,6 +22,7 @@ from ..services.execution_request_service import (
     read_execution_request,
     reject_execution_replay,
 )
+from ..services.execution_run_publication import ExecutionPublicationUnconfirmed, execution_run_counts, publish_execution_outcome
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
@@ -45,7 +46,6 @@ from ..services.workflow_project_service import (
     find_idempotent_stage_snapshot,
     get_project,
     project_error_to_http,
-    record_execution_run,
 )
 
 router = APIRouter()
@@ -150,10 +150,6 @@ def _target_environment(payload: ExecutionPreviewInput) -> str:
     return "default"
 
 
-def _action_idempotency_key(action: str, *, request_id: str, target_environment: str) -> str:
-    return f"{action}:{request_id}:{target_environment}"
-
-
 def _preview_project_payload(response: ExecutionPreviewResponse, *, target_environment: str, target_base_url: Optional[str]) -> dict[str, Any]:
     return {
         "target_environment": target_environment,
@@ -185,34 +181,6 @@ def _preview_project_payload(response: ExecutionPreviewResponse, *, target_envir
                 for candidate in response.invalid
             ],
         },
-    }
-
-
-def _run_project_payload(response: ExecutionRunResponse, *, target_environment: str, target_base_url: Optional[str]) -> dict[str, Any]:
-    return {
-        "target_environment": target_environment,
-        "target_base_url": target_base_url,
-        "run_id": response.run_id,
-        "status": response.status,
-        "artifacts_root": response.artifacts_root,
-        "playwright_report_paths": list(response.playwright_report_paths or []),
-        "summary": _model_payload(response.summary),
-        "warnings": list(response.warnings or []),
-        "results": [
-            {
-                "id": item.id,
-                "source_test_case_id": item.source_test_case_id,
-                "title": item.title,
-                "status": item.status,
-                "returncode": item.returncode,
-                "generated_spec_path": item.generated_spec_path,
-                "artifacts_dir": item.artifacts_dir,
-                "report_json_path": item.report_json_path,
-                "playwright_report_path": item.playwright_report_path,
-                "issues": _model_payload(item.issues),
-            }
-            for item in response.results
-        ],
     }
 
 
@@ -568,127 +536,37 @@ async def automation_execution_run(
             settings=settings,
         )
         response.preview.readiness = readiness
-        event_id = _log_success(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="automation.execution.run",
-            event_type="automation.execution.ran",
-            billing_key="automation.execution.run",
-            quantity=len(response.results),
-            unit="test_case",
-            result_metadata={
-                "status": response.status,
-                "run_id": response.run_id,
-                "passed_count": response.summary.passed,
-                "failed_count": response.summary.failed,
-                "invalid_count": response.summary.invalid,
-                "skipped_count": response.summary.skipped,
-            },
-        )
         if payload.project_id:
             try:
-                source_snapshot_id = readiness.source_snapshot_id
-
-                def write_run(snapshot_id, project_revision, transaction=None):
-                    return record_execution_run(
-                        project_id=payload.project_id,
-                        actor=current_user,
-                        request_id=request_id,
-                        run_id=response.run_id,
-                        target_environment=target_environment,
-                        target_base_url=target_base_url,
-                        status_value=response.status,
-                        summary=_model_payload(response.summary),
-                        test_case_count=len(payload.test_cases),
-                        snapshot_id=snapshot_id,
-                        source_snapshot_id=source_snapshot_id,
-                        selected_test_case_ids=list(payload.selected_test_case_ids),
-                        artifacts_root=response.artifacts_root,
-                        playwright_report_paths=list(response.playwright_report_paths or []),
-                        workflow_run_id=workflow_run_id,
-                        source_event_id=event_id,
-                        project_revision=project_revision,
-                        transaction=transaction,
-                        idempotency_key=_action_idempotency_key(
-                            "automation.execution.run_record",
-                            request_id=request_id,
-                            target_environment=target_environment,
-                        ),
-                    )
-
-                def complete_request(transaction, snapshot):
-                    run = write_run(snapshot["snapshot_id"], snapshot["project_revision"], transaction)
-                    transaction.update(request_ref, {"status": "completed", "run_id": run.run_id, "run_record_id": run.run_record_id})
-
-                execution_snapshot = append_stage_snapshot(
-                    project_id=payload.project_id,
-                    stage="execution",
-                    payload=_run_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
-                    operation="automation.execution.run",
+                run = await run_in_threadpool(
+                    publish_execution_outcome,
+                    response,
                     actor=current_user,
                     request_id=request_id,
+                    request_ref=request_ref,
                     workflow_run_id=workflow_run_id,
-                    source_event_id=event_id,
-                    approved=response.status == "passed",
-                    source_snapshot_id=source_snapshot_id,
-                    title=f"{target_environment} execution run",
-                    metadata={
-                        "target_environment": target_environment,
-                        "target_base_url": target_base_url,
-                        "source_snapshot_id": source_snapshot_id,
-                        "selected_test_case_ids": list(payload.selected_test_case_ids),
-                        "run_id": response.run_id,
-                        "status": response.status,
-                        "passed_count": response.summary.passed,
-                        "failed_count": response.summary.failed,
-                        "invalid_count": response.summary.invalid,
-                    },
-                    base_project_revision=payload.base_project_revision,
-                    transaction_guard=complete_request if request_ref is not None else None,
-                    idempotency_key=_action_idempotency_key(
-                        "automation.execution.run",
-                        request_id=request_id,
-                        target_environment=target_environment,
-                    ),
+                    target_environment=target_environment,
+                    selected_ids=selected_ids,
+                    test_case_count=len(payload.test_cases),
                 )
-                if request_ref is None:
-                    write_run(execution_snapshot.snapshot_id, execution_snapshot.project_revision)
-                append_stage_snapshot(
-                    project_id=payload.project_id,
-                    stage="reports",
-                    payload={
-                        "source": "execution",
-                        "run_id": response.run_id,
-                        "target_environment": target_environment,
-                        "status": response.status,
-                        "artifacts_root": response.artifacts_root,
-                        "playwright_report_paths": list(response.playwright_report_paths or []),
-                        "summary": _model_payload(response.summary),
-                    },
-                    operation="reports.execution_summary",
-                    actor=current_user,
-                    request_id=request_id,
-                    workflow_run_id=workflow_run_id,
-                    source_event_id=event_id,
-                    approved=response.status == "passed",
-                    source_snapshot_id=execution_snapshot.snapshot_id,
-                    title=f"{target_environment} execution report",
-                    metadata={
-                        "run_id": response.run_id,
-                        "target_environment": target_environment,
-                        "status": response.status,
-                        "artifacts_root": response.artifacts_root,
-                        "playwright_report_paths": list(response.playwright_report_paths or []),
-                    },
-                    idempotency_key=_action_idempotency_key(
-                        "reports.execution_summary",
-                        request_id=request_id,
-                        target_environment=target_environment,
-                    ),
-                )
-            except Exception as project_exc:
-                raise project_error_to_http(project_exc) from project_exc
+            except HTTPException, ExecutionPublicationUnconfirmed:
+                raise
+            except Exception as exc:
+                raise project_error_to_http(exc) from exc
+            response.run_record_id = run.run_record_id
+            response.historical = run.historical
+        else:
+            _log_success(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation="automation.execution.run",
+                event_type="automation.execution.ran",
+                billing_key="automation.execution.run",
+                quantity=len(response.results),
+                unit="test_case",
+                result_metadata=execution_run_counts(response),
+            )
         return response
     except Exception as exc:
         if request_ref is not None:
@@ -696,20 +574,21 @@ async def automation_execution_run(
                 await run_in_threadpool(mark_execution_unconfirmed, request_ref)
             except Exception:
                 logger.warning("Could not update interrupted execution receipt", exc_info=True)
-        _log_failure(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="automation.execution.run",
-            event_type="automation.execution.ran",
-            billing_key="automation.execution.run",
-            error_message=str(exc),
-            metadata={
-                "test_case_count": len(payload.test_cases),
-                "selected_test_case_count": len(payload.selected_test_case_ids),
-            },
-        )
-        if request_ref is not None:
+        if not isinstance(exc, ExecutionPublicationUnconfirmed):
+            _log_failure(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation="automation.execution.run",
+                event_type="automation.execution.ran",
+                billing_key="automation.execution.run",
+                error_message=str(exc),
+                metadata={
+                    "test_case_count": len(payload.test_cases),
+                    "selected_test_case_count": len(payload.selected_test_case_ids),
+                },
+            )
+        if request_ref is not None or isinstance(exc, ExecutionPublicationUnconfirmed):
             raise HTTPException(
                 503,
                 detail={"code": "execution_request_unconfirmed", "message": "The browser request was admitted. Check its saved status."},

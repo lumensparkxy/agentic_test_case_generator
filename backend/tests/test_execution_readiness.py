@@ -268,7 +268,10 @@ class ExecutionAdmissionTests(unittest.TestCase):
         with (
             patch("app.routers.automation.get_project", return_value=project),
             patch("app.routers.automation.append_stage_snapshot", side_effect=persisted_preview),
-            patch("app.routers.automation.record_execution_run"),
+            patch(
+                "app.routers.automation.publish_execution_outcome",
+                return_value=SimpleNamespace(run_record_id="saved-run", historical=False),
+            ),
             patch("app.main.run_execution", return_value=response) as runtime,
             TestClient(app) as client,
         ):
@@ -296,16 +299,14 @@ class ExecutionAdmissionTests(unittest.TestCase):
     def test_current_approved_run_uses_captured_source_and_selected_ids(self):
         project = project_fixture()
         response = ExecutionRunResponse(status="passed", run_id="exec-1", preview=preview_fixture())
-        snapshots = [
-            type("Snapshot", (), {"snapshot_id": "exec-snapshot", "project_revision": 8})(),
-            type("Snapshot", (), {"snapshot_id": "report-snapshot", "project_revision": 9})(),
-        ]
         with (
             patch("app.routers.automation.get_project", return_value=project) as read,
             patch("app.main.preview_execution", return_value=preview_fixture()),
             patch("app.main.run_execution", return_value=response) as runtime,
-            patch("app.routers.automation.append_stage_snapshot", side_effect=snapshots) as persist,
-            patch("app.routers.automation.record_execution_run"),
+            patch(
+                "app.routers.automation.publish_execution_outcome",
+                return_value=SimpleNamespace(run_record_id="saved-run", historical=False),
+            ) as persist,
             TestClient(app) as client,
         ):
             result = client.post("/automation/execution/run", json=request_fixture())
@@ -313,7 +314,8 @@ class ExecutionAdmissionTests(unittest.TestCase):
         runtime.assert_called_once()
         read.assert_called_once()
         self.assertEqual(runtime.call_args.kwargs["selected_test_case_ids"], ["candidate-1"])
-        self.assertEqual(persist.call_args_list[0].kwargs["source_snapshot_id"], "tests-1")
+        self.assertEqual(persist.call_args.args[0].preview.readiness.source_snapshot_id, "tests-1")
+        self.assertEqual(persist.call_args.kwargs["selected_ids"], ["candidate-1"])
         self.assertEqual(result.json()["run_id"], "exec-1")
         stale_project = deepcopy(project)
         stale_project.current_revision = 9
