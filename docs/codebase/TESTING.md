@@ -61,6 +61,13 @@ mocked API fixtures and synthetic sessions for local UI checks unless the task
 requires a live integration. For a reusable browser workflow, see
 [repository-qa](../../.agents/skills/repository-qa/SKILL.md).
 
+Measure startup with a production `npm run build` served by `npm run preview`.
+Open Home in a fresh browser context and record its JavaScript asset requests.
+Compare the sum of raw bytes and the sum recompressed at the same gzip level
+across builds. Check first navigation, slow or failed module requests, and
+Settings tabs separately. The development module graph does not represent the
+production startup download.
+
 ### Broader checks when the change requires them
 
 From the repository root, with `.venv` activated:

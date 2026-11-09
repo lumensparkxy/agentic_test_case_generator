@@ -6,7 +6,6 @@ import DraftRecoveryNotice from "./components/reviews/DraftRecoveryNotice";
 import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
 import useRequirementImports from "./hooks/useRequirementImports";
-import RequirementImportReview from "./components/requirements/RequirementImportReview";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import GenerationGuidance from "./components/knowledge/GenerationGuidance";
@@ -16,13 +15,30 @@ import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from ".
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
-import ImproveTestsPanel from "./components/generation/ImproveTestsPanel";
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
 import { GlobalDestinationPlaceholderPage, ProjectLoadingPage, ProjectOverviewPage, RouteRecoveryPage } from "./app/RoutePages";
+import {
+	AutomationPanel,
+	ContextInputsPanel,
+	ExportPanel,
+	GeneratedTestCasesView,
+	ImproveTestsPanel,
+	OrchestratorCockpitPanel,
+	projectRouteModules,
+	ProjectsPage,
+	ReportsPage,
+	RequirementImportReview,
+	RequirementReviewWorkbench,
+	ReviewsPage,
+	RunsPage,
+	TemplateSetupPanel,
+	TraceabilityMatrixPanel,
+	UseCaseReviewPage,
+} from "./app/workspaceModules";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -33,24 +49,16 @@ import {
 import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
 import TestCaseReadiness from "./components/projects/TestCaseReadiness";
 import { getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
-import AutomationPanel from "./components/automation/AutomationPanel";
 import {
 	getDefaultSelectedCandidateIds,
 	getExecutionEligibility,
 	normalizeAutomationPreview,
 	resolveSelectedExecutableCandidates,
 } from "./components/automation/automationPreview";
-import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import { ProjectSyncStatus } from "./components/context/ProjectSyncPanel";
-import ExportPanel from "./components/export/ExportPanel";
-import GeneratedTestCasesView from "./components/generation/GeneratedTestCasesView";
-import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
-import OrchestratorCockpitPanel from "./components/projects/OrchestratorCockpitPanel";
 import { selectContextualTask } from "./components/projects/contextualTask";
-import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
-import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
 import WorkflowNavigationDrawer from "./components/layout/WorkflowNavigationDrawer";
 import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
@@ -66,11 +74,6 @@ import useWorkflowNavigationState from "./hooks/useWorkflowNavigationState";
 import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
 import useWorkspaceSummary from "./hooks/useWorkspaceSummary";
 import HomePage from "./pages/HomePage";
-import ProjectsPage from "./pages/ProjectsPage";
-import ReportsPage from "./pages/ReportsPage";
-import ReviewsPage from "./pages/ReviewsPage";
-import RunsPage from "./pages/RunsPage";
-import UseCaseReviewPage from "./pages/UseCaseReviewPage";
 import {
 	GLOBAL_DESTINATIONS,
 	PROJECT_DESTINATIONS,
@@ -800,6 +803,10 @@ export default function App() {
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
 	const activeReviewCaseScope = reviewCaseScope?.snapshot === sourceCaseSnapshot ? reviewCaseScope : null;
 	const focusResultContent = useRef(false);
+	const [improveMountedScope, setImproveMountedScope] = useState(null);
+	useEffect(() => {
+		if (activeTab === 3 && activeGenerateResultTab === "improve") setImproveMountedScope(sourceCaseSnapshot);
+	}, [activeTab, activeGenerateResultTab, sourceCaseSnapshot]);
 	useEffect(() => {
 		setSelectedTestCaseId(null);
 		setFindingCaseSelection(null);
@@ -1550,6 +1557,14 @@ export default function App() {
 	const routeFocusKey = `${route.kind}:${route.projectId || ""}:${route.destination || ""}`;
 	const previousRouteFocusKeyRef = useRef(routeFocusKey);
 	const pendingRouteFocusRef = useRef(false);
+	const focusPendingRoute = useCallback((replacingFocusedLoader = false) => {
+		if (!replacingFocusedLoader && !pendingRouteFocusRef.current) return;
+		const main = document.getElementById("main-content");
+		if (!main || main.dataset.workspaceModulePending) return;
+		if (document.activeElement === main) main.blur();
+		main.focus();
+		pendingRouteFocusRef.current = false;
+	}, []);
 
 	const storeExecutionPreview = (rawPreview, { source = "live", consistencyMessage = null, selectedCandidateIds = null } = {}) => {
 		const normalizedPreview = normalizeAutomationPreview(rawPreview, { source });
@@ -1588,6 +1603,10 @@ export default function App() {
 	}, [route.kind, route.destination, isAuthenticated, isVerifyingSession, refreshWorkspaceSummary]);
 
 	useEffect(() => {
+		if (isAuthenticated && !isVerifyingSession && route.kind === "project") projectRouteModules.get(route.destination)?.preload();
+	}, [isAuthenticated, isVerifyingSession, route.kind, route.destination]);
+
+	useEffect(() => {
 		if (previousRouteFocusKeyRef.current !== routeFocusKey) {
 			previousRouteFocusKeyRef.current = routeFocusKey;
 			pendingRouteFocusRef.current = true;
@@ -1598,19 +1617,9 @@ export default function App() {
 		if (route.kind === "project" && ["idle", "loading"].includes(projectRouteStatus)) {
 			return undefined;
 		}
-		const focusFrame = window.requestAnimationFrame(() => {
-			const main = document.getElementById("main-content");
-			if (!main) {
-				return;
-			}
-			if (document.activeElement === main) {
-				main.blur();
-			}
-			main.focus();
-			pendingRouteFocusRef.current = false;
-		});
+		const focusFrame = window.requestAnimationFrame(() => focusPendingRoute());
 		return () => window.cancelAnimationFrame(focusFrame);
-	}, [projectRouteStatus, route.kind, routeFocusKey]);
+	}, [focusPendingRoute, projectRouteStatus, route.kind, routeFocusKey]);
 
 	const hydrateProjectWorkflow = (project) => {
 		invalidateExecutionPreviewRequest();
@@ -4304,8 +4313,7 @@ export default function App() {
 	const focusPendingRequirements = () => {
 		setRequirementSetup({ projectId: navigationProjectId, open: false });
 		setRequirementReviewRequest({ projectId: navigationProjectId });
-		requirementReviewHeading.current?.focus({ preventScroll: true });
-		requirementReviewHeading.current?.scrollIntoView({ block: "nearest" });
+		setRequirementFocus({ projectId: navigationProjectId, target: "review" });
 	};
 	const reviewRequirementImport = async (action, payload) => {
 		const completed = await imports.mutate(action, payload);
@@ -4313,13 +4321,15 @@ export default function App() {
 		setRequirementSetup({ projectId: navigationProjectId, open: action === "cancel" && !requirements.length });
 		setRequirementFocus({ projectId: navigationProjectId, target: action === "apply" ? "review" : "import" });
 	};
-	useEffect(() => {
+	const focusRequirementTarget = useCallback(() => {
 		if (!requirementsRoute || imports.preview || requirementFocus?.projectId !== navigationProjectId) return;
 		const target = requirementFocus.target === "review" ? requirementReviewHeading.current : requirementImportControl.current;
-		target?.focus({ preventScroll: true });
-		target?.scrollIntoView({ block: "nearest" });
+		if (!target) return;
+		target.focus({ preventScroll: true });
+		target.scrollIntoView({ block: "nearest" });
 		setRequirementFocus(null);
 	}, [imports.preview, requirementFocus, requirementsRoute, navigationProjectId]);
+	useEffect(focusRequirementTarget, [focusRequirementTarget]);
 
 	const goPrev = () => moveProjectStep(-1);
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
@@ -4465,6 +4475,7 @@ export default function App() {
 						/>
 					) : route.destination === "projects" ? (
 						<ProjectsPage
+							onModuleReady={focusPendingRoute}
 							projects={workspaceSummary?.projects || []}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession) && !workspaceSummary}
 							error={isAuthenticated ? workspaceSummaryError : ""}
@@ -4475,6 +4486,7 @@ export default function App() {
 						/>
 					) : route.destination === "reviews" ? (
 						<ReviewsPage
+							onModuleReady={focusPendingRoute}
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}
@@ -4485,6 +4497,7 @@ export default function App() {
 						/>
 					) : route.destination === "runs" ? (
 						<RunsPage
+							onModuleReady={focusPendingRoute}
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}
@@ -4495,6 +4508,7 @@ export default function App() {
 						/>
 					) : route.destination === "reports" ? (
 						<ReportsPage
+							onModuleReady={focusPendingRoute}
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}
@@ -4579,6 +4593,7 @@ export default function App() {
 							/>
 						) : route.destination === "use-cases" ? (
 							<UseCaseReviewPage
+								onModuleReady={focusPendingRoute}
 								project={currentProject}
 								identity={currentUser?.sub || ""}
 								request={apiRequest}
@@ -5145,6 +5160,7 @@ export default function App() {
 											{imports.message && <p role="status">{imports.message}</p>}
 											<RequirementReviewWorkbench
 												key={navigationProjectId}
+												onModuleReady={focusRequirementTarget}
 												headingRef={requirementReviewHeading}
 												reviewRequest={requirementReviewRequest?.projectId === navigationProjectId ? requirementReviewRequest : null}
 												requirements={requirements}
@@ -5629,66 +5645,68 @@ export default function App() {
 														role="tabpanel"
 														aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
 													>
-														<div hidden={activeGenerateResultTab !== "improve"}>
-															<ImproveTestsPanel
-																identity={currentUser?.sub}
-																projectId={currentProjectId}
-																snapshotId={sourceCaseSnapshot}
-																reportedCase={reportedCase}
-																summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
-																onClearReport={() => setReportedCase(null)}
-																key={sourceCaseSnapshot}
-																review={testCaseReview}
-																findings={testCaseFindings}
-																needsOnlySetup={testCasesNeedSetup}
-																assessment={substantiveAssessment}
-																canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}
-																prerequisiteSnapshotId={
-																	projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id
-																}
-																browserHandoffWarnings={browserHandoffWarnings}
-																meta={testCaseReviewMeta}
-																testCases={testCases}
-																busy={isGenerating}
-																disabled={
-																	testCaseActionDisabled ||
-																	upstreamChangedForImpact ||
-																	!canGenerateFromApprovedRequirements ||
-																	!testCases.length
-																}
-																stale={upstreamChangedForImpact}
-																blockedReason={
-																	upstreamChangedForImpact
-																		? "Upstream inputs changed. Review their impact before applying fixes."
-																		: !testCases.length
-																			? "Generate test cases before applying improvements."
-																			: !canGenerateFromApprovedRequirements
-																				? "Approve requirements before applying fixes."
-																				: testCaseActionDisabled
-																					? "Refinement is unavailable while another operation is running or your account is restricted."
-																					: ""
-																}
-																onImpact={() => {
-																	setActiveGenerateResultTab("test-cases");
-																	document.querySelector(".generation-gate-card")?.scrollIntoView({ block: "center" });
-																}}
-																onApply={(feedbackText, selectedTestCaseIds) =>
-																	generateTestCases(true, { feedbackText, selectedTestCaseIds })
-																}
-																onReload={async () => {
-																	const project = await refreshCurrentProject({
-																		hydrate: true,
-																		operationScope: captureProjectOperationScope(),
-																	});
-																	if (project) {
-																		setActiveGenerateResultTab("improve");
+														{(activeGenerateResultTab === "improve" || improveMountedScope === sourceCaseSnapshot) && (
+															<div hidden={activeGenerateResultTab !== "improve"}>
+																<ImproveTestsPanel
+																	identity={currentUser?.sub}
+																	projectId={currentProjectId}
+																	snapshotId={sourceCaseSnapshot}
+																	reportedCase={reportedCase}
+																	summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
+																	onClearReport={() => setReportedCase(null)}
+																	key={sourceCaseSnapshot}
+																	review={testCaseReview}
+																	findings={testCaseFindings}
+																	needsOnlySetup={testCasesNeedSetup}
+																	assessment={substantiveAssessment}
+																	canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}
+																	prerequisiteSnapshotId={
+																		projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id
 																	}
-																	return Boolean(project);
-																}}
-																onViewCase={(id) => openCaseResults(id, null, { fromFinding: true })}
-																onReviewCases={() => openCaseResults()}
-															/>
-														</div>
+																	browserHandoffWarnings={browserHandoffWarnings}
+																	meta={testCaseReviewMeta}
+																	testCases={testCases}
+																	busy={isGenerating}
+																	disabled={
+																		testCaseActionDisabled ||
+																		upstreamChangedForImpact ||
+																		!canGenerateFromApprovedRequirements ||
+																		!testCases.length
+																	}
+																	stale={upstreamChangedForImpact}
+																	blockedReason={
+																		upstreamChangedForImpact
+																			? "Upstream inputs changed. Review their impact before applying fixes."
+																			: !testCases.length
+																				? "Generate test cases before applying improvements."
+																				: !canGenerateFromApprovedRequirements
+																					? "Approve requirements before applying fixes."
+																					: testCaseActionDisabled
+																						? "Refinement is unavailable while another operation is running or your account is restricted."
+																						: ""
+																	}
+																	onImpact={() => {
+																		setActiveGenerateResultTab("test-cases");
+																		document.querySelector(".generation-gate-card")?.scrollIntoView({ block: "center" });
+																	}}
+																	onApply={(feedbackText, selectedTestCaseIds) =>
+																		generateTestCases(true, { feedbackText, selectedTestCaseIds })
+																	}
+																	onReload={async () => {
+																		const project = await refreshCurrentProject({
+																			hydrate: true,
+																			operationScope: captureProjectOperationScope(),
+																		});
+																		if (project) {
+																			setActiveGenerateResultTab("improve");
+																		}
+																		return Boolean(project);
+																	}}
+																	onViewCase={(id) => openCaseResults(id, null, { fromFinding: true })}
+																	onReviewCases={() => openCaseResults()}
+																/>
+															</div>
+														)}
 														{activeGenerateResultTab === "traceability" && (
 															<TraceabilityMatrixPanel
 																approvedRequirements={approvedRequirements}

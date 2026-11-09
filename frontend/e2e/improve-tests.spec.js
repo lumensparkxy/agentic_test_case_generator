@@ -452,6 +452,7 @@ for (const width of [390, 1488])
 	test(`Improve tests is accessible at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });
 		await open(page);
+		await expect(panel(page)).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 		await expect(page.locator(".test-generation-panel")).toHaveCSS("opacity", "1");
 		const result = await new AxeBuilder({ page }).include(".improve-tests").analyze();
