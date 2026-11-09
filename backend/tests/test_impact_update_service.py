@@ -1,6 +1,8 @@
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextvars import ContextVar
+from datetime import timedelta
+import json
 from threading import Event
 import sys
 import unittest
@@ -17,7 +19,7 @@ if str(BACKEND_DIR) not in sys.path:
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.models import AuthUser, TestCase, TestStep
-from app.config import GenerationSettings
+from app.config import GenerationSettings, Settings
 from copy import deepcopy
 from fastapi import HTTPException
 from app.services import impact_update_service as service
@@ -25,6 +27,7 @@ from app.services import test_case_suite_review as suite_review
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
 from app.services.guidance_service import current_guidance
+from app.services.impact_application_state import ApplicationLease, now
 from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 
@@ -135,6 +138,10 @@ def _test_case(req_id: str, *, title: str | None = None) -> TestCase:
 class ImpactUpdateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
+        self.model_settings = Settings(gemini_api_key="synthetic", model_name="test-model")
+        settings_patch = patch.object(service, "get_settings", return_value=self.model_settings)
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
         for target in ("enforce_billing_access", "start_workflow_run", "complete_workflow_run", "record_billing_consumption"):
             patcher = patch.object(service, target, return_value="run-test")
             patcher.start()
@@ -481,17 +488,28 @@ class ImpactUpdateServiceTests(unittest.TestCase):
 
         self.assertFalse(entered["REQ-004"].is_set())
         self.assertEqual(self.generator.call_count, 3)
-        self.assertEqual({key: value for key, value in self.store.items() if "/impact_applications/" not in key}, before)
-        self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        checkpoint_path = f"qa_projects/{project.project_id}/impact_recovery/current"
+        self.assertEqual(len(self.store[checkpoint_path]["items"]), 2)
+        self.assertEqual({key: value for key, value in self.store.items() if "/impact_applications/" not in key and key != checkpoint_path}, before)
+        failed = get_project(project.project_id, actor=self.actor)
+        self.assertEqual(failed.impact_application.status, "failed")
+        self.assertEqual(failed.current_snapshots["test_cases"], project.current_snapshots["test_cases"])
+        self.assertNotIn("checkpoints", failed.model_dump_json())
         self.generator.side_effect = self._generate
-        repaired = self._apply(project)
+        with patch.object(service, "get_generation_settings", return_value=GenerationSettings()):
+            repaired = self._apply(project, request_id="retry")
+        self.assertEqual(self.generator.call_count, 5)
+        self.assertEqual(
+            {call.args[0].requirements[0].id for call in self.generator.call_args_list[3:]},
+            {"REQ-002", "REQ-004"},
+        )
+        self.assertNotIn(checkpoint_path, self.store)
         self.assertEqual(repaired.impact_application.status, "applied")
         self.assertEqual(repaired.current_revision, project.current_revision + 1)
+        self.assertEqual(repaired.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 2)
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
 
     def test_expired_worker_cannot_commit_after_retry_takes_lease(self):
-        from datetime import timedelta
-        from app.services.impact_application_state import ApplicationLease, now
-
         project = self._analyzed()
         aid = project.current_snapshots["impact_analysis"].snapshot_id
         selected = [r["recommendation_id"] for r in project.current_snapshots["impact_analysis"].payload["recommendations"] if r["accepted"]]
@@ -500,6 +518,11 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         path = f"qa_projects/{project.project_id}/impact_applications/{aid}"
         self.store[path]["lease_expires_at"] = now() - timedelta(seconds=1)
         self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        retry = ApplicationLease(project.project_id, aid, self.actor, project.current_revision, selected)
+        self.assertTrue(retry.reserve())
+        with self.assertRaisesRegex(RuntimeError, "superseded"):
+            old.checkpoint("late", "should never be saved")
+        retry.fail()
         applied = self._apply(project)
         before = deepcopy(self.store)
         with self.assertRaisesRegex(RuntimeError, "superseded"):
@@ -571,9 +594,6 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(self.generator.call_count, 1)
 
     def test_lease_renewal_cannot_resurrect_expired_worker(self):
-        from datetime import timedelta
-        from app.services.impact_application_state import ApplicationLease, now
-
         project = self._analyzed()
         aid = project.current_snapshots["impact_analysis"].snapshot_id
         lease = ApplicationLease(project.project_id, aid, self.actor, project.current_revision, ["selection"])
@@ -686,8 +706,9 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         latest = get_project(project.project_id, actor=self.actor)
         self.assertEqual(latest.current_snapshots["test_cases"], analyzed.current_snapshots["test_cases"])
         self.assertEqual(latest.name, "Other edit")
+        self.assertNotIn(f"qa_projects/{project.project_id}/impact_recovery/current", self.store)
 
-    def test_commit_failure_does_not_publish_artifact_versions(self):
+    def test_commit_failure_keeps_only_private_results_and_expired_retry_reuses_them(self):
         project = self._seed_project(modified={"REQ-003"})
         analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
         before = deepcopy(self.store)
@@ -698,8 +719,69 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 apply_project_impact_update(
                     project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
                 )
-        self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k}, before)
+        checkpoint_path = f"qa_projects/{project.project_id}/impact_recovery/current"
+        self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k and k != checkpoint_path}, before)
+        self.assertEqual(len(self.store[checkpoint_path]["items"]), 1)
         self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        aid = analyzed.current_snapshots["impact_analysis"].snapshot_id
+        receipt = self.store[f"qa_projects/{project.project_id}/impact_applications/{aid}"]
+        receipt.update(status="applying", lease_expires_at=now() - timedelta(seconds=1))
+
+        applied = self._apply(analyzed, request_id="expired-retry")
+        self.assertEqual(applied.impact_application.status, "applied")
+        self.assertEqual(self.generator.call_count, 1)
+        self.assertEqual(applied.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 1)
+        self.assertEqual(applied.current_snapshots["test_cases"].metadata["targeted_generation_worker_count"], 0)
+        self.assertNotIn(checkpoint_path, self.store)
+
+    def test_retry_regenerates_expired_invalid_and_policy_mismatched_results(self):
+        prepare = service.prepare_run
+        for cause in ("expired", "malformed", "scope", "model", "guidance", "source_revision"):
+            with self.subTest(cause=cause):
+                self.generator.reset_mock()
+                self.model_settings.model_name = "test-model"
+                project = self._analyzed()
+                path = f"qa_projects/{project.project_id}/impact_recovery/current"
+                with patch.object(service, "append_stage_snapshot", side_effect=RuntimeError("Synthetic commit interruption")):
+                    with self.assertRaisesRegex(RuntimeError, "commit interruption"):
+                        self._apply(project)
+                saved = self.store[path]
+                key, payload = next(iter(saved["items"].items()))
+                if cause == "expired":
+                    saved["expires_at"] = now() - timedelta(seconds=1)
+                elif cause == "malformed":
+                    saved["items"][key] = "{"
+                elif cause == "scope":
+                    changed = json.loads(payload)
+                    changed["test_cases"][0]["scenario_refs"] = ["unapproved-scenario"]
+                    saved["items"][key] = json.dumps(changed)
+                elif cause == "model":
+                    self.model_settings.model_name = "changed-model"
+                elif cause == "source_revision":
+                    project = update_project(
+                        project_id=project.project_id,
+                        actor=self.actor,
+                        request_id="revision-changed",
+                        name="Revision changed",
+                        base_project_revision=project.current_revision,
+                    )
+
+                def prepare_retry(*args, **kwargs):
+                    manifest = prepare(*args, **kwargs)
+                    return manifest.model_copy(update={"manifest_id": "changed-guidance"}) if cause == "guidance" else manifest
+
+                with patch.object(service, "prepare_run", side_effect=prepare_retry):
+                    applied = self._apply(project, request_id="retry")
+                self.assertEqual(self.generator.call_count, 2)
+                self.assertEqual(applied.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 0)
+                self.assertNotIn(path, self.store)
+
+    def test_checkpoint_size_cap_does_not_prevent_an_approved_replacement(self):
+        project = self._analyzed()
+        with patch("app.services.impact_application_state.MAX_RECOVERY_BYTES", 100):
+            updated = self._apply(project)
+        self.assertEqual(updated.impact_application.status, "applied")
+        self.assertNotIn(f"qa_projects/{project.project_id}/impact_recovery/current", self.store)
 
     def test_substantive_repair_groups_findings_and_preserves_unselected_gaps(self):
         project = self._seed_project()

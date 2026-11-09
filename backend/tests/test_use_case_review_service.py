@@ -114,6 +114,10 @@ class FakeTransaction:
         self.pending.append(("merge" if merge else "set", document, deepcopy(payload)))
         self.operations.append(("set", document.path))
 
+    def delete(self, document):
+        self.pending.append(("delete", document, {}))
+        self.operations.append(("delete", document.path))
+
     def commit(self) -> None:
         next_store = deepcopy(self.store)
         for operation, document, payload in self.pending:
@@ -121,6 +125,8 @@ class FakeTransaction:
                 next_store[document.path] = payload
             elif operation == "merge":
                 next_store.setdefault(document.path, {}).update(payload)
+            elif operation == "delete":
+                next_store.pop(document.path, None)
             else:
                 next_store[document.path].update(payload)
         self.store.clear()

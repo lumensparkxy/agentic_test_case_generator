@@ -123,6 +123,20 @@ Usage and billing consumption follow the committed targeted run. Repaired tests
 are saved for review, without a fabricated pass
 score. Old invalid snapshot content is retained as historical evidence.
 
+**Retry** on a failed or interrupted apply reuses replacements that already
+passed individual review. The saved result must match the same analysis,
+selection, source revision, generation input, model settings and current
+guidance. Missing or invalid results go through generation and review again.
+The completed draft records how many replacements were reused and retains their
+original generation evidence. It still needs combined-suite review.
+
+Recovery keeps one private Firestore record per project, capped at 512 KiB of
+checkpoint data. A record is eligible for reuse for 24 hours after its latest
+checkpoint. A successful apply deletes it in the draft transaction. A subsequent
+apply discards a record from an expired or different operation. Results outside
+the storage bound can still be applied and may need to be generated again after
+an interruption.
+
 ## Validation boundary
 
 The offline generation benchmark checks safe fallback handling: withholding

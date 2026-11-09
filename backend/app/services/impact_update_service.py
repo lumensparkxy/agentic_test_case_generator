@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from itertools import islice
 from time import monotonic
 from uuid import uuid4
@@ -11,9 +11,11 @@ import logging
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 
+from ..agents.evaluation_limits import current_evaluation_limits
 from ..agents.impact_update_agent import analyze_impact
-from ..config import get_generation_settings
+from ..config import get_generation_settings, get_settings
 from ..models import (
     AuthUser,
     ImpactAnalysisResult,
@@ -58,6 +60,10 @@ class _TargetedGeneration:
     scenario_refs: frozenset[str]
 
 
+def _fingerprint(value):
+    return sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
 def _model_payload(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -81,7 +87,13 @@ def _generate_targeted(work, manifest, *, actor_user_id, request_id, run_id, par
                 **({"max_parallel_workers": 1} if parallel_batch else {}),
             )
         )
+    _validate_targeted(work, response)
+    return response
+
+
+def _validate_targeted(work, response):
     generated = response.test_cases
+    payload = work.payload
     allowed = {requirement.id for requirement in payload.requirements}
     covered = {ref for case in generated for ref in case.scenario_refs}
     if (
@@ -102,25 +114,80 @@ def _generate_targeted(work, manifest, *, actor_user_id, request_id, run_id, par
         or not work.scenario_refs <= covered
     ):
         raise ImpactWorkflowError("Targeted generation is incomplete or failed quality checks. The existing suite was preserved.")
-    return response
 
 
-def _run_targeted_batch(inputs, manifests, *, workers, actor_user_id, request_id, run_id):
-    args = {"actor_user_id": actor_user_id, "request_id": request_id, "run_id": run_id, "parallel_batch": workers > 1}
-    jobs = zip(inputs, manifests, strict=True)
-    if workers <= 1:
-        return [_generate_targeted(work, manifest, **args) for work, manifest in jobs]
+def _targeted_policy(settings):
+    try:
+        model = get_settings().model_name
+    except RuntimeError as exc:
+        if "GEMINI_API_KEY" not in str(exc):
+            raise
+        model = None
+    return _fingerprint([model, settings.model_dump(mode="json"), asdict(current_evaluation_limits.get())]) if model else None
 
-    queue = enumerate(jobs)
+
+def _recover_targeted(inputs, keys, lease):
     results = {}
+    usable = {}
+    for index, (work, key) in enumerate(zip(inputs, keys, strict=True)):
+        if key not in lease.checkpoints:
+            continue
+        saved = lease.checkpoints[key]
+        try:
+            response = GenerateTestCasesResponse.model_validate_json(saved)
+            _validate_targeted(work, response)
+        except ValidationError, ImpactWorkflowError:
+            continue
+        if (response.substantive_assessment or {}).get("status") == "assessed_complete":
+            results[index] = response
+            usable[key] = saved
+    lease.checkpoints = usable
+    return results
+
+
+def _run_targeted_batch(inputs, manifests, keys, lease, *, worker_limit, actor_user_id, request_id, run_id):
+    results = _recover_targeted(inputs, keys, lease)
+    reused = len(results)
+    workers = min(worker_limit, len(inputs) - reused)
+    pending = [index for index in range(len(inputs)) if index not in results]
+
+    def generate(index):
+        response = _generate_targeted(
+            inputs[index],
+            manifests[index],
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            run_id=run_id,
+            parallel_batch=min(worker_limit, len(inputs)) > 1,
+        )
+        key = keys[index]
+        if key and (response.substantive_assessment or {}).get("status") == "assessed_complete":
+            lease.checkpoint(
+                key,
+                response.model_dump_json(
+                    include={"test_cases", "approved", "generation_tasks", "workflow_diagnostics", "generation_evidence", "substantive_assessment"}
+                ),
+            )
+        return response
+
+    if workers <= 1:
+        for index in pending:
+            results[index] = generate(index)
+    else:
+        _generate_targeted_in_parallel(pending, generate, workers, results)
+    return [results[index] for index in range(len(inputs))], workers, reused
+
+
+def _generate_targeted_in_parallel(pending, generate, workers, results):
+    queue = iter(pending)
     # Keep only running work in flight. A failure stops submission, and the
-    # executor joins already-running calls before the lease can be released.
+    # executor lets active workers finish checkpointing before lease release.
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="impact-repair") as executor:
         active = {}
         free_slots = workers
         while True:
-            for index, (work, manifest) in islice(queue, free_slots):
-                future = submit_with_guidance(executor, _generate_targeted, work, manifest, **args)
+            for index in islice(queue, free_slots):
+                future = submit_with_guidance(executor, generate, index)
                 active[future] = index
             if not active:
                 break
@@ -128,7 +195,6 @@ def _run_targeted_batch(inputs, manifests, *, workers, actor_user_id, request_id
             for future in done:
                 results[active.pop(future)] = future.result()
             free_slots = len(done)
-    return [results[index] for index in range(len(inputs))]
 
 
 def _load_snapshot_by_id(project_id: str, snapshot_id: Optional[str], *, actor: AuthUser) -> Optional[QaProjectStageSnapshot]:
@@ -379,16 +445,17 @@ def apply_project_impact_update(
             generated_count = 0
             evidence = []
             try:
+                input_hashes = [_fingerprint(work.payload.model_dump(mode="json")) for work in inputs]
                 manifests = [
                     prepare_run(
                         "test_cases",
                         actor,
                         project_id,
-                        f"{request_id}:{work.recommendation.recommendation_id}",
+                        f"{request_id}:{lease.token}:{work.recommendation.recommendation_id}",
                         requirement_ids=[r.id for r in work.payload.requirements],
-                        input_fingerprint=sha256(json.dumps(work.payload.model_dump(mode="json"), sort_keys=True).encode()).hexdigest(),
+                        input_fingerprint=input_hash,
                     )
-                    for work in inputs
+                    for work, input_hash in zip(inputs, input_hashes, strict=True)
                 ]
                 if len(manifests) > 1:
                     current_revision = get_project(project_id, actor=actor).current_revision
@@ -396,11 +463,18 @@ def apply_project_impact_update(
                         raise ProjectConflictError(current_revision)
                 settings = get_generation_settings()
                 worker_limit = min(3, settings.parallel_test_case_max_workers) if settings.parallel_test_case_generation_enabled else 1
-                workers = min(worker_limit, len(inputs))
+                policy = _targeted_policy(settings) if inputs else None
+                keys = [
+                    _fingerprint([work.recommendation.recommendation_id, input_hash, manifest.manifest_id, policy]) if policy else None
+                    for work, input_hash, manifest in zip(inputs, input_hashes, manifests, strict=True)
+                ]
                 started = monotonic()
-                responses = _run_targeted_batch(inputs, manifests, workers=workers, actor_user_id=actor.sub, request_id=request_id, run_id=run_id)
+                responses, workers, reused = _run_targeted_batch(
+                    inputs, manifests, keys, lease, worker_limit=worker_limit, actor_user_id=actor.sub, request_id=request_id, run_id=run_id
+                )
                 batch_metrics = {
                     "targeted_generation_worker_count": workers,
+                    "targeted_generation_reused_count": reused,
                     "targeted_generation_duration_ms": round((monotonic() - started) * 1000, 2),
                 }
                 for work, manifest, response in zip(inputs, manifests, responses, strict=True):
