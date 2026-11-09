@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 
-from browser_benchmark_fixtures import FIXTURES, Defect, Fixture
+from browser_benchmark_fixtures import FIXTURES, Defect, Fixture, LiteralSubmission
 from evaluate_guidance import ROOT, canonical_hash, evaluate
 
 from app.config import DEFAULT_MODEL_NAME, ExecutionSettings
@@ -19,9 +19,12 @@ from app.contracts.execution import ExecutionRunItem
 from app.contracts.grounding import EnrichInput
 from app.contracts.quality_feedback import ExecutionPrerequisite
 from app.contracts.test_cases import TestCase, TestStep
-from app.services.browser_handoff import validate_browser_handoff
+from app.services.browser_handoff import _compiled_steps, validate_browser_handoff
 from app.services.context_grounding import build_grounded_context
 from app.services.execution_service import _annotation_description, _iter_playwright_tests, preview_execution, run_execution
+from plain_english_test_framework.compiler import CompilerError
+from plain_english_test_framework.ir_validator import IrValidationError
+from plain_english_test_framework.spec_parser import SpecValidationError
 
 
 @contextmanager
@@ -65,7 +68,7 @@ def fixture_context(fixture: Fixture, target: str) -> EnrichInput:
     context = EnrichInput(
         app_link=target,
         requirements=[{"id": key, "text": text} for key, text in fixture.requirements.items()],
-        notes=fixture.notes,
+        notes=fixture.notes.replace("{target}", target),
         execution_prerequisites=prerequisites,
     )
     # Supply the fixture's known HTML through the normal analyzer. The real
@@ -91,8 +94,13 @@ def authored_cases(fixture: Fixture, context: EnrichInput) -> list[TestCase]:
                 linked_requirement_ids=[requirement],
                 execution_prerequisites=context.execution_prerequisites if is_manual else [],
                 steps=[
-                    TestStep(step=index, action=action.replace("{target}", str(context.app_link)), expected=expected)
-                    for index, (action, expected) in enumerate(steps, start=1)
+                    TestStep(
+                        step=index,
+                        action=action.replace("{target}", str(context.app_link)),
+                        expected=expected,
+                        test_data=data[0] if data else None,
+                    )
+                    for index, (action, expected, *data) in enumerate(steps, start=1)
                 ],
             )
         )
@@ -151,6 +159,30 @@ def defect_status(defect: Defect, eligible: list[str], healthy: dict[str, dict],
     return "runtime_unavailable"
 
 
+def has_exact_literal_submission(steps: list[dict], submission: LiteralSubmission) -> bool:
+    field = {"strategy": "label", "value": submission.field, "exact": True}
+    button = {"strategy": "role", "role": "button", "value": submission.button, "exact": True}
+    filled = None
+    submitted = []
+    for step in steps:
+        locator = step.get("locator", {})
+        if step["action"] == "navigate":
+            filled = None
+        elif step["action"] in {"fill", "fill_literal"} and locator.get("strategy") == "label" and locator.get("value") == submission.field:
+            filled = step["value"] if step["action"] == "fill_literal" and locator == field else None
+        elif step["action"] == "click" and locator == button:
+            submitted.append(filled)
+    return submitted == [submission.value]
+
+
+def _fixture_hash(fixture: Fixture) -> str:
+    data = asdict(fixture)
+    for defect in data["defects"]:
+        if defect["submission"] is None:
+            del defect["submission"]
+    return canonical_hash(data)
+
+
 def measure_fixture(fixture, context, cases, pages, settings):
     target = str(context.app_link)
     handoff_warnings = validate_browser_handoff(cases, context, context.requirements)
@@ -159,20 +191,32 @@ def measure_fixture(fixture, context, cases, pages, settings):
     pages.clear()
     pages.update(fixture.documents())
     healthy = run_cases(cases, [candidate.id for candidate in preview.executable], target, settings)
+    compiled = {}
+    if any(defect.submission for defect in fixture.defects):
+        for candidate in preview.executable:
+            try:
+                compiled[candidate.id] = _compiled_steps(candidate, target)
+            except CompilerError, IrValidationError, SpecValidationError:
+                continue
 
     defects = []
     for defect in fixture.defects:
-        eligible = [candidate.id for candidate in preview.executable if defect.requirement in requirements_by_case[candidate.source_test_case_id]]
+        linked = [candidate.id for candidate in preview.executable if defect.requirement in requirements_by_case[candidate.source_test_case_id]]
+        eligible = [
+            candidate for candidate in linked if defect.submission is None or has_exact_literal_submission(compiled.get(candidate, []), defect.submission)
+        ]
         selected = [candidate for candidate in eligible if healthy.get(candidate, {}).get("status") == "passed"]
         pages.update(fixture.documents(defect))
         broken = run_cases(cases, selected, target, settings)
+        status = "exact_payload_unverified" if linked and not eligible else defect_status(defect, eligible, healthy, broken)
         defects.append(
             {
                 "defect": defect.name,
                 "requirement": defect.requirement,
                 "intended_failing_check": defect.failing_check,
+                "linked_candidates": linked,
                 "eligible_candidates": eligible,
-                "status": defect_status(defect, eligible, healthy, broken),
+                "status": status,
                 "broken_outcomes": broken,
             }
         )
@@ -189,7 +233,7 @@ def measure_fixture(fixture, context, cases, pages, settings):
         and (manual is None or (bool(manual_cases) and not manual_executable))
     )
     return {
-        "fixture_hash": canonical_hash(asdict(fixture)),
+        "fixture_hash": _fixture_hash(fixture),
         "passed": passed,
         "preview": preview.summary.model_dump(),
         "handoff_warnings": handoff_warnings,
@@ -203,13 +247,14 @@ def measure_fixture(fixture, context, cases, pages, settings):
     }
 
 
-def benchmark(*, live: bool, model: str, port: int, output: Path):
+def benchmark(*, live: bool, model: str, port: int, output: Path, fixture_names: tuple[str, ...] = ()):
     mode = "live" if live else "authored_controls"
     settings = ExecutionSettings(artifact_root=output.parent / f"{output.stem}-browser-artifacts")
     report = {"version": 1, "mode": mode, "model": model if live else None, "fixtures": {}}
     with loopback_pages(port) as (origin, pages), patch.dict(os.environ, {"PETF_PLAYWRIGHT_BROWSER_CHANNEL": "chromium"}):
         os.environ.pop("PETF_PLAYWRIGHT_WEB_SERVER_COMMAND", None)
-        for name, fixture in FIXTURES.items():
+        for name in fixture_names or FIXTURES:
+            fixture = FIXTURES[name]
             context = fixture_context(fixture, origin + fixture.route)
             inputs = {
                 "requirements": [requirement.model_dump(mode="json", exclude_none=True) for requirement in context.requirements],
@@ -261,6 +306,7 @@ def main():
     parser.add_argument("--live", action="store_true", help="Generate one new suite per fixture using the configured Gemini provider.")
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--port", type=int, default=58946)
+    parser.add_argument("--fixture", action="append", choices=FIXTURES, help="Select specific fixtures instead of running the full set.")
     parser.add_argument("--output", type=Path, required=True, help="Report file outside this repository.")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
@@ -269,7 +315,7 @@ def main():
     if output.is_relative_to(ROOT):
         parser.error("keep benchmark evidence outside the repository")
     output.parent.mkdir(parents=True, exist_ok=True)
-    report = benchmark(live=args.live, model=args.model, port=args.port, output=output)
+    report = benchmark(live=args.live, model=args.model, port=args.port, output=output, fixture_names=tuple(dict.fromkeys(args.fixture or ())))
     print(f"Report: {output}")
     return 0 if report["passed"] else 1
 

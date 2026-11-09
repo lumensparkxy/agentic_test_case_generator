@@ -1,6 +1,14 @@
 """Versioned, authored inputs for the Chromium fault-detection benchmark."""
 
 from dataclasses import dataclass
+import json
+
+
+@dataclass(frozen=True)
+class LiteralSubmission:
+    field: str
+    button: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -10,6 +18,7 @@ class Defect:
     before: str
     after: str
     failing_check: str
+    submission: LiteralSubmission | None = None
 
 
 @dataclass(frozen=True)
@@ -18,7 +27,7 @@ class Fixture:
     pages: dict[str, str]
     requirements: dict[str, str]
     notes: str
-    controls: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
+    controls: tuple[tuple[str, tuple[tuple[str, str] | tuple[str, str, str], ...]], ...]
     defects: tuple[Defect, ...]
     manual_requirement: str | None = None
 
@@ -84,6 +93,26 @@ document.querySelector("form").addEventListener("submit", event => {
   document.querySelector("[role=status]").textContent = email.checked ? "Email receipt enabled" : "Email receipt disabled";
 });
 </script></html>"""
+
+PAYLOAD_EDITOR = """<!doctype html><html lang="en"><title>Payload editor</title><h1>Payload editor</h1>
+<label for="payload">Payload</label><textarea id="payload"></textarea>
+<button>Apply payload</button><p role="status">Waiting</p><pre id="saved" data-testid="saved-payload"></pre>
+<script>
+document.querySelector("button").addEventListener("click", () => {
+  const input = document.querySelector("#payload").value;
+  const saved = input;
+  document.querySelector("#saved").textContent = saved;
+  try {
+    JSON.parse(saved);
+    document.querySelector("[role=status]").textContent = "Valid JSON accepted";
+  } catch {
+    document.querySelector("[role=status]").textContent = "Invalid JSON rejected";
+  }
+});
+</script></html>"""
+
+VALID_PAYLOAD = '{\n  "enabled": false,\n  "label": "  Launch into β  ",\n  "template": "{env.example}"\n}'
+INVALID_PAYLOAD = '{\n  "enabled": false,\n  "label": "broken"\n'
 
 FIXTURES = {
     "directory": Fixture(
@@ -253,5 +282,68 @@ FIXTURES = {
             Defect("wrong-confirmation", "REC-SAVE", '= "Request saved";', '= "Save queued";', 'exact text "Request saved" should be visible'),
         ),
         manual_requirement="REC-AUDIT",
+    ),
+    "payload-editor": Fixture(
+        route="/payload-editor",
+        pages={"/payload-editor": PAYLOAD_EDITOR},
+        requirements={
+            "JSON-VALID": (
+                'Submit the exact supplied valid JSON in "Payload" using "Apply payload". '
+                'Show "Valid JSON accepted" and the submitted text with its original line breaks, indentation and spaces. '
+                "The exact test data is this JSON-encoded string. Decode the string once before entering it.\n"
+                f"{json.dumps(VALID_PAYLOAD, ensure_ascii=False)}"
+            ),
+            "JSON-INVALID": (
+                'Submit the exact supplied malformed JSON in "Payload" using "Apply payload". '
+                'Show "Invalid JSON rejected" and the attempted payload as entered. The input has no closing brace. '
+                "The final line feed is part of the input. The exact test data is this JSON-encoded string. "
+                "Decode the string once before entering it.\n"
+                f"{json.dumps(INVALID_PAYLOAD)}"
+            ),
+        },
+        notes=(
+            'The public editor starts with an empty native multiline "Payload" field and requires no account or setup.\n'
+            'Browser result test id "saved-payload" on "{target}" shows field "Payload" after button "Apply payload"'
+        ),
+        controls=tuple(
+            (
+                requirement,
+                (
+                    ('Enter step data into field "Payload"', 'field "Payload" value should equal step data', data),
+                    ('Click exact button "Apply payload"', f'exact text "{status}" is visible'),
+                    ("Inspect the saved payload", 'test id "saved-payload" text should equal step data', data),
+                ),
+            )
+            for requirement, data, status in (
+                ("JSON-VALID", VALID_PAYLOAD, "Valid JSON accepted"),
+                ("JSON-INVALID", INVALID_PAYLOAD, "Invalid JSON rejected"),
+            )
+        ),
+        defects=(
+            Defect(
+                "compact-valid-payload",
+                "JSON-VALID",
+                "const saved = input;",
+                "const saved = JSON.stringify(JSON.parse(input));",
+                f'test id "saved-payload" text should equal literal {json.dumps(VALID_PAYLOAD)}',
+                LiteralSubmission("Payload", "Apply payload", VALID_PAYLOAD),
+            ),
+            Defect(
+                "repair-invalid-payload",
+                "JSON-INVALID",
+                "const saved = input;",
+                'const saved = input + "}";',
+                'exact text "Invalid JSON rejected" should be visible',
+                LiteralSubmission("Payload", "Apply payload", INVALID_PAYLOAD),
+            ),
+            Defect(
+                "change-rejected-payload",
+                "JSON-INVALID",
+                "const saved = input;",
+                'const saved = input + " ";',
+                f'test id "saved-payload" text should equal literal {json.dumps(INVALID_PAYLOAD)}',
+                LiteralSubmission("Payload", "Apply payload", INVALID_PAYLOAD),
+            ),
+        ),
     ),
 }

@@ -9,8 +9,9 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from browser_benchmark_fixtures import FIXTURES
-from evaluate_browser_handoff import defect_status, failed_checks
+from evaluate_browser_handoff import _compiled_steps, authored_cases, defect_status, failed_checks, fixture_context, has_exact_literal_submission
 from app.contracts.execution import ExecutionRunItem
+from app.services.execution_service import preview_execution
 
 
 class BrowserHandoffBenchmarkTests(unittest.TestCase):
@@ -62,3 +63,25 @@ class BrowserHandoffBenchmarkTests(unittest.TestCase):
                     pages = fixture.documents(defect)
                     self.assertEqual({route for route in pages if pages[route] != fixture.pages[route]}, {fixture.route})
         self.assertIn(FIXTURES["receipt"].manual_requirement, FIXTURES["receipt"].requirements)
+
+    def test_literal_submission_requires_exact_latest_fill_and_one_matching_submit(self):
+        fixture = FIXTURES["payload-editor"]
+        target = "http://127.0.0.1:58946/payload-editor"
+        context = fixture_context(fixture, target)
+        cases = authored_cases(fixture, context)
+        preview = preview_execution(cases, target_base_url=target)
+        self.assertEqual(preview.summary.executable, 2)
+        steps = _compiled_steps(preview.executable[1], target)
+        proof = fixture.defects[1].submission
+        fill = next(step for step in steps if step["action"] == "fill_literal")
+        click = next(step for step in steps if step["action"] == "click")
+        click_index = steps.index(click)
+        no_newline = {**fill, "value": fill["value"].removesuffix("\n")}
+        self.assertNotEqual(no_newline["value"], fill["value"])
+        self.assertTrue(has_exact_literal_submission(steps, proof))
+        for edit in (no_newline, steps[0], {**fill, "locator": {**fill["locator"], "exact": False}}):
+            with self.subTest(edit=edit):
+                self.assertFalse(has_exact_literal_submission([*steps[:click_index], edit, *steps[click_index:]], proof))
+        self.assertFalse(has_exact_literal_submission([*steps, click], proof))
+        wrong_button = {**click, "locator": {**click["locator"], "value": "Cancel"}}
+        self.assertFalse(has_exact_literal_submission([*steps[:click_index], wrong_button, *steps[click_index + 1 :]], proof))

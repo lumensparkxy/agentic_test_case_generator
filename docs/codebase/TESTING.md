@@ -645,6 +645,7 @@ controls and an optional live comparison from the repository root.
 ```bash
 .venv/bin/python scripts/evaluate_browser_handoff.py --output /tmp/tcg-browser-controls.json
 .venv/bin/python scripts/evaluate_browser_handoff.py --live --output /tmp/tcg-browser-live.json
+.venv/bin/python scripts/evaluate_browser_handoff.py --fixture payload-editor --live --output /tmp/tcg-payload-editor-live.json
 ```
 
 The live command uses the configured Gemini credentials and generates one
@@ -656,6 +657,11 @@ report.
 
 A defect counts as detected when a case linked to its requirement passes on
 the healthy fixture and fails at the intended check on the broken fixture.
+The payload editor also requires the latest literal fill before the single
+named submit action to match the supplied string exactly. That includes the
+malformed sample's final line feed. The evaluator records
+`exact_payload_unverified` when a linked case lacks this proof. Use
+`--fixture` to run a single workflow.
 The report lists missing cases, healthy-target failures, surviving defects,
 failures at another check, and unavailable runtime evidence separately.
 Manual audit coverage and generation approval have separate fields. A
