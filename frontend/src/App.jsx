@@ -97,7 +97,7 @@ import {
 	STORAGE_CURRENT_PROJECT_ID,
 } from "./constants/workflow";
 import { buildTestCaseExportFilename } from "./services/exportFilename";
-import { API_BASE, createRequestId, downloadResponseBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
+import { API_BASE, createRequestId, downloadBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
 import { API_CONTRACT_ENDPOINTS } from "./api/generated/api-contracts";
 import {
 	buildAzureDevOpsConnectionForm,
@@ -285,6 +285,7 @@ export default function App() {
 	const requirementImportControl = useRef(null);
 	const requirementExtractionAttempts = useRef(new Map());
 	const contextAnalysisAttempt = useRef(null);
+	const fileExportAttempts = useRef(new Map());
 	const requirementReviewHeading = useRef(null);
 	const [requirementSetup, setRequirementSetup] = useState(null);
 	const [requirementFocus, setRequirementFocus] = useState(null);
@@ -3820,34 +3821,53 @@ export default function App() {
 			if (!exportPath) {
 				throw new Error(`Unsupported export format: ${format}`);
 			}
-			const res = await apiRequest(exportPath, {
+			const attempts = fileExportAttempts.current;
+			const fingerprint = JSON.stringify([operationScope, payload]);
+			if (attempts.get(format)?.fingerprint !== fingerprint) {
+				attempts.set(format, { fingerprint, requestId: createRequestId() });
+			}
+			const attempt = attempts.get(format);
+			const clearAttempt = () => {
+				if (attempts.get(format) === attempt) attempts.delete(format);
+			};
+			const options = {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.requestId },
 				body: JSON.stringify(payload),
-			});
-
-			if (!res.ok) {
-				if (res.status === 422) {
-					const rejection = await res
-						.clone()
-						.json()
-						.catch(() => null);
-					if (rejection?.detail?.code === "draft_override_required" && isProjectOperationCurrent(operationScope)) {
-						setExportDraftRequiredFor(exportEvidenceKey);
+			};
+			const send = async () => {
+				try {
+					const res = await apiRequest(exportPath, options);
+					if (res.ok) return await res.blob();
+					if ([422, 502, 503, 504].includes(res.status)) {
+						const rejection = await res
+							.clone()
+							.json()
+							.catch(() => null);
+						if (res.status !== 422 && (!rejection?.detail || rejection.detail.code === "export_publication_unconfirmed")) return null;
+						if (rejection?.detail?.code === "draft_override_required" && isProjectOperationCurrent(operationScope)) {
+							setExportDraftRequiredFor(exportEvidenceKey);
+						}
 					}
+					clearAttempt();
+					throw new Error(await parseApiError(res, "Export failed"));
+				} catch (error) {
+					if (error instanceof TypeError) return null;
+					throw error;
 				}
-				const errorMessage = await parseApiError(res, "Export failed");
-				throw new Error(errorMessage);
+			};
+			let blob = await send();
+			if (!blob && isProjectOperationCurrent(operationScope)) {
+				blob = await send();
 			}
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
+			if (!blob) throw new Error("The export could not be confirmed. Retry the same format with the same inputs.");
 
 			const filename = buildTestCaseExportFilename(currentProject, format);
-			await downloadResponseBlob(res, filename);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
+			downloadBlob(blob, filename);
+			clearAttempt();
 			await refreshCurrentProject({ hydrate: false, operationScope });
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;

@@ -40,8 +40,7 @@ export const parseApiError = async (res, fallbackMessage) => {
 	}
 };
 
-export const downloadResponseBlob = async (res, filename) => {
-	const blob = await res.blob();
+export const downloadBlob = (blob, filename) => {
 	const url = window.URL.createObjectURL(blob);
 	const anchor = document.createElement("a");
 	anchor.href = url;

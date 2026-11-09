@@ -304,8 +304,9 @@ test("export filenames handle missing and long international project names", () 
 	);
 });
 
-for (const reviewState of ["approved", "unavailable", "incomplete", "server-rejected"]) {
-	test(`saved ${reviewState} suite exports with snapshot identity`, { tag: [] }, async ({ page }, testInfo) => {
+for (const reviewState of ["approved", "unavailable", "incomplete", "server-rejected", "delivery-lost"]) {
+	const losesDelivery = reviewState === "delivery-lost";
+	test(`saved ${reviewState} suite exports with snapshot identity`, { tag: losesDelivery ? "@p1" : [] }, async ({ page }, testInfo) => {
 		const cases = [
 			{
 				id: "TC-SAVED",
@@ -314,7 +315,7 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 				steps: [{ step: 1, action: "Open checkout", expected: "Checkout is visible" }],
 			},
 		];
-		const approved = ["approved", "server-rejected"].includes(reviewState);
+		const approved = ["approved", "server-rejected", "delivery-lost"].includes(reviewState);
 		const project = structuredClone(PROJECT);
 		project.current_revision = 7;
 		project.stage_state.test_cases = { current_snapshot_id: "tests-saved", approved: reviewState !== "unavailable", stale: false };
@@ -330,6 +331,24 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 			},
 		};
 		let exported;
+		let receipt;
+		const attempts = [];
+		if (losesDelivery) {
+			await page.addInitScript(() => {
+				const fetch = window.fetch.bind(window);
+				let interruptBody = true;
+				window.fetch = async (...args) => {
+					const response = await fetch(...args);
+					if (interruptBody && response.ok && new URL(response.url).pathname === "/export/json") {
+						interruptBody = false;
+						response.blob = async () => {
+							throw new TypeError("Simulated incomplete download body");
+						};
+					}
+					return response;
+				};
+			});
+		}
 		await page.route("**/*", async (route) => {
 			if (!["fetch", "xhr"].includes(route.request().resourceType())) return route.fallback();
 			const pathname = new URL(route.request().url()).pathname;
@@ -340,8 +359,16 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 				return jsonResponse(route, { ...orchestratorStatus(), project_revision: project.current_revision });
 			if (pathname === "/export/json") {
 				exported = route.request().postDataJSON();
+				attempts.push({ id: route.request().headers()["x-request-id"], payload: exported });
 				if (reviewState === "server-rejected" && !exported.draft_override_requested) {
 					return jsonResponse(route, { detail: { code: "draft_override_required", message: "Saved coverage is incomplete." } }, 422);
+				}
+				if (receipt) {
+					if (attempts.at(-1).id !== attempts[0].id || JSON.stringify(exported) !== JSON.stringify(attempts[0].payload)) {
+						return jsonResponse(route, { detail: "Stale export request" }, 409);
+					}
+					if (attempts.length === 2) return route.abort("failed");
+					return jsonResponse(route, receipt, 200, { "content-disposition": "attachment; filename=test_cases.json" });
 				}
 				const draft = exported.draft_override_requested;
 				project.current_revision += 1;
@@ -354,17 +381,14 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 					source_snapshot_id: exported.source_snapshot_id,
 					payload: { format: "json", approved: !draft },
 				};
-				return jsonResponse(
-					route,
-					{
-						export_format: "test_cases_v1",
-						total_count: 1,
-						test_cases: cases,
-						audit_metadata: { schema_version: 1, snapshot_id: exported.source_snapshot_id, is_draft: draft },
-					},
-					200,
-					{ "content-disposition": "attachment; filename=test_cases.json" }
-				);
+				const document = {
+					export_format: "test_cases_v1",
+					total_count: 1,
+					test_cases: cases,
+					audit_metadata: { schema_version: 1, snapshot_id: exported.source_snapshot_id, is_draft: draft },
+				};
+				if (losesDelivery) receipt = document;
+				return jsonResponse(route, document, 200, { "content-disposition": "attachment; filename=test_cases.json" });
 			}
 			return jsonResponse(route, {});
 		});
@@ -389,6 +413,11 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 			await page.getByPlaceholder(/Reason for exporting this draft/i).fill("Independent QA review requested.");
 		}
 		await expect(downloadButton).toBeEnabled();
+		if (losesDelivery) {
+			await downloadButton.click();
+			await expect(page.getByRole("alert").filter({ hasText: "The export could not be confirmed" })).toBeVisible();
+			expect(attempts).toHaveLength(2);
+		}
 		const downloadPromise = page.waitForEvent("download");
 		await downloadButton.click();
 		const download = await downloadPromise;
@@ -401,6 +430,11 @@ for (const reviewState of ["approved", "unavailable", "incomplete", "server-reje
 		expect(exported.base_project_revision).toBe(7);
 		expect(exported.draft_override_requested).toBe(!approved || reviewState === "server-rejected");
 		expect(document.audit_metadata.is_draft).toBe(exported.draft_override_requested);
+		if (losesDelivery) {
+			expect(attempts[0].id).toBeTruthy();
+			expect(attempts).toEqual(Array(3).fill(attempts[0]));
+			expect(project.current_revision).toBe(8);
+		}
 		const reportState = exported.draft_override_requested ? "Needs attention" : "Complete";
 		const reportsLink = page.getByRole("link", { name: `Reports, ${reportState}`, exact: true });
 		await expect(reportsLink).toHaveAttribute("aria-current", "page");

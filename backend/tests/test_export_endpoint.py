@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -15,7 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.main import app, get_current_user
 from app.models import AuthUser
 from app.contracts.projects import QaProjectDetail
+from app.routers import export as routes
+from app.services import workflow_project_service as projects
 from app.services.workflow_project_service import ProjectPermissionError
+from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 
 def _test_case():
@@ -119,11 +123,16 @@ class ExportEndpointTests(unittest.TestCase):
             patcher = patch(f"app.routers.export.{target}", return_value=result)
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.enterContext(patch.object(routes, "find_idempotent_stage_snapshot", return_value=None))
+        self.enterContext(patch.object(routes, "get_required_firestore_client", return_value=FakeFirestoreClient({})))
 
     def export(self, format="json", payload=None, project=None):
         with (
             patch("app.routers.export.get_project", return_value=project or _project()) as get,
-            patch("app.routers.export.append_stage_snapshot") as append,
+            patch(
+                "app.routers.export.append_stage_snapshot",
+                side_effect=lambda **kwargs: SimpleNamespace(workflow_run_id=kwargs["workflow_run_id"], metadata=kwargs["metadata"]),
+            ) as append,
             TestClient(app) as client,
         ):
             result = client.post(f"/export/{format}", json=payload or _payload())
@@ -202,7 +211,7 @@ class ExportEndpointTests(unittest.TestCase):
             append.assert_not_called()
 
     def test_stale_mismatched_and_forged_cases_conflict_before_export(self):
-        for variant in ("revision", "missing_revision", "snapshot", "case", "stale", "old_source", "unknown_snapshot"):
+        for variant in ("revision", "missing_revision", "snapshot", "case", "stale", "old_source", "unknown_snapshot", "unreadable_snapshot"):
             project = _project()
             payload = _payload()
             if variant == "revision":
@@ -217,8 +226,10 @@ class ExportEndpointTests(unittest.TestCase):
                 project.stage_state["test_cases"].stale = True
             if variant == "old_source":
                 project.current_snapshots["test_cases"].metadata["source_requirements_snapshot_id"] = "old"
-            if variant == "unknown_snapshot":
+            if variant in {"unknown_snapshot", "unreadable_snapshot"}:
                 project.current_snapshots.pop("test_cases")
+                if variant == "unreadable_snapshot":
+                    payload.pop("source_snapshot_id")
             response, append, _ = self.export(payload=payload, project=project)
             self.assertEqual(response.status_code, 409, (variant, response.text))
             append.assert_not_called()
@@ -300,3 +311,136 @@ class ExportEndpointTests(unittest.TestCase):
         response, append, _ = self.export(payload=payload)
         self.assertEqual(response.status_code, 422, response.text)
         append.assert_not_called()
+
+
+class ExportPublicationTests(unittest.TestCase):
+    def setUp(self):
+        self.store = {}
+        self.firestore = FakeFirestoreClient(self.store)
+        self.actor = AuthUser(sub="export-owner", name="Export owner")
+        self.enterContext(patch.dict(app.dependency_overrides, {get_current_user: lambda: self.actor}))
+        self.enterContext(patch.object(projects, "get_required_firestore_collection", return_value=self.firestore.collection("qa_projects")))
+        self.enterContext(patch.object(projects, "get_required_firestore_client", return_value=self.firestore))
+        self.enterContext(patch.object(projects, "transactional", side_effect=_run_transaction))
+        self.enterContext(patch.object(routes, "get_required_firestore_client", return_value=self.firestore))
+        self.enterContext(
+            patch("app.services.audit_repository.get_optional_firestore_collection", side_effect=lambda name, **kwargs: self.firestore.collection(name))
+        )
+        self.project_id = projects.create_project(name="Report checks", description=None, actor=self.actor, request_id="seed").project_id
+        source = _project(True).current_snapshots
+        requirements = self.save("requirements", {"requirements": source["requirements"].payload["requirements"][:1]})
+        self.suite = self.save("test_cases", source["test_cases"].payload, metadata={"source_requirements_snapshot_id": requirements.snapshot_id})
+        self.save("reports", {"source": "export", "format": "json"})
+        self.before = self.project()
+        self.input = {
+            "project_id": self.project_id,
+            "base_project_revision": self.before.current_revision,
+            "source_snapshot_id": self.suite.snapshot_id,
+            "test_cases": self.suite.payload["test_cases"],
+        }
+        self.http = self.enterContext(TestClient(app))
+
+    def save(self, stage, payload, **kwargs):
+        return projects.append_stage_snapshot(
+            project_id=self.project_id, stage=stage, payload=payload, operation="seed", actor=self.actor, request_id=f"seed-{stage}", approved=True, **kwargs
+        )
+
+    def project(self):
+        return projects.get_project(self.project_id, actor=self.actor)
+
+    def post(self, fmt="json", *, request_id="export", **changes):
+        return self.http.post(f"/export/{fmt}", headers={"X-Request-ID": request_id}, json={**self.input, **changes})
+
+    def audit(self, collection):
+        return [value for path, value in self.store.items() if path.startswith(f"{collection}/")]
+
+    def assert_audit(self, status, quantity, operation="export.json"):
+        [event] = self.audit("usage_events")
+        [workflow] = self.audit("workflow_runs")
+        self.assertEqual((event["status"], event["quantity"], workflow["status"]), (status, quantity, status))
+        self.assertEqual(event["event_type"], operation)
+        self.assertEqual(event["workflow_run_id"], workflow["run_id"])
+        return event
+
+    def test_all_formats_replay_original_evidence_without_additional_publication(self):
+        before = self.before
+        for fmt in ("json", "csv", "excel"):
+            with self.subTest(format=fmt):
+                first = self.post(fmt, base_project_revision=before.current_revision)
+                self.assertEqual(first.status_code, 200, first.status_code)
+                after = self.project()
+                snapshot = after.current_snapshots["reports"]
+                self.assertEqual(after.current_revision, before.current_revision + 1)
+                self.assertEqual(after.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
+                event = next(event for event in self.audit("usage_events") if event["event_id"] == snapshot.source_event_id)
+                self.assertEqual((event["quantity"], event["status"], event["workflow_run_id"]), (1, "completed", snapshot.workflow_run_id))
+                self.assertEqual(event["metadata"]["exported_at"], snapshot.payload["audit_metadata"]["exported_at"])
+
+                written = deepcopy(self.store)
+                replay = self.post(fmt, base_project_revision=before.current_revision)
+                self.assertEqual(replay.status_code, 200, replay.status_code)
+                self.assertEqual(replay.headers["content-disposition"], first.headers["content-disposition"])
+                if fmt == "excel":
+                    books = [load_workbook(io.BytesIO(reply.content)) for reply in (first, replay)]
+                    self.assertEqual(books[0].sheetnames, books[1].sheetnames)
+                    for name in books[0].sheetnames:
+                        self.assertEqual(list(books[0][name].values), list(books[1][name].values))
+                else:
+                    self.assertEqual(replay.content, first.content)
+                self.assertEqual(self.post(fmt, base_project_revision=before.current_revision, draft_override_reason="Changed").status_code, 409)
+                self.assertEqual(self.store, written)
+                before = after
+        self.assertEqual(self.post().status_code, 409)
+        self.assertEqual(len(self.audit("usage_events")), 3)
+        self.assertEqual(len(self.audit("workflow_runs")), 3)
+
+    def test_postcommit_reply_loss_recovers_the_exact_saved_report(self):
+        publish = routes.append_stage_snapshot
+
+        def lose_reply(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic report commit reply lost")
+
+        with patch.object(routes, "append_stage_snapshot", side_effect=lose_reply):
+            first = self.post()
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(self.post().content, first.content)
+        event = self.assert_audit("completed", 1)
+        self.assertEqual(self.project().current_snapshots["reports"].source_event_id, event["event_id"])
+        self.save("test_cases", self.suite.payload)
+        self.assertEqual(self.post().status_code, 409)
+        self.assert_audit("completed", 1)
+
+    def test_project_revision_changed_during_file_render_leaves_only_zero_usage(self):
+        render = routes.export_to_json
+
+        def revise(cases, *, audit_metadata):
+            projects.update_project(project_id=self.project_id, actor=self.actor, request_id="rename", name="Renamed during export")
+            return render(cases, audit_metadata=audit_metadata)
+
+        with patch.object(routes, "export_to_json", side_effect=revise):
+            result = self.post()
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(self.project().current_snapshots, self.before.current_snapshots)
+        self.assert_audit("failed", 0)
+
+    def test_report_write_failure_rolls_back_completed_usage_and_keeps_the_prior_report(self):
+        self.firestore.fail_on_create_segment = "/snapshots/"
+        result = self.post()
+        self.assertEqual(result.status_code, 503, result.text)
+        self.assertEqual(self.project(), self.before)
+        transaction = self.firestore.transactions[-1]
+        self.assertEqual([path.split("/")[0] for action, path in transaction.operations if action == "set"], ["usage_events", "workflow_runs"])
+        self.assert_audit("failed", 0)
+
+    def test_foreign_and_archived_projects_are_blocked_before_render_and_audit(self):
+        owner = self.actor
+        with patch.object(routes, "export_to_json") as render:
+            self.actor = AuthUser(sub="foreign-user", name="Foreign user")
+            self.assertEqual(self.post().status_code, 403)
+            self.actor = owner
+            archived = projects.update_project(project_id=self.project_id, actor=owner, request_id="archive", status_value="archived")
+            self.assertEqual(self.post(base_project_revision=archived.current_revision).status_code, 409)
+            render.assert_not_called()
+        self.assertFalse(self.audit("usage_events"))
+        self.assertFalse(self.audit("workflow_runs"))
