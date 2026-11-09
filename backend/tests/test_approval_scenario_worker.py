@@ -325,6 +325,7 @@ class ScenarioWorkerTests(TestCase):
             patch.object(substantive_review.genai, "Client") as critic_client,
             patch.object(test_case_routes, "generate_test_cases", side_effect=produce_tests) as model,
             patch.object(test_case_routes, "get_required_firestore_client", return_value=self.client),
+            patch("app.services.versioning_service.get_optional_firestore_collection", side_effect=lambda name, **_: self.client.collection(name)),
             patch.object(test_case_routes, "enforce_billing_access"),
             patch.object(test_case_routes, "record_billing_consumption") as bill,
         ):
