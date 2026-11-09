@@ -19,6 +19,7 @@ from .guidance_service import guidance_scope
 from .orchestrator_service import _use_cases_human_approved
 from .requirement_scope import approved_generation_requirements
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
+from .test_case_review_progress import SavedReviewProgress
 from .workflow_project_service import ProjectConflictError, append_stage_snapshot, get_project, get_project_stage_snapshot
 
 REVIEW_OPERATION = "test_cases.review"
@@ -67,7 +68,7 @@ def _current_review_inputs(project, suite):
     return requirements, plans, analysis, enriched, sources
 
 
-def _review_payload(payload, requirements, plans, analysis, context):
+def _review_payload(payload, requirements, plans, analysis, context, *, progress):
     try:
         cases = [TestCase.model_validate(case) for case in payload.get("test_cases", [])]
         workflow_settings = WorkflowSettings.model_validate(payload.get("workflow_settings") or {})
@@ -102,7 +103,7 @@ def _review_payload(payload, requirements, plans, analysis, context):
         settings = get_settings()
     except RuntimeError as exc:
         raise HTTPException(503, "Independent review is unavailable. The saved suite is unchanged.") from exc
-    assessment = assess_delivered_suite(concrete, requirements, context, settings=settings)
+    assessment = assess_delivered_suite(concrete, requirements, context, settings=settings, progress=progress)
     if assessment.get("model_status", assessment["status"]) == "unknown":
         diagnostics = assessment.get("diagnostics") or {}
         if diagnostics.get("failure_reason") == "review_input_too_large":
@@ -222,10 +223,11 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
     review_scope = nullcontext()
     if generated_retry:
         review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id)
+    progress = SavedReviewProgress(project_id, snapshot_id, base_project_revision, actor)
     run_id = start_workflow_run(operation=REVIEW_OPERATION, actor=actor, request_id=request_id, metadata={"source_snapshot_id": snapshot_id})
     try:
         with review_scope:
-            reviewed = _review_payload(original.payload, requirements, plans, analysis, context)
+            reviewed = _review_payload(original.payload, requirements, plans, analysis, context, progress=progress)
             append_stage_snapshot(
                 project_id=project_id,
                 stage="test_cases",
@@ -245,6 +247,7 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
                     "approved": reviewed["approved"],
                 },
                 base_project_revision=base_project_revision,
+                transaction_guard=progress.clear_on_commit,
             )
     except Exception:
         complete_workflow_run(run_id, status="failed", error_message="Saved suite review was not published")

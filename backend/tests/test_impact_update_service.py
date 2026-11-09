@@ -1,5 +1,7 @@
 from pathlib import Path
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import timedelta
 import json
@@ -22,6 +24,8 @@ from app.models import AuthUser, EnrichInput, TestCase, TestStep
 from app.config import GenerationSettings, Settings
 from copy import deepcopy
 from fastapi import HTTPException
+import httpx
+from app.agents import substantive_review
 from app.services import impact_update_service as service
 from app.services import test_case_suite_review as suite_review
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
@@ -31,6 +35,7 @@ from app.services.impact_application_state import ApplicationLease, now
 from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.requirement_scope import approved_generation_requirements
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
+from test_substantive_review_groups import critic_output
 
 
 class FakeSnapshot:
@@ -1002,11 +1007,19 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertIn("Verify saved payment", snapshot.payload["generation_tasks"][0]["reason"])
         self.assertNotIn("review_retry_available", snapshot.metadata)
 
-    def test_saved_suite_grouped_review_publishes_verified_gaps_but_not_an_unavailable_review(self):
-        import httpx
-        from app.agents import substantive_review
-        from test_substantive_review_groups import critic_output
+    @contextmanager
+    def _mock_grouped_suite_review(self, critic):
+        with (
+            patch.object(substantive_review, "GROUP_REVIEW_MIN_CASES", 1),
+            patch.object(substantive_review, "GROUP_REVIEW_TARGET_CASES", 3),
+            patch.object(substantive_review, "_call_critic", side_effect=critic),
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=self.model_settings) as settings,
+        ):
+            yield settings
 
+    def test_saved_suite_grouped_review_publishes_verified_gaps_but_not_an_unavailable_review(self):
         project, path = self._generated_suite_pending_review()
         original = deepcopy(self.store[path])
         known_gap = False
@@ -1014,25 +1027,18 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         def critic(settings, prompt, **kwargs):
             data, output = critic_output(prompt)
             ids = data["review_group"]["requirement_ids"]
-            if "REQ-004" in ids:
+            if "REQ-007" in ids or ("REQ-004" in ids and not known_gap):
                 raise httpx.ReadTimeout("synthetic unavailable group")
-            if known_gap and "REQ-001" in ids:
+            if known_gap and "REQ-004" in ids:
                 output["obligations"][0].update(status="unmet", reason="Saved result needs a better assertion.")
             return json.dumps(output)
 
-        with (
-            patch.object(substantive_review, "GROUP_REVIEW_MIN_CASES", 1),
-            patch.object(substantive_review, "GROUP_REVIEW_TARGET_CASES", 3),
-            patch.object(substantive_review, "_call_critic", side_effect=critic),
-            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
-            patch.object(suite_review, "complete_workflow_run"),
-            patch.object(suite_review, "get_settings", return_value=object()),
-        ):
+        with self._mock_grouped_suite_review(critic):
             with self.assertRaises(HTTPException) as unavailable:
                 self._review_saved_suite(project)
             self.assertEqual(unavailable.exception.status_code, 503)
             self.assertEqual(unavailable.exception.detail["code"], "review_groups_unverified")
-            self.assertIn("1 of 4 groups unverified", unavailable.exception.detail["message"])
+            self.assertIn("2 of 4 groups unverified", unavailable.exception.detail["message"])
             groups = unavailable.exception.detail["groups"]
             self.assertEqual(len(groups), 4)
             self.assertEqual(groups[1]["requirement_ids"], ["REQ-004", "REQ-005", "REQ-006"])
@@ -1047,8 +1053,151 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(snapshot.payload["test_cases"], original["payload"]["test_cases"])
         self.assertEqual(snapshot.payload["substantive_assessment"]["diagnostics"]["unverified_group_count"], 1)
         self.assertIn("1 of 4 groups unverified", " ".join(snapshot.payload["review"]["blocking_issues"]))
-        self.assertEqual([task["source_test_case_id"] for task in snapshot.payload["generation_tasks"]], ["TC-001"])
+        self.assertEqual([task["source_test_case_id"] for task in snapshot.payload["generation_tasks"]], ["TC-004"])
+        self.assertNotIn(f"qa_projects/{project.project_id}/test_case_review_progress/current", self.store)
         self.assertEqual(self.store[path], original)
+
+    def test_saved_suite_retry_reuses_only_valid_completed_review_groups(self):
+        project, path = self._generated_suite_pending_review()
+        original = deepcopy(self.store[path])
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = Counter()
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            key = data["review_group"]["requirement_ids"][0]
+            calls[key] += 1
+            if outage and key == "REQ-004":
+                raise httpx.ReadTimeout("synthetic unavailable group")
+            return json.dumps(output)
+
+        with self._mock_grouped_suite_review(critic):
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            groups = unavailable.exception.detail["groups"]
+            self.assertEqual(set(self.store[progress_path]["items"]), {group["input_hash"] for group in groups if group["status"] != "unknown"})
+            self.assertEqual(self.store[path], original)
+            interrupted = deepcopy(self.store)
+            outage = False
+            for defect in (None, "hash", "quote", "step", "grounding", "deep_json"):
+                with self.subTest(defect=defect):
+                    self.store.clear()
+                    self.store.update(deepcopy(interrupted))
+                    calls.clear()
+                    if defect:
+                        key = groups[0]["input_hash"]
+                        items = self.store[progress_path]["items"]
+                        invalid = json.loads(items[key])
+                        if defect == "hash":
+                            invalid["input_hash"] = groups[2]["input_hash"]
+                        elif defect == "quote":
+                            invalid["obligations"][0].pop("source_field")
+                            invalid["obligations"][0]["source_quote"] = "Not in the source"
+                        elif defect == "step":
+                            invalid["obligations"][0]["evidence"][0]["step"] = 99
+                        elif defect == "grounding":
+                            invalid["case_grounding"][0]["test_case_id"] = "TC-004"
+                        items[key] = "[" * 2000 + "]" * 2000 if defect == "deep_json" else json.dumps(invalid)
+
+                    result = self._review_saved_suite(project)
+                    replay = self._review_saved_suite(project)
+                    expected = {"REQ-004": 1, **({"REQ-001": 1} if defect else {})}
+                    self.assertEqual(calls, expected)
+                    self.assertEqual(result.current_revision, project.current_revision + 1)
+                    self.assertEqual(replay.current_revision, result.current_revision)
+                    snapshot = result.current_snapshots["test_cases"]
+                    self.assertTrue(snapshot.approved)
+                    self.assertEqual(snapshot.payload["test_cases"], original["payload"]["test_cases"])
+                    assessment = snapshot.payload["substantive_assessment"]
+                    self.assertEqual(assessment["diagnostics"]["reused_group_count"], 4 - len(expected))
+                    self.assertEqual([row["test_case_id"] for row in assessment["case_grounding"]], [case["id"] for case in snapshot.payload["test_cases"]])
+                    self.assertNotIn(progress_path, self.store)
+                    self.assertFalse(any(key.startswith(("test_case_sets/", "usage_events/")) for key in self.store))
+
+    def test_saved_suite_review_progress_cannot_cross_review_policy_or_project_revision(self):
+        project, _ = self._generated_suite_pending_review()
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = Counter()
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            key = data["review_group"]["requirement_ids"][0]
+            calls[key] += 1
+            if outage and key == "REQ-004":
+                raise httpx.ReadTimeout("synthetic unavailable group")
+            return json.dumps(output)
+
+        prepare_run = suite_review.prepare_run
+        quality_goal = substantive_review.QUALITY_GOAL
+        with self._mock_grouped_suite_review(critic) as settings:
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(len(self.store[progress_path]["items"]), 3)
+            interrupted = deepcopy(self.store)
+            outage = False
+            for cause in ("model", "prompt", "guidance", "expiry", "revision"):
+                with self.subTest(cause=cause):
+                    self.store.clear()
+                    self.store.update(deepcopy(interrupted))
+                    calls.clear()
+                    settings.return_value = self.model_settings.model_copy(update={"model_name": "another-model"}) if cause == "model" else self.model_settings
+                    retry = project
+                    if cause == "expiry":
+                        self.store[progress_path]["expires_at"] = now() - timedelta(seconds=1)
+                    if cause == "revision":
+                        retry = update_project(
+                            project_id=project.project_id,
+                            actor=self.actor,
+                            request_id="change",
+                            name="New name",
+                            base_project_revision=project.current_revision,
+                        )
+                        with self.assertRaises(ProjectConflictError):
+                            self._review_saved_suite(project)
+                        self.assertEqual(calls, {})
+
+                    def guidance(*args, **kwargs):
+                        manifest = prepare_run(*args, **kwargs)
+                        return manifest.model_copy(update={"manifest_id": "changed-guidance"}) if cause == "guidance" else manifest
+
+                    with (
+                        patch.object(suite_review, "prepare_run", side_effect=guidance),
+                        patch.object(
+                            substantive_review, "QUALITY_GOAL", quality_goal + "Changed reviewer instructions." if cause == "prompt" else quality_goal
+                        ),
+                    ):
+                        result = self._review_saved_suite(retry)
+                    assessment = result.current_snapshots["test_cases"].payload["substantive_assessment"]
+                    self.assertEqual(assessment["diagnostics"]["reused_group_count"], 0)
+                    self.assertEqual(calls, {"REQ-001": 1, "REQ-004": 1, "REQ-007": 1, "REQ-010": 1})
+                    self.assertNotIn(progress_path, self.store)
+
+    def test_saved_suite_review_progress_survives_an_interrupted_publication(self):
+        project, _ = self._generated_suite_pending_review()
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = []
+
+        def critic(settings, prompt, **kwargs):
+            calls.append(prompt)
+            return json.dumps(critic_output(prompt)[1])
+
+        with self._mock_grouped_suite_review(critic):
+            self.transaction_client.fail_on_create_segment = "/snapshots/"
+            with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                self._review_saved_suite(project)
+            self.assertEqual(len(self.store[progress_path]["items"]), 4)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            self.transaction_client.fail_on_create_segment = None
+            result = self._review_saved_suite(project)
+
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(result.current_snapshots["test_cases"].approved)
+        self.assertEqual(result.current_revision, project.current_revision + 1)
+        self.assertNotIn(progress_path, self.store)
 
     def test_generated_suite_retry_reconstructs_selected_workbench_context(self):
         project, _ = self._generated_suite_pending_review()

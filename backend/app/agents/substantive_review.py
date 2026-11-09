@@ -1,7 +1,7 @@
 """Independent, bounded review of delivered cases. Citation checks are not a semantic oracle."""
 
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from hashlib import sha256
 import json
@@ -638,7 +638,7 @@ def _invalid_evidence_code(exc):
     }.get(str(exc), "invalid_output_schema")
 
 
-def assess_delivered_suite(cases, requirements, context, *, settings=None, scope_plan=None):
+def assess_delivered_suite(cases, requirements, context, *, settings=None, scope_plan=None, progress=None):
     data, input_hash, _ = review_input(cases, requirements, context, scope_plan=scope_plan)
     if not cases or not requirements or settings is None:
         return unknown_assessment(data, input_hash, "No independent model assessment is available for this delivered suite.")
@@ -646,7 +646,7 @@ def assess_delivered_suite(cases, requirements, context, *, settings=None, scope
     if scope_plan is None and len(cases) >= GROUP_REVIEW_MIN_CASES:
         groups = _plan_review_groups(data, input_hash, budget)
         if groups:
-            return _assess_review_groups(data, input_hash, settings, groups, budget)
+            return _assess_review_groups(data, input_hash, settings, groups, budget, progress)
     return _assess_input(data, input_hash, review_prompt(data, input_hash), settings, budget=budget, deadline=monotonic() + ASSESSMENT_BUDGET_SECONDS)
 
 
@@ -708,26 +708,74 @@ def _assess_input(data, input_hash, prompt, settings, *, budget, deadline, attem
         return result
 
 
-def _assess_review_groups(data, input_hash, settings, groups, budget):
-    workers = min(GROUP_REVIEW_MAX_WORKERS, len(groups))
-    deadline = monotonic() + GROUP_REVIEW_BUDGET_SECONDS
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="suite-review") as executor:
-        futures = [
-            submit_with_guidance(
-                executor,
-                _assess_input,
-                group.data,
-                group.input_hash,
-                group.prompt,
-                settings,
-                budget=min(budget, GROUP_REVIEW_MAX_BYTES),
-                deadline=deadline,
-                attempt_seconds=GROUP_REVIEW_ATTEMPT_SECONDS,
-            )
-            for group in groups
-        ]
-        results = [future.result() for future in futures]
-    return _combine_review_groups(data, input_hash, groups, results, workers)
+def _group_checkpoint(result, group):
+    sources = {row["id"]: row for row in group.data["requirements"]}
+    obligations = []
+    for obligation in result["obligations"]:
+        row = {**obligation, "evidence": [{"test_case_id": item["test_case_id"], "step": item["step"]} for item in obligation["evidence"]]}
+        source = sources[row["requirement_id"]]
+        for field in ("text", "source_excerpt"):
+            if row["source_quote"] == source.get(field):
+                row["source_field"] = field
+                del row["source_quote"]
+                break
+        obligations.append(row)
+    # Preserve validated judgments and exact citation references. Derived
+    # statuses are recomputed against the current group when it is recovered.
+    return _canonical_json({"input_hash": group.input_hash, "obligations": obligations, "case_grounding": result["case_grounding"]})
+
+
+def _recover_review_groups(progress, input_hash, settings, groups):
+    if progress is None:
+        return {}
+    review_key = sha256(
+        _canonical_json(
+            [input_hash, settings.model_name, CriticReferenceOutput.model_json_schema(), [sha256(group.prompt.encode()).hexdigest() for group in groups]]
+        ).encode()
+    ).hexdigest()
+    saved = progress.load(review_key, [group.input_hash for group in groups])
+    results = {}
+    for group in groups:
+        if group.input_hash not in saved:
+            continue
+        try:
+            result = validate_assessment(saved[group.input_hash], group.data, group.input_hash)
+        except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
+            logging.warning("Saved suite review group will be reassessed: %s", _invalid_evidence_code(exc))
+            continue
+        result["diagnostics"] = {"attempt_count": 0, "failure_reason": None, "reused": True}
+        results[group.input_hash] = result
+    return results
+
+
+def _assess_review_groups(data, input_hash, settings, groups, budget, progress):
+    results = _recover_review_groups(progress, input_hash, settings, groups)
+    pending = [group for group in groups if group.input_hash not in results]
+    workers = min(GROUP_REVIEW_MAX_WORKERS, len(pending))
+    if pending:
+        deadline = monotonic() + GROUP_REVIEW_BUDGET_SECONDS
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="suite-review") as executor:
+            futures = {
+                submit_with_guidance(
+                    executor,
+                    _assess_input,
+                    group.data,
+                    group.input_hash,
+                    group.prompt,
+                    settings,
+                    budget=min(budget, GROUP_REVIEW_MAX_BYTES),
+                    deadline=deadline,
+                    attempt_seconds=GROUP_REVIEW_ATTEMPT_SECONDS,
+                ): group
+                for group in pending
+            }
+            for future in as_completed(futures):
+                group = futures[future]
+                result = future.result()
+                results[group.input_hash] = result
+                if progress is not None and result["status"] != "unknown":
+                    progress.save(group.input_hash, _group_checkpoint(result, group))
+    return _combine_review_groups(data, input_hash, groups, [results[group.input_hash] for group in groups], workers)
 
 
 def _combine_review_groups(data, input_hash, groups, results, workers):
@@ -800,6 +848,7 @@ def _combine_review_groups(data, input_hash, groups, results, workers):
             "attempt_count": sum(item["attempt_count"] for item in diagnostics),
             "failure_reason": failure,
             "worker_count": workers,
+            "reused_group_count": sum(item.get("reused", False) for item in diagnostics),
             "unverified_group_count": len(missing),
             "groups": diagnostics,
         },

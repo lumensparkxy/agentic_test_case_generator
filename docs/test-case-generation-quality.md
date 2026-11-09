@@ -217,6 +217,15 @@ findings and opens the exact cases assigned to a group. A failed review
 attempt can show its groups while the current suite is open. Saved group
 evidence remains available after reload.
 
+Retrying an interrupted **Review saved suite** reuses completed groups from
+the same project, saved suite, revision, reviewer model and effective prompts.
+The service revalidates each group's source and step citations before combining
+the results. Missing or invalid groups go to the reviewer again. Progress stays
+in one private Firestore record per project, capped at 768 KiB and eligible for
+24 hours. The next grouped review replaces expired or incompatible progress.
+Publishing the reviewed snapshot removes its progress in the same transaction.
+Groups beyond the storage cap can still complete in the current attempt.
+
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and
 explicitly needing review. Saved-suite review reports an input limit separately
