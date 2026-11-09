@@ -25,6 +25,7 @@ const STATE_LABELS = {
 	preview_refresh: "Preview needs refresh",
 	execution_passed: "Execution passed",
 	execution_failed: "Run failed",
+	execution_flaky: "Flaky run",
 	execution_disabled: "Execution disabled",
 	unavailable: "Evidence unavailable",
 };
@@ -136,6 +137,7 @@ export default function WorkflowNavigationDrawer({
 												preview_refresh: "warning",
 												execution_passed: "success",
 												execution_failed: "danger",
+												execution_flaky: "warning",
 												execution_disabled: "blocked",
 												unavailable: "warning",
 											}[state] || "neutral"

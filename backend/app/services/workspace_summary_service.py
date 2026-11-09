@@ -226,11 +226,12 @@ def _run_summary(project: QaProjectDetail, run: QaProjectExecutionRun) -> Worksp
     summary = dict(run.summary or {})
     passed_count = _run_count(summary, "passed")
     failed_count = _run_count(summary, "failed")
+    flaky_count = _run_count(summary, "flaky")
     invalid_count = _run_count(summary, "invalid")
     skipped_count = _run_count(summary, "skipped")
     executed_count = _first_count(summary, ("total", "executed"))
     if executed_count is None:
-        executed_count = passed_count + failed_count + invalid_count + skipped_count
+        executed_count = passed_count + failed_count + flaky_count + invalid_count + skipped_count
     return WorkspaceRunSummary(
         run_record_id=run.run_record_id,
         run_id=run.run_id,
@@ -243,6 +244,7 @@ def _run_summary(project: QaProjectDetail, run: QaProjectExecutionRun) -> Worksp
         executed_count=executed_count,
         passed_count=passed_count,
         failed_count=failed_count,
+        flaky_count=flaky_count,
         invalid_count=invalid_count,
         skipped_count=skipped_count,
         snapshot_id=run.snapshot_id,

@@ -188,6 +188,26 @@ class QualityFeedbackTests(unittest.TestCase):
             "classify",
         )
         self.assertEqual(classified["finding"]["category"], "environment")
+        flaky = projects.append_stage_snapshot(
+            project_id=self.project_id,
+            stage="execution",
+            payload={"results": [{"source_test_case_id": "TC-1", "status": "flaky"}]},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="flaky-rerun",
+            source_snapshot_id=source,
+            metadata={"target_environment": "staging"},
+        )
+        with self.assertRaises(HTTPException) as retry_only:
+            update_finding(
+                self.project_id,
+                finding["id"],
+                self.actor,
+                QualityFindingAction(action="verify", base_project_revision=flaky.project_revision, verification_snapshot_id=flaky.snapshot_id),
+                "verify-flaky",
+            )
+        self.assertEqual(retry_only.exception.status_code, 409)
+
         with patch("app.services.execution_result_storage.INLINE_RESULT_BYTES", 1):
             passed = projects.append_stage_snapshot(
                 project_id=self.project_id,

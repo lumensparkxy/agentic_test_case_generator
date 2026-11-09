@@ -321,8 +321,11 @@ def _real_stage_status(project: QaProjectDetail, stage: ProjectStageName, state:
     if stage == "impact_analysis":
         return "completed"
     if stage == "execution":
-        if _current_execution_status(project) == "failed":
+        execution_status = _current_execution_status(project)
+        if execution_status == "failed":
             return "failed"
+        if execution_status == "flaky":
+            return "attention_required"
         if state.operation == "automation.execution.preview" or _current_execution_snapshot(project) is None:
             return "ready"
     if stage == "use_cases" and not _use_cases_human_approved(state):
@@ -418,11 +421,14 @@ def _automation_stage(project: QaProjectDetail) -> OrchestratorStageState:
 def _review_stage(project: QaProjectDetail) -> OrchestratorStageState:
     blockers = _review_blockers(project)
     execution_status = _current_execution_status(project)
-    if execution_status == "failed":
+    if execution_status in {"failed", "flaky"}:
+        flaky = execution_status == "flaky"
         blockers.append(
             _blocker(
-                "failed_execution",
-                "The current execution failed and requires review before reporting.",
+                "flaky_execution" if flaky else "failed_execution",
+                "The current execution passed only on retry and requires review before reporting."
+                if flaky
+                else "The current execution failed and requires review before reporting.",
                 stage="review",
                 source_stage="execution",
             )
@@ -697,13 +703,16 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
 
     execution_status = _current_execution_status(project)
     report_stale = bool(reports_state and reports_state.current_snapshot_id and reports_state.stale)
-    if execution_status == "failed":
+    if execution_status in {"failed", "flaky"}:
+        flaky = execution_status == "flaky"
         actions.append(
             _action(
                 "review",
-                "Review Failed Execution",
+                "Review Flaky Execution" if flaky else "Review Failed Execution",
                 "review",
-                reason="The current execution failed and should be reviewed before reporting.",
+                reason="One or more cases passed only on retry. Review the recorded failure before reporting."
+                if flaky
+                else "The current execution failed and should be reviewed before reporting.",
                 primary=True,
             )
         )

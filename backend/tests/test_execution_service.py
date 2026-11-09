@@ -1275,6 +1275,35 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.results[1].stderr, "batch stderr")
         self.assertEqual(response.results[1].issues[0].message, "tc_002 assertion failed")
 
+    def test_retry_pass_preserves_failure_evidence_across_duplicate_playwright_records(self) -> None:
+        def run_batch(*args, **kwargs):
+            result = _fake_batch_run({"tc_001": "passed", "tc_002": "passed"})(*args, **kwargs)
+            path = result.paths.artifacts_dir / "results.json"
+            report = json.loads(path.read_text(encoding="utf-8"))
+            spec = report["suites"][0]["suites"][0]["specs"][0]
+            clean = spec["tests"][0]
+            flaky = {
+                **clean,
+                "status": "flaky",
+                "results": [
+                    {"status": "timedOut", "errors": [{"message": "First attempt timed out"}]},
+                    *clean["results"],
+                ],
+            }
+            spec["tests"] = [flaky, clean]
+            path.write_text(json.dumps(report), encoding="utf-8")
+            return result
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch("app.services.execution_service.run_local_playwright_specs", side_effect=run_batch):
+            response = run_execution([_browser_case(), _browser_case("TC-002")], settings=_settings(Path(temp_dir)))
+
+        self.assertEqual(response.status, "flaky")
+        self.assertEqual((response.summary.passed, response.summary.flaky, response.summary.failed), (1, 1, 0))
+        flaky, clean = response.results
+        self.assertEqual((flaky.status, clean.status), ("flaky", "passed"))
+        self.assertEqual(flaky.issues[0].message, "First attempt timed out")
+        self.assertEqual(flaky.issues[0].code, "playwright.error")
+
     def test_run_keeps_selected_non_executable_cases_skipped_outside_batch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

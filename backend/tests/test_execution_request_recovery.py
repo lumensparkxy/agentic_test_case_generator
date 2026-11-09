@@ -87,7 +87,9 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
             entered.set()
             if not release.wait(10):
                 raise RuntimeError("Synthetic browser release timed out")
-            return self.run_response(status="failed")
+            outcome = self.run_response(status="flaky")
+            outcome.results[0].issues = [ExecutionIssue(code="playwright.error", message="First attempt timed out")]
+            return outcome
 
         with patch("app.main.run_execution", side_effect=run) as runner, TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
             first = pool.submit(client.post, "/automation/execution/run", json=self.body, headers=self.headers)
@@ -116,6 +118,10 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
             exact = client.get(f"{self.prefix}/execution-runs/{completed['run_record_id']}")
             self.assertEqual(exact.status_code, 200, exact.text)
             self.assertEqual(exact.json()["run_id"], completed["run_id"])
+            self.assertEqual(exact.json()["status"], "flaky")
+            self.assertEqual(exact.json()["summary"]["flaky"], 1)
+            self.assertEqual(exact.json()["results"][0]["status"], "flaky")
+            self.assertEqual(exact.json()["results"][0]["issues"][0]["message"], "First attempt timed out")
             original_actor = self.actor
             self.actor = original_actor.model_copy(update={"sub": "another-user"})
             self.assertEqual(client.get(self.receipt_path).status_code, 403)
@@ -127,6 +133,10 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
         self.assertEqual(saved.current_revision, self.body["base_project_revision"] + 2)
         execution = saved.current_snapshots["execution"]
         report = saved.current_snapshots["reports"]
+        self.assertFalse(execution.approved)
+        self.assertFalse(report.approved)
+        self.assertEqual(audit["metadata"]["flaky_count"], 1)
+        self.assertTrue(any("/quality_findings/" in path for path in self.store))
         self.assertEqual(report.source_snapshot_id, execution.snapshot_id)
         self.assertEqual(report.source_event_id, execution.source_event_id)
         self.assertEqual(execution.source_event_id, audit["event_id"])
@@ -191,7 +201,7 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
                 approved=True,
             )
             new_project = self.project_detail()
-            outcome = self.run_response(status="failed")
+            outcome = self.run_response(status="flaky")
             outcome.results[0].issues = [ExecutionIssue(code="fixture", message=diagnostic)]
             return outcome
 
@@ -206,7 +216,9 @@ class ExecutionRequestRecoveryTests(unittest.TestCase):
             self.assertEqual(detail["source_snapshot_id"], self.snapshot.snapshot_id)
             self.assertEqual(detail["project_revision"], self.body["base_project_revision"])
             self.assertTrue(detail["historical"])
-            self.assertEqual(detail["results"][0]["status"], "failed")
+            self.assertEqual(detail["status"], "flaky")
+            self.assertEqual(detail["summary"]["flaky"], 1)
+            self.assertEqual(detail["results"][0]["status"], "flaky")
             self.assertEqual(detail["results"][0]["issues"][0]["message"], diagnostic)
             self.assertEqual(client.post("/automation/execution/run", json=self.body, headers=self.headers).status_code, 409)
         runtime.assert_called_once()

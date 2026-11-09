@@ -55,6 +55,12 @@ function RunRow({ run, onOpenProject }) {
 						<dt>Failed</dt>
 						<dd>{exactCount(run.failed_count)}</dd>
 					</div>
+					{run.flaky_count > 0 && (
+						<div>
+							<dt>Flaky</dt>
+							<dd>{exactCount(run.flaky_count)}</dd>
+						</div>
+					)}
 					<div>
 						<dt>Invalid</dt>
 						<dd>{exactCount(run.invalid_count)}</dd>

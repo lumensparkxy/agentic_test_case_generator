@@ -284,15 +284,22 @@ test.describe("Global Runs and Reports indexes", () => {
 		const reportsPath = buildProjectPath(projectId, "reports");
 		const older = {
 			...FAILED_RUN,
+			run_id: "run-nova-flaky",
+			run_record_id: "run-record-nova-flaky",
+			status: "flaky",
+			selected_count: 1,
+			executed_count: 1,
+			failed_count: 0,
+			flaky_count: 1,
 			target_base_url: "https://staging.example.test",
 			source_snapshot_id: "suite-before-fix",
-			summary: { failed: 1 },
+			summary: { flaky: 1 },
 			results: [
 				{
 					id: "candidate-old",
 					source_test_case_id: "TC-OLD",
 					title: "Empty search displays a notice",
-					status: "failed",
+					status: "flaky",
 					issues: [
 						{ message: "Expected: No employees found", path: "$.results[0].error", code: "playwright.error" },
 						{ message: "\u001b[31mExpected: No employees found\u001b[39m", path: "$.results[0].errors[0]", code: "playwright.error" },
@@ -308,6 +315,8 @@ test.describe("Global Runs and Reports indexes", () => {
 			target_environment: "staging",
 			source_snapshot_id: "suite-after-fix",
 			status: "passed",
+			passed_count: 1,
+			flaky_count: 0,
 			summary: { passed: 1 },
 			results: null,
 		};
@@ -334,14 +343,20 @@ test.describe("Global Runs and Reports indexes", () => {
 		});
 		await seedAuthenticatedSession(page);
 		await page.goto("/runs");
+		await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("flaky");
+		const flakyRow = activityRow(page, "Runs", NOVA_PROJECT.name);
+		await expectStatusWithIcon(flakyRow, "flaky", "Flaky");
+		await expect(flakyRow).toContainText(/Flaky\s*1/);
 		await page.getByRole("link", { name: `Open evidence for run ${older.run_id}` }).click();
 		await expect(page).toHaveURL(new RegExp(`${reportsPath}\\?run=${older.run_record_id}$`));
 		const report = page.locator(".playwright-report-card");
 		const expectOlderEvidence = async () => {
 			await expect(report.getByText(`Run ${older.run_id}`, { exact: true })).toBeVisible();
 			await expect(report.getByText(older.source_snapshot_id, { exact: true })).toBeVisible();
+			await expect(report.getByText("Flaky 1", { exact: true })).toBeVisible();
 			await report.getByText("Case outcomes (1)", { exact: true }).click();
 			await expect(report.getByText("TC-OLD", { exact: true })).toBeVisible();
+			await expect(report.getByText("Flaky (passed on retry)", { exact: true })).toBeVisible();
 			await expect(report.getByText("Empty search displays a notice", { exact: true })).toBeVisible();
 			await expect(report.getByText("Expected: No employees found", { exact: true })).toBeVisible();
 			await expect(report.getByText("The page also raised an error during teardown", { exact: true })).toBeVisible();

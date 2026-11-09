@@ -27,6 +27,7 @@ def execution_run_counts(response: ExecutionRunResponse) -> dict:
         "run_id": response.run_id,
         "passed_count": response.summary.passed,
         "failed_count": response.summary.failed,
+        "flaky_count": response.summary.flaky,
         "invalid_count": response.summary.invalid,
         "skipped_count": response.summary.skipped,
     }

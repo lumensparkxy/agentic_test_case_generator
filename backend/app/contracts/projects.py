@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Literal
 from .impact import ImpactApplication
 from pydantic import BaseModel, Field
 
-from .execution import ExecutionIssue
+from .execution import ExecutionCaseStatus, ExecutionIssue
 from .requirements import (
     RequirementAnalysis,
     RequirementCoveragePlan,
@@ -101,7 +101,7 @@ class QaProjectExecutionCaseResult(BaseModel):
     id: str
     source_test_case_id: str
     title: str
-    status: Literal["passed", "failed", "invalid", "skipped"]
+    status: ExecutionCaseStatus
     issues: List[ExecutionIssue] = Field(default_factory=list)
 
 

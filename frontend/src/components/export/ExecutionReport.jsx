@@ -3,6 +3,7 @@ import { API_CONTRACT_ENDPOINTS } from "../../api/generated/api-contracts";
 import { List, ListItem, CollectionState } from "../ui/collections";
 import { Button } from "../ui/controls";
 import { Disclosure } from "../ui/surfaces";
+import { formatExecutionCaseStatus } from "../automation/automationEvidence";
 
 const REPORT_PATH_LIMIT = 8;
 // Playwright saves terminal colors with its assertion messages.
@@ -71,7 +72,7 @@ function CaseOutcomes({ results }) {
 								<strong>{result.source_test_case_id}</strong>
 								<p>{result.title}</p>
 							</div>
-							<span className="execution-case-status">{result.status}</span>
+							<span className="execution-case-status">{formatExecutionCaseStatus(result.status)}</span>
 						</div>
 						<RecordedIssues issues={result.issues} />
 					</ListItem>
@@ -116,6 +117,7 @@ function PlaywrightExecutionReport({ report, notice, onRetry }) {
 					<div className="workflow-diagnostics-pills">
 						{renderSummaryPill("Passed", summary.passed, "success")}
 						{renderSummaryPill("Failed", summary.failed, "warning")}
+						{summary.flaky > 0 && renderSummaryPill("Flaky", summary.flaky, "warning")}
 						{renderSummaryPill("Invalid", summary.invalid, "warning")}
 						{renderSummaryPill("Skipped", summary.skipped)}
 					</div>

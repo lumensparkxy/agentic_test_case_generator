@@ -308,6 +308,30 @@ async function openAutomation(page) {
 }
 
 test.describe("Automation preview consistency", () => {
+	test("shows a retry-only pass as flaky immediately after execution @p1", async ({ page }) => {
+		const preview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const requests = await installApi(page, {
+			project: projectFixture(),
+			previews: [preview],
+			handleRun: (route, body) => {
+				const run = runResponse(preview, body.selected_test_case_ids);
+				run.status = "flaky";
+				run.summary = { ...run.summary, passed: 0, flaky: 1 };
+				run.results[0].status = "flaky";
+				run.results[0].issues = [{ code: "playwright.error", message: "First attempt timed out" }];
+				return jsonResponse(route, run);
+			},
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		await expect(page.getByLabel("Automation evidence")).toContainText("Flaky run");
+		await expect(page.getByRole("link", { name: "Automation, Flaky run", exact: true })).toBeVisible();
+		await expect(page.getByText("Flaky (passed on retry)", { exact: true })).toBeVisible();
+		await expect(page.getByText("Flaky 1", { exact: true })).toBeVisible();
+		expect(requests.runs).toBe(1);
+	});
+
 	test("opens the exact historical run after a project edit without replacing current evidence @p1", async ({ page }) => {
 		const project = projectFixture();
 		const priorPreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
@@ -844,13 +868,13 @@ test("preview evidence remains distinct from execution through navigation and re
 	await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
 });
 
-for (const state of ["passed", "failed", "disabled", "unknown", "stale"]) {
+for (const state of ["passed", "failed", "flaky", "disabled", "unknown", "stale"]) {
 	test(`saved run evidence: ${state}`, async ({ page }) => {
 		const payload = {
 			run_id: "exec-evidence",
 			status: state,
 			results: [{ id: "result-1", source_test_case_id: "TC-001", status: state }],
-			summary: { passed: state === "passed" ? 1 : 0, failed: state === "failed" ? 1 : 0 },
+			summary: { passed: state === "passed" ? 1 : 0, failed: state === "failed" ? 1 : 0, flaky: state === "flaky" ? 1 : 0 },
 		};
 		if (state === "stale") {
 			payload.status = "passed";
@@ -865,6 +889,7 @@ for (const state of ["passed", "failed", "disabled", "unknown", "stale"]) {
 		const labels = {
 			passed: "Execution passed",
 			failed: "Execution failed",
+			flaky: "Flaky run",
 			disabled: "Execution disabled",
 			unknown: "Execution evidence unavailable",
 			stale: "Past run; inputs changed",

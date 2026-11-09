@@ -48,7 +48,7 @@ import {
 } from "./firebase";
 import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
 import TestCaseReadiness from "./components/projects/TestCaseReadiness";
-import { getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
+import { formatExecutionRunSummary, getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
 import {
 	getDefaultSelectedCandidateIds,
 	getExecutionEligibility,
@@ -3413,10 +3413,7 @@ export default function App() {
 				selectedCandidateIds: executableCandidates.map((candidate) => candidate.id),
 			});
 			setApplicationLiveStatus("");
-			const summary = data?.summary || {};
-			setStatus(
-				`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`
-			);
+			setStatus(formatExecutionRunSummary(data));
 			await refreshCurrentProject({ hydrate: false, operationScope });
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {

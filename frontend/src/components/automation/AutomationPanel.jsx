@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { getAutomationEvidenceStatus } from "./automationEvidence";
+import { formatExecutionCaseStatus, formatExecutionRunSummary, getAutomationEvidenceStatus } from "./automationEvidence";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
 import { Checkbox, Field, Input, Button, Link } from "../ui/controls";
 import { Surface, Alert, Disclosure } from "../ui/surfaces";
@@ -152,7 +152,7 @@ const renderRunResults = (runResult) => {
 		return null;
 	}
 	const summary = runResult.summary || {};
-	const resultMessage = `Execution ${runResult.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`;
+	const resultMessage = formatExecutionRunSummary(runResult);
 	const directReportPaths = Array.isArray(runResult.playwright_report_paths) ? runResult.playwright_report_paths : [];
 	const resultReportPaths = Array.isArray(runResult.results)
 		? runResult.results.map((result) => result?.playwright_report_path).filter(Boolean)
@@ -176,6 +176,7 @@ const renderRunResults = (runResult) => {
 			<div className="workflow-diagnostics-pills">
 				{renderBucketCount("Passed", summary.passed, "success")}
 				{renderBucketCount("Failed", summary.failed, "warning")}
+				{summary.flaky > 0 && renderBucketCount("Flaky", summary.flaky, "warning")}
 				{renderBucketCount("Invalid", summary.invalid, "warning")}
 				{renderBucketCount("Skipped", summary.skipped)}
 			</div>
@@ -207,7 +208,7 @@ const renderRunResults = (runResult) => {
 									<td>
 										<strong>{result.source_test_case_id}</strong>
 									</td>
-									<td>{result.status}</td>
+									<td>{formatExecutionCaseStatus(result.status)}</td>
 									<td>{result.generated_spec_path ? <code>{result.generated_spec_path}</code> : "None"}</td>
 									<td>{result.artifacts_dir ? <code>{result.artifacts_dir}</code> : "None"}</td>
 								</tr>

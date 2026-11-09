@@ -59,6 +59,7 @@ class WorkspaceRunSummary(BaseModel):
     executed_count: int = Field(ge=0)
     passed_count: int = Field(ge=0)
     failed_count: int = Field(ge=0)
+    flaky_count: int = Field(default=0, ge=0)
     invalid_count: int = Field(ge=0)
     skipped_count: int = Field(ge=0)
     snapshot_id: Optional[str] = None

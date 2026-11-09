@@ -337,7 +337,9 @@ def execution_finding_writes(project_id, snapshot):
     payload = snapshot["payload"]
     observations = []
     for result in payload.get("results", []):
-        if result.get("status") in ("failed", "invalid", "skipped"):
+        if result.get("status") == "flaky":
+            observations.append((result.get("source_test_case_id"), "Execution passed on retry. Review the recorded first-attempt failure."))
+        elif result.get("status") in ("failed", "invalid", "skipped"):
             observations.append((result.get("source_test_case_id"), "Execution did not pass; classify using the recorded run evidence."))
     for category in ("manual", "unsupported", "invalid"):
         for candidate in payload.get("candidates", {}).get(category, []):

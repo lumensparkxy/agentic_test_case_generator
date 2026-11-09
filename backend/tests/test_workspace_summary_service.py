@@ -673,7 +673,7 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
                 project_revision=6,
                 test_case_count=4,
                 status="failed",
-                summary={"passed": 2, "failed": 1, "invalid": 1, "skipped": 1},
+                summary={"passed": 2, "failed": 1, "flaky": 1, "invalid": 1, "skipped": 1},
                 snapshot_id=f"execution-{project_id}",
                 source_snapshot_id=f"test-cases-{project_id}",
                 selected_test_case_ids=["TC-1", "TC-2", "TC-3"],
@@ -721,7 +721,8 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
         self.assertEqual([item.project_id for item in result.recent_runs], ["newer"])
         run = result.recent_runs[0]
         self.assertEqual(run.selected_count, 3)
-        self.assertEqual(run.executed_count, 5)
+        self.assertEqual(run.executed_count, 6)
+        self.assertEqual(run.flaky_count, 1)
         self.assertEqual((run.passed_count, run.failed_count, run.invalid_count, run.skipped_count), (2, 1, 1, 1))
         self.assertNotIn("summary", run.model_dump())
         self.assertNotIn("artifacts_root", run.model_dump())

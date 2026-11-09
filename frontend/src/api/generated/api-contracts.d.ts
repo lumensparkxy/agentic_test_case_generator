@@ -375,7 +375,7 @@ export interface ExecutionRunItem {
 	returncode?: number | null;
 	source_test_case_id: string;
 	spec_id?: string | null;
-	status: "passed" | "failed" | "invalid" | "skipped";
+	status: "passed" | "failed" | "flaky" | "invalid" | "skipped";
 	stderr?: string;
 	stdout?: string;
 	title: string;
@@ -389,13 +389,14 @@ export interface ExecutionRunResponse {
 	results?: Array<ExecutionRunItem>;
 	run_id: string;
 	run_record_id?: string | null;
-	status: "passed" | "failed" | "disabled";
+	status: "passed" | "failed" | "flaky" | "disabled";
 	summary?: ExecutionRunSummary;
 	warnings?: Array<string>;
 }
 
 export interface ExecutionRunSummary {
 	failed?: number;
+	flaky?: number;
 	invalid?: number;
 	manual?: number;
 	passed?: number;
@@ -610,7 +611,7 @@ export interface OrchestratorActionRecommendation {
 
 export interface OrchestratorBlocker {
 	action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
-	code: "missing_project" | "missing_requirements" | "missing_use_cases" | "missing_test_cases" | "missing_approval" | "stale_downstream_stage" | "missing_baseline" | "failed_execution" | "unresolved_review" | "missing_execution";
+	code: "missing_project" | "missing_requirements" | "missing_use_cases" | "missing_test_cases" | "missing_approval" | "stale_downstream_stage" | "missing_baseline" | "failed_execution" | "flaky_execution" | "unresolved_review" | "missing_execution";
 	message: string;
 	severity?: "info" | "warning" | "blocking";
 	source_stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
@@ -735,7 +736,7 @@ export interface QaProjectExecutionCaseResult {
 	id: string;
 	issues?: Array<ExecutionIssue>;
 	source_test_case_id: string;
-	status: "passed" | "failed" | "invalid" | "skipped";
+	status: "passed" | "failed" | "flaky" | "invalid" | "skipped";
 	title: string;
 }
 
@@ -1369,6 +1370,7 @@ export interface WorkspaceReportSummary {
 export interface WorkspaceRunSummary {
 	executed_count: number;
 	failed_count: number;
+	flaky_count?: number;
 	invalid_count: number;
 	passed_count: number;
 	project_id: string;

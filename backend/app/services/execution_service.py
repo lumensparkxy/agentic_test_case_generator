@@ -22,6 +22,7 @@ from plain_english_test_framework.spec_parser import SpecValidationError
 from plain_english_test_framework.validation import ValidationIssue, find_secret_issues
 
 from ..config import ExecutionSettings, get_execution_settings
+from ..contracts.execution import ExecutionCaseStatus
 from ..models import (
     ExecutionCandidate,
     ExecutionIssue,
@@ -256,7 +257,7 @@ class _PreparedExecutionCandidate:
 
 @dataclass(frozen=True)
 class _PlaywrightCaseResult:
-    status: str
+    status: ExecutionCaseStatus
     stdout: str = ""
     stderr: str = ""
     issues: tuple[ExecutionIssue, ...] = ()
@@ -398,7 +399,12 @@ def run_execution(
         )
 
     summary = _summarize_run(results, preview)
-    status = "passed" if summary.passed and summary.failed == 0 and summary.invalid == 0 else "failed"
+    if summary.failed or summary.invalid:
+        status = "failed"
+    elif summary.flaky:
+        status = "flaky"
+    else:
+        status = "passed" if summary.passed else "failed"
     playwright_report_paths = list(dict.fromkeys(item.playwright_report_path for item in results if item.playwright_report_path))
     return ExecutionRunResponse(
         status=status,
@@ -1070,11 +1076,20 @@ def _load_playwright_case_results(report_json_path: Path) -> tuple[dict[str, _Pl
         ]
 
     results: dict[str, _PlaywrightCaseResult] = {}
+    precedence = ("skipped", "passed", "flaky", "failed", "invalid")
     for test in _iter_playwright_tests(report):
         case_id = _annotation_description(test, "caseId") or _annotation_description(test, "specId")
         if not case_id:
             continue
-        results[case_id] = _playwright_case_result(test)
+        result = _playwright_case_result(test)
+        if prior := results.get(case_id):
+            result = _PlaywrightCaseResult(
+                status=max(prior.status, result.status, key=precedence.index),
+                stdout="\n".join(filter(None, (prior.stdout, result.stdout))),
+                stderr="\n".join(filter(None, (prior.stderr, result.stderr))),
+                issues=prior.issues + result.issues,
+            )
+        results[case_id] = result
     return results, []
 
 
@@ -1113,17 +1128,16 @@ def _playwright_case_result(test: dict[str, Any]) -> _PlaywrightCaseResult:
     )
 
 
-def _playwright_status(test: dict[str, Any]) -> str:
+def _playwright_status(test: dict[str, Any]) -> ExecutionCaseStatus:
     test_status = str(test.get("status") or "").strip()
-    result_statuses = {str(result.get("status") or "").strip() for result in test.get("results") or []}
-
-    if test_status == "skipped" or result_statuses == {"skipped"}:
+    attempts = [str(result.get("status") or "").strip() for result in test.get("results") or []]
+    if (not attempts and test_status == "skipped") or (attempts and all(attempt == "skipped" for attempt in attempts)):
         return "skipped"
-    if test_status in {"expected", "flaky"}:
-        return "passed"
-    if "passed" in result_statuses and not (result_statuses & {"failed", "timedOut", "interrupted"}):
-        return "passed"
-    return "failed"
+    if not attempts or attempts[-1] != "passed" or test_status == "unexpected":
+        return "failed"
+    if test_status == "flaky" or any(attempt in {"failed", "timedOut", "interrupted"} for attempt in attempts[:-1]):
+        return "flaky"
+    return "passed"
 
 
 def _playwright_stdio_text(results: list[dict[str, Any]], field: str) -> str:
@@ -1168,6 +1182,7 @@ def _summarize_run(results: list[ExecutionRunItem], preview: ExecutionPreviewRes
     return ExecutionRunSummary(
         passed=sum(1 for item in results if item.status == "passed"),
         failed=sum(1 for item in results if item.status == "failed"),
+        flaky=sum(1 for item in results if item.status == "flaky"),
         invalid=sum(1 for item in results if item.status == "invalid"),
         skipped=sum(1 for item in results if item.status == "skipped"),
         unsupported=len(preview.unsupported),

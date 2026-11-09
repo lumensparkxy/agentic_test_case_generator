@@ -87,11 +87,14 @@ class ExecutionRunInput(ExecutionPreviewInput):
     selected_test_case_ids: List[str] = Field(default_factory=list)
 
 
+ExecutionCaseStatus = Literal["passed", "failed", "flaky", "invalid", "skipped"]
+
+
 class ExecutionRunItem(BaseModel):
     id: str
     source_test_case_id: str
     title: str
-    status: Literal["passed", "failed", "invalid", "skipped"]
+    status: ExecutionCaseStatus
     spec_id: Optional[str] = None
     ir_path: Optional[str] = None
     generated_spec_path: Optional[str] = None
@@ -107,6 +110,7 @@ class ExecutionRunItem(BaseModel):
 class ExecutionRunSummary(BaseModel):
     passed: int = 0
     failed: int = 0
+    flaky: int = 0
     invalid: int = 0
     skipped: int = 0
     unsupported: int = 0
@@ -114,7 +118,7 @@ class ExecutionRunSummary(BaseModel):
 
 
 class ExecutionRunResponse(BaseModel):
-    status: Literal["passed", "failed", "disabled"]
+    status: Literal["passed", "failed", "flaky", "disabled"]
     run_id: str
     run_record_id: Optional[str] = None
     historical: bool = False

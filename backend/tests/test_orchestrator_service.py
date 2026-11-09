@@ -659,17 +659,22 @@ class OrchestratorServiceTests(unittest.TestCase):
             actor_user_id=self.actor.sub,
             created_at=snapshot.created_at,
         )
-        for changes in ({"snapshot_id": "older-run"}, {"source_snapshot_id": "older-suite"}, {"historical": True}):
-            with self.subTest(changes=changes):
-                detail.execution_runs = [run.model_copy(update=changes)]
-                status = build_orchestrator_status(detail)
-                self.assertNotEqual(status.stages["execution"].status, "failed")
-                self.assertNotIn("failed_execution", [blocker.code for blocker in status.stages["review"].blockers])
+        for outcome, stage_status in (("failed", "failed"), ("flaky", "attention_required")):
+            detail.stage_state["execution"].stale = False
+            for changes in ({"snapshot_id": "older-run"}, {"source_snapshot_id": "older-suite"}, {"historical": True}):
+                with self.subTest(outcome=outcome, changes=changes):
+                    detail.execution_runs = [run.model_copy(update={"status": outcome, **changes})]
+                    status = build_orchestrator_status(detail)
+                    self.assertNotEqual(status.stages["execution"].status, stage_status)
+                    self.assertNotIn(f"{outcome}_execution", [blocker.code for blocker in status.stages["review"].blockers])
 
-        detail.execution_runs = [run]
-        self.assertEqual(build_orchestrator_status(detail).next_actions[0].label, "Review Failed Execution")
-        detail.stage_state["execution"].stale = True
-        self.assertEqual(build_orchestrator_status(detail).next_actions[0].action, "automate")
+            detail.execution_runs = [run.model_copy(update={"status": outcome})]
+            status = build_orchestrator_status(detail)
+            self.assertEqual(status.stages["execution"].status, stage_status)
+            self.assertEqual(status.next_actions[0].label, f"Review {outcome.title()} Execution")
+            self.assertIn(f"{outcome}_execution", [blocker.code for blocker in status.stages["review"].blockers])
+            detail.stage_state["execution"].stale = True
+            self.assertEqual(build_orchestrator_status(detail).next_actions[0].action, "automate")
 
     def test_existing_approved_suite_without_use_cases_can_report_manual_preview(self) -> None:
         project = self._create_project()

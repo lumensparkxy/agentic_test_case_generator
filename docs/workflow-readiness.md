@@ -120,3 +120,11 @@ suite. The existing current snapshots retain their status, and the workbench
 links directly to the historical run. An unconfirmed request remains fenced.
 The request claim protects portal replay. External systems still control the
 effects of each browser action.
+
+If the Playwright configuration retries a failed attempt and the case later
+passes, the portal records the case as flaky and retains the initial failure
+details. Flaky cases have their own count. A run with flaky cases and no failed
+or invalid cases requires review. If any case fails or is invalid, the run is
+failed and still shows its flaky cases. A retry-only pass cannot verify a
+quality finding. Runs and the saved report carry the same outcome. Earlier
+records retain the evidence available when they were saved.
