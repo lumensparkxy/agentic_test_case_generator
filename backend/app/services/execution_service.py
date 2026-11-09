@@ -162,30 +162,26 @@ PAGE_TITLE_EQUALS_PATTERN = re.compile(
     r"\b(?:page\s+)?title\s+(?:is|should\s+be|equals?|should\s+equal)\s+['\"](?P<title>[^'\"]*)['\"]",
     re.IGNORECASE,
 )
+LOCATOR_ASSERTION_TARGET = rf"(?<!\w)(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?(?P<value>{QUOTED_BROWSER_LOCATOR})\s+"
 LOCATOR_VISIBLE_PATTERN = re.compile(
-    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
-    r"(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
+    LOCATOR_ASSERTION_TARGET + r"(?:is|should be)\s+(?:displayed|visible|shown|present)\b",
     re.IGNORECASE,
 )
 LOCATOR_CHECKED_PATTERN = re.compile(
-    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
-    r"should\s+(?P<negation>not\s+)?be\s+checked\b",
+    LOCATOR_ASSERTION_TARGET + r"should\s+(?P<negation>not\s+)?be\s+checked\b",
     re.IGNORECASE,
 )
 LOCATOR_ENABLED_PATTERN = re.compile(
-    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
-    r"(?:is|should be)\s+(?P<state>enabled|disabled)\b",
+    LOCATOR_ASSERTION_TARGET + r"(?:is|should be)\s+(?P<state>enabled|disabled)\b",
     re.IGNORECASE,
 )
 LOCATOR_ATTRIBUTE_EQUALS_PATTERN = re.compile(
-    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
-    r"(?:attribute|attr)\s+['\"](?P<attribute>[^'\"]+)['\"]\s+(?:is|should\s+be|equals?|should\s+equal)\s+"
-    r"['\"](?P<expected>[^'\"]*)['\"]",
+    LOCATOR_ASSERTION_TARGET + rf"(?:attribute|attr)\s+(?P<attribute>{QUOTED_BROWSER_LOCATOR})\s+(?:is|should\s+be|equals?|should\s+equal)\s+"
+    rf"(?P<expected>{QUOTED_BROWSER_LOCATOR})",
     re.IGNORECASE,
 )
 LOCATOR_COUNT_PATTERN = re.compile(
-    rf"(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?(?P<value>{QUOTED_BROWSER_LOCATOR})\s+"
-    r"count\s+(?:is|should\s+be|equals?|should\s+equal)\s+(?P<count>\d+)\b",
+    LOCATOR_ASSERTION_TARGET + r"count\s+(?:is|should\s+be|equals?|should\s+equal)\s+(?P<count>\d+)\b",
     re.IGNORECASE,
 )
 ASSERTION_KINDS = {
@@ -623,17 +619,8 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(raw_action)
     quoted_fill = QUOTED_FILL_ACTION.fullmatch(raw_action)
     # A supported assertion's quoted locator and value are data, not operations.
-    literal_assertions = {"assert_hidden", "assert_checked", "assert_radio_selected", "assert_scoped_text_equals", "assert_count"}
-    action_is_literal = (
-        data_action
-        or action_value
-        or exact_click
-        or exact_select
-        or exact_radio
-        or exact_checkbox
-        or (action_assertion and action_assertion.kind in literal_assertions)
-    )
-    expected_is_literal = data_expectation or expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
+    action_is_literal = data_action or action_value or exact_click or exact_select or exact_radio or exact_checkbox or _is_literal_assertion(action_assertion)
+    expected_is_literal = data_expectation or expected_value or _is_literal_assertion(expected_assertion)
     domain_action = "" if action_is_literal else step.action
     if quoted_fill or data_fill:
         domain_action = unquoted_action
@@ -800,18 +787,45 @@ def _assertion_statement(text: str) -> str:
     return ASSERTION_PREFIX_PATTERN.sub("", text.strip(), count=1).removesuffix(".").rstrip()
 
 
+def _is_literal_assertion(assertion: _ConvertedStep | None) -> bool:
+    return bool(
+        assertion
+        and (
+            assertion.kind in {"assert_hidden", "assert_checked", "assert_radio_selected", "assert_scoped_text_equals"}
+            or assertion.body.startswith(("css ", "test id "))
+        )
+    )
+
+
+def _convert_locator_assertion(text: str) -> _ConvertedStep | None:
+    if match := LOCATOR_COUNT_PATTERN.fullmatch(text):
+        count = parse_browser_count(match["count"])
+        if count is None:
+            return None
+        kind, body = "assert_count", f"count should be {count}"
+    elif match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.fullmatch(text):
+        attribute = unquote_browser_locator(match["attribute"])
+        if not attribute.strip():
+            return None
+        expected = unquote_browser_locator(match["expected"])
+        kind, body = "assert_attribute_equals", f"attribute {_structured_operand(attribute)} should equal {_structured_operand(expected)}"
+    elif match := LOCATOR_CHECKED_PATTERN.fullmatch(text):
+        negation = "not " if match["negation"] else ""
+        kind, body = "assert_checked", f"should {negation}be checked"
+    elif match := LOCATOR_ENABLED_PATTERN.fullmatch(text):
+        kind, body = "assert_enabled", f"should be {match['state'].lower()}"
+    elif match := LOCATOR_VISIBLE_PATTERN.fullmatch(text):
+        kind, body = "assert_visible", "should be visible"
+    else:
+        return None
+    locator = _locator_assertion_body(match["kind"], match["value"])
+    return _ConvertedStep(kind, f"{locator} {body}") if locator else None
+
+
 def _convert_assertion(text: str) -> _ConvertedStep | None:
     text = _assertion_statement(text)
-    if match := LOCATOR_COUNT_PATTERN.fullmatch(text):
-        value = unquote_browser_locator(match["value"])
-        kind = _normalize_locator_kind(match["kind"]) or ("css" if _looks_like_selector_value(value) else None)
-        count = parse_browser_count(match["count"])
-        if not kind or not value.strip() or count is None:
-            return None
-        encoded = json.dumps(value, ensure_ascii=False)
-        if encoded != f'"{value}"' or "{" in value or "}" in value:
-            encoded = f"literal {encoded}"
-        return _ConvertedStep("assert_count", f"{kind} {encoded} count should be {count}")
+    if locator_assertion := _convert_locator_assertion(text):
+        return locator_assertion
 
     if match := SCOPED_TEXT_ASSERTION_PATTERN.fullmatch(text):
         if match["locator"].strip():
@@ -859,33 +873,6 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
             return None
         qualifier = "exact " if match["exact"] else ""
         return _ConvertedStep("assert_visible", f'{qualifier}{role} "{_escape_step_text(role_text)}" should be visible')
-
-    if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.fullmatch(text):
-        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
-        if locator:
-            attribute = _clean_value(match.group("attribute"))
-            expected = match["expected"]
-            return _ConvertedStep(
-                "assert_attribute_equals",
-                f'{locator} attribute "{_escape_step_text(attribute)}" should equal "{_escape_step_text(expected)}"',
-            )
-
-    if match := LOCATOR_CHECKED_PATTERN.fullmatch(text):
-        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
-        if locator:
-            negation = "not " if match.group("negation") else ""
-            return _ConvertedStep("assert_checked", f"{locator} should {negation}be checked")
-
-    if match := LOCATOR_ENABLED_PATTERN.fullmatch(text):
-        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
-        if locator:
-            state = str(match.group("state")).lower()
-            return _ConvertedStep("assert_enabled", f"{locator} should be {state}")
-
-    if match := LOCATOR_VISIBLE_PATTERN.fullmatch(text):
-        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
-        if locator:
-            return _ConvertedStep("assert_visible", f"{locator} should be visible")
 
     if (match := TEXT_EQUALS_PATTERN.fullmatch(text)) and match["label"].strip():
         return _ConvertedStep("assert_text_equals", f'"{_escape_step_text(match["label"])}" should equal "{_escape_step_text(match["expected"])}"')
@@ -1462,13 +1449,6 @@ def _clean_value(value: str) -> str:
     return normalized
 
 
-def _clean_locator_value(value: str) -> str:
-    normalized = _normalize_text(value).strip()
-    if quoted := QUOTED_PATTERN.findall(normalized):
-        return quoted[0].strip()
-    return normalized
-
-
 def _clean_label(value: str) -> str:
     normalized = _clean_value(value)
     normalized = re.sub(r"^(?:the|a|an)\s+", "", normalized, flags=re.IGNORECASE)
@@ -1483,17 +1463,17 @@ def _clean_visible_text(value: str) -> str:
     return normalized
 
 
-def _locator_assertion_body(kind: str | None, value: str) -> str | None:
-    locator_value = _clean_locator_value(value)
-    if not locator_value:
+def _locator_assertion_body(kind: str | None, quoted: str) -> str | None:
+    value = unquote_browser_locator(quoted)
+    if not value.strip():
         return None
+    locator_kind = _normalize_locator_kind(kind) or ("css" if _looks_like_selector_value(value) else None)
+    return f"{locator_kind} {_structured_operand(value)}" if locator_kind else None
 
-    locator_kind = _normalize_locator_kind(kind)
-    if locator_kind == "test id":
-        return f'test id "{_escape_step_text(locator_value)}"'
-    if locator_kind == "css" or _looks_like_selector_value(locator_value):
-        return f'css "{_escape_step_text(locator_value)}"'
-    return None
+
+def _structured_operand(value: str) -> str:
+    encoded = json.dumps(value, ensure_ascii=False)
+    return f"literal {encoded}" if encoded != f'"{value}"' or "{" in value or "}" in value else encoded
 
 
 def _normalize_locator_kind(kind: str | None) -> str | None:

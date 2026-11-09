@@ -90,6 +90,27 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertEqual(invented.automation_status, "Manual")
         self.assertTrue(any("lacks exact interface evidence" in warning for warning in warnings))
 
+    def test_attribute_handoff_binds_exact_values_to_the_declared_locator_and_name(self):
+        exact = r'''test id 'receipt\panel' attribute "data-path" should equal "  café \"Q\" 'L'  "'''
+        grounded = context().model_copy(update={"notes": f'Observed {exact}. The page also says "Other".'})
+        case = candidate()
+        case.steps = [
+            TestStep(step=1, action=f'Open "{TARGET}"', expected=""),
+            TestStep(step=2, action="Inspect the saved receipt", expected=exact),
+        ]
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+        self.assertEqual(case.automation_status, "To Be Automated")
+        for wrong in (
+            r'''test id 'receipt\panel' attribute "data-path" should equal "Other"''',
+            exact.replace("data-path", "data-other"),
+            exact.replace("receipt", "decoy"),
+        ):
+            with self.subTest(wrong=wrong):
+                changed = case.model_copy(deep=True)
+                changed.steps[1].expected = wrong
+                self.assertTrue(validate_browser_handoff([changed], grounded, [REQUIREMENT]))
+                self.assertEqual(changed.automation_status, "Manual")
+
     def test_populated_field_can_be_cleared_with_grounded_exact_input(self):
         case = candidate()
         case.steps[1].action = 'Enter "  Q  into  17  " into field "Reference"'

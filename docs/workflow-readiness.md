@@ -136,6 +136,15 @@ breaks in the actual text. An empty expectation requires empty text. Use a
 separate check when the element must also be visible. Legacy unscoped label
 text checks continue to normalize whitespace.
 
+For visibility, checked state, enabled state, and attributes, use the exact
+observed CSS selector or test ID. For example, use
+`test id "saved-order" is visible` or
+`css "#receipt" attribute "data-status" should equal "Saved"`.
+Keep spaces and escapes in the selector and attribute value. A Context
+declaration in the same form ties the expected value to its named attribute.
+Structured specs can use a JSON string after `literal` for a selector or
+attribute operand whose characters must survive template processing.
+
 Use `css "#orders tr" count should be 1` or
 `test id "rejected-order" count should be 0` for an exact number of DOM matches.
 Preserve the observed selector, including spaces, quotes and CSS escapes.

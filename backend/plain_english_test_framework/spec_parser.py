@@ -33,7 +33,13 @@ STRUCTURED_LITERAL_STEP_PATTERN = re.compile(
     rf'|(?P<kind>field|css|test id) "(?P<locator>{_QUOTED_LOCATOR})" (?P<subject>value|text) should equal)'
     rf" literal (?P<literal>{_JSON_STRING})"
 )
-STRUCTURED_COUNT_LITERAL_PATTERN = re.compile(rf"(?P<kind>css|test id) literal (?P<literal>{_JSON_STRING}) count should be (?P<count>\d+)")
+STRUCTURED_LOCATOR_ASSERTION_PATTERN = re.compile(
+    rf'(?P<kind>css|test id) (?:literal (?P<locator_literal>{_JSON_STRING})|"(?P<locator>[^"]+)") '
+    r"(?:(?P<visible>should be visible)|should (?P<negation>not )?be (?P<checked>checked)|should be (?P<enabled>enabled|disabled)"
+    rf'|attribute (?:literal (?P<attribute_literal>{_JSON_STRING})|"(?P<attribute>[^"]+)") should equal '
+    rf'(?:literal (?P<expected_literal>{_JSON_STRING})|"(?P<expected>[^"]*)")'
+    r"|count should be (?P<count>\d+))"
+)
 
 
 class SpecValidationError(Exception):
@@ -172,9 +178,15 @@ def _validate_placeholders(document: Mapping[str, Any]) -> list[ValidationIssue]
         if not isinstance(step, str):
             continue
         body = STEP_KEYWORD_PATTERN.sub("", step, count=1)
-        if literal := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body) or STRUCTURED_COUNT_LITERAL_PATTERN.fullmatch(body):
+        if literal := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body):
             # Only the explicit operand is exempt from template validation.
             step = body[: literal.start("literal")]
+        elif assertion := STRUCTURED_LOCATOR_ASSERTION_PATTERN.fullmatch(body):
+            step = body
+            for group in ("expected_literal", "attribute_literal", "locator_literal"):
+                start, end = assertion.span(group)
+                if start >= 0:
+                    step = step[:start] + step[end:]
 
         if step.count("{") != step.count("}"):
             issues.append(ValidationIssue(f"$.steps[{index}]", "placeholder braces are not balanced", "placeholder.unbalanced"))

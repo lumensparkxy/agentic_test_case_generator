@@ -18,7 +18,7 @@ from ..contracts.grounding import EnrichInput
 from ..contracts.execution import ExecutionCandidate
 from ..contracts.requirements import Requirement
 from ..contracts.test_cases import TestCase
-from .execution_service import EXPLICIT_OPEN_ACTION, preview_execution
+from .execution_service import EXPLICIT_OPEN_ACTION, LOCATOR_ATTRIBUTE_EQUALS_PATTERN, preview_execution
 
 BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplied app target and observed interface:
 - Use one browser action and at most one observable check per source step. Split independent outcomes into separate steps.
@@ -34,6 +34,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
 - When the same text can appear in multiple elements, scope its check to a declared unique locator. Use expected 'css "#observed-status" text should equal "source copy"' or 'test id "observed-status" text should equal "source copy"'. Match the full observed text, including spaces. Use a separate visibility check when visibility itself is required. Never choose the first match or invent a locator.
+- Use the exact observed CSS or test-ID selector for visibility, checked state, enabled state, or attribute equality. Examples include 'test id "saved-order" is visible' and 'css "#receipt" attribute "data-status" should equal "Saved"'. Preserve spaces and escapes in the selector and attribute value. Ground a specific attribute and value with the same explicit check in Context.
 - To verify an exact count, use 'css "#orders tr" count should be 1' or 'test id "rejected-order" count should be 0'. Use the exact supplied selector and keep its whitespace and CSS escapes. Use different outer quotes when the selector contains quotes. For an asynchronous collection, first check its supplied loaded indicator in a separate step.
 - For a source requirement that says a saved record displays submitted values, check each value on that same record after submission. A form value or confirmation alone leaves this outcome untested. A 'Browser result css "#saved-value" on "https://app.example/" shows field "Name" after button "Save"' declaration supplies an observed result locator. Use a scoped text check with the exact prior selected label or entered literal. For a text entry, include its exact field-value check before submission.
 - A 'Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible' declaration supplies an observed collection and its loaded indicator. Check the indicator, then assert the grounded starting count with expected 'css "#records tr" count should be 1' before the named submit action. Assert the exact error, then reopen the same URL with 'Open "https://app.example/"'. Check the indicator and the same count in that fresh page. Use the actual supplied selector and actor's starting count.
@@ -67,6 +68,7 @@ class _BrowserEvidence:
     names_by_type: dict[str, set[str]]
     text_literals: set[str]
     declared_locators: set[tuple[str, str]]
+    attribute_values: dict[tuple[str, str], set[tuple[str, str]]]
     select_options: dict[tuple[str, str], set[str]]
     select_dom_values: dict[str, set[str]]
     checkboxes: dict[tuple[str, str], bool]
@@ -273,6 +275,16 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
         for text in source_text
         for kind, quoted in _DECLARED_LOCATOR.findall(text)
     }
+    attribute_values: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for text in source_text:
+        for match in LOCATOR_ATTRIBUTE_EQUALS_PATTERN.finditer(text):
+            if not match["kind"]:
+                continue
+            strategy = "css" if match["kind"].lower() in {"css", "selector"} else "test_id"
+            locator = (strategy, unquote_browser_locator(match["value"]))
+            if locator in declared_locators:
+                attribute = unquote_browser_locator(match["attribute"])
+                attribute_values.setdefault(locator, set()).add((attribute, unquote_browser_locator(match["expected"])))
     select_dom_values: dict[str, set[str]] = {}
     for text in source_text:
         for field, value in _DROPDOWN_DOM_VALUE.findall(text):
@@ -286,7 +298,9 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
                 strategy = "css" if kind.lower() == "css" else "test_id"
                 result_bindings.setdefault((page, strategy, selector), set()).add((button, field))
     result_fields = {key: next(iter(bindings)) for key, bindings in result_bindings.items() if len(bindings) == 1}
-    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators, select_options, select_dom_values, checkboxes, radios, result_fields)
+    return _BrowserEvidence(
+        target, urls, names_by_type, literals, declared_locators, attribute_values, select_options, select_dom_values, checkboxes, radios, result_fields
+    )
 
 
 def _locator_supported(locator: dict[str, Any], evidence: _BrowserEvidence) -> bool:
@@ -401,6 +415,12 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 continue
         if value_action or action in {"assert_text_equals", "assert_scoped_text_equals", "assert_title", "assert_attribute_equals"}:
             expected = step["expected"]
+            if action == "assert_attribute_equals":
+                declared = evidence.attribute_values.get((locator["strategy"], locator["value"]))
+                if declared is not None:
+                    if (step["attribute"], expected) not in declared:
+                        return "The attribute check does not match a declared attribute and value for this locator."
+                    continue
             if action == "assert_scoped_text_equals" and binding and submission and submission[0] == binding[0] and binding[1] in submission[1]:
                 if expected != submission[1][binding[1]]:
                     return "The saved-result text does not match the exact submitted input."

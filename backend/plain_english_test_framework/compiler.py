@@ -12,7 +12,7 @@ import yaml
 
 from plain_english_test_framework.ir_validator import ValidatedIr, parse_ir_document
 from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text, parse_browser_count
-from plain_english_test_framework.spec_parser import STRUCTURED_COUNT_LITERAL_PATTERN, STRUCTURED_LITERAL_STEP_PATTERN, ParsedSpec, parse_spec_file
+from plain_english_test_framework.spec_parser import STRUCTURED_LITERAL_STEP_PATTERN, STRUCTURED_LOCATOR_ASSERTION_PATTERN, ParsedSpec, parse_spec_file
 from plain_english_test_framework.validation import ValidationIssue, deduplicate_issues, find_secret_issues
 
 
@@ -32,7 +32,6 @@ EXACT_HIDDEN_PATTERN = re.compile(r'^exact (?P<kind>heading|link|button|text) "(
 CLICK_LINK_PATTERN = re.compile(r'^I click link "(?P<name>[^"]+)"$')
 CLICK_PATTERN = re.compile(r'^I click "(?P<name>[^"]+)"$')
 ROLE_VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact )?(?P<role>heading|link|button) "(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
-LOCATOR_VISIBLE_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be visible$')
 VISIBLE_PATTERN = re.compile(r'^(?P<exact>exact text )?"(?P<text>(?:\\["\\]|[^"])+)" should be visible$')
 TEXT_EQUALS_PATTERN = re.compile(r'^"(?P<label>[^"]+)" should equal "(?P<expected>[^"]*)"$')
 SCOPED_TEXT_ASSERTION_PATTERN = re.compile(
@@ -45,10 +44,6 @@ VALUE_ASSERTION_PATTERN = re.compile(
 )
 URL_EQUALS_PATTERN = re.compile(r'^URL should be "(?P<url>[^"]+)"$')
 TITLE_EQUALS_PATTERN = re.compile(r'^page title should be "(?P<title>[^"]*)"$')
-LOCATOR_CHECKED_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should (?P<negation>not )?be checked$')
-LOCATOR_ENABLED_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" should be (?P<state>enabled|disabled)$')
-LOCATOR_ATTRIBUTE_EQUALS_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" attribute "(?P<attribute>[^"]+)" should equal "(?P<expected>[^"]*)"$')
-LOCATOR_COUNT_PATTERN = re.compile(r'^(?P<kind>css|test id) "(?P<value>[^"]+)" count should be (?P<count>\d+)$')
 SCALAR_TYPES = (str, int, float, bool, type(None))
 
 
@@ -386,15 +381,8 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             },
         }
 
-    if match := LOCATOR_VISIBLE_PATTERN.match(body):
-        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
-        return {
-            "id": _slug_identifier(f"assert {match.group('kind')} {value} visible"),
-            "sourceStepIndex": source_step_index,
-            "original": original,
-            "action": "assert_visible",
-            "locator": _locator_for_kind(match.group("kind"), value),
-        }
+    if match := STRUCTURED_LOCATOR_ASSERTION_PATTERN.fullmatch(body):
+        return _compile_locator_assertion(match, original, source_step_index, environment, data)
 
     if match := TITLE_EQUALS_PATTERN.match(body):
         title = _resolve_text(match.group("title"), environment, data, path=f"$.steps[{source_step_index}]")
@@ -404,59 +392,6 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "original": original,
             "action": "assert_title",
             "expected": title,
-        }
-
-    if match := LOCATOR_CHECKED_PATTERN.match(body):
-        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
-        expected = not bool(match.group("negation"))
-        return {
-            "id": _slug_identifier(f"assert checked {value}"),
-            "sourceStepIndex": source_step_index,
-            "original": original,
-            "action": "assert_checked",
-            "locator": _locator_for_kind(match.group("kind"), value),
-            "expected": expected,
-        }
-
-    if match := LOCATOR_ENABLED_PATTERN.match(body):
-        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
-        expected = str(match.group("state")).lower() == "enabled"
-        return {
-            "id": _slug_identifier(f"assert enabled {value}"),
-            "sourceStepIndex": source_step_index,
-            "original": original,
-            "action": "assert_enabled",
-            "locator": _locator_for_kind(match.group("kind"), value),
-            "expected": expected,
-        }
-
-    if match := LOCATOR_ATTRIBUTE_EQUALS_PATTERN.match(body):
-        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
-        expected = _resolve_text(match.group("expected"), environment, data, path=f"$.steps[{source_step_index}]")
-        return {
-            "id": _slug_identifier(f"assert attribute {match.group('attribute')} {value}"),
-            "sourceStepIndex": source_step_index,
-            "original": original,
-            "action": "assert_attribute_equals",
-            "locator": _locator_for_kind(match.group("kind"), value),
-            "attribute": match.group("attribute"),
-            "expected": expected,
-        }
-
-    literal_count = STRUCTURED_COUNT_LITERAL_PATTERN.fullmatch(body)
-    if match := literal_count or LOCATOR_COUNT_PATTERN.fullmatch(body):
-        path = f"$.steps[{source_step_index}]"
-        count = parse_browser_count(match["count"])
-        if count is None:
-            raise CompilerError((ValidationIssue(path, "count must be a nonnegative JavaScript safe integer", "step.count_range"),))
-        value = json.loads(match["literal"]) if literal_count else _resolve_text(match["value"], environment, data, path=path)
-        return {
-            "id": _slug_identifier(f"assert count {value}"),
-            "sourceStepIndex": source_step_index,
-            "original": original,
-            "action": "assert_count",
-            "locator": _locator_for_kind(match.group("kind"), value),
-            "expected": count,
         }
 
     if match := VISIBLE_PATTERN.match(body):
@@ -548,6 +483,37 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             ),
         )
     )
+
+
+def _compile_locator_assertion(
+    match: re.Match[str], original: str, source_step_index: int, environment: Mapping[str, Any], data: Mapping[str, Any]
+) -> dict[str, Any]:
+    path = f"$.steps[{source_step_index}]"
+    kind = match["kind"]
+    value = json.loads(match["locator_literal"]) if match["locator_literal"] is not None else _resolve_text(match["locator"], environment, data, path=path)
+    step = {"sourceStepIndex": source_step_index, "original": original, "locator": _locator_for_kind(kind, value)}
+    if match["visible"]:
+        return {**step, "id": _slug_identifier(f"assert {kind} {value} visible"), "action": "assert_visible"}
+    if match["checked"]:
+        return {**step, "id": _slug_identifier(f"assert checked {value}"), "action": "assert_checked", "expected": not bool(match["negation"])}
+    if match["enabled"]:
+        return {**step, "id": _slug_identifier(f"assert enabled {value}"), "action": "assert_enabled", "expected": match["enabled"] == "enabled"}
+    if match["attribute"] is not None or match["attribute_literal"] is not None:
+        attribute = json.loads(match["attribute_literal"]) if match["attribute_literal"] is not None else match["attribute"]
+        expected = (
+            json.loads(match["expected_literal"]) if match["expected_literal"] is not None else _resolve_text(match["expected"], environment, data, path=path)
+        )
+        return {
+            **step,
+            "id": _slug_identifier(f"assert attribute {attribute} {value}"),
+            "action": "assert_attribute_equals",
+            "attribute": attribute,
+            "expected": expected,
+        }
+    count = parse_browser_count(match["count"])
+    if count is None:
+        raise CompilerError((ValidationIssue(path, "count must be a nonnegative JavaScript safe integer", "step.count_range"),))
+    return {**step, "id": _slug_identifier(f"assert count {value}"), "action": "assert_count", "expected": count}
 
 
 def _locator_for_kind(kind: str, value: str) -> dict[str, str]:

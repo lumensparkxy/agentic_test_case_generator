@@ -20,7 +20,7 @@ from plain_english_test_framework.compiler import CompilerError, ResolvedEnviron
 from plain_english_test_framework.ir_validator import validate_ir_document
 from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
 from plain_english_test_framework.playwright_generator import generate_playwright_spec
-from plain_english_test_framework.spec_parser import parse_spec_document
+from plain_english_test_framework.spec_parser import SpecValidationError, parse_spec_document
 from plain_english_test_framework.validation import ValidationIssue
 
 
@@ -736,6 +736,70 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('await expect(page.locator(".result")).toHaveCount(3);', generated)
         self.assertIn('await expect(page.getByTestId("email-input")).toBeVisible();', generated)
         self.assertIn('await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();', generated)
+
+    def test_state_and_attribute_assertions_preserve_exact_locator_operands(self) -> None:
+        target = "https://example.test/orders"
+        expectation = r"""test id ' receipt\path ' attribute "data-{env.marker}" should equal '  A\B "{env.baseUrl}" café  '"""
+        case = TestCase(
+            id="TC-LOCATOR",
+            title="Observe exact saved-order controls",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{target}"', expected=""),
+                TestStep(step=2, action="""Verify css '[data-name="  café  "]' is visible""", expected=""),
+                TestStep(step=3, action="Inspect the control", expected=r'test id "console \state {data.user}" is disabled'),
+                TestStep(step=4, action="Inspect the checkbox", expected=r'css ".ordered\#row" should not be checked'),
+                TestStep(step=5, action="Inspect the saved receipt", expected=expectation),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=target)
+        self.assertEqual(preview.summary.executable, 1)
+        environment = ResolvedEnvironment("web", {"baseUrl": target, "marker": "expanded"}, target, None)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=environment)
+        checks = ir.raw["cases"][0]["steps"][1:]
+        expected_value = r'  A\B "{env.baseUrl}" café  '
+        self.assertEqual(
+            [(item["action"], item["locator"]["value"], item.get("expected")) for item in checks],
+            [
+                ("assert_visible", '[data-name="  café  "]', None),
+                ("assert_enabled", r"console \state {data.user}", False),
+                ("assert_checked", r".ordered\#row", False),
+                ("assert_attribute_equals", r" receipt\path ", expected_value),
+            ],
+        )
+        self.assertEqual(checks[-1]["attribute"], "data-{env.marker}")
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn(r'page.getByTestId("console \\state {data.user}")).toBeDisabled()', generated)
+        self.assertIn(r'page.locator(".ordered\\#row")).not.toBeChecked()', generated)
+        self.assertIn(f'toHaveAttribute("data-{{env.marker}}", {json.dumps(expected_value)})', generated)
+
+    def test_legacy_and_mixed_structured_locator_assertions_keep_their_templates(self) -> None:
+        target = "https://example.test/orders"
+        legacy_selector = r".legacy\\row"
+        legacy_value = r"orders\\receipt"
+        env = ResolvedEnvironment("web", {"baseUrl": target, "selector": legacy_selector, "value": legacy_value}, target, None)
+        literal_selector = r"#{env.selector}\row"
+        literal_expected = '{data.unused} "  value  "'
+        document = {
+            "schemaVersion": "1.0",
+            "id": "orders",
+            "title": "Check old and literal saved order selectors",
+            "steps": [
+                f'Given I open "{target}"',
+                'Then css "{env.selector}" should be visible',
+                f'And css "{legacy_selector}" should be enabled',
+                f'And css literal {json.dumps(literal_selector)} attribute "data-receipt" should equal "{{env.value}}"',
+                f'And css "{{env.selector}}" attribute "data-receipt" should equal literal {json.dumps(literal_expected)}',
+            ],
+        }
+        ir = compile_parsed_spec(parse_spec_document(document), environment=env)
+        checks = ir.raw["cases"][0]["steps"][1:]
+        self.assertEqual([item["locator"]["value"] for item in checks], [legacy_selector, legacy_selector, literal_selector, legacy_selector])
+        self.assertEqual([item["expected"] for item in checks[-2:]], [legacy_value, literal_expected])
+        document["steps"][-2] = document["steps"][-2].replace("{env.value}", "{unsupported}")
+        with self.assertRaises(SpecValidationError) as raised:
+            parse_spec_document(document)
+        self.assertIn("placeholder.unsupported", {issue.code for issue in raised.exception.issues})
 
     def test_exact_count_selectors_survive_preview_compilation_and_playwright_rendering(self) -> None:
         target = "https://example.test/orders"
