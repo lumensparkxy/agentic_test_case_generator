@@ -41,6 +41,12 @@ remain available in Runs. A stale report with no newer preview still offers
 regeneration. The Reports navigation shows Complete for current approved
 evidence and Needs attention for draft or stale evidence, including after reload.
 
+Saving a preview preserves the current report and its evidence. A completed
+run can replace that report, and upstream changes can make it stale. Older
+reports marked stale by a preview regain their status when the saved sources
+and run evidence can be verified. An exact retry of a current file export
+returns the original audit and file after a preview, with no new publication.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

@@ -47,9 +47,10 @@ def _load_export_project(project_id, actor):
     return project
 
 
-def _find_export_receipt(project_id, actor, operation, key, *, require_current=True):
+def _find_export_receipt(project_id, actor, operation, key):
     try:
-        return find_idempotent_stage_snapshot(project_id, "reports", operation, key, actor=actor, require_current=require_current)
+        # Freshness is verified against the loaded suite and report during replay.
+        return find_idempotent_stage_snapshot(project_id, "reports", operation, key, actor=actor, require_current=False)
     except (ProjectConflictError, ProjectNotFoundError, ProjectPermissionError) as exc:
         raise project_error_to_http(exc) from exc
     except Exception as exc:
@@ -158,7 +159,7 @@ def _publish_project_export(
         )
     except Exception as project_exc:
         # A reply may be lost after Firestore commits, even if the report later becomes stale.
-        receipt = _find_export_receipt(payload.project_id, current_user, operation, key, require_current=False)
+        receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
         if receipt:
             return receipt
         if isinstance(project_exc, HTTPException):

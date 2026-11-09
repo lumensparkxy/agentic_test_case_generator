@@ -341,10 +341,20 @@ class ExportPublicationTests(unittest.TestCase):
         }
         self.http = self.enterContext(TestClient(app))
 
-    def save(self, stage, payload, **kwargs):
+    def save(self, stage, payload, *, operation="seed", approved=True, **kwargs):
         return projects.append_stage_snapshot(
-            project_id=self.project_id, stage=stage, payload=payload, operation="seed", actor=self.actor, request_id=f"seed-{stage}", approved=True, **kwargs
+            project_id=self.project_id,
+            stage=stage,
+            payload=payload,
+            operation=operation,
+            actor=self.actor,
+            request_id=f"seed-{stage}",
+            approved=approved,
+            **kwargs,
         )
+
+    def save_preview(self):
+        return self.save("execution", {"summary": {"manual": 1}}, operation="automation.execution.preview", source_snapshot_id=self.suite.snapshot_id)
 
     def project(self):
         return projects.get_project(self.project_id, actor=self.actor)
@@ -377,6 +387,10 @@ class ExportPublicationTests(unittest.TestCase):
                 self.assertEqual((event["quantity"], event["status"], event["workflow_run_id"]), (1, "completed", snapshot.workflow_run_id))
                 self.assertEqual(event["metadata"]["exported_at"], snapshot.payload["audit_metadata"]["exported_at"])
 
+                self.save_preview()
+                previewed = self.project()
+                self.assertEqual(previewed.stage_state["reports"], after.stage_state["reports"])
+                self.assertEqual(previewed.current_snapshots["reports"], snapshot)
                 written = deepcopy(self.store)
                 replay = self.post(fmt, base_project_revision=before.current_revision)
                 self.assertEqual(replay.status_code, 200, replay.status_code)
@@ -390,10 +404,60 @@ class ExportPublicationTests(unittest.TestCase):
                     self.assertEqual(replay.content, first.content)
                 self.assertEqual(self.post(fmt, base_project_revision=before.current_revision, draft_override_reason="Changed").status_code, 409)
                 self.assertEqual(self.store, written)
-                before = after
+                before = previewed
         self.assertEqual(self.post().status_code, 409)
         self.assertEqual(len(self.audit("usage_events")), 3)
         self.assertEqual(len(self.audit("workflow_runs")), 3)
+
+    def test_legacy_preview_staleness_only_recovers_with_current_evidence(self):
+        first = self.post()
+        self.assertEqual(first.status_code, 200, first.text)
+        preview = self.save_preview()
+        header = self.store[f"qa_projects/{self.project_id}"]
+        header["stage_state"]["reports"].update(stale=True, stale_reason=f"execution changed in project revision {preview.project_revision}")
+
+        written = deepcopy(self.store)
+        status = self.project().stage_state["reports"]
+        self.assertFalse(status.stale)
+        self.assertIsNone(status.stale_reason)
+        replay = self.post()
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.content, first.content)
+        self.assertEqual(self.store, written)
+
+        projects.record_execution_run(
+            project_id=self.project_id,
+            actor=self.actor,
+            request_id="late-run",
+            run_id="new-runtime-evidence",
+            target_environment="test",
+            status_value="passed",
+            summary={"passed": 1},
+            test_case_count=1,
+            snapshot_id=None,
+            workflow_run_id=None,
+            source_event_id=None,
+            project_revision=preview.project_revision - 1,
+            source_snapshot_id=self.suite.snapshot_id,
+            historical=True,
+        )
+        self.assertTrue(self.project().stage_state["reports"].stale)
+        self.assertEqual(self.post().status_code, 409)
+        self.assert_audit("completed", 1)
+
+    def test_preview_preserves_draft_and_existing_stale_report_state(self):
+        report = self.save("reports", {"source": "export", "format": "json"}, approved=False)
+        draft_state = self.project().stage_state["reports"]
+        self.save_preview()
+        self.assertEqual(self.project().stage_state["reports"], draft_state)
+        self.save("context", {"app_link": "https://example.test/changed"})
+        stale_state = self.project().stage_state["reports"]
+        self.assertTrue(stale_state.stale)
+        self.assertIn("context changed", stale_state.stale_reason)
+        self.save_preview()
+        detail = self.project()
+        self.assertEqual(detail.stage_state["reports"], stale_state)
+        self.assertEqual(detail.current_snapshots["reports"], report)
 
     def test_postcommit_reply_loss_recovers_the_exact_saved_report(self):
         publish = routes.append_stage_snapshot

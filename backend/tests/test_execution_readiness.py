@@ -392,7 +392,7 @@ class ExecutionPreviewPublicationTests(unittest.TestCase):
         self.assertEqual(snapshot.payload["target_environment"], "qa")
         self.assertNotIn("spec", snapshot.payload["candidates"]["executable"][0])
         self.assertEqual(snapshot.payload["target_base_url"], "https://preview.example.test/")
-        self.assertTrue(saved.stage_state["reports"].stale)
+        self.assertEqual(saved.stage_state["reports"], self.before.stage_state["reports"])
         self.assertEqual(saved.current_snapshots["reports"], self.before.current_snapshots["reports"])
         self.assertEqual(self.assert_audit("completed", 1)["event_id"], snapshot.source_event_id)
         self.assertEqual(self.post(target_base_url="https://changed.example.test").status_code, 409)

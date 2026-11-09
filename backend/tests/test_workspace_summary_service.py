@@ -414,6 +414,82 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
                     if not verified:
                         self.assertEqual(reads[-1], ("payload.candidates",))
 
+    def test_workspace_recovers_only_verified_legacy_preview_report_staleness(self) -> None:
+        actor = AuthUser(sub="user-1", email="user@example.com", name="User")
+        project_id = "preview-report"
+        path = f"qa_projects/{project_id}"
+        suite = _snapshot(project_id=project_id, stage="test_cases", snapshot_id="suite", created_at=BASE_TIME)
+        report = _snapshot(
+            project_id=project_id,
+            stage="reports",
+            snapshot_id="report",
+            operation="reports.execution_summary",
+            source_snapshot_id="execution-run",
+            project_revision=4,
+            approved=True,
+            created_at=BASE_TIME,
+            payload={"source": "execution", "run_id": "run-1", "status": "passed"},
+        )
+        earlier_preview = _snapshot(
+            project_id=project_id,
+            stage="execution",
+            snapshot_id="preview-5",
+            operation="automation.execution.preview",
+            source_snapshot_id=suite.snapshot_id,
+            project_revision=5,
+            created_at=BASE_TIME,
+        )
+        current_preview = earlier_preview.model_copy(update={"snapshot_id": "preview-6", "project_revision": 6})
+        report_state = _stage_state(report.snapshot_id, updated_at=BASE_TIME, approved=True, stale=True)
+        report_state.stale_reason = "execution changed in project revision 5"
+        project = _project(
+            project_id,
+            revision=6,
+            stage_state={
+                "test_cases": _stage_state(suite.snapshot_id, updated_at=BASE_TIME, approved=True),
+                "reports": report_state,
+                "execution": _stage_state(current_preview.snapshot_id, updated_at=BASE_TIME, approved=True, operation=current_preview.operation),
+            },
+        )
+        run = QaProjectExecutionRun(
+            run_record_id="record-1",
+            project_id=project_id,
+            run_id="run-1",
+            target_environment="staging",
+            project_revision=3,
+            status="passed",
+            snapshot_id="execution-run",
+            source_snapshot_id=suite.snapshot_id,
+            actor_user_id=actor.sub,
+            created_at=BASE_TIME,
+        )
+        store = {
+            path: project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"}),
+            **{f"{path}/snapshots/{snapshot.snapshot_id}": snapshot.model_dump() for snapshot in (suite, report, earlier_preview, current_preview)},
+            f"{path}/execution_runs/{run.run_record_id}": run.model_dump(),
+        }
+        query_log = []
+        collection = FakeCollection("qa_projects", store, query_log)
+        earlier_path = f"{path}/snapshots/{earlier_preview.snapshot_id}"
+        with patch("app.services.workflow_project_service.get_required_firestore_collection", return_value=collection):
+            projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=1, execution_run_limit=1)
+            summary = build_workspace_summary(projects, work_items_limit=10, runs_limit=1, reports_limit=1)
+            self.assertEqual(summary.recent_reports[0].status, "approved")
+            self.assertEqual(summary.recent_reports[0].execution_run_ids, ["run-1"])
+            self.assertIn(("select", f"{path}/snapshots", ("project_id", "stage", "source_snapshot_id")), query_log)
+            self.assertIn(("limit", f"{path}/snapshots", 1), query_log)
+            self.assertTrue(store[path]["stage_state"]["reports"]["stale"])
+
+            store[earlier_path]["operation"] = "automation.execution.run"
+            projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=1, execution_run_limit=1)
+            summary = build_workspace_summary(projects, work_items_limit=10, runs_limit=1, reports_limit=1)
+            self.assertEqual(summary.recent_reports[0].status, "stale")
+
+            store[earlier_path]["operation"] = earlier_preview.operation
+            store[f"{path}/execution_runs/{run.run_record_id}"]["status"] = "failed"
+            projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=1, execution_run_limit=1)
+            self.assertTrue(projects[0].stage_state["reports"].stale)
+
     def test_work_items_are_deduplicated_ranked_and_used_for_continue_working(self) -> None:
         enabled_project = _project("project-a", updated_at=BASE_TIME)
         blocked_project = _project("project-b", updated_at=BASE_TIME + timedelta(hours=2))

@@ -5,6 +5,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from google.api_core.exceptions import GoogleAPICallError
 from google.cloud.firestore_v1 import FieldFilter, Query, transactional
 
 from ..contracts.projects import QaProjectExecutionRunDetail
@@ -26,6 +27,8 @@ from .execution_readiness import preview_has_verified_receipt
 from .firestore_repository import get_required_firestore_collection, get_required_firestore_client
 
 QA_PROJECTS_COLLECTION = "qa_projects"
+_EXECUTION_PREVIEW_OPERATION = "automation.execution.preview"
+_LEGACY_REPORT_STALE_PREFIX = "execution changed in project revision "
 PROJECT_STAGES: tuple[ProjectStageName, ...] = (
     "requirements",
     "context",
@@ -166,11 +169,13 @@ def _summary_from_payload(payload: dict[str, Any]) -> QaProjectSummary:
     )
 
 
-def _stream_collection(collection_ref: Any) -> list[dict[str, Any]]:
+def _stream_collection(collection_ref: Any, *, suppress_errors: bool = True) -> list[dict[str, Any]]:
     try:
         return [dict(snapshot.to_dict() or {}) for snapshot in collection_ref.stream()]
     except Exception as exc:  # pragma: no cover - defensive around external store
         logging.warning("Project subcollection stream skipped: %s", exc)
+        if not suppress_errors:
+            raise
         return []
 
 
@@ -218,6 +223,110 @@ def get_project_summary(project_id: str, *, actor: AuthUser) -> QaProjectSummary
     return _summary_from_payload(payload)
 
 
+def _restore_preview_staled_report(
+    project_doc: Any,
+    summary: QaProjectSummary,
+    snapshots: dict[ProjectStageName, QaProjectStageSnapshot],
+    latest_run: Optional[QaProjectExecutionRun],
+) -> None:
+    """Recover legacy report freshness only when its saved evidence still matches."""
+    report_state = summary.stage_state.get("reports")
+    if not report_state or not report_state.stale or not (report_state.stale_reason or "").startswith(_LEGACY_REPORT_STALE_PREFIX):
+        return
+    stale_revision = (report_state.stale_reason or "").removeprefix(_LEGACY_REPORT_STALE_PREFIX)
+    if not stale_revision.isascii() or not stale_revision.isdecimal() or len(stale_revision) > 19:
+        return
+    stale_revision = int(stale_revision)
+    report = snapshots.get("reports")
+    preview = snapshots.get("execution")
+    preview_state = summary.stage_state.get("execution")
+    suite = snapshots.get("test_cases")
+    if (
+        not report
+        or not preview
+        or not suite
+        or report.stage != "reports"
+        or report.project_id != summary.project_id
+        or report.snapshot_id != report_state.current_snapshot_id
+        or report.approved != report_state.approved
+        or not preview_state
+        or preview_state.stale
+        or preview_state.current_snapshot_id != preview.snapshot_id
+        or preview.stage != "execution"
+        or preview.operation != _EXECUTION_PREVIEW_OPERATION
+        or preview.project_id != summary.project_id
+        or preview.source_snapshot_id != suite.snapshot_id
+        or not report.project_revision < stale_revision <= preview.project_revision
+    ):
+        return
+
+    for stage in ("requirements", "context", "use_cases", "impact_analysis", "test_cases"):
+        source_state = summary.stage_state.get(stage)
+        if source_state and source_state.current_snapshot_id:
+            source = snapshots.get(stage)
+            if (
+                source_state.stale
+                or not source
+                or source.project_id != summary.project_id
+                or source.snapshot_id != source_state.current_snapshot_id
+                or source.project_revision > report.project_revision
+                or (source_state.updated_at is not None and source_state.updated_at > report.created_at)
+            ):
+                return
+
+    if report.operation in {"export.json", "export.csv", "export.excel"}:
+        sources = report.metadata.get("source_snapshot_ids")
+        run_ids = report.metadata.get("execution_run_ids", [])
+        if (
+            report.source_snapshot_id != suite.snapshot_id
+            or not isinstance(sources, dict)
+            or sources.get("test_cases") != suite.snapshot_id
+            or any(stage not in snapshots or snapshots[stage].snapshot_id != source_id for stage, source_id in sources.items() if stage != "execution")
+            or not isinstance(run_ids, list)
+            or (not latest_run and bool(run_ids))
+            or (latest_run and (latest_run.project_revision > report.project_revision or latest_run.created_at > report.created_at))
+            or (
+                latest_run
+                and latest_run.source_snapshot_id == suite.snapshot_id
+                and (run_ids[:1] != [latest_run.run_id] or sources.get("execution") != latest_run.snapshot_id)
+            )
+        ):
+            return
+    elif report.operation == "reports.execution_summary":
+        if (
+            not latest_run
+            or latest_run.historical
+            or latest_run.source_snapshot_id != suite.snapshot_id
+            or not latest_run.snapshot_id
+            or latest_run.snapshot_id != report.source_snapshot_id
+            or latest_run.run_id != report.payload.get("run_id")
+            or latest_run.status != report.payload.get("status")
+            or latest_run.project_revision > report.project_revision
+        ):
+            return
+    else:
+        return
+
+    if stale_revision != preview.project_revision:
+        # A later preview preserves the old flag. Verify the original cause using a field mask.
+        query = (
+            project_doc.collection("snapshots")
+            .where(filter=FieldFilter("project_revision", "==", stale_revision))
+            .where(filter=FieldFilter("operation", "==", _EXECUTION_PREVIEW_OPERATION))
+            .select(("project_id", "stage", "source_snapshot_id"))
+            .limit(1)
+        )
+        try:
+            cause = _document_to_dict(next(iter(query.stream()), None)) or {}
+        except GoogleAPICallError:
+            return
+        if cause.get("project_id") != summary.project_id or cause.get("stage") != "execution" or cause.get("source_snapshot_id") != suite.snapshot_id:
+            return
+
+    report_state.stale = False
+    report_state.stale_reason = None
+
+
 def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = False) -> QaProjectDetail:
     payload = _get_project_payload(project_id)
     _require_owner(payload, actor)
@@ -250,10 +359,14 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
     project_doc = _get_project_doc(project_id)
     timeline = [QaProjectTimelineEvent.model_validate(item) for item in _stream_collection(project_doc.collection("timeline")) if item.get("event_id")]
     timeline.sort(key=lambda item: (item.occurred_at, item.project_revision), reverse=True)
-    execution_runs = [
-        QaProjectExecutionRun.model_validate(item) for item in _stream_collection(project_doc.collection("execution_runs")) if item.get("run_record_id")
-    ]
+    try:
+        run_rows = _stream_collection(project_doc.collection("execution_runs"), suppress_errors=False)
+    except Exception:  # An unavailable history cannot prove that a legacy report is current.
+        run_rows = None
+    execution_runs = [QaProjectExecutionRun.model_validate(item) for item in run_rows or [] if item.get("run_record_id")]
     execution_runs.sort(key=lambda item: item.created_at, reverse=True)
+    if run_rows is not None:
+        _restore_preview_staled_report(project_doc, summary, current_snapshots, execution_runs[0] if execution_runs else None)
     from .impact_application_state import read_current
 
     application = read_current(project_doc, current_snapshots)
@@ -340,7 +453,7 @@ def _workspace_snapshot_for(project_id: str, snapshot_id: str, stage: ProjectSta
     snapshot = QaProjectStageSnapshot.model_validate(payload)
     if snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id:
         return None
-    if snapshot.operation == "automation.execution.preview" and "candidate_counts" in snapshot.payload and not preview_has_verified_receipt(snapshot.metadata):
+    if snapshot.operation == _EXECUTION_PREVIEW_OPERATION and "candidate_counts" in snapshot.payload and not preview_has_verified_receipt(snapshot.metadata):
         # Legacy counts need their compact bucket lists to establish a complete preview.
         buckets = _document_to_dict(reference.get(field_paths=("payload.candidates",))) or {}
         snapshot.payload.update(buckets.get("payload") or {})
@@ -460,6 +573,7 @@ def list_workspace_projects(
             project_id=summary.project_id,
             limit=execution_run_limit,
         )
+        _restore_preview_staled_report(project_doc, summary, current_snapshots, execution_runs[0] if execution_runs else None)
         projects.append(
             QaProjectDetail(
                 **summary.model_dump(),
@@ -668,7 +782,9 @@ def _stage_snapshot_change(
         "source_snapshot_id": source_snapshot_id,
         "metadata": _serialize_value(stage_metadata),
     }
-    for downstream_stage in DOWNSTREAM_STAGES[stage]:
+    # A preview classifies the same suite without adding or replacing run evidence.
+    downstream_stages = () if stage == "execution" and operation == _EXECUTION_PREVIEW_OPERATION else DOWNSTREAM_STAGES[stage]
+    for downstream_stage in downstream_stages:
         if downstream_stage not in stage_state:
             continue
         downstream = dict(stage_state[downstream_stage])
