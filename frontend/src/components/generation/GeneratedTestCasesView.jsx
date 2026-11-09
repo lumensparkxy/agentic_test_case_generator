@@ -12,6 +12,28 @@ const AUTOMATION_INTENTS = ["Manual", "To Be Automated", "Automated"];
 const casePriority = (testCase) => testCase.priority || "Medium";
 const caseAutomationIntent = (testCase) => testCase.automation_status || "Manual";
 
+function TestStepData({ value }) {
+	const [escapedOpen, setEscapedOpen] = useState(false);
+	if (value === "") return <p className="test-step-data">Test data is an empty string.</p>;
+
+	return (
+		<Disclosure className="test-step-data">
+			<summary>Test data</summary>
+			<p className="test-step-data-value" tabIndex={0}>
+				{value}
+			</p>
+			<Disclosure onToggle={(event) => setEscapedOpen(event.currentTarget.open)}>
+				<summary>Escaped JSON</summary>
+				{escapedOpen && (
+					<pre className="test-step-data-value" tabIndex={0}>
+						{JSON.stringify(value).replace(/[^\u0020-\u007e]/g, (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)}
+					</pre>
+				)}
+			</Disclosure>
+		</Disclosure>
+	);
+}
+
 export default function GeneratedTestCasesView({
 	testCases,
 	identity,
@@ -275,15 +297,10 @@ export default function GeneratedTestCasesView({
 									<tbody>
 										{steps.map((step, index) => (
 											<tr key={`${selected.id}-${index}`}>
-												<th scope="row">{index + 1}</th>
+												<th scope="row">{step.step ?? index + 1}</th>
 												<td>
 													{step.action}
-													{step.test_data && (
-														<Disclosure className="test-step-data">
-															<summary>Test data</summary>
-															<p>{step.test_data}</p>
-														</Disclosure>
-													)}
+													{typeof step.test_data === "string" && <TestStepData value={step.test_data} />}
 												</td>
 												<td>{step.expected || "Not specified"}</td>
 											</tr>

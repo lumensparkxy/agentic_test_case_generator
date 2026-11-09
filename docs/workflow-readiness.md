@@ -62,6 +62,11 @@ parts in numeric Part order. If Encoding is **JSON string**, decode the
 joined text as a JSON string first, then parse the step array. Saved exports
 replay the layout recorded at publication.
 
+The Test Cases reader uses the saved step numbers. An explicit empty test
+data string is identified in the step. For supplied text, open **Test data**
+and then **Escaped JSON** to inspect line endings, surrounding spaces and
+Unicode escapes.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

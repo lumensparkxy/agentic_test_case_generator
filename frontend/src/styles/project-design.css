@@ -580,7 +580,10 @@ select {
 	margin: 8px 0 0;
 	font-size: var(--font-secondary);
 }
-.test-review-detail .test-step-data p {
+.test-review-detail .test-step-data-value {
+	box-sizing: border-box;
+	max-block-size: 12rem;
+	overflow: auto;
 	white-space: break-spaces;
 }
 .test-case-metadata {

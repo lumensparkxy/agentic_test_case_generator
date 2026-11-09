@@ -376,7 +376,10 @@ test("step table shows actions and expectations with step data on demand", async
 	await openCases(page);
 	const table = page.getByRole("region", { name: "Test steps and expected results" }).getByRole("table");
 	await expect(table.getByRole("columnheader")).toHaveText(["Step", "Action", "Expected result"]);
-	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText(["TC-001 action 1", "TC-001 expectation 1"]);
+	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText([
+		/^TC-001 action 1\s*Test data is an empty string\.$/,
+		"TC-001 expectation 1",
+	]);
 	await expect(table.getByRole("rowheader")).toHaveText(["1", "2", "3"]);
 	await expect(page.getByRole("button", { name: /Show (all .*|fewer) steps/ })).toHaveCount(0);
 	const thirdAction = table.getByRole("row").nth(3).getByRole("cell").first();
