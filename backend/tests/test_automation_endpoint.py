@@ -240,7 +240,14 @@ class AutomationEndpointTests(unittest.TestCase):
                 with patch("app.main.record_usage_event", return_value="event-execution-preview-1") as record_event:
                     with patch("app.main.preview_execution", return_value=service_response):
                         with patch("app.routers.automation.get_project", return_value=project):
-                            with patch("app.routers.automation.append_stage_snapshot", return_value=SimpleNamespace(project_revision=8)) as append_snapshot:
+                            with (
+                                patch("app.routers.automation.find_idempotent_stage_snapshot", return_value=None),
+                                patch("app.routers.automation.get_required_firestore_client", return_value=object()),
+                                patch(
+                                    "app.routers.automation.append_stage_snapshot",
+                                    side_effect=lambda **kwargs: SimpleNamespace(workflow_run_id=kwargs["workflow_run_id"], metadata=kwargs["metadata"]),
+                                ) as append_snapshot,
+                            ):
                                 with TestClient(app) as client:
                                     response = client.post(
                                         "/automation/execution/preview",

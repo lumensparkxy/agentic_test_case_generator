@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from ..agents.automation_agent import generate_playwright_pom
 from ..config import get_execution_settings
-from ..services.execution_readiness import assess_execution, selected_candidates
+from ..services.execution_readiness import PREVIEW_SOURCE_BLOCKER_CODES, assess_execution, selected_candidates
 from ..services.execution_prerequisites import execution_reference_scope
 from ..services.execution_target import saved_execution_source_url
 from ..services.execution_request_service import (
@@ -32,12 +32,31 @@ from ..models import (
     ExecutionRunInput,
     ExecutionRunResponse,
 )
+from ..observability.metrics import record_workflow_completed
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.execution_service import preview_execution, run_execution
-from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http, record_execution_run
+from ..services.firestore_repository import get_required_firestore_client
+from ..services.requirement_reconciliation import digest
+from ..services.workflow_project_service import (
+    ProjectConflictError,
+    ProjectNotFoundError,
+    ProjectPermissionError,
+    append_stage_snapshot,
+    find_idempotent_stage_snapshot,
+    get_project,
+    project_error_to_http,
+    record_execution_run,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_PREVIEW_OPERATION = "automation.execution.preview"
+_PREVIEW_EVENT = "automation.execution.previewed"
+
+
+class _PreviewPublicationUnconfirmed(HTTPException):
+    def __init__(self):
+        super().__init__(503, {"code": "execution_preview_unconfirmed", "message": "The execution preview could not be confirmed. Retry this request."})
 
 
 def _resolve_main_callable(name: str, fallback: Callable[..., Any]) -> Callable[..., Any]:
@@ -279,11 +298,15 @@ def _execution_project(payload: ExecutionPreviewInput, actor: AuthUser):
         raise project_error_to_http(exc) from exc
 
 
-async def _execution_with_references(function, payload, actor, *, project=None, **kwargs):
+def _call_with_execution_references(function, payload, actor, *, project=None, **kwargs):
     if source_url := saved_execution_source_url(project):
         kwargs["source_app_url"] = source_url
     with execution_reference_scope(actor.sub, payload.project_id):
-        return await run_in_threadpool(function, payload.test_cases, **kwargs)
+        return function(payload.test_cases, **kwargs)
+
+
+async def _execution_with_references(function, payload, actor, *, project=None, **kwargs):
+    return await run_in_threadpool(_call_with_execution_references, function, payload, actor, project=project, **kwargs)
 
 
 def _require_execution_ready(readiness) -> None:
@@ -291,97 +314,183 @@ def _require_execution_ready(readiness) -> None:
         raise HTTPException(status_code=409, detail={"message": "Execution prerequisites are not satisfied.", "readiness": readiness.model_dump(mode="json")})
 
 
+def _require_verified_preview_inputs(readiness):
+    conflicts = [blocker for blocker in readiness.blockers if blocker.code in PREVIEW_SOURCE_BLOCKER_CODES]
+    if conflicts:
+        raise HTTPException(409, {"message": conflicts[0].message, "readiness": readiness.model_dump(mode="json")})
+
+
+def _find_preview_receipt(project_id, actor, key, *, require_current=True):
+    try:
+        return find_idempotent_stage_snapshot(project_id, "execution", _PREVIEW_OPERATION, key, actor=actor, require_current=require_current)
+    except (ProjectConflictError, ProjectNotFoundError, ProjectPermissionError) as exc:
+        raise project_error_to_http(exc) from exc
+    except Exception as exc:
+        raise _PreviewPublicationUnconfirmed() from exc
+
+
+def _check_preview_fingerprint(receipt, fingerprint):
+    if receipt.metadata.get("preview_request_fingerprint") != fingerprint:
+        raise HTTPException(409, "This request already saved an execution preview for different inputs.")
+
+
+def _compile_execution_preview(payload, actor, project, settings, target_base_url):
+    response = _call_with_execution_references(
+        _resolve_main_callable("preview_execution", preview_execution),
+        payload,
+        actor,
+        project=project,
+        target_base_url=target_base_url,
+        settings=settings,
+    )
+    response.readiness = assess_execution(payload, project=project, settings=settings, preview=response)
+    return response
+
+
+def _replay_execution_preview(receipt, payload, actor, fingerprint, settings):
+    _check_preview_fingerprint(receipt, fingerprint)
+    project = _execution_project(payload, actor)
+    state = project.stage_state.get("execution")
+    if project.current_revision != receipt.project_revision or not state or state.stale or state.current_snapshot_id != receipt.snapshot_id:
+        raise HTTPException(409, "The saved execution preview is no longer current. Preview again from the current project.")
+    current = payload.model_copy(update={"base_project_revision": project.current_revision})
+    readiness = assess_execution(current, project=project, settings=settings)
+    _require_verified_preview_inputs(readiness)
+    response = _compile_execution_preview(current, actor, project, settings, readiness.target_base_url)
+    if digest(response.model_dump(mode="json")) != receipt.metadata.get("preview_response_fingerprint"):
+        raise HTTPException(409, "Execution readiness has changed. Preview the saved suite again.")
+    return response
+
+
+def _publish_execution_preview(payload, response, actor, request_id, run_id, key, fingerprint, counts):
+    readiness = response.readiness
+    target_environment = _target_environment(payload)
+    target_base_url = readiness.target_base_url
+    try:
+        client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
+        writes = []
+        event_id = _resolve_main_callable("record_usage_event", record_usage_event)(
+            event_type=_PREVIEW_EVENT,
+            billing_key=_PREVIEW_OPERATION,
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            actor=actor,
+            request_id=request_id,
+            workflow_run_id=run_id,
+            status="completed",
+            metadata={"operation": _PREVIEW_OPERATION, **counts},
+            pending_writes=writes,
+            firestore_client=client,
+        )
+        _resolve_main_callable("complete_workflow_run", complete_workflow_run)(
+            run_id, status="completed", metadata=counts, pending_writes=writes, firestore_client=client
+        )
+        return append_stage_snapshot(
+            project_id=payload.project_id,
+            stage="execution",
+            payload=_preview_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
+            operation=_PREVIEW_OPERATION,
+            actor=actor,
+            request_id=request_id,
+            workflow_run_id=run_id,
+            source_event_id=event_id,
+            approved=True,
+            source_snapshot_id=readiness.source_snapshot_id,
+            title=f"{target_environment} execution preview",
+            metadata={
+                "target_environment": target_environment,
+                "target_base_url": target_base_url,
+                "source_snapshot_id": readiness.source_snapshot_id,
+                "preview_request_fingerprint": fingerprint,
+                "preview_response_fingerprint": digest(response.model_dump(mode="json")),
+                **counts,
+            },
+            base_project_revision=payload.base_project_revision,
+            idempotency_key=key,
+            pending_writes=writes,
+        )
+    except Exception as exc:
+        # A lost commit reply may refer to an already superseded snapshot.
+        receipt = _find_preview_receipt(payload.project_id, actor, key, require_current=False)
+        if receipt:
+            return receipt
+        if isinstance(exc, HTTPException):
+            raise
+        raise project_error_to_http(exc) from exc
+
+
 @router.post("/automation/execution/preview", response_model=ExecutionPreviewResponse)
-async def automation_execution_preview(
+def automation_execution_preview(
     request: Request,
     payload: ExecutionPreviewInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> ExecutionPreviewResponse:
     request_id = _get_request_id(request)
+    settings = get_execution_settings()
+    project = None
+    if payload.project_id:
+        key = digest(["execution-preview", current_user.sub, request_id])
+        fingerprint = digest(payload.model_dump(mode="json"))
+        receipt = _find_preview_receipt(payload.project_id, current_user, key)
+        if receipt:
+            return _replay_execution_preview(receipt, payload, current_user, fingerprint, settings)
+        project = _execution_project(payload, current_user)
+        if payload.base_project_revision != project.current_revision:
+            receipt = _find_preview_receipt(payload.project_id, current_user, key)
+            if receipt:
+                return _replay_execution_preview(receipt, payload, current_user, fingerprint, settings)
+
+    readiness = assess_execution(payload, project=project, settings=settings)
+    if payload.project_id:
+        _require_verified_preview_inputs(readiness)
     workflow_run_id = _resolve_main_callable("start_workflow_run", start_workflow_run)(
-        operation="automation.execution.preview",
+        operation=_PREVIEW_OPERATION,
         actor=current_user,
         request_id=request_id,
         metadata={"test_case_count": len(payload.test_cases)},
     )
     try:
-        project = await run_in_threadpool(_execution_project, payload, current_user)
-        settings = get_execution_settings()
-        readiness = assess_execution(payload, project=project, settings=settings)
-        target_base_url = readiness.target_base_url
-        target_environment = _target_environment(payload)
-        response = await _execution_with_references(
-            _resolve_main_callable("preview_execution", preview_execution),
-            payload,
-            current_user,
-            project=project,
-            target_base_url=target_base_url,
-            settings=settings,
-        )
-        response.readiness = assess_execution(payload, project=project, settings=settings, preview=response)
-        event_id = _log_success(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="automation.execution.preview",
-            event_type="automation.execution.previewed",
-            billing_key="automation.execution.preview",
-            quantity=len(payload.test_cases),
-            unit="test_case",
-            result_metadata={
-                "executable_count": response.summary.executable,
-                "manual_count": response.summary.manual,
-                "unsupported_count": response.summary.unsupported,
-                "invalid_count": response.summary.invalid,
-            },
-        )
+        response = _compile_execution_preview(payload, current_user, project, settings, readiness.target_base_url)
+        counts = {f"{bucket}_count": count for bucket, count in response.summary.model_dump().items()}
         if payload.project_id:
-            try:
-                source_snapshot_id = response.readiness.source_snapshot_id
-                preview_snapshot = append_stage_snapshot(
-                    project_id=payload.project_id,
-                    stage="execution",
-                    payload=_preview_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
-                    operation="automation.execution.preview",
-                    actor=current_user,
-                    request_id=request_id,
-                    workflow_run_id=workflow_run_id,
-                    source_event_id=event_id,
-                    approved=True,
-                    source_snapshot_id=source_snapshot_id,
-                    title=f"{target_environment} execution preview",
-                    metadata={
-                        "target_environment": target_environment,
-                        "target_base_url": target_base_url,
-                        "source_snapshot_id": source_snapshot_id,
-                        "executable_count": response.summary.executable,
-                        "manual_count": response.summary.manual,
-                        "unsupported_count": response.summary.unsupported,
-                        "invalid_count": response.summary.invalid,
-                    },
-                    base_project_revision=payload.base_project_revision,
-                    idempotency_key=_action_idempotency_key(
-                        "automation.execution.preview",
-                        request_id=request_id,
-                        target_environment=target_environment,
-                    ),
-                )
-                response.readiness.project_revision = preview_snapshot.project_revision
-            except Exception as project_exc:
-                raise project_error_to_http(project_exc) from project_exc
-        return response
+            response.readiness.project_revision = project.current_revision + 1
+            snapshot = _publish_execution_preview(payload, response, current_user, request_id, workflow_run_id, key, fingerprint, counts)
+            _check_preview_fingerprint(snapshot, fingerprint)
+        else:
+            _log_success(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation=_PREVIEW_OPERATION,
+                event_type=_PREVIEW_EVENT,
+                billing_key=_PREVIEW_OPERATION,
+                quantity=len(payload.test_cases),
+                unit="test_case",
+                result_metadata=counts,
+            )
+            return response
+    except _PreviewPublicationUnconfirmed:
+        raise
     except Exception as exc:
         _log_failure(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="automation.execution.preview",
-            event_type="automation.execution.previewed",
-            billing_key="automation.execution.preview",
+            operation=_PREVIEW_OPERATION,
+            event_type=_PREVIEW_EVENT,
+            billing_key=_PREVIEW_OPERATION,
             error_message=str(exc),
             metadata={"test_case_count": len(payload.test_cases)},
         )
         raise
+
+    if snapshot.workflow_run_id == workflow_run_id:
+        record_workflow_completed(workflow_run_id, "completed")
+        return response
+    _resolve_main_callable("complete_workflow_run", complete_workflow_run)(
+        workflow_run_id, status="completed", metadata={"reused_snapshot_id": snapshot.snapshot_id}
+    )
+    return _replay_execution_preview(snapshot, payload, current_user, fingerprint, settings)
 
 
 @router.post("/automation/execution/run", response_model=ExecutionRunResponse)

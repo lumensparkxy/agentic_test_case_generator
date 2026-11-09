@@ -305,6 +305,52 @@ async function openAutomation(page) {
 }
 
 test.describe("Automation preview consistency", () => {
+	test("recovers a lost preview with the original request and keeps the prior candidates visible @p1", async ({ page }) => {
+		const one = executableCandidate("candidate-checkout", "TC-001");
+		const two = executableCandidate("candidate-refund", "TC-002");
+		const project = projectFixture({ testCaseIds: ["TC-001", "TC-002"] });
+		const attempts = [];
+		let receipt;
+		const requests = await installApi(page, {
+			project,
+			handlePreview: (route, index) => {
+				const attempt = { id: route.request().headers()["x-request-id"], body: route.request().postDataJSON() };
+				attempts.push(attempt);
+				if (index === 0) {
+					project.current_revision += 1;
+					return jsonResponse(
+						route,
+						previewFixture([one], { readiness: readinessFixture({ project_revision: project.current_revision }) })
+					);
+				}
+				if (index === 1) {
+					project.current_revision += 1;
+					receipt = previewFixture([one, two], { readiness: readinessFixture({ project_revision: project.current_revision }) });
+				}
+				if (attempt.id !== attempts[1].id || JSON.stringify(attempt.body) !== JSON.stringify(attempts[1].body)) {
+					return jsonResponse(route, { detail: "Stale preview request" }, 409);
+				}
+				if (index <= 2) return route.abort("failed");
+				return jsonResponse(route, receipt);
+			},
+		});
+		await openAutomation(page);
+		const preview = page.getByRole("button", { name: "Preview Execution", exact: true });
+		await preview.click();
+		await expect(page.getByRole("button", { name: "Run 1 Candidate", exact: true })).toBeEnabled();
+		await preview.click();
+		await expect(page.getByRole("alert").filter({ hasText: "The execution preview could not be confirmed" })).toBeVisible();
+		await expect(page.getByText("Executable 1", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Run 1 Candidate", exact: true })).toBeDisabled();
+		expect(requests.runs).toBe(0);
+		await preview.click();
+		await expect(page.getByRole("button", { name: "Run 2 Candidates", exact: true })).toBeEnabled();
+		expect(attempts[0].id).not.toBe(attempts[1].id);
+		expect(attempts[1].id).toBeTruthy();
+		expect(attempts.slice(1)).toEqual(Array(3).fill(attempts[1]));
+		expect(project.current_revision).toBe(6);
+	});
+
 	test("renders a valid mixed preview with counts that match every candidate collection", async ({ page }) => {
 		const mixedPreview = previewFixture([executableCandidate("candidate-executable", "TC-001")], {
 			manual: [nonExecutableCandidate("candidate-manual", "TC-002", "manual")],

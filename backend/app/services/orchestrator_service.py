@@ -19,6 +19,7 @@ from ..models import (
     QaProjectStageState,
 )
 from ..agents.specialist_registry import agent_contract_metadata_for_action
+from .execution_readiness import PREVIEW_SOURCE_BLOCKER_CODES
 from .workflow_project_service import get_project
 
 ORCHESTRATOR_STAGES: tuple[OrchestratorStageName, ...] = (
@@ -238,6 +239,12 @@ def _execution_preview_action(project: QaProjectDetail, test_snapshot_id: Option
         return "automate"
     source_snapshot_id = preview.source_snapshot_id
     if source_snapshot_id and source_snapshot_id != test_snapshot_id:
+        return "automate"
+    readiness = preview.payload.get("readiness")
+    blockers = readiness.get("blockers") if isinstance(readiness, dict) else None
+    if isinstance(blockers, list) and any(
+        isinstance(blocker, dict) and isinstance(blocker.get("code"), str) and blocker["code"] in PREVIEW_SOURCE_BLOCKER_CODES for blocker in blockers
+    ):
         return "automate"
 
     summary = preview.payload.get("summary")

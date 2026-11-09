@@ -518,6 +518,18 @@ class OrchestratorServiceTests(unittest.TestCase):
             ("mismatch", {"summary": counts, "candidate_counts": counts, "candidates": {**buckets, "executable": [{}]}}, test_snapshot_id, False, "automate"),
             ("outdated source", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, "older-tests", False, "automate"),
             ("stale", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, test_snapshot_id, True, "automate"),
+            (
+                "unverified saved cases",
+                {
+                    "summary": counts,
+                    "candidate_counts": counts,
+                    "candidates": buckets,
+                    "readiness": {"run_allowed": False, "blockers": [{"code": "case_snapshot_mismatch", "message": "The cases could not be verified."}]},
+                },
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
         ):
             with self.subTest(label=label):
                 append_stage_snapshot(

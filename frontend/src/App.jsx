@@ -404,6 +404,7 @@ export default function App() {
 		resetExecutionWorkflowState: resetExecutionState,
 	} = useExecutionWorkflowState();
 	const executionPreviewRequestIdRef = useRef(0);
+	const executionPreviewAttempt = useRef(null);
 	const executionRunRequestIdRef = useRef(0);
 	const executingScopeRef = useRef(null);
 	const invalidateExecutionPreviewRequest = () => {
@@ -3181,7 +3182,13 @@ export default function App() {
 		if (!operationScope || !isProjectOperationCurrent(operationScope)) {
 			return null;
 		}
-		resetExecutionWorkflowState();
+		invalidateExecutionPreviewRequest();
+		setExecutionError("");
+		setExecutionPreview((previous) =>
+			previous
+				? { ...previous, requiresRefresh: true, consistencyMessage: "Refresh the prior preview before running candidates." }
+				: previous
+		);
 		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
 		if (!casesToPreview.length) {
 			if (updateStatus) {
@@ -3193,6 +3200,7 @@ export default function App() {
 		}
 
 		const previewRequestId = executionPreviewRequestIdRef.current;
+		const isCurrent = () => isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current;
 		setIsPreviewingExecution(true);
 		if (updateStatus) {
 			const message = "Previewing execution readiness...";
@@ -3200,23 +3208,50 @@ export default function App() {
 			setApplicationLiveStatus(message);
 		}
 		try {
-			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, {
+			const payload = buildExecutionPayload(casesToPreview, { includeProject: persistProject, operationScope });
+			const fingerprint = JSON.stringify([operationScope, payload]);
+			const priorAttempt = executionPreviewAttempt.current;
+			const attempt = persistProject && priorAttempt?.fingerprint === fingerprint ? priorAttempt : { fingerprint, id: createRequestId() };
+			if (persistProject) executionPreviewAttempt.current = attempt;
+			const clearAttempt = () => {
+				if (executionPreviewAttempt.current === attempt) executionPreviewAttempt.current = null;
+			};
+			const request = {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildExecutionPayload(casesToPreview, { includeProject: persistProject, operationScope })),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to preview execution");
-				throw new Error(errorMessage);
+				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.id },
+				body: JSON.stringify(payload),
+			};
+			const send = async () => {
+				try {
+					const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, request);
+					if (res.ok) return { data: await res.json() };
+					if (persistProject && [502, 503, 504].includes(res.status)) {
+						const rejection = await res
+							.clone()
+							.json()
+							.catch(() => null);
+						if (!rejection?.detail || rejection.detail.code === "execution_preview_unconfirmed") return null;
+					}
+					clearAttempt();
+					throw new Error(await parseApiError(res, "Failed to preview execution"));
+				} catch (error) {
+					if (persistProject && (error instanceof TypeError || error instanceof SyntaxError)) return null;
+					throw error;
+				}
+			};
+			let reply = await send();
+			if (!reply && isCurrent()) {
+				reply = await send();
 			}
-			const data = await res.json();
+			if (!isCurrent()) return null;
+			if (!reply) throw new Error("The execution preview could not be confirmed. Retry with the same target and test cases.");
+			const { data } = reply;
+			clearAttempt();
 			if (!data || typeof data !== "object" || Array.isArray(data)) {
 				throw new Error("Preview response did not include candidate data.");
 			}
-			if (!isProjectOperationCurrent(operationScope) || previewRequestId !== executionPreviewRequestIdRef.current) {
-				return null;
-			}
 			const normalizedPreview = storeExecutionPreview(data, { source: "live" });
+			setExecutionRunResult(null);
 			if (updateStatus) {
 				if (!normalizedPreview.isConsistent) {
 					const message = "Execution preview data was inconsistent. Preview again before running candidates.";
@@ -3231,20 +3266,20 @@ export default function App() {
 			}
 			if (persistProject) {
 				await refreshCurrentProject({ hydrate: false, operationScope });
-				if (!isProjectOperationCurrent(operationScope) || previewRequestId !== executionPreviewRequestIdRef.current) {
+				if (!isCurrent()) {
 					return null;
 				}
 			}
 			return normalizedPreview;
 		} catch (error) {
-			if (isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
+			if (isCurrent()) {
 				const message = `Execution preview failed: ${error.message}`;
 				setApplicationLiveStatus("");
 				setExecutionError(message);
 			}
 			return null;
 		} finally {
-			if (isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
+			if (isCurrent()) {
 				setIsPreviewingExecution(false);
 			}
 		}
@@ -3257,7 +3292,8 @@ export default function App() {
 	});
 
 	const runApprovedExecution = async () => {
-		if (executionNeedsResolution || isRunningExecution || isProjectOperationCurrent(executingScopeRef.current)) return;
+		if (executionNeedsResolution || isPreviewingExecution || isRunningExecution || isProjectOperationCurrent(executingScopeRef.current))
+			return;
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
 			return;

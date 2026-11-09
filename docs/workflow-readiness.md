@@ -20,9 +20,18 @@ target and its source, project revision and source test-case snapshot. Drafts ma
 be previewed, but Run requires current readiness and selected eligible candidates.
 Stored or older responses without readiness require a fresh preview.
 
+Project previews require an active, owned project, the current revision and
+the exact saved case array. The compact preview and its completed audit commit
+together under that revision. After an interrupted response, the workbench
+reuses the request ID. The server verifies that the preview is still current
+and the compiler returns the same evidence before returning the result again.
+This leaves the saved revision and usage unchanged. A prior preview remains
+visible during recovery, with Run disabled until a current preview is confirmed.
+
 A saved preview for the current approved test suite that consistently reports
 zero executable candidates leads to Reports. Test-case evidence can be exported
 for manual testing, including for saved suites that predate the Use Cases stage.
+Older previews with a recorded source or revision conflict prompt a fresh preview.
 The Reports navigation shows Complete for current approved evidence and Needs
 attention for draft or stale evidence, including after reload.
 
