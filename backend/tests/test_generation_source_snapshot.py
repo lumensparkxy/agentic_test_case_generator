@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse
 from app.routers import testcases as routes
 from app.routers.testcases import _append_project_generation_snapshots, _refinement_source_inputs
+from app.services.test_case_review_progress import GenerationReviewProgress
 from app.services.workflow_project_service import ProjectConflictError
 
 
@@ -95,10 +96,12 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(generate.call_args.kwargs["source_coverage_plan"], [p.model_dump(mode="json") for p in self.response.coverage_plan])
             self.assertEqual(generate.call_args.kwargs["source_requirement_analysis"], self.source.payload["requirement_analysis"])
+            self.assertIsInstance(generate.call_args.kwargs["review_progress"], GenerationReviewProgress)
             append.assert_called_once()
             self.assertEqual(append.call_args.kwargs["stage"], "test_cases")
             self.assertEqual(append.call_args.kwargs["source_snapshot_id"], self.source.snapshot_id)
             self.assertEqual(append.call_args.kwargs["base_project_revision"], 7)
+            self.assertEqual(append.call_args.kwargs["transaction_guard"], generate.call_args.kwargs["review_progress"].publish_on_commit)
             self.assertEqual(self.project, before)
 
             append.reset_mock()

@@ -15,12 +15,12 @@ from ..contracts.test_cases import TestCase
 from ..models import AuthUser
 from .audit_service import complete_workflow_run, start_workflow_run
 from .guidance_runtime import prepare_run
-from .guidance_service import guidance_scope
+from .guidance_service import guidance_scope, public_manifest
 from .orchestrator_service import _use_cases_human_approved
 from .requirement_scope import approved_generation_requirements
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
 from .test_case_review_progress import SavedReviewProgress
-from .workflow_project_service import ProjectConflictError, append_stage_snapshot, get_project, get_project_stage_snapshot
+from .workflow_project_service import ProjectConflictError, _serialize_value, append_stage_snapshot, get_project, get_project_stage_snapshot
 
 REVIEW_OPERATION = "test_cases.review"
 REVIEWABLE_OPERATIONS = {"impact.update.apply", "testcases.refine", "quality.feedback.apply"}
@@ -187,11 +187,19 @@ def _prepare_generated_review(suite, sources, requirements, context, actor, requ
         requirement_ids=[requirement.id for requirement in requirements],
         input_fingerprint=suite.snapshot_id,
     )
+    recorded_guidance = suite.metadata.get("guidance") or {}
     if manifest.project_inputs:
-        recorded_inputs = (suite.metadata.get("guidance") or {}).get("project_inputs")
+        recorded_inputs = recorded_guidance.get("project_inputs")
         current_inputs = manifest.project_inputs.model_dump(mode="json", exclude_none=True)
         if (recorded_inputs and current_inputs != recorded_inputs) or (not recorded_inputs and manifest.project_inputs.decisions):
             raise HTTPException(409, "Project decisions or sources changed after generation. Analyze their impact before reviewing.")
+    original_id = recorded_guidance.get("manifest_id")
+    if isinstance(original_id, str) and original_id:
+        # The request fingerprint differs between generation and review. Bind
+        # to the generation manifest only when all current guidance matches.
+        original = manifest.model_copy(update={"manifest_id": original_id})
+        if _serialize_value(public_manifest(original)) == recorded_guidance:
+            manifest = original
     return guidance_scope(manifest), context
 
 

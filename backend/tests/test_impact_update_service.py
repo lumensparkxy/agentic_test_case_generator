@@ -20,7 +20,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
-from app.models import AuthUser, EnrichInput, TestCase, TestStep
+from app.models import AuthUser, EnrichInput, GenerateTestCasesResponse, TestCase, TestStep
 from app.config import GenerationSettings, Settings
 from copy import deepcopy
 from fastapi import HTTPException
@@ -28,12 +28,14 @@ import httpx
 from app.agents import substantive_review
 from app.services import impact_update_service as service
 from app.services import test_case_suite_review as suite_review
+from app.routers.testcases import _append_project_generation_snapshots
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
-from app.services.guidance_service import current_guidance
+from app.services.guidance_service import current_guidance, guidance_scope
 from app.services.impact_application_state import ApplicationLease, now
 from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.requirement_scope import approved_generation_requirements
+from app.services.test_case_review_progress import GenerationReviewProgress
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 from test_substantive_review_groups import critic_output
 
@@ -1198,6 +1200,116 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertTrue(result.current_snapshots["test_cases"].approved)
         self.assertEqual(result.current_revision, project.current_revision + 1)
         self.assertNotIn(progress_path, self.store)
+
+    def _publish_generated_progress(self, project, response, progress, requirements, manifest):
+        with guidance_scope(manifest):
+            _append_project_generation_snapshots(
+                project_id=project.project_id,
+                response=response,
+                operation="testcases.generate",
+                actor=self.actor,
+                request_id="generation-request",
+                workflow_run_id="generation-run",
+                source_event_id="generation-event",
+                base_project_revision=project.current_revision,
+                source_requirements=requirements,
+                approved_use_case_snapshot_id=project.current_snapshots["use_cases"].snapshot_id,
+                review_progress=progress,
+            )
+        return get_project(project.project_id, actor=self.actor)
+
+    def test_first_saved_retry_reuses_published_generation_review_progress(self):
+        project, _ = self._generated_suite_pending_review()
+        requirements = approved_generation_requirements(project)
+        original = project.current_snapshots["test_cases"]
+        cases = [TestCase.model_validate(case) for case in original.payload["test_cases"]]
+        progress = GenerationReviewProgress()
+        prepare_run = suite_review.prepare_run
+        manifest = prepare_run("test_cases", self.actor, project.project_id, "generation", input_fingerprint="generation inputs")
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = Counter()
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            key = data["review_group"]["requirement_ids"][0]
+            calls[key] += 1
+            if outage and key == "REQ-004":
+                raise httpx.ReadTimeout("synthetic unavailable group during generation")
+            return json.dumps(output)
+
+        with self._mock_grouped_suite_review(critic) as settings:
+            with guidance_scope(manifest):
+                assessment = substantive_review.assess_delivered_suite(cases, requirements, None, settings=self.model_settings, progress=progress)
+            self.assertEqual(assessment["status"], "unknown")
+            self.assertEqual(len(progress.items), 3)
+            self.assertNotIn(progress_path, self.store)
+            response = GenerateTestCasesResponse.model_validate(
+                {
+                    **original.payload,
+                    "review": {**original.payload["review"], "blocking_issues": [assessment["reason"]]},
+                    "substantive_assessment": assessment,
+                }
+            )
+            pending = self._publish_generated_progress(project, response, progress, requirements, manifest)
+            draft = pending.current_snapshots["test_cases"]
+            self.assertTrue(draft.metadata["review_retry_available"])
+            self.assertEqual(set(self.store[progress_path]["items"]), set(progress.items))
+            self.assertNotIn("test_case_review_progress", pending.model_dump_json())
+            saved = deepcopy(self.store)
+            outage = False
+
+            for cause in (None, "model", "guidance", "legacy"):
+                with self.subTest(cause=cause):
+                    self.store.clear()
+                    self.store.update(deepcopy(saved))
+                    calls.clear()
+                    settings.return_value = self.model_settings.model_copy(update={"model_name": "new-model"}) if cause == "model" else self.model_settings
+                    if cause == "legacy":
+                        del self.store[progress_path]
+
+                    def review_guidance(*args, **kwargs):
+                        current = prepare_run(*args, **kwargs)
+                        self.assertNotEqual(current.manifest_id, manifest.manifest_id)
+                        return current.model_copy(update={"knowledge_revision": "changed"}) if cause == "guidance" else current
+
+                    with patch.object(suite_review, "prepare_run", side_effect=review_guidance):
+                        reviewed = self._review_saved_suite(pending)
+                    snapshot = reviewed.current_snapshots["test_cases"]
+                    expected = {"REQ-004": 1} if cause is None else {"REQ-001": 1, "REQ-004": 1, "REQ-007": 1, "REQ-010": 1}
+                    self.assertEqual(calls, expected)
+                    self.assertTrue(snapshot.approved)
+                    self.assertEqual(snapshot.source_snapshot_id, draft.snapshot_id)
+                    self.assertEqual(snapshot.payload["test_cases"], draft.payload["test_cases"])
+                    self.assertEqual(snapshot.payload["generation_evidence"], draft.payload["generation_evidence"])
+                    self.assertNotIn(progress_path, self.store)
+                    self.assertFalse(any(key.startswith(("test_case_sets/", "usage_events/")) for key in self.store))
+
+    def test_generation_review_progress_commits_only_with_an_eligible_current_draft(self):
+        project, _ = self._generated_suite_pending_review()
+        requirements = approved_generation_requirements(project)
+        draft = project.current_snapshots["test_cases"]
+        response = GenerateTestCasesResponse.model_validate(draft.payload)
+        progress = GenerationReviewProgress()
+        progress.load("reviewer-input-binding", ["verified-group"])
+        progress.save("verified-group", '{"input_hash":"validated-fixture"}')
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        saved = deepcopy(self.store)
+        self.transaction_client.fail_on_create_segment = "/snapshots/"
+        with self.assertRaises(HTTPException) as failed:
+            self._publish_generated_progress(project, response, progress, requirements, None)
+        self.assertEqual(failed.exception.status_code, 503)
+        self.assertEqual(self.store, saved)
+        self.transaction_client.fail_on_create_segment = None
+
+        approved = self._publish_generated_progress(project, response.model_copy(update={"approved": True}), progress, requirements, None)
+        self.assertTrue(approved.current_snapshots["test_cases"].approved)
+        self.assertNotIn(progress_path, self.store)
+        before_stale = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as stale:
+            self._publish_generated_progress(project, response, progress, requirements, None)
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertEqual(self.store, before_stale)
 
     def test_generated_suite_retry_reconstructs_selected_workbench_context(self):
         project, _ = self._generated_suite_pending_review()

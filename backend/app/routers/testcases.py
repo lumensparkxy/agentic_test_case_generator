@@ -19,6 +19,7 @@ from ..services.billing_service import enforce_billing_access, record_billing_co
 from ..services.orchestrator_service import _use_cases_human_approved
 from ..services.requirement_import_service import validate_generation_baseline
 from ..services.test_case_quality import case_source_hash
+from ..services.test_case_review_progress import GenerationReviewProgress
 from ..services.versioning_service import persist_test_case_versions
 from ..services.workflow_project_service import ProjectConflictError, append_stage_snapshot, get_project, project_error_to_http
 
@@ -196,6 +197,7 @@ def _append_project_generation_snapshots(
     source_requirements: list[Any] | None = None,
     source_context: Any = None,
     approved_use_case_snapshot_id: str | None = None,
+    review_progress: GenerationReviewProgress | None = None,
 ) -> None:
     if not project_id:
         return
@@ -273,6 +275,7 @@ def _append_project_generation_snapshots(
             approved=response.approved,
             source_snapshot_id=use_case_snapshot.snapshot_id,
             base_project_revision=base_project_revision if reuse_use_cases else None,
+            transaction_guard=review_progress.publish_on_commit if review_progress is not None and approved_use_case_snapshot_id is not None else None,
             title="Test cases updated",
             metadata={
                 "test_case_count": len(response.test_cases),
@@ -388,6 +391,7 @@ async def generate_test_cases_endpoint(
 ) -> GenerateTestCasesResponse:
     await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
     base_revision, approved_use_case_snapshot_id, source_inputs = await run_in_threadpool(_project_generation_source, payload, current_user)
+    review_progress = GenerationReviewProgress() if approved_use_case_snapshot_id is not None else None
     request_id = _get_request_id(request)
     billing_context = await run_in_threadpool(
         enforce_billing_access,
@@ -408,6 +412,7 @@ async def generate_test_cases_endpoint(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation="testcases.generate",
+            review_progress=review_progress,
             **source_inputs,
         )
         response = GenerateTestCasesResponse(**result)
@@ -464,6 +469,7 @@ async def generate_test_cases_endpoint(
             source_requirements=payload.requirements,
             source_context=payload.context,
             approved_use_case_snapshot_id=approved_use_case_snapshot_id,
+            review_progress=review_progress,
         )
         return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:

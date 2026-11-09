@@ -235,6 +235,10 @@ in one private Firestore record per project, capped at 768 KiB and eligible for
 Publishing the reviewed snapshot removes its progress in the same transaction.
 Groups beyond the storage cap can still complete in the current attempt.
 For a batched review, retry also revalidates and reuses the source inventory.
+Generation against an approved Use Cases snapshot can save that same private
+progress with an eligible outage-only draft. The draft and progress commit
+together. The first saved review can reuse it when the current inputs, reviewer
+and effective guidance match the original review.
 
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and

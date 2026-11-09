@@ -2698,6 +2698,7 @@ def generate_test_cases(
     source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
     *,
     max_parallel_workers: Optional[int] = None,
+    review_progress=None,
 ) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
@@ -2966,6 +2967,7 @@ def generate_test_cases(
         payload.context,
         settings=settings if not workflow.get("workflow_diagnostics", {}).get("used_fallback") else None,
         scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" else None,
+        progress=review_progress,
     )
     return apply_assessment(response, assessment)
 
