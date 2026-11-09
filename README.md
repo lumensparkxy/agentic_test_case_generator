@@ -140,6 +140,7 @@ Copy .env.example to .env and set values:
 - AUDIT_DEAD_LETTER_BACKEND (optional; defaults to local in-memory summaries; set to `firestore` for a durable Firestore sink)
 - AUDIT_DEAD_LETTER_COLLECTION (optional Firestore collection for sanitized dead-letter summaries; defaults to `audit_dead_letters`)
 - VITE_GOOGLE_CLIENT_ID (optional compatibility-mode Google client ID hint)
+- VITE_PROJECT_WORKSPACES_V2 (set to `true` at build time to show Inputs, Review, and Deliver. Defaults to false. See the [workspace route contract](docs/test-case-generator-2-continuation.md#workspace-and-route-contract).)
 - VITE_FIREBASE_API_KEY (required for frontend sign-in button)
 - VITE_FIREBASE_AUTH_DOMAIN (required for frontend sign-in button)
 - VITE_FIREBASE_PROJECT_ID (required for frontend sign-in button)

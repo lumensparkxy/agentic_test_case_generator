@@ -16,6 +16,36 @@ export const PROJECT_DESTINATIONS = Object.freeze({
 	REPORTS: "reports",
 });
 
+export const PROJECT_WORKSPACES = Object.freeze(
+	[
+		{
+			id: "inputs",
+			label: "Inputs",
+			sections: [
+				{ id: "sources", label: "Sources", destination: PROJECT_DESTINATIONS.REQUIREMENTS },
+				{ id: "context", label: "Context", destination: PROJECT_DESTINATIONS.CONTEXT },
+			],
+		},
+		{
+			id: "review",
+			label: "Review",
+			sections: [
+				{ id: "scope", label: "Scope", destination: PROJECT_DESTINATIONS.REQUIREMENTS },
+				{ id: "scenarios", label: "Scenarios", destination: PROJECT_DESTINATIONS.USE_CASES },
+				{ id: "tests", label: "Tests", destination: PROJECT_DESTINATIONS.TEST_CASES },
+			],
+		},
+		{
+			id: "deliver",
+			label: "Deliver",
+			sections: [
+				{ id: "export", label: "Export", destination: PROJECT_DESTINATIONS.REPORTS },
+				{ id: "browser-tests", label: "Browser tests", destination: PROJECT_DESTINATIONS.AUTOMATION },
+			],
+		},
+	].map((workspace) => Object.freeze({ ...workspace, sections: Object.freeze(workspace.sections.map(Object.freeze)) }))
+);
+
 const GLOBAL_PATH_BY_DESTINATION = Object.freeze({
 	[GLOBAL_DESTINATIONS.HOME]: "/",
 	[GLOBAL_DESTINATIONS.PROJECTS]: "/projects",
@@ -200,6 +230,20 @@ export function buildProjectPath(projectId, destination = PROJECT_DESTINATIONS.O
 	return segment ? `${projectRoot}/${segment}` : projectRoot;
 }
 
+export function buildProjectWorkspacePath(projectId, workspaceId, sectionId) {
+	const workspace = PROJECT_WORKSPACES.find((item) => item.id === workspaceId);
+	if (!workspace) {
+		throw new RangeError(`Unknown project workspace: ${workspaceId}`);
+	}
+	const section = sectionId === undefined ? workspace.sections[0] : workspace.sections.find((item) => item.id === sectionId);
+	if (!section) {
+		throw new RangeError(`Unknown section of project workspace ${workspaceId}: ${sectionId}`);
+	}
+
+	const path = `${buildProjectPath(projectId)}/${workspaceId}`;
+	return section === workspace.sections[0] ? path : `${path}/${section.id}`;
+}
+
 export function parseWorkflowRoute(pathname) {
 	const normalizedPathname = normalizePathname(pathname);
 	const globalDestination = Object.entries(GLOBAL_PATH_BY_DESTINATION).find(([, path]) => path === normalizedPathname)?.[0];
@@ -226,6 +270,21 @@ export function parseWorkflowRoute(pathname) {
 		return {
 			kind: "project",
 			destination: PROJECT_DESTINATIONS.OVERVIEW,
+			workspace: null,
+			section: null,
+			projectId,
+			pathname: normalizedPathname,
+		};
+	}
+
+	const workspace = PROJECT_WORKSPACES.find((item) => item.id === segments[2]);
+	const section = segments.length === 3 ? workspace?.sections[0] : workspace?.sections.slice(1).find((item) => item.id === segments[3]);
+	if (section && segments.length <= 4) {
+		return {
+			kind: "project",
+			destination: section.destination,
+			workspace: workspace.id,
+			section: section.id,
 			projectId,
 			pathname: normalizedPathname,
 		};
@@ -235,7 +294,17 @@ export function parseWorkflowRoute(pathname) {
 		([candidate, segment]) => candidate !== PROJECT_DESTINATIONS.OVERVIEW && segment === segments[2]
 	)?.[0];
 	if (segments.length === 3 && destination) {
-		return { kind: "project", destination, projectId, pathname: normalizedPathname };
+		// The first matching workspace owns each legacy path, including the shared requirements controller.
+		const legacyWorkspace = PROJECT_WORKSPACES.find((item) => item.sections.some((candidate) => candidate.destination === destination));
+		const legacySection = legacyWorkspace.sections.find((item) => item.destination === destination);
+		return {
+			kind: "project",
+			destination,
+			workspace: legacyWorkspace.id,
+			section: legacySection.id,
+			projectId,
+			pathname: normalizedPathname,
+		};
 	}
 
 	return {

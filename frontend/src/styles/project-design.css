@@ -1148,3 +1148,55 @@ select {
 	border-radius: 8px;
 	margin-bottom: 18px;
 }
+
+.workflow-shell.project-workspaces-v2 {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.project-workspace-navigation,
+.project-workspace-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 1rem;
+}
+
+.project-workspace-navigation {
+	min-width: 0;
+	padding: 0.5rem clamp(1rem, 3vw, 2rem);
+	background: var(--card-bg);
+	border-bottom: 1px solid var(--border-color);
+}
+
+.project-workspace-sections {
+	border-inline-start: 1px solid var(--border-color);
+	padding-inline-start: 0.75rem;
+}
+
+.project-workspace-meta {
+	margin-inline-start: auto;
+}
+
+.project-workspace-section {
+	display: inline-flex;
+	align-items: center;
+	min-height: 2rem;
+	padding: 0.25rem 0.65rem;
+	border-radius: var(--radius-md);
+	color: var(--text-main);
+	text-decoration: none;
+}
+
+.project-workspace-section:hover,
+.project-workspace-section[aria-current="page"] {
+	background: var(--primary-tonal);
+	color: var(--primary-hover);
+	text-decoration: underline;
+	text-underline-offset: 0.2em;
+}
+
+.project-workspace-counts {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: var(--font-body);
+}

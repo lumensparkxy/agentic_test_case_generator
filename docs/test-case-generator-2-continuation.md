@@ -31,11 +31,26 @@ drafts in their existing user/project/snapshot scopes. Resolve counts and
 decisions against one hydrated project revision. Opening a workspace can
 perform reads.
 
-P1 introduces the shell with a reversible frontend build flag, off by default
-for deployment. P2 separates source collection from scope decisions and unifies
+P1 introduces the shell with the frontend build flag
+`VITE_PROJECT_WORKSPACES_V2=true`, off by default. P2 separates source collection from scope decisions and unifies
 the intake. The legacy routes continue to read the same artifacts when the flag
 is off. Each new workspace route resolves to an existing workbench when the
 flag is off. Keep server admission checks active on both paths.
+
+| Workspace section | Workspace route suffix | Evidence alias |
+| --- | --- | --- |
+| Sources | `/inputs` | `/requirements` |
+| Context | `/inputs/context` | `/context` |
+| Scope | `/review` | `/requirements` with the combined intake/review view |
+| Scenarios | `/review/scenarios` | `/use-cases` |
+| Tests | `/review/tests` | `/test-cases` |
+| Export | `/deliver` | `/reports` |
+| Browser tests | `/deliver/browser-tests` | `/automation` |
+
+These suffixes follow `/projects/:projectId`. The project root still opens
+the overview via Project status. Roll back by rebuilding this compatible
+version with the flag off. Older builds released before the aliases were
+added cannot resolve the new suffixes.
 
 ## Continuation and recovery decisions
 
@@ -165,8 +180,12 @@ the corpus, measurement rules and thresholds for the paired comparison.
 
 ## Continuation state
 
-P0 pins the baseline and records the prospective gates. Next is P1 on the
-2.0 stack. The production queue identity and timeout policy remain
+P0 pins the baseline and records the prospective gates (commit `2327ab9`,
+[PR #450](https://github.com/lumensparkxy/agentic_test_case_generator/pull/450)).
+P1 adds opt-in navigation and compatible aliases under
+[#451](https://github.com/lumensparkxy/agentic_test_case_generator/issues/451).
+P2 can build on those routes to unify intake and split scope review from
+source setup. The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with
 [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354).

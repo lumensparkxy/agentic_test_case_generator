@@ -15,6 +15,7 @@ import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from ".
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
+import ProjectWorkspaceNavigation from "./components/layout/ProjectWorkspaceNavigation";
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -117,6 +118,8 @@ import {
 import { buildEmptyUsageSummary, getCurrentUserUsageSummary } from "./utils/usage";
 import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workflow";
 import "./styles/index.css";
+
+const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
 
 const EXPORT_API_PATHS = Object.freeze({
 	csv: API_CONTRACT_ENDPOINTS.exportCsv.path,
@@ -1580,7 +1583,9 @@ export default function App() {
 		identity: currentUser?.sub || "",
 	});
 	const previousWorkspaceRouteRef = useRef({ kind: route.kind, destination: route.destination });
-	const routeFocusKey = `${route.kind}:${route.projectId || ""}:${route.destination || ""}`;
+	const routeFocusKey = PROJECT_WORKSPACES_V2
+		? `${route.kind}:${route.projectId || ""}:${route.workspace || ""}:${route.section || route.destination || ""}`
+		: `${route.kind}:${route.projectId || ""}:${route.destination || ""}`;
 	const previousRouteFocusKeyRef = useRef(routeFocusKey);
 	const pendingRouteFocusRef = useRef(false);
 	const focusPendingRoute = useCallback((replacingFocusedLoader = false) => {
@@ -4306,11 +4311,18 @@ export default function App() {
 				: "blocked",
 	};
 
+	const savedArtifactCounts = {
+		requirements: projectSnapshots.requirements?.payload?.requirements?.length || 0,
+		scenarios: (projectSnapshots.use_cases?.payload?.coverage_plan || []).reduce((sum, group) => sum + (group.scenarios?.length || 0), 0),
+		testCases: persistedTestCaseCount,
+	};
 	const selectWorkflowTab = (nextTab) => {
 		const resolvedTab = typeof nextTab === "function" ? nextTab(activeTab) : nextTab;
 		setActiveTab(resolvedTab);
 		if (route.kind === "project" && route.projectId) {
-			navigate(buildProjectPath(route.projectId, getDestinationForLegacyTab(resolvedTab)));
+			const destination = getDestinationForLegacyTab(resolvedTab);
+			if (PROJECT_WORKSPACES_V2 && destination === route.destination) return;
+			navigate(buildProjectPath(route.projectId, destination));
 		}
 	};
 	const moveProjectStep = (direction) => {
@@ -4375,7 +4387,9 @@ export default function App() {
 		!isLoadingOrchestrator &&
 		orchestratorStatus?.project_revision === currentProjectRevision;
 	const { billingContactEmail, billingStatusItems, statusUsageItems, pilotAlert } = useBillingStatus(billingEntitlements, usageSummary);
-	const workflowShellClassName = ["workflow-shell", isWorkflowNavCollapsed ? "nav-collapsed" : ""].filter(Boolean).join(" ");
+	const workflowShellClassName = PROJECT_WORKSPACES_V2
+		? "workflow-shell project-workspaces-v2"
+		: `workflow-shell${isWorkflowNavCollapsed ? " nav-collapsed" : ""}`;
 	const currentAuthProviderLabel = activeAuthProvider ? getAuthProviderLabel(activeAuthProvider) : "";
 	const jiraSettings = {
 		jiraConnected,
@@ -4575,29 +4589,30 @@ export default function App() {
 					<ProjectLoadingPage projectId={route.projectId} />
 				) : (
 					<div className={workflowShellClassName}>
-						<WorkflowNavigationDrawer
-							tabs={tabs}
-							activeTab={activeProjectNavigationTab}
-							onTabChange={selectWorkflowTab}
-							statusByTabId={workflowNavStatusByTabId}
-							isCollapsed={isWorkflowNavCollapsed}
-							isCompact={isCompactWorkflowNavigation}
-							onToggleCollapsed={toggleWorkflowNavCollapsed}
-							onRequestClose={closeCompactWorkflowNavigation}
-						/>
+						{PROJECT_WORKSPACES_V2 ? (
+							<ProjectWorkspaceNavigation route={route} navigate={navigate} counts={savedArtifactCounts} />
+						) : (
+							<WorkflowNavigationDrawer
+								tabs={tabs}
+								activeTab={activeProjectNavigationTab}
+								onTabChange={selectWorkflowTab}
+								statusByTabId={workflowNavStatusByTabId}
+								isCollapsed={isWorkflowNavCollapsed}
+								isCompact={isCompactWorkflowNavigation}
+								onToggleCollapsed={toggleWorkflowNavCollapsed}
+								onRequestClose={closeCompactWorkflowNavigation}
+							/>
+						)}
 
 						{route.destination === "overview" ? (
 							<ProjectOverviewPage
 								project={currentProject}
 								status={orchestratorStatus}
-								counts={{
-									requirements: requirements.length,
-									scenarios: (currentProject.current_snapshots?.use_cases?.payload?.coverage_plan || []).reduce(
-										(sum, group) => sum + (group.scenarios?.length || 0),
-										0
-									),
-									testCases: testCases.length,
-								}}
+								counts={
+									PROJECT_WORKSPACES_V2
+										? savedArtifactCounts
+										: { ...savedArtifactCounts, requirements: requirements.length, testCases: testCases.length }
+								}
 								testCaseReview={testCaseReview}
 								testCasesNeedSetup={testCasesNeedSetup}
 								exportLocked={exportGateLocked}
