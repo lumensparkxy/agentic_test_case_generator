@@ -41,6 +41,17 @@ counts, warnings and an import ID. Standalone extraction without a project keeps
 its previous response. Older project clients receive HTTP 409 `import_review_required`
 before extraction; release API and UI together.
 
+File extraction and feedback refinement save the pending preview, completed
+workflow, usage and applicable consumption in one transaction. A stale revision
+or failed publication preserves the baseline and produces no extraction charge.
+The workbench retries an interrupted extraction once with the same upload or
+feedback and request ID. If the result is still uncertain, a retry with the
+same inputs in the open workbench keeps that ID. API callers can resend the
+original request with the same `X-Request-ID` while the preview is pending at
+the captured revision.
+Reusing the ID with different inputs, or after applying, cancelling or
+superseding the preview, returns HTTP 409.
+
 Project routes:
 
 - `GET /projects/{project_id}/requirement-imports`: pending previews, newest first.

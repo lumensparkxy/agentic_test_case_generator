@@ -10,13 +10,16 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import AuthUser, Requirement, RequirementsWorkflowResponse
-from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementReviewsInput
+from app.contracts.billing import BillingAccount, BillingUserProfile
+from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementImportPreview, RequirementReviewsInput
+from app.routers import requirements as requirement_routes
+from app.services.billing_service import BillingAccessContext
 from app.services.requirement_reconciliation import canonical_requirements, build_preview, reconcile
 from app.services.requirement_source_evidence import bind_document_evidence
 from app.services import requirement_import_service as service
 from app.agents.requirement_matching_agent import suggest_matches
 from app.main import app, get_current_user
-from test_use_case_review_service import FakeFirestoreClient, _run_transaction
+from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
 
 NOW = datetime(2026, 9, 12, tzinfo=timezone.utc)
 ACTOR = AuthUser(sub="owner", name="Owner")
@@ -496,10 +499,13 @@ class ImportPersistenceTests(unittest.TestCase):
                 with self.subTest(path=url, extractor=extractor), ExitStack() as stack:
                     prefix = f"app.routers.{module}"
                     stack.enter_context(patch("app.services.guidance_dependency.prepare_run", return_value=None))
-                    for function in ["enforce_billing_access", "start_workflow_run", "_log_success", "_record_billing_consumption_safe"]:
+                    for function in ["enforce_billing_access", "_log_success", "_record_billing_consumption_safe"]:
                         stack.enter_context(patch(f"{prefix}.{function}", return_value=None))
+                    stack.enter_context(patch(f"{prefix}.start_workflow_run", return_value="test-intake"))
                     if module != "requirements":
                         stack.enter_context(patch(f"{prefix}.project_for", return_value=None))
+                    else:
+                        stack.enter_context(patch(f"{prefix}.record_billing_consumption"))
                     stack.enter_context(patch(f"{prefix}.{extractor}", return_value=workflow))
                     persist = stack.enter_context(patch(f"{prefix}.persist_requirement_versions"))
                     response = client.post(url, **kwargs)
@@ -509,6 +515,162 @@ class ImportPersistenceTests(unittest.TestCase):
                     self.assertEqual(len(response.json()["candidates"]), 2)
                     self.assertEqual(self.store[f"qa_projects/{PID}"]["current_revision"], 7)
                     persist.assert_not_called()
+
+    def extraction_client(self):
+        account = BillingAccount(account_id="account", scope_key=f"user:{ACTOR.sub}", owner_user_id=ACTOR.sub, plan_tier="premium", balance_units=100)
+        self.store["billing_accounts/account"] = account.model_dump()
+        app.dependency_overrides[get_current_user] = lambda: ACTOR
+        self.addCleanup(app.dependency_overrides.clear)
+        stack = self.enterContext(ExitStack())
+        stack.enter_context(patch("app.services.guidance_dependency.prepare_run", return_value=None))
+        stack.enter_context(
+            patch("app.services.audit_repository.get_optional_firestore_collection", side_effect=lambda name, **kwargs: self.client.collection(name))
+        )
+        stack.enter_context(patch("app.services.billing_service.calculate_units_for_quantity", side_effect=lambda *, billing_key, quantity: quantity * 4))
+        billing = stack.enter_context(
+            patch.object(
+                requirement_routes,
+                "enforce_billing_access",
+                return_value=BillingAccessContext(
+                    account=account, profile=BillingUserProfile(user_id=ACTOR.sub), pricing_entry=None, allocation=None, shadow_mode=False
+                ),
+            )
+        )
+        workflow = {
+            "requirements": [c.requirement for c in self.p.candidates],
+            "approved": True,
+            "review": {"approved": True},
+            "iteration_history": [],
+            "coverage_metrics": {},
+        }
+        return stack.enter_context(TestClient(app)), billing, workflow
+
+    def _extract(self, client, request_id, *, name="a.md", content=b"Original file", data=None, extra_headers=None):
+        return client.post(
+            "/requirements/parse",
+            data={"project_id": PID, "base_project_revision": "7", "import_mode": "review", **(data or {})},
+            headers={"X-Request-ID": request_id, **(extra_headers or {})},
+            files={"file": (name, content, "text/markdown")},
+        )
+
+    def _rows(self, collection):
+        return [value for key, value in self.store.items() if key.startswith(collection + "/")]
+
+    def test_file_extraction_atomically_stages_and_replays_paid_preview(self):
+        client, billing, workflow = self.extraction_client()
+        stage = requirement_routes.stage_extraction
+
+        def lose_commit_response(*args, **kwargs):
+            stage(*args, **kwargs)
+            raise RuntimeError("Synthetic lost transaction reply")
+
+        with (
+            patch.object(requirement_routes, "extract_requirements", return_value=workflow) as model,
+            patch.object(requirement_routes, "stage_extraction", side_effect=lose_commit_response),
+        ):
+            first = self._extract(client, "file-extraction")
+            self.assertEqual(first.status_code, 200, first.text)
+            replay = self._extract(client, "file-extraction")
+            self.assertEqual(replay.json(), first.json())
+            for changed in (
+                {"content": b"Different file"},
+                {"name": "b.md"},
+                {"data": {"workflow_settings": '{"approval_threshold": 99}'}},
+                {"extra_headers": {"X-Knowledge-Bypass": "true"}},
+            ):
+                with self.subTest(changed=changed):
+                    self.assertEqual(self._extract(client, "file-extraction", **changed).status_code, 409)
+        model.assert_called_once()
+        billing.assert_called_once()
+        self.assertEqual(self.store[f"qa_projects/{PID}"]["current_revision"], 7)
+        preview_id = first.json()["import_id"]
+        staged = self.repo.read(PID, preview_id, ACTOR)
+        [usage] = self._rows("usage_events")
+        [consumption] = self._rows("billing_consumption")
+        [ledger] = self._rows("billing_wallet_ledger")
+        [run] = self._rows("workflow_runs")
+        self.assertEqual(staged["extraction"]["source_event_id"], usage["event_id"])
+        self.assertEqual(staged["extraction"]["workflow_run_id"], run["run_id"])
+        self.assertEqual({usage["metadata"]["import_id"], consumption["metadata"]["import_id"], run["result"]["import_id"]}, {preview_id})
+        self.assertEqual((usage["status"], usage["quantity"], run["status"]), ("completed", 2, "completed"))
+        self.assertEqual(
+            (consumption["source_event_id"], ledger["units_delta"], self.store["billing_accounts/account"]["balance_units"]), (usage["event_id"], -8, 92)
+        )
+        self.repo.apply(PID, preview_id, ACTOR, choices(RequirementImportPreview.model_validate(first.json())), "apply-extraction")
+        self.assertEqual(self._extract(client, "file-extraction").status_code, 409)
+        self.assertEqual(len(self._rows("billing_consumption")), 1)
+
+    def test_feedback_refinement_recovers_pending_preview_and_rejects_cancelled_or_changed_request(self):
+        client, billing, workflow = self.extraction_client()
+        data = {"feedback": "Add clearer acceptance criteria", "existing_requirements": "[]"}
+        with patch.object(requirement_routes, "refine_requirements", return_value=workflow) as model:
+            original = self._extract(client, "feedback-1", data=data)
+            self.assertEqual(original.status_code, 200, original.text)
+            self.assertEqual(self._extract(client, "feedback-1", data=data).json(), original.json())
+            self.assertEqual(self._extract(client, "feedback-1", data={**data, "feedback": "Different request"}).status_code, 409)
+            self.repo.cancel(PID, original.json()["import_id"], ACTOR)
+            self.assertEqual(self._extract(client, "feedback-1", data=data).status_code, 409)
+        model.assert_called_once()
+        billing.assert_called_once()
+        [usage] = self._rows("usage_events")
+        [consumption] = self._rows("billing_consumption")
+        self.assertEqual((usage["event_type"], usage["quantity"]), ("requirements.refined", 2))
+        self.assertEqual(consumption["source_event_id"], usage["event_id"])
+
+    def test_unconfirmed_extraction_preserves_completed_audit_until_exact_retry(self):
+        client, billing, workflow = self.extraction_client()
+        stage = requirement_routes.stage_extraction
+
+        def lose_commit_response(*args, **kwargs):
+            stage(*args, **kwargs)
+            raise RuntimeError("Synthetic lost transaction reply")
+
+        with patch.object(requirement_routes, "extract_requirements", return_value=workflow) as model:
+            with (
+                patch.object(requirement_routes, "stage_extraction", side_effect=lose_commit_response),
+                patch.object(service.RequirementImportRepository, "find_extraction", side_effect=[None, RuntimeError("Receipt read failed")]),
+            ):
+                unavailable = self._extract(client, "unconfirmed-file")
+            self.assertEqual(unavailable.status_code, 503)
+            self.assertEqual(unavailable.json()["detail"]["code"], "requirement_extraction_unconfirmed")
+            replay = self._extract(client, "unconfirmed-file")
+            self.assertEqual(replay.status_code, 200, replay.text)
+        model.assert_called_once()
+        billing.assert_called_once()
+        self.assertEqual([row["status"] for row in self._rows("usage_events")], ["completed"])
+        self.assertEqual([row["status"] for row in self._rows("workflow_runs")], ["completed"])
+
+    def test_preview_write_failure_and_stale_extraction_do_not_publish_or_charge(self):
+        client, _, workflow = self.extraction_client()
+        project_path = f"qa_projects/{PID}"
+        prior = deepcopy(self.store)
+        create = FakeTransaction.create
+        staged = []
+
+        def reject_preview(transaction, document, payload):
+            if "/requirement_imports/" in document.path:
+                staged.extend(ref.path.split("/")[0] for _, ref, _ in transaction.pending)
+                raise RuntimeError("Synthetic preview write failure")
+            return create(transaction, document, payload)
+
+        with patch.object(requirement_routes, "extract_requirements", return_value=workflow), patch.object(FakeTransaction, "create", reject_preview):
+            failed = self._extract(client, "failed-file")
+        self.assertEqual(failed.status_code, 503, failed.text)
+        self.assertTrue({"usage_events", "workflow_runs", "billing_wallet_ledger"} <= set(staged))
+
+        def revise(*args, **kwargs):
+            self.store[project_path]["current_revision"] += 1
+            return workflow
+
+        with patch.object(requirement_routes, "extract_requirements", side_effect=revise):
+            stale = self._extract(client, "stale-file")
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(self._rows("billing_consumption"), [])
+        self.assertEqual(self._rows("billing_wallet_ledger"), [])
+        self.assertEqual(self.store["billing_accounts/account"], prior["billing_accounts/account"])
+        self.assertEqual(self._rows(f"{project_path}/requirement_imports"), [value for key, value in prior.items() if "/requirement_imports/" in key])
+        self.assertEqual([(event["status"], event["quantity"]) for event in self._rows("usage_events")], [("failed", 0), ("failed", 0)])
+        self.assertEqual([run["status"] for run in self._rows("workflow_runs")], ["failed", "failed"])
 
     def test_generation_rejects_retired_forged_and_stale_requirements(self):
         project = self.repo.apply(PID, self.p.import_id, ACTOR, choices(self.p), "first")

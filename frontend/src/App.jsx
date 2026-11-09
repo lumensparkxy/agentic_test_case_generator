@@ -11,7 +11,7 @@ import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import GenerationGuidance from "./components/knowledge/GenerationGuidance";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
-import { Badge, Disclosure, Surface } from "./components/ui/surfaces";
+import { Alert, Badge, Disclosure, Surface } from "./components/ui/surfaces";
 import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from "./components/ui/controls";
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
@@ -266,6 +266,7 @@ export default function App() {
 	const projectOperationUserRef = useRef("");
 	const workflowMainRef = useRef(null);
 	const requirementImportControl = useRef(null);
+	const requirementExtractionAttempt = useRef(null);
 	const requirementReviewHeading = useRef(null);
 	const [requirementSetup, setRequirementSetup] = useState(null);
 	const [requirementFocus, setRequirementFocus] = useState(null);
@@ -3075,39 +3076,85 @@ export default function App() {
 			return;
 		}
 		setIsParsing(true);
+		imports.setExtractionError("");
 		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
 		resetIntegrationSyncState();
 		try {
 			const formData = new FormData();
-			const requestId = createRequestId();
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
+			const feedback = withFeedback ? reqFeedback : "";
+			const existing = feedback ? JSON.stringify(requirements) : "";
+			const upload = requirementSourceMode === "file" ? sourceFile : null;
+			const fingerprint = JSON.stringify([
+				operationScope,
+				currentProjectRevision,
+				requirementSourceMode === "paste" ? pasteDraft.value : null,
+				workflowSettingsPayload,
+				feedback,
+				existing,
+			]);
+			const prior = requirementExtractionAttempt.current;
+			const attempt =
+				prior?.fingerprint === fingerprint && prior.file === upload ? prior : { fingerprint, file: upload, requestId: createRequestId() };
+			requirementExtractionAttempt.current = attempt;
+			const clearAttempt = () => {
+				if (requirementExtractionAttempt.current === attempt) requirementExtractionAttempt.current = null;
+			};
 			if (sourceFile) formData.append("file", sourceFile);
 			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
 			formData.append("project_id", operationScope.projectId);
 			formData.append("import_mode", "review");
 			if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
-			if (withFeedback && reqFeedback) {
-				formData.append("feedback", reqFeedback);
-				formData.append("existing_requirements", JSON.stringify(requirements));
+			if (feedback) {
+				formData.append("feedback", feedback);
+				formData.append("existing_requirements", existing);
 			}
-			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsParse.path, {
+			const options = {
 				method: "POST",
-				headers: { "X-Request-ID": requestId },
+				headers: { "X-Request-ID": attempt.requestId },
 				body: formData,
+			};
+			const send = async () => {
+				const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsParse.path, options);
+				return { res, data: res.ok ? await res.json() : null };
+			};
+			let reply = await send().catch((error) => {
+				if (error instanceof TypeError || error instanceof SyntaxError) return null;
+				throw error;
 			});
+			const unconfirmed = async (response) => {
+				if (![502, 503, 504].includes(response.status)) return false;
+				const data = await response
+					.clone()
+					.json()
+					.catch(() => null);
+				return !data?.detail || data.detail.code === "requirement_extraction_unconfirmed";
+			};
+			if (!reply || (await unconfirmed(reply.res))) {
+				if (!isProjectOperationCurrent(operationScope)) return;
+				reply = await send();
+			}
+			const { res, data } = reply;
 			if (!res.ok) {
+				if (await unconfirmed(res)) throw new Error("The requirements preview could not be confirmed. Retry with the same inputs.");
+				clearAttempt();
 				const errorMessage = await parseApiError(res, "Failed to parse requirements");
 				throw new Error(errorMessage);
 			}
-			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
 			imports.accept(data);
+			clearAttempt();
 			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
+				imports.setExtractionError(
+					error instanceof TypeError || error instanceof SyntaxError
+						? "The requirements preview could not be confirmed. Retry with the same inputs."
+						: error.message
+				);
 				setStatus(`Parse failed: ${error.message}`);
 			}
 		} finally {
@@ -4605,6 +4652,11 @@ export default function App() {
 												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
 												until you apply an update.
 											</p>
+											{imports.extractionError && (requirementSourceMode === "file" || requirementSourceMode === "paste") && (
+												<Alert tone="danger" role="alert">
+													{imports.extractionError}
+												</Alert>
+											)}
 											<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
 												{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
 													<label key={option.value} className={`choice-card ${requirementSourceMode === option.value ? "selected" : ""}`}>

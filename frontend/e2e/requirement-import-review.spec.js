@@ -42,6 +42,7 @@ async function setup(
 		candidates = incoming,
 		revision = 7,
 		failedApply = false,
+		extractionInterruption,
 		pendingOnLoad = false,
 		emptyBaseline = false,
 		sourceName = "TX-6",
@@ -116,10 +117,23 @@ async function setup(
 
 	await page.route(`**/projects/${ID}`, (route) => route.fulfill({ json: project }));
 	await page.route(`**/projects/${ID}/requirement-imports`, (route) => route.fulfill({ json: pending }));
+	const extractions = [];
 	await page.route("**/requirements/parse", (route) => {
-		expect(route.request().postData()).toContain('name="import_mode"');
-		expect(route.request().postData()).toContain("review");
+		const request = route.request();
+		const body = request.postData();
+		expect(body).toContain('name="import_mode"');
+		expect(body).toContain("review");
+		const boundary = request.headers()["content-type"].split("boundary=")[1];
+		extractions.push({ id: request.headers()["x-request-id"], body: body.replaceAll(boundary, "boundary") });
+		if (extractions.length === 1 && extractionInterruption === "failed")
+			return route.fulfill({ status: 503, json: { detail: "Project persistence is unavailable." } });
 		pending = [preview];
+		if (extractions.length === 1 && extractionInterruption === "transport") return route.abort("failed");
+		if (extractions.length <= 2 && extractionInterruption === "repeated-transport") return route.abort("failed");
+		if (extractions.length === 1 && extractionInterruption === "unconfirmed")
+			return route.fulfill({ status: 503, json: { detail: { code: "requirement_extraction_unconfirmed" } } });
+		if (extractions.length === 1 && extractionInterruption === "gateway")
+			return route.fulfill({ status: 504, contentType: "text/html", body: "<h1>Gateway timeout</h1>" });
 		return route.fulfill({ json: preview });
 	});
 	await page.route(`**/projects/${ID}/requirement-imports/import-1`, (route) => {
@@ -191,16 +205,19 @@ async function setup(
 	});
 	await page.goto(`/projects/${ID}/requirements`);
 	await expect(page.getByRole("heading", { name: "Requirement Review Workbench" })).toBeVisible();
-	return { applies, preview, guidanceReads, summaryReads, getProject: () => project };
+	return { applies, extractions, preview, guidanceReads, summaryReads, getProject: () => project };
 }
 
-async function stage(page) {
+async function startExtraction(page) {
 	const open = page.getByRole("button", { name: "Import requirements", exact: true });
 	if (await open.isVisible()) await open.click();
 	await page
 		.locator('input[type="file"]')
 		.setInputFiles({ name: "new.md", mimeType: "text/markdown", buffer: Buffer.from("Incoming requirements") });
 	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
+}
+async function stage(page) {
+	await startExtraction(page);
 	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
 	await expect(page.getByRole("heading", { name: "Upload Requirements", exact: true })).toBeHidden();
 }
@@ -211,6 +228,46 @@ const openRequirement = (page, id) =>
 		.click();
 const openIncoming = (page, text = incoming[0].requirement.text) =>
 	page.getByRole("button", { name: `Review incoming requirement: ${text}`, exact: true }).click();
+
+for (const interruption of ["transport", "unconfirmed", "gateway"]) {
+	test(
+		`recovers a ${interruption} extraction response with the same upload and request ID`,
+		{ tag: interruption === "transport" ? "@p1" : [] },
+		async ({ page }) => {
+			const state = await setup(page, { extractionInterruption: interruption });
+			await stage(page);
+			expect(state.extractions).toHaveLength(2);
+			expect(state.extractions[0].id).toBeTruthy();
+			expect(state.extractions[1]).toEqual(state.extractions[0]);
+			expect(state.applies).toHaveLength(0);
+			expect(state.getProject().current_revision).toBe(7);
+			expect(state.getProject().current_snapshots.requirements.payload.requirements).toHaveLength(8);
+		}
+	);
+}
+
+test("a rejected extraction shows an error and keeps the file available to retry", { tag: "@p1" }, async ({ page }) => {
+	const state = await setup(page, { extractionInterruption: "failed" });
+	await startExtraction(page);
+	await expect(page.getByRole("alert").filter({ hasText: "Project persistence is unavailable" })).toBeVisible();
+	expect(state.extractions).toHaveLength(1);
+	expect(state.applies).toHaveLength(0);
+	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
+	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+	expect(state.extractions).toHaveLength(2);
+	expect(state.extractions[1].id).not.toBe(state.extractions[0].id);
+});
+
+test("an uncertain extraction keeps the request ID when the user retries the same file", { tag: "@p1" }, async ({ page }) => {
+	const state = await setup(page, { extractionInterruption: "repeated-transport" });
+	await startExtraction(page);
+	await expect(page.getByRole("alert").filter({ hasText: "The requirements preview could not be confirmed" })).toBeVisible();
+	expect(state.extractions).toHaveLength(2);
+	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
+	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+	expect(state.extractions).toEqual(Array(3).fill(state.extractions[0]));
+	expect(state.applies).toHaveLength(0);
+});
 
 test("comparison displays verified original IDs and quotes before applying", async ({ page }) => {
 	await setup(page, {
