@@ -6,13 +6,17 @@ from google.genai import errors as genai_errors, types
 import httpx
 
 from app.agents.substantive_review import (
+    MAX_INPUT_BYTES,
     review_input,
+    review_prompt,
     validate_assessment,
     assess_delivered_suite,
     apply_assessment,
     assessment_tasks,
 )
+from app.contracts.guidance import GuidanceManifest, MemoryGuidance, SkillGuidance
 from app.models import Requirement, TestCase
+from app.services.guidance_service import guidance_scope
 
 
 def fixture(*, retry=True):
@@ -562,6 +566,123 @@ class SubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(review_input([versioned], [req], None)[1], digest)
         self.assertNotEqual(review_input([case], [req], {"notes": "contradictory policy"})[1], digest)
         self.assertNotEqual(review_input([case.model_copy(update={"title": "changed"})], [req], None)[1], digest)
+
+    def test_compact_prompt_keeps_behavior_and_exact_input_binding(self):
+        req, case, _, _, _ = fixture(retry=False)
+        case = case.model_copy(
+            update={
+                "generation_source": "model",
+                "generation_pass_id": "opaque-pass",
+                "source_shard_id": "opaque-shard",
+                "source_refs": ["ART-001"],
+                "scenario_refs": ["SCN-001"],
+                "test_data": '{"optionalAttendee":null,"attendees":0}',
+            }
+        )
+        scope = [{"requirement_id": req.id, "scenarios": [{"id": "SCN-001", "must_have": False, "objective": "Verify the saved identifier."}]}]
+        context = {
+            "requirements": [req.model_dump(mode="json")],
+            "notes": "Retain the ID after refresh.",
+            "grounded_context": {"ui_elements": [{"source_id": "ART-001", "name": "Room", "select_options": [], "checkbox_available": False}]},
+        }
+        guidance = GuidanceManifest(
+            manifest_id="guidance-1",
+            stage="test_cases",
+            model="fixture",
+            skills=(
+                SkillGuidance(id="skill", version="1", stage="test_cases", description="Method", content_hash="hash", instructions="Check the final state."),
+            ),
+            memories=(MemoryGuidance(id="memory", revision=0, scope="project", text="Existing fixture has one booking.", source="fixture", reason="Scoped"),),
+        )
+        with guidance_scope(guidance):
+            data, digest, encoded = review_input([case], [req], context, scope_plan=scope)
+            prompt = review_prompt(data, digest)
+            projected = json.loads(prompt.rsplit("\nDATA:\n", 1)[1])
+            self.assertIn(digest, prompt)
+            self.assertEqual(projected["requirements"][0]["text"], req.text)
+            self.assertEqual(projected["context"]["grounded_context"], context["grounded_context"])
+            self.assertNotIn("requirements", projected["context"])
+            self.assertEqual(projected["selected_scenarios"], scope)
+            self.assertEqual(projected["test_cases"][0]["steps"][0], case.steps[0].model_dump(exclude_none=True))
+            self.assertEqual(projected["test_cases"][0]["test_data"], case.test_data)
+            self.assertEqual(projected["test_cases"][0]["source_refs"], ["ART-001"])
+            self.assertEqual(projected["test_cases"][0]["scenario_refs"], ["SCN-001"])
+            self.assertNotIn("generation_source", projected["test_cases"][0])
+            self.assertNotIn("opaque-pass", prompt)
+            self.assertNotIn("opaque-shard", prompt)
+            self.assertNotIn("guidance_manifest", projected)
+            self.assertEqual(projected["applied_guidance"]["manifest_id"], "guidance-1")
+            self.assertEqual(projected["applied_guidance"]["skills"][0]["instructions"], "Check the final state.")
+            self.assertEqual(projected["applied_guidance"]["memories"][0]["text"], "Existing fixture has one booking.")
+            self.assertEqual(projected["applied_guidance"]["memories"][0]["revision"], 0)
+            self.assertEqual(json.loads(encoded), data)
+            self.assertEqual(data["test_cases"][0]["generation_pass_id"], "opaque-pass")
+
+            context["requirements"] = [{**context["requirements"][0], "text": "Different Context requirement."}]
+            changed, changed_digest, _ = review_input([case], [req], context, scope_plan=scope)
+            retained = json.loads(review_prompt(changed, changed_digest).rsplit("\nDATA:\n", 1)[1])
+            self.assertEqual(retained["context"]["requirements"][0]["text"], "Different Context requirement.")
+            self.assertNotEqual(changed_digest, digest)
+
+    def test_200_case_prompt_fits_and_requires_all_case_citations(self):
+        req, base, _, _, output = fixture(retry=False)
+        cases = [
+            base.model_copy(
+                update={
+                    "id": f"TC-{index:03d}",
+                    "description": "Capture saved receipt and exact IDs. " * 52,
+                    "generation_source": "model",
+                    "generation_pass_id": "39cb139b-7760-4a22-8286-667ad29fc4d9",
+                    "source_shard_id": "test-case-shard-01",
+                }
+            )
+            for index in range(1, 201)
+        ]
+        context = {"requirements": [req.model_dump(mode="json")]}
+        data, digest, encoded = review_input(cases, [req], context)
+        self.assertGreater(len(encoded.encode("utf-8")), MAX_INPUT_BYTES)
+        self.assertLessEqual(len(review_prompt(data, digest).encode("utf-8")), MAX_INPUT_BYTES)
+        output["input_hash"] = digest
+        output["obligations"][0]["evidence"][0]["test_case_id"] = cases[0].id
+        output["case_grounding"] = [{"test_case_id": case.id, "reason": "Grounded fixture", "prerequisites": []} for case in cases]
+        with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)) as critic:
+            reviewed = assess_delivered_suite(cases, [req], context, settings=object())
+            self.assertEqual(reviewed["status"], "assessed_complete")
+            self.assertEqual(len(reviewed["case_grounding"]), len(cases))
+            sent = json.loads(critic.call_args.args[1].rsplit("\nDATA:\n", 1)[1])
+            self.assertEqual([row["id"] for row in sent["test_cases"]], [case.id for case in cases])
+            output["case_grounding"].pop()
+            critic.return_value = json.dumps(output)
+            incomplete = assess_delivered_suite(cases, [req], context, settings=object())
+            self.assertEqual(incomplete["status"], "unknown")
+            self.assertEqual(incomplete["diagnostics"]["validation_error"], "incomplete_case_review")
+
+    def test_prompt_budget_counts_utf8_and_repair_instructions(self):
+        req, case, _, _, _ = fixture(retry=False)
+        context = {"notes": "Check pièce 雪 after reload." * 40}
+        data, digest, _ = review_input([case], [req], context)
+        prompt = review_prompt(data, digest)
+        byte_count = len(prompt.encode("utf-8"))
+        self.assertGreater(byte_count, len(prompt))
+        with (
+            patch("app.agents.substantive_review._call_critic", return_value="not JSON") as critic,
+            patch("app.agents.substantive_review.MAX_INPUT_BYTES", len(prompt)),
+        ):
+            oversized = assess_delivered_suite([case], [req], context, settings=object())
+            critic.assert_not_called()
+        self.assertEqual(oversized["status"], "unknown")
+        self.assertEqual(oversized["diagnostics"]["prompt_bytes"], byte_count)
+        self.assertEqual(oversized["diagnostics"]["attempt_count"], 0)
+        with (
+            patch("app.agents.substantive_review._call_critic", return_value="not JSON") as critic,
+            patch("app.agents.substantive_review.MAX_INPUT_BYTES", byte_count),
+        ):
+            retry_oversized = assess_delivered_suite([case], [req], context, settings=object())
+            critic.assert_called_once()
+        self.assertEqual(retry_oversized["status"], "unknown")
+        self.assertEqual(retry_oversized["diagnostics"]["failure_reason"], "review_input_too_large")
+        self.assertEqual(retry_oversized["diagnostics"]["first_validation_error"], "malformed_json")
+        self.assertGreater(retry_oversized["diagnostics"]["prompt_bytes"], byte_count)
 
 
 class LiteralSourceTests(unittest.IsolatedAsyncioTestCase):

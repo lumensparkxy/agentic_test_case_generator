@@ -25,6 +25,7 @@ RUBRIC = "delivered_business_coverage_v6"
 MAX_INPUT_BYTES = 512_000
 ASSESSMENT_BUDGET_SECONDS = 180
 ASSESSMENT_ATTEMPT_SECONDS = 120
+_CASE_GENERATION_FIELDS = {"generation_source", "generation_pass_id", "source_shard_id"}
 _RECORD_CREATION = r"(?:booking|reservation|record|order|submission|transaction|entry)"
 _NO_NEW_RECORD = re.compile(
     rf"\b(?:creat(?:e[sd]?|ing)|sav(?:e[sd]?|ing)) no (?:(?:new|additional) )?{_RECORD_CREATION}\b"
@@ -121,6 +122,29 @@ def review_input(cases, requirements, context, *, scope_plan=None):
     return data, sha256(encoded.encode()).hexdigest(), encoded
 
 
+def _without_null_fields(value):
+    if isinstance(value, dict):
+        return {key: _without_null_fields(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [_without_null_fields(item) for item in value]
+    return value
+
+
+def _critic_data(data):
+    # The provider sees behavioral evidence. The full canonical data stays
+    # bound to input_hash and is used for citation and regression validation.
+    projected = {
+        **data,
+        "test_cases": [{key: value for key, value in case.items() if key not in _CASE_GENERATION_FIELDS} for case in data["test_cases"]],
+    }
+    context = data["context"]
+    if context is not None and context.get("requirements") == data["requirements"]:
+        projected["context"] = {key: value for key, value in context.items() if key != "requirements"}
+    if data["applied_guidance"] is not None:
+        projected.pop("guidance_manifest")
+    return _without_null_fields(projected)
+
+
 def review_prompt(data, input_hash, correction=""):
     return (
         QUALITY_GOAL
@@ -140,7 +164,7 @@ Judge business design and runtime setup separately. If steps verify a sourced ru
 Copy input_hash exactly as {input_hash}. Split distinct triggers, numeric boundaries or outcomes into separate obligations instead of combining evidence from different cases. For any obligation use evidence from at most one case. A covered chain may cite standalone trigger steps with empty expected fields, and its final cited step must state the observable expected result. Use empty evidence for unmet/unknown when no relevant step exists, and empty prerequisites when all needed facts are grounded.
 {correction}
 DATA:
-{json.dumps(data, ensure_ascii=False)}
+{json.dumps(_critic_data(data), ensure_ascii=False, separators=(",", ":"))}
 """
     )
 
@@ -449,18 +473,28 @@ def _invalid_evidence_code(exc):
 
 
 def assess_delivered_suite(cases, requirements, context, *, settings=None, scope_plan=None):
-    data, input_hash, encoded = review_input(cases, requirements, context, scope_plan=scope_plan)
+    data, input_hash, _ = review_input(cases, requirements, context, scope_plan=scope_plan)
     if not cases or not requirements or settings is None:
         return unknown_assessment(data, input_hash, "No independent model assessment is available for this delivered suite.")
     budget = current_evaluation_limits.get().review_bytes or MAX_INPUT_BYTES
-    if len(encoded.encode()) > budget:
-        return unknown_assessment(data, input_hash, "Assessment input exceeds the bounded review size; split the scope for review.")
     deadline = monotonic() + ASSESSMENT_BUDGET_SECONDS
     prompt = review_prompt(data, input_hash)
     # Share one retry between transport recovery and a fresh, schema-bound review.
     repairable = {"malformed_json", "incomplete_model_output", "incoherent_case_evidence", "invalid_output_schema", "missing_observable_result"}
     first_validation_error = None
     for attempt in range(1, 3):
+        prompt_bytes = len(prompt.encode("utf-8"))
+        if prompt_bytes > budget:
+            result = unknown_assessment(data, input_hash, "Assessment input exceeds the bounded review size; split the scope for review.")
+            result["diagnostics"] = {
+                "attempt_count": attempt - 1,
+                "failure_reason": "review_input_too_large",
+                "prompt_bytes": prompt_bytes,
+                "prompt_byte_limit": budget,
+            }
+            if first_validation_error:
+                result["diagnostics"]["first_validation_error"] = first_validation_error
+            return result
         try:
             output = _call_critic(settings, prompt, timeout_seconds=min(ASSESSMENT_ATTEMPT_SECONDS, max(0.001, deadline - monotonic())))
             result = validate_assessment(output, data, input_hash)

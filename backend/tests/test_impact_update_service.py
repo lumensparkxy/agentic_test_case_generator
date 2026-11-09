@@ -1104,6 +1104,11 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 self._review_saved_suite(project)
             self.assertEqual(unavailable.exception.status_code, 503)
             self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            critic.return_value = {"status": "unknown", "diagnostics": {"failure_reason": "review_input_too_large"}}
+            with self.assertRaises(HTTPException) as oversized:
+                self._review_saved_suite(project)
+            self.assertEqual(oversized.exception.status_code, 422)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
 
             def concurrent_review(*args, **kwargs):
                 update_project(

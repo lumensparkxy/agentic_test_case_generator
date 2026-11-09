@@ -185,10 +185,18 @@ with a repair finding for the affected case.
 Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible
 ```
 
-The final review has one request, no HTTP retries, a 60-second HTTP timeout,
-160,000-byte input limit and 24,000-token output limit. Missing credentials,
-empty output, oversized inputs, malformed evidence or provider failure preserve
-cases but leave coverage `unknown`, unapproved and explicitly needing review.
+The independent review allows up to two requests within a 180-second budget,
+with at most 120 seconds per request and no SDK retries. Each prompt, including
+review instructions and any correction, must fit within 512,000 UTF-8 bytes.
+The output limit is 24,000 tokens. The prompt keeps every case and its behavioral
+evidence, omitting duplicate Context requirements, redundant guidance metadata,
+null fields and generation bookkeeping. Citations and regression checks use the
+full input and its hash.
+
+Missing credentials, empty output, oversized inputs, malformed evidence or
+provider failure preserve cases but leave coverage `unknown`, unapproved and
+explicitly needing review. Saved-suite review reports an input limit separately
+from a provider outage.
 This adds a bounded model call to generation/refinement; it does not enable held
 guidance. The review never upgrades another failed quality or completeness gate.
 

@@ -104,6 +104,8 @@ def _review_payload(payload, requirements, plans, analysis, context):
         raise HTTPException(503, "Independent review is unavailable. The saved suite is unchanged.") from exc
     assessment = assess_delivered_suite(concrete, requirements, context, settings=settings)
     if assessment.get("model_status", assessment["status"]) == "unknown":
+        if (assessment.get("diagnostics") or {}).get("failure_reason") == "review_input_too_large":
+            raise HTTPException(422, "The saved suite exceeds the independent review input limit. The saved cases are unchanged.")
         raise HTTPException(503, "Independent review is unavailable. The saved suite is unchanged. Try review again.")
     reviewed = apply_assessment(
         {
