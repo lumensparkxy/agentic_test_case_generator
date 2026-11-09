@@ -1,4 +1,4 @@
-from ..services.scoped_refinement import prepare_scoped_refinement, merge_scoped_refinement
+from ..services.scoped_refinement import bind_suite_refinement, merge_scoped_refinement, prepare_scoped_refinement, prepare_suite_refinement
 from ..services.knowledge_feedback import finish_generation, suggest_feedback
 from ..services.guidance_dependency import generation_guidance
 import json
@@ -131,12 +131,13 @@ def _incomplete_generation_message(response: GenerateTestCasesResponse) -> str:
     )
 
 
-def _refinement_source_inputs(project_id: str | None, actor: AuthUser, base_revision: int | None = None) -> dict[str, Any]:
+def _refinement_source_inputs(project_id: str | None, actor: AuthUser, base_revision: int | None = None, *, project=None) -> dict[str, Any]:
     if not project_id:
         return {}
-    project = get_project(project_id, actor=actor)
+    if project is None:
+        project = get_project(project_id, actor=actor)
     if base_revision is not None and project.current_revision != base_revision:
-        raise HTTPException(409, "The source suite changed. Reload before repairing selected tests.")
+        raise HTTPException(409, "The source suite changed. Reload it before refining tests.")
     snapshot = project.current_snapshots.get("use_cases")
     state = project.stage_state.get("use_cases")
     if not snapshot or not state or state.stale or state.current_snapshot_id != snapshot.snapshot_id or not snapshot.payload.get("coverage_plan"):
@@ -208,7 +209,7 @@ def _append_project_generation_snapshots(
     request_fingerprint: str | None = None,
     pending_writes=(),
     publication_guard=None,
-    repair_source=None,
+    refinement_source=None,
     changed_case_ids=None,
 ):
     if not project_id:
@@ -219,14 +220,14 @@ def _append_project_generation_snapshots(
         current_context_snapshot = current_project.current_snapshots.get("context")
         use_case_snapshot = current_project.current_snapshots.get("use_cases")
         use_case_state = getattr(current_project, "stage_state", {}).get("use_cases")
-        if (operation == "testcases.generate" or repair_source is not None) and current_project.status != "active":
+        if (operation == "testcases.generate" or refinement_source is not None) and current_project.status != "active":
             raise HTTPException(409, "Restore the project before publishing test cases.")
         if base_project_revision is not None and current_project.current_revision != base_project_revision:
             raise ProjectConflictError(current_project.current_revision)
-        if repair_source is not None:
+        if refinement_source is not None:
             suite_state = current_project.stage_state.get("test_cases")
-            if not suite_state or suite_state.stale or suite_state.current_snapshot_id != repair_source.snapshot_id:
-                raise HTTPException(409, "The source suite changed. Reload before repairing selected tests.")
+            if not suite_state or suite_state.stale or suite_state.current_snapshot_id != refinement_source.snapshot_id:
+                raise HTTPException(409, "The source suite changed. Reload it before refining tests.")
         current_plan_available = bool(
             use_case_snapshot
             and use_case_state
@@ -234,7 +235,7 @@ def _append_project_generation_snapshots(
             and use_case_state.current_snapshot_id == use_case_snapshot.snapshot_id
             and response.coverage_plan
         )
-        # Bound generation and selected repair keep the exact source plan
+        # Bound generation and refinement keep the exact source plan
         # verified before the model ran, including older sparse snapshots.
         if approved_use_case_snapshot_id is not None:
             if (
@@ -250,13 +251,10 @@ def _append_project_generation_snapshots(
             reuse_use_cases = False
             if current_plan_available:
                 saved_plan = use_case_snapshot.payload.get("coverage_plan") or []
-                if operation == "testcases.generate":
-                    try:
-                        reuse_use_cases = [RequirementCoveragePlan.model_validate(group) for group in saved_plan] == response.coverage_plan
-                    except TypeError, ValidationError:
-                        pass
-                else:
-                    reuse_use_cases = saved_plan == _model_payload(response.coverage_plan)
+                try:
+                    reuse_use_cases = [RequirementCoveragePlan.model_validate(group) for group in saved_plan] == response.coverage_plan
+                except TypeError, ValidationError:
+                    pass
 
         # Test Case review/analysis belongs to the downstream artifact. Reusing a
         # plan must retain its exact source assessment and human review record.
@@ -283,11 +281,9 @@ def _append_project_generation_snapshots(
                 review_progress.publish_on_commit(transaction, snapshot)
 
         case_payload = _test_case_project_payload(response)
-        if repair_source is not None:
-            case_payload["test_cases"] = [
-                case if case["id"] in changed_case_ids else original
-                for case, original in zip(case_payload["test_cases"], repair_source.payload["test_cases"], strict=True)
-            ]
+        if refinement_source is not None:
+            original = {case["id"]: case for case in refinement_source.payload["test_cases"]}
+            case_payload["test_cases"] = [case if case["id"] in changed_case_ids else original[case["id"]] for case in case_payload["test_cases"]]
         return append_stage_snapshot(
             project_id=project_id,
             stage="test_cases",
@@ -316,7 +312,7 @@ def _append_project_generation_snapshots(
                 "source_use_case_hashes": _scenario_hash_map(response.coverage_plan),
                 "source_context_hash": _content_hash(source_context) if source_context is not None else None,
                 "generation_request_fingerprint": request_fingerprint,
-                "source_test_cases_snapshot_id": repair_source.snapshot_id if repair_source is not None else None,
+                "source_test_cases_snapshot_id": refinement_source.snapshot_id if refinement_source is not None else None,
                 **context_selection,
             },
         )
@@ -446,18 +442,18 @@ def _publish_bound_suite(
     result_metadata,
     source_snapshot_id=None,
     progress=None,
-    repair_source=None,
+    refinement_source=None,
+    changed_case_ids=None,
 ):
     try:
         client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
     except RuntimeError as exc:
         raise project_error_to_http(exc) from exc
     pending_writes = []
-    repairing = repair_source is not None
-    changed_case_ids = set(response.scoped_refinement["changed_ids"]) if repairing else None
-    quantity = len(changed_case_ids) if repairing else len(response.test_cases)
+    refining = refinement_source is not None
+    quantity = result_metadata["test_cases_modified_count"] if refining else len(response.test_cases)
     event_id = record_usage_event(
-        event_type="testcases.refined" if repairing else "testcases.generated",
+        event_type="testcases.refined" if refining else "testcases.generated",
         billing_key=operation,
         quantity=quantity,
         unit="test_case",
@@ -471,12 +467,12 @@ def _publish_bound_suite(
     )
     response.test_cases = persist_test_case_versions(
         current_test_cases=response.test_cases
-        if repairing
+        if refining
         else [
             case.model_copy(update={"artifact_set_id": None, "artifact_item_id": None, "artifact_version_id": None, "artifact_version_number": None})
             for case in response.test_cases
         ],
-        previous_test_cases=payload.test_cases if repairing else None,
+        previous_test_cases=payload.test_cases if refining else None,
         actor=actor,
         request_id=request_id,
         workflow_run_id=run_id,
@@ -521,7 +517,7 @@ def _publish_bound_suite(
             request_fingerprint=fingerprint,
             pending_writes=pending_writes,
             publication_guard=bill,
-            repair_source=repair_source,
+            refinement_source=refinement_source,
             changed_case_ids=changed_case_ids,
         )
     except Exception:
@@ -670,14 +666,28 @@ async def refine_test_cases_endpoint(
 ) -> GenerateTestCasesResponse:
     request_id = _get_request_id(request)
     scoped = bool(payload.project_id and payload.selected_test_case_ids)
-    fingerprint = _content_hash(payload) if scoped else None
-    if scoped:
+    fingerprint = _content_hash(payload) if payload.project_id else None
+    if payload.project_id:
         receipt = await run_in_threadpool(_test_case_publication_receipt, payload.project_id, request_id, current_user, "testcases.refine")
         if receipt is not None:
             return _test_case_receipt_response(receipt, fingerprint)
     await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
-    source_inputs = await run_in_threadpool(_refinement_source_inputs, payload.project_id, current_user, payload.base_project_revision if scoped else None)
-    model_payload, model_sources, baseline, source_project = await run_in_threadpool(prepare_scoped_refinement, payload, source_inputs, current_user)
+    try:
+        if payload.project_id and not scoped:
+            payload, baseline, source_project = await run_in_threadpool(prepare_suite_refinement, payload, current_user)
+            source_inputs = _refinement_source_inputs(payload.project_id, current_user, payload.base_project_revision, project=source_project)
+            try:
+                saved_plan = [RequirementCoveragePlan.model_validate(group) for group in source_inputs["source_coverage_plan"]]
+            except (TypeError, ValidationError) as exc:
+                raise HTTPException(409, "Review the current Use Cases plan before refining the suite.") from exc
+            model_payload, model_sources = payload, source_inputs
+        else:
+            source_inputs = await run_in_threadpool(_refinement_source_inputs, payload.project_id, current_user, payload.base_project_revision)
+            model_payload, model_sources, baseline, source_project = await run_in_threadpool(prepare_scoped_refinement, payload, source_inputs, current_user)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
     billing_context = await run_in_threadpool(
         enforce_billing_access,
         current_user=current_user,
@@ -701,15 +711,24 @@ async def refine_test_cases_endpoint(
             **model_sources,
         )
         response = GenerateTestCasesResponse(**result)
-        if baseline is not None:
-            response = merge_scoped_refinement(response, baseline, payload.selected_test_case_ids, source_inputs)
-            payload = payload.model_copy(
-                update={
-                    "test_cases": baseline.test_cases,
-                    "requirements": source_project.current_snapshots["requirements"].payload.get("requirements", []),
-                    "context": model_payload.context,
-                }
-            )
+        if source_project is not None:
+            if scoped:
+                response = merge_scoped_refinement(response, baseline, payload.selected_test_case_ids, source_inputs)
+                payload = payload.model_copy(
+                    update={
+                        "test_cases": baseline.test_cases,
+                        "requirements": source_project.current_snapshots["requirements"].payload.get("requirements", []),
+                        "context": model_payload.context,
+                    }
+                )
+                changed_case_ids = set(response.scoped_refinement["changed_ids"])
+                modified_count = response.scoped_refinement["changed"]
+            else:
+                if response.generation_tasks:
+                    raise HTTPException(422, _incomplete_generation_message(response))
+                if response.coverage_plan != saved_plan:
+                    raise HTTPException(409, "Refined Test Cases did not match the saved Use Cases plan. Reload and retry.")
+                changed_case_ids, modified_count = bind_suite_refinement(response, baseline)
             response, own_publication = await run_in_threadpool(
                 _publish_bound_suite,
                 payload,
@@ -722,9 +741,10 @@ async def refine_test_cases_endpoint(
                 billing_context=billing_context,
                 base_revision=payload.base_project_revision,
                 source_snapshot_id=source_project.current_snapshots["use_cases"].snapshot_id,
-                repair_source=source_project.current_snapshots["test_cases"],
+                refinement_source=source_project.current_snapshots["test_cases"],
+                changed_case_ids=changed_case_ids,
                 result_metadata={
-                    "test_cases_modified_count": response.scoped_refinement["changed"],
+                    "test_cases_modified_count": modified_count,
                     "test_cases_total": len(response.test_cases),
                     "approved": response.approved,
                 },
@@ -733,10 +753,6 @@ async def refine_test_cases_endpoint(
             if own_publication:
                 response.knowledge_suggestion = suggest_feedback(current_user, payload.project_id, "test_cases", payload.feedback, request_id)
             return response
-        if response.generation_tasks and payload.project_id and baseline is None:
-            existing = await run_in_threadpool(get_project, payload.project_id, actor=current_user)
-            if existing.current_snapshots.get("test_cases"):
-                raise HTTPException(422, _incomplete_generation_message(response))
         modified_count = _count_snapshot_changes(
             _test_case_snapshot(payload.test_cases),
             _test_case_snapshot(response.test_cases),
@@ -776,18 +792,6 @@ async def refine_test_cases_endpoint(
             source_event_id=event_id,
             operation="testcases.refine",
             approved=response.approved,
-        )
-        _append_project_generation_snapshots(
-            project_id=payload.project_id,
-            response=response,
-            operation="testcases.refine",
-            actor=current_user,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=event_id,
-            base_project_revision=payload.base_project_revision,
-            source_requirements=payload.requirements,
-            source_context=payload.context,
         )
         return finish_generation(response, current_user, payload.project_id, "test_cases", payload.feedback, request_id)
     except Exception as exc:

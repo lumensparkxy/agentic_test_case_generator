@@ -77,6 +77,35 @@ async function open(page, options = {}) {
 const panel = (page) => page.getByRole("region", { name: "Improve test quality" });
 const apply = (page) => panel(page).getByRole("button", { name: "Apply selected fixes", exact: true });
 
+test("recovers a lost suite-wide improvement response with the same request ID", { tag: "@p1" }, async ({ page }) => {
+	const { api, project } = await open(page);
+	const attempts = [];
+	const changedCase = { ...cases[1], title: "Check the saved confirmation" };
+	const payload = { ...project.current_snapshots.test_cases.payload, test_cases: [cases[0], changedCase] };
+	await page.route("**/testcases/refine", async (route) => {
+		const request = route.request();
+		attempts.push({ id: request.headers()["x-request-id"], body: request.postDataJSON() });
+		if (attempts.length === 1) {
+			const saved = structuredClone(project);
+			saved.current_revision++;
+			saved.current_snapshots.test_cases = { ...saved.current_snapshots.test_cases, snapshot_id: "cases-v2", payload };
+			saved.stage_state.test_cases.current_snapshot_id = "cases-v2";
+			api.setProject(saved);
+			return route.abort("failed");
+		}
+		await route.fulfill({ json: payload });
+	});
+	await panel(page).getByRole("checkbox", { name: issue, exact: true }).check();
+	await apply(page).click();
+	await expect.poll(() => attempts.length).toBe(2);
+	expect(attempts[0].id).toBeTruthy();
+	expect(attempts[0].body.selected_test_case_ids).toEqual([]);
+	expect(attempts[1]).toEqual(attempts[0]);
+	await expect(page.getByRole("button", { name: "Open QA project menu" })).toContainText(`revision ${project.current_revision + 1}`);
+	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
+	await expect(page.getByRole("button", { name: new RegExp(changedCase.title) })).toBeVisible();
+});
+
 const mixedGroups = [
 	{ input_hash: "group-1", status: "incomplete", design_status: "incomplete", requirement_ids: ["REQ-101"], case_ids: ["TC-001"] },
 	{ input_hash: "group-2", status: "unknown", requirement_ids: ["REQ-102"], case_ids: ["TC-002"], failure_reason: "provider_unavailable" },

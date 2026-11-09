@@ -154,7 +154,7 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
                 for name in ("validate_generation_baseline", "enforce_billing_access", "start_workflow_run", "_log_failure"):
                     stack.enter_context(patch.object(routes, name))
                 stack.enter_context(patch.object(routes, "_test_case_publication_receipt", return_value=None))
-                stack.enter_context(patch.object(routes, "_refinement_source_inputs", return_value={}))
+                stack.enter_context(patch.object(routes, "_refinement_source_inputs", return_value={"source_coverage_plan": []}))
                 stack.enter_context(
                     patch.object(
                         routes,
@@ -165,13 +165,14 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
                         },
                     )
                 )
-                stack.enter_context(
-                    patch.object(
-                        routes,
-                        "get_project",
-                        return_value=SimpleNamespace(status="active", current_revision=1, stage_state={}, current_snapshots={"test_cases": object()}),
-                    )
+                project = SimpleNamespace(
+                    status="active",
+                    current_revision=1,
+                    stage_state={"test_cases": SimpleNamespace(stale=False, current_snapshot_id="saved")},
+                    current_snapshots={"test_cases": SimpleNamespace(snapshot_id="saved", payload={"test_cases": []})},
                 )
+                stack.enter_context(patch.object(routes, "get_project", return_value=project))
+                stack.enter_context(patch("app.services.scoped_refinement.get_project", return_value=project))
                 versions = stack.enter_context(patch.object(routes, "persist_test_case_versions"))
                 snapshot = stack.enter_context(patch.object(routes, "_append_project_generation_snapshots"))
                 with self.assertRaises(HTTPException) as caught:

@@ -255,11 +255,12 @@ for the current suite returns its saved cases and versions. An ID used for
 different inputs or an earlier suite returns a conflict. Standalone generation
 keeps its existing response and artifact workflow.
 
-Selected repair uses the same publication and request recovery flow. It versions
-only selected tests whose content changed, and preserves the other case records
-and artifact pointers. A repair with no content change leaves the original suite
-available and asks for more specific feedback. A published repair needs combined
-suite review before approved export.
+Project refinements use the same publication and request recovery flow. They
+start from the saved suite, keep unchanged cases and their version IDs, and
+save new versions for changed or added cases. Removing a case from the suite
+preserves its version history. Fallback results and requests that make no case
+changes leave the original suite available. Selected repair limits updates to
+the selected tests and needs combined suite review before approved export.
 
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and

@@ -1,4 +1,4 @@
-"""Repair selected cases against server-owned sources, preserving every other case."""
+"""Refine saved suites against server-owned cases and artifact identities."""
 
 from fastapi import HTTPException
 from ..contracts.test_cases import GenerateTestCasesResponse
@@ -8,7 +8,58 @@ from .workflow_project_service import get_project
 from .test_case_quality import delivered_coverage, placeholder_reason
 
 _ARTIFACT_FIELDS = {"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
-_REPAIR_METADATA = _ARTIFACT_FIELDS | {"status", "generation_source", "generation_pass_id", "source_shard_id"}
+_WORKFLOW_METADATA = _ARTIFACT_FIELDS | {"generation_source", "generation_pass_id", "source_shard_id"}
+_REPAIR_METADATA = _WORKFLOW_METADATA | {"status"}
+_SUITE_WORKFLOW_METADATA = _WORKFLOW_METADATA | {"source_case_id", "coverage_completion_reason"}
+
+
+def _current_refinement_suite(project, revision):
+    snapshot = project.current_snapshots.get("test_cases")
+    state = project.stage_state.get("test_cases")
+    if (
+        project.status != "active"
+        or project.current_revision != revision
+        or not snapshot
+        or not state
+        or state.stale
+        or state.current_snapshot_id != snapshot.snapshot_id
+    ):
+        raise HTTPException(409, "The source suite changed. Reload it before refining tests.")
+    baseline = GenerateTestCasesResponse(**snapshot.payload)
+    if len({case.id for case in baseline.test_cases}) != len(baseline.test_cases):
+        raise HTTPException(409, "The saved suite contains duplicate case IDs. Resolve them before refining tests.")
+    return baseline
+
+
+def prepare_suite_refinement(payload, actor):
+    project = get_project(payload.project_id, actor=actor)
+    revision = payload.base_project_revision if payload.base_project_revision is not None else project.current_revision
+    baseline = _current_refinement_suite(project, revision)
+    return payload.model_copy(update={"base_project_revision": revision, "test_cases": baseline.test_cases}), baseline, project
+
+
+def bind_suite_refinement(response, baseline):
+    """Keep unchanged case records and allow the model to add or remove cases by ID."""
+    if response.workflow_diagnostics.used_fallback or not response.test_cases:
+        raise HTTPException(422, "Refinement did not return an updated suite. The saved suite was preserved.")
+    revised = {case.id: case for case in response.test_cases}
+    if len(revised) != len(response.test_cases):
+        raise HTTPException(422, "Refinement returned duplicate case IDs. The saved suite was preserved.")
+    original = {case.id: case for case in baseline.test_cases}
+    changed = set()
+    cases = []
+    for identity, case in revised.items():
+        prior = original.get(identity)
+        if prior and case.model_dump(exclude=_SUITE_WORKFLOW_METADATA) == prior.model_dump(exclude=_SUITE_WORKFLOW_METADATA):
+            cases.append(prior)
+            continue
+        changed.add(identity)
+        cases.append(case.model_copy(update={field: getattr(prior, field, None) for field in _ARTIFACT_FIELDS}))
+    removed = original.keys() - revised.keys()
+    if not changed and not removed:
+        raise HTTPException(422, "Refinement did not change the saved tests. Add specific feedback and try again.")
+    response.test_cases = cases
+    return changed, len(changed) + len(removed)
 
 
 def prepare_scoped_refinement(payload, source_inputs, actor):
@@ -18,20 +69,7 @@ def prepare_scoped_refinement(payload, source_inputs, actor):
     if not payload.project_id or len(selected) != len(payload.selected_test_case_ids):
         raise HTTPException(422, "Select unique test cases in a saved project")
     project = get_project(payload.project_id, actor=actor)
-    snapshot = project.current_snapshots.get("test_cases")
-    state = project.stage_state.get("test_cases")
-    if (
-        project.status != "active"
-        or project.current_revision != payload.base_project_revision
-        or not snapshot
-        or not state
-        or state.stale
-        or state.current_snapshot_id != snapshot.snapshot_id
-    ):
-        raise HTTPException(409, "The source suite changed. Reload before repairing selected tests.")
-    baseline = GenerateTestCasesResponse(**snapshot.payload)
-    if len({case.id for case in baseline.test_cases}) != len(baseline.test_cases):
-        raise HTTPException(409, "The saved suite contains duplicate case IDs. Resolve them before repairing selected tests.")
+    baseline = _current_refinement_suite(project, payload.base_project_revision)
     cases = [case for case in baseline.test_cases if case.id in selected]
     if {case.id for case in cases} != selected:
         raise HTTPException(422, "Selected test cases are not in the current suite")

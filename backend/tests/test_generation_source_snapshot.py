@@ -571,6 +571,100 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
         request.state.request_id = request_id
         return await routes.refine_test_cases_endpoint(request, payload, self.actor)
 
+    async def test_suite_improvements_bind_saved_cases_and_replay_with_additions_and_removals(self):
+        repair, saved_rows, candidate = await self._scoped_repair_fixture()
+        prior = get_project(self.project.project_id, actor=self.actor)
+        original = {key: deepcopy(value) for key, value in self.store.items() if key.startswith("test_case_sets/")}
+        payload = repair.model_copy(
+            update={"selected_test_case_ids": [], "test_cases": [repair.test_cases[0].model_copy(update={"title": "Forged client test"})]}
+        )
+        changed = candidate.test_cases[0]
+        added = changed.model_copy(update={"id": "TC-4", "title": "New test"})
+        untouched = repair.test_cases[2].model_copy(
+            update={"artifact_item_id": "forged-legacy", "generation_pass_id": "new-model-pass", "source_case_id": "local-model-id"}
+        )
+        result = candidate.model_copy(update={"test_cases": [untouched, changed, added]})
+        publish = routes._append_project_generation_snapshots
+
+        def drop_reply(**kwargs):
+            publish(**kwargs)
+            raise HTTPException(503, "Synthetic publication response lost")
+
+        with (
+            patch.object(routes, "refine_test_cases", return_value=result.model_dump()) as model,
+            patch.object(routes, "_append_project_generation_snapshots", side_effect=drop_reply),
+        ):
+            refined = await self._refine(payload)
+            replay = await self._refine(payload)
+            self.assertEqual(replay.model_dump(exclude={"knowledge_suggestion"}), refined.model_dump(exclude={"knowledge_suggestion"}))
+        model.assert_called_once()
+        self.assertEqual(model.call_args.args[0].test_cases, repair.test_cases)
+        self.assertIsNone(refined.scoped_refinement)
+        current = get_project(self.project.project_id, actor=self.actor)
+        self.assertEqual(current.current_revision, prior.current_revision + 1)
+        snapshot = current.current_snapshots["test_cases"]
+        self.assertEqual(snapshot.metadata["source_test_cases_snapshot_id"], prior.current_snapshots["test_cases"].snapshot_id)
+        self.assertEqual(snapshot.source_snapshot_id, prior.current_snapshots["use_cases"].snapshot_id)
+        retained, revised, new = snapshot.payload["test_cases"]
+        self.assertEqual(retained, saved_rows[2])
+        self.assertEqual(revised["artifact_set_id"], saved_rows[1]["artifact_set_id"])
+        self.assertEqual(revised["artifact_item_id"], saved_rows[1]["artifact_item_id"])
+        self.assertEqual(revised["artifact_version_number"], saved_rows[1]["artifact_version_number"] + 1)
+        self.assertEqual(new["artifact_version_number"], 1)
+        self.assertNotIn(new["artifact_item_id"], {"foreign", *[row.get("artifact_item_id") for row in saved_rows]})
+        self.assertNotIn("test_case_sets/foreign", self.store)
+        removed_path = f"test_case_sets/{saved_rows[0]['artifact_set_id']}/items/{saved_rows[0]['artifact_item_id']}"
+        self.assertEqual(
+            {key: value for key, value in self.store.items() if key.startswith(removed_path)},
+            {key: value for key, value in original.items() if key.startswith(removed_path)},
+        )
+        self.assertEqual(len([key for key in self.store.keys() - original.keys() if "/versions/" in key]), 2)
+        usage = [row for row in self._records("usage_events") if row["billing_key"] == "testcases.refine"]
+        self.assertEqual([(row["status"], row["quantity"]) for row in usage], [("completed", 3)])
+        self.assertEqual(len([row for row in self._records("billing_consumption") if row["billing_key"] == "testcases.refine"]), 1)
+        self.assertEqual(self.store[self.account_path]["balance_units"], 66)
+        before_mismatch = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as mismatch:
+            await self._refine(payload.model_copy(update={"feedback": "Different input"}))
+        self.assertEqual(mismatch.exception.status_code, 409)
+        self.assertEqual(self.store, before_mismatch)
+
+    async def test_suite_improvements_preserve_saved_artifacts_on_invalid_failed_and_stale_results(self):
+        repair, saved_rows, candidate = await self._scoped_repair_fixture()
+        payload = repair.model_copy(update={"selected_test_case_ids": []})
+        cases = list(repair.test_cases)
+        result = candidate.model_copy(update={"test_cases": [cases[0], candidate.test_cases[0], cases[2]]})
+        prefixes = ("test_case_sets/", "billing_consumption/", "billing_wallet_ledger/", self.account_path, self.allocation_path)
+        initial = {key: deepcopy(value) for key, value in self.store.items() if key.startswith(prefixes)}
+        controls = (
+            ("no-op", result.model_copy(update={"test_cases": cases})),
+            ("duplicate", result.model_copy(update={"test_cases": [*cases, cases[0]]})),
+            ("fallback", result.model_copy(update={"workflow_diagnostics": result.workflow_diagnostics.model_copy(update={"used_fallback": True})})),
+        )
+        for name, invalid in controls:
+            with self.subTest(name=name), patch.object(routes, "refine_test_cases", return_value=invalid.model_dump()):
+                with self.assertRaises(HTTPException) as rejected:
+                    await self._refine(payload, name)
+                self.assertEqual(rejected.exception.status_code, 422)
+        self.client.fail_on_create_segment = "/snapshots/"
+        with patch.object(routes, "refine_test_cases", return_value=result.model_dump()), self.assertRaises(HTTPException) as failed:
+            await self._refine(payload)
+        self.assertEqual(failed.exception.status_code, 503)
+        self.client.fail_on_create_segment = None
+
+        def change_project(*args, **kwargs):
+            update_project(project_id=self.project.project_id, actor=self.actor, request_id="rename", name="Concurrent project revision")
+            return result.model_dump()
+
+        with patch.object(routes, "refine_test_cases", side_effect=change_project), self.assertRaises(HTTPException) as stale:
+            await self._refine(payload, "stale")
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertEqual({key: value for key, value in self.store.items() if key.startswith(prefixes)}, initial)
+        current = get_project(self.project.project_id, actor=self.actor)
+        self.assertEqual(current.current_snapshots["test_cases"].payload["test_cases"], saved_rows)
+        usage = [row for row in self._records("usage_events") if row["billing_key"] == "testcases.refine"]
+        self.assertEqual([(row["status"], row["quantity"]) for row in usage], [("failed", 0)] * 5)
+
     async def test_selected_repair_commits_only_the_changed_case_and_replays(self):
         repair, saved_rows, candidate = await self._scoped_repair_fixture()
         prior_artifacts = {key: deepcopy(value) for key, value in self.store.items() if key.startswith("test_case_sets/")}
