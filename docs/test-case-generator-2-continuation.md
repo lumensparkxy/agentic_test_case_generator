@@ -129,8 +129,33 @@ transaction contention leaves work due for a later poll. The dispatch
 reservation records a possibly paid attempt before an invocation, so an
 expired uncertain attempt cannot be reclaimed automatically. The result
 guard verifies the exact actor, operation, request, revision and source
-lineage before the artifact transaction advances the run. The next packet
-connects those guards to a separately invoked worker and Review status.
+lineage before the artifact transaction advances the run.
+
+### Scenario preparation in the local emulator
+
+The Review action **Approve scope and prepare scenarios** records the
+approval and next stage through its named API. The worker picks up the
+persisted intent independently of the browser. The Review status reads
+the owner-scoped run and exact approval receipt. It recovers a lost
+response using the same request identity and offers a link when the
+matching saved scenario plan is current. Scenario approval stays explicit.
+
+The local runtime requires `TCG_APPROVAL_SCENARIOS_ENABLED=true`, the
+`demo-tcg-v2-continuation` Firebase project and a loopback Firestore
+emulator. The build requires `VITE_PROJECT_WORKSPACES_V2=true` and
+`VITE_APPROVAL_CONTINUATION_ENABLED=true`. The worker checks the
+configured project and the actual emulator client before polling. Use
+`scripts/run_approval_scenario_worker.py --once` for one bounded scan or
+omit `--once` for polling. Use the repository virtual environment and
+an isolated synthetic project. A live provider requires an explicitly
+authorized budget and environment.
+
+Each local scenario run reserves at most seven provider requests, disables
+SDK retry multiplication and uses the approved sources and a fixed
+settings fingerprint. Observed provider cost remains unknown when the
+provider does not return usage. The emulator validation uses a synthetic
+provider. Shared admission with legacy and Project Sync work remains a
+release gate before enabling a hosted worker.
 
 ## Quality and delivery policy
 
@@ -227,9 +252,12 @@ P1 adds opt-in navigation and compatible aliases (commit `1d5977b`,
 P2 adds unified intake and scoped decisions (commit `750fa78`,
 [PR #454](https://github.com/lumensparkxy/agentic_test_case_generator/pull/454)).
 P3a adds the internal transactional approval, intent outbox and fenced
-stage claim under
-[#455](https://github.com/lumensparkxy/agentic_test_case_generator/issues/455).
-Next is a separately invoked scenario worker and Review recovery status.
+stage claim (commit `ca554da`,
+[PR #456](https://github.com/lumensparkxy/agentic_test_case_generator/pull/456)).
+P3b connects scenario preparation and Review status under
+[#457](https://github.com/lumensparkxy/agentic_test_case_generator/issues/457).
+Next is the exact-plan approval continuation into saved Test Cases
+generation and assessment.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

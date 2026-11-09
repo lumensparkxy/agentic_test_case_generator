@@ -14,6 +14,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from .adk_runtime import scenario_model
 from .literal_instructions import literal_source_agent
 from .scenario_assessment import STATE_SCENARIO_ASSESSMENT, assessment_input, assess_scenarios, build_scenario_critic, combine_review, parse_critic_output
 from .scenario_boundary_coverage import inclusive_input_ranges
@@ -174,7 +175,7 @@ async def _run_single_use_case_shard_workflow_async(
         return assessment_input(plan, shard.requirements, context_text)
 
     root_agent = _build_use_case_pipeline(
-        model,
+        scenario_model(model),
         requirements_text,
         context_text,
         semantic_input,
@@ -347,7 +348,7 @@ async def _review_merged_use_cases_async(*, coverage_plan, requirements, context
     async def consume():
         rows = assessment_input(coverage_plan, requirements, context_text)
         source_text = json.dumps([{"id": r.id, "text": r.text} for r in requirements], ensure_ascii=False) + "\n" + context_text
-        critic = build_scenario_critic(model, lambda _state: rows, source_text, input_ranges=inclusive_input_ranges(requirements))
+        critic = build_scenario_critic(scenario_model(model), lambda _state: rows, source_text, input_ranges=inclusive_input_ranges(requirements))
         sessions = InMemorySessionService()
         runner = Runner(agent=critic, app_name="use_case_semantic_review", session_service=sessions)
         user_id = str(actor_user_id or "use-case-review")

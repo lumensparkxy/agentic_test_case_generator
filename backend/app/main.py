@@ -10,6 +10,7 @@ from .observability.logging import bind_log_context, configure_logging, reset_lo
 from .observability.metrics import record_http_request, render_prometheus_metrics
 from .observability.tracing import configure_tracing, resolve_trace_id
 
+from .routers.approval_continuations import router as approval_continuations_router
 from .routers.requirement_imports import router as requirement_imports_router
 from .routers.knowledge import router as knowledge_router
 from .routers.auth import router as auth_router
@@ -50,6 +51,7 @@ app.include_router(projects_router)
 app.include_router(project_sync_router)
 app.include_router(requirements_router)
 app.include_router(requirement_imports_router)
+app.include_router(approval_continuations_router)
 app.include_router(jira_router)
 app.include_router(azure_devops_router)
 app.include_router(export_router)

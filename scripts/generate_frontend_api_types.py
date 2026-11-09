@@ -121,6 +121,23 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "requirementHistory", "get", "/projects/{project_id}/requirements/{requirement_uid}/history", "RequirementHistoryRequest", "RequirementHistoryResponse"
     ),
     SelectedOperation("requirementReviews", "patch", "/projects/{project_id}/requirements/reviews", "RequirementReviewsRequest", "RequirementReviewsResponse"),
+    SelectedOperation(
+        "approvalContinuations", "get", "/projects/{project_id}/approval-continuations", "ApprovalContinuationsRequest", "ApprovalContinuationsResponse"
+    ),
+    SelectedOperation(
+        "approveAndPrepareScenarios",
+        "post",
+        "/projects/{project_id}/requirements/approve-and-prepare-scenarios",
+        "ApproveAndPrepareScenariosRequest",
+        "ApproveAndPrepareScenariosResponse",
+    ),
+    SelectedOperation(
+        "approvalContinuationCancel",
+        "post",
+        "/projects/{project_id}/approval-continuations/{run_id}/cancel",
+        "ApprovalContinuationCancelRequest",
+        "ApprovalContinuationCancelResponse",
+    ),
     SelectedOperation("jiraImport", "post", "/integrations/jira/import", "JiraImportRequest", "JiraImportResponse"),
     SelectedOperation("azureDevOpsImport", "post", "/integrations/azure-devops/import", "AzureDevOpsImportRequest", "AzureDevOpsImportResponse"),
     SelectedOperation("requirementsParse", "post", "/requirements/parse", "RequirementsParseRequest", "RequirementsParseResponse"),

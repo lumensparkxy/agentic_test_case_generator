@@ -5,6 +5,8 @@ import { hasApprovedGenerationScope } from "./utils/requirementScope";
 import useReviewDraft from "./hooks/useReviewDraft";
 import useExecutionRecovery from "./hooks/useExecutionRecovery";
 import DraftRecoveryNotice from "./components/reviews/DraftRecoveryNotice";
+import ApprovalContinuationPanel from "./components/reviews/ApprovalContinuationPanel";
+import useApprovalContinuation from "./hooks/useApprovalContinuation";
 import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
 import useRequirementImports from "./hooks/useRequirementImports";
@@ -123,6 +125,7 @@ import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workfl
 import "./styles/index.css";
 
 const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
+const APPROVAL_CONTINUATION_ENABLED = PROJECT_WORKSPACES_V2 && import.meta.env.VITE_APPROVAL_CONTINUATION_ENABLED === "true";
 
 const EXPORT_API_PATHS = Object.freeze({
 	csv: API_CONTRACT_ENDPOINTS.exportCsv.path,
@@ -999,7 +1002,7 @@ export default function App() {
 		resetExecutionWorkflowState();
 	};
 
-	const saveRequirementReviews = async (reviews) => {
+	const saveRequirementReviews = async (reviews, { prepareScenarios = false } = {}) => {
 		if (requirementReviewLock.current) return;
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || reviews.length === 0) return;
@@ -1010,22 +1013,36 @@ export default function App() {
 			review_status: r.review_status,
 			quality_flags: r.quality_flags || [],
 		}));
-		const fingerprint = JSON.stringify([operationScope.projectId, currentProjectRevision, changes]);
-		if (requirementReviewAttempt.current?.fingerprint !== fingerprint)
-			requirementReviewAttempt.current = { fingerprint, key: createRequestId() };
+		const fingerprint = JSON.stringify([operationScope.projectId, currentProjectRevision, changes, prepareScenarios]);
+		if (requirementReviewAttempt.current?.fingerprint !== fingerprint) {
+			const prior = prepareScenarios ? approvalContinuation.pendingRequest : null;
+			requirementReviewAttempt.current = { fingerprint, key: prior?.fingerprint === fingerprint ? prior.requestId : createRequestId() };
+		}
+		const { key } = requirementReviewAttempt.current;
+		const projectSegment = encodeURIComponent(operationScope.projectId);
+		const path = prepareScenarios
+			? API_CONTRACT_ENDPOINTS.approveAndPrepareScenarios.path.replace("{project_id}", projectSegment)
+			: `/projects/${projectSegment}/requirements/reviews`;
+		if (prepareScenarios) approvalContinuation.begin({ requestId: key, fingerprint, baseRevision: currentProjectRevision });
 		try {
-			const res = await apiRequest(`/projects/${operationScope.projectId}/requirements/reviews`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
+			const res = await apiRequest(path, {
+				method: prepareScenarios ? API_CONTRACT_ENDPOINTS.approveAndPrepareScenarios.method : "PATCH",
+				headers: { "Content-Type": "application/json", ...(prepareScenarios ? { "X-Request-ID": key } : {}) },
 				body: JSON.stringify({
 					base_project_revision: currentProjectRevision,
-					idempotency_key: requirementReviewAttempt.current.key,
+					idempotency_key: key,
 					reviews: changes,
 				}),
 			});
-			if (!res.ok) throw new Error(await parseApiError(res, "Could not save requirement reviews"));
-			const project = await res.json();
+			if (!res.ok) {
+				if (prepareScenarios && res.status < 500 && res.status !== 409 && isProjectOperationCurrent(operationScope))
+					approvalContinuation.clearPending();
+				throw new Error(await parseApiError(res, "Could not save requirement reviews"));
+			}
+			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) return;
+			const project = prepareScenarios ? data.project : data;
+			if (prepareScenarios) approvalContinuation.accept(data);
 			requirementReviewAttempt.current = null;
 			if (!isLatestProjectRevision(project.project_id, project.current_revision)) return;
 			recordProjectRevision(project.project_id, project.current_revision);
@@ -2004,6 +2021,31 @@ export default function App() {
 		}
 		return openProject(operationScope.projectId, { hydrate, silent: true, operationScope });
 	};
+
+	const approvalContinuation = useApprovalContinuation({
+		enabled:
+			APPROVAL_CONTINUATION_ENABLED &&
+			route.workspace === "review" &&
+			Boolean(currentUser?.sub) &&
+			route.projectId === currentProjectId &&
+			isAuthenticated &&
+			!isVerifyingSession,
+		projectId: currentProjectId,
+		identity: currentUser?.sub || "",
+		request: apiRequest,
+	});
+	const continuationReadRevision = useRef(null);
+	const continuationRevision = approvalContinuation.run?.project_revision;
+	const continuationReceiptId = approvalContinuation.receipt?.request_id;
+	useEffect(() => {
+		if (!continuationReceiptId && (!Number.isInteger(continuationRevision) || continuationRevision <= currentProjectRevision)) return;
+		const operationScope = captureProjectOperationScope();
+		if (!operationScope) return;
+		const readKey = JSON.stringify([operationScope, approvalContinuation.run?.run_id, continuationRevision, continuationReceiptId]);
+		if (continuationReadRevision.current === readKey) return;
+		continuationReadRevision.current = readKey;
+		void refreshCurrentProject({ hydrate: true, operationScope });
+	}, [approvalContinuation.run?.run_id, continuationRevision, continuationReceiptId, currentProjectRevision]);
 
 	const refreshUseCaseReviewProject = async ({ projectId, orchestratorStatus: committedStatus = null } = {}) => {
 		const operationScope = captureProjectOperationScope();
@@ -3553,6 +3595,13 @@ export default function App() {
 		withFeedback = false,
 		{ fullRegeneration = false, feedbackText = feedback, selectedTestCaseIds = [] } = {}
 	) => {
+		if (
+			APPROVAL_CONTINUATION_ENABLED &&
+			(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted")
+		) {
+			setStatus("Check the current scenario preparation in Review before generating tests.");
+			return false;
+		}
 		if (contextRefreshRequired) {
 			setStatus("Analyze context again in Inputs before generating tests.");
 			return false;
@@ -4418,6 +4467,34 @@ export default function App() {
 	const inputsSources = PROJECT_WORKSPACES_V2 && route.workspaceRoute && requirementsRoute && route.workspace === "inputs";
 	const reviewScope = PROJECT_WORKSPACES_V2 && requirementsRoute && route.workspace === "review";
 	const openScope = () => navigate(buildProjectWorkspacePath(navigationProjectId, "review"));
+	const scenariosPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "scenarios") : "";
+	const continuationBusy = approvalContinuation.active || approvalContinuation.run?.state === "interrupted";
+	const continuationPanel = APPROVAL_CONTINUATION_ENABLED ? (
+		<ApprovalContinuationPanel
+			continuation={approvalContinuation}
+			scenariosPath={scenariosPath}
+			navigate={navigate}
+			onCheck={() => {
+				void approvalContinuation.refresh({ reset: true });
+				const operationScope = captureProjectOperationScope();
+				if (operationScope && (approvalContinuation.run?.state === "awaiting_user" || approvalContinuation.pendingRequest))
+					void refreshCurrentProject({ hydrate: true, operationScope });
+			}}
+			saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
+			resultCurrent={
+				approvalContinuation.run?.result_snapshot_id === projectSnapshots.use_cases?.snapshot_id && !projectStageState.use_cases?.stale
+			}
+		/>
+	) : null;
+	const proposedScopeApproval =
+		reviewScope && approvalContinuation.available
+			? requirements
+					.filter(
+						(row) => getRequirementReviewStatus(row) !== "Rejected" && !["open", "deferred", "excluded"].includes(row.clarification_status)
+					)
+					.map((row) => ({ ...row, review_status: "Approved" }))
+			: [];
+	const retryableApproval = approvalContinuation.unresolved && approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
 	const openTraceabilityCase = (path, target) => {
 		navigate(`${location.pathname}${location.search}${location.hash}`, {
@@ -4735,7 +4812,8 @@ export default function App() {
 								scopePath={PROJECT_WORKSPACES_V2 ? buildProjectWorkspacePath(navigationProjectId, "review") : undefined}
 								onDecisionCommitted={handleUseCaseReviewCommitted}
 								onGenerated={handleUseCasesGenerated}
-								generationDisabled={testCaseActionDisabled || isGenerating}
+								generationDisabled={testCaseActionDisabled || isGenerating || continuationBusy || approvalContinuation.unresolved}
+								continuationPanel={continuationPanel}
 								contextRefreshRequired={contextRefreshRequired}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
 								onBack={PROJECT_WORKSPACES_V2 ? openScope : goPrev}
@@ -4805,13 +4883,29 @@ export default function App() {
 												) : null}
 											</div>
 										) : reviewScope && !imports.preview ? (
-											<Button
-												size="compact"
-												onClick={() => navigate(buildProjectWorkspacePath(navigationProjectId, "review", "scenarios"))}
-												disabled={!hasApprovedGenerationScope(currentProject)}
-											>
-												Review scenarios
-											</Button>
+											approvalContinuation.available && (!useCasesStageState.current_snapshot_id || useCasesStageState.stale) ? (
+												<Button
+													size="compact"
+													onClick={() => void saveRequirementReviews(proposedScopeApproval, { prepareScenarios: true })}
+													disabled={
+														requirementActionDisabled ||
+														continuationBusy ||
+														(approvalContinuation.unresolved && !retryableApproval) ||
+														!proposedScopeApproval.length ||
+														contextRefreshRequired
+													}
+												>
+													{retryableApproval ? "Retry scope approval request" : "Approve scope and prepare scenarios"}
+												</Button>
+											) : (
+												<Button
+													size="compact"
+													onClick={() => navigate(scenariosPath)}
+													disabled={!hasApprovedGenerationScope(currentProject)}
+												>
+													Review scenarios
+												</Button>
+											)
 										) : route.destination === "test-cases" && !savedCaseLink ? (
 											<div className="workbench-actions">
 												{testReviewRoute && testCases.length > 0 && exportGateLocked && (
@@ -4844,6 +4938,7 @@ export default function App() {
 									}
 								/>
 
+								{reviewScope && continuationPanel}
 								{!inputsSources && !savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}

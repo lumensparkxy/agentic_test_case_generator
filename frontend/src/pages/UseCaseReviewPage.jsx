@@ -25,6 +25,7 @@ export default function UseCaseReviewPage({
 	onGenerated,
 	generationDisabled = false,
 	contextRefreshRequired = false,
+	continuationPanel = null,
 	onBack,
 	onNext,
 }) {
@@ -116,6 +117,7 @@ export default function UseCaseReviewPage({
 					) : null
 				}
 			/>
+			{continuationPanel}
 			{scopeAvailable && generationAllowed && refreshDialogScope === refreshScope && (
 				<UseCaseRefreshDialog
 					requirements={generationRequirementRows(requirementsSnapshot?.payload?.requirements || [])}

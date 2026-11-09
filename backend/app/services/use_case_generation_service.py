@@ -1,5 +1,6 @@
 """Generate a fresh, reviewable Use Cases snapshot from the durable baseline."""
 
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 
@@ -9,7 +10,7 @@ from pydantic import ValidationError
 from ..agents.use_case_agent import RetainedUseCaseGroup, generate_use_cases
 from ..contracts.grounding import EnrichInput
 from ..contracts.projects import QaProjectUseCaseSnapshotInput
-from ..models import GenerateTestCasesInput, TestCaseTemplate
+from ..models import GenerateTestCasesInput, TestCaseTemplate, WorkflowSettings
 from ..observability.metrics import record_workflow_completed
 from .audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from .billing_service import enforce_billing_access
@@ -31,6 +32,13 @@ from .workflow_project_service import (
 )
 
 _OPERATION = "use_cases.generate"
+
+
+@dataclass(frozen=True)
+class ApprovedScenarioSource:
+    requirements_snapshot_id: str
+    context_snapshot_id: str | None
+    requirement_ids: tuple[str, ...]
 
 
 class _PublicationUnconfirmed(HTTPException):
@@ -183,9 +191,30 @@ def _snapshot_payload(result, active, retained, *, scoped):
     return payload
 
 
-def generate_project_use_cases(*, project_id, actor, request_id, base_project_revision, refresh_requirement_ids=None, memory_bypass=False):
+def generate_project_use_cases(
+    *,
+    project_id,
+    actor,
+    request_id,
+    base_project_revision,
+    refresh_requirement_ids=None,
+    memory_bypass=False,
+    approved_source: ApprovedScenarioSource | None = None,
+    workflow_settings: WorkflowSettings | None = None,
+    publication_guard=None,
+):
     idempotency_key = case_source_hash([actor.sub, request_id])
-    fingerprint = case_source_hash([base_project_revision, refresh_requirement_ids, memory_bypass])
+    request_inputs = [base_project_revision, refresh_requirement_ids, memory_bypass]
+    if approved_source is not None:
+        request_inputs.extend(
+            [
+                approved_source.requirements_snapshot_id,
+                approved_source.context_snapshot_id,
+                approved_source.requirement_ids,
+                workflow_settings.model_dump(mode="json") if workflow_settings else None,
+            ]
+        )
+    fingerprint = case_source_hash(request_inputs)
     replay = _replay_result(project_id, actor, idempotency_key, fingerprint)
     if replay is not None:
         return replay
@@ -207,12 +236,24 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
     retained, refresh = _scoped_refresh(project, active, refresh_requirement_ids, actor) if refresh_requirement_ids is not None else ({}, None)
 
     context_snapshot = project.current_snapshots.get("context")
+    if approved_source is not None:
+        context_state = project.stage_state.get("context")
+        if (
+            baseline.snapshot_id != approved_source.requirements_snapshot_id
+            or baseline.operation != "requirements.review"
+            or baseline.actor_user_id != actor.sub
+            or tuple(row.id for row in active) != approved_source.requirement_ids
+            or (context_snapshot.snapshot_id if context_snapshot else None) != approved_source.context_snapshot_id
+            or (context_snapshot and (not context_state or context_state.stale or context_state.current_snapshot_id != context_snapshot.snapshot_id))
+        ):
+            raise HTTPException(409, "The saved scope or Context no longer matches this approval.")
     context_payload = context_snapshot.payload if context_snapshot else {}
     context = EnrichInput.model_validate({**context_payload, "requirements": active, "project_id": project_id, "base_project_revision": base_project_revision})
     payload = GenerateTestCasesInput(
         requirements=active,
         context=context,
         template=TestCaseTemplate(name="Use Cases", format="json", fields=[]),
+        workflow_settings=workflow_settings,
         project_id=project_id,
         base_project_revision=base_project_revision,
     )
@@ -268,6 +309,7 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
             )
 
             def complete_in_transaction(transaction, snapshot):
+                advance = publication_guard(transaction, client, snapshot) if publication_guard is not None else None
                 writes = []
                 complete_workflow_run(
                     run_id,
@@ -278,6 +320,8 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
                 )
                 for reference, value, merge in writes:
                     transaction.set(reference, value, merge=merge)
+                if advance is not None:
+                    advance()
 
             try:
                 snapshot = append_stage_snapshot(

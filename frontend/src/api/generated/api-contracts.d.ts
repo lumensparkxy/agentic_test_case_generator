@@ -35,6 +35,9 @@ export interface ApiContractOperations {
 	requirementImportRecovery: ApiOperation<RequirementImportRecoveryRequest, RequirementImportRecoveryResponse, "POST", "/projects/{project_id}/requirement-imports/recovery">;
 	requirementHistory: ApiOperation<RequirementHistoryRequest, RequirementHistoryResponse, "GET", "/projects/{project_id}/requirements/{requirement_uid}/history">;
 	requirementReviews: ApiOperation<RequirementReviewsRequest, RequirementReviewsResponse, "PATCH", "/projects/{project_id}/requirements/reviews">;
+	approvalContinuations: ApiOperation<ApprovalContinuationsRequest, ApprovalContinuationsResponse, "GET", "/projects/{project_id}/approval-continuations">;
+	approveAndPrepareScenarios: ApiOperation<ApproveAndPrepareScenariosRequest, ApproveAndPrepareScenariosResponse, "POST", "/projects/{project_id}/requirements/approve-and-prepare-scenarios">;
+	approvalContinuationCancel: ApiOperation<ApprovalContinuationCancelRequest, ApprovalContinuationCancelResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/cancel">;
 	jiraImport: ApiOperation<JiraImportRequest, JiraImportResponse, "POST", "/integrations/jira/import">;
 	azureDevOpsImport: ApiOperation<AzureDevOpsImportRequest, AzureDevOpsImportResponse, "POST", "/integrations/azure-devops/import">;
 	requirementsParse: ApiOperation<RequirementsParseRequest, RequirementsParseResponse, "POST", "/requirements/parse">;
@@ -113,6 +116,14 @@ export type RequirementHistoryRequest = undefined;
 export type RequirementHistoryResponse = Array<ImportHistoryEntry>;
 export type RequirementReviewsRequest = RequirementReviewsInput;
 export type RequirementReviewsResponse = QaProjectDetail;
+export type ApprovalContinuationsRequest = {
+	request_id?: string | null;
+};
+export type ApprovalContinuationsResponse = ApprovalContinuationStatus;
+export type ApproveAndPrepareScenariosRequest = ApproveAndPrepareScenariosInput;
+export type ApproveAndPrepareScenariosResponse = ApproveAndPrepareScenariosResult;
+export type ApprovalContinuationCancelRequest = undefined;
+export type ApprovalContinuationCancelResponse = ApprovalContinuationView;
 export type JiraImportRequest = JiraImportInput;
 export type JiraImportResponse = RequirementsWorkflowResponse | RequirementImportPreview;
 export type AzureDevOpsImportRequest = AzureDevOpsImportInput;
@@ -147,6 +158,46 @@ export interface AcceptProjectFinding {
 	finding_id: string;
 	resolution?: string;
 	supersedes?: Array<string>;
+}
+
+export interface ApprovalContinuationReceipt {
+	blocked_reason: string | null;
+	request_id: string;
+	run_id: string | null;
+}
+
+export interface ApprovalContinuationStatus {
+	enabled: boolean;
+	receipt?: ApprovalContinuationReceipt | null;
+	runs: Array<ApprovalContinuationView>;
+}
+
+export interface ApprovalContinuationView {
+	project_revision: number;
+	reason: string | null;
+	request_id: string;
+	result_snapshot_id: string | null;
+	run_id: string;
+	stage: "prepare_scenarios";
+	state: "queued" | "running" | "awaiting_user" | "completed" | "failed" | "interrupted" | "cancelled" | "superseded";
+}
+
+export interface ApproveAndPrepareScenariosInput {
+	base_project_revision: number;
+	idempotency_key: string;
+	reviews: Array<ApprovedRequirementReviewChange>;
+}
+
+export interface ApproveAndPrepareScenariosResult {
+	blocked_reason: string | null;
+	continuation: ApprovalContinuationView | null;
+	project: QaProjectDetail;
+}
+
+export interface ApprovedRequirementReviewChange {
+	quality_flags?: Array<string>;
+	requirement_uid: string;
+	review_status: "Approved";
 }
 
 export interface ArtifactSource {

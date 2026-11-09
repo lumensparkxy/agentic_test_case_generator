@@ -311,6 +311,21 @@ def mark_dispatched(client, claim, *, provider_requests=1):
     dispatch(client.transaction())
 
 
+def stop_stage(client, claim, *, reason):
+    """Close an admitted worker failure without releasing uncertain provider work."""
+    if reason not in {"settings_changed", "actor_unavailable", "scenario_preparation_failed", "publication_unconfirmed"}:
+        raise ValueError("Unsupported continuation failure reason")
+    refs = _documents(client, claim.project_id, claim.run_id)
+
+    @transactional
+    def stop(transaction):
+        run, intent, lease, now = _load_claim(transaction, refs, claim)
+        state = "interrupted" if intent.get("dispatch") else "failed"
+        _close(transaction, refs, run, intent, lease, state, now, reason)
+
+    stop(client.transaction())
+
+
 def cancel_stage(client, *, project_id, run_id, actor_id) -> bool:
     refs = _documents(client, project_id, run_id)
 

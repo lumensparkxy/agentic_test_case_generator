@@ -3,11 +3,64 @@
 Keep model-call behavior deterministic and resilient across the agent pipelines.
 """
 
+import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Callable
+
+from google.adk.models import Gemini
 from google.genai import types
 from .quality_goal import QUALITY_GOAL
 
 DEFAULT_MODEL_HTTP_RETRY_ATTEMPTS = 2
 DEFAULT_MODEL_HTTP_RETRY_INITIAL_DELAY = 1.0
+_model_reservation: ContextVar[Callable[[], float] | None] = ContextVar("model_request_reservation", default=None)
+
+
+@contextmanager
+def bounded_model_requests(reserve):
+    """Use the same reservation callback in each copied shard context."""
+    token = _model_reservation.set(reserve)
+    try:
+        yield
+    finally:
+        _model_reservation.reset(token)
+
+
+class _BoundedGemini(Gemini):
+    async def generate_content_async(self, llm_request, stream=False):
+        reserve = _model_reservation.get()
+        if reserve is None:
+            raise RuntimeError("The bounded model requires a request reservation")
+        timeout = await asyncio.to_thread(reserve)
+        config = llm_request.config or types.GenerateContentConfig()
+        http_options = config.http_options or types.HttpOptions()
+        llm_request.config = config.model_copy(
+            update={
+                "http_options": http_options.model_copy(update={"timeout": max(1, int(timeout * 1000)), "retry_options": types.HttpRetryOptions(attempts=1)}),
+                "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
+            }
+        )
+        llm_request.cache_config = None
+        async with asyncio.timeout(timeout):
+            async for response in super().generate_content_async(llm_request, stream):
+                yield response
+
+
+def scenario_model(model: str) -> str | Gemini:
+    if _model_reservation.get() is None:
+        return model
+    return _BoundedGemini(
+        model=model,
+        client_kwargs={
+            "vertexai": False,
+            "http_options": types.HttpOptions(
+                retry_options=types.HttpRetryOptions(attempts=1),
+                client_args={"follow_redirects": False},
+                async_client_args={"follow_redirects": False, "allow_redirects": False},
+            ),
+        },
+    )
 
 
 def _http_options() -> types.HttpOptions:
