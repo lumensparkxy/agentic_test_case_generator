@@ -64,6 +64,13 @@ Escape an embedded double quote or backslash with a backslash. To clear a
 populated field, use `Enter "" into field "Reference"` and check the empty value.
 For an initially blank field, check the empty value without filling it.
 
+For JSON, multiline values, or deliberately malformed input, put the exact
+string in the step's `test_data`. Use `Enter step data into field "Payload"`
+and `field "Payload" value should equal step data`. For a saved text check,
+put the expected literal in that observation step's own data and use
+`css "#saved" text should equal step data`. Ground the field and result locator
+in Context and use synthetic data for the payload.
+
 For a grounded native single-choice dropdown, use
 `Select exact option "Closed" in field "Order status"`. Linked HTML supplies
 the selectable labels. A separate field-value check needs an explicit

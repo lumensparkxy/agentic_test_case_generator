@@ -99,6 +99,17 @@ class TestCaseQualityTests(unittest.TestCase):
                 draft["steps"][2]["expected"] = final_expected
                 self.assertIsNotNone(placeholder_reason(draft))
 
+    def test_step_data_fill_is_complete_only_with_its_saved_data(self):
+        row = self.concrete().model_dump()
+        row["steps"] = [
+            {"step": 1, "action": 'Open "https://example.test/orders"', "expected": ""},
+            {"step": 2, "action": 'Enter step data into field "Payload"', "expected": "", "test_data": '{\n  "id": 9\n}'},
+            {"step": 3, "action": 'Click exact button "Submit"', "expected": 'exact text "Saved" is visible'},
+        ]
+        self.assertIsNone(placeholder_reason(row))
+        row["steps"][1].pop("test_data")
+        self.assertIsNotNone(placeholder_reason(row))
+
     def test_targeted_generation_preserves_exact_reviewed_scenario_slice(self):
         requirement = Requirement(id="REQ-001", text="Declined cards keep cart contents", review_status="Approved")
         plan = [

@@ -26,6 +26,13 @@ PLACEHOLDER_PATTERN = re.compile(r"\{(?:env|data)\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A
 BRACED_PATTERN = re.compile(r"\{[^{}\s]*(?:\.[^{}\s]*)*\}")
 MARKDOWN_YAML_BLOCK_PATTERN = re.compile(r"(?ms)^```ya?ml\s*\n(.*?)\n```")
 STEP_KEYWORD_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+")
+_JSON_STRING = r'"(?:\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|[^"\\\x00-\x1f])*"'
+_QUOTED_LOCATOR = r'(?:\\["\\]|[^"\\\r\n])+'
+STRUCTURED_LITERAL_STEP_PATTERN = re.compile(
+    rf'(?:I fill exact field "(?P<field>{_QUOTED_LOCATOR})" with'
+    rf'|(?P<kind>field|css|test id) "(?P<locator>{_QUOTED_LOCATOR})" (?P<subject>value|text) should equal)'
+    rf" literal (?P<literal>{_JSON_STRING})"
+)
 
 
 class SpecValidationError(Exception):
@@ -163,6 +170,10 @@ def _validate_placeholders(document: Mapping[str, Any]) -> list[ValidationIssue]
     for index, step in enumerate(steps):
         if not isinstance(step, str):
             continue
+        body = STEP_KEYWORD_PATTERN.sub("", step, count=1)
+        if literal := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body):
+            # Only the explicit operand is exempt from template validation.
+            step = body[: literal.start("literal")]
 
         if step.count("{") != step.count("}"):
             issues.append(ValidationIssue(f"$.steps[{index}]", "placeholder braces are not balanced", "placeholder.unbalanced"))

@@ -87,6 +87,22 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertIn("lacks exact interface evidence", validate_browser_handoff([case], context(), [REQUIREMENT])[1])
         self.assertEqual(case.automation_status, "Manual")
 
+    def test_multiline_step_data_keeps_exact_grounded_fill_and_saved_readback(self):
+        case = candidate()
+        value = '{\n  "template": "{env.example}",\n  "reference": "[[env:PETF_TEST_EXAMPLE]]"\n}'
+        case.steps[1] = TestStep(
+            step=2, action='Enter step data into field "Reference"', expected='field "Reference" value should equal step data', test_data=value
+        )
+        case.steps.append(TestStep(step=4, action="Inspect the saved reference", expected='css "#saved-ref" text should equal step data', test_data=value))
+        grounded = context()
+        grounded.notes = f'Browser result css "#saved-ref" on "{TARGET}" shows field "Reference" after button "Save request"'
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+        self.assertEqual(case.automation_status, "To Be Automated")
+
+        case.steps[-1].test_data = value.replace("  ", " ")
+        self.assertIn("does not match the exact submitted input", validate_browser_handoff([case], grounded, [REQUIREMENT])[1])
+        self.assertEqual(case.automation_status, "Manual")
+
     def test_scoped_text_handoff_requires_grounded_locator_and_exact_value(self):
         for locator in ('css "#result"', 'test id "result"'):
             with self.subTest(locator=locator):

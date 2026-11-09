@@ -19,7 +19,7 @@ from plain_english_test_framework.local_runner import (
 from plain_english_test_framework.playwright_generator import TARGET_ORIGIN_ERROR, PlaywrightGenerationError
 from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
 from plain_english_test_framework.spec_parser import SpecValidationError
-from plain_english_test_framework.validation import ValidationIssue
+from plain_english_test_framework.validation import ValidationIssue, find_secret_issues
 
 from ..config import ExecutionSettings, get_execution_settings
 from ..models import (
@@ -69,6 +69,13 @@ QUOTED_FILL_ACTION = re.compile(
     rf"(?:enter|fill|type|input)\s+(?P<value>{QUOTED_FILL_LITERAL})\s+(?:in|into)\s+"
     rf"(?:field\s+(?P<exact_label>{QUOTED_FILL_LITERAL})"
     rf"""|(?:the\s+)?(?P<label>{QUOTED_FILL_LITERAL}|[^"'\r\n]+?)(?:\s+field)?)\.?""",
+    re.IGNORECASE,
+)
+STEP_DATA_FILL_INTENT = re.compile(r"\b(?:enter|fill|type|input)\s+step\s+data\b", re.IGNORECASE)
+STEP_DATA_FILL_ACTION = re.compile(rf"(?:enter|fill|type|input)\s+step\s+data\s+into\s+field\s+(?P<label>{QUOTED_FILL_LITERAL})\.?", re.IGNORECASE)
+STEP_DATA_ASSERTION = re.compile(
+    rf"(?P<kind>field|css|test\s+id)\s+(?P<target>{QUOTED_FILL_LITERAL})\s+"
+    r"(?P<subject>value|text)\s+should\s+equal\s+step\s+data\b",
     re.IGNORECASE,
 )
 SCOPED_TEXT_ASSERTION_INTENT = re.compile(rf"^(?:css|test\s+id)\s+{QUOTED_ASSERTION_TARGET}\s+text\b", re.IGNORECASE)
@@ -563,25 +570,42 @@ def _with_unique_candidate_id(
 
 def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep], ExecutionUnsupportedStep | None]:
     converted: list[_ConvertedStep] = []
+    raw_action = step.action.strip()
     action = _normalize_text(step.action)
     expected = _normalize_text(step.expected)
     unquoted_action = re.sub(QUOTED_ASSERTION_TARGET, "", action)
-    action_value, unsupported_action = _field_value_assertion(step.action)
-    expected_value, unsupported_expected = _field_value_assertion(step.expected)
-    action_assertion = _convert_assertion(step.action)
-    expected_assertion = _convert_assertion(step.expected)
-    exact_click = EXACT_CLICK_ACTION.fullmatch(step.action.strip())
-    exact_select = EXACT_SELECT_ACTION.fullmatch(step.action.strip())
-    exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(step.action.strip())
-    quoted_fill = QUOTED_FILL_ACTION.fullmatch(step.action.strip())
+    data_fill_intent = STEP_DATA_FILL_INTENT.search(unquoted_action)
+    data_fill = STEP_DATA_FILL_ACTION.fullmatch(raw_action)
+    data_action, action_uses_data = _step_data_assertion(step.action, step.test_data)
+    data_expectation, expected_uses_data = _step_data_assertion(step.expected, step.test_data)
+    uses_step_data = bool(data_fill_intent or action_uses_data or expected_uses_data)
+    if uses_step_data:
+        if step.test_data is None:
+            return [], _unsupported_step(step, "step_data_missing", "Supply Test data on this step.")
+        if (data_fill_intent and not data_fill) or (action_uses_data and not data_action) or (expected_uses_data and not data_expectation):
+            return [], _unsupported_step(step, "unsupported_step_data_instruction", "Use a complete step-data action or check with an exact locator.")
+        if find_secret_issues(step.test_data, message="Raw credential-looking step data", code="secret.raw_value"):
+            safe_step = step.model_copy(update={"test_data": None})
+            return [], _unsupported_step(safe_step, "secret.raw_value", "Use synthetic data or a credential prerequisite.")
+
+    action_value, unsupported_action = (None, False) if data_action else _field_value_assertion(step.action)
+    expected_value, unsupported_expected = (None, False) if data_expectation else _field_value_assertion(step.expected)
+    action_assertion = data_action or _convert_assertion(step.action)
+    expected_assertion = data_expectation or _convert_assertion(step.expected)
+    exact_click = EXACT_CLICK_ACTION.fullmatch(raw_action)
+    exact_select = EXACT_SELECT_ACTION.fullmatch(raw_action)
+    exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(raw_action)
+    quoted_fill = QUOTED_FILL_ACTION.fullmatch(raw_action)
     # A supported assertion's quoted locator and value are data, not operations.
     literal_assertions = {"assert_hidden", "assert_checked", "assert_scoped_text_equals"}
-    action_is_literal = action_value or exact_click or exact_select or exact_checkbox or (action_assertion and action_assertion.kind in literal_assertions)
-    expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
+    action_is_literal = (
+        data_action or action_value or exact_click or exact_select or exact_checkbox or (action_assertion and action_assertion.kind in literal_assertions)
+    )
+    expected_is_literal = data_expectation or expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
     domain_action = "" if action_is_literal else step.action
-    if quoted_fill:
+    if quoted_fill or data_fill:
         domain_action = unquoted_action
-    domain_text = " ".join((domain_action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
+    domain_text = " ".join((domain_action, "" if expected_is_literal else step.expected, "" if uses_step_data else step.test_data or "")).lower()
     if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
         return [], _unsupported_step(step, "unsupported_non_browser_domain", "manual_execution")
     if unsupported_action or unsupported_expected:
@@ -593,6 +617,11 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
 
     if action_value:
         converted.append(action_value)
+    elif data_fill:
+        label = _assertion_literal(data_fill["label"])
+        if not label.strip():
+            return [], _unsupported_step(step, "unsupported_step_data_instruction", "Supply an exact field label.")
+        converted.append(_ConvertedStep("fill_literal", f'I fill exact field "{_escape_step_text(label)}" with literal {json.dumps(step.test_data)}'))
     elif EXACT_CLICK_INTENT.match(action):
         if not exact_click or not (name := _assertion_literal(exact_click["name"])).strip():
             return [], _unmapped_step(step, action, is_expected=False)
@@ -679,10 +708,12 @@ def _fill_step(value: str, label: str, *, exact: bool) -> _ConvertedStep:
     return _ConvertedStep("fill", f'I enter "{value}" into {field}"{label}"')
 
 
-def is_complete_browser_action(action: str) -> bool:
+def is_complete_browser_action(action: str, *, test_data: str | None = None) -> bool:
     """Recognize a standalone interaction without substituting a default target."""
     action = action.strip()
-    converted, issue = _convert_step(TestStep(step=1, action=action, expected=""), base_url="")
+    if not STEP_DATA_FILL_INTENT.match(action) or not isinstance(test_data, str):
+        test_data = None
+    converted, issue = _convert_step(TestStep(step=1, action=action, expected="", test_data=test_data), base_url="")
     if issue or len(converted) != 1:
         return False
     kind = converted[0].kind
@@ -691,7 +722,21 @@ def is_complete_browser_action(action: str) -> bool:
         return bool(opening and (URL_PATTERN.fullmatch(opening[1]) or (opening[1].startswith("/") and not opening[1].startswith("//"))))
     if kind == "click":
         return bool(EXACT_CLICK_ACTION.fullmatch(action))
-    return kind in {"fill", "select_option", "set_checked"}
+    return kind in {"fill", "fill_literal", "select_option", "set_checked"}
+
+
+def _step_data_assertion(text: str, test_data: str | None) -> tuple[_ConvertedStep | None, bool]:
+    statement = _assertion_statement(text)
+    match = STEP_DATA_ASSERTION.match(statement)
+    if not match:
+        return None, False
+    kind = " ".join(match["kind"].lower().split())
+    subject = match["subject"].lower()
+    target = _assertion_literal(match["target"])
+    if match.end() != len(statement) or test_data is None or not target.strip() or (kind == "field" and subject == "text"):
+        return None, True
+    action = "assert_value_equals" if subject == "value" else "assert_scoped_text_equals"
+    return _ConvertedStep(action, f'{kind} "{_escape_step_text(target)}" {subject} should equal literal {json.dumps(test_data)}'), True
 
 
 def _field_value_assertion(text: str) -> tuple[_ConvertedStep | None, bool]:

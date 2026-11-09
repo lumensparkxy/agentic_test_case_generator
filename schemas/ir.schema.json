@@ -290,12 +290,12 @@
           ],
           "properties": {
             "action": {
-              "enum": ["fill", "select_option", "set_checked"]
+              "enum": ["fill", "fill_literal", "select_option", "set_checked"]
             }
           },
           "if": {
             "properties": {
-              "action": { "enum": ["select_option", "set_checked"] }
+              "action": { "enum": ["fill_literal", "select_option", "set_checked"] }
             }
           },
           "then": {
@@ -310,6 +310,10 @@
             }
           },
           "allOf": [
+            {
+              "if": { "properties": { "action": { "const": "fill_literal" } } },
+              "then": { "properties": { "value": { "type": "string" } } }
+            },
             {
               "if": { "properties": { "action": { "const": "select_option" } } },
               "then": { "properties": { "value": { "type": "string", "minLength": 1 } } }

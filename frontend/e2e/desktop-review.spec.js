@@ -6,6 +6,7 @@ for (const hasMetrics of [true, false]) {
 	test(`desktop review owns its evidence after reload (metrics ${hasMetrics})`, { tag: "@p1" }, async ({ page }) => {
 		await page.setViewportSize({ width: hasMetrics ? 1366 : 1920, height: 900 });
 		const project = useCaseProjectFixture();
+		const stepData = '{\n  "total": 9,\n  "memo": "  Keep spaces  "\n}';
 		project.current_snapshots.use_cases.payload.coverage_metrics = {
 			cases_with_traceability: 30,
 			covered_planned_scenarios: 32,
@@ -21,7 +22,7 @@ for (const hasMetrics of [true, false]) {
 						id: "TC-DESKTOP",
 						title: "Submit payment",
 						linked_requirement_ids: ["REQ-101"],
-						steps: [{ step: 1, action: "Submit the order", expected: "Unique receipt identifier appears" }],
+						steps: [{ step: 1, action: "Submit the order", expected: "Unique receipt identifier appears", test_data: stepData }],
 					},
 				],
 				review: { approved: false, score: 0, threshold: 90 },
@@ -60,6 +61,14 @@ for (const hasMetrics of [true, false]) {
 			await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 			await page.getByRole("searchbox", { name: "Search test cases" }).fill("Unique receipt");
 			await expect(page.getByRole("button", { name: /TC-DESKTOP/ })).toBeVisible();
+			await page
+				.getByRole("row", { name: /Submit the order/ })
+				.getByText("Test data", { exact: true })
+				.click();
+			const data = page.locator(".test-step-data p");
+			await expect(data).toBeVisible();
+			await expect(data).toHaveCSS("white-space", "break-spaces");
+			expect(await data.textContent()).toBe(stepData);
 			await page.getByText("Why this test? Source and assessment", { exact: true }).click();
 			await expect(
 				page.getByText(hasMetrics ? "Each order receives a unique receipt." : "No source-to-step assessment is available", {

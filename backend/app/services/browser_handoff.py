@@ -23,6 +23,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Use one browser action and at most one observable check per source step. Split independent outcomes into separate steps.
 - Start with action 'Open "exact supplied URL"'. Leave expected as an empty string on a pure navigation or interaction step when it has no separate source outcome.
 - Use action 'Enter "literal input" into field "observed accessible label"' and expected 'field "observed accessible label" value should equal "literal input"' when the field value matters. Preserve spaces in quoted values. Escape double quotes and backslashes inside the value.
+- For multiline or brace-sensitive input, put the exact string in the step's test_data. Use action 'Enter step data into field "observed accessible label"' and expected 'field "observed accessible label" value should equal step data'. For an exact saved-text comparison, put the expected string on that observation step and use 'css "#saved-value" text should equal step data'. Use synthetic data or credential prerequisites.
 - For a native dropdown with grounded select_options, use action 'Select exact option "observed option label" in field "observed accessible label"'. Leave expected empty for a selection with no separate source outcome and verify the business result in its own check. A field-value assertion needs the supplied DOM value, which may differ from the label. Keep unavailable or unsupported options manual.
 - Context lines beginning with 'Browser page' or 'Browser dropdown' may supply observed same-origin URLs and exact native option labels on a named page. Use only the declared page and choices.
 - For an available native checkbox with grounded checkbox_available, use action 'Check exact checkbox "observed accessible label"' or 'Uncheck exact checkbox "observed accessible label"'. Assert 'exact checkbox "observed accessible label" is checked' or 'exact checkbox "observed accessible label" is not checked' for a required state. Verify saved behavior separately.
@@ -350,7 +351,8 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             if action == "set_checked" and not availability:
                 return "The grounded native checkbox is unavailable for interaction."
         value_action = action in {"assert_value_equals", "assert_value_contains"}
-        if action == "fill" or value_action:
+        fill_action = action in {"fill", "fill_literal"}
+        if fill_action or value_action:
             field = locator["value"]
             known_checkbox = locator["strategy"] == "label" and (
                 (current_page, field) in evidence.checkboxes if current_page is not None else any(label == field for _, label in evidence.checkboxes)
@@ -360,12 +362,12 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             known_dropdown = (
                 (current_page, field) in evidence.select_options if current_page is not None else any(label == field for _, label in evidence.select_options)
             )
-            if action == "fill":
+            if fill_action:
                 if known_dropdown:
                     return "A known dropdown needs an exact option selection instead of a text fill."
                 entered_values[(locator["strategy"], field)] = str(step["value"])
                 pending_values.pop(field, None)
-                if locator["strategy"] == "label" and locator.get("exact") and "[[env:" not in str(step["value"]):
+                if locator["strategy"] == "label" and locator.get("exact") and (action == "fill_literal" or "[[env:" not in str(step["value"])):
                     pending_values[field] = str(step["value"])
             elif known_dropdown:
                 expected = step["expected"]

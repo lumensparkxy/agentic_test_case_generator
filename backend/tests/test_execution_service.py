@@ -854,6 +854,59 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(steps[1]["locator"], {"strategy": "label", "value": "Path"})
         self.assertEqual(steps[2]["locator"], {"strategy": "label", "value": "Bound", "exact": True})
 
+    def test_step_data_compiles_as_literal_fill_value_and_saved_text(self) -> None:
+        target = "https://example.test/"
+        for value in ('{\n  "nested": "{data.missing}",\n  "tag": "café"\n}', '{"missing_closer":', "[[env:PETF_TEST_LITERAL]]", ""):
+            with self.subTest(value=value):
+                case = _browser_case("TC-STEP-DATA")
+                case.steps = [
+                    TestStep(step=1, action=f'Open "{target}"', expected=""),
+                    TestStep(
+                        step=2,
+                        action='Enter step data into field "Payload"',
+                        expected='field "Payload" value should equal step data',
+                        test_data=value,
+                    ),
+                    TestStep(step=3, action='Click exact button "Save"', expected="", test_data=None),
+                    TestStep(step=4, action="Inspect the saved payload", expected='test id "saved" text should equal step data', test_data=value),
+                ]
+                preview = preview_execution([case], target_base_url=target)
+                self.assertEqual(preview.summary.executable, 1)
+                ir = compile_parsed_spec(
+                    parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None)
+                )
+                fill, value_check, _, saved = ir.raw["cases"][0]["steps"][1:]
+                self.assertEqual(fill["locator"], {"strategy": "label", "value": "Payload", "exact": True})
+                self.assertEqual(fill["action"], "fill_literal")
+                self.assertEqual(fill["value"], value)
+                self.assertEqual(value_check["action"], "assert_value_equals")
+                self.assertEqual(saved["action"], "assert_scoped_text_equals")
+                self.assertEqual(value_check["expected"], value)
+                self.assertEqual(saved["expected"], value)
+                generated = generate_playwright_spec(ir).contents
+                self.assertIn(f".fill({json.dumps(value)});", generated)
+                self.assertNotIn("process.env", generated)
+
+    def test_incomplete_or_sensitive_step_data_cannot_become_executable(self) -> None:
+        for action, expected, data, reason in (
+            ('Enter step data into field "Email"', '"Email" is visible', None, "step_data_missing"),
+            ("Inspect the field", 'field "Email" value should equal step data', None, "step_data_missing"),
+            ('Enter step data into field "Email" then submit', '"Email" is visible', "[]", "unsupported_step_data_instruction"),
+            ('On the current page, enter step data into field "Email"', '"Email" is visible', "[]", "unsupported_step_data_instruction"),
+            ("Inspect the result", 'css "#result" text should equal step data and the record is saved', "[]", "unsupported_step_data_instruction"),
+            ('Enter step data into field "Email"', '"Email" is visible', "token=synthetic-test-only", "secret.raw_value"),
+        ):
+            with self.subTest(action=action, expected=expected, reason=reason):
+                case = _browser_case()
+                case.test_data = "Case-level data cannot substitute for step data."
+                case.steps[1] = TestStep(step=2, action=action, expected=expected, test_data=data)
+                preview = preview_execution([case], target_base_url="https://example.test/")
+                self.assertFalse(preview.executable)
+                step = preview.unsupported[0].unsupported_steps[0]
+                self.assertEqual(step.reason_code, reason)
+                if reason == "secret.raw_value":
+                    self.assertIsNone(step.test_data)
+
     def test_malformed_scoped_text_check_does_not_drop_the_expected_result(self) -> None:
         for statement in (
             'css "#result" text should contain "Click save"',

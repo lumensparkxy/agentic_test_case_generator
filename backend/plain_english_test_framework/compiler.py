@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
@@ -11,7 +12,7 @@ import yaml
 
 from plain_english_test_framework.ir_validator import ValidatedIr, parse_ir_document
 from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
-from plain_english_test_framework.spec_parser import ParsedSpec, parse_spec_file
+from plain_english_test_framework.spec_parser import STRUCTURED_LITERAL_STEP_PATTERN, ParsedSpec, parse_spec_file
 from plain_english_test_framework.validation import ValidationIssue, deduplicate_issues, find_secret_issues
 
 
@@ -222,6 +223,23 @@ def _build_case(spec: ParsedSpec, row: DataRow, steps: list[dict[str, Any]]) -> 
 def _compile_step(original: str, source_step_index: int, environment: Mapping[str, Any], data: Mapping[str, Any]) -> dict[str, Any]:
     body_match = STEP_PATTERN.match(original)
     body = body_match.group("body") if body_match else original
+
+    if match := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        kind = match["kind"] or "field"
+        target = re.sub(r'\\(["\\])', r"\1", match["field"] or match["locator"])
+        target = _resolve_text(target, environment, data, path=path)
+        literal = json.loads(match["literal"])
+        step = {
+            "id": _slug_identifier(f"literal {target}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "locator": {"strategy": "label", "value": target, "exact": True} if kind == "field" else _locator_for_kind(kind, target),
+        }
+        if match["field"]:
+            return {**step, "action": "fill_literal", "value": literal}
+        action = "assert_value_equals" if match["subject"] == "value" else "assert_scoped_text_equals"
+        return {**step, "action": action, "expected": literal}
 
     if match := OPEN_PATTERN.match(body):
         url = _resolve_text(match.group("url"), environment, data, path=f"$.steps[{source_step_index}]")

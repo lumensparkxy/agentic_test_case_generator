@@ -30,7 +30,8 @@ def placeholder_reason(case, *, strict=True):
     if strict:
         actions = [str(step.get("action") or "").strip() for step in steps]
         if not any(expectations) or any(
-            not action or (not expected and not is_complete_browser_action(action)) for action, expected in zip(actions, expectations, strict=True)
+            not action or (not expected and not is_complete_browser_action(action, test_data=step.get("test_data")))
+            for action, expected, step in zip(actions, expectations, steps, strict=True)
         ):
             return "Concrete test actions and observable expected results are missing."
     if any(_GENERIC_ACTION.search(str(s.get("action", "")).strip()) for s in steps):

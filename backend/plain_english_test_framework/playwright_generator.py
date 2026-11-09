@@ -69,6 +69,7 @@ async function protectExecutionTarget(page: Page, baseURL: string) {
 SUPPORTED_ACTIONS = {
     "navigate",
     "fill",
+    "fill_literal",
     "select_option",
     "set_checked",
     "click",
@@ -187,6 +188,8 @@ def _render_action(step: Mapping[str, Any], *, enforce_target_origin: bool = Fal
         return f"await page.goto({_js_string(step['url'])});"
     if action == "fill":
         return f"await {_render_locator(step['locator'])}.fill({_input_value(step['value'])});"
+    if action == "fill_literal":
+        return f"await {_render_locator(step['locator'])}.fill({_js_string(step['value'])});"
     if action == "select_option":
         locator = _render_locator(step["locator"])
         label = _js_string(step["value"])

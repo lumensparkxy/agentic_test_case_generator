@@ -100,6 +100,11 @@ breaks in the actual text. An empty expectation requires empty text. Use a
 separate check when the element must also be visible. Legacy unscoped label
 text checks continue to normalize whitespace.
 
+The step-data syntax uses only the string saved on that step. It preserves
+newlines and braces in values such as JSON, including deliberately malformed
+JSON. Placeholder-shaped text in this data stays literal. Use a credential
+prerequisite for values that should come from the environment.
+
 Supply `target_base_url` or explicitly configure `EXECUTION_DEFAULT_BASE_URL`.
 The runtime's implicit localhost fallback does not authorize an API run. This
 also applies to non-project API requests, which require explicit selection but
