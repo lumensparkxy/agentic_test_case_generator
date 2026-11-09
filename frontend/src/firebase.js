@@ -1,5 +1,12 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
+import {
+	browserLocalPersistence,
+	browserSessionPersistence,
+	GoogleAuthProvider,
+	indexedDBLocalPersistence,
+	initializeAuth,
+	OAuthProvider,
+} from "firebase/auth";
 
 const firebaseConfig = {
 	apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
@@ -29,7 +36,11 @@ export const firebaseAuthHandlerUrl = firebaseAuthDomain ? `https://${firebaseAu
 
 export const firebaseApp = hasFirebaseAuthConfig ? (getApps().length ? getApp() : initializeApp(firebaseConfig)) : null;
 
-export const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
+export const firebaseAuth = firebaseApp
+	? initializeAuth(firebaseApp, {
+			persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+		})
+	: null;
 
 const createGoogleProvider = () => {
 	const provider = new GoogleAuthProvider();

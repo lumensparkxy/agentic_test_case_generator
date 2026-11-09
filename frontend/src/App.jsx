@@ -18,7 +18,7 @@ import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { browserPopupRedirectResolver, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
 import { GlobalDestinationPlaceholderPage, ProjectLoadingPage, ProjectOverviewPage, RouteRecoveryPage } from "./app/RoutePages";
 import {
@@ -302,6 +302,7 @@ export default function App() {
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
 	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
+	const [authActionError, setAuthActionError] = useState("");
 	const { isWorkflowNavCollapsed, isCompactWorkflowNavigation, toggleWorkflowNavCollapsed, closeCompactWorkflowNavigation } =
 		useWorkflowShellLayoutState();
 	const {
@@ -1331,6 +1332,7 @@ export default function App() {
 		if (isAuthenticating || !hasVisibleAuthProviders) {
 			return;
 		}
+		setAuthActionError("");
 		setIsSignInDialogOpen(true);
 	};
 
@@ -1401,6 +1403,7 @@ export default function App() {
 					return;
 				}
 
+				const isCurrentStoredSession = () => !firebaseAuth.currentUser && localStorage.getItem(STORAGE_AUTH_TOKEN) === storedToken;
 				try {
 					const res = await fetch(`${API_BASE}/auth/me`, {
 						method: "GET",
@@ -1412,12 +1415,13 @@ export default function App() {
 						throw new Error("Stored session is no longer valid");
 					}
 					const data = await res.json();
+					if (!isCurrentStoredSession()) return;
 					persistAuthState(storedToken, data || storedUser);
 					setStatus(`Welcome back, ${(data || storedUser).name}.`);
 				} catch {
-					clearAuthState("Stored compatibility session expired or is disabled. Please sign in again.");
+					if (isCurrentStoredSession()) clearAuthState("Stored compatibility session expired or is disabled. Please sign in again.");
 				} finally {
-					setIsVerifyingSession(false);
+					if (!firebaseAuth.currentUser) setIsVerifyingSession(false);
 				}
 				return;
 			}
@@ -3118,9 +3122,10 @@ export default function App() {
 		setIsSignInDialogOpen(false);
 		setStatus(`Signing in with ${providerConfig.label}...`);
 		try {
-			await signInWithPopup(firebaseAuth, provider);
+			await signInWithPopup(firebaseAuth, provider, browserPopupRedirectResolver);
 		} catch (error) {
-			clearAuthState(buildProviderSignInErrorMessage(providerConfig, error));
+			clearAuthState();
+			setAuthActionError(buildProviderSignInErrorMessage(providerConfig, error));
 		} finally {
 			setIsAuthenticating(false);
 			setActiveAuthProvider("");
@@ -3129,14 +3134,15 @@ export default function App() {
 
 	const handleLogout = async () => {
 		setIsAuthenticating(true);
+		// The Firebase observer can report a null user before signOut resolves.
+		clearAuthState("Signed out.");
 		try {
 			if (firebaseAuth) {
 				await signOut(firebaseAuth);
 			}
 		} catch (error) {
-			setStatus(`Sign out failed: ${error.message}`);
+			setAuthActionError(`Sign out failed: ${error.message}`);
 		} finally {
-			clearAuthState("Signed out.");
 			setIsAuthenticating(false);
 		}
 	};
@@ -4447,7 +4453,9 @@ export default function App() {
 				{applicationLiveStatus}
 			</div>
 			{!isAuthenticated && !isVerifyingSession && (
-				<div className="auth-warning-banner">🔐 Sign in to parse requirements, generate test cases, and export artifacts.</div>
+				<div className="auth-warning-banner" role={authActionError ? "alert" : undefined}>
+					{authActionError || "🔐 Sign in to parse requirements, generate test cases, and export artifacts."}
+				</div>
 			)}
 
 			<BillingBanner isAuthenticated={isAuthenticated} pilotAlert={pilotAlert} billingContactEmail={billingContactEmail} />

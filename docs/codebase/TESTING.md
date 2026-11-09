@@ -140,9 +140,14 @@ disabled:
 
 ```bash
 JWT_SECRET_KEY=local-chromium-regression-test-secret \
+E2E_FIREBASE_FIXTURE_API_KEY=offline-ui-smoke-key \
 E2E_BASE_URL=http://127.0.0.1:5173 E2E_LIVE=0 E2E_LOCAL_WORKBENCH=0 \
 npm run test:e2e -- --workers=4 --retries=0
 ```
+
+`E2E_FIREBASE_FIXTURE_API_KEY` must match the dummy Vite key above. The restored
+session test uses the browser Firebase SDK with intercepted Firebase and backend
+responses. Use disposable web settings for this test.
 
 CI currently runs:
 

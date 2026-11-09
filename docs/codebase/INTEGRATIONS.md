@@ -70,6 +70,12 @@ Rotation/lifecycle notes:
 - `docs/production-auth-policy-decision.md` defines Firebase ID tokens as the
   production protected-endpoint token type and backend JWTs as local/test
   compatibility tokens.
+- The browser initializes Firebase Auth with IndexedDB, local and session
+  persistence in that order. Google, Microsoft and Apple supply the browser
+  popup resolver when the user selects a provider, keeping its network
+  work separate from startup session verification. The sign-in banner shows
+  popup errors so the user can retry. Sign-out clears the local session before
+  Firebase notifies the observer.
 
 ## 4) Reliability and Failure Behavior
 
