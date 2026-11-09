@@ -186,7 +186,7 @@ def _snapshot_for(project_id: str, snapshot_id: str) -> Optional[QaProjectStageS
     return QaProjectStageSnapshot.model_validate(payload)
 
 
-def find_idempotent_stage_snapshot(project_id, stage, operation, key, *, actor):
+def find_idempotent_stage_snapshot(project_id, stage, operation, key, *, actor, require_current=True):
     """Read a publication receipt without treating a storage failure as absence."""
     project_doc = _get_project_doc(project_id)
     project = _document_to_dict(project_doc.get())
@@ -197,6 +197,8 @@ def find_idempotent_stage_snapshot(project_id, stage, operation, key, *, actor):
     value = _document_to_dict(project_doc.collection("snapshots").document(snapshot_id).get())
     if value is None:
         return None
+    if not require_current:
+        return QaProjectStageSnapshot.model_validate(value)
     # Read the header after the receipt. A publication may have committed
     # between the ownership read and the receipt read.
     current = _document_to_dict(project_doc.get())

@@ -22,10 +22,11 @@ uses the existing [content matching rules](scenario-review-persistence.md); the
 new version never inherits whole-version approval.
 
 Failures, fallback output, incomplete requirement coverage and revision conflicts
-do not replace the old snapshot. Use **Reload latest** after a conflict, then
-retry against the current project. Navigating away does not cancel server work;
-return or reload to see a result that committed successfully. Late responses
-cannot overwrite a different project, account, route or newer revision in the UI.
+preserve the old snapshot. After interrupted delivery, the workbench retries
+once with the same request ID and inputs. Use **Reload latest** after a
+revision conflict. If you navigate away during generation, return or reload
+to see a result that committed successfully. The workbench discards late
+responses after a change of project, account, route or revision.
 
 ## API
 
@@ -50,15 +51,18 @@ Client-supplied requirements or old coverage plans are rejected. Runtime guidanc
 uses the existing Use Cases stage flags and records the manifest with the new
 snapshot; this endpoint does not enable any deployment flags.
 
-Successful responses contain the refreshed `QaProjectDetail`. Snapshot creation,
-history, downstream staleness and the project revision commit use the existing
-atomic project transaction. A concurrent edit returns HTTP 409. Invalid or
-incomplete generated output returns HTTP 502; fallback or unavailable generation
-returns an error without publishing a snapshot. Scoped refresh also preserves
+Successful responses contain the refreshed `QaProjectDetail`. The snapshot,
+history, downstream staleness, project revision, usage event and completed
+workflow outcome commit together. The snapshot identifies its usage event.
+A concurrent edit returns HTTP 409. Invalid or incomplete generated output
+returns HTTP 502. Fallback or unavailable generation preserves the previous
+snapshot. Scoped refresh also preserves
 the prior version if the independent reviewer cannot assess every scenario.
 The new snapshot records its previous snapshot ID and the refreshed, retained
-and removed requirement IDs. Retrying a committed request
-with its old revision returns 409, so reload before retrying an uncertain result.
+and removed requirement IDs. Resending the same `X-Request-ID`, revision,
+refresh scope and guidance bypass setting returns the current project while
+that saved Use Cases version is current. Changed inputs, a stale result or
+a superseded result return HTTP 409.
 
 The existing `testcases.generate` billing access gate applies. This operation
 records `use_cases.generate` usage for newly planned scenarios, creates no

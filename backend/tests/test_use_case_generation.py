@@ -1,3 +1,4 @@
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -11,10 +12,11 @@ for directory in (BACKEND, BACKEND / "tests"):
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from test_use_case_review_service import FakeFirestoreClient, _run_transaction
+from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
 from test_workflow_project_service import FakeCollection
 from app.main import app, get_current_user
 from app.models import AuthUser, Requirement
+from app.services import audit_service
 from app.services import use_case_generation_service as service
 from app.services.workflow_project_service import (
     ProjectConflictError,
@@ -46,15 +48,17 @@ def generated(requirements):
 class UseCaseGenerationTests(unittest.TestCase):
     def setUp(self):
         self.store = {}
+        self.client = FakeFirestoreClient(self.store)
         self.actor = AuthUser(sub="user-1", email="user@example.com", name="User")
         patches = {
             "app.services.workflow_project_service.get_required_firestore_collection": {"return_value": FakeCollection("qa_projects", self.store)},
-            "app.services.workflow_project_service.get_required_firestore_client": {"return_value": FakeFirestoreClient(self.store)},
+            "app.services.workflow_project_service.get_required_firestore_client": {"return_value": self.client},
             "app.services.workflow_project_service.transactional": {"side_effect": _run_transaction},
+            "app.services.use_case_generation_service.get_required_firestore_client": {"return_value": self.client},
             "app.services.use_case_generation_service.enforce_billing_access": {},
             "app.services.use_case_generation_service.start_workflow_run": {"return_value": "run-generation"},
             "app.services.use_case_generation_service.complete_workflow_run": {},
-            "app.services.use_case_generation_service.record_usage_event": {},
+            "app.services.use_case_generation_service.record_usage_event": {"return_value": "usage-generation"},
         }
         self.mocks = {}
         for target, kwargs in patches.items():
@@ -86,10 +90,138 @@ class UseCaseGenerationTests(unittest.TestCase):
             project_id=self.project_id, stage=stage, payload=payload, actor=self.actor, request_id=f"seed-{stage}", operation="seed", **kwargs
         )
 
-    def run_generation(self, **kwargs):
+    def run_generation(self, *, base_project_revision=None, **kwargs):
         return service.generate_project_use_cases(
-            project_id=self.project_id, actor=self.actor, request_id="generate-1", base_project_revision=self.project.current_revision, **kwargs
+            project_id=self.project_id,
+            actor=self.actor,
+            request_id="generate-1",
+            base_project_revision=self.project.current_revision if base_project_revision is None else base_project_revision,
+            **kwargs,
         )
+
+    def durable_audit(self):
+        stack = self.enterContext(ExitStack())
+        stack.enter_context(
+            patch("app.services.audit_repository.get_optional_firestore_collection", side_effect=lambda name, **kwargs: self.client.collection(name))
+        )
+        for name in ("start_workflow_run", "complete_workflow_run", "record_usage_event"):
+            stack.enter_context(patch.object(service, name, wraps=getattr(audit_service, name)))
+
+    def test_generation_commits_usage_and_recovers_exact_result_after_commit_reply_loss(self):
+        self.durable_audit()
+        publish = service.append_stage_snapshot
+
+        def drop_reply(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic commit reply lost")
+
+        with patch.object(service, "append_stage_snapshot", side_effect=drop_reply):
+            saved = self.run_generation()
+        replay = self.run_generation()
+        self.assertEqual(replay, saved)
+        self.model.assert_called_once()
+        self.mocks["enforce_billing_access"].assert_called_once()
+        snapshot = saved.current_snapshots["use_cases"]
+        self.assertEqual(saved.current_revision, self.project.current_revision + 1)
+        self.assertFalse(snapshot.approved)
+        [event] = [value for path, value in self.store.items() if path.startswith("usage_events/")]
+        [workflow] = [value for path, value in self.store.items() if path.startswith("workflow_runs/")]
+        self.assertEqual((event["status"], event["quantity"], workflow["status"]), ("completed", 10, "completed"))
+        self.assertEqual(event["event_id"], snapshot.source_event_id)
+        self.assertEqual({event["workflow_run_id"], workflow["run_id"]}, {snapshot.workflow_run_id})
+        self.assertEqual(workflow["result"]["snapshot_id"], snapshot.snapshot_id)
+        self.assertFalse(any(path.startswith("billing_consumption/") for path in self.store))
+
+        before = deepcopy(self.store)
+        for kwargs in ({"memory_bypass": True}, {"refresh_requirement_ids": []}, {"base_project_revision": saved.current_revision}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(HTTPException) as changed:
+                self.run_generation(**kwargs)
+            self.assertEqual(changed.exception.status_code, 409)
+        self.assertEqual(self.store, before)
+
+        renamed = update_project(project_id=self.project_id, actor=self.actor, request_id="rename", name="New name")
+        self.assertEqual(self.run_generation(), renamed)
+        self.save("context", {"notes": "Changed context"}, approved=True)
+        with self.assertRaises(ProjectConflictError):
+            self.run_generation()
+        self.model.assert_called_once()
+
+    def test_unconfirmed_publication_keeps_committed_workflow_status_and_recovers_on_retry(self):
+        self.durable_audit()
+        publish = service.append_stage_snapshot
+
+        def drop_reply(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic commit reply lost")
+
+        with (
+            patch.object(service, "append_stage_snapshot", side_effect=drop_reply),
+            patch.object(service, "find_idempotent_stage_snapshot", side_effect=[None, RuntimeError("Synthetic receipt read failure")]),
+            self.assertRaises(HTTPException) as uncertain,
+        ):
+            self.run_generation()
+        self.assertEqual(uncertain.exception.detail["code"], "use_case_publication_unconfirmed")
+        saved = self.run_generation()
+        self.model.assert_called_once()
+        workflow = self.store[f"workflow_runs/{saved.current_snapshots['use_cases'].workflow_run_id}"]
+        self.assertEqual(workflow["status"], "completed")
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
+
+    def test_retry_recovers_a_commit_between_receipt_lookup_and_revision_check(self):
+        self.durable_audit()
+        committed = None
+
+        def read_after_commit(project_id, *, actor):
+            nonlocal committed
+            if committed is None:
+                with patch.object(service, "get_project", get_project):
+                    committed = self.run_generation()
+            return get_project(project_id, actor=actor)
+
+        with patch.object(service, "get_project", side_effect=read_after_commit):
+            replay = self.run_generation()
+        self.assertEqual(replay, committed)
+        self.model.assert_called_once()
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
+
+    def test_superseded_commit_reply_preserves_completed_workflow(self):
+        self.durable_audit()
+        publish = service.append_stage_snapshot
+
+        def supersede_then_drop_reply(**kwargs):
+            publish(**kwargs)
+            self.save("context", {"notes": "Superseding context"}, approved=True)
+            raise RuntimeError("Synthetic commit reply lost")
+
+        with patch.object(service, "append_stage_snapshot", side_effect=supersede_then_drop_reply), self.assertRaises(ProjectConflictError):
+            self.run_generation()
+        current = get_project(self.project_id, actor=self.actor)
+        self.assertTrue(current.stage_state["use_cases"].stale)
+        [workflow] = [value for key, value in self.store.items() if key.startswith("workflow_runs/")]
+        self.assertEqual(workflow["status"], "completed")
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
+        with self.assertRaises(ProjectConflictError):
+            self.run_generation()
+        self.model.assert_called_once()
+
+    def test_usage_write_failure_rolls_back_use_cases_and_completed_workflow(self):
+        self.durable_audit()
+        original_set = FakeTransaction.set
+        staged = []
+
+        def reject_usage(transaction, document, payload, merge=False):
+            if document.path.startswith("usage_events/"):
+                staged.extend(value["status"] for _, ref, value in transaction.pending if ref.path.startswith("workflow_runs/"))
+                raise RuntimeError("Synthetic usage write failure")
+            return original_set(transaction, document, payload, merge=merge)
+
+        with patch.object(FakeTransaction, "set", reject_usage), self.assertRaisesRegex(RuntimeError, "usage write failure"):
+            self.run_generation()
+        self.assertEqual(staged, ["completed"])
+        self.assertEqual(get_project(self.project_id, actor=self.actor), self.project)
+        self.assertFalse(any(key.startswith("usage_events/") for key in self.store))
+        [workflow] = [value for path, value in self.store.items() if path.startswith("workflow_runs/")]
+        self.assertEqual(workflow["status"], "failed")
 
     def prepare_scope(self, *, removal_only=False):
         project_path = f"qa_projects/{self.project_id}"
@@ -136,11 +268,18 @@ class UseCaseGenerationTests(unittest.TestCase):
         selected = ["REQ-001", "REQ-003", "REQ-009", "REQ-010"]
         app.dependency_overrides[get_current_user] = lambda: self.actor
         self.addCleanup(app.dependency_overrides.clear)
-        response = TestClient(app).post(
+        client = TestClient(app)
+        payload = {"base_project_revision": self.project.current_revision, "refresh_requirement_ids": selected}
+        headers = {"X-Request-ID": "scoped-use-cases-1"}
+        response = client.post(
             f"/projects/{self.project_id}/use-cases/generate",
-            json={"base_project_revision": self.project.current_revision, "refresh_requirement_ids": selected},
+            json=payload,
+            headers=headers,
         )
         self.assertEqual(response.status_code, 200, response.text)
+        replay = client.post(f"/projects/{self.project_id}/use-cases/generate", json=payload, headers=headers)
+        self.assertEqual(replay.json(), response.json())
+        self.model.assert_called_once()
         after = get_project(self.project_id, actor=self.actor)
         self.assertEqual(self.model.call_args.args[0].context.notes, "Current reviewed context")
         self.assertEqual(set(self.model.call_args.kwargs["retained_groups"]), {"REQ-002", "REQ-004", "REQ-005", "REQ-006", "REQ-007"})
@@ -166,6 +305,7 @@ class UseCaseGenerationTests(unittest.TestCase):
         self.assertTrue(after.stage_state["test_cases"].stale)
         path = f"qa_projects/{self.project_id}/snapshots/{self.old_snapshot.snapshot_id}"
         self.assertEqual(self.store[path], self.before[path])
+        self.mocks["record_usage_event"].assert_called_once()
         self.assertEqual(self.mocks["record_usage_event"].call_args.kwargs["quantity"], len(selected))
 
     def test_scope_requires_every_changed_and_added_requirement_and_current_context(self):
@@ -331,7 +471,7 @@ class UseCaseGenerationTests(unittest.TestCase):
         after = get_project(self.project_id, actor=self.actor)
         self.assertEqual(after.name, "New name")
         self.assertEqual(after.current_snapshots, self.project.current_snapshots)
-        self.mocks["record_usage_event"].assert_not_called()
+        self.assertFalse(any(key.startswith("usage_events/") for key in self.store))
 
     def test_unexpected_model_exception_has_generation_error_and_preserves_snapshot(self):
         self.model.side_effect = RuntimeError("Provider failure")

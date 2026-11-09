@@ -46,18 +46,29 @@ export default function useUseCaseGeneration({ project, identity, request, onGen
 				: "Generating Use Cases from the approved requirements. Your current artifacts remain available.",
 		});
 		try {
-			const response = await callbacks.current.request(
-				API_CONTRACT_ENDPOINTS.projectUseCasesGenerate.path.replace("{project_id}", encodeURIComponent(projectId)),
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json", "X-Request-ID": operation.requestId },
-					body: JSON.stringify({
-						base_project_revision: revision,
-						...(refreshRequirementIds ? { refresh_requirement_ids: refreshRequirementIds } : {}),
-					}),
-				}
-			);
-			const data = await response.json();
+			const path = API_CONTRACT_ENDPOINTS.projectUseCasesGenerate.path.replace("{project_id}", encodeURIComponent(projectId));
+			const options = {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": operation.requestId },
+				body: JSON.stringify({
+					base_project_revision: revision,
+					...(refreshRequirementIds ? { refresh_requirement_ids: refreshRequirementIds } : {}),
+				}),
+			};
+			const send = async () => {
+				const response = await callbacks.current.request(path, options);
+				const data = response.ok ? await response.json() : await response.json().catch(() => null);
+				return { response, data };
+			};
+			let reply = await send().catch((error) => {
+				if (error instanceof TypeError || error instanceof SyntaxError) return null;
+				throw error;
+			});
+			if (!reply || (reply.response.status === 503 && reply.data?.detail?.code === "use_case_publication_unconfirmed")) {
+				if (!current()) return;
+				reply = await send();
+			}
+			const { response, data } = reply;
 			if (!current()) return;
 			if (!response.ok) {
 				const message = typeof data?.detail === "string" ? data.detail : data?.detail?.message;
@@ -71,12 +82,16 @@ export default function useUseCaseGeneration({ project, identity, request, onGen
 			) {
 				throw new Error("The generation response did not match this project. Reload latest to check the saved result.");
 			}
-			const refresh = data.current_snapshots.use_cases.metadata?.use_case_refresh;
+			const snapshot = data.current_snapshots.use_cases;
+			const refresh = snapshot.metadata?.use_case_refresh;
+			const reviewed = data.stage_state?.use_cases?.metadata?.latest_human_review?.snapshot_id === snapshot.snapshot_id;
 			setOutcome({
 				status: "success",
-				message: refresh
-					? `New Use Cases are ready for human review. ${refresh.refreshed_requirement_ids.length} groups refreshed, ${refresh.retained_requirement_ids.length} kept, and ${refresh.removed_requirement_ids.length} removed.`
-					: "New Use Cases are ready for human review. Existing test cases were preserved and marked stale.",
+				message: reviewed
+					? "The saved Use Cases and human review were recovered."
+					: refresh
+						? `New Use Cases are ready for human review. ${refresh.refreshed_requirement_ids.length} groups refreshed, ${refresh.retained_requirement_ids.length} kept, and ${refresh.removed_requirement_ids.length} removed.`
+						: "New Use Cases are ready for human review. Existing test cases were preserved and marked stale.",
 				committedRevision: data.current_revision,
 				projectId,
 				identity,

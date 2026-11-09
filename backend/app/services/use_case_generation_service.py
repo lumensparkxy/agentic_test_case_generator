@@ -10,14 +10,60 @@ from ..agents.use_case_agent import RetainedUseCaseGroup, generate_use_cases
 from ..contracts.grounding import EnrichInput
 from ..contracts.projects import QaProjectUseCaseSnapshotInput
 from ..models import GenerateTestCasesInput, TestCaseTemplate
+from ..observability.metrics import record_workflow_completed
 from .audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from .billing_service import enforce_billing_access
+from .firestore_repository import get_required_firestore_client
 from .guidance_runtime import prepare_run
 from .guidance_service import guidance_scope
 from .orchestrator_service import _use_cases_human_approved
 from .requirement_reconciliation import canonical_requirements
 from .requirement_scope import approved_generation_requirements
-from .workflow_project_service import ProjectConflictError, ProjectNotFoundError, append_stage_snapshot, get_project, get_project_stage_snapshot
+from .test_case_quality import case_source_hash
+from .workflow_project_service import (
+    ProjectConflictError,
+    ProjectNotFoundError,
+    ProjectPermissionError,
+    append_stage_snapshot,
+    find_idempotent_stage_snapshot,
+    get_project,
+    get_project_stage_snapshot,
+)
+
+_OPERATION = "use_cases.generate"
+
+
+class _PublicationUnconfirmed(HTTPException):
+    def __init__(self):
+        super().__init__(503, {"code": "use_case_publication_unconfirmed", "message": "Use Cases publication could not be confirmed. Retry this request."})
+
+
+def _check_fingerprint(snapshot, fingerprint):
+    if snapshot.metadata.get("generation_request_fingerprint") != fingerprint:
+        raise HTTPException(409, "This request already published Use Cases for different inputs.")
+
+
+def _current_result(project_id, actor, snapshot):
+    try:
+        project = get_project(project_id, actor=actor)
+    except ProjectNotFoundError, ProjectPermissionError:
+        raise
+    except Exception as exc:
+        raise _PublicationUnconfirmed() from exc
+    state = project.stage_state.get("use_cases")
+    if project.status != "active" or not state or state.stale or state.current_snapshot_id != snapshot.snapshot_id:
+        raise ProjectConflictError(project.current_revision)
+    if project.current_snapshots.get("use_cases") is None:
+        raise _PublicationUnconfirmed()
+    return project
+
+
+def _replay_result(project_id, actor, idempotency_key, fingerprint):
+    receipt = find_idempotent_stage_snapshot(project_id, "use_cases", _OPERATION, idempotency_key, actor=actor)
+    if receipt is not None:
+        _check_fingerprint(receipt, fingerprint)
+        return _current_result(project_id, actor, receipt)
+    return None
 
 
 def _validate_output(result, requirements):
@@ -138,8 +184,18 @@ def _snapshot_payload(result, active, retained, *, scoped):
 
 
 def generate_project_use_cases(*, project_id, actor, request_id, base_project_revision, refresh_requirement_ids=None, memory_bypass=False):
+    idempotency_key = case_source_hash([actor.sub, request_id])
+    fingerprint = case_source_hash([base_project_revision, refresh_requirement_ids, memory_bypass])
+    replay = _replay_result(project_id, actor, idempotency_key, fingerprint)
+    if replay is not None:
+        return replay
+
     project = get_project(project_id, actor=actor)
     if project.current_revision != base_project_revision:
+        # The original request may have committed between the two reads.
+        replay = _replay_result(project_id, actor, idempotency_key, fingerprint)
+        if replay is not None:
+            return replay
         raise ProjectConflictError(project.current_revision)
     if project.status != "active":
         raise HTTPException(409, "Restore this project before generating Use Cases.")
@@ -177,7 +233,7 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
     metadata = {"project_id": project_id, "requirement_count": len(active), "source_requirements_snapshot_id": baseline.snapshot_id}
     if refresh:
         metadata["use_case_refresh"] = refresh
-    run_id = start_workflow_run(operation="use_cases.generate", actor=actor, request_id=request_id, metadata=metadata)
+    run_id = start_workflow_run(operation=_OPERATION, actor=actor, request_id=request_id, metadata=metadata)
     try:
         with guidance_scope(manifest):
             try:
@@ -186,7 +242,7 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
                     actor_user_id=actor.sub,
                     request_id=request_id,
                     workflow_run_id=run_id,
-                    operation="use_cases.generate",
+                    operation=_OPERATION,
                     **({"retained_groups": retained} if refresh else {}),
                 )
             except HTTPException:
@@ -194,38 +250,77 @@ def generate_project_use_cases(*, project_id, actor, request_id, base_project_re
             except Exception as exc:
                 raise HTTPException(502, "Use Cases generation failed. The previous snapshot was preserved. Retry generation.") from exc
             saved_payload = _snapshot_payload(result, active, retained, scoped=refresh is not None)
-            snapshot = append_stage_snapshot(
-                project_id=project_id,
-                stage="use_cases",
-                payload=saved_payload,
-                operation="use_cases.generate",
+            count = sum(len(group["scenarios"]) for group in saved_payload["coverage_plan"] if group["requirement_id"] not in retained)
+            client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
+            pending_writes = []
+            event_id = record_usage_event(
+                event_type="use_cases.generated",
+                billing_key=_OPERATION,
+                quantity=count,
+                unit="use_case",
                 actor=actor,
                 request_id=request_id,
                 workflow_run_id=run_id,
-                approved=False,
-                source_snapshot_id=baseline.snapshot_id,
-                title="Use Cases generated for human review",
-                metadata={
-                    **metadata,
-                    "source_context_snapshot_id": context_snapshot.snapshot_id if context_snapshot else None,
-                    "source_requirement_identities": {row.id: _requirement_identity(row) for row in active},
-                },
-                base_project_revision=base_project_revision,
+                status="completed",
+                metadata=metadata,
+                pending_writes=pending_writes,
+                firestore_client=client,
             )
+
+            def complete_in_transaction(transaction, snapshot):
+                writes = []
+                complete_workflow_run(
+                    run_id,
+                    status="completed",
+                    metadata={**metadata, "scenario_count": count, "snapshot_id": snapshot["snapshot_id"]},
+                    pending_writes=writes,
+                    firestore_client=client,
+                )
+                for reference, value, merge in writes:
+                    transaction.set(reference, value, merge=merge)
+
+            try:
+                snapshot = append_stage_snapshot(
+                    project_id=project_id,
+                    stage="use_cases",
+                    payload=saved_payload,
+                    operation=_OPERATION,
+                    actor=actor,
+                    request_id=request_id,
+                    workflow_run_id=run_id,
+                    source_event_id=event_id,
+                    approved=False,
+                    source_snapshot_id=baseline.snapshot_id,
+                    title="Use Cases generated for human review",
+                    metadata={
+                        **metadata,
+                        "source_context_snapshot_id": context_snapshot.snapshot_id if context_snapshot else None,
+                        "source_requirement_identities": {row.id: _requirement_identity(row) for row in active},
+                        "generation_request_fingerprint": fingerprint,
+                    },
+                    base_project_revision=base_project_revision,
+                    idempotency_key=idempotency_key,
+                    pending_writes=pending_writes,
+                    transaction_guard=complete_in_transaction,
+                )
+            except Exception:
+                try:
+                    # Reconcile the commit before checking whether its result is still current.
+                    snapshot = find_idempotent_stage_snapshot(project_id, "use_cases", _OPERATION, idempotency_key, actor=actor, require_current=False)
+                except ProjectConflictError, ProjectNotFoundError, ProjectPermissionError:
+                    raise
+                except Exception as exc:
+                    raise _PublicationUnconfirmed() from exc
+                if snapshot is None:
+                    raise
+            _check_fingerprint(snapshot, fingerprint)
+    except _PublicationUnconfirmed:
+        raise
     except Exception:
         complete_workflow_run(run_id, status="failed", metadata=metadata, error_message="Use Cases generation or revision commit failed")
         raise
-    count = sum(len(group["scenarios"]) for group in saved_payload["coverage_plan"] if group["requirement_id"] not in retained)
-    complete_workflow_run(run_id, status="completed", metadata={**metadata, "scenario_count": count, "snapshot_id": snapshot.snapshot_id})
-    record_usage_event(
-        event_type="use_cases.generated",
-        billing_key="use_cases.generate",
-        quantity=count,
-        unit="use_case",
-        actor=actor,
-        request_id=request_id,
-        workflow_run_id=run_id,
-        status="completed",
-        metadata=metadata,
-    )
-    return get_project(project_id, actor=actor)
+    if snapshot.workflow_run_id == run_id:
+        record_workflow_completed(run_id, "completed")
+    else:
+        complete_workflow_run(run_id, status="completed", metadata={**metadata, "reused_snapshot_id": snapshot.snapshot_id})
+    return _current_result(project_id, actor, snapshot)

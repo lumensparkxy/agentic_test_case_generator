@@ -66,9 +66,11 @@ async function setup(page, options = {}) {
 	const project = options.project || staleProject();
 	const api = await installUseCaseReviewApi(page, { initialProject: project });
 	const requests = [];
+	const requestIds = [];
 	await page.route(`**${path}/generate`, async (route) => {
 		const input = route.request().postDataJSON();
 		requests.push(input);
+		requestIds.push(route.request().headers()["x-request-id"]);
 		if (options.gate) await options.gate;
 		if (options.status)
 			return route.fulfill({
@@ -100,12 +102,15 @@ async function setup(page, options = {}) {
 			};
 		}
 		api.setProject(next);
+		if (requests.length === 1 && options.interruption === "transport") return route.abort("failed");
+		if (requests.length === 1 && options.interruption === "unconfirmed")
+			return route.fulfill({ status: 503, json: { detail: { code: "use_case_publication_unconfirmed" } } });
 		await route.fulfill({ json: next });
 	});
 	await seedAuthenticatedSession(page);
 	await page.goto(path);
 	await expect(page.getByRole("heading", { name: "Use Cases", exact: true })).toBeVisible();
-	return { api, requests, project };
+	return { api, requests, requestIds, project };
 }
 
 test(
@@ -165,6 +170,22 @@ test("regenerates 8 groups into 10 using one revision-only request and requires 
 	expect(requests).toHaveLength(1);
 	await page.screenshot({ path: test.info().outputPath("regenerated-use-cases.png"), fullPage: true });
 });
+
+for (const interruption of ["transport", "unconfirmed"]) {
+	test(
+		`recovers a ${interruption} Use Cases response with the same request`,
+		{ tag: interruption === "transport" ? "@p1" : [] },
+		async ({ page }) => {
+			const { requests, requestIds, project } = await setup(page, { interruption });
+			await page.getByRole("button", { name: "Regenerate Use Cases", exact: true }).click();
+			await expect(page.getByText("Fresh REQ-10", { exact: true })).toBeVisible();
+			await expect(page.getByLabel("Current human review status")).toHaveText("Awaiting human review");
+			expect(requests).toEqual(Array(2).fill({ base_project_revision: project.current_revision }));
+			expect(requestIds[0]).toBeTruthy();
+			expect(requestIds).toEqual([requestIds[0], requestIds[0]]);
+		}
+	);
+}
 
 for (const status of [503, 409])
 	test(`failed generation ${status} keeps the old snapshot and allows reload`, async ({ page }) => {
