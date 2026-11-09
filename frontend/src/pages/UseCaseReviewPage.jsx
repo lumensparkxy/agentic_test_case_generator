@@ -26,6 +26,8 @@ export default function UseCaseReviewPage({
 	generationDisabled = false,
 	contextRefreshRequired = false,
 	continuationPanel = null,
+	continuation = null,
+	generateOnApproval = false,
 	onBack,
 	onNext,
 }) {
@@ -43,6 +45,7 @@ export default function UseCaseReviewPage({
 		baseProjectRevision: Number.isInteger(project?.current_revision) ? project.current_revision : null,
 		onCommitted: onDecisionCommitted,
 		onReload: onReloadLatest,
+		continuation,
 	});
 	const requirementsSnapshot = project?.current_snapshots?.requirements || null;
 	const requirementsState = project?.stage_state?.requirements || null;
@@ -175,6 +178,8 @@ export default function UseCaseReviewPage({
 						snapshot={snapshot}
 						stageState={stageState}
 						review={review}
+						generateOnApproval={generateOnApproval}
+						approvalRecovery={continuation?.unresolved}
 						onContinue={matchingHumanDecision === "approve" && !effectiveStageState?.stale ? onNext : undefined}
 					/>
 				</fieldset>

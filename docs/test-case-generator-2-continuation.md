@@ -174,8 +174,27 @@ assessment outage retains valid saved cases for saved-suite review. A saved
 run result proves publication of that exact suite. Design and human
 acceptance are separate evidence.
 
-The second named approval and cumulative journey budget are the next
-packet. The worker path is still limited to the local emulator.
+### Named scenario approval and suite recovery
+
+**Approve scenarios and generate tests** applies to the currently displayed
+scenario plan from a completed scope preparation run. The existing review
+dialog keeps the decision explicit. Requesting changes, editing individual
+scenarios and approving legacy plans use their existing review behavior.
+
+The second approval binds the exact plan, prior run, approved scope and
+sources before attaching one child. It commits the human decision, receipt,
+child intent and outbox with the budget allocation. The two stages share a
+31-request ceiling, with up to seven reserved for preparation and 24 for test
+generation. A missing or spent budget yields a recoverable receipt for the
+saved approval. Exact replay returns the recorded outcome without consuming
+another reservation, including after a change to server settings.
+
+Review shows the stage and exposes readback and cancellation. After a lost
+response it reads the exact owner, project, stage and request. A retry of an
+unconfirmed decision reuses the original request identity and comment.
+The link to Review Tests appears when the exact saved suite is current.
+An assessment outage remains a separate saved-suite review action. The
+worker stays limited to the local emulator and invokes no browser execution.
 
 ## Quality and delivery policy
 
@@ -276,10 +295,12 @@ stage claim (commit `ca554da`,
 [PR #456](https://github.com/lumensparkxy/agentic_test_case_generator/pull/456)).
 P3b connects scenario preparation and Review status (commit `2bf1cef`,
 [PR #458](https://github.com/lumensparkxy/agentic_test_case_generator/pull/458)).
-P3c adds the exact-plan Test Cases worker under
-[#459](https://github.com/lumensparkxy/agentic_test_case_generator/issues/459).
-Next is the named scenario approval, cumulative budget and Review
-recovery for the second stage.
+P3c adds the exact-plan Test Cases worker (head `86c194b`,
+[PR #460](https://github.com/lumensparkxy/agentic_test_case_generator/pull/460)).
+P3d connects the second named approval, budget and Review recovery under
+[#461](https://github.com/lumensparkxy/agentic_test_case_generator/issues/461).
+Next is shared provider admission across continuation, Project Sync and
+foreground generation before any hosted activation.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

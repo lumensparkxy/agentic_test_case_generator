@@ -14,7 +14,7 @@ from ..models import (
     UseCaseReviewRecord,
     UseCaseReviewResponse,
 )
-from .approval_continuation import ContinuationOptions, enqueue_approval
+from .approval_continuation import ContinuationOptions, continuation_run_id, enqueue_approval
 from .requirement_reconciliation import canonical_requirements, digest
 from .requirement_scope import eligible_generation_scope
 from .scenario_review_state import current_scenario_reviews, scenario_key
@@ -29,6 +29,9 @@ from .workflow_project_service import (
 
 
 QA_PROJECTS_COLLECTION = "qa_projects"
+_PREPARED_SCENARIO_RESERVATION = 7
+_TEST_GENERATION_RESERVATION = 24
+_JOURNEY_PROVIDER_REQUEST_LIMIT = _PREPARED_SCENARIO_RESERVATION + _TEST_GENERATION_RESERVATION
 
 
 class UseCaseReviewConflictError(RuntimeError):
@@ -52,6 +55,11 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     raw = "::".join(str(part or "") for part in parts)
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
     return f"{prefix}_{digest}"
+
+
+def use_case_review_id(project_id: str, request_id: str) -> str:
+    """Return the durable review receipt document ID for this request."""
+    return _stable_id("usecasereview", project_id, f"use_cases.review:{request_id}")
 
 
 def _request_fingerprint(
@@ -109,6 +117,79 @@ def recorded_use_case_context_matches(metadata: dict[str, Any], context_snapshot
     return not omitted
 
 
+def _read_prepared_journey(
+    transaction,
+    project_doc,
+    *,
+    plan,
+    actor_id,
+    requirements_id,
+    context_id,
+    requirement_ids,
+    options,
+):
+    """Find the exact completed preparation and determine if it can fund one child."""
+    missing = "journey_budget_missing"
+    exhausted = "journey_budget_exhausted"
+    parent_id = continuation_run_id(project_doc.id, actor_id, "prepare_scenarios", requirements_id)
+    plan_revision = plan.get("project_revision")
+    if (
+        plan.get("request_id") != parent_id
+        or plan.get("actor_user_id") != actor_id
+        or plan.get("operation") != "use_cases.generate"
+        or type(plan_revision) is not int
+        or plan_revision < 2
+    ):
+        return missing
+    parent_doc = project_doc.collection("orchestrator_runs").document(parent_id)
+    run = _document_to_dict(parent_doc.get(transaction=transaction)) or {}
+    intent = run.get("continuation")
+    if (
+        run.get("run_id") != parent_id
+        or run.get("project_id") != project_doc.id
+        or run.get("actor_user_id") != actor_id
+        or run.get("project_revision") != plan_revision
+        or run.get("produced_snapshot_ids") != {"use_cases": plan["snapshot_id"]}
+        or not isinstance(intent, dict)
+        or type(intent.get("schema_version")) is not int
+        or intent["schema_version"] != 1
+        or intent.get("stage") != "prepare_scenarios"
+        or intent.get("approval_id") != requirements_id
+        or intent.get("approval_project_revision") != plan_revision - 1
+        or intent.get("source_snapshot_ids") != {"requirements": requirements_id, "context": context_id}
+        or intent.get("requirement_ids") != requirement_ids
+    ):
+        return missing
+    if "journey_budget" in intent:
+        return exhausted
+    dispatch = intent.get("dispatch")
+    reservation = intent.get("provider_requests_reserved")
+    parent_options = intent.get("options")
+    if (
+        intent.get("state") != "awaiting_user"
+        or intent.get("attempts") != 1
+        or not isinstance(dispatch, dict)
+        or type(dispatch.get("fence")) is not int
+        or dispatch["fence"] < 1
+        or not isinstance(dispatch.get("at"), datetime)
+        or type(reservation) is not int
+        or reservation < _PREPARED_SCENARIO_RESERVATION
+        or not isinstance(parent_options, dict)
+        or parent_options.get("max_attempts") != 1
+    ):
+        return missing
+    if reservation + options.max_provider_requests > _JOURNEY_PROVIDER_REQUEST_LIMIT:
+        return exhausted
+    if (
+        reservation != _PREPARED_SCENARIO_RESERVATION
+        or parent_options.get("max_provider_requests") != reservation
+        or options.max_provider_requests != _TEST_GENERATION_RESERVATION
+        or options.max_attempts != 1
+    ):
+        return missing
+    return parent_doc, intent
+
+
 def _test_generation_intent(
     transaction,
     project_doc,
@@ -121,6 +202,8 @@ def _test_generation_intent(
     review_id,
     resulting_revision,
     options,
+    require_prepared_journey,
+    decided_at,
 ):
     if project_payload.get("status") != "active":
         return {"continuation_blocked_reason": "project_inactive"}
@@ -156,21 +239,56 @@ def _test_generation_intent(
     if len(groups) != len(expected) or {group.get("requirement_id"): group.get("requirement_text") for group in groups if group.get("scenarios")} != expected:
         return {"continuation_blocked_reason": "use_cases_scope_mismatch"}
 
-    return {
-        "continuation_run_id": enqueue_approval(
+    requirement_ids = [row.id for row in scope]
+    parent = None
+    if require_prepared_journey:
+        parent = _read_prepared_journey(
             transaction,
             project_doc,
-            client=client,
-            stage="generate_tests",
+            plan=plan_snapshot,
             actor_id=actor.sub,
-            approval_id=review_id,
-            request_id=request_id,
-            resulting_revision=resulting_revision,
-            source_snapshot_ids={"requirements": requirements_id, "context": context_id, "use_cases": plan_snapshot["snapshot_id"]},
-            requirement_ids=[row.id for row in scope],
+            requirements_id=requirements_id,
+            context_id=context_id,
+            requirement_ids=requirement_ids,
             options=options,
         )
-    }
+        if isinstance(parent, str):
+            return {"continuation_blocked_reason": parent}
+
+    run_id = enqueue_approval(
+        transaction,
+        project_doc,
+        client=client,
+        stage="generate_tests",
+        actor_id=actor.sub,
+        approval_id=review_id,
+        request_id=request_id,
+        resulting_revision=resulting_revision,
+        source_snapshot_ids={"requirements": requirements_id, "context": context_id, "use_cases": plan_snapshot["snapshot_id"]},
+        requirement_ids=requirement_ids,
+        options=options,
+    )
+    if parent is not None:
+        parent_doc, intent = parent
+        transaction.update(
+            parent_doc,
+            {
+                "status": "completed",
+                "updated_at": decided_at,
+                "continuation": {
+                    **intent,
+                    "state": "completed",
+                    "journey_budget": {
+                        "provider_request_limit": _JOURNEY_PROVIDER_REQUEST_LIMIT,
+                        "scenario_requests_reserved": intent["provider_requests_reserved"],
+                        "test_requests_allocated": options.max_provider_requests,
+                        "child_run_id": run_id,
+                        "scenario_review_id": review_id,
+                    },
+                },
+            },
+        )
+    return {"continuation_run_id": run_id}
 
 
 def _apply_review_transaction(
@@ -192,6 +310,7 @@ def _apply_review_transaction(
     request_fingerprint: str,
     decided_at: datetime,
     continuation: ContinuationOptions | None = None,
+    require_prepared_journey: bool = False,
     scenario_reviews: Optional[list[dict]] = None,
 ) -> UseCaseReviewRecord:
     project_payload = _document_to_dict(project_doc.get(transaction=transaction))
@@ -208,7 +327,9 @@ def _apply_review_transaction(
     if existing_review is not None:
         if (
             existing_review.get("request_fingerprint") == request_fingerprint
-            and existing_review.get("continuation_options_fingerprint") == continuation_fingerprint
+            and existing_review.get("require_prepared_journey", False) == require_prepared_journey
+            # The named path's settings are server-owned and already pinned by the saved decision.
+            and (require_prepared_journey or existing_review.get("continuation_options_fingerprint") == continuation_fingerprint)
         ):
             return UseCaseReviewRecord.model_validate(existing_review)
         raise UseCaseReviewConflictError(
@@ -234,6 +355,8 @@ def _apply_review_transaction(
     snapshot_fields = ("snapshot_id", "project_id", "stage", "payload")
     if continuation is not None:
         snapshot_fields += ("source_snapshot_id", "metadata")
+    if require_prepared_journey:
+        snapshot_fields += ("request_id", "operation", "actor_user_id", "project_revision")
     snapshot_payload = _document_to_dict(
         snapshot_doc.get(
             transaction=transaction,
@@ -346,6 +469,8 @@ def _apply_review_transaction(
 
     if continuation is not None:
         review_payload["continuation_options_fingerprint"] = continuation_fingerprint
+        if require_prepared_journey:
+            review_payload["require_prepared_journey"] = True
         if approved:
             review_payload.update(
                 _test_generation_intent(
@@ -359,6 +484,8 @@ def _apply_review_transaction(
                     review_id=review_id,
                     resulting_revision=resulting_revision,
                     options=continuation,
+                    require_prepared_journey=require_prepared_journey,
+                    decided_at=decided_at,
                 )
             )
         else:
@@ -390,7 +517,10 @@ def review_use_case_snapshot(
     request_id: str,
     scenario_reviews: Optional[list[dict]] = None,
     continuation: ContinuationOptions | None = None,
+    require_prepared_journey: bool = False,
 ) -> UseCaseReviewResponse:
+    if require_prepared_journey and continuation is None:
+        raise ValueError("Prepared journey approval requires continuation options")
     client = get_required_firestore_client(
         unavailable_message="Firestore client unavailable for Use Cases review persistence",
     )
@@ -404,7 +534,7 @@ def review_use_case_snapshot(
         comment=comment,
         scenario_reviews=scenario_reviews,
     )
-    review_id = _stable_id("usecasereview", project_id, idempotency_key)
+    review_id = use_case_review_id(project_id, request_id)
     timeline_event_id = _stable_id("timeline", project_id, idempotency_key)
     review_doc = project_doc.collection("use_case_reviews").document(review_id)
     timeline_doc = project_doc.collection("timeline").document(timeline_event_id)
@@ -429,6 +559,7 @@ def review_use_case_snapshot(
             request_fingerprint=request_fingerprint,
             decided_at=decided_at,
             continuation=continuation,
+            require_prepared_journey=require_prepared_journey,
             scenario_reviews=scenario_reviews,
         )
 
@@ -475,5 +606,6 @@ def use_case_review_error_to_http(exc: Exception) -> HTTPException:
 __all__ = [
     "UseCaseReviewConflictError",
     "review_use_case_snapshot",
+    "use_case_review_id",
     "use_case_review_error_to_http",
 ]

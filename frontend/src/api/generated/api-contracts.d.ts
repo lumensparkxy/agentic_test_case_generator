@@ -37,6 +37,7 @@ export interface ApiContractOperations {
 	requirementReviews: ApiOperation<RequirementReviewsRequest, RequirementReviewsResponse, "PATCH", "/projects/{project_id}/requirements/reviews">;
 	approvalContinuations: ApiOperation<ApprovalContinuationsRequest, ApprovalContinuationsResponse, "GET", "/projects/{project_id}/approval-continuations">;
 	approveAndPrepareScenarios: ApiOperation<ApproveAndPrepareScenariosRequest, ApproveAndPrepareScenariosResponse, "POST", "/projects/{project_id}/requirements/approve-and-prepare-scenarios">;
+	approveAndGenerateTests: ApiOperation<ApproveAndGenerateTestsRequest, ApproveAndGenerateTestsResponse, "POST", "/projects/{project_id}/use-cases/approve-and-generate-tests">;
 	approvalContinuationCancel: ApiOperation<ApprovalContinuationCancelRequest, ApprovalContinuationCancelResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/cancel">;
 	jiraImport: ApiOperation<JiraImportRequest, JiraImportResponse, "POST", "/integrations/jira/import">;
 	azureDevOpsImport: ApiOperation<AzureDevOpsImportRequest, AzureDevOpsImportResponse, "POST", "/integrations/azure-devops/import">;
@@ -118,10 +119,13 @@ export type RequirementReviewsRequest = RequirementReviewsInput;
 export type RequirementReviewsResponse = QaProjectDetail;
 export type ApprovalContinuationsRequest = {
 	request_id?: string | null;
+	stage?: "prepare_scenarios" | "generate_tests";
 };
 export type ApprovalContinuationsResponse = ApprovalContinuationStatus;
 export type ApproveAndPrepareScenariosRequest = ApproveAndPrepareScenariosInput;
 export type ApproveAndPrepareScenariosResponse = ApproveAndPrepareScenariosResult;
+export type ApproveAndGenerateTestsRequest = ApproveAndGenerateTestsInput;
+export type ApproveAndGenerateTestsResponse = ApproveAndGenerateTestsResult;
 export type ApprovalContinuationCancelRequest = undefined;
 export type ApprovalContinuationCancelResponse = ApprovalContinuationView;
 export type JiraImportRequest = JiraImportInput;
@@ -170,6 +174,7 @@ export interface ApprovalContinuationStatus {
 	enabled: boolean;
 	receipt?: ApprovalContinuationReceipt | null;
 	runs: Array<ApprovalContinuationView>;
+	tests_enabled: boolean;
 }
 
 export interface ApprovalContinuationView {
@@ -178,8 +183,27 @@ export interface ApprovalContinuationView {
 	request_id: string;
 	result_snapshot_id: string | null;
 	run_id: string;
-	stage: "prepare_scenarios";
+	source_snapshot_id: string;
+	stage: "prepare_scenarios" | "generate_tests";
 	state: "queued" | "running" | "awaiting_user" | "completed" | "failed" | "interrupted" | "cancelled" | "superseded";
+}
+
+export interface ApproveAndGenerateTestsInput {
+	base_project_revision: number;
+	comment?: string | null;
+	decision: "approve";
+	scenario_reviews?: Array<ScenarioReviewUpdate>;
+	snapshot_id: string;
+}
+
+export interface ApproveAndGenerateTestsResult {
+	blocked_reason: string | null;
+	continuation: ApprovalContinuationView | null;
+	knowledge_suggestion?: Record<string, unknown> | null;
+	orchestrator_status: OrchestratorStatusResponse;
+	project_revision: number;
+	review: UseCaseReviewRecord;
+	use_cases_state: QaProjectStageState;
 }
 
 export interface ApproveAndPrepareScenariosInput {

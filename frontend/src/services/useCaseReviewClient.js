@@ -1,8 +1,10 @@
 import { API_CONTRACT_ENDPOINTS } from "../api/generated/api-contracts";
 
-const REVIEW_PATH_TEMPLATE = API_CONTRACT_ENDPOINTS.projectUseCasesReview.path;
-
-const buildReviewPath = (projectId) => REVIEW_PATH_TEMPLATE.replace("{project_id}", encodeURIComponent(`${projectId || ""}`.trim()));
+const buildReviewPath = (projectId, generateTests) =>
+	(generateTests ? API_CONTRACT_ENDPOINTS.approveAndGenerateTests.path : API_CONTRACT_ENDPOINTS.projectUseCasesReview.path).replace(
+		"{project_id}",
+		encodeURIComponent(`${projectId || ""}`.trim())
+	);
 
 const parseResponsePayload = async (response) => {
 	const text = await response.text();
@@ -43,7 +45,7 @@ export class UseCaseReviewRequestError extends Error {
 
 export async function submitUseCaseReviewDecision(
 	request,
-	{ projectId, snapshotId, baseProjectRevision, decision, comment = "", scenarioReviews, requestId, signal } = {}
+	{ projectId, snapshotId, baseProjectRevision, decision, comment = "", scenarioReviews, requestId, signal, generateTests = false } = {}
 ) {
 	if (typeof request !== "function") {
 		throw new TypeError("An authenticated request function is required to submit a Use Cases review.");
@@ -63,7 +65,7 @@ export async function submitUseCaseReviewDecision(
 		throw new TypeError("Add a comment describing the requested changes.");
 	}
 
-	const response = await request(buildReviewPath(projectId), {
+	const response = await request(buildReviewPath(projectId, generateTests), {
 		method: "POST",
 		signal,
 		headers: {
@@ -74,7 +76,7 @@ export async function submitUseCaseReviewDecision(
 			snapshot_id: `${snapshotId}`.trim(),
 			base_project_revision: baseProjectRevision,
 			decision,
-			...(scenarioReviews ? { scenario_reviews: scenarioReviews } : {}),
+			...(scenarioReviews || generateTests ? { scenario_reviews: scenarioReviews || [] } : {}),
 			comment: normalizedComment || null,
 		}),
 	});
@@ -87,5 +89,8 @@ export async function submitUseCaseReviewDecision(
 		});
 	}
 
+	if (generateTests && !payload?.review?.review_id) {
+		throw new UseCaseReviewRequestError("The scenario approval response could not be confirmed.");
+	}
 	return payload;
 }

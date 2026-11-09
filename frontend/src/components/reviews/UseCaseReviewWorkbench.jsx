@@ -187,7 +187,7 @@ function ArtifactSummary({ project, snapshot, stageState, scenarioTotal, groupTo
 	);
 }
 
-function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, groupTotal, hasDrafts }) {
+function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, groupTotal, hasDrafts, generateOnApproval, approvalRecovery }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	useEffect(() => {
 		if (review.status === "success") setDialogOpen(false);
@@ -207,6 +207,8 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 	const snapshotMatches = stageState?.current_snapshot_id === snapshot.snapshot_id;
 	const approvalBlocked = Boolean(stageState?.stale);
 	const formDisabled = isBusy || !snapshotMatches || refreshRequired || hasDrafts;
+	const generateTests = generateOnApproval && review.decision === "approve";
+	const decisionBlocked = approvalRecovery && !generateTests;
 	const focusDecisionPanel = () => window.requestAnimationFrame(() => formRef.current?.focus());
 	const handleReload = async () => {
 		await review.reloadLatest();
@@ -238,13 +240,17 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 							Review details
 						</Button>
 					) : null}
-					<Button variant="secondary" onClick={() => openDecision("request_changes")} disabled={isBusy || hasDrafts || !scenarioTotal}>
+					<Button
+						variant="secondary"
+						onClick={() => openDecision("request_changes")}
+						disabled={isBusy || hasDrafts || !scenarioTotal || approvalRecovery}
+					>
 						Request changes
 					</Button>
 					<Button
 						variant={hasDrafts || humanReview?.decision === "approve" || approvalBlocked ? "secondary" : "primary"}
 						onClick={() => openDecision("approve")}
-						disabled={isBusy || approvalBlocked || hasDrafts || !scenarioTotal}
+						disabled={isBusy || approvalBlocked || hasDrafts || !scenarioTotal || (approvalRecovery && !generateOnApproval)}
 					>
 						Approve all
 					</Button>
@@ -273,12 +279,13 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 							noValidate
 							onSubmit={(event) => {
 								event.preventDefault();
+								if (decisionBlocked) return;
 								if (commentRequired && !review.comment.trim()) {
 									void review.submit();
 									commentRef.current?.focus();
 									return;
 								}
-								void review.submit();
+								void review.submit({ generateTests });
 							}}
 						>
 							<div className="use-case-decision-heading">
@@ -406,7 +413,9 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 								</Alert>
 							) : review.status === "error" ? (
 								<Alert as="div" tone="danger" id="use-case-review-error" className="use-case-review-alert error" role="alert">
-									<strong>{commentInvalid ? "Comment required" : "Decision not saved"}</strong>
+									<strong>
+										{commentInvalid ? "Comment required" : approvalRecovery ? "Approval outcome unconfirmed" : "Decision not saved"}
+									</strong>
 									<p>{review.error}</p>
 									{commentInvalid ? null : (
 										<Button type="button" className="secondary" onClick={() => void handleRetry()} disabled={isBusy || formDisabled}>
@@ -420,19 +429,26 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 								<p>
 									{review.decision === "request_changes"
 										? "Your feedback will be recorded with the decision."
-										: "Approval records this version as ready for downstream work."}
+										: generateTests
+											? "Approval queues test generation from this exact scenario plan."
+											: "Approval records this version as ready for downstream work."}
 								</p>
 								<Button type="button" variant="secondary" disabled={isBusy} onClick={() => setDialogOpen(false)}>
 									Cancel
 								</Button>
-								<Button type="submit" disabled={!review.decision || formDisabled || (review.decision === "approve" && approvalBlocked)}>
+								<Button
+									type="submit"
+									disabled={!review.decision || formDisabled || decisionBlocked || (review.decision === "approve" && approvalBlocked)}
+								>
 									{review.isSubmitting
 										? "Saving decision…"
 										: !review.decision
 											? "Choose a decision"
 											: review.decision === "request_changes"
 												? "Request changes"
-												: "Approve Use Cases"}
+												: generateTests
+													? "Approve scenarios and generate tests"
+													: "Approve Use Cases"}
 								</Button>
 							</div>
 						</form>
@@ -443,7 +459,16 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 	);
 }
 
-export default function UseCaseReviewWorkbench({ identity, project, snapshot, stageState, review, onContinue }) {
+export default function UseCaseReviewWorkbench({
+	identity,
+	project,
+	snapshot,
+	stageState,
+	review,
+	onContinue,
+	generateOnApproval,
+	approvalRecovery,
+}) {
 	const searchId = useId();
 	const searchRef = useRef(null);
 	const recovery = useReviewDraft({
@@ -640,6 +665,8 @@ export default function UseCaseReviewWorkbench({ identity, project, snapshot, st
 				scenarioTotal={scenarioTotal}
 				groupTotal={coveragePlan.length}
 				hasDrafts={Object.keys(drafts).length > 0}
+				generateOnApproval={generateOnApproval}
+				approvalRecovery={approvalRecovery}
 			/>
 		</div>
 	);

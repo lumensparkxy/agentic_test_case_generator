@@ -1,4 +1,4 @@
-"""Explicit scope approval and read-only recovery for local scenario preparation."""
+"""Explicit approval actions and read-only recovery for local generation."""
 
 from typing import Annotated
 
@@ -9,14 +9,24 @@ from pydantic import ValidationError
 from ..auth.jwt_auth import get_current_user
 from ..contracts.approval_continuations import (
     ApprovalContinuationReceipt,
+    ApprovalContinuationStage,
     ApprovalContinuationStatus,
     ApprovalContinuationView,
+    ApproveAndGenerateTestsInput,
+    ApproveAndGenerateTestsResult,
     ApproveAndPrepareScenariosInput,
     ApproveAndPrepareScenariosResult,
 )
 from ..models import AuthUser
+from ..services import use_case_review_service
 from ..services.approval_continuation import cancel_stage
-from ..services.approval_scenario_worker import approval_scenario_client_allowed, approval_scenarios_enabled, scenario_continuation_options
+from ..services.approval_scenario_worker import (
+    approval_scenario_client_allowed,
+    approval_scenarios_enabled,
+    approval_test_cases_enabled,
+    scenario_continuation_options,
+    test_case_continuation_options,
+)
 from ..services.requirement_import_service import repository
 from ..services.requirement_reconciliation import digest
 from ..services.workflow_project_service import project_error_to_http
@@ -24,11 +34,18 @@ from ..services.workflow_project_service import project_error_to_http
 
 router = APIRouter()
 _RUN_LIMIT = 20
+_STAGE_ARTIFACTS = {
+    "prepare_scenarios": ("requirements", "use_cases"),
+    "generate_tests": ("use_cases", "test_cases"),
+}
 
 
-def _require_enabled(client=None):
-    allowed = approval_scenarios_enabled() if client is None else approval_scenario_client_allowed(client)
-    if not allowed:
+def _require_enabled(client=None, *, stage: ApprovalContinuationStage = "prepare_scenarios"):
+    scenarios_enabled = approval_scenarios_enabled() if client is None else approval_scenario_client_allowed(client)
+    if stage == "generate_tests":
+        if not (scenarios_enabled and approval_test_cases_enabled()):
+            raise HTTPException(409, "Test Cases generation is disabled in this environment.")
+    elif not scenarios_enabled:
         raise HTTPException(409, "Scenario preparation is disabled in this environment.")
 
 
@@ -44,8 +61,12 @@ def _run_view(run, project_id, actor_id):
     if not run or run.get("project_id") != project_id or run.get("actor_user_id") != actor_id:
         return None
     intent = run.get("continuation")
-    if not isinstance(intent, dict) or intent.get("schema_version") != 1 or intent.get("stage") != "prepare_scenarios":
+    if not isinstance(intent, dict) or intent.get("schema_version") != 1 or intent.get("stage") not in _STAGE_ARTIFACTS:
         return None
+    sources = intent.get("source_snapshot_ids")
+    if not isinstance(sources, dict):
+        return None
+    source_stage, result_stage = _STAGE_ARTIFACTS[intent["stage"]]
     produced = run.get("produced_snapshot_ids")
     try:
         return ApprovalContinuationView(
@@ -55,20 +76,29 @@ def _run_view(run, project_id, actor_id):
             project_revision=run.get("project_revision"),
             request_id=run.get("request_id"),
             reason=intent.get("reason"),
-            result_snapshot_id=produced.get("use_cases") if isinstance(produced, dict) else None,
+            source_snapshot_id=sources.get(source_stage),
+            result_snapshot_id=produced.get(result_stage) if isinstance(produced, dict) else None,
         )
     except ValidationError:
         return None
 
 
-def _read_run(doc, actor, run_id):
+def _read_run(doc, actor, run_id, *, stage=None):
     run = doc.collection("orchestrator_runs").document(run_id).get().to_dict()
     view = _run_view(run, doc.id, actor.sub)
-    return view if view and view.run_id == run_id else None
+    return view if view and view.run_id == run_id and (stage is None or view.stage == stage) else None
 
 
-def _read_receipt(doc, request_id):
-    receipt = doc.collection("requirement_import_receipts").document(digest(request_id)).get().to_dict()
+def _read_receipt(doc, actor, request_id, stage):
+    if stage == "generate_tests":
+        review_id = use_case_review_service.use_case_review_id(doc.id, request_id)
+        receipt = doc.collection("use_case_reviews").document(review_id).get().to_dict()
+        if not receipt or receipt.get("review_id") != review_id or receipt.get("project_id") != doc.id or receipt.get("reviewer_user_id") != actor.sub:
+            return None
+        if receipt.get("request_id") != request_id or receipt.get("decision") != "approve" or receipt.get("require_prepared_journey") is not True:
+            return None
+    else:
+        receipt = doc.collection("requirement_import_receipts").document(digest(request_id)).get().to_dict()
     if not receipt or not receipt.get("continuation_options_fingerprint"):
         return None
     run_id = receipt.get("continuation_run_id")
@@ -78,10 +108,19 @@ def _read_receipt(doc, request_id):
     return ApprovalContinuationReceipt(request_id=request_id, run_id=run_id, blocked_reason=blocked_reason)
 
 
+def _approval_outcome(doc, actor, request_id, stage):
+    receipt = _read_receipt(doc, actor, request_id, stage)
+    continuation = _read_run(doc, actor, receipt.run_id, stage=stage) if receipt and receipt.run_id else None
+    if not receipt or (receipt.run_id and not continuation):
+        raise HTTPException(503, "The saved approval outcome could not be confirmed. Check its status before retrying.")
+    return continuation, receipt.blocked_reason
+
+
 @router.get("/projects/{project_id}/approval-continuations", response_model=ApprovalContinuationStatus)
 def list_approval_continuations(
     project_id: str,
     request_id: Annotated[str | None, Query(min_length=1, max_length=160)] = None,
+    stage: Annotated[ApprovalContinuationStage, Query()] = "prepare_scenarios",
     actor: AuthUser = Depends(get_current_user),
 ):
     try:
@@ -95,13 +134,19 @@ def list_approval_continuations(
             .stream()
         )
         runs = [view for snapshot in snapshots if (view := _run_view(snapshot.to_dict(), project_id, actor.sub)) is not None]
-        receipt = _read_receipt(doc, request_id) if request_id is not None else None
+        receipt = _read_receipt(doc, actor, request_id, stage) if request_id is not None else None
         if receipt and receipt.run_id and all(view.run_id != receipt.run_id for view in runs):
             # Keep an exact recovery target readable even after it falls out of the recent window.
-            requested = _read_run(doc, actor, receipt.run_id)
+            requested = _read_run(doc, actor, receipt.run_id, stage=stage)
             if requested is not None:
                 runs = [*runs[: _RUN_LIMIT - 1], requested]
-        return ApprovalContinuationStatus(enabled=approval_scenario_client_allowed(repo.client), runs=runs, receipt=receipt)
+        scenarios_enabled = approval_scenario_client_allowed(repo.client)
+        return ApprovalContinuationStatus(
+            enabled=scenarios_enabled,
+            tests_enabled=scenarios_enabled and approval_test_cases_enabled(),
+            runs=runs,
+            receipt=receipt,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -125,15 +170,46 @@ def approve_and_prepare_scenarios(
         _require_enabled(repo.client)
         project = repo.review(project_id, actor, payload, request_id, continuation=scenario_continuation_options())
         doc = _project_doc(repo, project_id, actor)
-        receipt = _read_receipt(doc, request_id)
-        continuation = _read_run(doc, actor, receipt.run_id) if receipt and receipt.run_id else None
-        if not receipt or (receipt.run_id and not continuation):
-            raise HTTPException(503, "The saved approval outcome could not be confirmed. Check its status before retrying.")
-        return ApproveAndPrepareScenariosResult(project=project, continuation=continuation, blocked_reason=receipt.blocked_reason)
+        continuation, blocked_reason = _approval_outcome(doc, actor, request_id, "prepare_scenarios")
+        return ApproveAndPrepareScenariosResult(project=project, continuation=continuation, blocked_reason=blocked_reason)
     except HTTPException:
         raise
     except Exception as exc:
         raise project_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/use-cases/approve-and-generate-tests", response_model=ApproveAndGenerateTestsResult)
+def approve_and_generate_tests(
+    project_id: str,
+    payload: ApproveAndGenerateTestsInput,
+    request: Request,
+    actor: AuthUser = Depends(get_current_user),
+):
+    _require_enabled(stage="generate_tests")
+    request_id = request.state.request_id
+    if len(request_id) > 160 or not request_id.strip():
+        raise HTTPException(422, "X-Request-ID must be nonblank and at most 160 characters.")
+    try:
+        repo = repository()
+        _require_enabled(repo.client, stage="generate_tests")
+        doc = _project_doc(repo, project_id, actor)
+        response = use_case_review_service.review_use_case_snapshot(
+            project_id=project_id,
+            snapshot_id=payload.snapshot_id,
+            base_project_revision=payload.base_project_revision,
+            decision=payload.decision,
+            comment=payload.comment,
+            actor=actor,
+            request_id=request_id,
+            continuation=test_case_continuation_options(),
+            require_prepared_journey=True,
+        )
+        continuation, blocked_reason = _approval_outcome(doc, actor, request_id, "generate_tests")
+        return ApproveAndGenerateTestsResult(**response.model_dump(), continuation=continuation, blocked_reason=blocked_reason)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise use_case_review_service.use_case_review_error_to_http(exc) from exc
 
 
 @router.post("/projects/{project_id}/approval-continuations/{run_id}/cancel", response_model=ApprovalContinuationView)
@@ -147,8 +223,10 @@ def cancel_approval_continuation(
         repo = repository()
         _require_enabled(repo.client)
         doc = _project_doc(repo, project_id, actor)
-        if _read_run(doc, actor, run_id) is None:
-            raise HTTPException(404, "Scenario preparation run not found")
+        current = _read_run(doc, actor, run_id)
+        if current is None:
+            raise HTTPException(404, "Approval continuation run not found")
+        _require_enabled(repo.client, stage=current.stage)
         cancel_stage(repo.client, project_id=project_id, run_id=run_id, actor_id=actor.sub)
         view = _read_run(doc, actor, run_id)
         if view is None:

@@ -12,7 +12,7 @@ const initialOutcome = () => ({
 	announcement: "",
 });
 
-const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevision, decision, comment, scenarioReviews }) =>
+const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevision, decision, comment, scenarioReviews, generateTests }) =>
 	JSON.stringify({
 		identity,
 		projectId,
@@ -20,6 +20,7 @@ const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevisio
 		baseProjectRevision,
 		decision,
 		scenarioReviews,
+		generateTests,
 		comment: `${comment || ""}`.trim(),
 	});
 
@@ -31,9 +32,10 @@ export default function useUseCaseReview({
 	baseProjectRevision = null,
 	onCommitted = null,
 	onReload = null,
+	continuation = null,
 } = {}) {
 	const requestRef = useRef(request);
-	const callbacksRef = useRef({ onCommitted, onReload });
+	const callbacksRef = useRef({ onCommitted, onReload, continuation });
 	const activeRequestRef = useRef({ sequence: 0, scope: "", phase: "idle" });
 	const retryIdentityRef = useRef(null);
 	const lastSubmissionRef = useRef({});
@@ -54,7 +56,7 @@ export default function useUseCaseReview({
 	const [outcome, setOutcome] = useState(initialOutcome);
 
 	requestRef.current = request;
-	callbacksRef.current = { onCommitted, onReload };
+	callbacksRef.current = { onCommitted, onReload, continuation };
 	const projectScope = `${identity}::${projectId}`;
 	const requestScope = `${projectScope}::${snapshotId}::${baseProjectRevision ?? ""}`;
 	projectScopeRef.current = projectScope;
@@ -116,6 +118,18 @@ export default function useUseCaseReview({
 		[]
 	);
 
+	const recoveredApproval =
+		continuation?.pendingRequest?.stage === "generate_tests" &&
+		continuation.pendingRequest.requestId === retryIdentityRef.current?.requestId &&
+		!continuation.unresolved &&
+		Boolean(continuation.receipt || continuation.run);
+	useEffect(() => {
+		if (!recoveredApproval || !["error", "conflict"].includes(outcome.status)) return;
+		retryIdentityRef.current = null;
+		recoveryRef.current.clear({ keepVisible: true });
+		setOutcome({ ...initialOutcome(), status: "success", announcement: "Use Cases approved." });
+	}, [outcome.status, recoveredApproval]);
+
 	const setDecision = useCallback(
 		(nextDecision) => {
 			recoveryRef.current.setValue((old) => ({ ...old, decision: nextDecision, revision: baseProjectRevision }));
@@ -153,6 +167,7 @@ export default function useUseCaseReview({
 				return null;
 			}
 			const normalizedComment = scenarioReviews ? "" : `${comment || ""}`.trim();
+			const generateTests = options.generateTests === true && submittedDecision === "approve" && Boolean(callbacksRef.current.continuation);
 			if (submittedDecision === "request_changes" && !normalizedComment) {
 				setOutcome({
 					status: "error",
@@ -175,9 +190,20 @@ export default function useUseCaseReview({
 				decision: submittedDecision,
 				scenarioReviews,
 				comment: normalizedComment,
+				generateTests,
 			});
+			const pending = callbacksRef.current.continuation?.pendingRequest;
+			const pendingOutcome = callbacksRef.current.continuation?.unresolved;
+			if (pendingOutcome && (!generateTests || pending?.fingerprint !== fingerprint)) {
+				setOutcome({
+					...initialOutcome(),
+					status: "error",
+					error: "Check the pending approval or retry it with the original decision and comment.",
+				});
+				return null;
+			}
 			if (retryIdentityRef.current?.fingerprint !== fingerprint) {
-				retryIdentityRef.current = { fingerprint, requestId: createRequestId() };
+				retryIdentityRef.current = { fingerprint, requestId: pending?.fingerprint === fingerprint ? pending.requestId : createRequestId() };
 			}
 			const requestId = retryIdentityRef.current.requestId;
 			const isCurrent = () =>
@@ -188,6 +214,9 @@ export default function useUseCaseReview({
 			const isProjectCurrent = () => activeRequestRef.current.sequence === sequence && projectScopeRef.current === projectScope;
 
 			submittingRef.current = true;
+			if (generateTests) {
+				callbacksRef.current.continuation.begin({ requestId, fingerprint, baseRevision: baseProjectRevision, stage: "generate_tests" });
+			}
 			setOutcome({ status: "submitting", error: "", conflict: null, response: null, announcement: "Saving review decision…" });
 			try {
 				const response = await submitUseCaseReviewDecision(requestRef.current, {
@@ -198,10 +227,12 @@ export default function useUseCaseReview({
 					scenarioReviews,
 					comment: normalizedComment,
 					requestId,
+					generateTests,
 				});
 				if (!isCurrent()) {
 					return null;
 				}
+				if (generateTests) callbacksRef.current.continuation.accept(response, "generate_tests");
 				retryIdentityRef.current = null;
 				recoveryRef.current.clear({ keepVisible: true });
 				activeRequestRef.current = { ...activeRequestRef.current, phase: "committed" };
@@ -258,6 +289,9 @@ export default function useUseCaseReview({
 				if (!isCurrent()) {
 					return null;
 				}
+				if (generateTests && error?.status >= 400 && error.status < 500 && error.status !== 409) {
+					callbacksRef.current.continuation.clearPending();
+				}
 				if (error?.status === 409) {
 					setOutcome({
 						status: "conflict",
@@ -272,7 +306,9 @@ export default function useUseCaseReview({
 						error: error?.message || "The Use Cases decision could not be saved.",
 						conflict: null,
 						response: null,
-						announcement: "The review decision was not saved.",
+						announcement: generateTests
+							? "The approval outcome could not be confirmed. Check Test Cases generation status."
+							: "The review decision was not saved.",
 					});
 				}
 				return null;

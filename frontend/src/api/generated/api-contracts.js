@@ -30,6 +30,7 @@ export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	requirementReviews: Object.freeze({ method: "PATCH", path: "/projects/{project_id}/requirements/reviews" }),
 	approvalContinuations: Object.freeze({ method: "GET", path: "/projects/{project_id}/approval-continuations" }),
 	approveAndPrepareScenarios: Object.freeze({ method: "POST", path: "/projects/{project_id}/requirements/approve-and-prepare-scenarios" }),
+	approveAndGenerateTests: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/approve-and-generate-tests" }),
 	approvalContinuationCancel: Object.freeze({ method: "POST", path: "/projects/{project_id}/approval-continuations/{run_id}/cancel" }),
 	jiraImport: Object.freeze({ method: "POST", path: "/integrations/jira/import" }),
 	azureDevOpsImport: Object.freeze({ method: "POST", path: "/integrations/azure-devops/import" }),

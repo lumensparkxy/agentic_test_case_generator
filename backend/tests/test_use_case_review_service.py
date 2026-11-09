@@ -23,10 +23,11 @@ from app.models import (
     UseCaseReviewRequest,
     UseCaseReviewResponse,
 )
-from app.services.approval_continuation import OUTBOX_COLLECTION, ContinuationOptions
+from app.services.approval_continuation import OUTBOX_COLLECTION, ContinuationOptions, continuation_run_id
 from app.services.use_case_review_service import (
     UseCaseReviewConflictError,
     review_use_case_snapshot,
+    use_case_review_id,
 )
 from app.services.workflow_project_service import ProjectPermissionError
 
@@ -35,6 +36,7 @@ NOW = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 PROJECT_ID = "project-review"
 SNAPSHOT_ID = "snapshot-use-cases-v3"
 PROJECT_REVISION = 7
+TEST_CONTINUATION = ContinuationOptions(settings_fingerprint="a" * 64, max_provider_requests=24, deadline_seconds=300)
 
 
 class FakeSnapshot:
@@ -58,8 +60,12 @@ class FakeDocument:
         transaction: Any | None = None,
         field_paths: tuple[str, ...] | None = None,
     ) -> FakeSnapshot:
-        del transaction, field_paths
-        return FakeSnapshot(self.store.get(self.path))
+        if transaction is not None and transaction.pending:
+            raise AssertionError("Firestore transaction reads must precede writes")
+        payload = self.store.get(self.path)
+        if payload is not None and field_paths is not None:
+            payload = {field: payload[field] for field in field_paths if field in payload}
+        return FakeSnapshot(payload)
 
     def set(self, payload: dict[str, Any], merge: bool = False) -> None:
         self.store[self.path] = {**self.store.get(self.path, {}), **deepcopy(payload)} if merge else deepcopy(payload)
@@ -348,6 +354,7 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         request_id: str = "req-review-1",
         scenario_reviews: list[dict] | None = None,
         continuation: ContinuationOptions | None = None,
+        require_prepared_journey: bool = False,
     ) -> UseCaseReviewResponse:
         return review_use_case_snapshot(
             project_id=PROJECT_ID,
@@ -359,6 +366,7 @@ class UseCaseReviewServiceTests(unittest.TestCase):
             actor=actor or self.actor,
             request_id=request_id,
             continuation=continuation,
+            require_prepared_journey=require_prepared_journey,
         )
 
     def _paths_containing(self, segment: str) -> list[str]:
@@ -476,6 +484,148 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         )
         plan["payload"]["coverage_plan"][0]["requirement_text"] = "Checkout"
         return plan
+
+    def _prepared_journey(self):
+        plan = self._continuation_plan()
+        requirements_id = plan["source_snapshot_id"]
+        parent_id = continuation_run_id(PROJECT_ID, self.actor.sub, "prepare_scenarios", requirements_id)
+        plan.update(request_id=parent_id, actor_user_id=self.actor.sub)
+        parent_path = f"qa_projects/{PROJECT_ID}/orchestrator_runs/{parent_id}"
+        self.store[parent_path] = {
+            "run_id": parent_id,
+            "project_id": PROJECT_ID,
+            "project_revision": PROJECT_REVISION,
+            "actor_user_id": self.actor.sub,
+            "status": "blocked",
+            "produced_snapshot_ids": {"use_cases": SNAPSHOT_ID},
+            "continuation": {
+                "schema_version": 1,
+                "stage": "prepare_scenarios",
+                "state": "awaiting_user",
+                "approval_id": requirements_id,
+                "approval_project_revision": PROJECT_REVISION - 1,
+                "source_snapshot_ids": {"requirements": requirements_id, "context": "context-v1"},
+                "requirement_ids": ["REQ-1"],
+                "options": ContinuationOptions(settings_fingerprint="b" * 64, max_provider_requests=7, deadline_seconds=240).model_dump(mode="json"),
+                "attempts": 1,
+                "provider_requests_reserved": 7,
+                "dispatch": {"fence": 1, "at": NOW},
+            },
+        }
+        return parent_path, plan
+
+    def _journey_review(self, **kwargs):
+        return self._review(continuation=TEST_CONTINUATION, require_prepared_journey=True, **kwargs)
+
+    def _review_receipt(self, request_id="req-review-1"):
+        return self.store[f"qa_projects/{PROJECT_ID}/use_case_reviews/{use_case_review_id(PROJECT_ID, request_id)}"]
+
+    def test_named_approval_attaches_one_child_to_exact_preparation_and_replays(self):
+        parent_path, _ = self._prepared_journey()
+        self._review(
+            decision="review_scenarios",
+            request_id="scenario-row-review",
+            scenario_reviews=[{"requirement_id": "REQ-1", "scenario_id": "SCN-1", "status": "approved", "quality_flags": []}],
+        )
+        response = self._journey_review(base_project_revision=PROJECT_REVISION + 1)
+        receipt = self._review_receipt()
+        child_id = receipt["continuation_run_id"]
+        child_path = f"qa_projects/{PROJECT_ID}/orchestrator_runs/{child_id}"
+        child = self.store[child_path]
+        parent = self.store[parent_path]
+        self.assertTrue(response.use_cases_state.approved)
+        self.assertEqual((parent["status"], parent["continuation"]["state"]), ("completed", "completed"))
+        self.assertEqual(parent["project_revision"], PROJECT_REVISION)
+        self.assertEqual(parent["produced_snapshot_ids"], {"use_cases": SNAPSHOT_ID})
+        self.assertEqual(
+            parent["continuation"]["journey_budget"],
+            {
+                "provider_request_limit": 31,
+                "scenario_requests_reserved": 7,
+                "test_requests_allocated": 24,
+                "child_run_id": child_id,
+                "scenario_review_id": response.review.review_id,
+            },
+        )
+        self.assertEqual(child["continuation"]["options"]["max_provider_requests"], 24)
+        self.assertEqual(child["continuation"]["approval_id"], response.review.review_id)
+        self.assertEqual(child["continuation"]["source_snapshot_ids"]["use_cases"], SNAPSHOT_ID)
+        self.assertEqual(child["project_revision"], response.review.resulting_project_revision)
+        self.assertEqual(self._paths_containing(f"{OUTBOX_COLLECTION}/"), [f"{OUTBOX_COLLECTION}/{child_id}"])
+
+        committed = deepcopy(self.store)
+        replay = self._journey_review(base_project_revision=PROJECT_REVISION + 1)
+        self.assertEqual(replay.review, response.review)
+        replay_after_settings_change = self._review(
+            base_project_revision=PROJECT_REVISION + 1,
+            continuation=ContinuationOptions(settings_fingerprint="c" * 64, max_provider_requests=25),
+            require_prepared_journey=True,
+        )
+        self.assertEqual(replay_after_settings_change.review, response.review)
+        self.assertEqual(self.store, committed)
+        self.assertEqual(self.client.transactions[-1].operations, [])
+        with self.assertRaises(UseCaseReviewConflictError):
+            self._review(base_project_revision=PROJECT_REVISION + 1, continuation=TEST_CONTINUATION)
+        with self.assertRaises(UseCaseReviewConflictError):
+            self._journey_review(base_project_revision=PROJECT_REVISION + 1, request_id="same-revision-second-tab")
+        self.assertEqual(self.store, committed)
+
+        again = self._journey_review(base_project_revision=response.project_revision, request_id="spent-journey")
+        self.assertTrue(again.use_cases_state.approved)
+        self.assertEqual(self._review_receipt("spent-journey")["continuation_blocked_reason"], "journey_budget_exhausted")
+        self.assertEqual(self._paths_containing("/orchestrator_runs/"), sorted([parent_path, child_path]))
+        self.assertEqual(self.store[parent_path], parent)
+
+    def test_named_approval_records_a_decision_when_the_parent_budget_cannot_be_used(self):
+        parent_path, plan = self._prepared_journey()
+        plan_path = f"qa_projects/{PROJECT_ID}/snapshots/{plan['snapshot_id']}"
+        initial = deepcopy(self.store)
+        for target, field, value, reason in (
+            ("plan", "request_id", "manual-generation", "journey_budget_missing"),
+            ("plan", "actor_user_id", "old-owner", "journey_budget_missing"),
+            ("parent", "run_id", "mismatched-run", "journey_budget_missing"),
+            ("parent", "actor_user_id", "old-owner", "journey_budget_missing"),
+            ("parent", "project_id", "other-project", "journey_budget_missing"),
+            ("parent", "produced_snapshot_ids", {"use_cases": "different-plan"}, "journey_budget_missing"),
+            ("intent", "schema_version", 2, "journey_budget_missing"),
+            ("intent", "stage", "generate_tests", "journey_budget_missing"),
+            ("intent", "state", "interrupted", "journey_budget_missing"),
+            ("intent", "source_snapshot_ids", {"requirements": plan["source_snapshot_id"], "context": None}, "journey_budget_missing"),
+            ("intent", "requirement_ids", ["REQ-OTHER"], "journey_budget_missing"),
+            ("intent", "dispatch", None, "journey_budget_missing"),
+            ("intent", "provider_requests_reserved", 6, "journey_budget_missing"),
+            ("intent", "provider_requests_reserved", 8, "journey_budget_exhausted"),
+        ):
+            with self.subTest(target=target, field=field):
+                self.store.clear()
+                self.store.update(deepcopy(initial))
+                parent = self.store[parent_path]
+                records = {"plan": self.store[plan_path], "parent": parent, "intent": parent["continuation"]}
+                records[target][field] = value
+                parent_before = deepcopy(parent)
+                response = self._journey_review()
+                self.assertTrue(response.use_cases_state.approved)
+                receipt = self._review_receipt()
+                self.assertEqual(receipt["continuation_blocked_reason"], reason)
+                self.assertNotIn("continuation_run_id", receipt)
+                self.assertEqual(self.store[parent_path], parent_before)
+                self.assertEqual(self._paths_containing("/orchestrator_runs/"), [parent_path])
+                self.assertEqual(self._paths_containing(f"{OUTBOX_COLLECTION}/"), [])
+                committed = deepcopy(self.store)
+                self.assertEqual(self._journey_review().review, response.review)
+                self.assertEqual(self.store, committed)
+
+    def test_named_approval_rolls_back_the_parent_attachment_with_the_decision(self):
+        self._prepared_journey()
+        before = deepcopy(self.store)
+        for segment in (OUTBOX_COLLECTION, "/timeline/"):
+            with self.subTest(segment=segment):
+                self.client.fail_on_create_segment = segment
+                with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                    self._journey_review()
+                self.assertEqual(self.store, before)
+        self.client.fail_on_create_segment = None
+        self.assertTrue(self._journey_review().use_cases_state.approved)
 
     def test_scenario_approval_enqueues_the_exact_plan_with_current_sources_and_replays(self):
         plan = deepcopy(self._continuation_plan())

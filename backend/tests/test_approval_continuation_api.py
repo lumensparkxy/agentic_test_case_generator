@@ -4,19 +4,32 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from test_use_case_review_service import PROJECT_ID, PROJECT_REVISION, FakeCollection, FakeDocument, FakeFirestoreClient, _run_transaction, _seed_store
+from test_use_case_review_service import (
+    NOW,
+    PROJECT_ID,
+    PROJECT_REVISION,
+    SNAPSHOT_ID,
+    FakeCollection,
+    FakeDocument,
+    FakeFirestoreClient,
+    _run_transaction,
+    _seed_store,
+)
 
 from app.main import app, get_current_user
 from app.models import AuthUser
+from app.routers import approval_continuations as routes
 from app.services import approval_continuation as continuation
 from app.services.approval_scenario_worker import DEMO_PROJECT_ID
 from app.services import requirement_import_service as imports
+from app.services import use_case_review_service as scenario_review
 from app.services.requirement_reconciliation import canonical_requirements
 
 
 PROJECT_ROOT = f"qa_projects/{PROJECT_ID}"
 STATUS_PATH = f"/projects/{PROJECT_ID}/approval-continuations"
 APPROVAL_PATH = f"/projects/{PROJECT_ID}/requirements/approve-and-prepare-scenarios"
+TEST_APPROVAL_PATH = f"/projects/{PROJECT_ID}/use-cases/approve-and-generate-tests"
 EMULATOR_HOST = "127.0.0.1:9090"
 
 
@@ -74,6 +87,7 @@ class ApprovalContinuationApiTests(TestCase):
                     "ADK_SKILLS_ENABLED": "false",
                     "ADK_MEMORY_ENABLED": "false",
                     "GOOGLE_GENAI_USE_VERTEXAI": "false",
+                    "PARALLEL_TEST_CASE_MAX_WORKERS": "3",
                 },
             )
         )
@@ -84,6 +98,8 @@ class ApprovalContinuationApiTests(TestCase):
         )
         self.enterContext(patch.object(imports, "transactional", side_effect=_run_transaction))
         self.enterContext(patch.object(continuation, "transactional", side_effect=_run_transaction))
+        self.enterContext(patch.object(scenario_review, "get_required_firestore_client", return_value=self.firestore))
+        self.enterContext(patch.object(scenario_review, "transactional", side_effect=_run_transaction))
         self.client = self.enterContext(TestClient(app))
         baseline = self.store[f"{PROJECT_ROOT}/snapshots/snapshot-requirements-v1"]
         rows, _ = canonical_requirements(PROJECT_ID, baseline)
@@ -96,15 +112,51 @@ class ApprovalContinuationApiTests(TestCase):
     def approve(self, *, headers=None):
         return self.client.post(APPROVAL_PATH, json=self.payload, headers=headers)
 
-    def status(self, request_id=None):
-        return self.client.get(STATUS_PATH, params={"request_id": request_id} if request_id is not None else None)
+    def status(self, request_id=None, *, stage=None):
+        params = {}
+        if request_id is not None:
+            params["request_id"] = request_id
+        if stage is not None:
+            params["stage"] = stage
+        return self.client.get(STATUS_PATH, params=params)
+
+    def approve_tests(self, payload, request_id):
+        return self.client.post(TEST_APPROVAL_PATH, json=payload, headers={"X-Request-ID": request_id})
+
+    def prepared_plan(self):
+        first = self.approve()
+        self.assertEqual(first.status_code, 200, first.text)
+        parent_id = first.json()["continuation"]["run_id"]
+        parent = self.store[f"{PROJECT_ROOT}/orchestrator_runs/{parent_id}"]
+        requirement_id = parent["continuation"]["source_snapshot_ids"]["requirements"]
+        revision = parent["project_revision"] + 1
+        self.store[PROJECT_ROOT]["current_revision"] = revision
+        self.store[PROJECT_ROOT]["stage_state"]["use_cases"].update(stale=False, approved=False)
+        self.store[f"{PROJECT_ROOT}/snapshots/{SNAPSHOT_ID}"].update(
+            operation="use_cases.generate",
+            project_revision=revision,
+            actor_user_id=self.actor.sub,
+            request_id=parent_id,
+            source_snapshot_id=requirement_id,
+            metadata={"source_requirements_snapshot_id": requirement_id, "source_context_omitted": True},
+        )
+        self.store[f"{PROJECT_ROOT}/snapshots/{SNAPSHOT_ID}"]["payload"]["coverage_plan"][0]["requirement_text"] = "Checkout"
+        parent.update(project_revision=revision, produced_snapshot_ids={"use_cases": SNAPSHOT_ID})
+        parent["continuation"].update(
+            state="awaiting_user",
+            attempts=1,
+            provider_requests_reserved=parent["continuation"]["options"]["max_provider_requests"],
+            dispatch={"fence": 1, "at": NOW},
+        )
+        del self.store[f"{continuation.OUTBOX_COLLECTION}/{parent_id}"]
+        return parent, {"snapshot_id": SNAPSHOT_ID, "base_project_revision": revision, "decision": "approve"}
 
     def cancel(self, run_id):
         return self.client.post(f"{STATUS_PATH}/{run_id}/cancel")
 
     def test_approval_and_exact_retry_return_the_same_public_run_and_receipt(self):
         initial = deepcopy(self.store)
-        self.assertEqual(self.status().json(), {"enabled": True, "runs": [], "receipt": None})
+        self.assertEqual(self.status().json(), {"enabled": True, "tests_enabled": True, "runs": [], "receipt": None})
         self.assertEqual(self.store, initial)
         self.assertEqual(self.firestore.transactions, [])
 
@@ -123,6 +175,7 @@ class ApprovalContinuationApiTests(TestCase):
                 "project_revision": PROJECT_REVISION + 1,
                 "request_id": self.payload["idempotency_key"],
                 "reason": None,
+                "source_snapshot_id": result["project"]["stage_state"]["requirements"]["current_snapshot_id"],
                 "result_snapshot_id": None,
             },
         )
@@ -139,6 +192,7 @@ class ApprovalContinuationApiTests(TestCase):
             receipt_status,
             {
                 "enabled": True,
+                "tests_enabled": True,
                 "runs": [run],
                 "receipt": {"request_id": self.payload["idempotency_key"], "run_id": run["run_id"], "blocked_reason": None},
             },
@@ -159,6 +213,7 @@ class ApprovalContinuationApiTests(TestCase):
             self.status(self.payload["idempotency_key"]).json(),
             {
                 "enabled": True,
+                "tests_enabled": True,
                 "runs": [],
                 "receipt": {"request_id": self.payload["idempotency_key"], "run_id": None, "blocked_reason": "context_not_current"},
             },
@@ -168,12 +223,12 @@ class ApprovalContinuationApiTests(TestCase):
     def test_legacy_approval_does_not_queue_or_create_a_continuation_receipt(self):
         response = self.client.patch(f"/projects/{PROJECT_ID}/requirements/reviews", json=self.payload)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(self.status(self.payload["idempotency_key"]).json(), {"enabled": True, "runs": [], "receipt": None})
+        self.assertEqual(self.status(self.payload["idempotency_key"]).json(), {"enabled": True, "tests_enabled": True, "runs": [], "receipt": None})
 
     def test_disabled_operations_and_outsiders_cannot_change_approval_state(self):
         initial = deepcopy(self.store)
         with patch.dict(os.environ, {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
-            self.assertEqual(self.status().json(), {"enabled": False, "runs": [], "receipt": None})
+            self.assertEqual(self.status().json(), {"enabled": False, "tests_enabled": False, "runs": [], "receipt": None})
             self.assertEqual(self.approve().status_code, 409)
             self.assertEqual(self.cancel(f"continuation_{'a' * 64}").status_code, 409)
             self.assertEqual(self.store, initial)
@@ -223,7 +278,7 @@ class ApprovalContinuationApiTests(TestCase):
         approval = self.approve()
         self.assertEqual(approval.status_code, 200, approval.text)
         run_id = approval.json()["continuation"]["run_id"]
-        self.store[f"{PROJECT_ROOT}/orchestrator_runs/{run_id}"]["continuation"]["stage"] = "generate_tests"
+        self.store[f"{PROJECT_ROOT}/orchestrator_runs/{run_id}"]["continuation"]["stage"] = "execute_browser"
         before = deepcopy(self.store)
         self.assertEqual(self.status().json()["runs"], [])
         self.assertEqual(self.cancel(run_id).status_code, 404)
@@ -257,3 +312,140 @@ class ApprovalContinuationApiTests(TestCase):
         rows = self.status(self.payload["idempotency_key"]).json()["runs"]
         self.assertEqual(len(rows), 20)
         self.assertEqual(rows[-1]["run_id"], original_id)
+
+    def test_second_approval_returns_the_exact_child_and_disambiguates_same_request_identity(self):
+        parent, payload = self.prepared_plan()
+        request_id = self.payload["idempotency_key"]
+        response = self.approve_tests(payload, request_id)
+        self.assertEqual(response.status_code, 200, response.text)
+        outcome = response.json()
+        child = outcome["continuation"]
+        self.assertEqual(
+            child,
+            {
+                "run_id": child["run_id"],
+                "state": "queued",
+                "stage": "generate_tests",
+                "project_revision": payload["base_project_revision"] + 1,
+                "request_id": request_id,
+                "reason": None,
+                "source_snapshot_id": SNAPSHOT_ID,
+                "result_snapshot_id": None,
+            },
+        )
+        self.assertEqual(outcome["review"]["decision"], "approve")
+        self.assertTrue(outcome["use_cases_state"]["approved"])
+        self.assertNotIn("require_prepared_journey", outcome["review"])
+        self.assertNotIn("continuation_run_id", outcome["review"])
+        self.assertIsNone(outcome["blocked_reason"])
+        self.assertIn(f"{continuation.OUTBOX_COLLECTION}/{child['run_id']}", self.store)
+        committed_parent = self.store[f"{PROJECT_ROOT}/orchestrator_runs/{parent['run_id']}"]
+        budget = committed_parent["continuation"]["journey_budget"]
+        self.assertEqual(budget["child_run_id"], child["run_id"])
+        self.assertEqual(budget["scenario_requests_reserved"] + budget["test_requests_allocated"], budget["provider_request_limit"])
+
+        status = self.status(request_id, stage="generate_tests").json()
+        self.assertEqual([row["stage"] for row in status["runs"]], ["generate_tests", "prepare_scenarios"])
+        self.assertEqual(status["receipt"], {"request_id": request_id, "run_id": child["run_id"], "blocked_reason": None})
+        self.assertEqual(status["runs"][1]["result_snapshot_id"], SNAPSHOT_ID)
+        self.assertEqual(self.status(request_id).json()["receipt"]["run_id"], parent["run_id"])
+        before = deepcopy(self.store)
+        with patch.object(routes, "test_case_continuation_options", return_value=continuation.ContinuationOptions(settings_fingerprint="f" * 64)):
+            replay = self.approve_tests(payload, request_id)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        for key in ("review", "project_revision", "use_cases_state", "continuation", "blocked_reason"):
+            self.assertEqual(replay.json()[key], outcome[key])
+        self.assertEqual(self.approve_tests({**payload, "comment": "Different retry"}, request_id).status_code, 409)
+        self.assertEqual(self.store, before)
+
+    def test_blocked_test_generation_recovers_the_saved_scenario_approval(self):
+        _, payload = self.prepared_plan()
+        self.store[f"{PROJECT_ROOT}/snapshots/{SNAPSHOT_ID}"]["request_id"] = "not-a-prepared-result"
+        request_id = "scenario-approval-blocked"
+        response = self.approve_tests(payload, request_id)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["use_cases_state"]["approved"])
+        self.assertIsNone(response.json()["continuation"])
+        self.assertEqual(response.json()["blocked_reason"], "journey_budget_missing")
+        self.assertEqual(
+            self.status(request_id, stage="generate_tests").json()["receipt"],
+            {"request_id": request_id, "run_id": None, "blocked_reason": "journey_budget_missing"},
+        )
+        self.assertIsNone(self.status(request_id).json()["receipt"])
+
+    def test_spent_journey_does_not_schedule_a_second_test_generation(self):
+        _, payload = self.prepared_plan()
+        response = self.approve_tests(payload, "first-scenario-approval")
+        self.assertEqual(response.status_code, 200, response.text)
+        child = response.json()["continuation"]
+        next_payload = {**payload, "base_project_revision": response.json()["project_revision"]}
+        response = self.approve_tests(next_payload, "another-scenario-approval")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["use_cases_state"]["approved"])
+        self.assertEqual(response.json()["blocked_reason"], "journey_budget_exhausted")
+        self.assertIsNone(response.json()["continuation"])
+        status = self.status("another-scenario-approval", stage="generate_tests").json()
+        self.assertEqual([run["run_id"] for run in status["runs"] if run["stage"] == "generate_tests"], [child["run_id"]])
+        self.assertEqual(status["receipt"]["blocked_reason"], "journey_budget_exhausted")
+
+    def test_ordinary_scenario_approval_keeps_the_legacy_api_and_schedules_nothing(self):
+        parent, payload = self.prepared_plan()
+        request_id = "ordinary-scenario-approval"
+        response = self.client.post(f"/projects/{PROJECT_ID}/use-cases/reviews", json=payload, headers={"X-Request-ID": request_id})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["use_cases_state"]["approved"])
+        self.assertNotIn("continuation", response.json())
+        self.assertIsNone(self.status(request_id, stage="generate_tests").json()["receipt"])
+        self.assertEqual([row["run_id"] for row in self.status().json()["runs"]], [parent["run_id"]])
+        self.assertFalse(any(path.startswith(f"{continuation.OUTBOX_COLLECTION}/") for path in self.store))
+
+    def test_test_generation_has_its_own_enabled_guard_and_owner_only_cancel(self):
+        _, payload = self.prepared_plan()
+        request_id = "scenario-approved-for-generation"
+        initial = deepcopy(self.store)
+        with patch.object(routes, "approval_test_cases_enabled", return_value=False):
+            status = self.status().json()
+            self.assertTrue(status["enabled"])
+            self.assertFalse(status["tests_enabled"])
+            self.assertEqual(self.approve_tests(payload, request_id).status_code, 409)
+            self.assertEqual(self.store, initial)
+        with patch.object(self.firestore, "_emulator_host", None):
+            self.assertFalse(self.status().json()["tests_enabled"])
+            self.assertEqual(self.approve_tests(payload, request_id).status_code, 409)
+            self.assertEqual(self.store, initial)
+
+        self.assertEqual(self.approve_tests({**payload, "decision": "request_changes", "comment": "A change"}, request_id).status_code, 422)
+        self.assertEqual(self.approve_tests(payload, "x" * 161).status_code, 422)
+        self.assertEqual(self.store, initial)
+        approval = self.approve_tests(payload, request_id)
+        self.assertEqual(approval.status_code, 200, approval.text)
+        child_id = approval.json()["continuation"]["run_id"]
+        committed = deepcopy(self.store)
+        with patch.object(routes, "approval_test_cases_enabled", return_value=False):
+            self.assertEqual(self.cancel(child_id).status_code, 409)
+        with patch.object(self, "actor", AuthUser(sub="other", name="Other")):
+            self.assertEqual(self.status(request_id, stage="generate_tests").status_code, 404)
+            self.assertEqual(self.approve_tests(payload, request_id).status_code, 404)
+            self.assertEqual(self.cancel(child_id).status_code, 404)
+        self.assertEqual(self.store, committed)
+        cancelled = self.cancel(child_id)
+        self.assertEqual(cancelled.status_code, 200, cancelled.text)
+        self.assertEqual(cancelled.json()["stage"], "generate_tests")
+        self.assertEqual(cancelled.json()["state"], "cancelled")
+
+    def test_test_generation_result_projects_the_exact_saved_suite(self):
+        _, payload = self.prepared_plan()
+        request_id = "scenario-approved-for-result"
+        approval = self.approve_tests(payload, request_id)
+        self.assertEqual(approval.status_code, 200, approval.text)
+        child_id = approval.json()["continuation"]["run_id"]
+        child = self.store[f"{PROJECT_ROOT}/orchestrator_runs/{child_id}"]
+        child.update(produced_snapshot_ids={"test_cases": "saved-exact-suite"}, project_revision=child["project_revision"] + 1)
+        child["continuation"].update(state="completed")
+        before = deepcopy(self.store)
+        status = self.status(request_id, stage="generate_tests").json()
+        self.assertEqual(status["receipt"]["run_id"], child_id)
+        run = status["runs"][0]
+        self.assertEqual((run["source_snapshot_id"], run["result_snapshot_id"]), (SNAPSHOT_ID, "saved-exact-suite"))
+        self.assertEqual(run["state"], "completed")
+        self.assertEqual(self.store, before)

@@ -126,6 +126,7 @@ class ScenarioWorkerTests(TestCase):
 
     def approve_saved_plan_for_tests(self):
         self.assertTrue(self.handle())
+        parent_run_id = self.run_id
         project = projects.get_project(self.project_id, actor=self.actor)
         plan = project.current_snapshots["use_cases"]
         self.assertTrue(plan.metadata["source_context_omitted"])
@@ -142,8 +143,12 @@ class ScenarioWorkerTests(TestCase):
                 actor=self.actor,
                 request_id="approve-scenarios",
                 continuation=worker.test_case_continuation_options(),
+                require_prepared_journey=True,
             )
         self.run_id = runs.continuation_run_id(self.project_id, self.actor.sub, "generate_tests", result.review.review_id)
+        parent = self.project_doc.collection("orchestrator_runs").document(parent_run_id).get().to_dict()
+        self.assertEqual(parent["continuation"]["journey_budget"]["child_run_id"], self.run_id)
+        self.assertEqual(parent["continuation"]["journey_budget"]["scenario_requests_reserved"], 7)
         self.expected_reservation = 24
         self.requests.clear()
         return plan

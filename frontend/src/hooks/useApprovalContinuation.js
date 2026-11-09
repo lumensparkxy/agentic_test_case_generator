@@ -28,11 +28,13 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const [actionState, setActionState] = useState(null);
 	const current = readState?.scope === scope ? readState : null;
 	const action = actionState?.scope === scope ? actionState : null;
-	const runs = (current?.data?.runs || []).filter((item) => item.stage === "prepare_scenarios");
+	const runs = current?.data?.runs || [];
 	const requestId = pending.value?.requestId || "";
-	const match = requestId && runs.find((item) => item.request_id === requestId);
+	const pendingStage = pending.value?.stage || "prepare_scenarios";
+	const match = requestId && runs.find((item) => item.request_id === requestId && item.stage === pendingStage);
 	const receipt = requestId && current?.data?.receipt?.request_id === requestId ? current.data.receipt : null;
 	const run = match || (!requestId ? runs[0] : null);
+	const checkingTests = (requestId ? pendingStage : run?.stage) === "generate_tests";
 	const unresolved = Boolean(requestId && !match && !receipt);
 
 	const refresh = useCallback(
@@ -42,10 +44,13 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 			const controller = new AbortController();
 			const read = { scope, controller };
 			inFlight.current = read;
-			const path = requestId ? `${basePath}?${new URLSearchParams({ request_id: requestId })}` : basePath;
+			const query = new URLSearchParams();
+			if (requestId) query.set("request_id", requestId);
+			if (requestId && pendingStage === "generate_tests") query.set("stage", pendingStage);
+			const path = requestId ? `${basePath}?${query}` : basePath;
 			try {
 				const response = await requestRef.current(path, { method: "GET", signal: controller.signal });
-				if (!response.ok) throw new Error("Scenario preparation status is unavailable.");
+				if (!response.ok) throw new Error("Approval continuation status is unavailable.");
 				const data = await response.json();
 				if (!controller.signal.aborted && activeScope.current === scope) setReadState({ scope, data, error: "" });
 			} catch {
@@ -53,13 +58,13 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 					setReadState((previous) => ({
 						scope,
 						data: previous?.scope === scope ? previous.data : null,
-						error: "Could not check scenario preparation. Check status again.",
+						error: "Could not check approval status. Check status again.",
 					}));
 			} finally {
 				if (inFlight.current === read) inFlight.current = null;
 			}
 		},
-		[basePath, requestId, scope]
+		[basePath, pendingStage, requestId, scope]
 	);
 
 	useEffect(() => {
@@ -83,16 +88,20 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		return () => window.clearTimeout(timer);
 	}, [current, refresh, run?.state, scope, unresolved]);
 
-	const accept = (response) => {
+	const accept = (response, stage = "prepare_scenarios") => {
 		const result = response.continuation;
 		if (result) {
 			setReadState((previous) => ({
 				scope,
 				error: "",
-				data: { enabled: true, runs: [result, ...(previous?.data?.runs || []).filter((item) => item.run_id !== result.run_id)] },
+				data: {
+					enabled: true,
+					tests_enabled: stage === "generate_tests" || previous?.data?.tests_enabled,
+					runs: [result, ...(previous?.data?.runs || []).filter((item) => item.run_id !== result.run_id)],
+				},
 			}));
 		}
-		setActionState({ scope, error: "", blockedReason: response.blocked_reason || "" });
+		setActionState({ scope, stage, error: "", blockedReason: response.blocked_reason || "" });
 		pending.clear();
 	};
 	const cancel = async () => {
@@ -105,7 +114,12 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 				.replace("{project_id}", projectSegment)
 				.replace("{run_id}", encodeURIComponent(run.run_id));
 			const response = await requestRef.current(cancelPath, { method: API_CONTRACT_ENDPOINTS.approvalContinuationCancel.method });
-			if (!response.ok) throw new Error("Could not cancel scenario preparation. Check the current status.");
+			if (!response.ok)
+				throw new Error(
+					checkingTests
+						? "Could not cancel test generation. Check the current status."
+						: "Could not cancel scenario preparation. Check the current status."
+				);
 			const cancelled = await response.json();
 			if (activeScope.current !== scope) return;
 			if (inFlight.current?.scope === scope) {
@@ -132,7 +146,10 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 
 	return {
 		available: current?.data?.enabled === true,
+		testsAvailable: current?.data?.tests_enabled === true,
+		runs,
 		run,
+		stage: action?.blockedReason ? action.stage : requestId ? pendingStage : run?.stage || "prepare_scenarios",
 		active: ACTIVE_STATES.includes(run?.state),
 		unresolved,
 		receipt,

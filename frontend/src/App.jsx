@@ -4468,21 +4468,39 @@ export default function App() {
 	const reviewScope = PROJECT_WORKSPACES_V2 && requirementsRoute && route.workspace === "review";
 	const openScope = () => navigate(buildProjectWorkspacePath(navigationProjectId, "review"));
 	const scenariosPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "scenarios") : "";
+	const testsPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "tests") : "";
 	const continuationBusy = approvalContinuation.active || approvalContinuation.run?.state === "interrupted";
+	const continuationResultStage = approvalContinuation.stage === "generate_tests" ? "test_cases" : "use_cases";
+	const preparedScenarioId = projectSnapshots.use_cases?.snapshot_id;
+	const retryableScenarioApproval =
+		approvalContinuation.unresolved &&
+		approvalContinuation.pendingRequest?.stage === "generate_tests" &&
+		approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
+	const generateOnScenarioApproval =
+		approvalContinuation.testsAvailable &&
+		preparedScenarioId &&
+		(!approvalContinuation.unresolved || retryableScenarioApproval) &&
+		!continuationBusy &&
+		approvalContinuation.runs.some(
+			(run) => run.stage === "prepare_scenarios" && run.state === "awaiting_user" && run.result_snapshot_id === preparedScenarioId
+		) &&
+		!approvalContinuation.runs.some((run) => run.stage === "generate_tests" && run.source_snapshot_id === preparedScenarioId);
 	const continuationPanel = APPROVAL_CONTINUATION_ENABLED ? (
 		<ApprovalContinuationPanel
 			continuation={approvalContinuation}
 			scenariosPath={scenariosPath}
+			testsPath={testsPath}
 			navigate={navigate}
 			onCheck={() => {
 				void approvalContinuation.refresh({ reset: true });
 				const operationScope = captureProjectOperationScope();
-				if (operationScope && (approvalContinuation.run?.state === "awaiting_user" || approvalContinuation.pendingRequest))
+				if (operationScope && (approvalContinuation.run?.result_snapshot_id || approvalContinuation.pendingRequest))
 					void refreshCurrentProject({ hydrate: true, operationScope });
 			}}
 			saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
 			resultCurrent={
-				approvalContinuation.run?.result_snapshot_id === projectSnapshots.use_cases?.snapshot_id && !projectStageState.use_cases?.stale
+				approvalContinuation.run?.result_snapshot_id === projectSnapshots[continuationResultStage]?.snapshot_id &&
+				!projectStageState[continuationResultStage]?.stale
 			}
 		/>
 	) : null;
@@ -4494,7 +4512,10 @@ export default function App() {
 					)
 					.map((row) => ({ ...row, review_status: "Approved" }))
 			: [];
-	const retryableApproval = approvalContinuation.unresolved && approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
+	const retryableApproval =
+		approvalContinuation.unresolved &&
+		approvalContinuation.stage === "prepare_scenarios" &&
+		approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
 	const openTraceabilityCase = (path, target) => {
 		navigate(`${location.pathname}${location.search}${location.hash}`, {
@@ -4814,6 +4835,8 @@ export default function App() {
 								onGenerated={handleUseCasesGenerated}
 								generationDisabled={testCaseActionDisabled || isGenerating || continuationBusy || approvalContinuation.unresolved}
 								continuationPanel={continuationPanel}
+								continuation={APPROVAL_CONTINUATION_ENABLED ? approvalContinuation : null}
+								generateOnApproval={generateOnScenarioApproval}
 								contextRefreshRequired={contextRefreshRequired}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
 								onBack={PROJECT_WORKSPACES_V2 ? openScope : goPrev}
@@ -4938,7 +4961,7 @@ export default function App() {
 									}
 								/>
 
-								{reviewScope && continuationPanel}
+								{(reviewScope || (testReviewRoute && !savedCaseLink && continuationResultStage === "test_cases")) && continuationPanel}
 								{!inputsSources && !savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}
