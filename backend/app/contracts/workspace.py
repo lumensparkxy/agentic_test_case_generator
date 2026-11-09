@@ -75,6 +75,7 @@ class WorkspaceReportSummary(BaseModel):
     stage: Literal["reports"] = "reports"
     status: WorkspaceReportStatus
     report_type: str
+    delivery_kind: Literal["reviewed_design"] | None = None
     format: Optional[str] = None
     operation: str
     approved: bool = False

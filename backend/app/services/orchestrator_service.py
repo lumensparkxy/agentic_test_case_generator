@@ -911,6 +911,7 @@ def build_orchestrator_status(project: Optional[QaProjectDetail]) -> Orchestrato
         next_actions=actions,
         blockers=blockers,
         has_baseline_test_suite=has_baseline_test_suite,
+        reviewed_design_available=project.reviewed_design_available,
         upstream_changed=upstream_changed,
         changed_upstream_stages=changed_upstream_stages,
         generated_at=_utcnow(),

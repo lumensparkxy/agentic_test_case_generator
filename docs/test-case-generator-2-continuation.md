@@ -414,11 +414,18 @@ P3f enrolls bounded Project Sync refresh (commit `dbeda56`,
 [PR #466](https://github.com/lumensparkxy/agentic_test_case_generator/pull/466)).
 P4a binds independent design evidence to the exact saved suite (commit
 `1be782c`, [PR #468](https://github.com/lumensparkxy/agentic_test_case_generator/pull/468)).
-P4b adds explicit reviewed-design file delivery under
-[#469](https://github.com/lumensparkxy/agentic_test_case_generator/issues/469).
-Next is aligning Review, Deliver and project status with the server
-evidence. Direct draft producers remain a release gate. Targeted repair
-will join shared admission when the Review workflow consumes it.
+P4b adds explicit reviewed-design file delivery (commit `2ee40a4`,
+[PR #470](https://github.com/lumensparkxy/agentic_test_case_generator/pull/470)).
+P4c exposes exact suite quality, reviewed-design delivery eligibility and
+saved report classification in Review, Deliver and project status under
+[#471](https://github.com/lumensparkxy/agentic_test_case_generator/issues/471).
+The browser fixture exports an exact manual design while browser setup
+is blocked. Unknown, stale and legacy evidence retains its existing
+export gate. Exact historical case and run links remain available. P7
+still owns opening the exact historical file report from its index row.
+Next is direct case selection and focused test review, followed by
+targeted repair under shared admission. Direct draft producers remain
+a release gate.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

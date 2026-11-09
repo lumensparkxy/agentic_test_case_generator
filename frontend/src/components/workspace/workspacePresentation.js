@@ -6,6 +6,8 @@ import {
 	getReviewActionTitle,
 } from "../../app/workflowRoutes";
 
+const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
+
 const STATUS_LABELS = Object.freeze({
 	not_started: "Not started",
 	ready: "Ready",
@@ -19,6 +21,7 @@ const STATUS_LABELS = Object.freeze({
 	archived: "Archived",
 	approved: "Approved",
 	draft: "Draft",
+	reviewed_design: "Reviewed design",
 	queued: "Queued",
 	running: "Running",
 	passed: "Passed",
@@ -63,6 +66,12 @@ export const formatWorkspaceLabel = (value, fallback = "") => {
 
 export const formatWorkspaceStatus = (status) => STATUS_LABELS[status] || formatWorkspaceLabel(status, "Unknown");
 
+export function getWorkspaceReportPresentation(report) {
+	if (!PROJECT_WORKSPACES_V2 || report.delivery_kind !== "reviewed_design") return { status: report.status };
+	if (report.stale || report.status === "stale") return { status: "stale", label: "Reviewed design · Stale" };
+	return { status: "reviewed_design" };
+}
+
 export const formatWorkspaceDate = (value) => {
 	const date = new Date(value || "");
 	if (Number.isNaN(date.getTime())) return "";
@@ -79,7 +88,7 @@ export const getWorkspaceStatusTone = (status) => {
 	if (["failed", "attention_required"].includes(status)) return "danger";
 	if (["blocked", "stale", "draft", "partial", "cancelled", "disabled", "flaky"].includes(status)) return "warning";
 	if (["completed", "approved", "passed"].includes(status)) return "success";
-	if (["ready", "active", "running"].includes(status)) return "info";
+	if (["ready", "active", "running", "reviewed_design"].includes(status)) return "info";
 	return "neutral";
 };
 

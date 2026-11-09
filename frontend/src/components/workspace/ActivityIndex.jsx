@@ -30,9 +30,8 @@ export const formatActivityStatus = (status, kind) => {
 	return formatWorkspaceStatus(status);
 };
 
-export function ActivityStatus({ status, kind }) {
+export function ActivityStatus({ status, kind, label = formatActivityStatus(status, kind) }) {
 	const Icon = kind === "report" ? getReportStatusIcon(status) : getRunStatusIcon(status);
-	const label = formatActivityStatus(status, kind);
 	return (
 		<Badge
 			tone={getWorkspaceStatusTone(status)}

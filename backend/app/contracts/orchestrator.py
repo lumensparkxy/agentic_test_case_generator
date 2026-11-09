@@ -102,6 +102,7 @@ class OrchestratorStatusResponse(BaseModel):
     next_actions: List[OrchestratorActionRecommendation] = Field(default_factory=list)
     blockers: List[OrchestratorBlocker] = Field(default_factory=list)
     has_baseline_test_suite: bool = False
+    reviewed_design_available: bool = False
     upstream_changed: bool = False
     changed_upstream_stages: List[OrchestratorStageName] = Field(default_factory=list)
     generated_at: datetime

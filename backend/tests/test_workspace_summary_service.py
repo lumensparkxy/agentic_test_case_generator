@@ -739,6 +739,49 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
         self.assertNotIn("test_cases", report.model_dump())
         self.assertNotIn("evidence_refs", report.model_dump())
 
+    def test_reviewed_design_report_classification_uses_bounded_saved_metadata(self) -> None:
+        actor = AuthUser(sub="user-1", email="user@example.com", name="User")
+        report = _snapshot(
+            project_id="design",
+            stage="reports",
+            snapshot_id="report-v1",
+            created_at=BASE_TIME,
+            operation="export.json",
+            source_snapshot_id="exact-suite-v1",
+            metadata={"delivery_kind": "reviewed_design", "test_case_count": 1},
+            payload={"source": "export", "format": "json", "audit_metadata": {"large_private_field": "not needed"}},
+        )
+        project = _project(
+            "design", stage_state={"reports": _stage_state(report.snapshot_id, updated_at=BASE_TIME, approved=False, operation=report.operation)}
+        )
+        project_row = project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"})
+        snapshot_path = "qa_projects/design/snapshots/report-v1"
+        store = {"qa_projects/design": project_row, snapshot_path: report.model_dump()}
+        queries = []
+        client = FakeFirestoreClient(store, queries)
+        with patch("app.services.workflow_project_service.get_required_firestore_client", return_value=client):
+            for stale, recorded_kind, expected_kind in (
+                (False, "reviewed_design", "reviewed_design"),
+                (True, "reviewed_design", "reviewed_design"),
+                (False, "unrecognized", None),
+            ):
+                with self.subTest(stale=stale, recorded_kind=recorded_kind):
+                    store[snapshot_path]["metadata"]["delivery_kind"] = recorded_kind
+                    project_row["stage_state"]["reports"]["stale"] = stale
+                    projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=20, execution_run_limit=20)
+                    self.assertFalse(projects[0].design_delivery_enabled)
+                    self.assertNotIn("audit_metadata", projects[0].current_snapshots["reports"].payload)
+                    result = build_workspace_summary(projects, work_items_limit=50, runs_limit=20, reports_limit=20)
+                    [item] = result.recent_reports
+                    self.assertEqual(item.delivery_kind, expected_kind)
+                    self.assertEqual(item.report_id, "report-v1")
+                    self.assertEqual(item.source_snapshot_id, "exact-suite-v1")
+                    self.assertEqual(item.status, "stale" if stale else "draft")
+                    self.assertFalse(item.approved)
+        report_reads = [entry[2] for entry in queries if entry[0] == "get_all" and snapshot_path in entry[1]]
+        self.assertTrue(report_reads)
+        self.assertTrue(all("metadata" in fields and "payload.audit_metadata" not in fields for fields in report_reads))
+
     def test_get_workspace_summary_forwards_bounds_to_workspace_query(self) -> None:
         actor = AuthUser(sub="user-1", email="user@example.com", name="User")
         projects = [_project("project-1")]

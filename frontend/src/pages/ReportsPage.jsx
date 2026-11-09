@@ -15,6 +15,7 @@ import { ProjectOpenLink, WorkspaceErrorState, WorkspaceLoadingState } from "../
 import {
 	formatWorkspaceDate,
 	formatWorkspaceLabel,
+	getWorkspaceReportPresentation,
 	matchesWorkspaceQuery,
 	normalizeWorkspaceList,
 } from "../components/workspace/workspacePresentation";
@@ -35,7 +36,7 @@ function ReportRow({ report, onOpenProject }) {
 						<span className="activity-index-project">{report.project_name || "Project"}</span>
 						<h3>{formatWorkspaceLabel(report.report_type, "Report")}</h3>
 					</div>
-					<ActivityStatus kind="report" status={report.status} />
+					<ActivityStatus kind="report" {...getWorkspaceReportPresentation(report)} />
 				</div>
 				<div className="activity-index-evidence">
 					<span>Evidence ID</span>
@@ -80,7 +81,7 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 	const reports = normalizeWorkspaceList(summary?.recent_reports);
 	const statusOptions = useMemo(
 		() =>
-			[...new Set(reports.map((report) => report.status).filter(Boolean))]
+			[...new Set(reports.map((report) => getWorkspaceReportPresentation(report).status).filter(Boolean))]
 				.sort()
 				.map((value) => optionFromValue(value, (item) => formatActivityStatus(item, "report"))),
 		[reports]
@@ -109,21 +110,24 @@ export default function ReportsPage({ summary, isLoading = false, isRefreshing =
 		if (effectiveFormat !== format) setFormat(effectiveFormat);
 	}, [effectiveFormat, effectiveStatus, effectiveType, format, status, type]);
 
-	const filteredReports = reports.filter(
-		(report) =>
-			(effectiveStatus === "all" || report.status === effectiveStatus) &&
+	const filteredReports = reports.filter((report) => {
+		const { status: reportStatus, label } = getWorkspaceReportPresentation(report);
+		return (
+			(effectiveStatus === "all" || reportStatus === effectiveStatus) &&
 			(effectiveType === "all" || report.report_type === effectiveType) &&
 			(effectiveFormat === "all" || report.format === effectiveFormat) &&
 			matchesWorkspaceQuery(
 				query,
 				report.project_name,
-				report.status,
+				reportStatus,
+				label || formatActivityStatus(reportStatus, "report"),
 				report.report_type,
 				report.format,
 				report.operation,
 				report.report_id
 			)
-	);
+		);
+	});
 	const hasActiveFilters = Boolean(query.trim()) || effectiveStatus !== "all" || effectiveType !== "all" || effectiveFormat !== "all";
 	const clearFilters = () => {
 		setQuery("");

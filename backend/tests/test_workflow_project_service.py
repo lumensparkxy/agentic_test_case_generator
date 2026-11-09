@@ -102,6 +102,46 @@ class WorkflowProjectServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.collection_patch.stop()
 
+    def test_project_detail_projects_exact_reviewed_design_policy_without_approval_promotion(self):
+        from os import environ
+
+        from app.services.requirement_scope import approved_generation_requirements
+        from app.services.suite_quality import build_suite_design_proof
+        from app.services.test_case_quality import case_source_hash
+        from test_suite_quality import attach_suite, fixture
+
+        seed, payload, metadata = fixture(missing_setup=True)
+        actor = AuthUser(sub=seed.owner_user_id, name="Owner")
+        path = f"qa_projects/{seed.project_id}"
+        self.store[path] = seed.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"})
+        for snapshot in seed.current_snapshots.values():
+            self.store[f"{path}/snapshots/{snapshot.snapshot_id}"] = snapshot.model_dump()
+
+        current = get_project(seed.project_id, actor=actor)
+        hashes = {row.id: case_source_hash(row.model_dump(mode="json")) for row in approved_generation_requirements(current)}
+        metadata["source_requirement_hashes"] = hashes
+        payload["substantive_assessment"]["reviewed_source_binding"]["requirement_hashes"] = hashes
+        proof = build_suite_design_proof(current, payload, metadata, plan_snapshot_id="plan-v1")
+        self.assertIsNotNone(proof)
+        suite = attach_suite(current, payload, metadata, proof=proof)
+        self.store[path]["stage_state"]["test_cases"] = current.stage_state["test_cases"].model_dump()
+        self.store[f"{path}/snapshots/{suite.snapshot_id}"] = suite.model_dump()
+
+        with patch.dict(environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+            enabled = get_project(seed.project_id, actor=actor)
+            self.assertTrue(enabled.design_delivery_enabled)
+            self.assertTrue(enabled.reviewed_design_available)
+            self.assertEqual(enabled.suite_quality.declared_setup, "blocked")
+            self.assertFalse(enabled.stage_state["test_cases"].approved)
+            self.store[path]["stage_state"]["test_cases"]["stale"] = True
+            self.assertFalse(get_project(seed.project_id, actor=actor).reviewed_design_available)
+        self.store[path]["stage_state"]["test_cases"]["stale"] = False
+        with patch.dict(environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):
+            disabled = get_project(seed.project_id, actor=actor)
+            self.assertFalse(disabled.design_delivery_enabled)
+            self.assertFalse(disabled.reviewed_design_available)
+            self.assertEqual(disabled.suite_quality.design_status, "complete")
+
     def test_testing_intent_round_trips_separately_from_saved_sources(self) -> None:
         project = create_project(name="Booking", description="Project description", actor=self.actor, request_id="create")
         append_stage_snapshot(

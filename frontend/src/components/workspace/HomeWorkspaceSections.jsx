@@ -10,6 +10,7 @@ import {
 	formatWorkspaceDate,
 	formatWorkspaceLabel,
 	getProjectDestination,
+	getWorkspaceReportPresentation,
 	getWorkItemDestination,
 	getWorkItemTitle,
 	groupWorkspaceItems,
@@ -238,7 +239,7 @@ function ReportActivity({ report, onOpenProject }) {
 			<div>
 				<div className="workspace-card-meta">
 					<span>{report.project_name || "Project"}</span>
-					<WorkspaceStatus status={report.status} />
+					<WorkspaceStatus {...getWorkspaceReportPresentation(report)} />
 				</div>
 				<strong>{formatWorkspaceLabel(report.report_type, "Test report")}</strong>
 				<p>{report.count == null ? "Report activity" : `${report.count} items included`}</p>

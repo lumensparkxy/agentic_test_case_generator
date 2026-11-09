@@ -46,10 +46,10 @@ export function WorkspaceSearch({
 	);
 }
 
-export function WorkspaceStatus({ status }) {
+export function WorkspaceStatus({ status, label = formatWorkspaceStatus(status) }) {
 	return (
 		<Badge tone={getWorkspaceStatusTone(status)} className={`workspace-status workspace-status-${getWorkspaceStatusTone(status)}`}>
-			{formatWorkspaceStatus(status)}
+			{label}
 		</Badge>
 	);
 }

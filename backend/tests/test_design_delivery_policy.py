@@ -7,7 +7,9 @@ from fastapi import HTTPException
 
 from app.contracts.exports import ExportTestCasesInput
 from app.contracts.projects import QaProjectExecutionRun
-from app.services.export_evidence import build_export_evidence, design_delivery_enabled
+from app.services import export_evidence
+from app.services.export_evidence import build_export_evidence, design_delivery_enabled, reviewed_design_available
+from app.services.orchestrator_service import build_orchestrator_status
 from app.services.suite_quality import build_suite_design_proof, resolve_suite_quality
 from test_suite_quality import NOW, attach_suite, fixture
 
@@ -192,3 +194,39 @@ class DesignDeliveryPolicyTests(TestCase):
         old["scenario_refs"] = active["scenario_refs"]
         active["scenario_refs"] = ["SCN-OTHER"]
         self.rejection(self.export_input(project, suite), project, 409)
+
+    def test_availability_calls_the_exact_policy_and_preserves_legacy_actions(self):
+        project, suite = self.suite()
+        project.design_delivery_enabled = True
+        before = build_orchestrator_status(project)
+        self.assertFalse(before.reviewed_design_available)
+        with patch.object(export_evidence, "build_export_evidence", wraps=build_export_evidence) as policy:
+            self.assertTrue(reviewed_design_available(project, raw_suite=suite))
+        request, policy_project = policy.call_args.args
+        self.assertEqual(request.delivery_intent, "reviewed_design")
+        self.assertEqual(request.source_snapshot_id, suite.snapshot_id)
+        self.assertEqual(request.base_project_revision, project.current_revision)
+        self.assertIs(policy_project, project)
+
+        project.reviewed_design_available = True
+        after = build_orchestrator_status(project)
+        self.assertTrue(after.reviewed_design_available)
+        self.assertEqual(after.next_actions, before.next_actions)
+        self.assertEqual(after.blockers, before.blockers)
+        self.assertEqual(after.stages, before.stages)
+
+        # A workbench projection cannot hide a raw row from the exact policy.
+        raw = suite.model_copy(deep=True)
+        raw.payload["test_cases"][0]["steps"][0]["test_data"] = "A different saved value."
+        self.assertFalse(reviewed_design_available(project, raw_suite=raw))
+        suite.payload["generation_tasks"] = [{"reason": "Incomplete work"}]
+        self.assertFalse(reviewed_design_available(project, raw_suite=suite))
+
+    def test_availability_short_circuits_disabled_or_unverified_suites(self):
+        project, suite = self.suite()
+        with patch.object(export_evidence, "build_export_evidence") as policy:
+            self.assertFalse(reviewed_design_available(project, raw_suite=suite))
+            project.design_delivery_enabled = True
+            project.suite_quality.design_status = "unknown"
+            self.assertFalse(reviewed_design_available(project, raw_suite=suite))
+            policy.assert_not_called()

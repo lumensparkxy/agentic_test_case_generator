@@ -112,7 +112,13 @@ function CaseOutcomes({ results, caseNavigation }) {
 	);
 }
 
-function PlaywrightExecutionReport({ report, notice, onRetry, caseNavigation }) {
+function PlaywrightExecutionReport({
+	report,
+	notice,
+	onRetry,
+	caseNavigation,
+	emptyMessage = "No Playwright execution report has been recorded yet.",
+}) {
 	const summary = report?.summary || {};
 	const reportPaths = normalizeReportPaths(report);
 	const visibleReportPaths = reportPaths.slice(0, REPORT_PATH_LIMIT);
@@ -182,14 +188,14 @@ function PlaywrightExecutionReport({ report, notice, onRetry, caseNavigation }) 
 				</div>
 			) : !notice ? (
 				<CollectionState as="div" kind="empty" className="playwright-report-card empty">
-					<p>No Playwright execution report has been recorded yet.</p>
+					<p>{emptyMessage}</p>
 				</CollectionState>
 			) : null}
 		</div>
 	);
 }
 
-function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request, location, navigate }) {
+function SavedExecutionReport({ projectId, runRecordId, fallbackReport, expectedSuiteSnapshotId, request, location, navigate }) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
 	const fetchRun = useEffectEvent((signal) => {
@@ -210,7 +216,12 @@ function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request,
 				}
 				if (!response.ok) throw new Error("Run lookup failed.");
 				const run = await response.json();
-				if (run?.project_id !== projectId || run?.run_record_id !== runRecordId || !run?.run_id) {
+				if (
+					run?.project_id !== projectId ||
+					run?.run_record_id !== runRecordId ||
+					!run?.run_id ||
+					(expectedSuiteSnapshotId !== undefined && run.source_snapshot_id !== expectedSuiteSnapshotId)
+				) {
 					throw new Error("The saved evidence did not match the selected run.");
 				}
 				if (!controller.signal.aborted) setResult({ run });
@@ -220,7 +231,7 @@ function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request,
 		}
 		load();
 		return () => controller.abort();
-	}, [projectId, runRecordId, attempt]);
+	}, [projectId, runRecordId, expectedSuiteSnapshotId, attempt]);
 
 	const retry = () => {
 		setResult(null);
@@ -253,21 +264,39 @@ function SavedExecutionReport({ projectId, runRecordId, fallbackReport, request,
 	);
 }
 
-export default function ExecutionReport({ currentProject, executionRunResult, runRecordId, request, location, navigate }) {
+export default function ExecutionReport({
+	currentProject,
+	executionRunResult,
+	currentSuiteSnapshotId,
+	runRecordId,
+	request,
+	location,
+	navigate,
+}) {
 	const projectId = currentProject?.project_id;
-	const latest = latestExecutionReport(executionRunResult, currentProject);
+	const expectedSuiteSnapshotId = runRecordId ? undefined : currentSuiteSnapshotId;
+	const latest =
+		expectedSuiteSnapshotId === undefined
+			? latestExecutionReport(executionRunResult, currentProject)
+			: expectedSuiteSnapshotId && executionRunResult?.source_snapshot_id === expectedSuiteSnapshotId
+				? executionRunResult
+				: null;
 	const savedRunId = runRecordId || latest?.run_record_id || savedRecordIdForSnapshot(latest, currentProject);
 	return savedRunId && projectId ? (
 		<SavedExecutionReport
-			key={JSON.stringify([projectId, savedRunId, Boolean(runRecordId)])}
+			key={JSON.stringify([projectId, savedRunId, Boolean(runRecordId), expectedSuiteSnapshotId])}
 			projectId={projectId}
 			runRecordId={savedRunId}
 			fallbackReport={runRecordId ? null : latest}
+			expectedSuiteSnapshotId={expectedSuiteSnapshotId}
 			request={request}
 			location={location}
 			navigate={navigate}
 		/>
 	) : (
-		<PlaywrightExecutionReport report={runRecordId ? null : latest} />
+		<PlaywrightExecutionReport
+			report={runRecordId ? null : latest}
+			emptyMessage={expectedSuiteSnapshotId === undefined ? undefined : "No Playwright execution report matches this saved suite."}
+		/>
 	);
 }

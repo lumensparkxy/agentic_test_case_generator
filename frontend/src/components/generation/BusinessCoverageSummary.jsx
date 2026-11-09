@@ -3,6 +3,8 @@ import { Disclosure } from "../ui/surfaces";
 import { Link } from "../ui/controls";
 import { buildProjectPath } from "../../app/workflowRoutes";
 
+const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
+
 export default function BusinessCoverageSummary({ assessment }) {
 	const designStatus = assessment?.design_status ?? assessment?.status;
 	return (
@@ -69,7 +71,9 @@ export function ExecutionSetupSummary({ assessment, projectId, prerequisiteSnaps
 			<h3>Execution setup</h3>
 			<p>
 				{executionStatus === "blocked"
-					? "Missing prerequisites block approval and execution."
+					? PROJECT_WORKSPACES_V2
+						? "Missing prerequisites block browser execution."
+						: "Missing prerequisites block approval and execution."
 					: "No missing prerequisites were recorded in this assessment. Verify execution in Automation."}
 			</p>
 			{blockers.length > 0 && (

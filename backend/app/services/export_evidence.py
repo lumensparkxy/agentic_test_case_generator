@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from ..contracts.exports import DesignDeliveryEvidence, ExportAuditMetadata, ExportTestCasesInput
-from ..contracts.projects import QaProjectDetail
+from ..contracts.projects import QaProjectDetail, QaProjectStageSnapshot
 from ..contracts.requirements import Requirement, ReviewResult
 from ..contracts.test_cases import TestCase
 from .test_case_quality import placeholder_reason
@@ -19,6 +19,29 @@ def _conflict(message: str) -> None:
 
 def design_delivery_enabled() -> bool:
     return os.getenv("TCG_DESIGN_DELIVERY_ENABLED") == "true"
+
+
+def reviewed_design_available(project: QaProjectDetail, *, raw_suite: QaProjectStageSnapshot) -> bool:
+    quality = project.suite_quality
+    if (
+        not project.design_delivery_enabled
+        or project.status != "active"
+        or not quality
+        or quality.design_status != "complete"
+        or quality.source_freshness != "current"
+    ):
+        return False
+    try:
+        payload = ExportTestCasesInput(
+            project_id=project.project_id,
+            base_project_revision=project.current_revision,
+            source_snapshot_id=raw_suite.snapshot_id,
+            test_cases=raw_suite.payload.get("test_cases", []),
+            delivery_intent="reviewed_design",
+        )
+        return build_export_evidence(payload, project).design_delivery is not None
+    except HTTPException, ValidationError:
+        return False
 
 
 def _require_design_request(payload, project, *, allow_saved_design):

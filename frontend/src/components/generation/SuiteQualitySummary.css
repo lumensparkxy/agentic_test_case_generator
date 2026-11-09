@@ -1,0 +1,21 @@
+.suite-quality-evidence {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+	gap: 0.6rem 1rem;
+	margin: 0;
+}
+
+.suite-quality-evidence dt {
+	color: var(--text-muted);
+	font-size: 0.8rem;
+}
+
+.suite-quality-evidence dd {
+	margin: 0;
+	font-weight: 600;
+}
+
+.suite-quality-references {
+	margin-top: 0.65rem;
+	overflow-wrap: anywhere;
+}

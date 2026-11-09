@@ -798,6 +798,7 @@ export interface OrchestratorStatusResponse {
 	next_actions?: Array<OrchestratorActionRecommendation>;
 	project_id?: string | null;
 	project_revision?: number;
+	reviewed_design_available?: boolean;
 	stages?: Record<string, OrchestratorStageState>;
 	upstream_changed?: boolean;
 }
@@ -849,6 +850,7 @@ export interface QaProjectDetail {
 	project_decisions?: Array<Record<string, unknown>>;
 	project_id: string;
 	project_sync?: Record<string, unknown> | null;
+	reviewed_design_available?: boolean;
 	stage_state?: Record<string, QaProjectStageState>;
 	status?: "active" | "archived";
 	suite_quality?: SuiteQualityProjection | null;
@@ -1536,6 +1538,7 @@ export interface WorkspaceProjectSummary {
 export interface WorkspaceReportSummary {
 	approved?: boolean;
 	count?: number | null;
+	delivery_kind?: "reviewed_design" | null;
 	execution_run_ids?: Array<string>;
 	format?: string | null;
 	operation: string;

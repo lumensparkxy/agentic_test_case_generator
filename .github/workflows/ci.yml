@@ -119,7 +119,7 @@ jobs:
           VITE_PID=$!
           trap 'kill $VITE_PID' EXIT
           node -e "const http=require('http');let attempts=0;const check=()=>http.get(process.env.E2E_BASE_URL,res=>{res.resume();process.exit(0)}).on('error',()=>{if(++attempts>60)process.exit(1);setTimeout(check,1000)});check();"
-          npm run test:e2e -- e2e/workspace-shell.spec.js e2e/intake-workspace.spec.js --output workspace-test-results
+          npm run test:e2e -- e2e/workspace-shell.spec.js e2e/intake-workspace.spec.js e2e/reviewed-design-workspaces.spec.js --output workspace-test-results
 
       - name: Verify project draft recovery
         working-directory: frontend

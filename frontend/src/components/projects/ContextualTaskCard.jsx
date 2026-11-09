@@ -27,6 +27,20 @@ function firstBlocker(action) {
 	return normalizeList(action?.blockers)[0]?.message || "";
 }
 
+function actionReason(action, reviewedDesignAvailable) {
+	if (reviewedDesignAvailable && action?.action === "approve" && action.stage === "test_cases") {
+		return "Suite approval is required to run tests or use the legacy approved export.";
+	}
+	if (
+		reviewedDesignAvailable &&
+		action?.action === "report" &&
+		normalizeList(action.blockers).some((blocker) => blocker.code === "missing_approval" && blocker.source_stage === "test_cases")
+	) {
+		return "The legacy approved export requires suite approval. The reviewed design file is available in Deliver.";
+	}
+	return action?.reason;
+}
+
 function actionCtaLabel(action, navigationOnly = false) {
 	if (navigationOnly || ["approve", "refine"].includes(action?.action)) {
 		return getWorkbenchNavigationLabel(action);
@@ -102,6 +116,7 @@ export default function ContextualTaskCard({
 	disabledMap = {},
 	navigationOnly = false,
 	compact = false,
+	reviewedDesignAvailable = false,
 	focusFallbackRef,
 	onAction,
 }) {
@@ -115,7 +130,7 @@ export default function ContextualTaskCard({
 	const provenanceLabel = formatTaskProvenance(provenance);
 	const blocker = firstBlocker(action);
 	const reason = hasPrimaryAction
-		? action?.reason || blocker || "Continue the current workflow."
+		? actionReason(action, reviewedDesignAvailable) || blocker || "Continue the current workflow."
 		: "Optional actions for this workbench remain available without replacing the recommended next task.";
 	const showSeparateBlocker = Boolean(blocker && blocker !== reason);
 	const isPrimaryBusy = Boolean(busyMap[action?.action] || locallyBusyAction === action?.action);
@@ -250,6 +265,8 @@ export default function ContextualTaskCard({
 									<strong>More actions</strong>
 									{secondaryActions.map((secondaryAction) => {
 										const secondaryBusy = Boolean(busyMap[secondaryAction.action] || locallyBusyAction === secondaryAction.action);
+										const secondaryReason = actionReason(secondaryAction, reviewedDesignAvailable);
+										const secondaryBlocker = firstBlocker(secondaryAction);
 										return (
 											<div className="contextual-task-secondary-action" key={`${secondaryAction.action}-${secondaryAction.stage}`}>
 												<Button
@@ -261,9 +278,9 @@ export default function ContextualTaskCard({
 												>
 													{secondaryBusy ? "Working…" : actionLabel(secondaryAction)}
 												</Button>
-												<p>{secondaryAction.reason || firstBlocker(secondaryAction) || "Optional workflow action."}</p>
-												{firstBlocker(secondaryAction) && firstBlocker(secondaryAction) !== secondaryAction.reason ? (
-													<span className="contextual-task-blocker">{firstBlocker(secondaryAction)}</span>
+												<p>{secondaryReason || secondaryBlocker || "Optional workflow action."}</p>
+												{secondaryBlocker && secondaryBlocker !== secondaryReason ? (
+													<span className="contextual-task-blocker">{secondaryBlocker}</span>
 												) : null}
 											</div>
 										);

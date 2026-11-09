@@ -387,7 +387,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
 
         if sync.get("input_manifest") != manifest_from_payload(payload).model_dump(mode="json"):
             sync = {**sync, "status": "superseded", "error": "Project sources changed. Review the current sources before starting another update."}
-    from .export_evidence import design_delivery_enabled
+    from .export_evidence import design_delivery_enabled, reviewed_design_available
 
     detail = QaProjectDetail(
         input_revision=payload.get("input_revision", 0),
@@ -405,6 +405,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
         from .suite_quality import resolve_suite_quality
 
         detail.suite_quality = resolve_suite_quality(detail, raw_suite=raw_test_suite)
+        detail.reviewed_design_available = reviewed_design_available(detail, raw_suite=raw_test_suite)
     return detail
 
 

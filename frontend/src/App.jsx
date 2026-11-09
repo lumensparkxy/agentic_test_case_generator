@@ -22,6 +22,7 @@ import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import ProjectWorkspaceNavigation from "./components/layout/ProjectWorkspaceNavigation";
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
+import SuiteQualitySummary, { findExactSuiteRun } from "./components/generation/SuiteQualitySummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browserPopupRedirectResolver, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
@@ -4012,6 +4013,45 @@ export default function App() {
 		apply_update: testCaseActionDisabled,
 	};
 	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
+	const currentSuiteSnapshotId =
+		PROJECT_WORKSPACES_V2 && route.projectId === currentProjectId && savedSuite?.snapshot_id === testCaseStageState.current_snapshot_id
+			? savedSuite?.snapshot_id
+			: null;
+	const suiteQuality =
+		currentSuiteSnapshotId && currentProject?.suite_quality?.suite_snapshot_id === currentSuiteSnapshotId
+			? currentProject.suite_quality
+			: null;
+	const reviewedDesignAvailable = Boolean(
+		suiteQuality &&
+		currentProject?.design_delivery_enabled === true &&
+		currentProject.reviewed_design_available === true &&
+		!testCaseStageState.stale &&
+		persistedTestCaseCount
+	);
+	const exactSuiteRun = findExactSuiteRun(currentProject, currentSuiteSnapshotId, executionRunResult);
+	const readiness = executionPreview?.readiness;
+	const hasExactPreview =
+		currentSuiteSnapshotId &&
+		executionPreview?.hasPreview &&
+		executionPreview.isConsistent &&
+		!executionPreview.requiresRefresh &&
+		readiness?.project_id === currentProjectId &&
+		readiness.project_revision === currentProjectRevision &&
+		readiness.source_snapshot_id === currentSuiteSnapshotId &&
+		typeof readiness.run_allowed === "boolean" &&
+		Array.isArray(readiness.blockers);
+	const targetReadiness = hasExactPreview ? (executionEligibility.ready ? "Ready" : "Blocked") : "Unknown";
+	const suiteQualitySummary = currentSuiteSnapshotId ? (
+		<SuiteQualitySummary
+			snapshotId={currentSuiteSnapshotId}
+			quality={suiteQuality}
+			sourceStale={testCaseStageState.stale}
+			designDeliveryEnabled={currentProject?.design_delivery_enabled}
+			reviewedDesignAvailable={reviewedDesignAvailable}
+			targetReadiness={targetReadiness}
+			executionRun={exactSuiteRun}
+		/>
+	) : null;
 	const exportReviewApproved = Boolean(
 		exportDraftRequiredFor !== exportEvidenceKey &&
 		testCaseReview?.approved &&
@@ -4021,7 +4061,7 @@ export default function App() {
 		Array.isArray(projectSnapshots.test_cases?.payload?.generation_tasks) &&
 		generationTasks.length === 0
 	);
-	const exportRequiresOverride = Boolean(testCases.length > 0 && !exportReviewApproved);
+	const exportRequiresOverride = Boolean(testCases.length > 0 && !exportReviewApproved && !reviewedDesignAvailable);
 	const draftExportOverrideReasonProvided = draftExportOverrideReason.trim().length > 0;
 	const exportGateLocked = Boolean(exportRequiresOverride && (!draftExportOverrideRequested || !draftExportOverrideReasonProvided));
 
@@ -4041,12 +4081,16 @@ export default function App() {
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
 			const payload = {
-				test_cases: testCases,
+				test_cases: reviewedDesignAvailable ? savedSuite.payload.test_cases : testCases,
 				source_snapshot_id: projectSnapshots.test_cases?.snapshot_id || null,
-				approved: exportReviewApproved,
-				review: testCaseReview || undefined,
-				draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
-				draft_override_reason: exportRequiresOverride && draftExportOverrideRequested ? draftExportOverrideReason.trim() : null,
+				...(reviewedDesignAvailable
+					? { delivery_intent: "reviewed_design" }
+					: {
+							approved: exportReviewApproved,
+							review: testCaseReview || undefined,
+							draft_override_requested: Boolean(exportRequiresOverride && draftExportOverrideRequested),
+							draft_override_reason: exportRequiresOverride && draftExportOverrideRequested ? draftExportOverrideReason.trim() : null,
+						}),
 				project_id: operationScope.projectId,
 				base_project_revision: currentProjectRevision,
 			};
@@ -4105,7 +4149,9 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			const message = `Exported to ${format.toUpperCase()} successfully`;
+			const message = reviewedDesignAvailable
+				? `Reviewed design exported as ${format.toUpperCase()}`
+				: `Exported to ${format.toUpperCase()} successfully`;
 			setExportMessage(message);
 			setStatus(message);
 		} catch (error) {
@@ -5854,6 +5900,7 @@ export default function App() {
 									{activeTab === 3 && !savedCaseLink && (
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
+											{suiteQualitySummary}
 											<TestCaseReadiness
 												project={currentProject}
 												status={orchestratorStatus}
@@ -6234,7 +6281,10 @@ export default function App() {
 										<ExportPanel
 											testCases={testCases}
 											testCaseReview={testCaseReview}
-											executionRunResult={executionRunResult}
+											executionRunResult={PROJECT_WORKSPACES_V2 ? exactSuiteRun : executionRunResult}
+											currentSuiteSnapshotId={PROJECT_WORKSPACES_V2 ? currentSuiteSnapshotId || "" : undefined}
+											suiteQualitySummary={suiteQualitySummary}
+											reviewedDesignAvailable={reviewedDesignAvailable}
 											currentProject={currentProject}
 											location={location}
 											navigate={navigate}

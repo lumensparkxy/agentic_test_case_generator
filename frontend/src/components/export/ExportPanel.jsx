@@ -11,6 +11,9 @@ export default function ExportPanel({
 	testCases,
 	testCaseReview,
 	executionRunResult,
+	currentSuiteSnapshotId,
+	suiteQualitySummary,
+	reviewedDesignAvailable,
 	currentProject,
 	location,
 	navigate,
@@ -35,6 +38,7 @@ export default function ExportPanel({
 		<ExecutionReport
 			currentProject={currentProject}
 			executionRunResult={executionRunResult}
+			currentSuiteSnapshotId={currentSuiteSnapshotId}
 			runRecordId={runRecordId}
 			request={request}
 			location={location}
@@ -55,20 +59,27 @@ export default function ExportPanel({
 		<Surface as="section" className="panel">
 			<h2 className="panel-title">Export Test Cases</h2>
 			<p className="panel-description">Download your generated test cases as CSV, Excel, or JSON.</p>
+			{suiteQualitySummary}
 			{testCases.length > 0 && (
 				<div className={`export-readiness-card ${exportRequiresOverride ? "locked" : exportReviewApproved ? "approved" : ""}`}>
 					<div>
-						<strong>
-							{exportRequiresOverride ? "Export locked by review gate" : exportReviewApproved ? "Approved for export" : "Ready to export"}
-						</strong>
+						{reviewedDesignAvailable ? (
+							<h3 className="section-subtitle">Reviewed design ready to export</h3>
+						) : (
+							<strong>
+								{exportRequiresOverride ? "Export locked by review gate" : exportReviewApproved ? "Approved for export" : "Ready to export"}
+							</strong>
+						)}
 						<p>
-							{exportRequiresOverride
-								? testCaseReview?.approved
-									? "The suite is incomplete or its saved approval is unavailable. Provide a reason to export this draft."
-									: testCaseReview?.summary || "No review decision is available. Provide a reason to export this draft."
-								: exportReviewApproved
-									? testCaseReview?.summary || "The latest generated test cases passed the review gate."
-									: "No review decision is available for this export."}
+							{reviewedDesignAvailable
+								? "Download the saved suite with its design assessment, source evidence, and separate browser setup status."
+								: exportRequiresOverride
+									? testCaseReview?.approved
+										? "The suite is incomplete or its saved approval is unavailable. Provide a reason to export this draft."
+										: testCaseReview?.summary || "No review decision is available. Provide a reason to export this draft."
+									: exportReviewApproved
+										? testCaseReview?.summary || "The latest generated test cases passed the review gate."
+										: "No review decision is available for this export."}
 						</p>
 					</div>
 					{exportRequiresOverride && (
@@ -96,7 +107,7 @@ export default function ExportPanel({
 			)}
 			{executionReport}
 			<div className="export-section">
-				<h3 className="section-subtitle">📥 Quick Export</h3>
+				<h3 className="section-subtitle">{reviewedDesignAvailable ? "Export reviewed design" : "📥 Quick Export"}</h3>
 				<p className="helper-text">
 					Download test cases directly to your computer. Filenames include the project name and export date/time in UTC.
 				</p>
@@ -115,11 +126,12 @@ export default function ExportPanel({
 						<Button
 							key={item.format}
 							className={`export-btn ${item.className}`}
+							aria-label={reviewedDesignAvailable ? `Export reviewed design as ${item.label}` : undefined}
 							onClick={() => exportToFormat(item.format)}
 							disabled={exportDisabled}
 						>
 							<span className="export-icon">{item.icon}</span>
-							<span className="export-label">{item.label}</span>
+							<span className="export-label">{reviewedDesignAvailable ? `Export reviewed design as ${item.label}` : item.label}</span>
 							<span className="export-desc">{item.description}</span>
 						</Button>
 					))}

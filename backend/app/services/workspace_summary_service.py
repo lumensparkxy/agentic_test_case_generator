@@ -275,6 +275,11 @@ def _report_summary(project: QaProjectDetail) -> Optional[WorkspaceReportSummary
         project_revision=snapshot.project_revision,
         status=report_status,
         report_type=str(payload.get("source") or snapshot.operation or "report"),
+        delivery_kind="reviewed_design"
+        if metadata.get("delivery_kind") == "reviewed_design"
+        and snapshot.operation in {"export.csv", "export.excel", "export.json"}
+        and snapshot.source_snapshot_id
+        else None,
         format=str(payload.get("format") or metadata.get("format")) if payload.get("format") or metadata.get("format") else None,
         operation=snapshot.operation,
         approved=state.approved,

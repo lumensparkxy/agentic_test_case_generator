@@ -1,6 +1,10 @@
-import { Alert, Disclosure } from "../ui/surfaces";
+import { Alert, Badge, Disclosure } from "../ui/surfaces";
+import { PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
 import ContextualTaskCard from "./ContextualTaskCard";
 import { selectContextualTask } from "./contextualTask";
+
+const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
+const DESIGN_DELIVERY_DESTINATIONS = [PROJECT_DESTINATIONS.OVERVIEW, PROJECT_DESTINATIONS.TEST_CASES, PROJECT_DESTINATIONS.REPORTS];
 
 export default function OrchestratorCockpitPanel({
 	currentProject,
@@ -42,12 +46,23 @@ export default function OrchestratorCockpitPanel({
 				}
 			: action
 	);
-	if (!primaryAction && !secondaryActions.length && !error) {
+	const reviewedDesignAvailable =
+		PROJECT_WORKSPACES_V2 &&
+		DESIGN_DELIVERY_DESTINATIONS.includes(currentDestination) &&
+		!isLoading &&
+		!error &&
+		status?.reviewed_design_available === true &&
+		status.project_id === currentProject.project_id &&
+		status.project_revision === currentProject.current_revision;
+	if (!primaryAction && !secondaryActions.length && !error && !reviewedDesignAvailable) {
 		return null;
 	}
 
+	const availability = reviewedDesignAvailable ? <Badge tone="info">Reviewed design available</Badge> : null;
+	const showOptionalActions = !compact && !primaryAction && !error && secondaryActions.length > 0;
 	const content = (
 		<section className="contextual-task-region" aria-label={compact ? "Test suite actions" : "Contextual task"}>
+			{showOptionalActions ? null : availability}
 			{error ? (
 				<Alert as="div" tone="danger" className="orchestrator-error" role="alert">
 					{error}
@@ -63,17 +78,21 @@ export default function OrchestratorCockpitPanel({
 					disabledMap={isOverview ? {} : actionDisabled || {}}
 					navigationOnly={isOverview}
 					compact={compact}
+					reviewedDesignAvailable={reviewedDesignAvailable}
 					focusFallbackRef={focusFallbackRef}
 					onAction={onAction}
 				/>
 			) : null}
 		</section>
 	);
-	return !compact && !primaryAction && !error ? (
-		<Disclosure className="optional-workflow-actions">
-			<summary>More actions</summary>
-			{content}
-		</Disclosure>
+	return showOptionalActions ? (
+		<>
+			{availability}
+			<Disclosure className="optional-workflow-actions">
+				<summary>More actions</summary>
+				{content}
+			</Disclosure>
+		</>
 	) : (
 		content
 	);

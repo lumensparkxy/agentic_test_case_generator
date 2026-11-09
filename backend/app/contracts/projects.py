@@ -140,6 +140,7 @@ class QaProjectDetail(QaProjectSummary):
     input_revision: int = 0
     suite_quality: SuiteQualityProjection | None = None
     design_delivery_enabled: bool = False
+    reviewed_design_available: bool = False
     testing_intent: Optional[QaProjectTestingIntent] = None
     project_sync: Optional[Dict[str, Any]] = None
     project_decisions: List[Dict[str, Any]] = Field(default_factory=list)
