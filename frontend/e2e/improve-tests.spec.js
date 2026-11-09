@@ -136,7 +136,10 @@ for (const width of [1440, 390]) {
 						status: "incomplete",
 						design_status: "incomplete",
 						reason,
-						diagnostics: { unverified_group_count: 1, groups: mixedGroups },
+						diagnostics: {
+							unverified_group_count: 1,
+							groups: mixedGroups.map((group) => (group.input_hash === "group-2" ? { ...group, case_ids: ["TC-002", "TC-004"] } : group)),
+						},
 					},
 				},
 			});
@@ -148,7 +151,7 @@ for (const width of [1440, 390]) {
 			for (const label of ["Design gaps", "Unverified", "Execution setup needed", "Assessed"]) {
 				await expect(groups.getByText(label, { exact: true })).toBeVisible();
 			}
-			await expect(groups.getByText("REQ-102 · 1 test case")).toBeVisible();
+			await expect(groups.getByText("REQ-102 · 2 test cases")).toBeVisible();
 			await expect(groups.getByText("Review provider unavailable")).toBeVisible();
 			const accessibility = await new AxeBuilder({ page }).include(".test-review-groups").analyze();
 			expect(accessibility.violations).toEqual([]);
@@ -159,15 +162,20 @@ for (const width of [1440, 390]) {
 			const results = page.getByRole("tabpanel", { name: "Generated Test Cases" });
 			await expect(results).toBeFocused();
 			await expect(results.getByText("Showing cases in Group 2")).toBeVisible();
-			await expect(results.getByText("1 of 4 test cases")).toBeVisible();
+			await expect(results.getByText("2 of 4 test cases")).toBeVisible();
 			await expect(results.getByRole("heading", { name: "Checkout 2" })).toBeVisible();
 			await expect(results.getByRole("button", { name: /TC-001 Checkout/ })).toHaveCount(0);
+			await results.getByRole("button", { name: "Next case" }).press("Enter");
+			await expect(results.getByRole("heading", { name: "Checkout 4" })).toBeFocused();
+			await expect(results.getByRole("button", { name: "Next case" })).toBeDisabled();
+			await results.getByRole("button", { name: "Previous case" }).press("Enter");
+			await expect(results.getByRole("heading", { name: "Checkout 2" })).toBeFocused();
 			await results.getByRole("button", { name: "Filters", exact: true }).click();
 			const priority = results.getByRole("combobox", { name: "Priority", exact: true });
 			await priority.selectOption("Low");
 			await expect(results.getByText("0 of 4 test cases")).toBeVisible();
 			await results.getByRole("button", { name: "Clear filters", exact: true }).click();
-			await expect(results.getByText("1 of 4 test cases")).toBeVisible();
+			await expect(results.getByText("2 of 4 test cases")).toBeVisible();
 			await priority.selectOption("Medium");
 			expect(requests).toEqual([]);
 			await results.getByRole("button", { name: "Clear group filter" }).click();
@@ -339,6 +347,7 @@ test("failed review opens actionable findings; selection and instructions surviv
 	const detail = results.getByRole("region", { name: "Selected test case", exact: true });
 	await expect(detail.getByRole("heading", { name: "Checkout 2", exact: true })).toBeVisible();
 	await expect(detail.getByText("Opened from Improve tests. This case is outside the current filters.")).toBeVisible();
+	await expect(detail.getByRole("navigation", { name: "Case navigation" })).toHaveCount(0);
 	await expect(results.getByText("0 of 2 test cases")).toBeVisible();
 	await results.getByRole("button", { name: "Clear filters", exact: true }).click();
 	await expect(results.getByRole("button", { name: "TC-002 Checkout 2", exact: true })).toHaveAttribute("aria-pressed", "true");

@@ -527,6 +527,28 @@ select {
 .test-review-detail {
 	min-width: 0;
 	overflow-wrap: anywhere;
+	scroll-margin-block-start: 0.5rem;
+}
+.test-case-identity,
+.test-case-navigation {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 8px;
+}
+.test-case-position {
+	color: var(--text-muted);
+	font-size: var(--font-secondary);
+}
+.test-case-navigation {
+	justify-content: space-between;
+	border-top: 1px solid var(--border-color);
+	margin-block-start: 0.75rem;
+	padding-block-start: 0.75rem;
+}
+.test-review-detail h2:focus-visible {
+	outline: var(--focus-outline);
+	outline-offset: 3px;
 }
 .test-review-detail h2 {
 	margin: 8px 0;

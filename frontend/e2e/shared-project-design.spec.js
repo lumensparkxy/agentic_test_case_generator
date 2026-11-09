@@ -86,6 +86,67 @@ test("selects cases and preserves all steps and metadata while searching", async
 	await expect(page.getByRole("heading", { name: "Generated Test Cases", exact: true })).toBeVisible();
 });
 
+test("moves through the filtered case sequence and restores selection after reload", { tag: "@p1" }, async ({ page }) => {
+	const writes = [];
+	page.on("request", (request) => {
+		if (request.method() !== "GET" && /\/(projects|testcases|automation|export)\b/.test(new URL(request.url()).pathname))
+			writes.push(request.url());
+	});
+	await openCases(page, [
+		caseFixture("TC-001", "Receipt review"),
+		{ ...caseFixture("TC-002", "Automated receipt"), automation_status: "Automated" },
+		caseFixture("TC-003", "Resend receipt"),
+		{ ...caseFixture("TC-004", "Draft receipt"), priority: "Medium" },
+		caseFixture("TC-005", "Cancel payment"),
+	]);
+	const pane = page.getByRole("region", { name: "Generated test cases", exact: true });
+	const detail = pane.getByRole("region", { name: "Selected test case" });
+	const search = pane.getByRole("searchbox", { name: "Search test cases" });
+	const skipList = pane.getByRole("button", { name: "Go to selected case" });
+	const firstTitle = detail.getByRole("heading", { name: "Receipt review" });
+	const lastTitle = detail.getByRole("heading", { name: "Resend receipt" });
+	const previous = detail.getByRole("button", { name: "Previous case" });
+	const next = detail.getByRole("button", { name: "Next case" });
+	await search.focus();
+	await page.keyboard.press("Tab");
+	await expect(pane.getByRole("button", { name: "Filters", exact: true })).toBeFocused();
+	await page.keyboard.press("Tab");
+	await expect(skipList).toBeFocused();
+	await page.keyboard.press("Enter");
+	await expect(firstTitle).toBeFocused();
+	await expect(firstTitle).toHaveAccessibleDescription("Case 1 of 5");
+
+	await search.fill("receipt");
+	await pane.getByRole("button", { name: "Filters", exact: true }).click();
+	await pane.getByRole("combobox", { name: "Priority", exact: true }).selectOption("High");
+	await pane.getByRole("combobox", { name: "Automation intent", exact: true }).selectOption("Manual");
+	await expect(firstTitle).toHaveAccessibleDescription("Case 1 of 2");
+	await expect(previous).toBeDisabled();
+	await next.press("Enter");
+	await expect(lastTitle).toBeFocused();
+	await expect(lastTitle).toHaveAccessibleDescription("Case 2 of 2");
+	await expect(next).toBeDisabled();
+	const lastRow = pane.getByRole("button", { name: "TC-003 Resend receipt" });
+	await expect(lastRow).toHaveAttribute("aria-pressed", "true");
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await expect(lastRow).toHaveAttribute("aria-pressed", "true");
+	await expect(search).toHaveValue("receipt");
+	await expect(lastTitle).toHaveAccessibleDescription("Case 2 of 2");
+	await previous.press("Enter");
+	await expect(firstTitle).toBeFocused();
+	await expect(previous).toBeDisabled();
+	await expect(next).toBeEnabled();
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+	await search.fill("no matching case");
+	await expect(skipList).toHaveCount(0);
+	await expect(next).toHaveCount(0);
+	expect(writes).toEqual([]);
+});
+
 test("triages a saved suite by priority and automation intent and restores only the same source", { tag: "@p1" }, async ({ page }) => {
 	const writes = [];
 	page.on("request", (request) => {

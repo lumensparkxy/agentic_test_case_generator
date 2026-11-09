@@ -67,6 +67,12 @@ data string is identified in the step. For supplied text, open **Test data**
 and then **Escaped JSON** to inspect line endings, surrounding spaces and
 Unicode escapes.
 
+In the Test Cases reader, **Go to selected case** moves keyboard focus
+straight to the case heading. At the end of a case, **Previous case** and
+**Next case** follow the visible results, including active filters and
+review scopes. The selected case and its filters recover within the same
+saved suite.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

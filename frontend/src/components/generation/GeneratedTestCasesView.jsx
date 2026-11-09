@@ -3,7 +3,7 @@ import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
 import { Input, Button, Select } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
-import { useId, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
@@ -11,6 +11,16 @@ const CASE_PRIORITIES = ["Critical", "High", "Medium", "Low"];
 const AUTOMATION_INTENTS = ["Manual", "To Be Automated", "Automated"];
 const casePriority = (testCase) => testCase.priority || "Medium";
 const caseAutomationIntent = (testCase) => testCase.automation_status || "Manual";
+
+function revealCaseRow(list, index) {
+	const row = list?.children[index];
+	if (!row) return;
+	const top = list.getBoundingClientRect().top + list.clientTop;
+	const bottom = top + list.clientHeight;
+	const bounds = row.getBoundingClientRect();
+	if (bounds.top < top) list.scrollTop += bounds.top - top;
+	else if (bounds.bottom > bottom) list.scrollTop += bounds.bottom - bottom;
+}
 
 function TestStepData({ value }) {
 	const [escapedOpen, setEscapedOpen] = useState(false);
@@ -66,10 +76,14 @@ export default function GeneratedTestCasesView({
 	};
 	const listRef = useRef(null);
 	const searchRef = useRef(null);
+	const detailRef = useRef(null);
+	const titleRef = useRef(null);
+	const focusAfterMove = useRef(false);
 	useEffect(() => {
 		if (listRef.current) listRef.current.scrollTop = recovery.value.scrollTop || 0;
 	}, [snapshotId]);
 	const searchId = useId();
+	const positionId = `${searchId}-position`;
 	const [filtersOpen, setFiltersOpen] = useState(false);
 	const visibleChanges = reviewGroup ? null : (changedIds ?? recovery.value.changedIds ?? null);
 	useEffect(() => {
@@ -120,6 +134,28 @@ export default function GeneratedTestCasesView({
 	}, [testCases, groupIds, visibleChanges, priority, automationIntent, normalizedQuery]);
 	const findingCase = findingCaseId ? testCases.find((tc) => tc.id === findingCaseId) : null;
 	const selected = findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
+	const selectedIndex = cases.indexOf(selected);
+	const selectCase = (id) => {
+		if (findingCaseId) onDismissFindingCase();
+		setSelectedId(id);
+		recovery.setValue((old) => ({ ...old, selectedId: id }));
+	};
+	const focusSelectedCase = useCallback(() => {
+		titleRef.current?.focus({ preventScroll: true });
+		detailRef.current?.scrollIntoView({ block: "start", behavior: "instant" });
+	}, []);
+	const moveToCase = (index) => {
+		const next = cases[index];
+		if (!next) return;
+		revealCaseRow(listRef.current, index);
+		focusAfterMove.current = true;
+		selectCase(next.id);
+	};
+	useLayoutEffect(() => {
+		if (!focusAfterMove.current) return;
+		focusAfterMove.current = false;
+		focusSelectedCase();
+	}, [selected?.id, focusSelectedCase]);
 	const steps = selected?.steps || [];
 	const findings = selected
 		? qualityIssues.filter((issue) => new RegExp(`\\b${selected.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(issue))
@@ -207,6 +243,11 @@ export default function GeneratedTestCasesView({
 								Clear filters
 							</Button>
 						)}
+						{selected && (
+							<Button variant="secondary" size="compact" aria-controls="selected-test-case" onClick={focusSelectedCase}>
+								Go to selected case
+							</Button>
+						)}
 					</div>
 					<List
 						as="div"
@@ -226,11 +267,7 @@ export default function GeneratedTestCasesView({
 									aria-controls="selected-test-case"
 									aria-labelledby={`${rowId}-id ${rowId}-title`}
 									aria-describedby={`${rowId}-meta`}
-									onClick={() => {
-										if (findingCaseId) onDismissFindingCase();
-										setSelectedId(tc.id);
-										recovery.setValue((old) => ({ ...old, selectedId: tc.id }));
-									}}
+									onClick={() => selectCase(tc.id)}
 								>
 									<span>
 										<small id={`${rowId}-id`}>{tc.id}</small> <strong id={`${rowId}-title`}>{tc.title}</strong>
@@ -254,20 +291,29 @@ export default function GeneratedTestCasesView({
 						</CollectionState>
 					)}
 				</div>
-				<section className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
+				<section ref={detailRef} className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
 					{selected ? (
 						<>
-							{findingCase && !cases.includes(findingCase) && (
+							{findingCase && selectedIndex < 0 && (
 								<p className="test-detail-meta">Opened from Improve tests. This case is outside the current filters.</p>
 							)}
-							<Badge icon={null} tone="info" className="case-id">
-								{selected.id}
-							</Badge>
+							<div className="test-case-identity">
+								<Badge icon={null} tone="info" className="case-id">
+									{selected.id}
+								</Badge>
+								{selectedIndex >= 0 && (
+									<span id={positionId} className="test-case-position">
+										Case {selectedIndex + 1} of {cases.length}
+									</span>
+								)}
+							</div>
 							<p className="test-detail-meta">
 								{selected.type || "Functional"} · {casePriority(selected)} priority · {getTestCaseLinkedRequirementIds(selected).join(", ")}
 							</p>
 							<div className="test-detail-title">
-								<h2>{selected.title}</h2>
+								<h2 ref={titleRef} tabIndex={-1} aria-describedby={selectedIndex >= 0 ? positionId : undefined}>
+									{selected.title}
+								</h2>
 								{onReport && (
 									<Button variant="secondary" size="compact" onClick={() => onReport(selected)}>
 										Report a problem
@@ -384,6 +430,21 @@ export default function GeneratedTestCasesView({
 									<p>Case status and automation intent do not indicate quality approval or execution readiness.</p>
 								</Disclosure>
 							</div>
+							{selectedIndex >= 0 && cases.length > 1 && (
+								<nav className="test-case-navigation" aria-label="Case navigation">
+									<Button variant="secondary" size="compact" disabled={selectedIndex === 0} onClick={() => moveToCase(selectedIndex - 1)}>
+										Previous case
+									</Button>
+									<Button
+										variant="secondary"
+										size="compact"
+										disabled={selectedIndex === cases.length - 1}
+										onClick={() => moveToCase(selectedIndex + 1)}
+									>
+										Next case
+									</Button>
+								</nav>
+							)}
 						</>
 					) : (
 						<p>Select a test case to review its details.</p>
