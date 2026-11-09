@@ -53,6 +53,13 @@ for (const width of [1366, 1440, 1920])
 			await expect(page.getByRole("button", { name: "TC-40 Checkout 40", exact: true })).toHaveAttribute("aria-pressed", "true");
 			await search.focus();
 			await page.keyboard.press("Tab");
+			await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeFocused();
+			await page.keyboard.press("Enter");
+			await page.keyboard.press("Tab");
+			await expect(page.getByRole("combobox", { name: "Priority", exact: true })).toBeFocused();
+			await page.keyboard.press("Tab");
+			await expect(page.getByRole("combobox", { name: "Automation intent", exact: true })).toBeFocused();
+			await page.keyboard.press("Tab");
 			await expect(page.locator(":focus")).toHaveAttribute("data-ui", "selectable-item");
 			expect(
 				(await new AxeBuilder({ page }).include(".test-review-workspace").withTags(["wcag2a", "wcag2aa"]).analyze()).violations

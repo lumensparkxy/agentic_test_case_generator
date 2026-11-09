@@ -1,11 +1,16 @@
 import useReviewDraft from "../../hooks/useReviewDraft";
 import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
-import { Input, Button } from "../ui/controls";
+import { Input, Button, Select } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
-import { useId, useEffect, useRef } from "react";
+import { useId, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
+
+const CASE_PRIORITIES = ["Critical", "High", "Medium", "Low"];
+const AUTOMATION_INTENTS = ["Manual", "To Be Automated", "Automated"];
+const casePriority = (testCase) => testCase.priority || "Medium";
+const caseAutomationIntent = (testCase) => testCase.automation_status || "Manual";
 
 export default function GeneratedTestCasesView({
 	testCases,
@@ -15,6 +20,8 @@ export default function GeneratedTestCasesView({
 	onReport,
 	selectedId,
 	setSelectedId,
+	findingCaseId,
+	onDismissFindingCase,
 	qualityIssues = [],
 	requirements = [],
 	substantiveAssessment = null,
@@ -30,39 +37,77 @@ export default function GeneratedTestCasesView({
 		name: reviewGroup ? `test-review:${reviewGroup.key}` : "test-review",
 		initialValue: { query: "", selectedId: "", scrollTop: 0, changedIds: null },
 	});
-	const query = recovery.value.query;
-	const setQuery = (query) => recovery.setValue((old) => ({ ...old, query }));
+	const query = recovery.value.query ?? "";
+	const setQuery = (query) => {
+		if (findingCaseId) onDismissFindingCase();
+		recovery.setValue((old) => ({ ...old, query }));
+	};
 	const listRef = useRef(null);
+	const searchRef = useRef(null);
 	useEffect(() => {
 		if (listRef.current) listRef.current.scrollTop = recovery.value.scrollTop || 0;
 	}, [snapshotId]);
 	const searchId = useId();
+	const [filtersOpen, setFiltersOpen] = useState(false);
 	const visibleChanges = reviewGroup ? null : (changedIds ?? recovery.value.changedIds ?? null);
 	useEffect(() => {
 		if (changedIds !== null) recovery.setValue((old) => ({ ...old, changedIds }));
 	}, [changedIds]);
-	const groupCases = reviewGroup ? new Set(reviewGroup.caseIds) : null;
-	const cases = testCases.filter(
-		(tc) =>
-			(!groupCases || groupCases.has(tc.id)) &&
-			(visibleChanges === null || visibleChanges.includes(tc.id)) &&
-			[
+	const filterScope = visibleChanges === null ? "suite" : "changed";
+	const savedFilters = recovery.value.caseFilters?.[filterScope];
+	const priority = CASE_PRIORITIES.includes(savedFilters?.priority) ? savedFilters.priority : "";
+	const automationIntent = AUTOMATION_INTENTS.includes(savedFilters?.automationIntent) ? savedFilters.automationIntent : "";
+	const activeFilterCount = Number(Boolean(priority)) + Number(Boolean(automationIntent));
+	const hasCaseFilters = activeFilterCount > 0;
+	const saveFilters = (filters, clearSearch = false) => {
+		if (findingCaseId) onDismissFindingCase();
+		recovery.setValue((old) => ({
+			...old,
+			query: clearSearch ? "" : old.query,
+			caseFilters: { ...old.caseFilters, [filterScope]: filters },
+		}));
+	};
+	const clearFilters = () => {
+		saveFilters({}, true);
+		searchRef.current?.focus();
+	};
+	const groupIds = reviewGroup?.caseIds;
+	const normalizedQuery = query.trim().toLowerCase();
+	const cases = useMemo(() => {
+		const scopedIds = groupIds ?? visibleChanges;
+		const scope = scopedIds ? new Set(scopedIds) : null;
+		return testCases.filter((tc) => {
+			if (scope && !scope.has(tc.id)) return false;
+			if (priority && casePriority(tc) !== priority) return false;
+			if (automationIntent && caseAutomationIntent(tc) !== automationIntent) return false;
+			if (!normalizedQuery) return true;
+			return [
 				tc.id,
 				tc.title,
 				tc.description,
 				tc.expected_result,
+				casePriority(tc),
+				caseAutomationIntent(tc),
 				...getTestCaseLinkedRequirementIds(tc),
 				...(tc.steps || []).flatMap((step) => [step.action, step.expected, step.test_data]),
 			]
 				.join(" ")
 				.toLowerCase()
-				.includes(query.toLowerCase().trim())
-	);
-	const selected = cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
+				.includes(normalizedQuery);
+		});
+	}, [testCases, groupIds, visibleChanges, priority, automationIntent, normalizedQuery]);
+	const findingCase = findingCaseId ? testCases.find((tc) => tc.id === findingCaseId) : null;
+	const selected = findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
 	const steps = selected?.steps || [];
 	const findings = selected
 		? qualityIssues.filter((issue) => new RegExp(`\\b${selected.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(issue))
 		: [];
+	let emptyMessage = "No test cases generated yet.";
+	if (visibleChanges?.length === 0) emptyMessage = "This application preserved all tests. There are no changed tests to review.";
+	else if (hasCaseFilters) emptyMessage = "No test cases match your filters.";
+	else if (normalizedQuery) emptyMessage = "No test cases match your search.";
+	else if (reviewGroup) emptyMessage = "No test cases are available in this review group.";
+	else if (visibleChanges) emptyMessage = "No changed test cases are available in this suite.";
 	return (
 		<>
 			<ListDetail
@@ -95,14 +140,51 @@ export default function GeneratedTestCasesView({
 						</label>
 						<Input
 							id={searchId}
+							ref={searchRef}
 							type="search"
 							placeholder="Search test cases"
 							value={query}
 							onChange={(event) => setQuery(event.target.value)}
 						/>
-						<ResultCount as="p" className="test-list-count" role="status">
+						<Button
+							variant="secondary"
+							size="compact"
+							aria-expanded={filtersOpen}
+							aria-controls={`${searchId}-filters`}
+							onClick={() => setFiltersOpen((open) => !open)}
+						>
+							Filters{hasCaseFilters ? ` (${activeFilterCount})` : ""}
+						</Button>
+					</div>
+					<div id={`${searchId}-filters`} className="test-review-filters" role="group" aria-label="Test case filters" hidden={!filtersOpen}>
+						<label>
+							Priority
+							<Select value={priority} onChange={(event) => saveFilters({ priority: event.target.value, automationIntent })}>
+								<option value="">All priorities</option>
+								{CASE_PRIORITIES.map((value) => (
+									<option key={value}>{value}</option>
+								))}
+							</Select>
+						</label>
+						<label>
+							Automation intent
+							<Select value={automationIntent} onChange={(event) => saveFilters({ priority, automationIntent: event.target.value })}>
+								<option value="">All intents</option>
+								{AUTOMATION_INTENTS.map((value) => (
+									<option key={value}>{value}</option>
+								))}
+							</Select>
+						</label>
+					</div>
+					<div className="test-review-filter-results">
+						<ResultCount as="p" className="test-list-count">
 							{cases.length} of {testCases.length} test cases
 						</ResultCount>
+						{hasCaseFilters && (
+							<Button variant="secondary" size="compact" onClick={clearFilters}>
+								Clear filters
+							</Button>
+						)}
 					</div>
 					<List
 						as="div"
@@ -111,36 +193,39 @@ export default function GeneratedTestCasesView({
 						ref={listRef}
 						onScroll={(event) => recovery.setValue((old) => ({ ...old, scrollTop: event.currentTarget.scrollTop }))}
 					>
-						{cases.map((tc) => (
-							<SelectableItem
-								key={tc.id}
-								type="button"
-								className={`test-review-item ${selected?.id === tc.id ? "selected" : ""}`}
-								aria-pressed={selected?.id === tc.id}
-								aria-controls="selected-test-case"
-								onClick={() => {
-									setSelectedId(tc.id);
-									recovery.setValue((old) => ({ ...old, selectedId: tc.id }));
-								}}
-							>
-								<span>
-									<small>{tc.id}</small> <strong>{tc.title}</strong>
-								</span>
-								<ChevronRight size={18} aria-hidden="true" />
-							</SelectableItem>
-						))}
+						{cases.map((tc, index) => {
+							const rowId = `${searchId}-case-${index}`;
+							return (
+								<SelectableItem
+									key={tc.id}
+									type="button"
+									className={`test-review-item ${selected?.id === tc.id ? "selected" : ""}`}
+									aria-pressed={selected?.id === tc.id}
+									aria-controls="selected-test-case"
+									aria-labelledby={`${rowId}-id ${rowId}-title`}
+									aria-describedby={`${rowId}-meta`}
+									onClick={() => {
+										if (findingCaseId) onDismissFindingCase();
+										setSelectedId(tc.id);
+										recovery.setValue((old) => ({ ...old, selectedId: tc.id }));
+									}}
+								>
+									<span>
+										<small id={`${rowId}-id`}>{tc.id}</small> <strong id={`${rowId}-title`}>{tc.title}</strong>
+										<span id={`${rowId}-meta`} className="test-review-item-meta">
+											{casePriority(tc)} priority · {caseAutomationIntent(tc)}
+										</span>
+									</span>
+									<ChevronRight size={18} aria-hidden="true" />
+								</SelectableItem>
+							);
+						})}
 					</List>
 					{!cases.length && (
 						<CollectionState kind={testCases.length ? "filtered" : "empty"}>
-							<p>
-								{visibleChanges?.length === 0
-									? "This application preserved all tests. There are no changed tests to review."
-									: testCases.length
-										? "No test cases match your search."
-										: "No test cases generated yet."}
-							</p>
-							{testCases.length > 0 && (
-								<Button variant="secondary" size="compact" onClick={() => setQuery("")}>
+							<p>{emptyMessage}</p>
+							{normalizedQuery && !hasCaseFilters && (
+								<Button variant="secondary" size="compact" onClick={clearFilters}>
 									Clear search
 								</Button>
 							)}
@@ -150,12 +235,14 @@ export default function GeneratedTestCasesView({
 				<section className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
 					{selected ? (
 						<>
+							{findingCase && !cases.includes(findingCase) && (
+								<p className="test-detail-meta">Opened from Improve tests. This case is outside the current filters.</p>
+							)}
 							<Badge icon={null} tone="info" className="case-id">
 								{selected.id}
 							</Badge>
 							<p className="test-detail-meta">
-								{selected.type || "Functional"} · {selected.priority || "Medium"} priority ·{" "}
-								{getTestCaseLinkedRequirementIds(selected).join(", ")}
+								{selected.type || "Functional"} · {casePriority(selected)} priority · {getTestCaseLinkedRequirementIds(selected).join(", ")}
 							</p>
 							<div className="test-detail-title">
 								<h2>{selected.title}</h2>
@@ -266,7 +353,7 @@ export default function GeneratedTestCasesView({
 											"Test data": selected.test_data,
 											"Estimated time": selected.estimated_time,
 											"Case status": selected.status || "Draft",
-											Automation: selected.automation_status || "Manual",
+											"Automation intent": caseAutomationIntent(selected),
 											Component: selected.component,
 											"Linked requirements": getTestCaseLinkedRequirementIds(selected).join(", "),
 											Tags: selected.tags?.join(", "),

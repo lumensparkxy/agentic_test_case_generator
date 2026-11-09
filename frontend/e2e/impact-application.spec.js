@@ -154,7 +154,17 @@ test("keyboard and rapid activation submit once, show persistent receipt, and fi
 	await expect(page.locator("#generate-result-panel")).toBeFocused();
 	await expect(page.getByRole("button", { name: /TC-CHANGED/ })).toBeVisible();
 	await expect(page.getByRole("button", { name: /TC-KEPT/ })).toHaveCount(0);
+	await page.getByRole("button", { name: "Filters", exact: true }).click();
+	const intent = page.getByRole("combobox", { name: "Automation intent", exact: true });
+	await intent.selectOption("Automated");
+	await expect(page.getByText("No test cases match your filters.")).toBeVisible();
+	await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+	await expect(page.getByRole("button", { name: /TC-CHANGED/ })).toBeVisible();
+	await expect(page.getByRole("button", { name: /TC-KEPT/ })).toHaveCount(0);
+	await intent.selectOption("Manual");
 	await page.getByRole("button", { name: "Show all tests" }).click();
+	await page.getByRole("button", { name: "Filters", exact: true }).click();
+	await expect(intent).toHaveValue("");
 	await expect(page.getByRole("button", { name: /TC-KEPT/ })).toBeVisible();
 	expect(flow.requests()).toBe(1);
 	expect(errors).toEqual([]);

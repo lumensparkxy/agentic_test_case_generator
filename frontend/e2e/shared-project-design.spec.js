@@ -50,12 +50,12 @@ async function openCases(
 		},
 	};
 	project.stage_state.test_cases = { current_snapshot_id: "cases-v1", approved: false, stale: false, version: 1 };
-	await installUseCaseReviewApi(page, { initialProject: project });
+	const api = await installUseCaseReviewApi(page, { initialProject: project });
 	await seedAuthenticatedSession(page);
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
 	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toBeVisible();
 	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
-	return project;
+	return { project, api };
 }
 
 test("selects cases and preserves all steps and metadata while searching", async ({ page }) => {
@@ -84,6 +84,68 @@ test("selects cases and preserves all steps and metadata while searching", async
 	await page.getByRole("button", { name: "Generate and review", exact: true }).click();
 	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
 	await expect(page.getByRole("heading", { name: "Generated Test Cases", exact: true })).toBeVisible();
+});
+
+test("triages a saved suite by priority and automation intent and restores only the same source", { tag: "@p1" }, async ({ page }) => {
+	const writes = [];
+	page.on("request", (request) => {
+		if (request.method() !== "GET" && /\/(projects|testcases|automation|export)\b/.test(new URL(request.url()).pathname)) {
+			writes.push(request.url());
+		}
+	});
+	const { project, api } = await openCases(page, [
+		caseFixture("TC-001", "Receipt review"),
+		{ ...caseFixture("TC-002", "Rejected receipt"), automation_status: "To Be Automated" },
+		{ ...caseFixture("TC-003", "Pending order"), priority: "Critical" },
+		{ ...caseFixture("TC-004", "Legacy confirmation"), priority: undefined, automation_status: undefined },
+	]);
+	const pane = page.getByRole("region", { name: "Generated test cases", exact: true });
+	const search = pane.getByRole("searchbox", { name: "Search test cases" });
+	const priority = pane.getByRole("combobox", { name: "Priority", exact: true });
+	const intent = pane.getByRole("combobox", { name: "Automation intent", exact: true });
+	const first = pane.getByRole("button", { name: "TC-001 Receipt review", exact: true });
+	const legacy = pane.getByRole("button", { name: "TC-004 Legacy confirmation", exact: true });
+	const clear = pane.getByRole("button", { name: "Clear filters", exact: true });
+	await expect(first).toHaveAccessibleDescription("High priority · Manual");
+	await expect(legacy).toHaveAccessibleDescription("Medium priority · Manual");
+	await search.fill("High");
+	await expect(pane.getByText("2 of 4 test cases")).toBeVisible();
+	await search.fill("Manual");
+	await expect(pane.getByText("3 of 4 test cases")).toBeVisible();
+	await pane.getByRole("button", { name: "Filters", exact: true }).click();
+	await priority.selectOption("High");
+	await intent.selectOption("To Be Automated");
+	await expect(pane.getByText("No test cases match your filters.")).toBeVisible();
+	await expect(pane.getByText("0 of 4 test cases")).toBeVisible();
+	await search.fill("receipt");
+	await expect(pane.getByText("1 of 4 test cases")).toBeVisible();
+	const selected = pane.getByRole("button", { name: "TC-002 Rejected receipt", exact: true });
+	await selected.click();
+	await expect(selected).toHaveAttribute("aria-pressed", "true");
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await pane.getByRole("button", { name: "Filters (2)", exact: true }).click();
+	await expect(priority).toHaveValue("High");
+	await expect(intent).toHaveValue("To Be Automated");
+	await expect(search).toHaveValue("receipt");
+	await expect(selected).toHaveAttribute("aria-pressed", "true");
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	await clear.click();
+	await expect(search).toBeFocused();
+	await expect(pane.getByText("4 of 4 test cases")).toBeVisible();
+	await intent.selectOption("Manual");
+	project.current_revision++;
+	project.current_snapshots.test_cases.snapshot_id = "cases-v2";
+	project.stage_state.test_cases.current_snapshot_id = "cases-v2";
+	api.setProject(project);
+	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await pane.getByRole("button", { name: "Filters", exact: true }).click();
+	await expect(intent).toHaveValue("");
+	await expect(priority).toHaveValue("");
+	await expect(pane.getByText("4 of 4 test cases")).toBeVisible();
+	expect(writes).toEqual([]);
 });
 
 test("requires an explicit human decision and keeps navigation status separate", async ({ page }) => {
@@ -290,12 +352,12 @@ test("project typography uses the compact shared reading scale", async ({ page }
 	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toHaveCSS("min-height", "36px");
 });
 
-test("case summaries flow inline and wrap only when the pane narrows", async ({ page }) => {
+test("case titles stay on one line at wide widths and wrap when the pane narrows", async ({ page }) => {
 	await page.setViewportSize({ width: 1920, height: 1080 });
 	const title = "Valid checkout with a saved payment method and delivery address";
 	await openCases(page, [caseFixture("TC-001", title)]);
 	const row = page.getByRole("button", { name: /TC-001 Valid checkout/ });
-	const text = row.locator(":scope > span");
+	const text = row.getByText(title, { exact: true });
 	const wideHeight = await text.evaluate((element) => element.getBoundingClientRect().height);
 	const lineHeight = await text.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight));
 	expect(wideHeight).toBeLessThanOrEqual(lineHeight + 1);
@@ -304,7 +366,9 @@ test("case summaries flow inline and wrap only when the pane narrows", async ({ 
 	await page.keyboard.press("Home");
 	await expect.poll(() => text.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(wideHeight);
 	await expect(row).toHaveAttribute("aria-pressed", "true");
-	await expect(row).toHaveText(`TC-001 ${title}`);
+	await expect(row).toHaveAccessibleName(`TC-001 ${title}`);
+	await expect(row).toHaveAccessibleDescription("High priority · Manual");
+	await expect(row.getByText("High priority · Manual", { exact: true })).toBeVisible();
 	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("High priority · REQ-101");
 });
 
@@ -340,7 +404,7 @@ test("stale Use Cases cannot be approved from either review entry point", async 
 });
 
 test("Test Cases keeps three result tabs and compact traceability rows", async ({ page }) => {
-	const project = await openCases(page);
+	const { project } = await openCases(page);
 	const tabs = page.getByRole("tablist", { name: "Generation result sections" });
 	await expect(tabs.getByRole("tab")).toHaveCount(3);
 	await expect(tabs).not.toContainText("Scenario Coverage");

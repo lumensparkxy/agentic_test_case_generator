@@ -786,6 +786,7 @@ export default function App() {
 	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
 	const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
+	const [findingCaseSelection, setFindingCaseSelection] = useState(null);
 	const [reviewCaseScope, setReviewCaseScope] = useState(null);
 
 	const pasteDraft = useReviewDraft({
@@ -801,6 +802,7 @@ export default function App() {
 	const focusResultContent = useRef(false);
 	useEffect(() => {
 		setSelectedTestCaseId(null);
+		setFindingCaseSelection(null);
 		setReportedCase(null);
 		setChangedTestCaseIds(null);
 		setReviewCaseScope(null);
@@ -811,8 +813,9 @@ export default function App() {
 			focusResultContent.current = false;
 		}
 	}, [activeGenerateResultTab]);
-	const openCaseResults = (id = null, group = null) => {
+	const openCaseResults = (id = null, group = null, { fromFinding = false } = {}) => {
 		setSelectedTestCaseId(id);
+		setFindingCaseSelection(fromFinding ? { id, source: sourceCaseSnapshot } : null);
 		setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
 		if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
 		else focusResultContent.current = true;
@@ -5682,7 +5685,7 @@ export default function App() {
 																	}
 																	return Boolean(project);
 																}}
-																onViewCase={openCaseResults}
+																onViewCase={(id) => openCaseResults(id, null, { fromFinding: true })}
 																onReviewCases={() => openCaseResults()}
 															/>
 														</div>
@@ -5718,6 +5721,8 @@ export default function App() {
 																	substantiveAssessment={substantiveAssessment}
 																	selectedId={selectedTestCaseId}
 																	setSelectedId={setSelectedTestCaseId}
+																	findingCaseId={findingCaseSelection?.source === sourceCaseSnapshot ? findingCaseSelection.id : null}
+																	onDismissFindingCase={() => setFindingCaseSelection(null)}
 																/>
 																<div className="workbench-support">
 																	{guidanceSummary("test_cases")}

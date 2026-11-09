@@ -10,6 +10,12 @@ exists, under one **More actions** disclosure. Once a local or saved suite exist
 replacement retains **Full Regenerate**, confirmation, and failure preservation.
 Draft generation does not approve Use Cases or the resulting test suite.
 
+In Generated Test Cases, search includes saved priority and automation intent.
+Open **Filters** to narrow the list within the full suite, changed tests,
+or an independent review group. The filters recover with the same saved source
+and review scope. Automation intent describes the test design. Check the
+Automation preview for current browser eligibility and target readiness.
+
 Automation navigation distinguishes a current preview, a stored preview needing
 refresh, and a run with its own ID and outcome. A preview never marks execution
 complete. Failed, disabled, stale and unrecognized run evidence remain distinct
