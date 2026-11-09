@@ -26,6 +26,8 @@ _QUOTED_LOCATOR_PREFIX_PATTERN = re.compile(
     r"\b(?:matching\s+(?:the\s+)?(?:css(?:\s+selector)?|selector)|rows?\s+(?:is|are)\s+present\s+in)\s*$", re.IGNORECASE
 )
 _TYPED_LOCATOR_PREFIX_PATTERN = re.compile(r"\b(?:css|test id)\s+$", re.IGNORECASE)
+_QUOTED_FILENAME_PREFIX_PATTERN = re.compile(r"\b(?:attachment|file(?:\s*name)?)(?:\s+(?:called|named))?\s+$", re.IGNORECASE)
+_FILENAME_PATTERN = re.compile(r"\w[\w .-]*\.[\w-]+")
 _SELECTOR_TEXT_PATTERN = re.compile(
     r"^(?:#|\.|\[|css=|xpath=|//|/html\b|[a-z][\w-]*(?:[#.\[]|\[[^\]]+\])|data-testid=|testid=)",
     re.IGNORECASE,
@@ -305,6 +307,8 @@ def _visible_quoted_values(text: str) -> List[str]:
         value = (match.group(1) or match.group(2)).strip()
         before = text[: match.start()]
         if _TYPED_LOCATOR_PREFIX_PATTERN.search(before):
+            continue
+        if _FILENAME_PATTERN.fullmatch(value) and _QUOTED_FILENAME_PREFIX_PATTERN.search(before):
             continue
         if _looks_like_selector_text(value) and _QUOTED_LOCATOR_PREFIX_PATTERN.search(before):
             continue

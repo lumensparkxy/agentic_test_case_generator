@@ -245,6 +245,8 @@ class BrowserAssertionReviewTests(unittest.TestCase):
         for expected, selector in (
             ('"#email-input" should be visible', "#email-input"),
             ('exact text "#bookings tr" is visible', "#bookings tr"),
+            ('exact text "div.notice" is visible', "div.notice"),
+            ('The attachment named "#expense-table tr" is visible', "#expense-table tr"),
             ('One row is present in "#bookings tr" and exact heading "#bookings tr" is visible', "#bookings tr"),
             ('css "#bookings" is visible and exact text "#bookings" is visible', "#bookings"),
         ):
@@ -258,6 +260,25 @@ class BrowserAssertionReviewTests(unittest.TestCase):
 
                 self.assertFalse(review["approved"])
                 self.assertTrue(any(f"raw selector `{selector}`" in issue for issue in review["blocking_issues"]))
+
+    def test_review_accepts_quoted_filenames_as_visible_copy(self) -> None:
+        for expected in (
+            "The expense record shows status 'Submitted', amount 150.00 EUR, and displays the attached receipt file 'hotel_receipt.pdf'.",
+            'The file name "Hotel receipt.final.pdf" is visible.',
+            'The attachment named "receipt-001.pdf" is shown.',
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)
+
+                self.assertTrue(review["approved"], review["blocking_issues"])
+
+    def test_filename_context_does_not_exempt_a_separate_selector_assertion(self) -> None:
+        expected = 'The receipt file "hotel_receipt.pdf" is shown, and exact text "div.notice" is visible.'
+        review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)
+
+        self.assertFalse(review["approved"])
+        self.assertTrue(any("raw selector `div.notice`" in issue for issue in review["blocking_issues"]))
+        self.assertFalse(any("raw selector `hotel_receipt.pdf`" in issue for issue in review["blocking_issues"]))
 
     def test_review_allows_selector_as_row_locator(self) -> None:
         for action, expected in (

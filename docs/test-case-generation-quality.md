@@ -122,6 +122,11 @@ External outcomes, such as checks in a separate audit store, remain manual.
 Business approval and execution are separate. Review the delivered cases, then
 preview eligible cases against the chosen environment before running them.
 
+For an attachment observation, label the quoted filename explicitly, as in
+`The attached receipt file "hotel_receipt.pdf" is visible`. Structural review
+treats the filename as literal evidence. The execution path still needs support
+for the attachment action and any required setup.
+
 ## Repair a suite
 
 1. Review and approve current requirements and the affected Use Cases.
