@@ -128,8 +128,16 @@ class QaProjectTestCaseEvidence(BaseModel):
     obligations: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class QaProjectTestingIntent(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    objective: str = Field(default="", max_length=500)
+    risk_emphasis: Literal["balanced", "business_critical", "edge_cases", "regression"] = "balanced"
+
+
 class QaProjectDetail(QaProjectSummary):
     input_revision: int = 0
+    testing_intent: Optional[QaProjectTestingIntent] = None
     project_sync: Optional[Dict[str, Any]] = None
     project_decisions: List[Dict[str, Any]] = Field(default_factory=list)
     impact_application: Optional[ImpactApplication] = None
@@ -151,6 +159,7 @@ class QaProjectUpdateInput(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
     description: Optional[str] = Field(default=None, max_length=1000)
     status: Optional[Literal["active", "archived"]] = None
+    testing_intent: Optional[QaProjectTestingIntent] = None
     base_project_revision: Optional[int] = Field(default=None, ge=0)
 
 
@@ -185,6 +194,7 @@ __all__ = [
     "QaProjectStageSnapshot",
     "QaProjectTimelineEvent",
     "QaProjectExecutionRun",
+    "QaProjectTestingIntent",
     "QaProjectDetail",
     "QaProjectListResponse",
     "QaProjectCreateInput",

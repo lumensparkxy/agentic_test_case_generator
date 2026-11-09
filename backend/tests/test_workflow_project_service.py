@@ -102,6 +102,72 @@ class WorkflowProjectServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.collection_patch.stop()
 
+    def test_testing_intent_round_trips_separately_from_saved_sources(self) -> None:
+        project = create_project(name="Booking", description="Project description", actor=self.actor, request_id="create")
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="context",
+            payload={"notes": "Source facts"},
+            operation="requirements.enrich",
+            actor=self.actor,
+            request_id="context",
+            approved=True,
+        )
+        baseline = get_project(project.project_id, actor=self.actor)
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: self.actor
+        path = f"/projects/{project.project_id}"
+        with TestClient(app) as client:
+            self.assertIsNone(client.get(path).json()["testing_intent"])
+            intent = {"objective": "Check high-risk booking changes", "risk_emphasis": "edge_cases"}
+            response = client.patch(path, json={"base_project_revision": baseline.current_revision, "testing_intent": intent})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["testing_intent"], intent)
+            self.assertEqual(response.json()["description"], "Project description")
+            after = get_project(project.project_id, actor=self.actor)
+            self.assertEqual(after.current_revision, baseline.current_revision + 1)
+            self.assertEqual(after.input_revision, baseline.input_revision)
+            self.assertEqual(after.current_snapshots, baseline.current_snapshots)
+            self.assertEqual(after.stage_state, baseline.stage_state)
+
+            renamed = client.patch(path, json={"name": "Renamed booking"})
+            self.assertEqual(renamed.status_code, 200, renamed.text)
+            self.assertEqual(renamed.json()["testing_intent"], intent)
+            reset = client.patch(path, json={"base_project_revision": renamed.json()["current_revision"], "testing_intent": {"objective": ""}})
+            self.assertEqual(reset.status_code, 200, reset.text)
+            self.assertEqual(client.get(path).json()["testing_intent"], {"objective": "", "risk_emphasis": "balanced"})
+
+    def test_testing_intent_requires_revision_owner_and_active_project(self) -> None:
+        project = create_project(name="Booking", description=None, actor=self.actor, request_id="create")
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: self.actor
+        path = f"/projects/{project.project_id}"
+        intent = {"objective": "Check state transitions", "risk_emphasis": "regression"}
+        valid = {"base_project_revision": project.current_revision, "testing_intent": intent}
+        before = deepcopy(self.store)
+        with TestClient(app) as client:
+            for payload, expected in (
+                ({"testing_intent": intent}, 422),
+                ({**valid, "base_project_revision": project.current_revision - 1}, 409),
+                ({**valid, "testing_intent": {**intent, "objective": "a" * 501}}, 422),
+                ({**valid, "testing_intent": {**intent, "risk_emphasis": "unknown"}}, 422),
+            ):
+                with self.subTest(payload=payload):
+                    self.assertEqual(client.patch(path, json=payload).status_code, expected)
+                    self.assertEqual(self.store, before)
+
+            app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="outsider", name="Outsider")
+            self.assertEqual(client.patch(path, json=valid).status_code, 403)
+            self.assertEqual(self.store, before)
+            app.dependency_overrides[get_current_user] = lambda: self.actor
+            archived = client.patch(path, json={"status": "archived"})
+            self.assertEqual(archived.status_code, 200, archived.text)
+            before = deepcopy(self.store)
+            self.assertEqual(client.patch(path, json={**valid, "base_project_revision": archived.json()["current_revision"]}).status_code, 409)
+            self.assertEqual(self.store, before)
+
     def test_create_list_and_load_project(self) -> None:
         project = create_project(name="Checkout QA", description="Regression scope", actor=self.actor, request_id="req-1")
 

@@ -32,14 +32,14 @@ decisions against one hydrated project revision. Opening a workspace can
 perform reads.
 
 P1 introduces the shell with the frontend build flag
-`VITE_PROJECT_WORKSPACES_V2=true`, off by default. P2 separates source collection from scope decisions and unifies
-the intake. The legacy routes continue to read the same artifacts when the flag
+`VITE_PROJECT_WORKSPACES_V2=true`, off by default. P2 brings source collection and supporting context together in Inputs and
+moves scope decisions to Review. The legacy routes continue to read the same artifacts when the flag
 is off. Each new workspace route resolves to an existing workbench when the
 flag is off. Keep server admission checks active on both paths.
 
 | Workspace section | Workspace route suffix | Evidence alias |
 | --- | --- | --- |
-| Sources | `/inputs` | `/requirements` |
+| Sources | `/inputs` | `/requirements` with the combined intake/review view |
 | Context | `/inputs/context` | `/context` |
 | Scope | `/review` | `/requirements` with the combined intake/review view |
 | Scenarios | `/review/scenarios` | `/use-cases` |
@@ -51,6 +51,29 @@ These suffixes follow `/projects/:projectId`. The project root still opens
 the overview via Project status. Roll back by rebuilding this compatible
 version with the flag off. Older builds released before the aliases were
 added cannot resolve the new suffixes.
+
+### Input and scope state
+
+In the enabled build, new projects open Inputs. A pending comparison keeps
+source replacements and retirements explicit. Local comparison choices are
+scoped to the pending import and base revision. Apply still checks the
+project revision and asks for retirement confirmation. Context and intent
+saves wait until the active comparison is finished or cancelled.
+
+Supporting context uses the existing Analyze Context action. The 2.0 form
+keeps local drafts under the current user, project, and context snapshot.
+It shows older values for comparison when a newer context snapshot or a
+material source change supersedes them. Only saved evidence feeds the
+normal project generation request. Context with a stale source must be
+analyzed again before starting generation. Compatible saved context stays
+current across approval-only requirements edits.
+
+Testing intent uses the existing revision-checked project PATCH. The
+optional `testing_intent` record stores a testing objective and risk
+emphasis separately from factual context and approval metadata. The current
+generation prompts are unchanged. Review Scope uses the saved requirements
+and existing clarification workflow. Deferred and excluded items are shown
+separately from eligible scope. Open questions still need a decision.
 
 ## Continuation and recovery decisions
 
@@ -182,10 +205,12 @@ the corpus, measurement rules and thresholds for the paired comparison.
 
 P0 pins the baseline and records the prospective gates (commit `2327ab9`,
 [PR #450](https://github.com/lumensparkxy/agentic_test_case_generator/pull/450)).
-P1 adds opt-in navigation and compatible aliases under
-[#451](https://github.com/lumensparkxy/agentic_test_case_generator/issues/451).
-P2 can build on those routes to unify intake and split scope review from
-source setup. The production queue identity and timeout policy remain
+P1 adds opt-in navigation and compatible aliases (commit `1d5977b`,
+[PR #452](https://github.com/lumensparkxy/agentic_test_case_generator/pull/452)).
+P2 adds unified intake and scoped decisions under
+[#453](https://github.com/lumensparkxy/agentic_test_case_generator/issues/453).
+Next is the P3 approval transaction, intent outbox and fenced stage claim.
+The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with
 [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354).

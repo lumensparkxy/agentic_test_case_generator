@@ -67,6 +67,7 @@ export default function ProjectsPage({
 				projectId: createdProject.project_id,
 				destination: PROJECT_DESTINATIONS.OVERVIEW,
 				path: buildProjectPath(createdProject.project_id),
+				created: true,
 			});
 		} catch (createProjectError) {
 			if (createProjectError?.name === "AbortError") {

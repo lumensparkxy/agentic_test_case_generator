@@ -20,6 +20,11 @@ export default function ContextInputsPanel({
 	setImageLinks,
 	contextNotes,
 	setContextNotes,
+	contextDraft,
+	contextDraftChanged = false,
+	contextStale = false,
+	contextSaveBlocked = false,
+	embedded = false,
 	hasContextInputs,
 	analyzeContext,
 	isAnalyzingContext,
@@ -33,9 +38,45 @@ export default function ContextInputsPanel({
 	goNext,
 }) {
 	return (
-		<Surface as="section" className="panel">
+		<Surface as="section" className={embedded ? "panel project-intake-context" : "panel"}>
 			<h2 className="panel-title">Context Inputs</h2>
 			<p className="panel-description">Add notes, links, and references to enrich the test case generation context.</p>
+			{contextDraft && (
+				<>
+					{contextDraft.error && <p role="alert">{contextDraft.error}</p>}
+					{contextDraftChanged && (
+						<p role="status">
+							{contextDraft.error ? "Unsaved context in this tab." : "Unsaved context on this device."} Analyze Context to save it to the
+							project.
+						</p>
+					)}
+					{contextStale && <p role="status">Saved context is stale. Analyze Context against the current requirements.</p>}
+					{contextSaveBlocked && <p>Finish or cancel the source comparison before saving context.</p>}
+					{contextDraft.stale && (
+						<Disclosure className="draft-recovery-notice">
+							<summary>Context draft from an earlier snapshot</summary>
+							<p>Compare these earlier inputs with the current values below.</p>
+							<dl>
+								{[
+									["appLink", "Application link"],
+									["prototypeLink", "Prototype link"],
+									["diagramLinks", "Diagram links"],
+									["imageLinks", "Image links"],
+									["contextNotes", "Context notes"],
+								].map(([field, label]) => (
+									<div key={field}>
+										<dt>{label}</dt>
+										<dd>{contextDraft.stale.value?.[field] || "Empty"}</dd>
+									</div>
+								))}
+							</dl>
+							<Button variant="secondary" disabled={isAnalyzingContext} onClick={contextDraft.discardStale}>
+								Discard earlier context draft
+							</Button>
+						</Disclosure>
+					)}
+				</>
+			)}
 			<div className="panel-form two-cols">
 				<Field className="form-group">
 					<label>Application link</label>
@@ -84,10 +125,10 @@ export default function ContextInputsPanel({
 			</div>
 			{hasContextInputs && (
 				<div className="panel-form button-row">
-					<Button onClick={analyzeContext} disabled={isAnalyzingContext || authActionDisabled}>
+					<Button onClick={analyzeContext} disabled={isAnalyzingContext || authActionDisabled || contextSaveBlocked}>
 						{isAnalyzingContext ? "⏳ Analyzing..." : "Analyze Context"}
 					</Button>
-					{enrichedContext && (
+					{enrichedContext && !contextDraft && (
 						<Button className="secondary" onClick={resetContextAnalysis} disabled={isAnalyzingContext}>
 							Clear Analysis
 						</Button>
@@ -97,7 +138,8 @@ export default function ContextInputsPanel({
 			{contextAnalysisError && <p role="alert">Context analysis failed: {contextAnalysisError}</p>}
 			{enrichedContext?.grounded_context && (
 				<Surface as="div" className="result-section">
-					<h3>Grounded Context</h3>
+					<h3>{contextDraft ? "Saved context evidence" : "Grounded Context"}</h3>
+					{contextDraft && contextDraftChanged && <p>These results describe the last saved inputs.</p>}
 					{(enrichedContext.grounded_context.artifact_sources || []).length > 0 && (
 						<div className="artifact-sources">
 							<h4>Artifact Sources</h4>
@@ -116,8 +158,16 @@ export default function ContextInputsPanel({
 												}}
 											/>
 											<span>{source.url || source.id}</span>
-											{source.type && <span className="artifact-type">{source.type}</span>}
+											{contextDraft ? (
+												<span className="artifact-type">
+													{" · "}
+													{source.source_type} · {contextStale ? "Stale" : source.status || "Provided"}
+												</span>
+											) : (
+												source.type && <span className="artifact-type">{source.type}</span>
+											)}
 										</label>
+										{contextDraft && source.notes && <p>{source.notes}</p>}
 									</ListItem>
 								))}
 							</List>
@@ -154,10 +204,10 @@ export default function ContextInputsPanel({
 			{projectId && request && (
 				<ProjectSyncStatus key={`sync-status-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
-			{projectId && project && request && (
+			{!contextDraft && projectId && project && request && (
 				<ProjectSyncPanel key={`sync-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
-			{projectId && request && (
+			{!embedded && projectId && request && (
 				<QualityFeedbackPanel
 					key={`feedback-${projectId}:${prerequisiteSearch}`}
 					request={request}
@@ -166,18 +216,20 @@ export default function ContextInputsPanel({
 					onUpdated={onProjectUpdated}
 				/>
 			)}
-			{projectId && request && (
+			{!embedded && projectId && request && (
 				<Disclosure className="context-knowledge-details">
 					<summary>Project knowledge and diagnostics</summary>
 					<KnowledgePanel key={projectId} request={request} projectId={projectId} />
 				</Disclosure>
 			)}
-			<div className="panel-nav">
-				<Button onClick={goPrev} className="secondary">
-					Back
-				</Button>
-				<Button onClick={goNext}>Next</Button>
-			</div>
+			{!embedded && (
+				<div className="panel-nav">
+					<Button onClick={goPrev} className="secondary">
+						Back
+					</Button>
+					<Button onClick={goNext}>{contextDraft ? "Review scope" : "Next"}</Button>
+				</div>
+			)}
 		</Surface>
 	);
 }

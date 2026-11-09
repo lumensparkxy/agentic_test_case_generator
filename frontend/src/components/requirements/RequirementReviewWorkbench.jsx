@@ -7,6 +7,9 @@ import { getRequirementReviewStatus, normalizeStringArray } from "../../utils/re
 import { requirementSources, downloadSourceMapping } from "../../utils/requirementSources";
 import ReviewRowToggle from "../reviews/ReviewRowToggle";
 import RequirementSourceEvidence from "./RequirementSourceEvidence";
+import { generationRequirementRows } from "../../utils/requirementScope";
+
+const blocksApproval = (requirement) => ["open", "deferred", "excluded"].includes(requirement.clarification_status);
 
 function RequirementHistory({ requirement, loadHistory }) {
 	const [history, setHistory] = useState(null);
@@ -51,6 +54,7 @@ function RequirementHistory({ requirement, loadHistory }) {
 
 export default function RequirementReviewWorkbench({
 	requirements,
+	scoped = false,
 	approvedRequirementCount,
 	reviewPendingRequirementCount,
 	rejectedRequirementCount,
@@ -71,6 +75,9 @@ export default function RequirementReviewWorkbench({
 	const statusFilter = filterChoice.request === reviewRequest ? filterChoice.value : "pending";
 	const filterRef = useRef(null);
 	const search = query.trim().toLowerCase();
+	const eligible = scoped ? generationRequirementRows(requirements) : [];
+	const canBulkApprove = !scoped || eligible.some((row) => !blocksApproval(row) && getRequirementReviewStatus(row) !== "Approved");
+	const scopeCounts = (status) => requirements.filter((row) => row.clarification_status === status).length;
 	const rows = requirements.filter(
 		(req) =>
 			(!statusFilter ||
@@ -93,10 +100,17 @@ export default function RequirementReviewWorkbench({
 							<h2 id="requirement-review-heading" ref={headingRef} tabIndex={-1}>
 								Requirement Review Workbench
 							</h2>
-							<p role="status">
-								{approvedRequirementCount}/{requirements.length} approved · {reviewPendingRequirementCount} pending ·{" "}
-								{rejectedRequirementCount} rejected
-							</p>
+							{scoped ? (
+								<p role="status">
+									{approvedRequirementCount}/{eligible.length} approved in scope · {scopeCounts("open")} open · {scopeCounts("deferred")}{" "}
+									deferred · {scopeCounts("excluded")} excluded · {rejectedRequirementCount} rejected
+								</p>
+							) : (
+								<p role="status">
+									{approvedRequirementCount}/{requirements.length} approved · {reviewPendingRequirementCount} pending ·{" "}
+									{rejectedRequirementCount} rejected
+								</p>
+							)}
 						</div>
 						<Input
 							type="search"
@@ -123,8 +137,8 @@ export default function RequirementReviewWorkbench({
 								<Button variant="secondary" size="compact" onClick={() => downloadSourceMapping(requirements)} disabled={busy}>
 									Download source mapping (JSON)
 								</Button>
-								<Button variant="secondary" size="compact" onClick={onApproveNonRejected} disabled={busy}>
-									Approve non-rejected
+								<Button variant="secondary" size="compact" onClick={onApproveNonRejected} disabled={busy || !canBulkApprove}>
+									{scoped ? "Approve eligible requirements" : "Approve non-rejected"}
 								</Button>
 								<Button variant="secondary" size="compact" onClick={onMarkAllNeedsReview} disabled={busy}>
 									Mark all needs review
@@ -189,7 +203,9 @@ export default function RequirementReviewWorkbench({
 																	}}
 																>
 																	{REQUIREMENT_REVIEW_STATUSES.map((option) => (
-																		<option key={option}>{option}</option>
+																		<option key={option} disabled={scoped && option === "Approved" && blocksApproval(req)}>
+																			{option}
+																		</option>
 																	))}
 																</Select>
 																<Disclosure className="requirement-quality-details">

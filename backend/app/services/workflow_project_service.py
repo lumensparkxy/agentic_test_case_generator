@@ -10,7 +10,7 @@ from google.api_core.exceptions import GoogleAPICallError
 from google.cloud.firestore_v1 import Client, CollectionReference, DocumentReference, FieldFilter, Query, transactional
 from pydantic import ValidationError
 
-from ..contracts.projects import QaProjectCaseSourceRequirement, QaProjectExecutionRunDetail, QaProjectTestCaseEvidence
+from ..contracts.projects import QaProjectCaseSourceRequirement, QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestingIntent
 from ..contracts.test_cases import TestCase
 from ..models import (
     AuthUser,
@@ -387,6 +387,7 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
             sync = {**sync, "status": "superseded", "error": "Project sources changed. Review the current sources before starting another update."}
     return QaProjectDetail(
         input_revision=payload.get("input_revision", 0),
+        testing_intent=payload.get("testing_intent"),
         project_sync=sync,
         project_decisions=payload.get("project_decisions") or [],
         impact_application=application,
@@ -797,10 +798,16 @@ def update_project(
     name: Optional[str] = None,
     description: Optional[str] = None,
     status_value: Optional[str] = None,
+    testing_intent: Optional[QaProjectTestingIntent] = None,
     base_project_revision: Optional[int] = None,
 ) -> QaProjectDetail:
     payload = _get_project_payload(project_id)
     _require_owner(payload, actor)
+    if testing_intent is not None:
+        if base_project_revision is None:
+            raise HTTPException(422, "A project revision is required to save testing intent.")
+        if payload.get("status") == "archived":
+            raise HTTPException(409, "Restore the project before changing its testing intent.")
     _check_revision(payload, base_project_revision)
     now = _utcnow()
     next_revision = int(payload.get("current_revision") or 0) + 1
@@ -815,6 +822,8 @@ def update_project(
         update_payload["description"] = description.strip() or None
     if status_value is not None:
         update_payload["status"] = status_value
+    if testing_intent is not None:
+        update_payload["testing_intent"] = {**testing_intent.model_dump(), "objective": testing_intent.objective.strip()}
     _commit_project_revision(
         project_id,
         actor,

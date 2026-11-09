@@ -4,6 +4,7 @@ import { Alert, Badge, Disclosure } from "../ui/surfaces";
 import { CollectionState, Table, TableScroll } from "../ui/collections";
 import ReviewRowToggle from "../reviews/ReviewRowToggle";
 import RequirementSourceEvidence from "./RequirementSourceEvidence";
+import useReviewDraft from "../../hooks/useReviewDraft";
 
 const labels = {
 	new: "New",
@@ -25,7 +26,7 @@ const requirementOption = (requirement) => (
 	</option>
 );
 
-export default function RequirementImportReview({ preview, revision, busy, error, stalePreview, onAction }) {
+export default function RequirementImportReview({ preview, identity, revision, busy, error, stalePreview, onAction }) {
 	const heading = useRef(null);
 	const actionBar = useRef(null);
 	const filterControl = useRef(null);
@@ -34,21 +35,40 @@ export default function RequirementImportReview({ preview, revision, busy, error
 	const evidenceFindings = preview.source_evidence_findings || [];
 	const [openCandidate, setOpenCandidate] = useState(null);
 	const [filter, setFilter] = useState("all");
-	const [scope, setScope] = useState([]);
 	const [confirm, setConfirm] = useState(false);
-	const [decisions, setDecisions] = useState(() =>
-		Object.fromEntries(
-			preview.candidates.map((c) => [
-				c.candidate_id,
-				{
-					candidate_id: c.candidate_id,
-					action:
-						c.classification === "unchanged" ? "keep" : c.classification === "updated" ? "update" : c.classification === "new" ? "add" : "",
-					target_requirement_uid: c.target_requirement_uid || null,
-				},
-			])
-		)
-	);
+	const draft = useReviewDraft({
+		identity,
+		projectId: preview.project_id,
+		snapshotId: `${preview.import_id}:${preview.base_project_revision}`,
+		name: "source-comparison",
+		initialValue: {
+			scope: [],
+			decisions: Object.fromEntries(
+				preview.candidates.map((c) => [
+					c.candidate_id,
+					{
+						candidate_id: c.candidate_id,
+						action:
+							c.classification === "unchanged"
+								? "keep"
+								: c.classification === "updated"
+									? "update"
+									: c.classification === "new"
+										? "add"
+										: "",
+						target_requirement_uid: c.target_requirement_uid || null,
+					},
+				])
+			),
+		},
+	});
+	const { scope, decisions } = draft.value;
+	const finish = async (action, payload) => {
+		if (await onAction(action, payload)) draft.clear();
+	};
+	const setScope = (update) =>
+		draft.setValue((current) => ({ ...current, scope: typeof update === "function" ? update(current.scope) : update }));
+	const setDecisions = (update) => draft.setValue((current) => ({ ...current, decisions: update(current.decisions) }));
 	useEffect(() => {
 		heading.current?.focus({ preventScroll: true });
 		heading.current?.scrollIntoView({ block: "nearest" });
@@ -120,6 +140,7 @@ export default function RequirementImportReview({ preview, revision, busy, error
 					{preview.source_name} · Revision {preview.base_project_revision}
 				</p>
 			</div>
+			{draft.error && <p role="alert">{draft.error}</p>}
 			{preview.warnings.map((warning) => (
 				<p key={warning} className="import-notice">
 					{warning}
@@ -354,7 +375,7 @@ export default function RequirementImportReview({ preview, revision, busy, error
 							? `${counts.needs_decision} requirement(s) need a decision.`
 							: "Ready to apply the reviewed changes."}
 				</span>
-				<Button variant="secondary" onClick={() => onAction("cancel")} disabled={busy}>
+				<Button variant="secondary" onClick={() => void finish("cancel")} disabled={busy}>
 					Cancel import
 				</Button>
 				<Button className="secondary" disabled={busy || Boolean(preview.recovery_snapshot_ids.length)} onClick={() => onAction("compare")}>
@@ -363,7 +384,7 @@ export default function RequirementImportReview({ preview, revision, busy, error
 				<Button
 					disabled={busy || stale || Boolean(counts.needs_decision) || (retiring.length > 0 && !confirm)}
 					onClick={() =>
-						onAction("apply", {
+						void finish("apply", {
 							base_project_revision: preview.base_project_revision,
 							decisions: Object.values(decisions),
 							update_scope: scope,

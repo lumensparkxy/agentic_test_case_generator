@@ -49,7 +49,23 @@ def check_extraction_receipt(data, fingerprint, *, require_pending=True):
         raise HTTPException(409, "This requirements preview is no longer pending.")
 
 
-def _snapshot_write(transaction, doc, project, payload, actor, request_id, snapshot_id, operation, counts):
+def _context_matches_requirements(transaction, doc, project, active):
+    state = (project.get("stage_state") or {}).get("context") or {}
+    snapshot_id = state.get("current_snapshot_id")
+    if not snapshot_id or state.get("stale"):
+        return False
+    snapshot = doc.collection("snapshots").document(snapshot_id).get(transaction=transaction).to_dict()
+    if not snapshot or snapshot.get("stage") != "context" or snapshot.get("project_id") != doc.id or snapshot.get("snapshot_id") != snapshot_id:
+        return False
+    payload = snapshot.get("payload")
+    rows = payload.get("requirements") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        return False
+    # The collector's requirement-derived evidence uses the wording, not review decisions.
+    return [(row.get("id"), row.get("text")) for row in rows] == [(row.id, row.text) for row in active]
+
+
+def _snapshot_write(transaction, doc, project, payload, actor, request_id, snapshot_id, operation, counts, *, preserve_context=False):
     now = datetime.now(timezone.utc)
     revision = project.get("current_revision", 0) + 1
     state = deepcopy(project.get("stage_state") or {})
@@ -82,6 +98,8 @@ def _snapshot_write(transaction, doc, project, payload, actor, request_id, snaps
         "metadata": {"changes": counts},
     }
     for stage in DOWNSTREAM_STAGES["requirements"]:
+        if stage == "context" and preserve_context:
+            continue
         if stage in state:
             state[stage].update(stale=True, stale_reason=f"requirements changed in project revision {revision}")
     _bounded(snapshot)
@@ -280,7 +298,10 @@ class RequirementImportRepository:
             }
             updated["review"] = {**updated.get("review", {}), "approved": updated["approved"]}
             sid = digest(["review", payload.idempotency_key])
-            _snapshot_write(transaction, doc, project, updated, actor, request_id, sid, "requirements.review", {"reviewed": len(seen)})
+            preserve_context = _context_matches_requirements(transaction, doc, project, active)
+            _snapshot_write(
+                transaction, doc, project, updated, actor, request_id, sid, "requirements.review", {"reviewed": len(seen)}, preserve_context=preserve_context
+            )
             transaction.create(receipt, {"fingerprint": fingerprint, "snapshot_id": sid})
 
         review(self.client.transaction())

@@ -122,7 +122,7 @@ test.describe("Opt-in project workspaces", () => {
 	test.skip(!v2, "Requires VITE_PROJECT_WORKSPACES_V2=true on the frontend");
 
 	for (const [width, initial, current, expected] of [
-		[1366, "inputs", "Inputs", "Requirement Review Workbench"],
+		[1366, "inputs", "Inputs", "Context Inputs"],
 		[1440, "review/tests", "Review", "Test Cases"],
 		[1920, "deliver/browser-tests", "Deliver", "Execution setup"],
 	]) {

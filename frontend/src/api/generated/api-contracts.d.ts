@@ -740,6 +740,7 @@ export interface QaProjectDetail {
 	project_sync?: Record<string, unknown> | null;
 	stage_state?: Record<string, QaProjectStageState>;
 	status?: "active" | "archived";
+	testing_intent?: QaProjectTestingIntent | null;
 	timeline?: Array<QaProjectTimelineEvent>;
 	updated_at: string;
 }
@@ -864,6 +865,11 @@ export interface QaProjectTestCaseReviewInput {
 	snapshot_id: string;
 }
 
+export interface QaProjectTestingIntent {
+	objective?: string;
+	risk_emphasis?: "balanced" | "business_critical" | "edge_cases" | "regression";
+}
+
 export interface QaProjectTimelineEvent {
 	actor_user_id?: string | null;
 	event_id: string;
@@ -883,6 +889,7 @@ export interface QaProjectUpdateInput {
 	description?: string | null;
 	name?: string | null;
 	status?: "active" | "archived" | null;
+	testing_intent?: QaProjectTestingIntent | null;
 }
 
 export interface QaProjectUseCaseGenerationInput {

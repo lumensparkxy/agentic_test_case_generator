@@ -283,6 +283,7 @@ export function parseWorkflowRoute(pathname) {
 		return {
 			kind: "project",
 			destination: section.destination,
+			workspaceRoute: true,
 			workspace: workspace.id,
 			section: section.id,
 			projectId,

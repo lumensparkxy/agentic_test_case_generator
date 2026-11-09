@@ -335,13 +335,26 @@ class ImportPersistenceTests(unittest.TestCase):
         self.p = preview()
         self.repo.save(self.p, ACTOR, [], {})
 
+    def save_context(self):
+        root = f"qa_projects/{PID}"
+        requirements = self.store[f"{root}/snapshots/original"]["payload"]["requirements"]
+        self.store[f"{root}/snapshots/context"] = {
+            **snapshot([], "context", 7),
+            "stage": "context",
+            "payload": {"requirements": deepcopy(requirements), "notes": "Project notes"},
+        }
+        self.store[root]["stage_state"]["context"] = {"current_snapshot_id": "context", "version": 1, "approved": True, "stale": False}
+
     def test_stage_does_not_publish_and_apply_is_complete_after_reload(self):
+        self.save_context()
         before = deepcopy(self.store[f"qa_projects/{PID}"])
         self.assertEqual(self.repo.list_pending(PID, ACTOR)[0].import_id, self.p.import_id)
         self.assertEqual(before["current_revision"], 7)
         project = self.repo.apply(PID, self.p.import_id, ACTOR, choices(self.p), "request")
         self.assertEqual(project.current_revision, 8)
         self.assertEqual(len(project.current_snapshots["requirements"].payload["requirements"]), 10)
+        self.assertTrue(project.stage_state["context"].stale)
+        self.assertEqual(project.current_snapshots["context"].snapshot_id, "context")
         self.assertTrue(project.stage_state["test_cases"].stale)
         self.assertEqual(project.current_snapshots["test_cases"].payload["test_cases"][0]["id"], "TC-001")
         self.assertEqual(len(self.store[f"qa_projects/{PID}/snapshots/original"]["payload"]["requirements"]), 8)
@@ -491,6 +504,36 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(result.current_snapshots["requirements"].payload["requirements"][0]["review_status"], "Rejected")
         with self.assertRaises(HTTPException):
             self.repo.apply(PID, self.p.import_id, ACTOR, choices(self.p), "stale")
+
+    def test_review_preserves_fresh_matching_context_and_stales_dependent_suite(self):
+        root = f"qa_projects/{PID}"
+        self.store[f"{root}/snapshots/original"]["payload"]["requirements"][0]["review_status"] = "Needs Review"
+        self.store[root]["stage_state"]["requirements"]["approved"] = False
+        self.save_context()
+        payload = RequirementReviewsInput(
+            base_project_revision=7,
+            idempotency_key="review-with-context",
+            reviews=[{"requirement_uid": self.p.current_requirements[0].requirement_uid, "review_status": "Approved", "quality_flags": ["Ambiguous"]}],
+        )
+        before = service.get_project(PID, actor=ACTOR)
+        result = self.repo.review(PID, ACTOR, payload, "review")
+        self.assertTrue(result.stage_state["requirements"].approved)
+        self.assertEqual(result.stage_state["context"], before.stage_state["context"])
+        self.assertEqual(result.current_snapshots["context"], before.current_snapshots["context"])
+        self.assertTrue(result.stage_state["test_cases"].stale)
+        self.assertEqual(result.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
+
+    def test_review_does_not_keep_context_with_different_recorded_requirement_text(self):
+        self.save_context()
+        self.store[f"qa_projects/{PID}/snapshots/context"]["payload"]["requirements"][0]["text"] = "Context was analyzed from older wording."
+        payload = RequirementReviewsInput(
+            base_project_revision=7,
+            idempotency_key="review-with-incompatible-context",
+            reviews=[{"requirement_uid": self.p.current_requirements[0].requirement_uid, "review_status": "Approved"}],
+        )
+        result = self.repo.review(PID, ACTOR, payload, "review")
+        self.assertTrue(result.stage_state["context"].stale)
+        self.assertEqual(result.current_snapshots["context"].snapshot_id, "context")
 
     def test_legacy_project_import_routes_fail_closed_before_extraction(self):
         app.dependency_overrides[get_current_user] = lambda: ACTOR

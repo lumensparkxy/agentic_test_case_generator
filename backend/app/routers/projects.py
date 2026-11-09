@@ -103,8 +103,11 @@ async def update_qa_project(
             name=payload.name,
             description=payload.description,
             status_value=payload.status,
+            testing_intent=payload.testing_intent,
             base_project_revision=payload.base_project_revision,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 

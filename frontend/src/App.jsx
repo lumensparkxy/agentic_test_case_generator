@@ -1,4 +1,6 @@
 import ClarificationScopeNotice from "./components/context/ClarificationScopeNotice";
+import TestingIntentPanel from "./components/context/TestingIntentPanel";
+import RouteLink from "./app/RouteLink";
 import { hasApprovedGenerationScope } from "./utils/requirementScope";
 import useReviewDraft from "./hooks/useReviewDraft";
 import useExecutionRecovery from "./hooks/useExecutionRecovery";
@@ -58,7 +60,7 @@ import {
 	normalizeAutomationPreview,
 	resolveSelectedExecutableCandidates,
 } from "./components/automation/automationPreview";
-import { ProjectSyncStatus } from "./components/context/ProjectSyncPanel";
+import ProjectSyncPanel, { ProjectSyncStatus } from "./components/context/ProjectSyncPanel";
 import BillingBanner from "./components/layout/BillingBanner";
 import { selectContextualTask } from "./components/projects/contextualTask";
 import SettingsDialog from "./components/settings/SettingsDialog";
@@ -81,6 +83,7 @@ import {
 	GLOBAL_DESTINATIONS,
 	PROJECT_DESTINATIONS,
 	buildProjectPath,
+	buildProjectWorkspacePath,
 	getDestinationForLegacyTab,
 	getAdjacentProjectDestination,
 	getLegacyTabForDestination,
@@ -227,6 +230,15 @@ const getRequirementSourceMetricMeta = (coverageMetrics) => {
 
 const normalizeImpactText = (value) => `${value || ""}`.trim().replace(/\s+/g, " ").toLowerCase();
 
+const contextFormValues = (payload) => ({
+	appLink: payload?.app_link || "",
+	prototypeLink: payload?.prototype_link || "",
+	diagramLinks: (payload?.diagram_links || []).join("; "),
+	imageLinks: (payload?.image_links || []).join("; "),
+	contextNotes: payload?.notes ?? "",
+	selectedArtifactSourceIds: (payload?.grounded_context?.artifact_sources || []).map(({ id }) => id),
+});
+
 const contextSourceInputs = (context) => {
 	const normalizeLink = (link) => {
 		try {
@@ -297,8 +309,10 @@ export default function App() {
 	const requirementImportControl = useRef(null);
 	const requirementExtractionAttempts = useRef(new Map());
 	const contextAnalysisAttempt = useRef(null);
+	const testingIntentSave = useRef(null);
 	const fileExportAttempts = useRef(new Map());
 	const requirementReviewHeading = useRef(null);
+	const reviewScopeAction = useRef(null);
 	const [requirementSetup, setRequirementSetup] = useState(null);
 	const [requirementFocus, setRequirementFocus] = useState(null);
 	const [requirementReviewRequest, setRequirementReviewRequest] = useState(null);
@@ -659,7 +673,6 @@ export default function App() {
 		return !operationScope || (operationScope.projectId === projectId && isProjectOperationCurrent(operationScope));
 	};
 	syncProjectOperationScope();
-	const hasContextInputs = Boolean(appLink || prototypeLink || diagramLinks.trim() || imageLinks.trim() || contextNotes.trim());
 	const billingEnforcementEnabled = Boolean(billingEntitlements && !billingEntitlements.shadow_mode);
 	const requirementWorkflowLocked = Boolean(
 		billingEnforcementEnabled && billingEntitlements?.account?.plan_tier === "pilot" && billingEntitlements?.requirements?.exhausted
@@ -732,13 +745,34 @@ export default function App() {
 		latestUseCasesHumanReview?.snapshot_id === useCasesStageState.current_snapshot_id &&
 		latestUseCasesHumanReview?.decision === "approve"
 	);
+	const contextRefreshRequired = PROJECT_WORKSPACES_V2 && Boolean(projectStageState.context?.stale);
 	const normalGenerationReady = Boolean(
 		projectStageState.requirements?.current_snapshot_id &&
 		hasApprovedGenerationScope(currentProject) &&
 		!projectStageState.requirements.stale &&
+		!contextRefreshRequired &&
 		(!useCasesStageState.current_snapshot_id || useCasesHumanApproved)
 	);
 	const projectSnapshots = currentProject?.current_snapshots || {};
+	const contextSnapshot = projectSnapshots.context;
+	const savedContextForm = contextFormValues(contextSnapshot?.payload);
+	const contextDraft = useReviewDraft({
+		identity: PROJECT_WORKSPACES_V2 ? currentUser?.sub : "",
+		projectId: currentProjectId,
+		snapshotId: contextRefreshRequired
+			? `${contextSnapshot?.snapshot_id || "empty"}:${projectStageState.requirements?.current_snapshot_id || "empty"}`
+			: contextSnapshot?.snapshot_id || "empty",
+		name: "context-inputs",
+		initialValue: savedContextForm,
+	});
+	const contextDraftChanged = JSON.stringify(contextDraft.value) !== JSON.stringify(savedContextForm);
+	const legacyContextForm = { appLink, prototypeLink, diagramLinks, imageLinks, contextNotes, selectedArtifactSourceIds };
+	const visibleContextForm = PROJECT_WORKSPACES_V2 ? contextDraft.value : legacyContextForm;
+	const hasContextInputs = Object.entries(visibleContextForm).some(
+		([field, value]) => field !== "selectedArtifactSourceIds" && value.trim()
+	);
+	const setContextDraftField = (field) => (next) =>
+		contextDraft.setValue((current) => ({ ...current, [field]: typeof next === "function" ? next(current[field]) : next }));
 	const persistedTestCaseCount = projectSnapshots.test_cases?.payload?.test_cases?.length || 0;
 	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount || projectSnapshots.test_cases);
 	const impactStageState = projectStageState.impact_analysis || {};
@@ -1022,7 +1056,10 @@ export default function App() {
 				})
 		);
 
-	const buildContextPayload = (requirementsOverride = requirements) => {
+	const buildContextPayload = (requirementsOverride = requirements, { saveInputs = false } = {}) => {
+		const { appLink, prototypeLink, diagramLinks, imageLinks, contextNotes, selectedArtifactSourceIds } =
+			PROJECT_WORKSPACES_V2 && !saveInputs ? savedContextForm : visibleContextForm;
+		const context = PROJECT_WORKSPACES_V2 ? contextSnapshot?.payload : enrichedContext;
 		const baseContext = {
 			requirements: requirementsOverride,
 			app_link: appLink || null,
@@ -1040,18 +1077,17 @@ export default function App() {
 						.filter(Boolean)
 				: null,
 			notes: contextNotes || null,
-			execution_prerequisites:
-				enrichedContext?.execution_prerequisites || currentProject?.current_snapshots?.context?.payload?.execution_prerequisites || [],
+			execution_prerequisites: context?.execution_prerequisites || contextSnapshot?.payload?.execution_prerequisites || [],
 			project_id: currentProjectId || null,
 			base_project_revision: currentProjectRevision,
 		};
 
-		if (!enrichedContext?.grounded_context) {
+		if (!context?.grounded_context || (PROJECT_WORKSPACES_V2 && projectStageState.context?.stale)) {
 			return { ...baseContext, grounded_context: null };
 		}
 
 		const selectedIds = new Set(selectedArtifactSourceIds);
-		const groundedContext = enrichedContext.grounded_context;
+		const groundedContext = context.grounded_context;
 		return {
 			...baseContext,
 			grounded_context: {
@@ -2125,18 +2161,22 @@ export default function App() {
 	const createProjectAndNavigate = async (nameOverride = null, options = {}) => {
 		const createdProject = await createProject(nameOverride, options);
 		if (createdProject?.project_id) {
-			navigate(buildProjectPath(createdProject.project_id));
+			navigate(
+				PROJECT_WORKSPACES_V2 ? buildProjectWorkspacePath(createdProject.project_id, "inputs") : buildProjectPath(createdProject.project_id)
+			);
 		}
 		return createdProject;
 	};
 
 	const createWorkspaceProject = (name) => createProject(name, { throwOnError: true });
 
-	const openWorkspaceProject = ({ projectId, destination, path } = {}) => {
+	const openWorkspaceProject = ({ projectId, destination, path, created = false } = {}) => {
 		if (!projectId) {
 			return null;
 		}
-		navigate(path || buildProjectPath(projectId, destination));
+		navigate(
+			PROJECT_WORKSPACES_V2 && created ? buildProjectWorkspacePath(projectId, "inputs") : path || buildProjectPath(projectId, destination)
+		);
 		return projects.find((project) => project.project_id === projectId) || { project_id: projectId };
 	};
 
@@ -3513,6 +3553,10 @@ export default function App() {
 		withFeedback = false,
 		{ fullRegeneration = false, feedbackText = feedback, selectedTestCaseIds = [] } = {}
 	) => {
+		if (contextRefreshRequired) {
+			setStatus("Analyze context again in Inputs before generating tests.");
+			return false;
+		}
 		if (withFeedback && (testCaseActionDisabled || isGenerating || upstreamChangedForImpact || !testCases.length)) return false;
 		if (!withFeedback && !fullRegeneration && !normalGenerationReady) {
 			setStatus("Review current requirements and Use Cases before normal generation. Use the explicit draft action when available.");
@@ -3794,6 +3838,11 @@ export default function App() {
 		}
 	};
 
+	const orchestratorPath = (destination, action) =>
+		PROJECT_WORKSPACES_V2 && destination === PROJECT_DESTINATIONS.REQUIREMENTS && ["approve", "review", "refine"].includes(action)
+			? buildProjectWorkspacePath(currentProjectId, "review")
+			: buildProjectPath(currentProjectId, destination);
+
 	const handleOrchestratorAction = async (recommendation) => {
 		const action = recommendation?.action;
 		if (!recommendation?.enabled) {
@@ -3803,7 +3852,7 @@ export default function App() {
 		}
 		const destination = resolveOrchestratorDestination(recommendation);
 		if (currentProjectId && destination) {
-			navigate(buildProjectPath(currentProjectId, destination));
+			navigate(orchestratorPath(destination, action));
 		}
 
 		if (action === "analyze_impact") {
@@ -3857,7 +3906,7 @@ export default function App() {
 		if (!destination) {
 			return false;
 		}
-		navigate(buildProjectPath(currentProjectId, destination));
+		navigate(orchestratorPath(destination, recommendation.action));
 		return true;
 	};
 
@@ -4194,12 +4243,14 @@ export default function App() {
 			setStatus("Open a QA project before analyzing context.");
 			return;
 		}
+		if (PROJECT_WORKSPACES_V2 && imports.preview) return;
 		setIsAnalyzingContext(true);
 		setContextAnalysisError("");
 		setStatus("Analyzing context artifacts...");
 		try {
-			const payload = buildContextPayload();
-			if (payload.grounded_context && contextSourceInputs(payload) !== contextSourceInputs(enrichedContext)) {
+			const payload = buildContextPayload(requirements, { saveInputs: true });
+			const previousContext = PROJECT_WORKSPACES_V2 ? contextSnapshot?.payload : enrichedContext;
+			if (payload.grounded_context && contextSourceInputs(payload) !== contextSourceInputs(previousContext)) {
 				payload.grounded_context = null;
 			}
 			const fingerprint = JSON.stringify([operationScope, payload]);
@@ -4242,6 +4293,7 @@ export default function App() {
 			}
 			if (!data) throw new Error("Context analysis could not be confirmed. Retry with the same inputs.");
 			clearAttempt();
+			if (PROJECT_WORKSPACES_V2) contextDraft.clear({ keepVisible: true });
 			setEnrichedContext(data);
 			setSelectedArtifactSourceIds((data.grounded_context?.artifact_sources || []).map((source) => source.id));
 			await refreshCurrentProject({ hydrate: false, operationScope });
@@ -4258,6 +4310,38 @@ export default function App() {
 			if (isProjectOperationCurrent(operationScope)) {
 				setIsAnalyzingContext(false);
 			}
+		}
+	};
+
+	const saveTestingIntent = async (testingIntent, baseRevision) => {
+		const operationScope = captureProjectOperationScope();
+		if (!operationScope || operationScope.projectId !== currentProjectId)
+			throw new Error("Open the project before saving the testing objective.");
+		if (imports.preview) throw new Error("Finish the source comparison before saving the testing objective.");
+		if (isProjectOperationCurrent(testingIntentSave.current)) throw new Error("The testing objective is already saving.");
+		testingIntentSave.current = operationScope;
+		try {
+			const response = await apiRequest(PROJECT_API_PATHS.project(operationScope.projectId), {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ testing_intent: testingIntent, base_project_revision: baseRevision }),
+			});
+			if (!response.ok) {
+				const error = new Error(await parseApiError(response, "Could not save the testing objective."));
+				error.status = response.status;
+				throw error;
+			}
+			const project = await response.json();
+			if (!isProjectOperationCurrent(operationScope) || !isLatestProjectRevision(project.project_id, project.current_revision)) {
+				throw new Error("Project changed while saving. Reload the current project to check the saved objective.");
+			}
+			recordProjectRevision(project.project_id, project.current_revision);
+			setCurrentProject(project);
+			invalidateWorkspaceProject(project.project_id, project.current_revision);
+			void loadProjectOrchestrator(project.project_id, { silent: true, operationScope });
+			return project;
+		} finally {
+			if (testingIntentSave.current === operationScope) testingIntentSave.current = null;
 		}
 	};
 
@@ -4331,6 +4415,9 @@ export default function App() {
 	};
 	const goNext = () => moveProjectStep(1);
 	const requirementsRoute = route.destination === PROJECT_DESTINATIONS.REQUIREMENTS;
+	const inputsSources = PROJECT_WORKSPACES_V2 && route.workspaceRoute && requirementsRoute && route.workspace === "inputs";
+	const reviewScope = PROJECT_WORKSPACES_V2 && requirementsRoute && route.workspace === "review";
+	const openScope = () => navigate(buildProjectWorkspacePath(navigationProjectId, "review"));
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
 	const openTraceabilityCase = (path, target) => {
 		navigate(`${location.pathname}${location.search}${location.hash}`, {
@@ -4353,13 +4440,19 @@ export default function App() {
 	};
 	const reviewRequirementImport = async (action, payload) => {
 		const completed = await imports.mutate(action, payload);
-		if (!completed || action === "compare") return;
+		if (!completed || action === "compare") return completed;
 		setRequirementSetup({ projectId: navigationProjectId, open: action === "cancel" && !requirements.length });
-		setRequirementFocus({ projectId: navigationProjectId, target: action === "apply" ? "review" : "import" });
+		setRequirementFocus({ projectId: navigationProjectId, target: action === "apply" ? (inputsSources ? "scope" : "review") : "import" });
+		return completed;
 	};
 	const focusRequirementTarget = useCallback(() => {
 		if (!requirementsRoute || imports.preview || requirementFocus?.projectId !== navigationProjectId) return;
-		const target = requirementFocus.target === "review" ? requirementReviewHeading.current : requirementImportControl.current;
+		const target =
+			requirementFocus.target === "scope"
+				? reviewScopeAction.current
+				: requirementFocus.target === "review"
+					? requirementReviewHeading.current
+					: requirementImportControl.current;
 		if (!target) return;
 		target.focus({ preventScroll: true });
 		target.scrollIntoView({ block: "nearest" });
@@ -4639,11 +4732,13 @@ export default function App() {
 								identity={currentUser?.sub || ""}
 								request={apiRequest}
 								navigate={navigate}
+								scopePath={PROJECT_WORKSPACES_V2 ? buildProjectWorkspacePath(navigationProjectId, "review") : undefined}
 								onDecisionCommitted={handleUseCaseReviewCommitted}
 								onGenerated={handleUseCasesGenerated}
 								generationDisabled={testCaseActionDisabled || isGenerating}
+								contextRefreshRequired={contextRefreshRequired}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
-								onBack={goPrev}
+								onBack={PROJECT_WORKSPACES_V2 ? openScope : goPrev}
 								onNext={goNext}
 							/>
 						) : (
@@ -4655,12 +4750,12 @@ export default function App() {
 								tabIndex={-1}
 							>
 								<ProjectPageHeader
-									title={activeProjectDestinationLabel}
+									title={inputsSources ? "Inputs" : reviewScope ? "Review scope" : activeProjectDestinationLabel}
 									compact={compactReview}
 									project={currentProject}
 									navigate={navigate}
 									actions={
-										requirementsRoute && !imports.preview ? (
+										requirementsRoute && !reviewScope && !imports.preview ? (
 											<div className="workbench-actions">
 												{imports.pending.length === 1 && (
 													<Button
@@ -4693,8 +4788,12 @@ export default function App() {
 												>
 													{requirementSetupOpen ? "Hide import setup" : "Import requirements"}
 												</Button>
-												{requirements.length > 0 &&
-													(reviewPendingRequirementCount > 0 ? (
+												{inputsSources ? (
+													<Button ref={reviewScopeAction} size="compact" onClick={openScope} disabled={!requirements.length}>
+														Review scope
+													</Button>
+												) : requirements.length > 0 ? (
+													reviewPendingRequirementCount > 0 ? (
 														<Button size="compact" onClick={focusPendingRequirements}>
 															Review pending requirements
 														</Button>
@@ -4702,8 +4801,17 @@ export default function App() {
 														<Button size="compact" onClick={goNext}>
 															Continue to Context
 														</Button>
-													))}
+													)
+												) : null}
 											</div>
+										) : reviewScope && !imports.preview ? (
+											<Button
+												size="compact"
+												onClick={() => navigate(buildProjectWorkspacePath(navigationProjectId, "review", "scenarios"))}
+												disabled={!hasApprovedGenerationScope(currentProject)}
+											>
+												Review scenarios
+											</Button>
 										) : route.destination === "test-cases" && !savedCaseLink ? (
 											<div className="workbench-actions">
 												{testReviewRoute && testCases.length > 0 && exportGateLocked && (
@@ -4736,7 +4844,7 @@ export default function App() {
 									}
 								/>
 
-								{!savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
+								{!inputsSources && !savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}
 										compact={compactReview}
@@ -4745,13 +4853,14 @@ export default function App() {
 										onUpdated={() => openProject(navigationProjectId, { silent: true })}
 									/>
 								)}
-								{!savedCaseLink && ["requirements", "test-cases"].includes(route.destination) && (
+								{!inputsSources && !reviewScope && !savedCaseLink && ["requirements", "test-cases"].includes(route.destination) && (
 									<ClarificationScopeNotice
 										project={currentProject}
-										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
+										onOpen={() => (PROJECT_WORKSPACES_V2 ? openScope() : navigate(buildProjectPath(navigationProjectId, "context")))}
 									/>
 								)}
-								{["requirements", "test-cases", "automation"].includes(route.destination) &&
+								{!inputsSources &&
+									["requirements", "test-cases", "automation"].includes(route.destination) &&
 									!(requirementsRoute && (requirements.length || imports.preview)) &&
 									!savedCaseLink &&
 									!(testReviewRoute && testCases.length) && (
@@ -4772,7 +4881,8 @@ export default function App() {
 									hidden={
 										viewingSavedCase ||
 										(route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2) ||
-										(requirementsRoute && Boolean(imports.preview))
+										(requirementsRoute && Boolean(imports.preview)) ||
+										inputsSources
 									}
 									compact={compactReview}
 									hidePrimary={Boolean(
@@ -4790,8 +4900,8 @@ export default function App() {
 									onAction={handleOrchestratorAction}
 								/>
 
-								<div className="tab-content">
-									{activeTab === 0 && (
+								<div className={inputsSources && !imports.preview ? "tab-content project-intake" : "tab-content"}>
+									{activeTab === 0 && !reviewScope && (
 										<section className="panel requirement-workspace" id="requirement-import-setup" hidden={!requirementSetupOpen}>
 											<h2 className="panel-title">Upload Requirements</h2>
 											<p className="panel-description">
@@ -5181,11 +5291,12 @@ export default function App() {
 											)}
 										</section>
 									)}
-									{activeTab === 0 && imports.preview && (
+									{activeTab === 0 && !reviewScope && imports.preview && (
 										<>
 											<RequirementImportReview
 												key={`${imports.preview.import_id}:${imports.preview.base_project_revision}`}
 												preview={imports.preview}
+												identity={PROJECT_WORKSPACES_V2 ? currentUser?.sub : ""}
 												revision={currentProjectRevision}
 												busy={imports.busy}
 												error={imports.error}
@@ -5197,7 +5308,16 @@ export default function App() {
 											)}
 										</>
 									)}
-									{activeTab === 0 && !imports.preview && (
+									{reviewScope && imports.preview && (
+										<p role="status">
+											A source comparison is open. Finish or cancel it in{" "}
+											<RouteLink to={buildProjectWorkspacePath(navigationProjectId, "inputs")} navigate={navigate}>
+												Inputs
+											</RouteLink>{" "}
+											before reviewing the scope.
+										</p>
+									)}
+									{activeTab === 0 && !inputsSources && !imports.preview && (
 										<section className="panel requirement-workspace">
 											{imports.error && <p role="alert">{imports.error}</p>}
 											{imports.message && <p role="status">{imports.message}</p>}
@@ -5207,6 +5327,7 @@ export default function App() {
 												headingRef={requirementReviewHeading}
 												reviewRequest={requirementReviewRequest?.projectId === navigationProjectId ? requirementReviewRequest : null}
 												requirements={requirements}
+												scoped={reviewScope}
 												approvedRequirementCount={approvedRequirementCount}
 												loadHistory={(uid) => imports.read(`/projects/${currentProjectId}/requirements/${uid}/history`)}
 												retiredRequirements={currentProject?.current_snapshots?.requirements?.payload?.retired_requirements || []}
@@ -5216,13 +5337,24 @@ export default function App() {
 												onApproveNonRejected={() =>
 													bulkUpdateRequirementReviewStatus(
 														"Approved",
-														(requirement) => getRequirementReviewStatus(requirement) !== "Rejected"
+														(requirement) =>
+															getRequirementReviewStatus(requirement) !== "Rejected" &&
+															(!reviewScope || !["open", "deferred", "excluded"].includes(requirement.clarification_status))
 													)
 												}
 												onMarkAllNeedsReview={() => bulkUpdateRequirementReviewStatus("Needs Review")}
 												onReviewStatusChange={updateRequirementReviewStatus}
 												onQualityFlagToggle={toggleRequirementQualityFlag}
 											/>
+
+											{reviewScope && (
+												<ProjectSyncPanel
+													key={`scope-sync-${navigationProjectId}`}
+													project={currentProject}
+													request={apiRequest}
+													onUpdated={() => openProject(navigationProjectId, { silent: true })}
+												/>
+											)}
 
 											{hasJiraRequirements && (
 												<div className="jira-sync-panel">
@@ -5473,7 +5605,10 @@ export default function App() {
 													/>
 													<div className="feedback-actions">
 														<Button
-															onClick={() => parseRequirements(true)}
+															onClick={() => {
+																if (reviewScope) navigate(buildProjectWorkspacePath(navigationProjectId, "inputs"));
+																void parseRequirements(true);
+															}}
 															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
 															className="feedback-button"
 														>
@@ -5485,7 +5620,7 @@ export default function App() {
 										</section>
 									)}
 
-									{activeTab === 0 && (requirements.length > 0 || imports.preview) && (
+									{activeTab === 0 && !inputsSources && (requirements.length > 0 || imports.preview) && (
 										<div className="workbench-support">
 											<GenerationGuidance
 												compact
@@ -5497,34 +5632,46 @@ export default function App() {
 										</div>
 									)}
 
-									{activeTab === 1 && (
+									{inputsSources && imports.error && <p role="alert">{imports.error}</p>}
+									{inputsSources && imports.message && <p role="status">{imports.message}</p>}
+									{inputsSources && (
+										<TestingIntentPanel
+											project={currentProject}
+											identity={currentUser?.sub || ""}
+											onSave={saveTestingIntent}
+											disabled={authActionDisabled || Boolean(imports.preview) || isAnalyzingContext}
+										/>
+									)}
+									{(activeTab === 1 || inputsSources) && (
 										<ContextInputsPanel
 											project={currentProject}
 											request={apiRequest}
 											projectId={navigationProjectId}
 											prerequisiteSearch={new URLSearchParams(location.search).has("prerequisite") ? location.search : ""}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
-											appLink={appLink}
-											setAppLink={setAppLink}
-											prototypeLink={prototypeLink}
-											setPrototypeLink={setPrototypeLink}
-											diagramLinks={diagramLinks}
-											setDiagramLinks={setDiagramLinks}
-											imageLinks={imageLinks}
-											setImageLinks={setImageLinks}
-											contextNotes={contextNotes}
-											setContextNotes={setContextNotes}
+											{...visibleContextForm}
+											setAppLink={PROJECT_WORKSPACES_V2 ? setContextDraftField("appLink") : setAppLink}
+											setPrototypeLink={PROJECT_WORKSPACES_V2 ? setContextDraftField("prototypeLink") : setPrototypeLink}
+											setDiagramLinks={PROJECT_WORKSPACES_V2 ? setContextDraftField("diagramLinks") : setDiagramLinks}
+											setImageLinks={PROJECT_WORKSPACES_V2 ? setContextDraftField("imageLinks") : setImageLinks}
+											setContextNotes={PROJECT_WORKSPACES_V2 ? setContextDraftField("contextNotes") : setContextNotes}
+											contextDraft={PROJECT_WORKSPACES_V2 ? contextDraft : null}
+											contextDraftChanged={contextDraftChanged}
+											contextStale={Boolean(projectStageState.context?.stale)}
+											contextSaveBlocked={PROJECT_WORKSPACES_V2 && Boolean(imports.preview)}
+											embedded={inputsSources}
 											hasContextInputs={hasContextInputs}
 											analyzeContext={analyzeContext}
 											isAnalyzingContext={isAnalyzingContext}
 											contextAnalysisError={contextAnalysisError}
 											authActionDisabled={authActionDisabled}
-											enrichedContext={enrichedContext}
+											enrichedContext={PROJECT_WORKSPACES_V2 ? contextSnapshot?.payload : enrichedContext}
 											resetContextAnalysis={resetContextAnalysis}
-											selectedArtifactSourceIds={selectedArtifactSourceIds}
-											setSelectedArtifactSourceIds={setSelectedArtifactSourceIds}
+											setSelectedArtifactSourceIds={
+												PROJECT_WORKSPACES_V2 ? setContextDraftField("selectedArtifactSourceIds") : setSelectedArtifactSourceIds
+											}
 											goPrev={goPrev}
-											goNext={goNext}
+											goNext={PROJECT_WORKSPACES_V2 ? openScope : goNext}
 										/>
 									)}
 

@@ -19,10 +19,12 @@ export default function UseCaseReviewPage({
 	identity,
 	request,
 	navigate,
+	scopePath,
 	onDecisionCommitted,
 	onReloadLatest,
 	onGenerated,
 	generationDisabled = false,
+	contextRefreshRequired = false,
 	onBack,
 	onNext,
 }) {
@@ -44,7 +46,7 @@ export default function UseCaseReviewPage({
 	const requirementsSnapshot = project?.current_snapshots?.requirements || null;
 	const requirementsState = project?.stage_state?.requirements || null;
 	const requirementsReady = hasApprovedGenerationScope(project);
-	const generationAllowed = requirementsReady && project?.status === "active" && !generationDisabled;
+	const generationAllowed = requirementsReady && project?.status === "active" && !generationDisabled && !contextRefreshRequired;
 	const responseStageState = review.response?.use_cases_state;
 	const effectiveStageState = responseStageState?.current_snapshot_id === snapshot?.snapshot_id ? responseStageState : stageState;
 	const latestHumanReview = effectiveStageState?.metadata?.latest_human_review;
@@ -128,15 +130,24 @@ export default function UseCaseReviewPage({
 				/>
 			)}
 
-			<ClarificationScopeNotice project={project} onOpen={() => navigate(buildProjectPath(projectId, "context"))} />
+			<ClarificationScopeNotice project={project} onOpen={() => navigate(scopePath || buildProjectPath(projectId, "context"))} />
 			{!requirementsReady && snapshot ? (
 				<p>
 					Approve the current requirements before regenerating.{" "}
-					<RouteLink to={buildProjectPath(projectId, PROJECT_DESTINATIONS.REQUIREMENTS)} navigate={navigate}>
-						Open Requirements
+					<RouteLink to={scopePath || buildProjectPath(projectId, PROJECT_DESTINATIONS.REQUIREMENTS)} navigate={navigate}>
+						{scopePath ? "Review scope" : "Open Requirements"}
 					</RouteLink>
 				</p>
 			) : null}
+			{contextRefreshRequired && (
+				<p role="status">
+					Saved context is stale.{" "}
+					<RouteLink to={buildProjectPath(projectId, PROJECT_DESTINATIONS.CONTEXT)} navigate={navigate}>
+						Analyze context again
+					</RouteLink>{" "}
+					before generating scenarios.
+				</p>
+			)}
 			{requirementsReady && generationDisabled ? (
 				<p>Use Cases generation is unavailable while generation access is locked or another workflow is busy.</p>
 			) : null}
