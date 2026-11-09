@@ -13,6 +13,7 @@ _EXCEL_CELL_LINE_FEEDS = 253
 _EXCEL_CONTINUATION_UNITS = 16_000
 _EXCEL_ESCAPE_MARKER = re.compile(r"_(?=x[0-9a-f]{4}_)", re.IGNORECASE)
 _XML_UNSAFE_TEXT = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+_EXACT_STEPS_HEADER = "Exact Steps (JSON)"
 
 
 def export_to_jira(payload: JiraExportInput) -> JiraExportResponse:
@@ -64,7 +65,11 @@ def _excel_text_parts(value: str):
     yield value[start:]
 
 
-def export_to_csv(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] | None = None) -> str:
+def _step_records(test_case: TestCase) -> list[dict[str, int | str | None]]:
+    return [{"step": step.step, "action": step.action, "expected": step.expected, "test_data": step.test_data} for step in test_case.steps]
+
+
+def export_to_csv(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] | None = None, include_exact_steps: bool = True) -> str:
     """Export test cases to CSV format."""
     output = io.StringIO()
 
@@ -91,6 +96,8 @@ def export_to_csv(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] 
 
     audit_cells = _audit_cells(audit_metadata)
     headers.extend(audit_cells)
+    if include_exact_steps:
+        headers.append(_EXACT_STEPS_HEADER)
     writer = csv.writer(output, quoting=csv.QUOTE_ALL)
     writer.writerow(headers)
 
@@ -117,12 +124,15 @@ def export_to_csv(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] 
             ", ".join(tc.source_refs or []),
             ", ".join(tc.tags) if tc.tags else "",
         ]
-        writer.writerow([_spreadsheet_text(value) for value in [*row, *audit_cells.values()]])
+        cells = [*row, *audit_cells.values()]
+        if include_exact_steps:
+            cells.append(json.dumps(_step_records(tc), separators=(",", ":")))
+        writer.writerow([_spreadsheet_text(value) for value in cells])
 
     return output.getvalue()
 
 
-def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] | None = None) -> bytes:
+def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] | None = None, include_exact_steps: bool = True) -> bytes:
     """Export test cases to Excel format (XLSX)."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
@@ -190,6 +200,8 @@ def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any
         "Source Refs",
         "Tags",
     ]
+    if include_exact_steps:
+        headers.append(_EXACT_STEPS_HEADER)
 
     # Styling
     header_font = Font(bold=True, color="FFFFFF")
@@ -231,6 +243,8 @@ def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any
             ", ".join(tc.source_refs or []),
             ", ".join(tc.tags) if tc.tags else "",
         ]
+        if include_exact_steps:
+            data.append(json.dumps(_step_records(tc), separators=(",", ":")))
 
         for col, value in enumerate(data, 1):
             cell = ws.cell(row=row_idx, column=col)
@@ -244,6 +258,8 @@ def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any
 
     # Adjust column widths
     column_widths = [12, 40, 50, 10, 15, 12, 40, 60, 40, 30, 15, 18, 20, 24, 24, 24, 30]
+    if include_exact_steps:
+        column_widths.append(45)
     for col, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
 
@@ -312,7 +328,7 @@ def export_to_json(test_cases: List[TestCase], *, audit_metadata: dict[str, Any]
                 "type": tc.type,
                 "status": tc.status,
                 "preconditions": tc.preconditions,
-                "steps": [{"step": s.step, "action": s.action, "expected": s.expected, "test_data": s.test_data} for s in tc.steps],
+                "steps": _step_records(tc),
                 "expected_result": tc.expected_result,
                 "test_data": tc.test_data,
                 "estimated_time": tc.estimated_time,

@@ -27,6 +27,8 @@ from ..services.workflow_project_service import (
 
 router = APIRouter()
 
+_EXACT_STEPS_LAYOUT = "exact-steps-v1"
+
 
 def _get_request_id(request: Request) -> str:
     return str(getattr(request.state, "request_id", "") or uuid4())
@@ -100,6 +102,7 @@ def _publish_project_export(
     result_metadata: dict[str, Any],
     key: str,
     fingerprint: str,
+    export_layout: str | None,
 ):
     operation = f"export.{export_format}"
     try:
@@ -152,6 +155,7 @@ def _publish_project_export(
                 "evidence_count": len(evidence["evidence_refs"]),
                 "export_request_fingerprint": fingerprint,
                 "export_audit_fingerprint": digest(audit_metadata),
+                **({"export_layout": export_layout} if export_layout else {}),
             },
             base_project_revision=payload.base_project_revision,
             idempotency_key=key,
@@ -281,9 +285,18 @@ def _file_export(
 ) -> Response:
     operation = f"export.{export_format}"
     request_id = _get_request_id(request)
+    export_layout = _EXACT_STEPS_LAYOUT if export_format in {"csv", "excel"} else None
 
     def response(content):
         return Response(content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename=test_cases.{extension}"})
+
+    def render_content(audit, layout):
+        options = {"include_exact_steps": layout == _EXACT_STEPS_LAYOUT} if export_layout else {}
+        return render(payload.test_cases, audit_metadata=audit, **options)
+
+    def render_saved_export(receipt):
+        audit = _replay_export_metadata(receipt, payload, current_user, fingerprint)
+        return render_content(audit, receipt.metadata.get("export_layout"))
 
     project = None
     if payload.project_id:
@@ -291,20 +304,18 @@ def _file_export(
         fingerprint = digest(payload.model_dump(mode="json"))
         receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
         if receipt:
-            audit = _replay_export_metadata(receipt, payload, current_user, fingerprint)
-            return response(render(payload.test_cases, audit_metadata=audit))
+            return response(render_saved_export(receipt))
         project = _load_export_project(payload.project_id, current_user)
         if payload.base_project_revision != project.current_revision:
             # A duplicate may have committed between the receipt read and the project read.
             receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
             if receipt:
-                audit = _replay_export_metadata(receipt, payload, current_user, fingerprint)
-                return response(render(payload.test_cases, audit_metadata=audit))
+                return response(render_saved_export(receipt))
 
     audit = build_export_evidence(payload, project).model_dump(mode="json")
     workflow_run_id = start_workflow_run(operation=operation, actor=current_user, request_id=request_id, metadata=audit)
     try:
-        content = render(payload.test_cases, audit_metadata=audit)
+        content = render_content(audit, export_layout)
         result_metadata = {**audit, ("byte_count" if isinstance(content, bytes) else "content_length"): len(content)}
         if payload.project_id:
             snapshot = _publish_project_export(
@@ -316,6 +327,7 @@ def _file_export(
                 result_metadata=result_metadata,
                 key=key,
                 fingerprint=fingerprint,
+                export_layout=export_layout,
             )
             _check_export_fingerprint(snapshot, fingerprint)
         else:
@@ -350,8 +362,7 @@ def _file_export(
         record_workflow_completed(workflow_run_id, "completed")
     else:
         complete_workflow_run(workflow_run_id, status="completed", metadata={"reused_snapshot_id": snapshot.snapshot_id})
-        audit = _replay_export_metadata(snapshot, payload, current_user, fingerprint)
-        content = render(payload.test_cases, audit_metadata=audit)
+        content = render_saved_export(snapshot)
     return response(content)
 
 

@@ -53,6 +53,15 @@ reports marked stale by a preview regain their status when the saved sources
 and run evidence can be verified. An exact retry of a current file export
 returns the original audit and file after a preview, with no new publication.
 
+New CSV and Excel exports include an **Exact Steps (JSON)** column after
+the existing columns. Read the column as a JSON array in saved step order.
+Each entry contains the step number, action, expectation and test data.
+`null` means no data was supplied and `""` means the step explicitly uses
+an empty value. In Excel, if the cell links to **Long Values**, join its Text
+parts in numeric Part order. If Encoding is **JSON string**, decode the
+joined text as a JSON string first, then parse the step array. Saved exports
+replay the layout recorded at publication.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

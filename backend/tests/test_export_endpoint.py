@@ -199,6 +199,43 @@ class ExportEndpointTests(unittest.TestCase):
         self.assertTrue(append.call_args.kwargs["approved"])
         self.assertEqual(metadata["human_review_status"], "unavailable")
 
+    def test_exact_spreadsheet_steps_match_the_saved_json_export(self):
+        steps = [
+            {"step": 4, "action": "Clear field", "expected": "Value is empty", "test_data": ""},
+            {"step": 7, "action": "Read label", "expected": "Label is visible", "test_data": None},
+            {
+                "step": 9,
+                "action": '=Set field, "quoted"\ncontinued',
+                "expected": "Saved -> Expected: [Data: ] 🧪",
+                "test_data": "=SUM(1,2)\r\n  ]\t\n",
+            },
+        ]
+        case = {**_test_case(), "steps": steps}
+        project = _project()
+        project.current_snapshots["test_cases"].payload["test_cases"] = [case]
+        payload = _payload(test_cases=[case])
+        for fmt in ("json", "csv", "excel"):
+            with self.subTest(format=fmt):
+                response, append, _ = self.export(fmt, payload=payload, project=project)
+                self.assertEqual(response.status_code, 200, response.status_code)
+                if fmt == "json":
+                    self.assertEqual(response.json()["test_cases"][0]["steps"], steps)
+                    self.assertNotIn("export_layout", append.call_args.kwargs["metadata"])
+                elif fmt == "csv":
+                    reader = csv.DictReader(io.StringIO(response.text))
+                    row = next(reader)
+                    self.assertEqual(reader.fieldnames[-1], "Exact Steps (JSON)")
+                    self.assertTrue(row["Title"].startswith("'="))
+                    self.assertEqual(json.loads(row["Exact Steps (JSON)"]), steps)
+                else:
+                    sheet = load_workbook(io.BytesIO(response.content))["Test Cases"]
+                    self.assertEqual(sheet["H1"].value, "Steps")
+                    self.assertEqual(sheet["R1"].value, "Exact Steps (JSON)")
+                    self.assertEqual(sheet["R2"].data_type, "s")
+                    self.assertEqual(json.loads(sheet["R2"].value), steps)
+                if fmt != "json":
+                    self.assertEqual(append.call_args.kwargs["metadata"]["export_layout"], "exact-steps-v1")
+
     def test_forged_approval_empty_reason_and_unknown_review_cannot_bypass_draft_gate(self):
         for variant in ("override_off", "empty_reason", "unknown_review", "incomplete_approved"):
             project = _project(variant == "incomplete_approved")
@@ -381,6 +418,8 @@ class ExportPublicationTests(unittest.TestCase):
                 self.assertEqual(first.status_code, 200, first.status_code)
                 after = self.project()
                 snapshot = after.current_snapshots["reports"]
+                if fmt != "json":
+                    self.assertEqual(snapshot.metadata["export_layout"], "exact-steps-v1")
                 self.assertEqual(after.current_revision, before.current_revision + 1)
                 self.assertEqual(after.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
                 event = next(event for event in self.audit("usage_events") if event["event_id"] == snapshot.source_event_id)
@@ -408,6 +447,51 @@ class ExportPublicationTests(unittest.TestCase):
         self.assertEqual(self.post().status_code, 409)
         self.assertEqual(len(self.audit("usage_events")), 3)
         self.assertEqual(len(self.audit("workflow_runs")), 3)
+
+    def test_legacy_spreadsheets_keep_their_layout_after_replay_and_publication_race(self):
+        publish = routes._publish_project_export
+        for fmt in ("csv", "excel"):
+            with self.subTest(format=fmt):
+                render = getattr(routes, f"export_to_{fmt}")
+                before = self.project()
+
+                def render_legacy(cases, *, audit_metadata, include_exact_steps):
+                    return render(cases, audit_metadata=audit_metadata, include_exact_steps=False)
+
+                def publish_legacy(**kwargs):
+                    return publish(**{**kwargs, "export_layout": None})
+
+                with (
+                    patch.object(routes, f"export_to_{fmt}", side_effect=render_legacy),
+                    patch.object(routes, "_publish_project_export", side_effect=publish_legacy),
+                ):
+                    first = self.post(fmt, base_project_revision=before.current_revision)
+                self.assertEqual(first.status_code, 200)
+                after = self.project()
+                self.assertNotIn("export_layout", after.current_snapshots["reports"].metadata)
+                written = deepcopy(self.store)
+                replay = self.post(fmt, base_project_revision=before.current_revision)
+                self.assertEqual(self.store, written)
+
+                # A parallel worker read the old revision before the legacy receipt committed.
+                with (
+                    patch.object(routes, "_find_export_receipt", return_value=None),
+                    patch.object(routes, "_load_export_project", side_effect=[before, after]),
+                ):
+                    raced = self.post(fmt, base_project_revision=before.current_revision)
+                self.assertEqual(self.project(), after)
+                for restored in (replay, raced):
+                    self.assertEqual(restored.status_code, 200)
+                    if fmt == "csv":
+                        self.assertEqual(restored.content, first.content)
+                        self.assertNotIn("Exact Steps (JSON)", next(csv.reader(io.StringIO(restored.text))))
+                    else:
+                        expected, actual = (load_workbook(io.BytesIO(response.content)) for response in (first, restored))
+                        self.assertEqual(actual.sheetnames, expected.sheetnames)
+                        for name in expected.sheetnames:
+                            self.assertEqual(list(actual[name].values), list(expected[name].values))
+                        self.assertEqual(actual["Test Cases"].max_column, 17)
+        self.assertEqual(len(self.audit("usage_events")), 2)
 
     def test_legacy_preview_staleness_only_recovers_with_current_evidence(self):
         first = self.post()
@@ -592,3 +676,10 @@ class ExcelExportValueTests(unittest.TestCase):
             self.assertEqual(self.continued_value(workbook, "Test Cases", address), expected)
         fragments = [row[-1] for row in workbook["Long Values"].iter_rows(min_row=2) if row[1].value == "C7"]
         self.assertEqual((fragments[-1].value, fragments[-1].data_type), ("=SUM(1,2)", "s"))
+
+    def test_long_exact_step_data_can_be_reconstructed_from_excel(self):
+        steps = [{"step": 1, "action": 'Fill "Payload"', "expected": "Data saved", "test_data": "=SUM(1,2)\r\n🧪_x000D_" * 2000 + "\n"}]
+        case = TestCase(id="TC-long-data", title="Exact payload", steps=steps)
+        workbook = self.workbook(cases=[case])
+        self.assertEqual(json.loads(self.continued_value(workbook, "Test Cases", "R2")), steps)
+        self.assertFalse(any(cell.data_type == "f" for sheet in workbook for row in sheet for cell in row))
