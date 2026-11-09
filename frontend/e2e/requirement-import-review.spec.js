@@ -43,6 +43,7 @@ async function setup(
 		revision = 7,
 		failedApply = false,
 		extractionInterruption,
+		connector,
 		pendingOnLoad = false,
 		emptyBaseline = false,
 		sourceName = "TX-6",
@@ -71,7 +72,7 @@ async function setup(
 		project_id: ID,
 		base_project_revision: 7,
 		source_name: sourceName,
-		operation: "requirements.import.jira",
+		operation: connector === "azure-devops" ? "requirements.import.azure_devops" : "requirements.import.jira",
 		status: "pending",
 		created_at: when,
 		current_requirements: structuredClone(baseline),
@@ -118,13 +119,9 @@ async function setup(
 	await page.route(`**/projects/${ID}`, (route) => route.fulfill({ json: project }));
 	await page.route(`**/projects/${ID}/requirement-imports`, (route) => route.fulfill({ json: pending }));
 	const extractions = [];
-	await page.route("**/requirements/parse", (route) => {
+	const finishExtraction = (route, input) => {
 		const request = route.request();
-		const body = request.postData();
-		expect(body).toContain('name="import_mode"');
-		expect(body).toContain("review");
-		const boundary = request.headers()["content-type"].split("boundary=")[1];
-		extractions.push({ id: request.headers()["x-request-id"], body: body.replaceAll(boundary, "boundary") });
+		extractions.push({ id: request.headers()["x-request-id"], body: input });
 		if (extractions.length === 1 && extractionInterruption === "failed")
 			return route.fulfill({ status: 503, json: { detail: "Project persistence is unavailable." } });
 		pending = [preview];
@@ -135,7 +132,35 @@ async function setup(
 		if (extractions.length === 1 && extractionInterruption === "gateway")
 			return route.fulfill({ status: 504, contentType: "text/html", body: "<h1>Gateway timeout</h1>" });
 		return route.fulfill({ json: preview });
+	};
+	await page.route("**/requirements/parse", (route) => {
+		const request = route.request();
+		const body = request.postData();
+		expect(body).toContain('name="import_mode"');
+		expect(body).toContain("review");
+		const boundary = request.headers()["content-type"].split("boundary=")[1];
+		return finishExtraction(route, body.replaceAll(boundary, "boundary"));
 	});
+	if (connector) {
+		const isJira = connector === "jira";
+		const endpoints = isJira
+			? {
+					connection: { connected: true, connection: { site_url: "https://jira.example.test" } },
+					"projects?*": { projects: [{ project_id: "123", key: "QA", name: "QA Project" }] },
+					"projects/*/issue-types": { issue_types: [{ name: "Epic" }] },
+					"issues/search?*": { issues: [{ key: "QA-416", issue_type: "Epic", summary: "Synthetic Jira source" }] },
+				}
+			: {
+					connection: { connected: true, connection: { default_project: "QA Project" } },
+					"projects?*": { projects: [{ project_id: "123", name: "QA Project" }] },
+					"projects/*/work-item-types": { work_item_types: [{ name: "Feature" }] },
+					"work-items/search?*": { work_items: [{ work_item_id: 416, work_item_type: "Feature", title: "Synthetic Azure DevOps source" }] },
+				};
+		for (const [endpoint, payload] of Object.entries(endpoints)) {
+			await page.route(`**/integrations/${connector}/${endpoint}`, (route) => route.fulfill({ json: payload }));
+		}
+		await page.route(`**/integrations/${connector}/import`, (route) => finishExtraction(route, route.request().postDataJSON()));
+	}
 	await page.route(`**/projects/${ID}/requirement-imports/import-1`, (route) => {
 		pending = [];
 		return route.fulfill({ status: 204 });
@@ -268,6 +293,34 @@ test("an uncertain extraction keeps the request ID when the user retries the sam
 	expect(state.extractions).toEqual(Array(3).fill(state.extractions[0]));
 	expect(state.applies).toHaveLength(0);
 });
+
+for (const [connector, sourceLabel, buttonLabel, selector] of [
+	["jira", "JIRA Cloud", "Import QA-416", { epic_key: "QA-416" }],
+	["azure-devops", "Azure DevOps", "Import #416", { project: "QA Project", work_item_id: 416 }],
+]) {
+	test(`${sourceLabel} retries an uncertain reviewed import with the same selection and request ID`, { tag: "@p1" }, async ({ page }) => {
+		const state = await setup(page, { connector, extractionInterruption: "repeated-transport" });
+		await page.getByRole("button", { name: "Import requirements", exact: true }).click();
+		await page.getByRole("radio", { name: sourceLabel, exact: true }).check();
+		await page.locator("#requirement-import-setup").getByRole("button", { name: "Search", exact: true }).click();
+		const importButton = page.getByRole("button", { name: buttonLabel, exact: true });
+		await importButton.click();
+		await expect(page.getByRole("alert").filter({ hasText: "The requirements preview could not be confirmed" })).toBeVisible();
+		expect(state.extractions).toHaveLength(2);
+		await importButton.click();
+		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+		expect(state.extractions[0].id).toBeTruthy();
+		expect(state.extractions[0].body).toMatchObject({
+			...selector,
+			include_children: true,
+			import_mode: "review",
+			base_project_revision: 7,
+		});
+		expect(state.extractions).toEqual(Array(3).fill(state.extractions[0]));
+		expect(state.applies).toHaveLength(0);
+		expect(state.getProject().current_snapshots.requirements.payload.requirements).toHaveLength(8);
+	});
+}
 
 test("comparison displays verified original IDs and quotes before applying", async ({ page }) => {
 	await setup(page, {

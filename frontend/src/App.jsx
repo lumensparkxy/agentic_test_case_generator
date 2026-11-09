@@ -266,7 +266,7 @@ export default function App() {
 	const projectOperationUserRef = useRef("");
 	const workflowMainRef = useRef(null);
 	const requirementImportControl = useRef(null);
-	const requirementExtractionAttempt = useRef(null);
+	const requirementExtractionAttempts = useRef(new Map());
 	const requirementReviewHeading = useRef(null);
 	const [requirementSetup, setRequirementSetup] = useState(null);
 	const [requirementFocus, setRequirementFocus] = useState(null);
@@ -2701,6 +2701,66 @@ export default function App() {
 		}
 	);
 
+	const submitRequirementPreview = async ({ path, body, headers = {}, input, upload = null, operationScope, setBusy, pendingMessage }) => {
+		setBusy(true);
+		imports.setExtractionError("");
+		setStatus(pendingMessage);
+		try {
+			const fingerprint = JSON.stringify([operationScope, input]);
+			const attempts = requirementExtractionAttempts.current;
+			const prior = attempts.get(path);
+			const attempt =
+				prior?.fingerprint === fingerprint && prior.file === upload ? prior : { fingerprint, file: upload, requestId: createRequestId() };
+			attempts.set(path, attempt);
+			const clearAttempt = () => {
+				if (attempts.get(path) === attempt) attempts.delete(path);
+			};
+			const options = { method: "POST", headers: { ...headers, "X-Request-ID": attempt.requestId }, body };
+			const send = async () => {
+				const res = await apiRequest(path, options);
+				return { res, data: res.ok ? await res.json() : null };
+			};
+			let reply = await send().catch((error) => {
+				if (error instanceof TypeError || error instanceof SyntaxError) return null;
+				throw error;
+			});
+			const unconfirmed = async (response) => {
+				if (![502, 503, 504].includes(response.status)) return false;
+				const data = await response
+					.clone()
+					.json()
+					.catch(() => null);
+				return !data?.detail || data.detail.code === "requirement_extraction_unconfirmed";
+			};
+			if (!reply || (await unconfirmed(reply.res))) {
+				if (!isProjectOperationCurrent(operationScope)) return;
+				reply = await send();
+			}
+			const { res, data } = reply;
+			if (!res.ok) {
+				if (await unconfirmed(res)) throw new Error("The requirements preview could not be confirmed. Retry with the same inputs.");
+				clearAttempt();
+				throw new Error(await parseApiError(res, "Failed to prepare requirements"));
+			}
+			if (!isProjectOperationCurrent(operationScope)) return;
+			imports.accept(data);
+			clearAttempt();
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
+			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
+		} catch (error) {
+			if (isProjectOperationCurrent(operationScope)) {
+				const message =
+					error instanceof TypeError || error instanceof SyntaxError
+						? "The requirements preview could not be confirmed. Retry with the same inputs."
+						: error.message;
+				imports.setExtractionError(message);
+				setStatus(message);
+			}
+		} finally {
+			if (isProjectOperationCurrent(operationScope)) setBusy(false);
+		}
+	};
+
 	const importRequirementsFromJira = async () => {
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
@@ -2716,43 +2776,24 @@ export default function App() {
 			setStatus("Open a QA project before importing requirements.");
 			return;
 		}
-		setIsImportingFromJira(true);
-		setStatus("Importing requirements from JIRA...");
 		resetJiraSyncState();
-		try {
-			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			const res = await apiRequest("/integrations/jira/import", {
-				method: "POST",
-				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
-				body: JSON.stringify({
-					project_id: operationScope.projectId,
-					import_mode: "review",
-					base_project_revision: currentProjectRevision,
-					epic_key: selectedJiraIssueKey,
-					include_children: true,
-					workflow_settings: workflowSettingsPayload,
-				}),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to import requirements from JIRA");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			imports.accept(data);
-			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
-			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
-				setStatus(`JIRA import failed: ${error.message}`);
-			}
-		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
-				setIsImportingFromJira(false);
-			}
-		}
+		const input = {
+			project_id: operationScope.projectId,
+			import_mode: "review",
+			base_project_revision: currentProjectRevision,
+			epic_key: selectedJiraIssueKey,
+			include_children: true,
+			workflow_settings: buildWorkflowSettingsPayload(requirementWorkflowSettings),
+		};
+		await submitRequirementPreview({
+			path: "/integrations/jira/import",
+			body: JSON.stringify(input),
+			headers: { "Content-Type": "application/json" },
+			input,
+			operationScope,
+			setBusy: setIsImportingFromJira,
+			pendingMessage: "Importing requirements from JIRA...",
+		});
 	};
 
 	const importRequirementsFromAzureDevOps = async () => {
@@ -2774,44 +2815,25 @@ export default function App() {
 			setStatus("Open a QA project before importing requirements.");
 			return;
 		}
-		setIsImportingFromAzureDevOps(true);
-		setStatus("Importing requirements from Azure DevOps...");
 		resetAzureDevOpsSyncState();
-		try {
-			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			const res = await apiRequest("/integrations/azure-devops/import", {
-				method: "POST",
-				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
-				body: JSON.stringify({
-					project_id: operationScope.projectId,
-					import_mode: "review",
-					base_project_revision: currentProjectRevision,
-					project: selectedAzureDevOpsProject,
-					work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
-					include_children: true,
-					workflow_settings: workflowSettingsPayload,
-				}),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to import requirements from Azure DevOps");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			imports.accept(data);
-			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
-			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
-				setStatus(`Azure DevOps import failed: ${error.message}`);
-			}
-		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
-				setIsImportingFromAzureDevOps(false);
-			}
-		}
+		const input = {
+			project_id: operationScope.projectId,
+			import_mode: "review",
+			base_project_revision: currentProjectRevision,
+			project: selectedAzureDevOpsProject,
+			work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
+			include_children: true,
+			workflow_settings: buildWorkflowSettingsPayload(requirementWorkflowSettings),
+		};
+		await submitRequirementPreview({
+			path: "/integrations/azure-devops/import",
+			body: JSON.stringify(input),
+			headers: { "Content-Type": "application/json" },
+			input,
+			operationScope,
+			setBusy: setIsImportingFromAzureDevOps,
+			pendingMessage: "Importing requirements from Azure DevOps...",
+		});
 	};
 
 	const previewJiraSync = async (requirementsOverride = requirements, options = {}) => {
@@ -3075,93 +3097,35 @@ export default function App() {
 			setStatus("Open a QA project before parsing requirements.");
 			return;
 		}
-		setIsParsing(true);
-		imports.setExtractionError("");
-		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
 		resetIntegrationSyncState();
-		try {
-			const formData = new FormData();
-			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			const feedback = withFeedback ? reqFeedback : "";
-			const existing = feedback ? JSON.stringify(requirements) : "";
-			const upload = requirementSourceMode === "file" ? sourceFile : null;
-			const fingerprint = JSON.stringify([
-				operationScope,
+		const formData = new FormData();
+		const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
+		const feedback = withFeedback ? reqFeedback : "";
+		const existing = feedback ? JSON.stringify(requirements) : "";
+		if (sourceFile) formData.append("file", sourceFile);
+		if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
+		formData.append("project_id", operationScope.projectId);
+		formData.append("import_mode", "review");
+		if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
+		if (feedback) {
+			formData.append("feedback", feedback);
+			formData.append("existing_requirements", existing);
+		}
+		await submitRequirementPreview({
+			path: API_CONTRACT_ENDPOINTS.requirementsParse.path,
+			body: formData,
+			input: [
 				currentProjectRevision,
 				requirementSourceMode === "paste" ? pasteDraft.value : null,
 				workflowSettingsPayload,
 				feedback,
 				existing,
-			]);
-			const prior = requirementExtractionAttempt.current;
-			const attempt =
-				prior?.fingerprint === fingerprint && prior.file === upload ? prior : { fingerprint, file: upload, requestId: createRequestId() };
-			requirementExtractionAttempt.current = attempt;
-			const clearAttempt = () => {
-				if (requirementExtractionAttempt.current === attempt) requirementExtractionAttempt.current = null;
-			};
-			if (sourceFile) formData.append("file", sourceFile);
-			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
-			formData.append("project_id", operationScope.projectId);
-			formData.append("import_mode", "review");
-			if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
-			if (feedback) {
-				formData.append("feedback", feedback);
-				formData.append("existing_requirements", existing);
-			}
-			const options = {
-				method: "POST",
-				headers: { "X-Request-ID": attempt.requestId },
-				body: formData,
-			};
-			const send = async () => {
-				const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsParse.path, options);
-				return { res, data: res.ok ? await res.json() : null };
-			};
-			let reply = await send().catch((error) => {
-				if (error instanceof TypeError || error instanceof SyntaxError) return null;
-				throw error;
-			});
-			const unconfirmed = async (response) => {
-				if (![502, 503, 504].includes(response.status)) return false;
-				const data = await response
-					.clone()
-					.json()
-					.catch(() => null);
-				return !data?.detail || data.detail.code === "requirement_extraction_unconfirmed";
-			};
-			if (!reply || (await unconfirmed(reply.res))) {
-				if (!isProjectOperationCurrent(operationScope)) return;
-				reply = await send();
-			}
-			const { res, data } = reply;
-			if (!res.ok) {
-				if (await unconfirmed(res)) throw new Error("The requirements preview could not be confirmed. Retry with the same inputs.");
-				clearAttempt();
-				const errorMessage = await parseApiError(res, "Failed to parse requirements");
-				throw new Error(errorMessage);
-			}
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			imports.accept(data);
-			clearAttempt();
-			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
-			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
-				imports.setExtractionError(
-					error instanceof TypeError || error instanceof SyntaxError
-						? "The requirements preview could not be confirmed. Retry with the same inputs."
-						: error.message
-				);
-				setStatus(`Parse failed: ${error.message}`);
-			}
-		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
-				setIsParsing(false);
-			}
-		}
+			],
+			upload: requirementSourceMode === "file" ? sourceFile : null,
+			operationScope,
+			setBusy: setIsParsing,
+			pendingMessage: withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...",
+		});
 	};
 
 	const buildExecutionPayload = (casesOverride = testCases, { includeProject = true, operationScope = null } = {}) => {
@@ -4652,7 +4616,7 @@ export default function App() {
 												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
 												until you apply an update.
 											</p>
-											{imports.extractionError && (requirementSourceMode === "file" || requirementSourceMode === "paste") && (
+											{imports.extractionError && (
 												<Alert tone="danger" role="alert">
 													{imports.extractionError}
 												</Alert>
@@ -4665,7 +4629,10 @@ export default function App() {
 															name="requirement-source"
 															value={option.value}
 															checked={requirementSourceMode === option.value}
-															onChange={() => setRequirementSourceMode(option.value)}
+															onChange={() => {
+																setRequirementSourceMode(option.value);
+																imports.setExtractionError("");
+															}}
 														/>
 														<span className="choice-card-copy">
 															<span className="choice-card-title">{option.label}</span>

@@ -12,11 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import AuthUser, Requirement, RequirementsWorkflowResponse
 from app.contracts.billing import BillingAccount, BillingUserProfile
 from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementImportPreview, RequirementReviewsInput
-from app.routers import requirements as requirement_routes
+from app.routers import integrations_azure_devops, integrations_jira, requirements as requirement_routes
 from app.services.billing_service import BillingAccessContext
 from app.services.requirement_reconciliation import canonical_requirements, build_preview, reconcile
 from app.services.requirement_source_evidence import bind_document_evidence
 from app.services import requirement_import_service as service
+from app.services import requirement_import_publication as publication
 from app.agents.requirement_matching_agent import suggest_matches
 from app.main import app, get_current_user
 from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
@@ -415,7 +416,10 @@ class ImportPersistenceTests(unittest.TestCase):
                 }
             ],
         )
-        staged = service.stage_import(PID, ACTOR, 7, response, "requirements.parse")
+        saved = service.stage_extraction(
+            self.repo, PID, ACTOR, 7, response, "requirements.parse", "range-preview", {"fingerprint": "range"}, lambda transaction: None
+        )
+        staged = RequirementImportPreview.model_validate(saved)
         self.assertEqual(staged.source_evidence_findings, response.source_evidence_findings)
         self.assertEqual(staged.candidates[0].target_requirement_uid, staged.current_requirements[0].requirement_uid)
         self.assertEqual(staged.current_requirements[0].review_status, "Approved")
@@ -427,7 +431,17 @@ class ImportPersistenceTests(unittest.TestCase):
     def test_empty_extraction_and_stale_staging_fail_without_changes(self):
         before = deepcopy(self.store)
         with self.assertRaises(HTTPException):
-            service.stage_import(PID, ACTOR, 7, RequirementsWorkflowResponse(source_name="empty", raw_text="", requirements=[]), "requirements.parse")
+            service.stage_extraction(
+                self.repo,
+                PID,
+                ACTOR,
+                7,
+                RequirementsWorkflowResponse(source_name="empty", raw_text="", requirements=[]),
+                "requirements.parse",
+                "empty-preview",
+                {"fingerprint": "empty"},
+                lambda transaction: None,
+            )
         with self.assertRaises(HTTPException):
             self.repo.save(self.p.model_copy(update={"base_project_revision": 6}), ACTOR, [], {})
         self.assertEqual(before, self.store)
@@ -504,8 +518,7 @@ class ImportPersistenceTests(unittest.TestCase):
                     stack.enter_context(patch(f"{prefix}.start_workflow_run", return_value="test-intake"))
                     if module != "requirements":
                         stack.enter_context(patch(f"{prefix}.project_for", return_value=None))
-                    else:
-                        stack.enter_context(patch(f"{prefix}.record_billing_consumption"))
+                    stack.enter_context(patch.object(publication, "record_billing_consumption"))
                     stack.enter_context(patch(f"{prefix}.{extractor}", return_value=workflow))
                     persist = stack.enter_context(patch(f"{prefix}.persist_requirement_versions"))
                     response = client.post(url, **kwargs)
@@ -558,7 +571,7 @@ class ImportPersistenceTests(unittest.TestCase):
 
     def test_file_extraction_atomically_stages_and_replays_paid_preview(self):
         client, billing, workflow = self.extraction_client()
-        stage = requirement_routes.stage_extraction
+        stage = publication.stage_extraction
 
         def lose_commit_response(*args, **kwargs):
             stage(*args, **kwargs)
@@ -566,7 +579,7 @@ class ImportPersistenceTests(unittest.TestCase):
 
         with (
             patch.object(requirement_routes, "extract_requirements", return_value=workflow) as model,
-            patch.object(requirement_routes, "stage_extraction", side_effect=lose_commit_response),
+            patch.object(publication, "stage_extraction", side_effect=lose_commit_response),
         ):
             first = self._extract(client, "file-extraction")
             self.assertEqual(first.status_code, 200, first.text)
@@ -619,7 +632,7 @@ class ImportPersistenceTests(unittest.TestCase):
 
     def test_unconfirmed_extraction_preserves_completed_audit_until_exact_retry(self):
         client, billing, workflow = self.extraction_client()
-        stage = requirement_routes.stage_extraction
+        stage = publication.stage_extraction
 
         def lose_commit_response(*args, **kwargs):
             stage(*args, **kwargs)
@@ -627,7 +640,7 @@ class ImportPersistenceTests(unittest.TestCase):
 
         with patch.object(requirement_routes, "extract_requirements", return_value=workflow) as model:
             with (
-                patch.object(requirement_routes, "stage_extraction", side_effect=lose_commit_response),
+                patch.object(publication, "stage_extraction", side_effect=lose_commit_response),
                 patch.object(service.RequirementImportRepository, "find_extraction", side_effect=[None, RuntimeError("Receipt read failed")]),
             ):
                 unavailable = self._extract(client, "unconfirmed-file")
@@ -671,6 +684,88 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(self._rows(f"{project_path}/requirement_imports"), [value for key, value in prior.items() if "/requirement_imports/" in key])
         self.assertEqual([(event["status"], event["quantity"]) for event in self._rows("usage_events")], [("failed", 0), ("failed", 0)])
         self.assertEqual([run["status"] for run in self._rows("workflow_runs")], ["failed", "failed"])
+
+    def test_connector_imports_replay_current_previews_once_at_the_existing_tariff(self):
+        client, billing, workflow = self.extraction_client()
+        options = {"project_id": PID, "base_project_revision": 7, "import_mode": "review"}
+        for provider, router, endpoint, selector, changed in (
+            ("jira", integrations_jira, "jira", {"epic_key": "QA-16"}, {"epic_key": "QA-17"}),
+            ("azure_devops", integrations_azure_devops, "azure-devops", {"project": "QA", "work_item_id": 16}, {"work_item_id": 17}),
+        ):
+            with self.subTest(provider=provider):
+                workflow = {**workflow, "requirements": [r.model_copy(update={"source_system": provider}) for r in workflow["requirements"]]}
+                url = f"/integrations/{endpoint}/import"
+                headers = {"X-Request-ID": f"{provider}-preview"}
+                body = {**options, **selector}
+                with (
+                    patch.object(router, "enforce_billing_access", billing),
+                    patch.object(router, f"import_requirements_from_{provider}", return_value=workflow) as model,
+                ):
+                    first = client.post(url, headers=headers, json=body)
+                    self.assertEqual(first.status_code, 200, first.text)
+                    self.assertEqual(client.post(url, headers=headers, json=body).json(), first.json())
+                    for different in ({**body, **changed}, {**body, "include_children": False}, {**body, "workflow_settings": {"approval_threshold": 99}}):
+                        self.assertEqual(client.post(url, headers=headers, json=different).status_code, 409)
+                    self.assertEqual(client.post(url, headers={**headers, "X-Knowledge-Bypass": "true"}, json=body).status_code, 409)
+                    self.repo.cancel(PID, first.json()["import_id"], ACTOR)
+                    self.assertEqual(client.post(url, headers=headers, json=body).status_code, 409)
+                model.assert_called_once()
+                preview_id = first.json()["import_id"]
+                self.assertTrue(all(row["requirement"]["source_system"] == provider for row in first.json()["candidates"]))
+                staged = self.repo.read(PID, preview_id, ACTOR)
+                event_id = staged["extraction"]["source_event_id"]
+                event = self.store[f"usage_events/{event_id}"]
+                consumption = self.store[f"billing_consumption/{event_id}"]
+                run = self.store[f"workflow_runs/{staged['extraction']['workflow_run_id']}"]
+                self.assertEqual((event["event_type"], event["billing_key"], event["quantity"]), (f"requirements.imported.{provider}", "requirements.parse", 2))
+                self.assertEqual((consumption["metadata"]["source"], consumption["units_charged"]), (provider, 8))
+                self.assertEqual({event["metadata"]["import_id"], consumption["metadata"]["import_id"], run["result"]["import_id"]}, {preview_id})
+        self.assertEqual(billing.call_count, 2)
+        self.assertEqual(self.store["billing_accounts/account"]["balance_units"], 84)
+        self.assertEqual(len(self._rows("usage_events")), 2)
+        self.assertEqual(len(self._rows("billing_consumption")), 2)
+        self.assertEqual(self.store[f"qa_projects/{PID}"]["current_revision"], 7)
+
+    def test_connector_imports_leave_no_success_writes_on_stale_revision_or_preview_failure(self):
+        client, billing, workflow = self.extraction_client()
+        project_path = f"qa_projects/{PID}"
+        before = deepcopy(self.store)
+        original_create = FakeTransaction.create
+        staged = []
+
+        def reject_preview(transaction, reference, value):
+            if "/requirement_imports/" in reference.path:
+                staged.append({ref.path.split("/")[0] for _, ref, _ in transaction.pending})
+                raise RuntimeError("Synthetic connector preview write failure")
+            return original_create(transaction, reference, value)
+
+        def revise(*args, **kwargs):
+            self.store[project_path]["current_revision"] += 1
+            return workflow
+
+        for provider, router, endpoint, selector in (
+            ("jira", integrations_jira, "jira", {"epic_key": "QA-16"}),
+            ("azure_devops", integrations_azure_devops, "azure-devops", {"project": "QA", "work_item_id": 16}),
+        ):
+            url = f"/integrations/{endpoint}/import"
+            body = {"project_id": PID, "base_project_revision": self.store[project_path]["current_revision"], "import_mode": "review", **selector}
+            with self.subTest(provider=provider), patch.object(router, "enforce_billing_access", billing):
+                with (
+                    patch.object(router, f"import_requirements_from_{provider}", return_value=workflow),
+                    patch.object(FakeTransaction, "create", reject_preview),
+                ):
+                    failed = client.post(url, headers={"X-Request-ID": f"{provider}-fail"}, json=body)
+                self.assertEqual(failed.status_code, 503, failed.text)
+                with patch.object(router, f"import_requirements_from_{provider}", side_effect=revise):
+                    stale = client.post(url, headers={"X-Request-ID": f"{provider}-stale"}, json=body)
+                self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(len(staged), 2)
+        self.assertTrue(all({"billing_wallet_ledger", "usage_events", "workflow_runs"} <= collections for collections in staged))
+        self.assertEqual(self._rows("billing_consumption"), [])
+        self.assertEqual(self._rows("billing_wallet_ledger"), [])
+        self.assertEqual(self.store["billing_accounts/account"], before["billing_accounts/account"])
+        self.assertEqual(self._rows(f"{project_path}/requirement_imports"), [value for key, value in before.items() if "/requirement_imports/" in key])
+        self.assertEqual([(row["status"], row["quantity"]) for row in self._rows("usage_events")], [("failed", 0)] * 4)
 
     def test_generation_rejects_retired_forged_and_stale_requirements(self):
         project = self.repo.apply(PID, self.p.import_id, ACTOR, choices(self.p), "first")

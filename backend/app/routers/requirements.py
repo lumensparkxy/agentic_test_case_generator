@@ -16,7 +16,6 @@ from ..agents.requirements_agent import extract_requirements, refine_requirement
 from ..auth.jwt_auth import get_current_user
 from ..config import get_settings
 from ..models import AuthUser, EnrichInput, EnrichResponse, RequirementsWorkflowResponse, WorkflowSettings
-from ..observability.metrics import record_workflow_completed
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.context_grounding import build_grounded_context
@@ -25,18 +24,14 @@ from ..services.workflow_project_service import append_stage_snapshot, project_e
 from ..utils.excel_parser import parse_excel_to_text
 
 from ..contracts.requirement_imports import RequirementImportPreview
-from ..services.requirement_import_service import repository, require_review_client, stage_extraction
+from ..services.requirement_import_service import require_review_client
+from ..services.requirement_import_publication import ExtractionPublicationUnconfirmed, ProjectRequirementExtraction
 from ..services.requirement_reconciliation import digest
 from ..services.requirement_source_evidence import bind_document_evidence
 
 router = APIRouter()
 
 MAX_UPLOAD_SIZE_BYTES = 16 * 1024 * 1024
-
-
-class _ExtractionPublicationUnconfirmed(HTTPException):
-    def __init__(self):
-        super().__init__(503, {"code": "requirement_extraction_unconfirmed", "message": "The requirements preview could not be confirmed. Retry this request."})
 
 
 async def _read_upload(upload: UploadFile) -> bytes:
@@ -55,96 +50,6 @@ async def _upload_fingerprints(uploads):
         finally:
             await upload.seek(0)
     return fingerprints
-
-
-def _find_extraction_preview(project_id, actor, revision, import_id, fingerprint, *, required=False):
-    try:
-        result = repository().find_extraction(project_id, import_id, actor, revision, fingerprint)
-        if result is not None:
-            return RequirementImportPreview.model_validate(result)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise _ExtractionPublicationUnconfirmed() from exc
-    if required:
-        raise _ExtractionPublicationUnconfirmed()
-    return None
-
-
-def _publish_extraction(
-    *,
-    project_id,
-    revision,
-    response,
-    operation,
-    event_type,
-    actor,
-    request_id,
-    run_id,
-    import_id,
-    fingerprint,
-    billing_context,
-    quantity,
-    result_metadata,
-    billing_metadata,
-):
-    try:
-        repo = repository()
-    except RuntimeError as exc:
-        raise project_error_to_http(exc) from exc
-    writes = []
-    metadata = {"operation": operation, "project_id": project_id, "import_id": import_id, **result_metadata}
-    event_id = record_usage_event(
-        event_type=event_type,
-        billing_key=operation,
-        quantity=quantity,
-        unit="requirement",
-        actor=actor,
-        request_id=request_id,
-        workflow_run_id=run_id,
-        status="completed",
-        metadata=metadata,
-        pending_writes=writes,
-        firestore_client=repo.client,
-    )
-    complete_workflow_run(run_id, status="completed", metadata=metadata, pending_writes=writes, firestore_client=repo.client)
-
-    def commit_audit(transaction):
-        record_billing_consumption(
-            current_user=actor,
-            billing_context=billing_context,
-            source_event_id=event_id,
-            request_id=request_id,
-            workflow_run_id=run_id,
-            billing_key=operation,
-            quantity=quantity,
-            unit="requirement",
-            metadata={"import_id": import_id, **billing_metadata},
-            transaction=transaction,
-            firestore_client=repo.client,
-        )
-        for reference, value, merge in writes:
-            transaction.set(reference, value, merge=merge)
-
-    extraction = {"fingerprint": fingerprint, "workflow_run_id": run_id, "source_event_id": event_id}
-    try:
-        saved = stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit)
-    except Exception as publish_error:
-        try:
-            # Past receipts can establish that a commit succeeded even if its preview is now stale.
-            saved = repo.find_extraction(project_id, import_id, actor, revision, fingerprint, require_pending=False)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise _ExtractionPublicationUnconfirmed() from exc
-        if saved is None:
-            if isinstance(publish_error, HTTPException):
-                raise
-            raise project_error_to_http(publish_error) from publish_error
-    if saved["extraction"]["workflow_run_id"] == run_id:
-        record_workflow_completed(run_id, "completed")
-    else:
-        complete_workflow_run(run_id, status="completed", metadata={"reused_import_id": import_id})
 
 
 def _build_grounded_context_from_enrich_input(payload: EnrichInput):
@@ -396,8 +301,8 @@ async def parse_requirements(
                 request.headers.get("X-Knowledge-Bypass", "").lower() == "true",
             ]
         )
-        import_id = digest(["requirement-extraction", current_user.sub, request_id])
-        saved = await run_in_threadpool(_find_extraction_preview, project_id, current_user, parsed_project_revision, import_id, fingerprint)
+        extraction = ProjectRequirementExtraction(project_id, parsed_project_revision, current_user, request_id, operation, fingerprint)
+        saved = await run_in_threadpool(extraction.find_preview)
         if saved is not None:
             return saved
 
@@ -422,24 +327,18 @@ async def parse_requirements(
     async def publish(response, quantity, result_metadata, billing_metadata):
         nonlocal published
         await run_in_threadpool(
-            _publish_extraction,
-            project_id=project_id,
-            revision=parsed_project_revision,
+            extraction.publish,
             response=response,
-            operation=operation,
             event_type=event_type,
-            actor=current_user,
-            request_id=request_id,
+            billing_key=operation,
             run_id=workflow_run_id,
-            import_id=import_id,
-            fingerprint=fingerprint,
             billing_context=billing_context,
             quantity=quantity,
             result_metadata=result_metadata,
             billing_metadata=billing_metadata,
         )
         published = True
-        return await run_in_threadpool(_find_extraction_preview, project_id, current_user, parsed_project_revision, import_id, fingerprint, required=True)
+        return await run_in_threadpool(extraction.find_preview, required=True)
 
     def fail(error_message):
         if not published:
@@ -525,7 +424,7 @@ async def parse_requirements(
                 approved=response.approved,
             )
             return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
-        except _ExtractionPublicationUnconfirmed:
+        except ExtractionPublicationUnconfirmed:
             raise
         except HTTPException:
             if project_id:
@@ -643,7 +542,7 @@ async def parse_requirements(
             approved=response.approved,
         )
         return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
-    except _ExtractionPublicationUnconfirmed:
+    except ExtractionPublicationUnconfirmed:
         raise
     except HTTPException:
         fail("http_exception")

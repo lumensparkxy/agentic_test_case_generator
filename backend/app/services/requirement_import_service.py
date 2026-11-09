@@ -324,7 +324,7 @@ def require_review_client(project_id, base_project_revision, import_mode, actor)
     repository().baseline(project_id, actor, base_project_revision)
 
 
-def _prepare_import(repo, project_id, actor, revision, response, operation, import_id):
+def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit):
     project, snapshot = repo.baseline(project_id, actor, revision)
     current, retired = canonical_requirements(project_id, snapshot)
     incoming = response.requirements
@@ -337,17 +337,6 @@ def _prepare_import(repo, project_id, actor, revision, response, operation, impo
     preview.source_evidence_findings = response.source_evidence_findings
     workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text", "source_evidence_findings"})
     workflow["guidance"] = preview.guidance
-    return preview, retired, workflow
-
-
-def stage_import(project_id, actor, revision, response, operation):
-    repo = repository()
-    preview, retired, workflow = _prepare_import(repo, project_id, actor, revision, response, operation, str(uuid4()))
-    return repo.save(preview, actor, retired, workflow)
-
-
-def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit):
-    preview, retired, workflow = _prepare_import(repo, project_id, actor, revision, response, operation, import_id)
     return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit)
 
 
