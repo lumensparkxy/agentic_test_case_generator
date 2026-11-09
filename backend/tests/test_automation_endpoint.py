@@ -15,7 +15,15 @@ from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
 from app.main import app, get_current_user
 from app.models import AuthUser, AutomationResponse, ExecutionCandidate, ExecutionPreviewResponse, ExecutionRunResponse, ExecutionRunSummary
+from app.services.project_draft_admission import DEMO_PROJECT_ID
 from app.services import workflow_project_service as projects
+
+
+_DEMO_ADMISSION_ENV = {
+    "TCG_APPROVAL_SCENARIOS_ENABLED": "true",
+    "FIREBASE_PROJECT_ID": DEMO_PROJECT_ID,
+    "FIRESTORE_EMULATOR_HOST": "127.0.0.1:44123",
+}
 
 
 class AutomationEndpointTests(unittest.TestCase):
@@ -117,6 +125,36 @@ class AutomationEndpointTests(unittest.TestCase):
         self.assertEqual(saved["payload"]["source"], "automation_generation")
         self.assertEqual(saved["payload"]["execution_status"], "not_executed")
         self.assertEqual(saved["payload"]["case_diagnostics"][0]["status"], "manual")
+
+    def test_demo_gate_defers_project_playwright_generation_without_affecting_standalone(self) -> None:
+        payload = {"test_cases": []}
+        response = AutomationResponse(status="skipped", files=[], diagnostics={"generated_case_count": 0})
+        demo_client = SimpleNamespace(project=DEMO_PROJECT_ID, _emulator_host=_DEMO_ADMISSION_ENV["FIRESTORE_EMULATOR_HOST"])
+        with (
+            patch.dict("os.environ", _DEMO_ADMISSION_ENV),
+            patch("app.services.project_draft_admission.get_required_firestore_client", return_value=demo_client) as lookup,
+            patch("app.routers.automation.project_for", return_value=SimpleNamespace(current_revision=9)),
+            patch("app.main.start_workflow_run", return_value="run-standalone") as start,
+            patch("app.main.complete_workflow_run"),
+            patch("app.main.record_usage_event", return_value="event-standalone") as usage,
+            patch("app.main.generate_playwright_pom", return_value=response) as generate,
+            patch("app.routers.automation.append_stage_snapshot") as append,
+            TestClient(app) as client,
+        ):
+            deferred = client.post("/automation/playwright", json={**payload, "project_id": "project-1"})
+            self.assertEqual(deferred.status_code, 409, deferred.text)
+            self.assertEqual(deferred.json()["detail"]["code"], "project_draft_refresh_deferred")
+            start.assert_not_called()
+            usage.assert_not_called()
+            generate.assert_not_called()
+            append.assert_not_called()
+
+            standalone = client.post("/automation/playwright", json=payload)
+            self.assertEqual(standalone.status_code, 200, standalone.text)
+            self.assertEqual(standalone.json()["status"], "skipped")
+            generate.assert_called_once()
+            lookup.assert_called_once()
+            append.assert_not_called()
 
     def test_generation_report_revision_conflict_is_recoverable(self) -> None:
         from app.services.workflow_project_service import ProjectConflictError
@@ -243,6 +281,8 @@ class AutomationEndpointTests(unittest.TestCase):
                     with patch("app.main.preview_execution", return_value=service_response):
                         with patch("app.routers.automation.get_project", return_value=project):
                             with (
+                                patch.dict("os.environ", _DEMO_ADMISSION_ENV),
+                                patch("app.services.project_draft_admission.get_required_firestore_client") as draft_lookup,
                                 patch("app.routers.automation.find_idempotent_stage_snapshot", return_value=None),
                                 patch("app.routers.automation.get_required_firestore_client", return_value=object()),
                                 patch(
@@ -258,6 +298,7 @@ class AutomationEndpointTests(unittest.TestCase):
                                     )
 
         self.assertEqual(response.status_code, 200)
+        draft_lookup.assert_not_called()
         expected_counts = {"executable": 1, "manual": 1, "unsupported": 0, "invalid": 0}
         self.assertEqual(response.json()["summary"], expected_counts)
         snapshot_call = append_snapshot.call_args.kwargs
@@ -353,6 +394,8 @@ class AutomationEndpointTests(unittest.TestCase):
         root.collection("snapshots").document(suite.snapshot_id).set(suite.model_dump())
         candidate = ExecutionCandidate(id="tc_001", source_test_case_id="TC-001", title="Checkout", status="executable")
         with (
+            patch.dict("os.environ", _DEMO_ADMISSION_ENV),
+            patch("app.services.project_draft_admission.get_required_firestore_client") as draft_lookup,
             patch.object(projects, "get_required_firestore_client", return_value=firestore),
             patch.object(projects, "get_required_firestore_collection", return_value=collection),
             patch.object(projects, "transactional", side_effect=_run_transaction),
@@ -364,6 +407,7 @@ class AutomationEndpointTests(unittest.TestCase):
             response = client.post("/automation/execution/run", json=payload)
             self.assertEqual(response.status_code, 200, response.text)
             detail = client.get(f"/projects/{project.project_id}").json()
+        draft_lookup.assert_not_called()
         request_id = response.headers["X-Request-ID"]
         run_id = response.json()["run_record_id"]
         self.assertFalse(response.json()["historical"])

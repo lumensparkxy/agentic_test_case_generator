@@ -145,6 +145,13 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "ApprovalContinuationCancelRequest",
         "ApprovalContinuationCancelResponse",
     ),
+    SelectedOperation(
+        "savedReviewAdmissionRelease",
+        "post",
+        "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release",
+        "SavedReviewAdmissionReleaseRequest",
+        "SavedReviewAdmissionReleaseResponse",
+    ),
     SelectedOperation("jiraImport", "post", "/integrations/jira/import", "JiraImportRequest", "JiraImportResponse"),
     SelectedOperation("azureDevOpsImport", "post", "/integrations/azure-devops/import", "AzureDevOpsImportRequest", "AzureDevOpsImportResponse"),
     SelectedOperation("requirementsParse", "post", "/requirements/parse", "RequirementsParseRequest", "RequirementsParseResponse"),

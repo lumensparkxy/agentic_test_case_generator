@@ -18,6 +18,7 @@ from .firestore_repository import get_required_firestore_client
 from .guidance_runtime import prepare_run
 from .guidance_service import guidance_scope
 from .orchestrator_service import _use_cases_human_approved
+from .project_draft_admission import draft_admission_client, draft_refresh_deferred
 from .requirement_reconciliation import canonical_requirements
 from .requirement_scope import approved_generation_requirements
 from .test_case_quality import case_source_hash
@@ -203,6 +204,8 @@ def generate_project_use_cases(
     workflow_settings: WorkflowSettings | None = None,
     publication_guard=None,
 ):
+    admitted_continuation = approved_source is not None and publication_guard is not None
+    draft_client = None if admitted_continuation else draft_admission_client()
     idempotency_key = case_source_hash([actor.sub, request_id])
     request_inputs = [base_project_revision, refresh_requirement_ids, memory_bypass]
     if approved_source is not None:
@@ -228,6 +231,8 @@ def generate_project_use_cases(
         raise ProjectConflictError(project.current_revision)
     if project.status != "active":
         raise HTTPException(409, "Restore this project before generating Use Cases.")
+    if draft_client is not None:
+        raise draft_refresh_deferred()
     baseline = project.current_snapshots.get("requirements")
     active = approved_generation_requirements(project)
     if not active:

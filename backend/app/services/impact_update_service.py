@@ -37,6 +37,7 @@ from ..agents.test_case_agent import generate_test_cases
 from .test_case_quality import placeholder_reason, separate_generation_work, delivered_coverage
 from .guidance_runtime import prepare_run
 from .guidance_service import guidance_scope, public_manifest, submit_with_guidance
+from .project_draft_admission import draft_admission_client, draft_refresh_deferred
 from .billing_service import enforce_billing_access, record_billing_consumption
 from .audit_service import start_workflow_run, complete_workflow_run, record_usage_event
 from .workflow_project_service import (
@@ -337,6 +338,7 @@ def apply_project_impact_update(
     accepted_recommendation_ids: Optional[list[str]] = None,
     base_project_revision: Optional[int] = None,
 ) -> QaProjectDetail:
+    draft_client = draft_admission_client()
     project = get_project(project_id, actor=actor)
     current_analysis = project.current_snapshots.get("impact_analysis")
     if analysis_snapshot_id and (not current_analysis or analysis_snapshot_id != current_analysis.snapshot_id):
@@ -376,6 +378,8 @@ def apply_project_impact_update(
     plans = project.current_snapshots.get("use_cases")
     plan_by_req = {p["requirement_id"]: p for p in (plans.payload.get("coverage_plan", []) if plans else [])}
     pending = [r for r in accepted if r.action in {"add", "update"}]
+    if pending and draft_client is not None:
+        raise draft_refresh_deferred()
     if len(pending) > 40:
         raise ImpactWorkflowError("Select at most 40 generation recommendations per update.")
     inputs = []

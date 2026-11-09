@@ -364,6 +364,25 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(self.store, before)
         self.assertEqual(len([k for k in self.store if k.startswith("usage_events/")]), 1)
 
+    def test_demo_gate_defers_targeted_impact_generation_but_keeps_receipt_readback(self):
+        project = self._analyzed()
+        before = deepcopy(self.store)
+        with patch.object(service, "draft_admission_client", return_value=self.transaction_client), self.assertRaises(HTTPException) as deferred:
+            self._apply(project)
+        self.assertEqual(deferred.exception.status_code, 409)
+        self.assertEqual(deferred.exception.detail["code"], "project_draft_refresh_deferred")
+        self.assertEqual(self.store, before)
+        self.generator.assert_not_called()
+        service.enforce_billing_access.assert_not_called()
+
+        saved = self._apply(project)
+        before_replay = deepcopy(self.store)
+        with patch.object(service, "draft_admission_client", return_value=self.transaction_client):
+            self.assertEqual(self._apply(project), saved)
+        self.assertEqual(self.store, before_replay)
+        self.generator.assert_called_once()
+        service.enforce_billing_access.assert_called_once()
+
     def test_concurrent_request_joins_active_lease(self):
         project = self._analyzed()
         joined = []
@@ -617,11 +636,13 @@ class ImpactUpdateServiceTests(unittest.TestCase):
 
     def test_removed_requirement_deprecates_linked_test_case(self) -> None:
         project = self._seed_project(omit={"REQ-005"})
-        analyzed_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
-
-        updated_project = apply_project_impact_update(
-            project_id=analyzed_project.project_id, actor=self.actor, request_id="req-apply", base_project_revision=analyzed_project.current_revision
-        )
+        with patch.object(service, "draft_admission_client", return_value=self.transaction_client) as admission:
+            analyzed_project = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="req-impact")
+            admission.assert_not_called()
+            updated_project = self._apply(analyzed_project)
+            admission.assert_called_once()
+        self.generator.assert_not_called()
+        service.enforce_billing_access.assert_not_called()
         test_cases = {item["id"]: item for item in updated_project.current_snapshots["test_cases"].payload["test_cases"]}
 
         self.assertEqual(test_cases["TC-005"]["status"], "Deprecated")

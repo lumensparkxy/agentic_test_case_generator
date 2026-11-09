@@ -21,6 +21,7 @@ from app.models import AuthUser
 from app.routers import approval_continuations as routes
 from app.services import approval_continuation as continuation
 from app.services.approval_scenario_worker import DEMO_PROJECT_ID
+from app.services import project_draft_admission as admission
 from app.services import requirement_import_service as imports
 from app.services import use_case_review_service as scenario_review
 from app.services.requirement_reconciliation import canonical_requirements
@@ -98,6 +99,7 @@ class ApprovalContinuationApiTests(TestCase):
         )
         self.enterContext(patch.object(imports, "transactional", side_effect=_run_transaction))
         self.enterContext(patch.object(continuation, "transactional", side_effect=_run_transaction))
+        self.enterContext(patch.object(admission, "transactional", side_effect=_run_transaction))
         self.enterContext(patch.object(scenario_review, "get_required_firestore_client", return_value=self.firestore))
         self.enterContext(patch.object(scenario_review, "transactional", side_effect=_run_transaction))
         self.client = self.enterContext(TestClient(app))
@@ -156,9 +158,12 @@ class ApprovalContinuationApiTests(TestCase):
 
     def test_approval_and_exact_retry_return_the_same_public_run_and_receipt(self):
         initial = deepcopy(self.store)
-        self.assertEqual(self.status().json(), {"enabled": True, "tests_enabled": True, "runs": [], "receipt": None})
+        self.assertEqual(
+            self.status().json(),
+            {"enabled": True, "tests_enabled": True, "saved_review_enabled": True, "saved_review_attempt": None, "runs": [], "receipt": None},
+        )
         self.assertEqual(self.store, initial)
-        self.assertEqual(self.firestore.transactions, [])
+        self.assertFalse(any(transaction.operations for transaction in self.firestore.transactions))
 
         response = self.approve(headers={"X-Request-ID": self.payload["idempotency_key"]})
         self.assertEqual(response.status_code, 200, response.text)
@@ -193,6 +198,8 @@ class ApprovalContinuationApiTests(TestCase):
             {
                 "enabled": True,
                 "tests_enabled": True,
+                "saved_review_enabled": True,
+                "saved_review_attempt": None,
                 "runs": [run],
                 "receipt": {"request_id": self.payload["idempotency_key"], "run_id": run["run_id"], "blocked_reason": None},
             },
@@ -214,6 +221,8 @@ class ApprovalContinuationApiTests(TestCase):
             {
                 "enabled": True,
                 "tests_enabled": True,
+                "saved_review_enabled": True,
+                "saved_review_attempt": None,
                 "runs": [],
                 "receipt": {"request_id": self.payload["idempotency_key"], "run_id": None, "blocked_reason": "context_not_current"},
             },
@@ -223,19 +232,27 @@ class ApprovalContinuationApiTests(TestCase):
     def test_legacy_approval_does_not_queue_or_create_a_continuation_receipt(self):
         response = self.client.patch(f"/projects/{PROJECT_ID}/requirements/reviews", json=self.payload)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(self.status(self.payload["idempotency_key"]).json(), {"enabled": True, "tests_enabled": True, "runs": [], "receipt": None})
+        self.assertEqual(
+            self.status(self.payload["idempotency_key"]).json(),
+            {"enabled": True, "tests_enabled": True, "saved_review_enabled": True, "saved_review_attempt": None, "runs": [], "receipt": None},
+        )
 
     def test_disabled_operations_and_outsiders_cannot_change_approval_state(self):
         initial = deepcopy(self.store)
         with patch.dict(os.environ, {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
-            self.assertEqual(self.status().json(), {"enabled": False, "tests_enabled": False, "runs": [], "receipt": None})
+            self.assertEqual(
+                self.status().json(),
+                {"enabled": False, "tests_enabled": False, "saved_review_enabled": False, "saved_review_attempt": None, "runs": [], "receipt": None},
+            )
             self.assertEqual(self.approve().status_code, 409)
             self.assertEqual(self.cancel(f"continuation_{'a' * 64}").status_code, 409)
             self.assertEqual(self.store, initial)
             self.assertEqual(self.firestore.transactions, [])
 
         with patch.object(self.firestore, "_emulator_host", None):
-            self.assertFalse(self.status().json()["enabled"])
+            status = self.status().json()
+            self.assertFalse(status["enabled"])
+            self.assertFalse(status["saved_review_enabled"])
             self.assertEqual(self.approve().status_code, 409)
             self.assertEqual(self.cancel(f"continuation_{'a' * 64}").status_code, 409)
             self.assertEqual(self.store, initial)
@@ -432,6 +449,43 @@ class ApprovalContinuationApiTests(TestCase):
         self.assertEqual(cancelled.status_code, 200, cancelled.text)
         self.assertEqual(cancelled.json()["stage"], "generate_tests")
         self.assertEqual(cancelled.json()["state"], "cancelled")
+
+    def test_saved_review_status_and_release_are_owner_only_and_fence_bound(self):
+        operation_id = f"draft_{'b' * 64}"
+        path = f"{STATUS_PATH}/saved-review/{operation_id}/release"
+        attempt = {
+            "operation_id": operation_id,
+            "fence": 13,
+            "state": "interrupted",
+            "operation": "test_cases.review",
+            "source_snapshot_id": "pending-suite",
+            "request_id": "review-request",
+            "reason": "provider_outcome_unconfirmed",
+        }
+        with (
+            patch.object(routes, "read_draft_attempt", return_value=attempt) as read,
+            patch.object(routes, "release_draft_attempt", return_value=True) as release,
+        ):
+            response = self.status()
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(response.json()["saved_review_enabled"])
+            self.assertEqual(
+                response.json()["saved_review_attempt"],
+                {field: attempt[field] for field in ("operation_id", "fence", "state", "source_snapshot_id", "request_id")},
+            )
+            read.assert_called_once_with(self.firestore, PROJECT_ID, self.actor.sub)
+            with patch.object(self, "actor", AuthUser(sub="other-account", name="Other")):
+                self.assertEqual(self.status().status_code, 404)
+                self.assertEqual(self.client.post(path, json={"fence": 13}).status_code, 404)
+            with patch.dict(os.environ, {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
+                self.assertEqual(self.client.post(path, json={"fence": 13}).status_code, 409)
+            self.assertEqual(self.client.post(path, json={"fence": "13"}).status_code, 422)
+            self.assertEqual(self.client.post(path, json={"fence": 13, "extra": "value"}).status_code, 422)
+            release.assert_not_called()
+            response = self.client.post(path, json={"fence": 13})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"released": True})
+            release.assert_called_once_with(self.firestore, PROJECT_ID, self.actor.sub, operation_id, 13)
 
     def test_test_generation_result_projects_the_exact_saved_suite(self):
         _, payload = self.prepared_plan()

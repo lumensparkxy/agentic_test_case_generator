@@ -18,6 +18,9 @@ const cancelPath = `${statusPath}/checkout-preparation/cancel`;
 const testApprovalPath = `${root}/use-cases/approve-and-generate-tests`;
 const scenarioReviewPath = `${root}/use-cases/reviews`;
 const testCancelPath = `${statusPath}/checkout-test-generation/cancel`;
+const savedReviewPath = `${root}/test-cases/review`;
+const savedReviewOperation = `draft_${"a".repeat(64)}`;
+const releasePath = `${statusPath}/saved-review/${savedReviewOperation}/release`;
 const initialRevision = 7;
 const readyPlanId = "checkout-prepared-plan-v2";
 const readyScenario = "Verify the current checkout confirmation";
@@ -31,6 +34,9 @@ const decision = (page) => page.getByRole("form", { name: "Human review decision
 const approveTests = (page) => decision(page).getByRole("button", { name: "Approve scenarios and generate tests", exact: true });
 const checkTests = (page) => testProgress(page).getByRole("button", { name: "Check test generation status", exact: true });
 const openTests = (page) => testProgress(page).getByRole("link", { name: "Open generated tests", exact: true });
+const recovery = (page) => page.getByRole("region", { name: "Saved suite review recovery", exact: true });
+const reviewSaved = (page) => page.getByRole("button", { name: "Review saved suite", exact: true });
+const checkReview = (page) => recovery(page).getByRole("button", { name: "Check saved review status", exact: true });
 const workspace = (page, name) =>
 	page.getByRole("navigation", { name: "Project workspaces", exact: true }).getByRole("link", { name, exact: true });
 const check = (page) => progress(page).getByRole("button", { name: "Check preparation status", exact: true });
@@ -83,7 +89,16 @@ function saveSuite(project, { snapshotId = readySuiteId, sourceId = readyPlanId,
 
 async function fixture(
 	page,
-	{ enabled = true, loseReply = false, firstStatusGate, priorRun, prepared = false, testsEnabled = prepared, loseTestReply = false } = {}
+	{
+		enabled = true,
+		loseReply = false,
+		firstStatusGate,
+		priorRun,
+		prepared = false,
+		testsEnabled = prepared,
+		loseTestReply = false,
+		savedReview,
+	} = {}
 ) {
 	const project = prepared ? useCaseProjectFixture() : pendingProject();
 	if (prepared) {
@@ -98,6 +113,11 @@ async function fixture(
 				stale: true,
 				version: 1,
 			});
+		if (savedReview) {
+			Object.assign(project, applyUseCaseReviewDecision(project, { decision: "approve" }));
+			project.current_revision++;
+			saveSuite(project);
+		}
 	}
 	const other = useCaseProjectFixture({ project_id: "continuation-second-project", name: "Separate checkout", snapshot: null });
 	let run = prepared
@@ -113,6 +133,8 @@ async function fixture(
 			}
 		: priorRun || null;
 	let testRun = null;
+	let reviewAttempt = savedReview?.attempt || null;
+	let failSavedReviewStatus = false;
 	let hideTestRun = loseTestReply;
 	let hideRun = loseReply;
 	let failPlanReadback = false;
@@ -122,6 +144,8 @@ async function fixture(
 	const approvalRequests = [];
 	const scenarioApprovalRequests = [];
 	const legacyScenarioReviews = [];
+	const savedReviewRequests = [];
+	const releaseRequests = [];
 	const executionRequests = [];
 	const reads = [];
 	const errors = [];
@@ -162,6 +186,10 @@ async function fixture(
 		const requestId = url.searchParams.get("request_id");
 		const stage = url.searchParams.get("stage");
 		reads.push({ project: project.project_id, requestId, stage });
+		if (failSavedReviewStatus) {
+			failSavedReviewStatus = false;
+			return route.fulfill({ status: 503, json: { detail: "Status temporarily unavailable." } });
+		}
 		const runs = [!hideTestRun && testRun, !hideRun && run].filter(Boolean);
 		if (!hideRun && run?.state === "awaiting_user") planAnnounced = true;
 		const matched = runs.find((item) => item.stage === (stage || "prepare_scenarios") && item.request_id === requestId);
@@ -169,7 +197,15 @@ async function fixture(
 		const held = firstStatusGate && reads.length === 1;
 		if (held) await firstStatusGate.promise;
 		try {
-			await route.fulfill({ json: { enabled, tests_enabled: testsEnabled, runs, receipt } });
+			await route.fulfill({
+				json: {
+					enabled,
+					tests_enabled: testsEnabled,
+					runs,
+					receipt,
+					...(savedReview ? { saved_review_enabled: true, saved_review_attempt: reviewAttempt } : {}),
+				},
+			});
 		} catch (error) {
 			if (!held) throw error;
 		} finally {
@@ -282,6 +318,61 @@ async function fixture(
 			json: useCaseReviewResponseFixture(project, { ...input, requestId: route.request().headers()["x-request-id"] }),
 		});
 	});
+	await page.route(routePath(savedReviewPath), (route) => {
+		const request = route.request();
+		const input = request.postDataJSON();
+		const requestId = request.headers()["x-request-id"];
+		expect(request.method()).toBe("POST");
+		expect(requestId).toBeTruthy();
+		expect(input).toEqual({ snapshot_id: readySuiteId, base_project_revision: project.current_revision });
+		expect(reviewAttempt).toBeNull();
+		savedReviewRequests.push({ input, requestId });
+		if (savedReview?.loseFirstReply && savedReviewRequests.length === 1) {
+			reviewAttempt = {
+				operation_id: savedReviewOperation,
+				fence: 12,
+				state: "running",
+				source_snapshot_id: readySuiteId,
+				request_id: requestId,
+			};
+			failSavedReviewStatus = Boolean(savedReview.failFirstStatus);
+			return route.abort("failed");
+		}
+		const previous = project.current_snapshots.test_cases;
+		const snapshotId = "checkout-assessed-suite";
+		project.current_revision++;
+		project.current_snapshots.test_cases = {
+			...previous,
+			snapshot_id: snapshotId,
+			operation: "test_cases.review",
+			source_snapshot_id: previous.snapshot_id,
+			project_revision: project.current_revision,
+			approved: true,
+			metadata: {},
+			payload: {
+				...previous.payload,
+				review: { approved: true, score: 100, threshold: 90, summary: "Saved cases assessed.", blocking_issues: [], unmet_criteria: [] },
+				substantive_assessment: { status: "assessed_complete" },
+			},
+		};
+		project.stage_state.test_cases = { ...project.stage_state.test_cases, current_snapshot_id: snapshotId, approved: true };
+		return route.fulfill({ json: project });
+	});
+	await page.route(routePath(releasePath), async (route) => {
+		const request = route.request();
+		const input = request.postDataJSON();
+		expect(request.method()).toBe("POST");
+		expect(input).toEqual({ fence: reviewAttempt.fence });
+		releaseRequests.push(input);
+		if (savedReview?.replaceFirstRelease && releaseRequests.length === 1) {
+			reviewAttempt = { ...reviewAttempt, fence: reviewAttempt.fence + 1 };
+			return route.fulfill({ status: 409, json: { detail: "Attempt fence changed." } });
+		}
+		if (savedReview?.releaseGate) await savedReview.releaseGate.promise;
+		reviewAttempt = null;
+		if (savedReview?.loseReleaseReply) return route.abort("failed");
+		return route.fulfill({ json: { released: true } });
+	});
 
 	await seedAuthenticatedSession(page);
 	return {
@@ -289,6 +380,8 @@ async function fixture(
 		scenarioApprovalRequests,
 		legacyScenarioReviews,
 		executionRequests,
+		savedReviewRequests,
+		releaseRequests,
 		firstStatusSettled,
 		reads,
 		writes,
@@ -320,6 +413,9 @@ async function fixture(
 		publishSuite: () => {
 			project.current_revision++;
 			saveSuite(project);
+		},
+		interruptSavedReview: () => {
+			reviewAttempt = { ...reviewAttempt, state: "interrupted" };
 		},
 	};
 }
@@ -543,6 +639,7 @@ test.describe("Recoverable approval continuation", () => {
 		await openTests(page).press("Enter");
 		await expect(page).toHaveURL(new RegExp(`${root}/review/tests(?:\\?.*)?$`));
 		await expect(page.getByRole("button", { name: "Review saved suite", exact: true })).toBeEnabled();
+		await expect(recovery(page)).toHaveCount(0);
 		await expect(page.getByText("Saved suite needs review", { exact: true })).toBeVisible();
 		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 		await expect(page.getByRole("button", { name: /Inspect the previous checkout result/ })).toHaveCount(0);
@@ -606,6 +703,119 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText("Human approved");
 		await expect(testProgress(page)).toHaveCount(0);
 		expect(api.writes).toEqual([`POST ${scenarioReviewPath}`]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("recovers an interrupted saved review and only resumes after a separate decision", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const api = await fixture(page, {
+			prepared: true,
+			testsEnabled: false,
+			savedReview: { loseFirstReply: true, failFirstStatus: true, loseReleaseReply: true },
+		});
+		await page.goto(`${root}/review/tests`);
+		await expect(reviewSaved(page)).toBeEnabled();
+		await expect(recovery(page)).toContainText("reuses compatible completed review groups");
+		expect(api.writes).toEqual([]);
+
+		const priorReads = api.reads.length;
+		await reviewSaved(page).click();
+		await expect(recovery(page).getByRole("alert")).toHaveText("Could not confirm saved review status. Check status again.");
+		await expect(reviewSaved(page)).toBeDisabled();
+		expect(api.reads.length).toBeGreaterThan(priorReads);
+		expect(api.writes).toEqual([`POST ${savedReviewPath}`]);
+
+		await checkReview(page).click();
+		await expect(recovery(page).getByRole("status")).toContainText("A saved review is running.");
+		await expect(recovery(page).getByRole("button", { name: "Cancel saved review", exact: true })).toBeEnabled();
+		api.interruptSavedReview();
+		await page.reload();
+		await expect(recovery(page).getByRole("status")).toContainText("The provider may already have received the request.");
+		await expect(reviewSaved(page)).toBeDisabled();
+		await recovery(page).getByText("Saved review details", { exact: true }).click();
+		await expect(recovery(page).getByText(api.savedReviewRequests[0].requestId, { exact: true })).toBeVisible();
+		await expect(recovery(page).getByText(readySuiteId, { exact: true })).toBeVisible();
+		expect(api.writes).toEqual([`POST ${savedReviewPath}`]);
+		await page.screenshot({ path: testInfo.outputPath("interrupted-saved-review.png") });
+
+		await recovery(page).getByRole("button", { name: "Acknowledge and release", exact: true }).click();
+		await expect(recovery(page)).toContainText("reuses compatible completed review groups");
+		await expect(reviewSaved(page)).toBeEnabled();
+		expect(api.releaseRequests).toEqual([{ fence: 12 }]);
+		expect(api.writes).toEqual([`POST ${savedReviewPath}`, `POST ${releasePath}`]);
+
+		const beforeResume = api.reads.length;
+		await reviewSaved(page).click();
+		await expect(page.getByText("Saved suite review passed.", { exact: true })).toBeVisible();
+		await expect.poll(() => api.reads.length).toBeGreaterThan(beforeResume);
+		await expect(recovery(page)).toHaveCount(0);
+		const [first, resumed] = api.savedReviewRequests;
+		expect(resumed.input).toEqual(first.input);
+		expect(resumed.requestId).not.toBe(first.requestId);
+		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
+		await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toContainText(testExpected);
+		expect(api.writes).toEqual([`POST ${savedReviewPath}`, `POST ${releasePath}`, `POST ${savedReviewPath}`]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("keeps an older saved review cancellable and reads back a changed fence", async ({ page }) => {
+		const releaseGate = createDeferred();
+		const api = await fixture(page, {
+			prepared: true,
+			testsEnabled: false,
+			savedReview: {
+				replaceFirstRelease: true,
+				releaseGate,
+				attempt: {
+					operation_id: savedReviewOperation,
+					fence: 21,
+					state: "running",
+					source_snapshot_id: "checkout-superseded-suite",
+					request_id: "another-tab-review",
+				},
+			},
+		});
+		await page.goto(`${root}/review/tests`);
+		const cancelReview = recovery(page).getByRole("button", { name: "Cancel saved review", exact: true });
+		await expect(recovery(page)).toContainText("This attempt uses an earlier source revision.");
+		await expect(cancelReview).toBeEnabled();
+		await expect(reviewSaved(page)).toBeDisabled();
+		await workspace(page, "Inputs").click();
+		await expect(page).toHaveURL(`${root}/inputs`);
+		await expect(recovery(page)).toHaveCount(0);
+		await workspace(page, "Review").click();
+		await page
+			.getByRole("navigation", { name: "Workspace sections", exact: true })
+			.getByRole("link", { name: "Tests", exact: true })
+			.click();
+		await expect(recovery(page)).toContainText("This attempt uses an earlier source revision.");
+		expect(api.writes).toEqual([]);
+
+		await cancelReview.click();
+		await expect(recovery(page).getByRole("alert")).toHaveText("The release was not confirmed. Check the current attempt.");
+		await expect(cancelReview).toBeDisabled();
+		await expect(reviewSaved(page)).toBeDisabled();
+		await checkReview(page).click();
+		await expect(cancelReview).toBeEnabled();
+		await cancelReview.click();
+		await expect.poll(() => api.releaseRequests.length).toBe(2);
+		await workspace(page, "Inputs").click();
+		await expect(page).toHaveURL(`${root}/inputs`);
+		await expect(recovery(page)).toHaveCount(0);
+		const released = page.waitForResponse((response) => new URL(response.url()).pathname === releasePath && response.ok());
+		releaseGate.resolve();
+		await released;
+		await workspace(page, "Review").click();
+		await page
+			.getByRole("navigation", { name: "Workspace sections", exact: true })
+			.getByRole("link", { name: "Tests", exact: true })
+			.click();
+		await expect(cancelReview).toHaveCount(0);
+		await expect(reviewSaved(page)).toBeEnabled();
+		expect(api.releaseRequests).toEqual([{ fence: 21 }, { fence: 22 }]);
+		expect(api.writes).toEqual([`POST ${releasePath}`, `POST ${releasePath}`]);
 		expect(api.executionRequests).toEqual([]);
 		expect(api.errors).toEqual([]);
 	});

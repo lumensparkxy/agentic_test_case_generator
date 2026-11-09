@@ -21,6 +21,7 @@ from ..services.audit_service import complete_workflow_run, record_usage_event, 
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.firestore_repository import get_required_firestore_client
 from ..services.orchestrator_service import _use_cases_human_approved
+from ..services.project_draft_admission import draft_admission_client, draft_refresh_deferred
 from ..services.requirement_import_service import validate_generation_baseline
 from ..services.test_case_quality import case_source_hash, placeholder_reason
 from ..services.test_case_review_progress import GenerationReviewProgress
@@ -562,6 +563,7 @@ def generate_bound_test_cases(
         raise ValueError("A project is required for bound Test Cases generation.")
     if approved_source is not None and stage_publication_guard is None:
         raise ValueError("Approved continuation requires a publication guard.")
+    draft_client = draft_admission_client() if approved_source is None else None
     fingerprint = (
         _content_hash(payload)
         if approved_source is None
@@ -572,6 +574,8 @@ def generate_bound_test_cases(
         return _test_case_receipt_response(receipt, fingerprint)
 
     if approved_source is None:
+        if draft_client is not None:
+            raise draft_refresh_deferred()
         validate_generation_baseline(payload.project_id, actor, payload.base_project_revision, payload.requirements)
         base_revision, plan_id, source_inputs = _project_generation_source(payload, actor)
     else:
@@ -734,9 +738,12 @@ async def refine_test_cases_endpoint(
     scoped = bool(payload.project_id and payload.selected_test_case_ids)
     fingerprint = _content_hash(payload) if payload.project_id else None
     if payload.project_id:
+        draft_client = await run_in_threadpool(draft_admission_client)
         receipt = await run_in_threadpool(_test_case_publication_receipt, payload.project_id, request_id, current_user, "testcases.refine")
         if receipt is not None:
             return _test_case_receipt_response(receipt, fingerprint)
+        if draft_client is not None:
+            raise draft_refresh_deferred()
     await run_in_threadpool(validate_generation_baseline, payload.project_id, current_user, payload.base_project_revision, payload.requirements)
     try:
         if payload.project_id and not scoped:

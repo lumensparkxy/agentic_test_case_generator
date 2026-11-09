@@ -39,6 +39,7 @@ export interface ApiContractOperations {
 	approveAndPrepareScenarios: ApiOperation<ApproveAndPrepareScenariosRequest, ApproveAndPrepareScenariosResponse, "POST", "/projects/{project_id}/requirements/approve-and-prepare-scenarios">;
 	approveAndGenerateTests: ApiOperation<ApproveAndGenerateTestsRequest, ApproveAndGenerateTestsResponse, "POST", "/projects/{project_id}/use-cases/approve-and-generate-tests">;
 	approvalContinuationCancel: ApiOperation<ApprovalContinuationCancelRequest, ApprovalContinuationCancelResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/cancel">;
+	savedReviewAdmissionRelease: ApiOperation<SavedReviewAdmissionReleaseRequest, SavedReviewAdmissionReleaseResponse, "POST", "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release">;
 	jiraImport: ApiOperation<JiraImportRequest, JiraImportResponse, "POST", "/integrations/jira/import">;
 	azureDevOpsImport: ApiOperation<AzureDevOpsImportRequest, AzureDevOpsImportResponse, "POST", "/integrations/azure-devops/import">;
 	requirementsParse: ApiOperation<RequirementsParseRequest, RequirementsParseResponse, "POST", "/requirements/parse">;
@@ -128,6 +129,8 @@ export type ApproveAndGenerateTestsRequest = ApproveAndGenerateTestsInput;
 export type ApproveAndGenerateTestsResponse = ApproveAndGenerateTestsResult;
 export type ApprovalContinuationCancelRequest = undefined;
 export type ApprovalContinuationCancelResponse = ApprovalContinuationView;
+export type SavedReviewAdmissionReleaseRequest = SavedReviewReleaseInput;
+export type SavedReviewAdmissionReleaseResponse = SavedReviewReleaseResult;
 export type JiraImportRequest = JiraImportInput;
 export type JiraImportResponse = RequirementsWorkflowResponse | RequirementImportPreview;
 export type AzureDevOpsImportRequest = AzureDevOpsImportInput;
@@ -174,6 +177,8 @@ export interface ApprovalContinuationStatus {
 	enabled: boolean;
 	receipt?: ApprovalContinuationReceipt | null;
 	runs: Array<ApprovalContinuationView>;
+	saved_review_attempt?: SavedReviewAdmissionView | null;
+	saved_review_enabled?: boolean;
 	tests_enabled: boolean;
 }
 
@@ -1159,6 +1164,22 @@ export interface RolePermission {
 	id: string;
 	requirement_id: string;
 	role: string;
+}
+
+export interface SavedReviewAdmissionView {
+	fence: number;
+	operation_id: string;
+	request_id: string;
+	source_snapshot_id: string;
+	state: "running" | "interrupted";
+}
+
+export interface SavedReviewReleaseInput {
+	fence: number;
+}
+
+export interface SavedReviewReleaseResult {
+	released?: true;
 }
 
 export interface ScenarioAssessment {

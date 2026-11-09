@@ -37,6 +37,7 @@ from ..observability.metrics import record_workflow_completed
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.execution_service import preview_execution, run_execution
 from ..services.firestore_repository import get_required_firestore_client
+from ..services.project_draft_admission import draft_admission_client, draft_refresh_deferred
 from ..services.requirement_reconciliation import digest
 from ..services.workflow_project_service import (
     ProjectConflictError,
@@ -191,7 +192,11 @@ async def automation_playwright(
     current_user: AuthUser = Depends(get_current_user),
 ) -> AutomationResponse:
     request_id = _get_request_id(request)
-    project = await run_in_threadpool(project_for, payload.project_id, current_user) if payload.project_id else None
+    if payload.project_id:
+        draft_client = await run_in_threadpool(draft_admission_client)
+        project = await run_in_threadpool(project_for, payload.project_id, current_user)
+        if draft_client is not None:
+            raise draft_refresh_deferred()
     workflow_run_id = _resolve_main_callable("start_workflow_run", start_workflow_run)(
         operation="automation.playwright.generate",
         actor=current_user,

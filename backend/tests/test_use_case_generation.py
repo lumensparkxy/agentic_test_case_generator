@@ -107,6 +107,23 @@ class UseCaseGenerationTests(unittest.TestCase):
         for name in ("start_workflow_run", "complete_workflow_run", "record_usage_event"):
             stack.enter_context(patch.object(service, name, wraps=getattr(audit_service, name)))
 
+    def test_demo_gate_defers_new_scenario_generation_and_preserves_exact_replay(self):
+        with patch.object(service, "draft_admission_client", return_value=self.client), self.assertRaises(HTTPException) as deferred:
+            self.run_generation()
+        self.assertEqual(deferred.exception.status_code, 409)
+        self.assertEqual(deferred.exception.detail["code"], "project_draft_refresh_deferred")
+        self.assertEqual(self.store, self.before)
+        self.model.assert_not_called()
+        self.mocks["enforce_billing_access"].assert_not_called()
+
+        saved = self.run_generation()
+        before_replay = deepcopy(self.store)
+        with patch.object(service, "draft_admission_client", return_value=self.client):
+            self.assertEqual(self.run_generation(), saved)
+        self.assertEqual(self.store, before_replay)
+        self.model.assert_called_once()
+        self.mocks["enforce_billing_access"].assert_called_once()
+
     def test_generation_commits_usage_and_recovers_exact_result_after_commit_reply_loss(self):
         self.durable_audit()
         publish = service.append_stage_snapshot

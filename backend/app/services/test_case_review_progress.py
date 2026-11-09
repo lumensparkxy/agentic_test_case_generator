@@ -58,11 +58,15 @@ class GenerationReviewProgress:
 
 
 class SavedReviewProgress:
-    def __init__(self, project_id, snapshot_id, revision, actor):
+    def __init__(self, project_id, snapshot_id, revision, actor, *, admission=None):
         self.project_id, self.snapshot_id, self.revision, self.actor = project_id, snapshot_id, revision, actor
+        self.admission = admission
         self.doc = None
 
     def _check_project(self, transaction):
+        if self.admission is not None:
+            self.admission.validate(transaction)
+            return
         project = projects._document_to_dict(self.project_doc.get(transaction=transaction))
         if project is None:
             raise projects.ProjectNotFoundError(self.project_id)

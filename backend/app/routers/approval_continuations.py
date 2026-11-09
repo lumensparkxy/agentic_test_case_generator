@@ -16,6 +16,9 @@ from ..contracts.approval_continuations import (
     ApproveAndGenerateTestsResult,
     ApproveAndPrepareScenariosInput,
     ApproveAndPrepareScenariosResult,
+    SavedReviewAdmissionView,
+    SavedReviewReleaseInput,
+    SavedReviewReleaseResult,
 )
 from ..models import AuthUser
 from ..services import use_case_review_service
@@ -27,6 +30,7 @@ from ..services.approval_scenario_worker import (
     scenario_continuation_options,
     test_case_continuation_options,
 )
+from ..services.project_draft_admission import draft_admission_client, read_draft_attempt, release_draft_attempt
 from ..services.requirement_import_service import repository
 from ..services.requirement_reconciliation import digest
 from ..services.workflow_project_service import project_error_to_http
@@ -141,11 +145,15 @@ def list_approval_continuations(
             if requested is not None:
                 runs = [*runs[: _RUN_LIMIT - 1], requested]
         scenarios_enabled = approval_scenario_client_allowed(repo.client)
+        draft_client = draft_admission_client(repo.client, read_only=True)
+        attempt = read_draft_attempt(draft_client, project_id, actor.sub) if draft_client is not None else None
         return ApprovalContinuationStatus(
             enabled=scenarios_enabled,
             tests_enabled=scenarios_enabled and approval_test_cases_enabled(),
             runs=runs,
             receipt=receipt,
+            saved_review_enabled=draft_client is not None,
+            saved_review_attempt=SavedReviewAdmissionView.model_validate(attempt) if attempt and attempt["operation"] == "test_cases.review" else None,
         )
     except HTTPException:
         raise
@@ -210,6 +218,30 @@ def approve_and_generate_tests(
         raise
     except Exception as exc:
         raise use_case_review_service.use_case_review_error_to_http(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release",
+    response_model=SavedReviewReleaseResult,
+)
+def release_saved_review_admission(
+    project_id: str,
+    operation_id: Annotated[str, Path(pattern=r"^draft_[0-9a-f]{64}$")],
+    payload: SavedReviewReleaseInput,
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        repo = repository()
+        client = draft_admission_client(repo.client)
+        if client is None:
+            raise HTTPException(409, "Saved-suite review recovery is disabled in this environment.")
+        _project_doc(repo, project_id, actor)
+        release_draft_attempt(client, project_id, actor.sub, operation_id, payload.fence)
+        return SavedReviewReleaseResult()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
 
 
 @router.post("/projects/{project_id}/approval-continuations/{run_id}/cancel", response_model=ApprovalContinuationView)

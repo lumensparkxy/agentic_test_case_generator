@@ -346,6 +346,24 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
     def _records(self, collection):
         return [value for key, value in self.store.items() if key.startswith(collection + "/")]
 
+    async def test_demo_gate_defers_new_suite_generation_and_preserves_exact_replay(self):
+        before = deepcopy(self.store)
+        with patch.object(routes, "draft_admission_client", return_value=self.client), self.assertRaises(HTTPException) as deferred:
+            await self._request()
+        self.assertEqual(deferred.exception.status_code, 409)
+        self.assertEqual(deferred.exception.detail["code"], "project_draft_refresh_deferred")
+        self.assertEqual(self.store, before)
+        self.generate.assert_not_called()
+        self.billing.assert_not_called()
+
+        saved = await self._request()
+        before_replay = deepcopy(self.store)
+        with patch.object(routes, "draft_admission_client", return_value=self.client):
+            self.assertEqual(await self._request(), saved)
+        self.assertEqual(self.store, before_replay)
+        self.generate.assert_called_once()
+        self.billing.assert_called_once()
+
     async def test_draft_generation_publishes_both_stages_once_without_human_approval(self):
         prior_use_cases = self.store[self.project_path]["stage_state"].pop("use_cases")
         saved = await self._request()
@@ -694,6 +712,28 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(r["status"], r["quantity"]) for r in self._records("usage_events") if r["billing_key"] == "testcases.refine"], [("completed", 1)])
         self.assertEqual(len([r for r in self._records("billing_consumption") if r["billing_key"] == "testcases.refine"]), 1)
         self.assertEqual(self.store[self.account_path]["balance_units"], 66)
+
+    async def test_demo_gate_defers_new_refinement_and_preserves_exact_replay(self):
+        repair, _, candidate = await self._scoped_repair_fixture()
+        before = deepcopy(self.store)
+        bill_calls = self.billing.call_count
+        with patch.object(routes, "refine_test_cases", return_value=candidate.model_dump()) as model:
+            with patch.object(routes, "draft_admission_client", return_value=self.client), self.assertRaises(HTTPException) as deferred:
+                await self._refine(repair)
+            self.assertEqual(deferred.exception.status_code, 409)
+            self.assertEqual(deferred.exception.detail["code"], "project_draft_refresh_deferred")
+            self.assertEqual(self.store, before)
+            self.assertEqual(self.billing.call_count, bill_calls)
+            model.assert_not_called()
+
+            refined = await self._refine(repair)
+            before_replay = deepcopy(self.store)
+            with patch.object(routes, "draft_admission_client", return_value=self.client):
+                replay = await self._refine(repair)
+            self.assertEqual(replay, refined.model_copy(update={"knowledge_suggestion": None}))
+            self.assertEqual(self.store, before_replay)
+            model.assert_called_once()
+            self.assertEqual(self.billing.call_count, bill_calls + 1)
 
     async def test_failed_and_stale_repairs_preserve_artifact_pointers_and_billing(self):
         repair, saved_rows, candidate = await self._scoped_repair_fixture()

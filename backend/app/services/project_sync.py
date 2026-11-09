@@ -11,6 +11,7 @@ from ..contracts.grounding import EnrichInput
 from ..models import GenerateTestCasesInput, GenerateTestCasesResponse, TestCaseTemplate
 from . import workflow_project_service as projects
 from .quality_feedback import digest, _project, _check_revision, _snapshot
+from .project_draft_admission import draft_admission_client, draft_refresh_deferred
 from .project_inputs import manifest_from_payload, behavioural_version
 from .guidance_runtime import prepare_run
 from .guidance_service import guidance_scope, public_manifest
@@ -61,6 +62,7 @@ def _write(project, actor, record, *, snapshots=(), states=None, updates=None, w
 
 
 def accept_finding(project_id, actor, payload, request_id):
+    draft_client = draft_admission_client()
     project = _project(project_id, actor)
     change_id = "change_" + digest([actor.sub, project_id, request_id])[:24]
     existing = projects._document_to_dict(_doc(project_id, change_id).get())
@@ -68,7 +70,14 @@ def accept_finding(project_id, actor, payload, request_id):
     if existing:
         if existing["fingerprint"] != fingerprint:
             raise HTTPException(409, "Request ID belongs to a different correction")
-        return resume_sync(project_id, actor, change_id)
+        if draft_client is None:
+            return resume_sync(project_id, actor, change_id)
+        # The correction may have committed between the project and receipt reads.
+        if project.current_revision < existing["project_revision"]:
+            project = _project(project_id, actor)
+        if not project.project_sync or project.project_sync["id"] != change_id:
+            raise HTTPException(409, "This update was superseded. Review the current project update.")
+        return project
     _check_revision(project, payload.base_project_revision)
     finding_ref = projects._get_project_doc(project_id).collection("quality_findings").document(payload.finding_id)
     finding = projects._document_to_dict(finding_ref.get())
@@ -157,9 +166,12 @@ def accept_finding(project_id, actor, payload, request_id):
     context_payload = {**(deepcopy(context.payload) if context else {}), "requirements": requirements, "project_decisions": decisions}
     source, states["context"] = _snapshot(project, "context", context_payload, identity, actor, revision, {"change_id": change_id})
     snapshots.append(source)
+    stale_reason = (
+        "Accepted project correction; drafts are refreshing" if draft_client is None else "Accepted project correction; paid draft refresh is deferred"
+    )
     for stage in projects.DOWNSTREAM_STAGES["context"]:
         if stage in states:
-            states[stage].update(stale=True, approved=False, stale_reason="Accepted project correction; drafts are refreshing")
+            states[stage].update(stale=True, approved=False, stale_reason=stale_reason)
     # Include other requirements sharing a case, so mixed-scope tests are regenerated together.
     changed = True
     while changed:
@@ -198,9 +210,10 @@ def accept_finding(project_id, actor, payload, request_id):
         "attempts": 0,
     }
     finding = {**finding, "status": "accepted", "change_id": change_id, "decision": payload.decision, "revision": finding.get("revision", 0) + 1}
-    enforce_billing_access(current_user=actor, billing_key="testcases.generate")
-    _write(project, actor, record, snapshots=snapshots, states=states, updates={"project_decisions": decisions}, writes=[(finding_ref, finding, False)])
-    return resume_sync(project_id, actor, change_id)
+    if draft_client is None:
+        enforce_billing_access(current_user=actor, billing_key="testcases.generate")
+    saved = _write(project, actor, record, snapshots=snapshots, states=states, updates={"project_decisions": decisions}, writes=[(finding_ref, finding, False)])
+    return saved if draft_client is not None else resume_sync(project_id, actor, change_id)
 
 
 def _check_current(project, record):
@@ -449,6 +462,7 @@ def _generate_stage(project, actor, record, stage):
 
 
 def resume_sync(project_id, actor, change_id):
+    draft_client = draft_admission_client()
     project = _project(project_id, actor)
     record = projects._document_to_dict(_doc(project_id, change_id).get())
     if not record:
@@ -459,6 +473,8 @@ def resume_sync(project_id, actor, change_id):
     now = projects._utcnow()
     if record["status"] == "running" and record.get("lease_until", "") > now.isoformat():
         return project
+    if draft_client is not None:
+        raise draft_refresh_deferred()
     enforce_billing_access(current_user=actor, billing_key="testcases.generate")
     record = {
         **record,

@@ -5,7 +5,6 @@ from hashlib import sha256
 import json
 import logging
 import os
-import re
 from threading import Lock
 
 from fastapi import HTTPException
@@ -26,12 +25,13 @@ from .approval_continuation import (
 )
 from .guidance_runtime import prepare_run
 from .guidance_service import enabled, guidance_scope
+from .project_draft_admission import DEMO_PROJECT_ID as DEMO_PROJECT_ID
+from .project_draft_admission import demo_client_matches, demo_provider_allowed
 from .project_inputs import behavioural_version
 from .use_case_generation_service import ApprovedScenarioSource, generate_project_use_cases
 from .workflow_project_service import QA_PROJECTS_COLLECTION
 
 
-DEMO_PROJECT_ID = "demo-tcg-v2-continuation"
 _MAX_PROVIDER_REQUESTS = 7  # Up to three planner pairs and one complete-plan reviewer.
 _MAX_TEST_CASE_PROVIDER_REQUESTS = 24
 _MAX_REQUEST_SECONDS = 25
@@ -41,25 +41,13 @@ _LEASE_SECONDS = 60
 _LOG = logging.getLogger(__name__)
 
 
-def _emulator_mode_enabled() -> bool:
-    if os.getenv("TCG_APPROVAL_SCENARIOS_ENABLED") != "true" or os.getenv("FIREBASE_PROJECT_ID") != DEMO_PROJECT_ID:
-        return False
-    target = re.fullmatch(r"(?:127\.0\.0\.1|\[::1\]):([0-9]{1,5})", os.getenv("FIRESTORE_EMULATOR_HOST", ""))
-    return bool(
-        target
-        and 1 <= int(target.group(1)) <= 65535
-        and os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in {"", "false", "0"}
-        and os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME).startswith("gemini-")
-    )
-
-
 def approval_scenarios_enabled() -> bool:
-    return _emulator_mode_enabled() and not enabled("memory", "use_cases") and not enabled("skills", "use_cases")
+    return demo_provider_allowed() and not enabled("memory", "use_cases") and not enabled("skills", "use_cases")
 
 
 def approval_test_cases_enabled() -> bool:
     return (
-        _emulator_mode_enabled()
+        demo_provider_allowed()
         and not enabled("memory", "test_cases")
         and not enabled("skills", "test_cases")
         and get_generation_settings().parallel_test_case_max_workers <= 3
@@ -67,12 +55,7 @@ def approval_test_cases_enabled() -> bool:
 
 
 def approval_scenario_client_allowed(client) -> bool:
-    # The pinned Firestore SDK resolves its transport once when the client is constructed.
-    return (
-        approval_scenarios_enabled()
-        and getattr(client, "project", None) == DEMO_PROJECT_ID
-        and getattr(client, "_emulator_host", None) == os.getenv("FIRESTORE_EMULATOR_HOST")
-    )
+    return approval_scenarios_enabled() and demo_client_matches(client)
 
 
 def _settings(stage):

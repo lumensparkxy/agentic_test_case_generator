@@ -205,6 +205,31 @@ class ProjectSyncTests(unittest.TestCase):
         path = f"qa_projects/{self.pid}/snapshots/{before.current_snapshots['test_cases'].snapshot_id}"
         self.assertEqual(self.store[path], original[path])
 
+    def test_demo_accept_and_exact_replay_preserve_correction_without_dispatch(self):
+        before = self.fixture()
+        with (
+            patch.object(sync, "draft_admission_client", return_value=self.transaction_client),
+            patch.object(sync, "enforce_billing_access") as billing,
+            patch.object(sync, "_generate_stage") as dispatch,
+        ):
+            accepted = sync.accept_finding(self.pid, self.actor, self.payload, "accept")
+            before_replay = deepcopy(self.store)
+            self.assertEqual(sync.accept_finding(self.pid, self.actor, self.payload, "accept"), accepted)
+            with self.assertRaises(HTTPException) as deferred:
+                sync.resume_sync(self.pid, self.actor, accepted.project_sync["id"])
+            billing.assert_not_called()
+            dispatch.assert_not_called()
+
+        self.assertEqual(deferred.exception.status_code, 409)
+        self.assertEqual(deferred.exception.detail["code"], "project_draft_refresh_deferred")
+        self.assertEqual(self.store, before_replay)
+        self.assertEqual(accepted.current_revision, before.current_revision + 1)
+        self.assertEqual(accepted.project_sync["status"], "pending")
+        self.assertEqual(accepted.project_sync["attempts"], 0)
+        self.assertEqual(accepted.current_snapshots["requirements"].payload["requirements"][0]["text"], "Limit is 6")
+        self.assertEqual(accepted.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
+        self.assertTrue(accepted.stage_state["test_cases"].stale)
+
     def test_partial_resumes_only_failed_stage(self):
         self.fixture()
         with (

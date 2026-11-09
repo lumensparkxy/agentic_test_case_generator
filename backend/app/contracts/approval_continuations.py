@@ -48,11 +48,31 @@ class ApprovalContinuationReceipt(BaseModel):
     blocked_reason: str | None
 
 
+class SavedReviewAdmissionView(BaseModel):
+    operation_id: str
+    fence: int = Field(ge=1)
+    state: Literal["running", "interrupted"]
+    source_snapshot_id: str
+    request_id: str
+
+
+class SavedReviewReleaseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fence: int = Field(strict=True, ge=1)
+
+
+class SavedReviewReleaseResult(BaseModel):
+    released: Literal[True] = True
+
+
 class ApprovalContinuationStatus(BaseModel):
     enabled: bool
     tests_enabled: bool
     runs: list[ApprovalContinuationView]
     receipt: ApprovalContinuationReceipt | None = None
+    saved_review_enabled: bool = False
+    saved_review_attempt: SavedReviewAdmissionView | None = None
 
 
 class ApproveAndPrepareScenariosResult(BaseModel):

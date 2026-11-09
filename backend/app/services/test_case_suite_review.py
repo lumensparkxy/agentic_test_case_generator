@@ -1,10 +1,12 @@
 """Assess immutable saved tests without a generation pass."""
 
 from contextlib import nullcontext
+import logging
 
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from ..agents.adk_runtime import bounded_model_requests
 from ..agents.substantive_review import apply_assessment, assess_delivered_suite
 from ..agents.test_case_review import _heuristic_test_case_review, _resolve_test_case_workflow_settings
 from ..config import get_settings
@@ -15,8 +17,9 @@ from ..contracts.test_cases import TestCase
 from ..models import AuthUser
 from .audit_service import complete_workflow_run, start_workflow_run
 from .guidance_runtime import prepare_run
-from .guidance_service import guidance_scope, public_manifest
+from .guidance_service import enabled, guidance_scope, public_manifest
 from .orchestrator_service import _use_cases_human_approved
+from .project_draft_admission import claim_draft_attempt, draft_admission_client, read_draft_attempt_result
 from .requirement_scope import approved_generation_requirements
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
 from .test_case_review_progress import SavedReviewProgress
@@ -24,6 +27,8 @@ from .workflow_project_service import ProjectConflictError, _serialize_value, ap
 
 REVIEW_OPERATION = "test_cases.review"
 REVIEWABLE_OPERATIONS = {"impact.update.apply", "testcases.refine", "quality.feedback.apply"}
+_MAX_REVIEW_PROVIDER_REQUESTS = 24
+_REVIEW_DEADLINE_SECONDS = 240
 
 
 def _current_review_inputs(project, suite):
@@ -169,7 +174,7 @@ def _generated_review_context(suite, context):
     raise HTTPException(409, "The original generation Context cannot be matched to the saved sources. Analyze their impact before reviewing.")
 
 
-def _prepare_generated_review(suite, sources, requirements, context, actor, request_id):
+def _prepare_generated_review(suite, sources, requirements, context, actor, request_id, *, memory_bypass=False):
     recorded = suite.metadata.get("source_snapshot_ids") or {}
     expected_requirements = {requirement.id: case_source_hash(requirement.model_dump(mode="json")) for requirement in requirements}
     if (
@@ -186,6 +191,7 @@ def _prepare_generated_review(suite, sources, requirements, context, actor, requ
         f"saved-review:{request_id}",
         requirement_ids=[requirement.id for requirement in requirements],
         input_fingerprint=suite.snapshot_id,
+        memory_bypass=memory_bypass,
     )
     recorded_guidance = suite.metadata.get("guidance") or {}
     if manifest.project_inputs:
@@ -205,12 +211,24 @@ def _prepare_generated_review(suite, sources, requirements, context, actor, requ
 
 def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_revision: int, actor: AuthUser, request_id: str) -> QaProjectDetail:
     project = get_project(project_id, actor=actor)
+    client = draft_admission_client()
+    if client is not None and read_draft_attempt_result(
+        client,
+        project_id=project_id,
+        actor_id=actor.sub,
+        request_id=request_id,
+        operation=REVIEW_OPERATION,
+        source_snapshot_id=snapshot_id,
+        base_revision=base_project_revision,
+    ):
+        return get_project(project_id, actor=actor)
     current = project.current_snapshots.get("test_cases")
     if project.status != "active":
         raise HTTPException(409, "Restore the project before reviewing its test cases.")
     if (
         current
         and current.operation == REVIEW_OPERATION
+        and (client is None or current.request_id == request_id)
         and current.source_snapshot_id == snapshot_id
         and current.project_revision == project.current_revision == base_project_revision + 1
     ):
@@ -228,13 +246,39 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
 
     requirements, plans, analysis, context, sources = _current_review_inputs(project, current)
     original = get_project_stage_snapshot(project_id, snapshot_id, actor=actor)
-    review_scope = nullcontext()
-    if generated_retry:
-        review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id)
-    progress = SavedReviewProgress(project_id, snapshot_id, base_project_revision, actor)
-    run_id = start_workflow_run(operation=REVIEW_OPERATION, actor=actor, request_id=request_id, metadata={"source_snapshot_id": snapshot_id})
+    admission = None
+    if client is not None:
+        if enabled("skills", "test_cases") or enabled("memory", "test_cases"):
+            raise HTTPException(409, "Saved-suite review in this demo requires the standard guidance settings.")
+        admission = claim_draft_attempt(
+            client,
+            project_id=project_id,
+            actor_id=actor.sub,
+            request_id=request_id,
+            operation=REVIEW_OPERATION,
+            source_snapshot_ids={**sources, "context": sources.get("context"), "test_cases": snapshot_id},
+            base_revision=base_project_revision,
+            max_requests=_MAX_REVIEW_PROVIDER_REQUESTS,
+            deadline_seconds=_REVIEW_DEADLINE_SECONDS,
+        )
+        if admission.result_snapshot_id:
+            return get_project(project_id, actor=actor)
+
+    progress = SavedReviewProgress(project_id, snapshot_id, base_project_revision, actor, admission=admission)
+    run_id = None
+
+    def publish_review(transaction, snapshot):
+        if admission is not None:
+            admission.finish_on_commit(transaction, snapshot)
+        progress.clear_on_commit(transaction, snapshot)
+
     try:
-        with review_scope:
+        review_scope = nullcontext()
+        if generated_retry:
+            review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id, memory_bypass=admission is not None)
+        run_id = start_workflow_run(operation=REVIEW_OPERATION, actor=actor, request_id=request_id, metadata={"source_snapshot_id": snapshot_id})
+        model_scope = bounded_model_requests(admission.reserve) if admission is not None else nullcontext()
+        with review_scope, model_scope:
             reviewed = _review_payload(original.payload, requirements, plans, analysis, context, progress=progress)
             append_stage_snapshot(
                 project_id=project_id,
@@ -255,10 +299,17 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
                     "approved": reviewed["approved"],
                 },
                 base_project_revision=base_project_revision,
-                transaction_guard=progress.clear_on_commit,
+                idempotency_key=admission.operation_id if admission is not None else None,
+                transaction_guard=publish_review,
             )
     except Exception:
-        complete_workflow_run(run_id, status="failed", error_message="Saved suite review was not published")
+        if admission is not None:
+            try:
+                admission.stop()
+            except Exception as exc:
+                logging.warning("Could not reconcile saved-suite review admission (%s)", type(exc).__name__)
+        if run_id is not None:
+            complete_workflow_run(run_id, status="failed", error_message="Saved suite review was not published")
         raise
     complete_workflow_run(run_id, status="completed", metadata={"approved": reviewed["approved"]})
     return get_project(project_id, actor=actor)

@@ -74,12 +74,31 @@ def continuation_run_id(project_id, actor_id, stage, approval_id):
     return f"continuation_{_digest([project_id, actor_id, stage, approval_id])}"
 
 
+def project_lease_ref(project_doc):
+    return project_doc.collection("approval_continuation_state").document("lease")
+
+
+def lease_blocks_claim(lease, now):
+    if not lease.get("run_id"):
+        return lease.get("dispatched") is True
+    expires_at = lease.get("expires_at")
+    return lease.get("dispatched") is not False or not isinstance(expires_at, datetime) or expires_at.tzinfo is None or expires_at > now
+
+
+def lease_matches(lease, *, kind, operation_id, fence=None):
+    return lease.get("kind", "continuation") == kind and lease.get("run_id") == operation_id and (fence is None or lease.get("fence") == fence)
+
+
+def released_project_lease(fence):
+    return {"run_id": None, "fence": fence, "expires_at": None, "dispatched": False}
+
+
 def _references(client, project_doc, run_id):
     return _Documents(
         project=project_doc,
         run=project_doc.collection("orchestrator_runs").document(run_id),
         outbox=client.collection(OUTBOX_COLLECTION).document(run_id),
-        lease=project_doc.collection("approval_continuation_state").document("lease"),
+        lease=project_lease_ref(project_doc),
     )
 
 
@@ -197,9 +216,9 @@ def _update_run(transaction, refs, intent, state, now, **fields):
 def _close(transaction, refs, run, intent, lease, state, now, reason=None, **fields):
     _update_run(transaction, refs, {**intent, "reason": reason}, state, now, completed_at=None if state == "interrupted" else now, **fields)
     transaction.delete(refs.outbox)
-    if state != "interrupted" and lease.get("run_id") == run["run_id"]:
+    if state != "interrupted" and lease_matches(lease, kind="continuation", operation_id=run["run_id"]):
         # Preserve the epoch even after a terminal outcome.
-        transaction.set(refs.lease, {"run_id": None, "fence": lease["fence"], "expires_at": None, "dispatched": False})
+        transaction.set(refs.lease, released_project_lease(lease["fence"]))
 
 
 def _expires_at(now, intent, lease_seconds):
@@ -236,7 +255,7 @@ def claim_stage(client, *, project_id, run_id, lease_seconds=60) -> Continuation
         if intent["deadline_at"] <= now:
             _close(transaction, refs, run, intent, lease, "failed", now, "deadline_exceeded")
             return None
-        if lease.get("run_id") and (lease["dispatched"] or lease["expires_at"] > now):
+        if lease_blocks_claim(lease, now):
             return None
         fence = lease.get("fence", 0) + 1
         expires_at = _expires_at(now, intent, lease_seconds)
@@ -267,8 +286,7 @@ def _load_claim(transaction, refs, claim):
         not intent
         or intent["state"] != "running"
         or claim.stage_request_id != run["run_id"]
-        or lease.get("run_id") != claim.run_id
-        or lease.get("fence") != claim.fence
+        or not lease_matches(lease, kind="continuation", operation_id=claim.run_id, fence=claim.fence)
         or lease["expires_at"] <= now
         or intent["deadline_at"] <= now
         or not _matches_sources(project, run, intent)

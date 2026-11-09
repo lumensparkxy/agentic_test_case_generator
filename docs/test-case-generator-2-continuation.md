@@ -196,6 +196,32 @@ The link to Review Tests appears when the exact saved suite is current.
 An assessment outage remains a separate saved-suite review action. The
 worker stays limited to the local emulator and invokes no browser execution.
 
+### Shared draft admission and assessment recovery
+
+The local approval worker and saved-suite assessment share the same
+project lease and increasing fence. The assessment uses its exact project
+revision, suite and upstream sources. It reserves at most 24 provider
+requests before dispatch and has a four-minute deadline. The exact
+assessment receipt and immutable review snapshot commit with release of the
+lease. Compatible partial assessment checkpoints can be recovered.
+Old continuation leases remain readable.
+
+If an attempt expires before dispatch, new work can claim a higher fence.
+After possible dispatch, Review shows the exact unresolved assessment.
+The owner can cancel a running assessment or acknowledge the interrupted
+attempt. The release names its operation and fence. Requests already sent
+may finish. Further provider calls, checkpoint writes and result publication
+from the old claim lose authority. Rechecking status never starts work.
+
+Until shared admission covers the remaining producers, the opted-in local
+demo defers paid draft refresh from Project Sync and direct scenario, suite,
+refinement, impact and generated-report entry points. Project Sync can
+still save an explicit correction. Deterministic impact analysis, execution
+preview and deliberate browser runs keep their existing admission. The
+shared lease covers competing project draft providers. Source intake uses
+its existing extraction policy. Flag-off and standalone flows retain their
+existing paths.
+
 ## Quality and delivery policy
 
 Use the existing [saved suite review](../backend/app/services/test_case_suite_review.py),
@@ -259,9 +285,9 @@ The baseline took **11 actions**, four workbench transitions and two explicit
 approvals. The sequence was Requirements, bulk review, approve non-rejected,
 Use Cases, generate plan, open scenario decision, approve plan, Test Cases,
 start generation, inspect case, Reports. The 30% gate allows at most **7
-actions** for this paired fixture. The core span was 1.723 seconds including
-scripted waits and screenshots under mocked responses. Measure live waiting
-and practitioner time separately.
+actions** for this paired fixture. The archived interaction log records a
+2.646-second core span including scripted waits and screenshots under mocked
+responses. Measure live waiting and practitioner time separately.
 
 Scenario approval recorded snapshot `snapshot-use-cases-v3` at revision 4.
 The JSON download matched the saved mocked suite including the literal test
@@ -278,6 +304,16 @@ From `frontend/`, run:
 JWT_SECRET_KEY=tcg-2-mocked-browser-fixture-signing-secret \
 E2E_BASE_URL=http://127.0.0.1:43999 node e2e/baseline-count.mjs
 ```
+
+At P3d, the paired mocked Chromium replay took **8 actions** and four
+workbench transitions, a **27.3% reduction** in actions. The source inputs,
+saved plan and test cases matched the frozen fixture. The reviewer made both
+approvals, selected the non-default case TC-202 and reached enabled JSON
+export. A separate export inspection matched the two saved cases. The
+recorded core span was 5.902 seconds including scripted polling and
+screenshots. These are mocked timings. The action count remains above the
+seven-action threshold. Direct selection of a saved case from the completed
+generation status is a P5 candidate for the remaining action.
 
 [The frozen evaluation protocol](test-case-generator-2-evaluation.md) defines
 the corpus, measurement rules and thresholds for the paired comparison.
@@ -297,10 +333,12 @@ P3b connects scenario preparation and Review status (commit `2bf1cef`,
 [PR #458](https://github.com/lumensparkxy/agentic_test_case_generator/pull/458)).
 P3c adds the exact-plan Test Cases worker (head `86c194b`,
 [PR #460](https://github.com/lumensparkxy/agentic_test_case_generator/pull/460)).
-P3d connects the second named approval, budget and Review recovery under
-[#461](https://github.com/lumensparkxy/agentic_test_case_generator/issues/461).
-Next is shared provider admission across continuation, Project Sync and
-foreground generation before any hosted activation.
+P3d connects the second named approval, budget and Review recovery (commit
+`2864d34`, [PR #462](https://github.com/lumensparkxy/agentic_test_case_generator/pull/462)).
+P3e shares provider admission with saved-suite assessment under
+[#463](https://github.com/lumensparkxy/agentic_test_case_generator/issues/463).
+Next is enrolling Project Sync and the remaining foreground draft producers
+before any hosted activation.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

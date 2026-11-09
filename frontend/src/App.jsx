@@ -144,6 +144,17 @@ const PROJECT_API_PATHS = Object.freeze({
 	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
 
+function savedReviewStatusMessage(review, sharedDraftBusy) {
+	if (review.busy || (!review.statusRead && !review.statusError)) return "Checking saved review status…";
+	if (review.attempt?.state === "interrupted")
+		return "The saved review was interrupted. The provider may already have received the request. Acknowledge and release the attempt before starting another review.";
+	if (review.attempt?.state === "running")
+		return "A saved review is running. Already issued provider requests may finish after cancellation. A cancelled attempt cannot publish a result.";
+	if (sharedDraftBusy) return "Another draft operation is active for this project.";
+	if (review.error || review.statusError) return "Check status before starting a saved review.";
+	return "Review saved suite resumes assessment of these saved cases and reuses compatible completed review groups.";
+}
+
 const createCancelledOperationError = () => {
 	const error = new Error("Project creation was cancelled because the workspace changed.");
 	error.name = "AbortError";
@@ -806,7 +817,7 @@ export default function App() {
 		(!testCaseStageState.stale || savedSuite?.operation === "quality.feedback.apply");
 	const savedSuiteReviewState = savedSuiteReview?.key === savedSuiteReviewKey ? savedSuiteReview : null;
 	const savedSuiteReviewed = savedSuite?.operation === "test_cases.review" && !testCaseStageState.stale;
-	const savedSuiteReviewDisabled =
+	const savedSuiteReviewUnavailable =
 		!savedSuiteInputsReady || authActionDisabled || isGenerating || isApplyingImpactUpdate || isAnalyzingImpact || isRunningExecution;
 	const testCaseFindings = improvementFindings(testCaseReview, substantiveAssessment);
 	const testCasesNeedSetup =
@@ -2034,6 +2045,26 @@ export default function App() {
 		identity: currentUser?.sub || "",
 		request: apiRequest,
 	});
+	const savedReview = approvalContinuation.savedReview;
+	const savedReviewRecovery =
+		APPROVAL_CONTINUATION_ENABLED && currentProject?.owner_user_id === currentUser?.sub && (savedReview.enabled || !savedReview.statusRead);
+	const sharedDraftBusy =
+		savedReview.enabled &&
+		(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted");
+	const savedSuiteReviewDisabled =
+		savedSuiteReviewUnavailable ||
+		(savedReviewRecovery &&
+			(!savedReview.statusRead ||
+				savedReview.statusError ||
+				savedReview.error ||
+				savedReview.busy ||
+				savedReview.attempt ||
+				sharedDraftBusy));
+	const checkSavedSuiteReview = (operationScope, { release = false } = {}) => {
+		if (!operationScope || !isProjectOperationCurrent(operationScope)) return;
+		const readProject = () => refreshCurrentProject({ hydrate: true, operationScope });
+		return release ? savedReview.release(readProject) : savedReview.check(readProject);
+	};
 	const continuationReadRevision = useRef(null);
 	const continuationRevision = approvalContinuation.run?.project_revision;
 	const continuationReceiptId = approvalContinuation.receipt?.request_id;
@@ -3850,6 +3881,7 @@ export default function App() {
 		if (scope?.projectId !== currentProjectId) return;
 		savedSuiteReviewRequests.current.add(savedSuiteReviewKey);
 		setSavedSuiteReview({ key: savedSuiteReviewKey, busy: true });
+		let reviewError = null;
 		try {
 			const response = await apiRequest(PROJECT_API_PATHS.savedSuiteReview(scope.projectId), {
 				method: "POST",
@@ -3878,12 +3910,18 @@ export default function App() {
 			hydrateProjectWorkflow(project);
 			void loadProjectOrchestrator(project.project_id, { silent: true, operationScope: scope });
 		} catch (error) {
-			if (isProjectOperationCurrent(scope)) {
-				setSavedSuiteReview({ key: savedSuiteReviewKey, busy: false, error: error.message, reviewGroups: error.reviewGroups });
-			}
+			if (!savedReview.enabled || !(error instanceof TypeError || error instanceof SyntaxError)) reviewError = error;
 		} finally {
+			if (savedReview.enabled) await checkSavedSuiteReview(scope);
 			savedSuiteReviewRequests.current.delete(savedSuiteReviewKey);
-			setSavedSuiteReview((current) => (current?.key === savedSuiteReviewKey && current.busy ? null : current));
+			const visibleError = isProjectOperationCurrent(scope) && reviewError;
+			setSavedSuiteReview((current) =>
+				current?.key === savedSuiteReviewKey
+					? visibleError
+						? { key: savedSuiteReviewKey, busy: false, error: visibleError.message, reviewGroups: visibleError.reviewGroups }
+						: null
+					: current
+			);
 		}
 	};
 
@@ -5824,6 +5862,54 @@ export default function App() {
 												taskCount={generationTasks.length}
 												onReview={selectWorkflowTab}
 											/>
+											{savedReviewRecovery && (savedReview.attempt || savedSuiteReviewPending) && (
+												<section className="generation-gate-card" aria-label="Saved suite review recovery">
+													<div>
+														<h3>Saved suite review recovery</h3>
+														<p role="status">{savedReviewStatusMessage(savedReview, sharedDraftBusy)}</p>
+														{savedReview.attempt &&
+															(savedReview.attempt.source_snapshot_id !== savedSuite?.snapshot_id || testCaseStageState.stale) && (
+																<p>This attempt uses an earlier source revision.</p>
+															)}
+														{savedReview.attempt && (
+															<Disclosure>
+																<summary>Saved review details</summary>
+																<p>
+																	Saved suite <code>{savedReview.attempt.source_snapshot_id}</code>
+																</p>
+																<p>
+																	Request <code>{savedReview.attempt.request_id}</code>
+																</p>
+															</Disclosure>
+														)}
+														{(savedReview.error || savedReview.statusError) && (
+															<p role="alert">{savedReview.error || savedReview.statusError}</p>
+														)}
+													</div>
+													<div className="workbench-actions">
+														<Button
+															variant="secondary"
+															size="compact"
+															disabled={savedReview.busy || savedSuiteReviewState?.busy}
+															onClick={() => void checkSavedSuiteReview(captureProjectOperationScope())}
+														>
+															Check saved review status
+														</Button>
+														{savedReview.attempt && (
+															<Button
+																variant="secondary"
+																size="compact"
+																disabled={Boolean(
+																	savedReview.busy || savedReview.statusError || savedReview.error || savedSuiteReviewState?.busy
+																)}
+																onClick={() => void checkSavedSuiteReview(captureProjectOperationScope(), { release: true })}
+															>
+																{savedReview.attempt.state === "interrupted" ? "Acknowledge and release" : "Cancel saved review"}
+															</Button>
+														)}
+													</div>
+												</section>
+											)}
 											{savedSuiteReviewPending && (
 												<div className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}>
 													<div role="status">

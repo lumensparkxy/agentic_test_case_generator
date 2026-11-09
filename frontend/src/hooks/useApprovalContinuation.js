@@ -24,10 +24,14 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const inFlight = useRef(null);
 	const pollCount = useRef(0);
 	const cancelInFlight = useRef(null);
+	const savedReviewInFlight = useRef(null);
 	const [readState, setReadState] = useState(null);
 	const [actionState, setActionState] = useState(null);
+	const [savedReviewState, setSavedReviewState] = useState(null);
 	const current = readState?.scope === scope ? readState : null;
 	const action = actionState?.scope === scope ? actionState : null;
+	const savedReviewAction = savedReviewState?.scope === scope ? savedReviewState : null;
+	const savedReviewAttempt = current?.data?.saved_review_attempt || null;
 	const runs = current?.data?.runs || [];
 	const requestId = pending.value?.requestId || "";
 	const pendingStage = pending.value?.stage || "prepare_scenarios";
@@ -38,8 +42,13 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const unresolved = Boolean(requestId && !match && !receipt);
 
 	const refresh = useCallback(
-		async ({ reset = false } = {}) => {
-			if (!scope || inFlight.current?.scope === scope) return;
+		async ({ reset = false, replace = false } = {}) => {
+			if (!scope) return null;
+			const existing = inFlight.current;
+			if (existing?.scope === scope) {
+				if (!replace) return null;
+				existing.controller.abort();
+			}
 			if (reset) pollCount.current = 0;
 			const controller = new AbortController();
 			const read = { scope, controller };
@@ -52,7 +61,10 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 				const response = await requestRef.current(path, { method: "GET", signal: controller.signal });
 				if (!response.ok) throw new Error("Approval continuation status is unavailable.");
 				const data = await response.json();
-				if (!controller.signal.aborted && activeScope.current === scope) setReadState({ scope, data, error: "" });
+				if (!controller.signal.aborted && activeScope.current === scope) {
+					setReadState({ scope, data, error: "" });
+					return data;
+				}
 			} catch {
 				if (!controller.signal.aborted && activeScope.current === scope)
 					setReadState((previous) => ({
@@ -63,6 +75,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 			} finally {
 				if (inFlight.current === read) inFlight.current = null;
 			}
+			return null;
 		},
 		[basePath, pendingStage, requestId, scope]
 	);
@@ -91,15 +104,19 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const accept = (response, stage = "prepare_scenarios") => {
 		const result = response.continuation;
 		if (result) {
-			setReadState((previous) => ({
-				scope,
-				error: "",
-				data: {
-					enabled: true,
-					tests_enabled: stage === "generate_tests" || previous?.data?.tests_enabled,
-					runs: [result, ...(previous?.data?.runs || []).filter((item) => item.run_id !== result.run_id)],
-				},
-			}));
+			setReadState((previous) => {
+				const prior = previous?.scope === scope ? previous.data : null;
+				return {
+					scope,
+					error: "",
+					data: {
+						...prior,
+						enabled: true,
+						tests_enabled: stage === "generate_tests" || prior?.tests_enabled,
+						runs: [result, ...(prior?.runs || []).filter((item) => item.run_id !== result.run_id)],
+					},
+				};
+			});
 		}
 		setActionState({ scope, stage, error: "", blockedReason: response.blocked_reason || "" });
 		pending.clear();
@@ -144,6 +161,43 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		}
 	};
 
+	const reconcileSavedReview = async (readProject, attempt = null) => {
+		if (!scope || savedReviewInFlight.current?.scope === scope) return;
+		const mutation = { scope };
+		savedReviewInFlight.current = mutation;
+		setSavedReviewState({ scope, mutation, busy: true });
+		let releaseUnconfirmed = false;
+		try {
+			if (attempt) {
+				try {
+					const endpoint = API_CONTRACT_ENDPOINTS.savedReviewAdmissionRelease;
+					const path = endpoint.path
+						.replace("{project_id}", projectSegment)
+						.replace("{operation_id}", encodeURIComponent(attempt.operation_id));
+					const response = await requestRef.current(path, {
+						method: endpoint.method,
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ fence: attempt.fence }),
+					});
+					releaseUnconfirmed = !response.ok || (await response.json()).released !== true;
+				} catch {
+					releaseUnconfirmed = true;
+				}
+			}
+			if (activeScope.current !== scope) return;
+			const status = await refresh({ reset: true, replace: true });
+			if (!status || activeScope.current !== scope || !(await readProject()))
+				throw new Error("Could not confirm saved review status. Check status again.");
+			const error = releaseUnconfirmed && status.saved_review_attempt ? "The release was not confirmed. Check the current attempt." : "";
+			if (activeScope.current === scope) setSavedReviewState({ scope, error });
+		} catch (error) {
+			if (activeScope.current === scope) setSavedReviewState({ scope, error: error.message });
+		} finally {
+			if (savedReviewInFlight.current === mutation) savedReviewInFlight.current = null;
+			setSavedReviewState((previous) => (previous?.mutation === mutation ? null : previous));
+		}
+	};
+
 	return {
 		available: current?.data?.enabled === true,
 		testsAvailable: current?.data?.tests_enabled === true,
@@ -165,5 +219,15 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		accept,
 		cancel,
 		refresh,
+		savedReview: {
+			enabled: current?.data?.saved_review_enabled === true,
+			statusRead: Boolean(current?.data),
+			statusError: current?.error || "",
+			error: savedReviewAction?.error || "",
+			busy: savedReviewAction?.busy === true,
+			attempt: savedReviewAttempt,
+			check: reconcileSavedReview,
+			release: (readProject) => savedReviewAttempt && reconcileSavedReview(readProject, savedReviewAttempt),
+		},
 	};
 }
