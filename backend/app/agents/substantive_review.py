@@ -542,7 +542,8 @@ def rejected_write_findings(data):
                         "obligation": "Verify saved state after a rejected write",
                         "status": "unmet",
                         "reason": f'After the rejection "{rule.message}", reopen the same page. Before clicking "{rule.button}" and again after reopening, '
-                        f'check exact {rule.ready_kind} "{rule.ready_name}" is visible and then assert the same count of {rule.kind} "{rule.selector}".',
+                        f'check exact {rule.ready_kind} "{rule.ready_name}" is visible and then assert the same count of {rule.kind} '
+                        f"{json.dumps(rule.selector, ensure_ascii=False)}.",
                         "evidence": [{"test_case_id": case["id"], **{key: step[key] for key in ("step", "action", "expected")}} for step in case["steps"]],
                         "assessment_method": "deterministic_regression_guard",
                     }

@@ -144,6 +144,16 @@ class SubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(findings(scoped_error), [])
         scoped_error.steps.pop(5)
         self.assertEqual(len(findings(scoped_error)), 1)
+        quoted_selector = """css '#bookings tr[data-owner="QA  User"]'"""
+        quoted_context = {**context, "notes": context["notes"].replace('css "#bookings tr"', quoted_selector)}
+        scoped_count = case.model_copy(deep=True)
+        for step_index in (2, 6):
+            scoped_count.steps[step_index].expected = f"{quoted_selector} count should be 1"
+        self.assertEqual(findings(scoped_count, quoted_context), [])
+        scoped_count.steps[6].expected = scoped_count.steps[6].expected.replace("QA  User", "QA User")
+        quoted_findings = findings(scoped_count, quoted_context)
+        self.assertEqual(len(quoted_findings), 1)
+        self.assertIn(r'css "#bookings tr[data-owner=\"QA  User\"]"', quoted_findings[0]["reason"])
         self.assertEqual(findings(stale.model_copy(update={"automation_status": "Manual"})), [])
         self.assertEqual(findings(stale, {**context, "notes": "No declared rejection."}), [])
         requirement.text = "Show an inline error when the attendee count is above the maximum."

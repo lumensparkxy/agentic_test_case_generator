@@ -11,8 +11,8 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from plain_english_test_framework.ir_validator import ValidatedIr, parse_ir_document
-from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
-from plain_english_test_framework.spec_parser import STRUCTURED_LITERAL_STEP_PATTERN, ParsedSpec, parse_spec_file
+from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text, parse_browser_count
+from plain_english_test_framework.spec_parser import STRUCTURED_COUNT_LITERAL_PATTERN, STRUCTURED_LITERAL_STEP_PATTERN, ParsedSpec, parse_spec_file
 from plain_english_test_framework.validation import ValidationIssue, deduplicate_issues, find_secret_issues
 
 
@@ -443,15 +443,20 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "expected": expected,
         }
 
-    if match := LOCATOR_COUNT_PATTERN.match(body):
-        value = _resolve_text(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+    literal_count = STRUCTURED_COUNT_LITERAL_PATTERN.fullmatch(body)
+    if match := literal_count or LOCATOR_COUNT_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        count = parse_browser_count(match["count"])
+        if count is None:
+            raise CompilerError((ValidationIssue(path, "count must be a nonnegative JavaScript safe integer", "step.count_range"),))
+        value = json.loads(match["literal"]) if literal_count else _resolve_text(match["value"], environment, data, path=path)
         return {
             "id": _slug_identifier(f"assert count {value}"),
             "sourceStepIndex": source_step_index,
             "original": original,
             "action": "assert_count",
             "locator": _locator_for_kind(match.group("kind"), value),
-            "expected": int(match.group("count")),
+            "expected": count,
         }
 
     if match := VISIBLE_PATTERN.match(body):

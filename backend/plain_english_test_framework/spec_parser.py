@@ -33,6 +33,7 @@ STRUCTURED_LITERAL_STEP_PATTERN = re.compile(
     rf'|(?P<kind>field|css|test id) "(?P<locator>{_QUOTED_LOCATOR})" (?P<subject>value|text) should equal)'
     rf" literal (?P<literal>{_JSON_STRING})"
 )
+STRUCTURED_COUNT_LITERAL_PATTERN = re.compile(rf"(?P<kind>css|test id) literal (?P<literal>{_JSON_STRING}) count should be (?P<count>\d+)")
 
 
 class SpecValidationError(Exception):
@@ -171,7 +172,7 @@ def _validate_placeholders(document: Mapping[str, Any]) -> list[ValidationIssue]
         if not isinstance(step, str):
             continue
         body = STEP_KEYWORD_PATTERN.sub("", step, count=1)
-        if literal := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body):
+        if literal := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body) or STRUCTURED_COUNT_LITERAL_PATTERN.fullmatch(body):
             # Only the explicit operand is exempt from template validation.
             step = body[: literal.start("literal")]
 

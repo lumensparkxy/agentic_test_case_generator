@@ -136,6 +136,16 @@ breaks in the actual text. An empty expectation requires empty text. Use a
 separate check when the element must also be visible. Legacy unscoped label
 text checks continue to normalize whitespace.
 
+Use `css "#orders tr" count should be 1` or
+`test id "rejected-order" count should be 0` for an exact number of DOM matches.
+Preserve the observed selector, including spaces, quotes and CSS escapes.
+For a quoted attribute, wrap the selector in the other quote style, as in
+`css '[data-order-id="ORDER-17"]' count should be 1`.
+Check a separate loaded indicator before counting an asynchronous collection.
+Preview marks counts that JavaScript cannot represent exactly as unsupported.
+Saved structured specs can continue to use locator templates. The compiler
+also accepts an explicit JSON locator in `css literal "…" count should be 1`.
+
 The step-data syntax uses only the string saved on that step. It preserves
 newlines and braces in values such as JSON, including deliberately malformed
 JSON. Placeholder-shaped text in this data stays literal. Use a credential

@@ -737,6 +737,69 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('await expect(page.getByTestId("email-input")).toBeVisible();', generated)
         self.assertIn('await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();', generated)
 
+    def test_exact_count_selectors_survive_preview_compilation_and_playwright_rendering(self) -> None:
+        target = "https://example.test/orders"
+        selectors = (
+            (r'css ".order\#rejected"', "css", r".order\#rejected", 0),
+            ("""css '[data-order-id="  café  "]'""", "css", '[data-order-id="  café  "]', 1),
+            ('''css "[data-order-id='Q-17']"''', "css", "[data-order-id='Q-17']", 1),
+            (r'test id " SAP GUI console\\\"  {env.baseUrl} "', "test_id", ' SAP GUI console\\"  {env.baseUrl} ', 2),
+        )
+        for source, strategy, value, expected in selectors:
+            with self.subTest(source=source):
+                case = TestCase(
+                    id="TC-COUNT",
+                    title="Count exactly the observed orders",
+                    automation_status="Automated",
+                    steps=[
+                        TestStep(step=1, action=f'Open "{target}"', expected=""),
+                        TestStep(step=2, action="Inspect the saved orders", expected=f"{source} count should be {expected}"),
+                    ],
+                )
+                preview = preview_execution([case], target_base_url=target)
+                self.assertEqual(preview.summary.executable, 1)
+                ir = compile_parsed_spec(
+                    parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None)
+                )
+                check = ir.raw["cases"][0]["steps"][-1]
+                self.assertEqual((check["action"], check["locator"], check["expected"]), ("assert_count", {"strategy": strategy, "value": value}, expected))
+                method = "getByTestId" if strategy == "test_id" else "locator"
+                self.assertIn(f"await expect(page.{method}({json.dumps(value)})).toHaveCount({expected});", generate_playwright_spec(ir).contents)
+
+    def test_invalid_count_only_disables_its_own_candidate(self) -> None:
+        valid = _browser_case()
+        for index, count in enumerate(("-1", "1.5", "2 or 3", "9007199254740992", "9" * 4400)):
+            with self.subTest(index=index):
+                invalid = valid.model_copy(deep=True, update={"id": "TC-BAD-COUNT"})
+                invalid.steps.append(TestStep(step=99, action="Inspect the order list", expected=f'css "#orders tr" count should be {count}'))
+                preview = preview_execution([invalid, valid], target_base_url="https://example.test")
+                self.assertEqual([item.source_test_case_id for item in preview.executable], [valid.id])
+                self.assertEqual(preview.unsupported[0].source_test_case_id, invalid.id)
+                diagnostic = preview.unsupported[0].unsupported_steps[0]
+                self.assertEqual(diagnostic.step, 99)
+                if index >= 3:
+                    self.assertIn("represent exactly", diagnostic.suggested_next_action)
+
+    def test_structured_count_retains_legacy_templates_and_reports_unsafe_values(self) -> None:
+        target = "https://example.test/orders"
+        locator = r".order\\part"
+        env = ResolvedEnvironment("web", {"baseUrl": target, "selector": locator}, target, None)
+        document = {
+            "schemaVersion": "1.0",
+            "id": "orders",
+            "title": "Count saved orders",
+            "steps": [f'Given I open "{target}"', 'Then css "{env.selector}" count should be 2', rf'Then css "{locator}" count should be 0'],
+        }
+        ir = compile_parsed_spec(parse_spec_document(document), environment=env)
+        checks = ir.raw["cases"][0]["steps"][1:]
+        self.assertEqual([(step["locator"]["value"], step["expected"]) for step in checks], [(locator, 2), (locator, 0)])
+        checks[0]["expected"] = 9007199254740992
+        self.assertTrue(validate_ir_document(ir.raw))
+        document["steps"][-1] = 'Then test id "orders" count should be ' + "9" * 4400
+        with self.assertRaises(CompilerError) as raised:
+            compile_parsed_spec(parse_spec_document(document), environment=env)
+        self.assertEqual(raised.exception.issues[0].code, "step.count_range")
+
     def test_field_value_assertions_survive_preview_compiler_and_codegen(self) -> None:
         case = TestCase(
             id="TC-FIELD-VALUE",

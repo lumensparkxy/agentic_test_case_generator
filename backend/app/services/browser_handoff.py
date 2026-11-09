@@ -11,6 +11,7 @@ from pydantic import HttpUrl, ValidationError
 
 from plain_english_test_framework.compiler import CompilerError, ResolvedEnvironment, compile_parsed_spec
 from plain_english_test_framework.ir_validator import IrValidationError
+from plain_english_test_framework.semantic_assertions import QUOTED_BROWSER_LOCATOR, unquote_browser_locator
 from plain_english_test_framework.spec_parser import SpecValidationError, parse_spec_document
 
 from ..contracts.grounding import EnrichInput
@@ -33,6 +34,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
 - When the same text can appear in multiple elements, scope its check to a declared unique locator. Use expected 'css "#observed-status" text should equal "source copy"' or 'test id "observed-status" text should equal "source copy"'. Match the full observed text, including spaces. Use a separate visibility check when visibility itself is required. Never choose the first match or invent a locator.
+- To verify an exact count, use 'css "#orders tr" count should be 1' or 'test id "rejected-order" count should be 0'. Use the exact supplied selector and keep its whitespace and CSS escapes. Use different outer quotes when the selector contains quotes. For an asynchronous collection, first check its supplied loaded indicator in a separate step.
 - For a source requirement that says a saved record displays submitted values, check each value on that same record after submission. A form value or confirmation alone leaves this outcome untested. A 'Browser result css "#saved-value" on "https://app.example/" shows field "Name" after button "Save"' declaration supplies an observed result locator. Use a scoped text check with the exact prior selected label or entered literal. For a text entry, include its exact field-value check before submission.
 - A 'Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible' declaration supplies an observed collection and its loaded indicator. Check the indicator, then assert the grounded starting count with expected 'css "#records tr" count should be 1' before the named submit action. Assert the exact error, then reopen the same URL with 'Open "https://app.example/"'. Check the indicator and the same count in that fresh page. Use the actual supplied selector and actor's starting count.
 - For a named role or exact text that should be out of view, write 'exact link "observed link" is not visible' or 'exact text "source copy" is not visible'. Use a separate step at the state where visibility matters. This check allows hidden and absent matches. Keep DOM presence, timing, and authorization requirements separate.
@@ -42,13 +44,13 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 """
 
 _QUOTED = re.compile(r""""([^"\n]*)"|(?<!\w)'([^'\n]*)'(?!\w)""")
-_DECLARED_LOCATOR = re.compile(r'(css(?: selector)?|test id)\s+"([^"\n]+)"', re.IGNORECASE)
+_DECLARED_LOCATOR = re.compile(rf"\b(css(?: selector)?|test id)\s+({QUOTED_BROWSER_LOCATOR})", re.IGNORECASE)
 _NOTED_CONTROL = re.compile(r'\b(field|heading|button|link)\s+"([^"\n]+)"|"([^"\n]+)"\s+(field|heading|button|link)\b', re.IGNORECASE)
 _NOTED_PAGE = re.compile(r'Browser page "([^"\n]+)"', re.IGNORECASE)
 _NOTED_DROPDOWN = re.compile(r'Browser dropdown "([^"\n]+)" on "([^"\n]+)" options (.+)', re.IGNORECASE)
 _NOTED_RESULT = re.compile(r'Browser result (css|test id) "([^"\n]+)" on "([^"\n]+)" shows field "([^"\n]+)" after button "([^"\n]+)"', re.IGNORECASE)
 _NOTED_REJECTION = re.compile(
-    r'Browser rejection "([^"\n]+)" on "([^"\n]+)" after button "([^"\n]+)" preserves (css|test id) "([^"\n]+)" '
+    rf'Browser rejection "([^"\n]+)" on "([^"\n]+)" after button "([^"\n]+)" preserves (css|test id) ({QUOTED_BROWSER_LOCATOR}) '
     r'when exact (heading|text) "([^"\n]+)" is visible',
     re.IGNORECASE,
 )
@@ -113,7 +115,8 @@ def declared_rejection_readbacks(notes: str, app_link: str | None) -> list[Rejec
     declarations = []
     for line in notes.splitlines():
         if match := _NOTED_REJECTION.fullmatch(line.strip()):
-            message, raw_page, button, kind, selector, ready_kind, ready_name = match.groups()
+            message, raw_page, button, kind, quoted_selector, ready_kind, ready_name = match.groups()
+            selector = unquote_browser_locator(quoted_selector)
             page = _http_url(raw_page)
             if page in pages and all(value.strip() for value in (message, button, selector, ready_name)):
                 declarations.append(RejectionReadback(message, page, button, kind.lower(), selector, ready_kind.lower(), ready_name))
@@ -266,7 +269,9 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
     literals = {double or single for text in source_text for double, single in _QUOTED.findall(text)}
     literals.update(name for names in names_by_type.values() for name in names)
     declared_locators = {
-        ("css" if kind.lower().startswith("css") else "test_id", value) for text in source_text for kind, value in _DECLARED_LOCATOR.findall(text)
+        ("css" if kind.lower().startswith("css") else "test_id", unquote_browser_locator(quoted))
+        for text in source_text
+        for kind, quoted in _DECLARED_LOCATOR.findall(text)
     }
     select_dom_values: dict[str, set[str]] = {}
     for text in source_text:

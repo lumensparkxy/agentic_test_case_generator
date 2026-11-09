@@ -73,6 +73,23 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertEqual(validate_browser_handoff([case], context(), [requirement]), [])
         self.assertEqual(case.automation_status, "To Be Automated")
 
+    def test_count_requires_the_exact_declared_selector(self):
+        selector = """css '[data-order-id="  café  "]'"""
+        grounded = context().model_copy(update={"notes": f"Observed {selector}."})
+        case = candidate()
+        case.steps = [
+            TestStep(step=1, action=f'Open "{TARGET}"', expected=""),
+            TestStep(step=2, action="Inspect saved orders", expected=f"{selector} count should be 1"),
+        ]
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+        self.assertEqual(case.automation_status, "To Be Automated")
+
+        invented = case.model_copy(deep=True)
+        invented.steps[1].expected = invented.steps[1].expected.replace("  café  ", "café")
+        warnings = validate_browser_handoff([invented], grounded, [REQUIREMENT])
+        self.assertEqual(invented.automation_status, "Manual")
+        self.assertTrue(any("lacks exact interface evidence" in warning for warning in warnings))
+
     def test_populated_field_can_be_cleared_with_grounded_exact_input(self):
         case = candidate()
         case.steps[1].action = 'Enter "  Q  into  17  " into field "Reference"'

@@ -17,7 +17,12 @@ from plain_english_test_framework.local_runner import (
     run_local_playwright_specs,
 )
 from plain_english_test_framework.playwright_generator import TARGET_ORIGIN_ERROR, PlaywrightGenerationError
-from plain_english_test_framework.semantic_assertions import is_ambiguous_semantic_visible_text
+from plain_english_test_framework.semantic_assertions import (
+    QUOTED_BROWSER_LOCATOR,
+    is_ambiguous_semantic_visible_text,
+    parse_browser_count,
+    unquote_browser_locator,
+)
 from plain_english_test_framework.spec_parser import SpecValidationError
 from plain_english_test_framework.validation import ValidationIssue, find_secret_issues
 
@@ -179,7 +184,7 @@ LOCATOR_ATTRIBUTE_EQUALS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOCATOR_COUNT_PATTERN = re.compile(
-    r"\b(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?['\"](?P<value>[^'\"]+)['\"]\s+"
+    rf"(?:(?P<kind>css|selector|test\s*id|test-id|data-testid)\s+)?(?P<value>{QUOTED_BROWSER_LOCATOR})\s+"
     r"count\s+(?:is|should\s+be|equals?|should\s+equal)\s+(?P<count>\d+)\b",
     re.IGNORECASE,
 )
@@ -593,7 +598,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     raw_action = step.action.strip()
     action = _normalize_text(step.action)
     expected = _normalize_text(step.expected)
-    unquoted_action = re.sub(QUOTED_ASSERTION_TARGET, "", action)
+    unquoted_action = re.sub(QUOTED_BROWSER_LOCATOR, "", action)
     data_fill_intent = STEP_DATA_FILL_INTENT.search(unquoted_action)
     data_fill = STEP_DATA_FILL_ACTION.fullmatch(raw_action)
     data_action, action_uses_data = _step_data_assertion(step.action, step.test_data)
@@ -618,7 +623,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(raw_action)
     quoted_fill = QUOTED_FILL_ACTION.fullmatch(raw_action)
     # A supported assertion's quoted locator and value are data, not operations.
-    literal_assertions = {"assert_hidden", "assert_checked", "assert_radio_selected", "assert_scoped_text_equals"}
+    literal_assertions = {"assert_hidden", "assert_checked", "assert_radio_selected", "assert_scoped_text_equals", "assert_count"}
     action_is_literal = (
         data_action
         or action_value
@@ -685,7 +690,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     elif OBSERVATION_ACTION_PATTERN.match(action):
         # The expected check represents the observation. A control name such
         # as "Open receipt" does not turn it into a navigation.
-        if not (expected_value or expected_assertion) or _unsupported_browser_assertion_text_reason(action):
+        if not expected or _unsupported_browser_assertion_text_reason(action):
             return [], _unmapped_step(step, action, is_expected=False)
     elif fill := quoted_fill or FILL_PATTERN.search(action):
         exact = False
@@ -797,6 +802,17 @@ def _assertion_statement(text: str) -> str:
 
 def _convert_assertion(text: str) -> _ConvertedStep | None:
     text = _assertion_statement(text)
+    if match := LOCATOR_COUNT_PATTERN.fullmatch(text):
+        value = unquote_browser_locator(match["value"])
+        kind = _normalize_locator_kind(match["kind"]) or ("css" if _looks_like_selector_value(value) else None)
+        count = parse_browser_count(match["count"])
+        if not kind or not value.strip() or count is None:
+            return None
+        encoded = json.dumps(value, ensure_ascii=False)
+        if encoded != f'"{value}"' or "{" in value or "}" in value:
+            encoded = f"literal {encoded}"
+        return _ConvertedStep("assert_count", f"{kind} {encoded} count should be {count}")
+
     if match := SCOPED_TEXT_ASSERTION_PATTERN.fullmatch(text):
         if match["locator"].strip():
             return _ConvertedStep("assert_scoped_text_equals", text)
@@ -853,11 +869,6 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
                 "assert_attribute_equals",
                 f'{locator} attribute "{_escape_step_text(attribute)}" should equal "{_escape_step_text(expected)}"',
             )
-
-    if match := LOCATOR_COUNT_PATTERN.fullmatch(text):
-        locator = _locator_assertion_body(match.group("kind"), match.group("value"))
-        if locator:
-            return _ConvertedStep("assert_count", f"{locator} count should be {int(match.group('count'))}")
 
     if match := LOCATOR_CHECKED_PATTERN.fullmatch(text):
         locator = _locator_assertion_body(match.group("kind"), match.group("value"))
@@ -1267,6 +1278,9 @@ def _unmapped_step(step: TestStep, text: str, *, is_expected: bool) -> Execution
 def _unsupported_browser_assertion_text_reason(text: str) -> str | None:
     if not text or _convert_assertion(text):
         return None
+
+    if (count := LOCATOR_COUNT_PATTERN.fullmatch(_assertion_statement(text))) and parse_browser_count(count["count"]) is None:
+        return "Use a nonnegative count that JavaScript can represent exactly."
 
     if _contains_runtime_assertion_intent(text):
         return "Runtime, CLI, stdout/stderr, and exception assertions are not browser DOM assertions; keep them manual or add runtime-level checks."
