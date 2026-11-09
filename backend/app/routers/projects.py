@@ -5,6 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from ..contracts.execution import ExecutionRequestReceipt
 from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
+from ..contracts.scenario_refresh import ScenarioRefreshRelease, ScenarioRefreshReleased, ScenarioRefreshStatus
 from ..contracts.selected_case_repair import (
     SelectedCaseRepairInput,
     SelectedCaseRepairRelease,
@@ -12,7 +13,7 @@ from ..contracts.selected_case_repair import (
     SelectedCaseRepairResult,
     SelectedCaseRepairStatus,
 )
-from ..services.use_case_generation_service import generate_project_use_cases
+from ..services.use_case_generation_service import generate_project_use_cases, release_scenario_refresh, scenario_refresh_status
 from ..auth.jwt_auth import get_current_user
 from ..models import (
     AuthUser,
@@ -370,6 +371,35 @@ async def review_qa_project_use_cases(
         raise use_case_review_error_to_http(exc) from exc
 
 
+@router.get("/projects/{project_id}/use-cases/refresh", response_model=ScenarioRefreshStatus)
+def get_scenario_refresh(
+    project_id: str,
+    request_id: str | None = Query(default=None, min_length=1, max_length=160),
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        return scenario_refresh_status(project_id, actor, request_id=request_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/use-cases/refresh/{operation_id}/release", response_model=ScenarioRefreshReleased)
+def release_project_scenario_refresh(
+    project_id: str,
+    operation_id: str,
+    payload: ScenarioRefreshRelease,
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        return ScenarioRefreshReleased(released=release_scenario_refresh(project_id, actor, operation_id, payload.fence))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
 @router.post("/projects/{project_id}/use-cases/generate", response_model=QaProjectDetail)
 async def generate_qa_project_use_cases(
     project_id: str,
@@ -385,6 +415,7 @@ async def generate_qa_project_use_cases(
             request_id=_get_request_id(request),
             base_project_revision=payload.base_project_revision,
             refresh_requirement_ids=payload.refresh_requirement_ids,
+            request_id_explicit=bool(request.headers.get("X-Request-ID")),
             memory_bypass=request.headers.get("X-Knowledge-Bypass", "").lower() == "true",
         )
     except HTTPException:

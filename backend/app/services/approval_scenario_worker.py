@@ -58,9 +58,13 @@ def approval_scenario_client_allowed(client) -> bool:
     return approval_scenarios_enabled() and demo_client_matches(client)
 
 
+def scenario_workflow_settings() -> WorkflowSettings:
+    return WorkflowSettings(max_iterations=1, timeout_seconds=90, retry_attempts=0)
+
+
 def _settings(stage):
     if stage == "prepare_scenarios":
-        return WorkflowSettings(max_iterations=1, timeout_seconds=90, retry_attempts=0)
+        return scenario_workflow_settings()
     return WorkflowSettings(max_iterations=2, timeout_seconds=120, retry_attempts=0)
 
 

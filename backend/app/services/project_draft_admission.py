@@ -20,11 +20,13 @@ from .workflow_project_service import QA_PROJECTS_COLLECTION, ProjectNotFoundErr
 DEMO_PROJECT_ID = "demo-tcg-v2-continuation"
 _REVIEW_OPERATION = "test_cases.review"
 REPAIR_OPERATION = "testcases.repair"
+SCENARIO_REFRESH_OPERATION = "use_cases.refresh"
+_SCENARIO_REFRESH_SCOPE_FIELDS = {"refreshed_requirement_ids", "retained_requirement_ids", "removed_requirement_ids"}
 _REPAIR_BINDING_FIELDS = {"target_id", "case_id", "case_version_id", "case_version_number", "request_fingerprint"}
 _SOURCE_STAGES = {"requirements", "context", "use_cases", "test_cases"}
 _SYNC_SOURCE_STAGES = _SOURCE_STAGES | {"reports"}
 _SYNC_STAGES = {"project.sync.use_cases": "use_cases", "project.sync.test_cases": "test_cases"}
-_REQUEST_CAPS = {_REVIEW_OPERATION: 24, REPAIR_OPERATION: 8, "project.sync.use_cases": 7, "project.sync.test_cases": 24}
+_REQUEST_CAPS = {_REVIEW_OPERATION: 24, REPAIR_OPERATION: 8, SCENARIO_REFRESH_OPERATION: 7, "project.sync.use_cases": 7, "project.sync.test_cases": 24}
 _ATTEMPTS = "project_draft_attempts"
 _KIND = "draft"
 _LEASE_SECONDS = 60
@@ -145,11 +147,27 @@ def _matches_sources(project, attempt):
         ):
             return False
     states = project.get("stage_state") or {}
+    scenario_refresh = attempt["operation"] == SCENARIO_REFRESH_OPERATION
+    if scenario_refresh:
+        predecessor = states.get("use_cases") or {}
+        human = (predecessor.get("metadata") or {}).get("latest_human_review") or {}
+        if (
+            not predecessor.get("approved")
+            or human.get("review_id") != attempt["scenario_refresh"]["previous_review_id"]
+            or human.get("snapshot_id") != attempt["source_snapshot_ids"]["use_cases"]
+            or human.get("reviewer_user_id") != attempt["actor_id"]
+            or human.get("decision") != "approve"
+            or not (states.get("test_cases") or {}).get("stale")
+            or not predecessor.get("stale")
+            or (states.get("requirements") or {}).get("operation") != "requirements.review"
+            or (states.get("context") or {}).get("approved") is not True
+        ):
+            return False
     merge_inputs = {"test_cases", "reports"} if stage_to_refresh == "test_cases" else {"use_cases", "test_cases", "reports"}
     for stage, snapshot_id in attempt["source_snapshot_ids"].items():
         state = states.get(stage) or {}
         may_review_stale_suite = attempt["operation"] == _REVIEW_OPERATION and stage == "test_cases" and state.get("operation") == "quality.feedback.apply"
-        may_merge_stale = stage_to_refresh and stage in merge_inputs
+        may_merge_stale = (stage_to_refresh and stage in merge_inputs) or (scenario_refresh and stage in {"use_cases", "test_cases"})
         if state.get("current_snapshot_id") != snapshot_id or (state.get("stale") and not (may_review_stale_suite or may_merge_stale)):
             return False
     return True
@@ -185,6 +203,24 @@ def _snapshot_matches(snapshot, attempt):
         operation = "project.sync.draft"
         source_snapshot_id = sources["requirements" if sync_stage == "use_cases" else "use_cases"]
         sources_match = metadata.get("change_id") == attempt["change_id"] and _recorded_sync_sources_match(metadata.get("source_snapshot_ids"), sources)
+    elif attempt["operation"] == SCENARIO_REFRESH_OPERATION:
+        output_stage = "use_cases"
+        operation = "use_cases.generate"
+        source_snapshot_id = sources["requirements"]
+        binding = attempt["scenario_refresh"]
+        sources_match = (
+            (snapshot or {}).get("approved") is False
+            and metadata.get("source_requirements_snapshot_id") == sources["requirements"]
+            and metadata.get("source_context_snapshot_id") == sources["context"]
+            and metadata.get("use_case_refresh") == binding["scope"]
+            and metadata.get("scenario_refresh_predecessor")
+            == {
+                "previous_requirements_snapshot_id": binding["previous_requirements_snapshot_id"],
+                "previous_review_id": binding["previous_review_id"],
+                "source_test_cases_snapshot_id": sources["test_cases"],
+            }
+            and metadata.get("generation_request_fingerprint") == binding["request_fingerprint"]
+        )
     elif attempt["operation"] == REPAIR_OPERATION:
         output_stage = "test_cases"
         operation = REPAIR_OPERATION
@@ -233,10 +269,13 @@ def _read_result(transaction, project_doc, attempt, *, include_snapshot=False):
     unavailable = {
         _REVIEW_OPERATION: "The saved assessment result could not be confirmed.",
         REPAIR_OPERATION: "The saved selected-case repair could not be confirmed.",
+        SCENARIO_REFRESH_OPERATION: "The saved scenario refresh could not be confirmed.",
     }.get(attempt["operation"], "The saved Project Sync draft could not be confirmed.")
     fields = ("snapshot_id", "project_id", "actor_user_id", "request_id", "stage", "operation", "project_revision", "source_snapshot_id", "metadata")
     if attempt["operation"] == REPAIR_OPERATION:
         fields += ("payload",)
+    if attempt["operation"] == SCENARIO_REFRESH_OPERATION:
+        fields += ("approved",)
     snapshot_id = attempt.get("result_snapshot_id")
     if not snapshot_id:
         raise HTTPException(503, unavailable)
@@ -301,7 +340,8 @@ class DraftAttemptClaim:
 
     def reserve(self):
         """Reserve the full stage cap durably before the first actual provider request."""
-        guidance_stage = _SYNC_STAGES.get(self._binding["operation"], "test_cases")
+        operation = self._binding["operation"]
+        guidance_stage = "use_cases" if operation == SCENARIO_REFRESH_OPERATION else _SYNC_STAGES.get(operation, "test_cases")
         with self._lock:
             if (
                 self._reservation_failed
@@ -348,6 +388,7 @@ class DraftAttemptClaim:
             message = {
                 _REVIEW_OPERATION: "The draft result does not match this saved suite and request.",
                 REPAIR_OPERATION: "The draft result does not match this selected-case repair.",
+                SCENARIO_REFRESH_OPERATION: "The draft result does not match this scoped scenario refresh.",
             }.get(attempt["operation"], "The draft result does not match this Project Sync stage's saved sources and request.")
             raise _conflict("project_draft_result_mismatch", message)
 
@@ -457,6 +498,31 @@ def _verify_sync_predecessor(transaction, project_doc, project, binding):
     _read_result(transaction, project_doc, attempt)
 
 
+def _valid_scenario_refresh(binding, previous_snapshot_id):
+    if (
+        not isinstance(binding, dict)
+        or binding.keys() != {"scope", "previous_requirements_snapshot_id", "previous_review_id", "request_fingerprint"}
+        or any(not isinstance(binding[key], str) or not binding[key] for key in ("previous_requirements_snapshot_id", "previous_review_id"))
+        or not isinstance(binding["request_fingerprint"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", binding["request_fingerprint"]) is None
+    ):
+        return False
+    scope = binding["scope"]
+    if (
+        not isinstance(scope, dict)
+        or scope.keys() != _SCENARIO_REFRESH_SCOPE_FIELDS | {"previous_snapshot_id"}
+        or scope["previous_snapshot_id"] != previous_snapshot_id
+    ):
+        return False
+    selected = []
+    for field in _SCENARIO_REFRESH_SCOPE_FIELDS:
+        values = scope[field]
+        if not isinstance(values, list) or any(not isinstance(item, str) or not item for item in values):
+            return False
+        selected.extend(values)
+    return bool(scope["refreshed_requirement_ids"] or scope["removed_requirement_ids"]) and len(selected) == len(set(selected))
+
+
 def claim_draft_attempt(
     client,
     *,
@@ -471,12 +537,13 @@ def claim_draft_attempt(
     change_id=None,
     settings_fingerprint=None,
     selected_repair=None,
+    scenario_refresh=None,
 ):
     if not demo_client_matches(client):
         raise HTTPException(503, "Project draft admission is unavailable.")
     sync_stage = _SYNC_STAGES.get(operation)
     source_stages = _SYNC_SOURCE_STAGES if sync_stage else _SOURCE_STAGES
-    optional_sources = {"context"}
+    optional_sources = set() if operation == SCENARIO_REFRESH_OPERATION else {"context"}
     if sync_stage:
         optional_sources = {"test_cases", "reports"}
         if sync_stage == "use_cases":
@@ -508,6 +575,14 @@ def claim_draft_attempt(
             or re.fullmatch(r"[0-9a-f]{64}", settings_fingerprint) is None
         ):
             raise ValueError("Project Sync admission requires an exact change ID and settings fingerprint")
+    elif operation == SCENARIO_REFRESH_OPERATION:
+        if (
+            change_id is not None
+            or not isinstance(settings_fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", settings_fingerprint) is None
+            or not _valid_scenario_refresh(scenario_refresh, source_snapshot_ids["use_cases"])
+        ):
+            raise ValueError("Scenario refresh admission requires exact prior scope and settings")
     elif operation == REPAIR_OPERATION:
         if (
             change_id is not None
@@ -526,6 +601,8 @@ def claim_draft_attempt(
         raise ValueError("Saved-suite assessment does not accept Project Sync settings")
     if operation != REPAIR_OPERATION and selected_repair is not None:
         raise ValueError("Only selected repair accepts a repair target")
+    if operation != SCENARIO_REFRESH_OPERATION and scenario_refresh is not None:
+        raise ValueError("Only a scoped scenario refresh accepts previous plan scope")
     binding = {
         "operation_id": _operation_id(project_id, actor_id, operation, request_id, change_id),
         "operation": operation,
@@ -540,6 +617,10 @@ def claim_draft_attempt(
     if operation == REPAIR_OPERATION:
         binding.update(
             selected_repair=dict(selected_repair), settings_fingerprint=settings_fingerprint, max_requests=max_requests, deadline_seconds=deadline_seconds
+        )
+    if operation == SCENARIO_REFRESH_OPERATION:
+        binding.update(
+            scenario_refresh=scenario_refresh, settings_fingerprint=settings_fingerprint, max_requests=max_requests, deadline_seconds=deadline_seconds
         )
     project_doc = _project_doc(client, project_id)
     stage_doc = _sync_stage_doc(project_doc, change_id, sync_stage) if sync_stage else None
@@ -556,7 +637,11 @@ def claim_draft_attempt(
             attempt = _read(transaction, _attempt_doc(project_doc, binding["operation_id"]))
         if attempt is not None:
             if not _same_attempt(attempt, canonical):
-                target = {REPAIR_OPERATION: "case repair", _REVIEW_OPERATION: "draft assessment"}.get(operation, "Project Sync draft")
+                target = {
+                    REPAIR_OPERATION: "case repair",
+                    _REVIEW_OPERATION: "draft assessment",
+                    SCENARIO_REFRESH_OPERATION: "scenario refresh",
+                }.get(operation, "Project Sync draft")
                 raise _conflict("project_draft_request_mismatch", f"This request ID belongs to a different {target}.")
             if attempt.get("state") == "completed":
                 return DraftAttemptClaim(client, canonical, attempt["fence"], _read_result(transaction, project_doc, attempt))
@@ -645,19 +730,28 @@ def read_draft_attempt_result(client, *, project_id, actor_id, request_id, opera
 
 
 def read_selected_repair_result(client, *, project_id, actor_id, request_id, request_fingerprint=None):
+    return _read_foreground_result(client, project_id, actor_id, request_id, REPAIR_OPERATION, "selected_repair", request_fingerprint)
+
+
+def read_scenario_refresh_result(client, *, project_id, actor_id, request_id, request_fingerprint=None):
+    return _read_foreground_result(client, project_id, actor_id, request_id, SCENARIO_REFRESH_OPERATION, "scenario_refresh", request_fingerprint)
+
+
+def _read_foreground_result(client, project_id, actor_id, request_id, operation, intent_field, request_fingerprint):
     """Read the exact immutable result, independently of current project revision or demo policy."""
-    operation_id = _operation_id(project_id, actor_id, REPAIR_OPERATION, request_id)
+    operation_id = _operation_id(project_id, actor_id, operation, request_id)
     project_doc = _project_doc(client, project_id)
 
     @transactional
     def read(transaction):
         _require_owner(_read(transaction, project_doc), project_id, actor_id)
         attempt = _read(transaction, _attempt_doc(project_doc, operation_id))
-        identity = {"project_id": project_id, "actor_id": actor_id, "operation_id": operation_id, "request_id": request_id, "operation": REPAIR_OPERATION}
+        identity = {"project_id": project_id, "actor_id": actor_id, "operation_id": operation_id, "request_id": request_id, "operation": operation}
         if not _same_attempt(attempt, identity):
             return None
-        if request_fingerprint is not None and attempt["selected_repair"]["request_fingerprint"] != request_fingerprint:
-            raise _conflict("project_draft_request_mismatch", "This request ID belongs to a different repair target.")
+        if request_fingerprint is not None and attempt[intent_field]["request_fingerprint"] != request_fingerprint:
+            target = "repair target" if operation == REPAIR_OPERATION else "scenario refresh"
+            raise _conflict("project_draft_request_mismatch", f"This request ID belongs to a different {target}.")
         if attempt.get("state") == "completed":
             return _read_result(transaction, project_doc, attempt, include_snapshot=True)
         return None
@@ -699,7 +793,8 @@ def _read_active_attempt(client, project_id, actor_id, *, operations):
         if sync_stage:
             public.update(change_id=attempt["change_id"], stage=sync_stage)
         else:
-            public["source_snapshot_id"] = attempt["source_snapshot_ids"]["test_cases"]
+            stage = "use_cases" if attempt["operation"] == SCENARIO_REFRESH_OPERATION else "test_cases"
+            public["source_snapshot_id"] = attempt["source_snapshot_ids"][stage]
         if attempt["operation"] == REPAIR_OPERATION:
             public["case_id"] = attempt["selected_repair"]["case_id"]
         return blocked, public
@@ -722,8 +817,13 @@ def read_selected_repair_admission(client, project_id, actor_id):
     return {"blocked": blocked, "attempt": attempt}
 
 
-def release_draft_attempt(client, project_id, actor_id, operation_id, fence, *, project_sync=False, selected_repair=False):
-    if project_sync and selected_repair:
+def read_scenario_refresh_admission(client, project_id, actor_id):
+    blocked, attempt = _read_active_attempt(client, project_id, actor_id, operations={SCENARIO_REFRESH_OPERATION})
+    return {"blocked": blocked, "attempt": attempt}
+
+
+def release_draft_attempt(client, project_id, actor_id, operation_id, fence, *, project_sync=False, selected_repair=False, scenario_refresh=False):
+    if sum((project_sync, selected_repair, scenario_refresh)) > 1:
         raise ValueError("Choose one draft admission operation family")
     if not _is_operation_id(operation_id) or type(fence) is not int or fence < 1:
         raise _conflict("project_draft_release_mismatch", "This draft attempt identity is unavailable. Reload its current status.")
@@ -742,7 +842,11 @@ def release_draft_attempt(client, project_id, actor_id, operation_id, fence, *, 
             "operation_id": operation_id,
             "fence": fence,
         }
-        allowed_operations = _SYNC_STAGES if project_sync else {REPAIR_OPERATION if selected_repair else _REVIEW_OPERATION}
+        allowed_operations = _SYNC_STAGES if project_sync else {_REVIEW_OPERATION}
+        if selected_repair:
+            allowed_operations = {REPAIR_OPERATION}
+        if scenario_refresh:
+            allowed_operations = {SCENARIO_REFRESH_OPERATION}
         if not _same_attempt(attempt, identity) or attempt.get("operation") not in allowed_operations:
             raise _conflict("project_draft_release_mismatch", "This draft attempt changed. Reload its current status.")
         if attempt.get("state") == "cancelled":

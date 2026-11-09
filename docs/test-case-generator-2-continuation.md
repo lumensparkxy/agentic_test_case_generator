@@ -343,6 +343,25 @@ receipt use the same source and lease fence. The combined suite remains
 pending until the user invokes **Review saved suite**. Neither action
 starts browser execution.
 
+### Scoped scenario refresh after source revision
+
+Review routes a verified stale predecessor to **Review refresh scope**
+after the revised requirements and current Context are ready. The scope
+dialog marks changed and added groups, lists removed groups, and lets
+the reviewer include other groups affected by Context. The existing
+approved plan and suite remain readable throughout the attempt.
+
+The loopback demo binds the exact predecessor plan, human review, suite,
+and current sources to the common provider fence. The confirmed selection
+can refresh only the approved groups in scope. Removal-only refresh keeps
+all remaining groups. The provider cap is seven requests with a
+240-second deadline. A saved response remains recoverable by its request
+ID. A running or interrupted attempt can be released by its owner.
+
+The new scenario plan remains pending for a fresh explicit human review.
+The current test suite and its prior execution and delivery evidence stay
+historical and stale. Scoped Test Cases application is a separate action.
+
 ## Baseline evidence
 
 [Desktop workspace sketches](test-case-generator-2-workspaces.md) show the
@@ -454,12 +473,17 @@ P5a opens priority cases from the exact completed suite (commit `2df24f2`,
 [PR #474](https://github.com/lumensparkxy/agentic_test_case_generator/pull/474)).
 The desktop browser verifies a 200-case suite, saved filters, keyboard
 focus, Back and Forward, stale/replaced suites, and existing case links.
-P5b adds the bounded one-case repair and exact saved comparison under
-[#475](https://github.com/lumensparkxy/agentic_test_case_generator/issues/475).
+P5b adds the bounded one-case repair and exact saved comparison (commit
+`d63d5a4`, [PR #476](https://github.com/lumensparkxy/agentic_test_case_generator/pull/476)).
 The loopback fixture proves one selected successor and charge, exact
 historical readback, lost acknowledgement recovery, source and cancellation
-fences, and explicit whole-suite reassessment. Next is scoped source
-refresh. Unenrolled paid draft producers remain a release gate.
+fences, and explicit whole-suite reassessment. P5c1 adds bounded scoped
+scenario refresh under
+[#477](https://github.com/lumensparkxy/agentic_test_case_generator/issues/477).
+The 8→6 synthetic replay refreshes two groups, retains seven exactly,
+and preserves the 14 prior cases. It keeps the new plan's human approval
+explicit. Next is bounded impact application for the changed tests.
+Unenrolled paid draft producers remain a release gate.
 P6 error analysis found prior Booking gaps covered by existing regression
 checks and no verified new prompt change. A credential-free preflight
 verified paired intake and HTTP metering seams. Full synthetic

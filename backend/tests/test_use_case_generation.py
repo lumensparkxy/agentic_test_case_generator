@@ -14,10 +14,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
 from test_workflow_project_service import FakeCollection
+from app.agents.adk_runtime import _model_reservation
 from app.main import app, get_current_user
 from app.models import AuthUser, Requirement
-from app.services import audit_service
+from app.services import audit_service, project_draft_admission as admission
 from app.services import use_case_generation_service as service
+from app.services.use_case_review_service import review_use_case_snapshot
 from app.services.workflow_project_service import (
     ProjectConflictError,
     ProjectPermissionError,
@@ -279,6 +281,210 @@ class UseCaseGenerationTests(unittest.TestCase):
 
         self.model.side_effect = combine
         self.before = deepcopy(self.store)
+
+    def prepare_demo_refresh(self, *, removal_only=False):
+        stack = self.enterContext(ExitStack())
+        demo_host = "127.0.0.1:44124"
+        self.client.project = admission.DEMO_PROJECT_ID
+        self.client._emulator_host = demo_host
+        stack.enter_context(
+            patch.dict(
+                "os.environ",
+                {
+                    "TCG_APPROVAL_SCENARIOS_ENABLED": "true",
+                    "FIREBASE_PROJECT_ID": admission.DEMO_PROJECT_ID,
+                    "FIRESTORE_EMULATOR_HOST": demo_host,
+                    "GOOGLE_GENAI_USE_VERTEXAI": "false",
+                    "MODEL_NAME": "gemini-local-fixture",
+                },
+            )
+        )
+        stack.enter_context(patch.object(admission, "get_required_firestore_client", return_value=self.client))
+        stack.enter_context(patch.object(admission, "transactional", side_effect=_run_transaction))
+        stack.enter_context(patch("app.services.use_case_review_service.get_required_firestore_client", return_value=self.client))
+        stack.enter_context(patch("app.services.use_case_review_service.transactional", side_effect=_run_transaction))
+        app.dependency_overrides[get_current_user] = lambda: self.actor
+        self.addCleanup(app.dependency_overrides.clear)
+
+        def save(stage, payload, operation, request_id, **kwargs):
+            return append_stage_snapshot(
+                project_id=self.project_id, stage=stage, payload=payload, actor=self.actor, operation=operation, request_id=request_id, **kwargs
+            )
+
+        rows = deepcopy(self.project.current_snapshots["requirements"].payload["requirements"][:9])
+        rows[0]["text"] = "Maximum booking attendance is 8."
+        rows[1]["text"] = "A booking accepts an attendee count of 8."
+        earlier_requirements = save("requirements", {"requirements": rows}, "requirements.review", "old-scope", approved=True)
+        earlier_context = save("context", {"notes": "Booking form and confirmation."}, "requirements.enrich", "old-context", approved=True)
+        old_plan = save(
+            "use_cases",
+            generated([Requirement.model_validate(row) for row in rows]),
+            "use_cases.generate",
+            "old-plan",
+            source_snapshot_id=earlier_requirements.snapshot_id,
+            metadata={"source_requirements_snapshot_id": earlier_requirements.snapshot_id, "source_context_snapshot_id": earlier_context.snapshot_id},
+        )
+        project = get_project(self.project_id, actor=self.actor)
+        review = review_use_case_snapshot(
+            project_id=self.project_id,
+            snapshot_id=old_plan.snapshot_id,
+            base_project_revision=project.current_revision,
+            decision="approve",
+            comment=None,
+            actor=self.actor,
+            request_id="old-plan-review",
+        )
+        self.assertTrue(review.use_cases_state.approved)
+        old_suite = save(
+            "test_cases",
+            {"test_cases": [{"id": "TC-OLD", "title": "Booking attendance", "artifact_version_id": "original-case-v1"}]},
+            "testcases.generate",
+            "old-suite",
+            source_snapshot_id=old_plan.snapshot_id,
+            metadata={
+                "source_requirements_snapshot_id": earlier_requirements.snapshot_id,
+                "source_context_snapshot_id": earlier_context.snapshot_id,
+                "source_use_case_snapshot_id": old_plan.snapshot_id,
+                "source_snapshot_ids": {
+                    "requirements": earlier_requirements.snapshot_id,
+                    "context": earlier_context.snapshot_id,
+                    "use_cases": old_plan.snapshot_id,
+                },
+            },
+        )
+        save("reports", {"report": "Prior signed report"}, "export", "old-report")
+        revised = deepcopy(rows[:8] if removal_only else rows)
+        if not removal_only:
+            for row in revised[:2]:
+                row.update(text=row["text"].replace("8", "6"), content_version=2)
+        save("requirements", {"requirements": revised}, "requirements.review", "reviewed-source-change", approved=True)
+        save("context", {"notes": "Exact reviewed current booking context."}, "requirements.enrich", "updated-context", approved=True)
+        self.project = get_project(self.project_id, actor=self.actor)
+        self.old_snapshot = self.project.current_snapshots["use_cases"]
+        self.assertEqual(self.project.current_snapshots["test_cases"].snapshot_id, old_suite.snapshot_id)
+
+        def combine(payload, retained_groups, **_kwargs):
+            self.assertEqual(_model_reservation.get()(), 25)
+            self.assertEqual(payload.workflow_settings.max_iterations, 1)
+            self.assertEqual(payload.workflow_settings.retry_attempts, 0)
+            result = generated(payload.requirements)
+            for field, attribute in (("requirement_analysis", "analysis"), ("coverage_plan", "plan")):
+                result[field] = [
+                    getattr(retained_groups[row["requirement_id"]], attribute) if row["requirement_id"] in retained_groups else row for row in result[field]
+                ]
+            count = sum(len(group["scenarios"]) for group in result["coverage_plan"])
+            result["review"]["semantic_assessment"] = {"rubric_version": "test", "status": "passed", "assessed_count": count, "scenario_count": count}
+            return result
+
+        self.model.side_effect = combine
+        return TestClient(app), f"/projects/{self.project_id}/use-cases", self.project.current_revision
+
+    def test_demo_scoped_refresh_recovers_exact_receipt_and_requires_explicit_plan_approval(self):
+        client, url, revision = self.prepare_demo_refresh()
+        status = client.get(f"{url}/refresh").json()
+        self.assertTrue(status["eligible"])
+        selected = ["REQ-001", "REQ-002"]
+        self.assertEqual(status["required_requirement_ids"], selected)
+        headers = {"X-Request-ID": "exact-scenario-refresh"}
+        payload = {"base_project_revision": revision, "refresh_requirement_ids": selected}
+        no_header = client.post(f"{url}/generate", json=payload)
+        self.assertEqual(no_header.status_code, 422, no_header.text)
+        missing = client.post(f"{url}/generate", headers=headers, json={**payload, "refresh_requirement_ids": selected[:1]})
+        self.assertEqual(missing.status_code, 409, missing.text)
+        self.assertEqual(missing.json()["detail"]["required_requirement_ids"], selected[1:])
+        self.model.assert_not_called()
+        publish = service.append_stage_snapshot
+
+        def drop_ack(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic committed response loss")
+
+        with patch.object(service, "append_stage_snapshot", side_effect=drop_ack):
+            result = client.post(f"{url}/generate", headers=headers, json=payload)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(client.post(f"{url}/generate", headers=headers, json=payload).json(), result.json())
+        mismatch = client.post(f"{url}/generate", headers=headers, json={**payload, "refresh_requirement_ids": list(reversed(selected))})
+        self.assertEqual(mismatch.status_code, 409)
+        after = get_project(self.project_id, actor=self.actor)
+        self.assertFalse(after.stage_state["use_cases"].approved)
+        self.assertTrue(after.stage_state["test_cases"].stale)
+        for stage in ("test_cases", "reports"):
+            self.assertEqual(after.current_snapshots[stage], self.project.current_snapshots[stage])
+        snapshot = after.current_snapshots["use_cases"]
+        for field in ("coverage_plan", "requirement_analysis"):
+            self.assertEqual(snapshot.payload[field][2:], self.old_snapshot.payload[field][2:])
+        self.assertEqual(len(self.model.call_args.kwargs["retained_groups"]), 7)
+        self.assertEqual(snapshot.metadata["scenario_refresh_predecessor"]["source_test_cases_snapshot_id"], after.current_snapshots["test_cases"].snapshot_id)
+        self.model.assert_called_once()
+        self.mocks["record_usage_event"].assert_called_once()
+        review = client.post(
+            f"{url}/reviews",
+            headers={"X-Request-ID": "explicit-revised-plan-approval"},
+            json={"snapshot_id": snapshot.snapshot_id, "base_project_revision": after.current_revision, "decision": "approve"},
+        )
+        self.assertEqual(review.status_code, 200, review.text)
+        self.assertTrue(review.json()["use_cases_state"]["approved"])
+        self.assertFalse(any(path.startswith("approval_continuation_outbox/") for path in self.store))
+        receipt = client.get(f"{url}/refresh", params={"request_id": headers["X-Request-ID"]}).json()
+        self.assertEqual(receipt["result"]["snapshot_id"], snapshot.snapshot_id)
+        self.assertEqual(receipt["result"]["refreshed_requirement_ids"], selected)
+        self.assertEqual(len(receipt["result"]["retained_requirement_ids"]), 7)
+        self.assertFalse(receipt["eligible"])
+        self.assertIsNone(receipt["attempt"])
+
+    def test_demo_scenario_refresh_allows_removal_only_without_regenerating_groups(self):
+        client, url, revision = self.prepare_demo_refresh(removal_only=True)
+        status = client.get(f"{url}/refresh").json()
+        self.assertTrue(status["eligible"])
+        self.assertEqual(status["required_requirement_ids"], [])
+        request_id = "removal-only-scenario-refresh"
+        result = client.post(
+            f"{url}/generate",
+            headers={"X-Request-ID": request_id},
+            json={"base_project_revision": revision, "refresh_requirement_ids": []},
+        )
+        self.assertEqual(result.status_code, 200, result.text)
+        snapshot = result.json()["current_snapshots"]["use_cases"]
+        self.assertEqual(snapshot["payload"]["coverage_plan"], self.old_snapshot.payload["coverage_plan"][:8])
+        self.assertEqual(snapshot["payload"]["requirement_analysis"], self.old_snapshot.payload["requirement_analysis"][:8])
+        receipt = client.get(f"{url}/refresh", params={"request_id": request_id}).json()["result"]
+        self.assertEqual(receipt["refreshed_requirement_ids"], [])
+        self.assertEqual(receipt["removed_requirement_ids"], ["REQ-009"])
+        self.assertEqual(self.mocks["record_usage_event"].call_args.kwargs["quantity"], 0)
+
+    def test_demo_scenario_refresh_interruption_blocks_new_work_until_exact_owner_release(self):
+        client, url, revision = self.prepare_demo_refresh()
+        source = self.project.current_snapshots
+        payload = {"base_project_revision": revision, "refresh_requirement_ids": ["REQ-001", "REQ-002"]}
+        headers = {"X-Request-ID": "interrupted-scenario-refresh"}
+
+        def interrupt(*_args, **_kwargs):
+            self.assertEqual(_model_reservation.get()(), 25)
+            raise RuntimeError("Synthetic provider outcome is unconfirmed")
+
+        self.model.side_effect = interrupt
+        response = client.post(f"{url}/generate", headers=headers, json=payload)
+        self.assertEqual(response.status_code, 502, response.text)
+        status = client.get(f"{url}/refresh", params={"request_id": headers["X-Request-ID"]}).json()
+        self.assertTrue(status["blocked"])
+        self.assertIsNone(status["result"])
+        attempt = status["attempt"]
+        self.assertEqual(attempt["state"], "interrupted")
+        self.assertEqual(attempt["source_snapshot_id"], source["use_cases"].snapshot_id)
+        same = client.post(f"{url}/generate", headers=headers, json=payload)
+        self.assertEqual(same.json()["detail"]["code"], "project_draft_recovery_required")
+        contender = client.post(f"{url}/generate", headers={"X-Request-ID": "another"}, json=payload)
+        self.assertEqual(contender.json()["detail"]["code"], "project_draft_busy")
+        app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="other", name="Other")
+        release = f"{url}/refresh/{attempt['operation_id']}/release"
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"]}).status_code, 403)
+        app.dependency_overrides[get_current_user] = lambda: self.actor
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"] + 1}).status_code, 409)
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"]}).json(), {"released": True})
+        self.assertFalse(client.get(f"{url}/refresh").json()["blocked"])
+        self.assertEqual(get_project(self.project_id, actor=self.actor).current_snapshots, source)
+        self.model.assert_called_once()
+        self.mocks["record_usage_event"].assert_not_called()
 
     def test_scoped_refresh_preserves_groups_and_historical_review_and_records_changed_scope(self):
         self.prepare_scope()

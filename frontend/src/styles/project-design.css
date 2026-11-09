@@ -1045,6 +1045,22 @@ select {
 	width: auto;
 }
 
+.scoped-scenario-refresh-dialog .use-case-decision-panel {
+	gap: var(--space-3);
+}
+.scoped-scenario-refresh-dialog .use-case-decision-panel > h2,
+.scoped-scenario-refresh-dialog .use-case-decision-panel > p,
+.scoped-scenario-refresh-dialog .use-case-decision-panel > section :is(h3, ul) {
+	margin-block: 0;
+}
+.scoped-scenario-refresh-dialog .use-case-decision-panel > section h3 {
+	margin-block-end: var(--space-1);
+}
+.scoped-scenario-refresh-dialog .use-case-decision-options > p {
+	grid-column: 1 / -1;
+	margin-block: 0 var(--space-2);
+}
+
 .scenario-table-toolbar {
 	display: flex;
 	flex-wrap: wrap;

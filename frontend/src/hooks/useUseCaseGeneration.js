@@ -4,7 +4,7 @@ import { createRequestId } from "../services/apiClient";
 
 const idle = { status: "idle", message: "", committedRevision: null };
 
-export default function useUseCaseGeneration({ project, identity, request, onGenerated }) {
+export default function useUseCaseGeneration({ project, identity, request, onGenerated, scopedRefresh }) {
 	const revision = project?.current_revision;
 	const projectId = project?.project_id;
 	const scope = `${identity}:${projectId}:${revision}`;
@@ -35,6 +35,7 @@ export default function useUseCaseGeneration({ project, identity, request, onGen
 	}, [scope, revision, projectId, identity]);
 
 	const generate = async (refreshRequirementIds) => {
+		if (refreshRequirementIds && scopedRefresh) return scopedRefresh.submit(refreshRequirementIds);
 		if (active.current || !projectId || !Number.isInteger(revision)) return;
 		const operation = { scope, requestId: createRequestId() };
 		active.current = operation;

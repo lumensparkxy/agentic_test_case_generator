@@ -1,17 +1,28 @@
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, Checkbox } from "../ui/controls";
 import { Dialog } from "../ui/dialog";
 
 const identityDefaults = { requirement_uid: null, content_version: 1, clarification_status: null, parent_requirement_id: null };
 
-export default function UseCaseRefreshDialog({ requirements, priorPlan, priorIdentities, contextChanged, onClose, onConfirm }) {
+export default function UseCaseRefreshDialog({
+	requirements,
+	priorPlan,
+	priorIdentities,
+	contextChanged,
+	requiredRequirementIds,
+	onClose,
+	onConfirm,
+}) {
 	const dialog = useRef(null);
 	const [additional, setAdditional] = useState([]);
 	const previous = new Map(priorPlan.map((group) => [group.requirement_id, group.requirement_text]));
 	const currentIds = new Set(requirements.map((row) => row.id));
+	const required = requiredRequirementIds ? new Set(requiredRequirementIds) : null;
 	const added = requirements.filter((row) => !previous.has(row.id));
 	const changed = requirements.filter((row) => {
 		if (!previous.has(row.id)) return false;
+		if (required) return required.has(row.id);
 		const identity = priorIdentities?.[row.id];
 		return (
 			previous.get(row.id) !== row.text ||
@@ -22,11 +33,11 @@ export default function UseCaseRefreshDialog({ requirements, priorPlan, priorIde
 	const unchanged = requirements.filter((row) => previous.has(row.id) && !changedIds.has(row.id));
 	const removed = priorPlan.filter((group) => !currentIds.has(group.requirement_id));
 	const refreshIds = [...changed.map((row) => row.id), ...added.map((row) => row.id), ...additional];
-	return (
+	const content = (
 		<div className="auth-dialog-overlay">
 			<Dialog
 				ref={dialog}
-				className="use-case-review-dialog"
+				className={`use-case-review-dialog${required ? " scoped-scenario-refresh-dialog" : ""}`}
 				manageFocus
 				initialFocusRef={dialog}
 				onClose={onClose}
@@ -109,4 +120,5 @@ export default function UseCaseRefreshDialog({ requirements, priorPlan, priorIde
 			</Dialog>
 		</div>
 	);
+	return required ? createPortal(content, document.body) : content;
 }

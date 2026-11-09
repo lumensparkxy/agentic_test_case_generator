@@ -31,6 +31,8 @@ export interface ApiContractOperations {
 	selectedCaseRepair: ApiOperation<SelectedCaseRepairRequest, SelectedCaseRepairResponse, "POST", "/projects/{project_id}/test-cases/repair">;
 	selectedCaseRepairRelease: ApiOperation<SelectedCaseRepairReleaseRequest, SelectedCaseRepairReleaseResponse, "POST", "/projects/{project_id}/test-cases/repair/{operation_id}/release">;
 	projectUseCasesGenerate: ApiOperation<ProjectUseCasesGenerateRequest, ProjectUseCasesGenerateResponse, "POST", "/projects/{project_id}/use-cases/generate">;
+	projectUseCasesRefreshStatus: ApiOperation<ProjectUseCasesRefreshStatusRequest, ProjectUseCasesRefreshStatusResponse, "GET", "/projects/{project_id}/use-cases/refresh">;
+	projectUseCasesRefreshRelease: ApiOperation<ProjectUseCasesRefreshReleaseRequest, ProjectUseCasesRefreshReleaseResponse, "POST", "/projects/{project_id}/use-cases/refresh/{operation_id}/release">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
 	requirementImportsList: ApiOperation<RequirementImportsListRequest, RequirementImportsListResponse, "GET", "/projects/{project_id}/requirement-imports">;
@@ -119,6 +121,12 @@ export type SelectedCaseRepairReleaseRequest = SelectedCaseRepairRelease;
 export type SelectedCaseRepairReleaseResponse = SelectedCaseRepairReleased;
 export type ProjectUseCasesGenerateRequest = QaProjectUseCaseGenerationInput;
 export type ProjectUseCasesGenerateResponse = QaProjectDetail;
+export type ProjectUseCasesRefreshStatusRequest = {
+	request_id?: string | null;
+};
+export type ProjectUseCasesRefreshStatusResponse = ScenarioRefreshStatus;
+export type ProjectUseCasesRefreshReleaseRequest = ScenarioRefreshRelease;
+export type ProjectUseCasesRefreshReleaseResponse = ScenarioRefreshReleased;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
 export type ProjectUseCasesSaveResponse = QaProjectDetail;
 export type ProjectUseCasesReviewRequest = UseCaseReviewRequest;
@@ -1260,6 +1268,42 @@ export interface ScenarioIntent {
 	requirement_id: string;
 	scenario_type?: "Happy Path" | "Negative" | "Boundary" | "Validation" | "Authorization" | "State Transition" | "Integration" | "Error Handling" | "Data Variation";
 	title: string;
+}
+
+export interface ScenarioRefreshAttempt {
+	fence: number;
+	operation_id: string;
+	reason?: string | null;
+	request_id: string;
+	source_snapshot_id: string;
+	state: "running" | "interrupted";
+}
+
+export interface ScenarioRefreshRelease {
+	fence: number;
+}
+
+export interface ScenarioRefreshReleased {
+	released?: true;
+}
+
+export interface ScenarioRefreshResult {
+	previous_snapshot_id: string;
+	project_revision: number;
+	refreshed_requirement_ids: Array<string>;
+	removed_requirement_ids: Array<string>;
+	request_id: string;
+	retained_requirement_ids: Array<string>;
+	snapshot_id: string;
+}
+
+export interface ScenarioRefreshStatus {
+	attempt?: ScenarioRefreshAttempt | null;
+	blocked?: boolean;
+	eligible?: boolean;
+	enabled?: boolean;
+	required_requirement_ids?: Array<string>;
+	result?: ScenarioRefreshResult | null;
 }
 
 export interface ScenarioReviewUpdate {

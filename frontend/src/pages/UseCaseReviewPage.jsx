@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import ClarificationScopeNotice from "../components/context/ClarificationScopeNotice";
 import { generationRequirementRows, hasApprovedGenerationScope } from "../utils/requirementScope";
 import useUseCaseGeneration from "../hooks/useUseCaseGeneration";
@@ -12,6 +12,7 @@ import RouteLink from "../app/RouteLink";
 import { PROJECT_DESTINATIONS, buildProjectPath } from "../app/workflowRoutes";
 import UseCaseReviewWorkbench from "../components/reviews/UseCaseReviewWorkbench";
 import UseCaseRefreshDialog from "../components/reviews/UseCaseRefreshDialog";
+import ScenarioRefreshStatus from "../components/reviews/ScenarioRefreshStatus";
 import useUseCaseReview from "../hooks/useUseCaseReview";
 
 export default function UseCaseReviewPage({
@@ -28,13 +29,16 @@ export default function UseCaseReviewPage({
 	continuationPanel = null,
 	continuation = null,
 	generateOnApproval = false,
+	scopedRefresh = null,
+	openRefreshScope = false,
 	onBack,
 	onNext,
 }) {
 	const projectId = project?.project_id || "";
-	const [refreshDialogScope, setRefreshDialogScope] = useState(null);
+	const [refreshDialogScope, setRefreshDialogScope] = useState(undefined);
+	const refreshScopeButton = useRef(null);
 	const refreshScope = `${identity}:${projectId}:${project?.current_revision}`;
-	const generation = useUseCaseGeneration({ project, identity, request, onGenerated });
+	const generation = useUseCaseGeneration({ project, identity, request, onGenerated, scopedRefresh });
 	const snapshot = project?.current_snapshots?.use_cases || null;
 	const stageState = project?.stage_state?.use_cases || null;
 	const review = useUseCaseReview({
@@ -58,13 +62,21 @@ export default function UseCaseReviewPage({
 	const contextSnapshot = project?.current_snapshots?.context;
 	const contextState = project?.stage_state?.context;
 	const contextReady = !contextSnapshot || (contextState?.current_snapshot_id === contextSnapshot.snapshot_id && !contextState.stale);
-	const scopeAvailable =
+	const legacyScopeAvailable =
 		effectiveStageState?.stale &&
 		effectiveStageState.approved &&
 		matchingHumanDecision === "approve" &&
 		(snapshot?.metadata?.source_requirements_snapshot_id || snapshot?.source_snapshot_id) &&
 		contextReady;
-	const generationBusy = generation.isBusy || review.isSubmitting || review.isReloading;
+	const scopeAvailable = scopedRefresh ? scopedRefresh.eligible : legacyScopeAvailable;
+	const refreshCanOpen = Boolean(scopeAvailable && (!scopedRefresh || scopedRefresh.canStart));
+	const openedFromScope = refreshDialogScope === undefined && openRefreshScope;
+	const refreshOpen = openedFromScope || refreshDialogScope === refreshScope;
+	const closeRefreshScope = () => {
+		setRefreshDialogScope(null);
+		if (openedFromScope) window.requestAnimationFrame(() => refreshScopeButton.current?.focus({ preventScroll: true }));
+	};
+	const generationBusy = generation.isBusy || review.isSubmitting || review.isReloading || scopedRefresh?.submitting;
 	const reviewStatus = effectiveStageState?.stale
 		? { label: "Regeneration needed", tone: "stale" }
 		: matchingHumanDecision === "approve"
@@ -99,18 +111,25 @@ export default function UseCaseReviewPage({
 								{reviewStatus.label}
 							</Badge>
 							{scopeAvailable && (
-								<Button size="compact" onClick={() => setRefreshDialogScope(refreshScope)} disabled={!generationAllowed || generationBusy}>
+								<Button
+									ref={refreshScopeButton}
+									size="compact"
+									onClick={() => setRefreshDialogScope(refreshScope)}
+									disabled={!refreshCanOpen || !generationAllowed || generationBusy}
+								>
 									Review refresh scope
 								</Button>
 							)}
-							<Button
-								variant={effectiveStageState?.stale && !scopeAvailable ? "primary" : "secondary"}
-								size="compact"
-								onClick={() => void generation.generate()}
-								disabled={!generationAllowed || generationBusy}
-							>
-								{generation.isBusy ? "Generating Use Cases…" : "Regenerate Use Cases"}
-							</Button>
+							{!scopedRefresh && (
+								<Button
+									variant={effectiveStageState?.stale && !scopeAvailable ? "primary" : "secondary"}
+									size="compact"
+									onClick={() => void generation.generate()}
+									disabled={!generationAllowed || generationBusy}
+								>
+									{generation.isBusy ? "Generating Use Cases…" : "Regenerate Use Cases"}
+								</Button>
+							)}
 							{matchingHumanDecision !== "approve" && (
 								<Link className="use-case-skip-review-link" href="#use-case-review-decision">
 									Skip to review decision
@@ -121,13 +140,21 @@ export default function UseCaseReviewPage({
 				}
 			/>
 			{continuationPanel}
-			{scopeAvailable && generationAllowed && refreshDialogScope === refreshScope && (
+			<ScenarioRefreshStatus
+				refresh={scopedRefresh}
+				snapshotId={snapshot?.snapshot_id}
+				currentRevision={project?.current_revision}
+				reviewApproved={matchingHumanDecision === "approve"}
+				disabled={!generationAllowed || generationBusy}
+			/>
+			{refreshCanOpen && generationAllowed && refreshOpen && (
 				<UseCaseRefreshDialog
 					requirements={generationRequirementRows(requirementsSnapshot?.payload?.requirements || [])}
 					priorPlan={snapshot.payload.coverage_plan || []}
 					priorIdentities={snapshot.metadata?.source_requirement_identities}
+					requiredRequirementIds={scopedRefresh?.requiredIds}
 					contextChanged={(snapshot.metadata?.source_context_snapshot_id || null) !== (contextSnapshot?.snapshot_id || null)}
-					onClose={() => setRefreshDialogScope(null)}
+					onClose={closeRefreshScope}
 					onConfirm={(ids) => {
 						setRefreshDialogScope(null);
 						void generation.generate(ids);
@@ -170,7 +197,7 @@ export default function UseCaseReviewPage({
 			) : null}
 
 			{snapshot ? (
-				<fieldset disabled={generation.isBusy} className="use-case-generation-review">
+				<fieldset disabled={generation.isBusy || scopedRefresh?.submitting} className="use-case-generation-review">
 					<UseCaseReviewWorkbench
 						identity={identity}
 						key={`${identity}:${projectId}`}

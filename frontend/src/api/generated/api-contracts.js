@@ -24,6 +24,8 @@ export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	selectedCaseRepair: Object.freeze({ method: "POST", path: "/projects/{project_id}/test-cases/repair" }),
 	selectedCaseRepairRelease: Object.freeze({ method: "POST", path: "/projects/{project_id}/test-cases/repair/{operation_id}/release" }),
 	projectUseCasesGenerate: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/generate" }),
+	projectUseCasesRefreshStatus: Object.freeze({ method: "GET", path: "/projects/{project_id}/use-cases/refresh" }),
+	projectUseCasesRefreshRelease: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/refresh/{operation_id}/release" }),
 	projectUseCasesSave: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases" }),
 	projectUseCasesReview: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/reviews" }),
 	requirementImportsList: Object.freeze({ method: "GET", path: "/projects/{project_id}/requirement-imports" }),
