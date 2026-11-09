@@ -73,6 +73,20 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertEqual(validate_browser_handoff([case], context(), [requirement]), [])
         self.assertEqual(case.automation_status, "To Be Automated")
 
+    def test_populated_field_can_be_cleared_with_grounded_exact_input(self):
+        case = candidate()
+        case.steps[1].action = 'Enter "  Q  into  17  " into field "Reference"'
+        case.steps[1].expected = 'field "Reference" value should equal "  Q  into  17  "'
+        case.steps.insert(2, TestStep(step=3, action='Enter "" into field "Reference"', expected='field "Reference" value should equal ""'))
+        case.steps[-1].step = 4
+        self.assertEqual(validate_browser_handoff([case], context(), [REQUIREMENT]), [])
+        self.assertEqual(case.automation_status, "To Be Automated")
+
+        case.steps[2].action = 'Enter "" into field "Unobserved field"'
+        case.steps[2].expected = 'field "Unobserved field" value should equal ""'
+        self.assertIn("lacks exact interface evidence", validate_browser_handoff([case], context(), [REQUIREMENT])[1])
+        self.assertEqual(case.automation_status, "Manual")
+
     def test_scoped_text_handoff_requires_grounded_locator_and_exact_value(self):
         for locator in ('css "#result"', 'test id "result"'):
             with self.subTest(locator=locator):

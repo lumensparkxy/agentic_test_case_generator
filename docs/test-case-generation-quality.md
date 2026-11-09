@@ -58,8 +58,11 @@ Generation and refinement use one browser action and at most one observable
 check per step. Complete browser actions may leave their expected result
 empty when the case has a separate observable outcome. Use
 `Click exact button "Save request"` and
-`Click exact link "View receipt"` for whole accessible names. A case for an
-initially blank field checks the blank value before submitting.
+`Click exact link "View receipt"` for whole accessible names. Enter data with
+`Enter "literal input" into field "Reference"`. Quoted values preserve spaces.
+Escape an embedded double quote or backslash with a backslash. To clear a
+populated field, use `Enter "" into field "Reference"` and check the empty value.
+For an initially blank field, check the empty value without filling it.
 
 For a grounded native single-choice dropdown, use
 `Select exact option "Closed" in field "Order status"`. Linked HTML supplies

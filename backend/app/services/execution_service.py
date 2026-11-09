@@ -63,6 +63,14 @@ TEXT_EQUALS_PATTERN = re.compile(
 )
 ASSERTION_PREFIX_PATTERN = re.compile(r"^(?:(?:verify|assert|confirm|check)(?:\s+that)?\s+)?(?:the\s+)?", re.IGNORECASE)
 QUOTED_ASSERTION_TARGET = r"""(?:"(?:\\["\\]|[^"\\])*"|'(?:\\['\\]|[^'\\])*')"""
+QUOTED_FILL_LITERAL = r"""(?:"(?:\\["\\]|[^"\\\r\n])*"|'(?:\\['\\]|[^'\\\r\n])*')"""
+QUOTED_FILL_INTENT = re.compile(r"""^(?:enter|fill|type|input)\s+["']""", re.IGNORECASE)
+QUOTED_FILL_ACTION = re.compile(
+    rf"(?:enter|fill|type|input)\s+(?P<value>{QUOTED_FILL_LITERAL})\s+(?:in|into)\s+"
+    rf"(?:field\s+(?P<exact_label>{QUOTED_FILL_LITERAL})"
+    rf"""|(?:the\s+)?(?P<label>{QUOTED_FILL_LITERAL}|[^"'\r\n]+?)(?:\s+field)?)\.?""",
+    re.IGNORECASE,
+)
 SCOPED_TEXT_ASSERTION_INTENT = re.compile(rf"^(?:css|test\s+id)\s+{QUOTED_ASSERTION_TARGET}\s+text\b", re.IGNORECASE)
 EXACT_CLICK_ACTION = re.compile(rf"^Click exact (?P<role>button|link)\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?$", re.IGNORECASE)
 EXACT_CLICK_INTENT = re.compile(r"^Click\s+exact\b", re.IGNORECASE)
@@ -565,11 +573,15 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     exact_click = EXACT_CLICK_ACTION.fullmatch(step.action.strip())
     exact_select = EXACT_SELECT_ACTION.fullmatch(step.action.strip())
     exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(step.action.strip())
+    quoted_fill = QUOTED_FILL_ACTION.fullmatch(step.action.strip())
     # A supported assertion's quoted locator and value are data, not operations.
     literal_assertions = {"assert_hidden", "assert_checked", "assert_scoped_text_equals"}
     action_is_literal = action_value or exact_click or exact_select or exact_checkbox or (action_assertion and action_assertion.kind in literal_assertions)
     expected_is_literal = expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
-    domain_text = " ".join(("" if action_is_literal else step.action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
+    domain_action = "" if action_is_literal else step.action
+    if quoted_fill:
+        domain_action = unquoted_action
+    domain_text = " ".join((domain_action, "" if expected_is_literal else step.expected, step.test_data or "")).lower()
     if any(term in domain_text for term in UNSUPPORTED_DOMAIN_TERMS):
         return [], _unsupported_step(step, "unsupported_non_browser_domain", "manual_execution")
     if unsupported_action or unsupported_expected:
@@ -602,6 +614,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         converted.append(action_assertion)
     elif (
         ASSERTION_ACTION_PATTERN.match(action)
+        or (QUOTED_FILL_INTENT.match(action) and not quoted_fill)
         or EXACT_CHECKBOX_ASSERTION_INTENT.match(_assertion_statement(step.action))
         or SCOPED_TEXT_ASSERTION_INTENT.match(_assertion_statement(step.action))
         or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action)
@@ -613,20 +626,25 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         # as "Open receipt" does not turn it into a navigation.
         if not (expected_value or expected_assertion) or _unsupported_browser_assertion_text_reason(action):
             return [], _unmapped_step(step, action, is_expected=False)
-    elif match := FILL_PATTERN.search(action):
-        value = _clean_value(match.group("value"))
-        label = _clean_label(match.group("label"))
-        if value and label:
-            locator = f'"{_escape_step_text(label)}"'
-            field_locator = f"field {locator}"
+    elif fill := quoted_fill or FILL_PATTERN.search(action):
+        exact = False
+        if quoted_fill:
+            value = _assertion_literal(fill["value"])
+            exact = fill["exact_label"] is not None
+            target = fill["exact_label"] or fill["label"]
+            label = _assertion_literal(target) if target.startswith(('"', "'")) else _clean_label(target)
+        else:
+            value = _clean_value(fill["value"])
+            label = _clean_label(fill["label"])
+        if label.strip() and (quoted_fill or value):
+            field_locator = f'field "{_escape_step_text(label)}"'
             if not expected_value and (equality := TEXT_EQUALS_PATTERN.fullmatch(_assertion_statement(step.expected))) and equality["label"] == label:
                 expected_value = _ConvertedStep(
                     "assert_value_equals",
                     f'{field_locator} value should equal "{_escape_step_text(equality["expected"])}"',
                 )
-            if expected_value and expected_value.body.startswith(f"{field_locator} value "):
-                locator = field_locator
-            converted.append(_ConvertedStep("fill", f'I enter "{_escape_step_text(value)}" into {locator}'))
+            exact = exact or bool(expected_value and expected_value.body.startswith(f"{field_locator} value "))
+            converted.append(_fill_step(value, label, exact=exact))
     elif match := CLICK_PATTERN.search(action):
         name = _clean_label(match.group("name"))
         if name:
@@ -649,6 +667,16 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         return [], _unmapped_step(step, action, is_expected=False)
 
     return converted, None
+
+
+def _fill_step(value: str, label: str, *, exact: bool) -> _ConvertedStep:
+    field = "field " if exact else ""
+    if any(character in value or character in label for character in ('"', "\\")):
+        # The legacy structured form treats backslashes as data and cannot
+        # escape embedded quotes. Use the quoted form for these literals.
+        qualifier = "exact " if exact else ""
+        return _ConvertedStep("fill", f'I fill {qualifier}field "{_escape_step_text(label)}" with "{_escape_step_text(value)}"')
+    return _ConvertedStep("fill", f'I enter "{value}" into {field}"{label}"')
 
 
 def is_complete_browser_action(action: str) -> bool:

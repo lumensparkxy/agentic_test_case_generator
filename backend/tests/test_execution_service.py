@@ -791,6 +791,69 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn(r'await expect(page.getByTestId("summary")).toHaveText("Keep \"quotes\"");', generated)
         self.assertIn('await expect(page.getByTestId("diagnostic")).toHaveText("");', generated)
 
+    def test_quoted_fills_preserve_exact_values_through_browser_codegen(self) -> None:
+        target = "https://example.test/"
+        case = _browser_case("TC-EXACT-FILL")
+        values = ["  A  into the room  ", '  A\t"quoted" \\path  ', "  ", ""]
+        label = 'Internal "Notes"'
+        field = json.dumps(label)
+        case.steps = [TestStep(step=1, action=f'Open "{target}"', expected="")]
+        for number, value in enumerate(values, start=2):
+            literal = json.dumps(value).replace(r"\t", "\t")
+            locator = f"field {field}" if number != 3 else f"the {field} field"
+            case.steps.append(TestStep(step=number, action=f"Enter {literal} into {locator}", expected=f"field {field} value should equal {literal}"))
+        case.steps.append(TestStep(step=6, action=f'Enter "" into field {field}', expected=""))
+
+        preview = preview_execution([case], target_base_url=target)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None))
+        steps = ir.raw["cases"][0]["steps"]
+        fills = [step for step in steps if step["action"] == "fill"]
+        checks = [step for step in steps if step["action"] == "assert_value_equals"]
+        self.assertEqual([step["value"] for step in fills], [*values, ""])
+        self.assertEqual([step["expected"] for step in checks], values)
+        self.assertTrue(all(step["locator"] == {"strategy": "label", "value": label, "exact": True} for step in [*fills, *checks]))
+        generated = generate_playwright_spec(ir).contents
+        for value in values:
+            self.assertIn(f".fill({json.dumps(value)});", generated)
+            self.assertIn(f".toHaveValue({json.dumps(value)});", generated)
+
+    def test_malformed_quoted_fills_remain_unsupported(self) -> None:
+        for action in (
+            'Enter "unfinished into field "Email"',
+            'Enter "one" into field "Email" and save the form',
+            'Enter "one" into "Email" and press Enter',
+            'Enter "one" into field ""',
+            'Enter "one\nanother" into field "Email"',
+        ):
+            with self.subTest(action=action):
+                case = _browser_case()
+                case.steps[1].action = action
+                preview = preview_execution([case], target_base_url="https://example.test/")
+                self.assertFalse(preview.executable)
+                self.assertEqual(preview.unsupported[0].unsupported_steps[0].action, action)
+
+    def test_legacy_structured_fill_retains_raw_backslashes_and_bindings(self) -> None:
+        target = "https://example.test/"
+        spec = parse_spec_document(
+            {
+                "schemaVersion": "1.0",
+                "id": "legacy_fill",
+                "title": "Fill inputs",
+                "steps": [
+                    f'Given I open "{target}"',
+                    r'When I enter "\\share\file" into "Path"',
+                    'And I enter "{env.input}" into field "Bound"',
+                    r'And I fill exact field "Path" with "prefix \"quote\" {env.input}"',
+                ],
+            }
+        )
+        environment = ResolvedEnvironment("web", {"baseUrl": target, "input": "  original  "}, target, None)
+        steps = compile_parsed_spec(spec, environment=environment).raw["cases"][0]["steps"]
+        self.assertEqual([step["value"] for step in steps[1:]], [r"\\share\file", "  original  ", 'prefix "quote"   original  '])
+        self.assertEqual(steps[1]["locator"], {"strategy": "label", "value": "Path"})
+        self.assertEqual(steps[2]["locator"], {"strategy": "label", "value": "Bound", "exact": True})
+
     def test_malformed_scoped_text_check_does_not_drop_the_expected_result(self) -> None:
         for statement in (
             'css "#result" text should contain "Click save"',

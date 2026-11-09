@@ -82,7 +82,11 @@ Then test id "employee-name" value should equal "Alex Rivera"
 ```
 
 Use an empty quoted value to check a blank field. Substring checks require a
-nonempty literal. Both compile to Playwright value assertions. Plain equality in
+nonempty literal. Both compile to Playwright value assertions. Use
+`Enter "literal input" into field "Employee name"` for an exact fill and
+`Enter "" into field "Employee name"` to clear a populated field. Quoted input
+preserves spaces, including at the edges. Escape embedded double quotes and
+backslashes. Plain equality in
 a saved structured spec still checks text content. Preview treats equality
 against a label filled by the same source step as a value assertion. When the
 fill and check name the same field, both use its exact label. Preview marks

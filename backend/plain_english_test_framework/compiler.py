@@ -20,6 +20,7 @@ PLACEHOLDER_PATTERN = re.compile(r"\{(?P<namespace>env|data)\.(?P<path>[A-Za-z_]
 STEP_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+(?P<body>.+)$")
 OPEN_PATTERN = re.compile(r'^I open "(?P<url>[^"]+)"$')
 ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into (?P<exact>field )?"(?P<label>[^"]+)"$')
+QUOTED_FILL_PATTERN = re.compile(r'I fill (?P<exact>exact )?field "(?P<label>(?:\\["\\]|[^"\\\r\n])+)" with "(?P<value>(?:\\["\\]|[^"\\\r\n])*)"')
 EXACT_CLICK_PATTERN = re.compile(r'^I click exact (?P<role>button|link) "(?P<name>(?:\\["\\]|[^"\\])+)"$')
 EXACT_SELECT_PATTERN = re.compile(r'^I select exact option "(?P<option>(?:\\["\\]|[^"\\])+)" in field "(?P<field>(?:\\["\\]|[^"\\])+)"$')
 CHECKBOX_ACTION_PATTERN = re.compile(r'^I (?P<verb>check|uncheck) exact checkbox "(?P<label>(?:\\["\\]|[^"\\])+)"$')
@@ -232,9 +233,15 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "url": url,
         }
 
-    if match := ENTER_PATTERN.match(body):
-        label = _resolve_text(match.group("label"), environment, data, path=f"$.steps[{source_step_index}]")
-        value = _resolve_value(match.group("value"), environment, data, path=f"$.steps[{source_step_index}]")
+    quoted_fill = QUOTED_FILL_PATTERN.fullmatch(body)
+    if match := quoted_fill or ENTER_PATTERN.match(body):
+        label, value = match["label"], match["value"]
+        if quoted_fill:
+            label = re.sub(r'\\(["\\])', r"\1", label)
+            value = re.sub(r'\\(["\\])', r"\1", value)
+        path = f"$.steps[{source_step_index}]"
+        label = _resolve_text(label, environment, data, path=path)
+        value = _resolve_value(value, environment, data, path=path)
         return {
             "id": _slug_identifier(f"enter {label}"),
             "sourceStepIndex": source_step_index,
