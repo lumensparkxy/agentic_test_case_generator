@@ -11,11 +11,13 @@ const cases = [1, 2].map((n) => ({
 	steps: [{ step: 1, action: "Submit", expected: "Saved" }],
 }));
 async function open(page, options = {}) {
-	const project = useCaseProjectFixture();
+	const project = useCaseProjectFixture({ reviewState: options.useCaseReviewState });
 	project.current_snapshots.test_cases = {
 		snapshot_id: "cases-v1",
 		project_id: USE_CASE_PROJECT_ID,
 		stage: "test_cases",
+		operation: options.operation,
+		metadata: options.metadata,
 		version: 1,
 		payload: {
 			test_cases: cases,
@@ -74,6 +76,120 @@ async function open(page, options = {}) {
 }
 const panel = (page) => page.getByRole("region", { name: "Improve test quality" });
 const apply = (page) => panel(page).getByRole("button", { name: "Apply selected fixes", exact: true });
+
+const mixedGroups = [
+	{ input_hash: "group-1", status: "incomplete", design_status: "incomplete", requirement_ids: ["REQ-101"], case_ids: ["TC-001"] },
+	{ input_hash: "group-2", status: "unknown", requirement_ids: ["REQ-102"], case_ids: ["TC-002"], failure_reason: "provider_unavailable" },
+	{
+		input_hash: "group-3",
+		status: "incomplete",
+		design_status: "assessed_complete",
+		execution_status: "blocked",
+		requirement_ids: ["REQ-103"],
+		case_ids: ["TC-003"],
+	},
+	{ input_hash: "group-4", status: "assessed_complete", requirement_ids: ["REQ-104"], case_ids: ["TC-004"] },
+];
+const groupCases = [...cases, { ...cases[0], id: "TC-003", title: "Checkout 3" }, { ...cases[1], id: "TC-004", title: "Checkout 4" }];
+
+for (const width of [1440, 390]) {
+	test(
+		`separates saved review groups from repair and opens the exact case at ${width}px`,
+		{ tag: width === 1440 ? "@p1" : [] },
+		async ({ page }, testInfo) => {
+			await page.setViewportSize({ width, height: 900 });
+			const reason = "Independent review left 1 of 4 groups unverified. Completed groups found design gaps.";
+			const { requests } = await open(page, {
+				payload: {
+					test_cases: groupCases,
+					review: { approved: false, score: 95, threshold: 90, blocking_issues: [issue, reason], unmet_criteria: [] },
+					substantive_assessment: {
+						status: "incomplete",
+						design_status: "incomplete",
+						reason,
+						diagnostics: { unverified_group_count: 1, groups: mixedGroups },
+					},
+				},
+			});
+			const groups = page.getByRole("region", { name: "Independent review groups" });
+			await expect(groups).toContainText("3 of 4 groups assessed · 1 unverified");
+			await expect(panel(page).getByRole("checkbox", { name: reason })).toHaveCount(0);
+			await groups.getByText("Show review groups", { exact: true }).focus();
+			await page.keyboard.press("Enter");
+			for (const label of ["Design gaps", "Unverified", "Execution setup needed", "Assessed"]) {
+				await expect(groups.getByText(label, { exact: true })).toBeVisible();
+			}
+			await expect(groups.getByText("REQ-102 · 1 test case")).toBeVisible();
+			await expect(groups.getByText("Review provider unavailable")).toBeVisible();
+			const accessibility = await new AxeBuilder({ page }).include(".test-review-groups").analyze();
+			expect(accessibility.violations).toEqual([]);
+			await groups.screenshot({ path: testInfo.outputPath("review-groups.png") });
+			const inspection = groups.getByRole("button", { name: "Inspect group 2 cases" });
+			await inspection.focus();
+			await page.keyboard.press("Enter");
+			const results = page.getByRole("tabpanel", { name: "Generated Test Cases" });
+			await expect(results).toBeFocused();
+			await expect(results.getByText("Showing cases in Group 2")).toBeVisible();
+			await expect(results.getByText("1 of 4 test cases")).toBeVisible();
+			await expect(results.getByRole("heading", { name: "Checkout 2" })).toBeVisible();
+			await expect(results.getByRole("button", { name: /TC-001 Checkout/ })).toHaveCount(0);
+			expect(requests).toEqual([]);
+			await results.getByRole("button", { name: "Clear group filter" }).click();
+			await expect(results).toBeFocused();
+			await expect(results.getByText("4 of 4 test cases")).toBeVisible();
+			await page.reload();
+			await expect(groups).toContainText("3 of 4 groups assessed · 1 unverified");
+			await page.getByRole("tab", { name: /^Improve tests/ }).click();
+			await panel(page).getByRole("button", { name: "Select all", exact: true }).click();
+			await apply(page).click();
+			await expect.poll(() => requests.length).toBe(1);
+			expect(requests[0].feedback).toContain(issue);
+			expect(requests[0].feedback).not.toContain(reason);
+			const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+			expect(overflow).toBeLessThanOrEqual(1);
+		}
+	);
+}
+
+test("a review-only failure shows last attempt groups and keeps review available", { tag: "@p1" }, async ({ page }) => {
+	const reason = "Independent assessment provider unavailable; review is required.";
+	const { requests } = await open(page, {
+		operation: "testcases.generate",
+		metadata: { review_retry_available: true },
+		useCaseReviewState: "approved",
+		payload: {
+			test_cases: groupCases,
+			review: { approved: false, score: 100, threshold: 90, blocking_issues: [reason], unmet_criteria: [] },
+			substantive_assessment: { status: "unknown", reason, diagnostics: { failure_reason: "provider_unavailable" } },
+		},
+	});
+	let attempts = 0;
+	await page.route("**/test-cases/review", (route) => {
+		attempts++;
+		return route.fulfill({
+			status: 503,
+			json: {
+				detail: { code: "review_groups_unverified", message: "Independent review left 1 of 4 groups unverified.", groups: mixedGroups },
+			},
+		});
+	});
+	await expect(panel(page).getByRole("heading", { name: "Independent review needed" })).toBeVisible();
+	await expect(panel(page).getByRole("checkbox")).toHaveCount(0);
+	await expect(panel(page).getByRole("button", { name: /Apply.*(fixes|improvements)/ })).toHaveCount(0);
+	const retry = page.getByRole("button", { name: "Review saved suite", exact: true });
+	await expect(retry).toBeEnabled();
+	await retry.click();
+	const latest = page.getByRole("region", { name: "Last review attempt" });
+	await expect(latest).toContainText("3 of 4 groups assessed · 1 unverified");
+	await latest.getByText("Show review groups", { exact: true }).click();
+	await latest.getByRole("button", { name: "Inspect group 2 cases" }).click();
+	await expect(page.getByText("Showing cases in Group 2")).toBeVisible();
+	expect(attempts).toBe(1);
+	expect(requests).toEqual([]);
+	await page.reload();
+	await expect(latest).toHaveCount(0);
+	await expect(retry).toBeEnabled();
+});
 
 test("shows the saved browser handoff reason independently of business approval", { tag: "@p1" }, async ({ page }) => {
 	const summary = "Browser handoff retained 1 of 1 browser-intended cases for manual review.";

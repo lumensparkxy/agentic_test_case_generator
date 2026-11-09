@@ -1,11 +1,20 @@
+export function requiresIndependentReview(assessment) {
+	return (
+		assessment?.status === "unknown" ||
+		assessment?.model_status === "unknown" ||
+		Number(assessment?.diagnostics?.unverified_group_count) > 0
+	);
+}
+
 export function improvementFindings(review, assessment) {
 	const setupReason =
 		assessment?.design_status === "assessed_complete" && assessment.execution_status === "blocked" ? assessment.reason : null;
+	const pendingReviewReason = requiresIndependentReview(assessment) ? assessment?.reason?.trim() : null;
 	return [
 		...new Set(
 			[...(review?.blocking_issues || []), ...(review?.unmet_criteria || [])]
 				.map((item) => String(item).trim())
-				.filter((item) => item && item !== setupReason)
+				.filter((item) => item && item !== setupReason && item !== pendingReviewReason)
 		),
 	];
 }

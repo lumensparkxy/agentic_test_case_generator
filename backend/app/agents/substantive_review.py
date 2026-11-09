@@ -747,6 +747,8 @@ def _combine_review_groups(data, input_hash, groups, results, workers):
                 "case_ids": [row["id"] for row in group.data["test_cases"]],
                 "reference_case_ids": [row["id"] for row in group.data.get("reference_cases", [])],
                 "status": result["status"],
+                "design_status": result["design_status"],
+                "execution_status": result["execution_status"],
                 "prompt_bytes": group.prompt_bytes,
                 **result["diagnostics"],
             }

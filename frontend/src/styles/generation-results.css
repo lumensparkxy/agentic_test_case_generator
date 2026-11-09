@@ -702,6 +702,33 @@ button.small {
 	margin-bottom: 0.75rem;
 }
 
+.test-review-groups {
+	margin-block: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+}
+.test-review-groups > p:first-child {
+	margin-top: 0;
+}
+.test-review-group {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.test-review-group p {
+	margin-block: var(--space-1);
+	overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+	.test-review-group {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+}
+
 .improve-tests {
 	max-width: 960px;
 	padding-block: var(--space-4);

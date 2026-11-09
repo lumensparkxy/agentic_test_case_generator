@@ -1031,7 +1031,13 @@ class ImpactUpdateServiceTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as unavailable:
                 self._review_saved_suite(project)
             self.assertEqual(unavailable.exception.status_code, 503)
-            self.assertIn("1 of 4 groups unverified", unavailable.exception.detail)
+            self.assertEqual(unavailable.exception.detail["code"], "review_groups_unverified")
+            self.assertIn("1 of 4 groups unverified", unavailable.exception.detail["message"])
+            groups = unavailable.exception.detail["groups"]
+            self.assertEqual(len(groups), 4)
+            self.assertEqual(groups[1]["requirement_ids"], ["REQ-004", "REQ-005", "REQ-006"])
+            self.assertEqual(groups[1]["status"], "unknown")
+            self.assertEqual(groups[1]["case_ids"], ["TC-004", "TC-005", "TC-006"])
             self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
             known_gap = True
             updated = self._review_saved_suite(project)

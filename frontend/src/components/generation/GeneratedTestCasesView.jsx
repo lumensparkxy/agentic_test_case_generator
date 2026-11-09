@@ -20,12 +20,14 @@ export default function GeneratedTestCasesView({
 	substantiveAssessment = null,
 	changedIds = null,
 	onClearChanged,
+	reviewGroup = null,
+	onClearReviewGroup,
 }) {
 	const recovery = useReviewDraft({
 		identity,
 		projectId,
 		snapshotId,
-		name: "test-review",
+		name: reviewGroup ? `test-review:${reviewGroup.key}` : "test-review",
 		initialValue: { query: "", selectedId: "", scrollTop: 0, changedIds: null },
 	});
 	const query = recovery.value.query;
@@ -35,12 +37,14 @@ export default function GeneratedTestCasesView({
 		if (listRef.current) listRef.current.scrollTop = recovery.value.scrollTop || 0;
 	}, [snapshotId]);
 	const searchId = useId();
-	const visibleChanges = changedIds ?? recovery.value.changedIds ?? null;
+	const visibleChanges = reviewGroup ? null : (changedIds ?? recovery.value.changedIds ?? null);
 	useEffect(() => {
 		if (changedIds !== null) recovery.setValue((old) => ({ ...old, changedIds }));
 	}, [changedIds]);
+	const groupCases = reviewGroup ? new Set(reviewGroup.caseIds) : null;
 	const cases = testCases.filter(
 		(tc) =>
+			(!groupCases || groupCases.has(tc.id)) &&
 			(visibleChanges === null || visibleChanges.includes(tc.id)) &&
 			[
 				tc.id,
@@ -70,17 +74,18 @@ export default function GeneratedTestCasesView({
 				<div className="test-review-list">
 					<DraftRecoveryNotice draft={recovery} />
 					<h2 className="sr-only">Generated Test Cases</h2>
-					{visibleChanges !== null && (
+					{(reviewGroup || visibleChanges !== null) && (
 						<div role="status">
-							<p>Showing changed tests</p>
+							<p>{reviewGroup ? `Showing cases in ${reviewGroup.label}` : "Showing changed tests"}</p>
 							<Button
 								variant="secondary"
 								onClick={() => {
 									recovery.setValue((old) => ({ ...old, changedIds: null }));
-									onClearChanged?.();
+									if (reviewGroup) onClearReviewGroup();
+									else onClearChanged?.();
 								}}
 							>
-								Show all tests
+								{reviewGroup ? "Clear group filter" : "Show all tests"}
 							</Button>
 						</div>
 					)}

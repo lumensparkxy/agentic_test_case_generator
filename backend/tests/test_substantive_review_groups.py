@@ -307,6 +307,9 @@ class GroupedSubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(result["design_status"], "assessed_complete")
         self.assertEqual(result["execution_status"], "blocked")
         self.assertEqual(result["execution_blockers"], [{"test_case_id": "TC-F", "prerequisite_name": "account"}])
+        group = next(item for item in result["diagnostics"]["groups"] if item["requirement_ids"] == ["F"])
+        self.assertEqual(group["design_status"], "assessed_complete")
+        self.assertEqual(group["execution_status"], "blocked")
         self.assertEqual(review.assessment_tasks(result, cases), [])
 
     def test_selected_repair_and_indivisible_scope_keep_one_full_review(self):

@@ -212,6 +212,10 @@ Completed groups retain verified findings. If any group remains unverified,
 approval stays blocked. A saved-suite review with verified gaps can record the
 findings on a new unapproved snapshot. If the service is unavailable and no
 group confirmed a gap, the original snapshot stays current for retry.
+The Test Cases workbench shows group status separately from test repair
+findings and opens the exact cases assigned to a group. A failed review
+attempt can show its groups while the current suite is open. Saved group
+evidence remains available after reload.
 
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and

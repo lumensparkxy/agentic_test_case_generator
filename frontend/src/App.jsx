@@ -18,6 +18,7 @@ import { TableScroll, Table, List, ListItem, CollectionState } from "./component
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import ImproveTestsPanel from "./components/generation/ImproveTestsPanel";
 import { improvementFindings } from "./components/generation/improvementFindings";
+import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
 import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
@@ -764,6 +765,7 @@ export default function App() {
 	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
 	const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
+	const [reviewCaseScope, setReviewCaseScope] = useState(null);
 
 	const pasteDraft = useReviewDraft({
 		identity: currentUser?.sub,
@@ -774,11 +776,13 @@ export default function App() {
 	});
 	const [reportedCase, setReportedCase] = useState(null);
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
+	const activeReviewCaseScope = reviewCaseScope?.snapshot === sourceCaseSnapshot ? reviewCaseScope : null;
 	const focusResultContent = useRef(false);
 	useEffect(() => {
 		setSelectedTestCaseId(null);
 		setReportedCase(null);
 		setChangedTestCaseIds(null);
+		setReviewCaseScope(null);
 	}, [sourceCaseSnapshot]);
 	useEffect(() => {
 		if (focusResultContent.current) {
@@ -786,9 +790,11 @@ export default function App() {
 			focusResultContent.current = false;
 		}
 	}, [activeGenerateResultTab]);
-	const openCaseResults = (id = null) => {
+	const openCaseResults = (id = null, group = null) => {
 		setSelectedTestCaseId(id);
-		focusResultContent.current = true;
+		setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
+		if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
+		else focusResultContent.current = true;
 		setActiveGenerateResultTab("test-cases");
 	};
 	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
@@ -3609,7 +3615,20 @@ export default function App() {
 				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
 				body: JSON.stringify({ snapshot_id: savedSuite.snapshot_id, base_project_revision: currentProjectRevision }),
 			});
-			if (!response.ok) throw new Error(await parseApiError(response, "Saved suite review failed"));
+			if (!response.ok) {
+				const details =
+					response.status === 503
+						? (
+								await response
+									.clone()
+									.json()
+									.catch(() => null)
+							)?.detail
+						: null;
+				const error = new Error(await parseApiError(response, "Saved suite review failed"));
+				if (details?.code === "review_groups_unverified" && Array.isArray(details.groups)) error.reviewGroups = details.groups;
+				throw error;
+			}
 			const project = await response.json();
 			if (!isProjectOperationCurrent(scope)) return;
 			if (project?.project_id !== scope.projectId || !isLatestProjectRevision(project.project_id, project.current_revision)) return;
@@ -3618,7 +3637,9 @@ export default function App() {
 			hydrateProjectWorkflow(project);
 			void loadProjectOrchestrator(project.project_id, { silent: true, operationScope: scope });
 		} catch (error) {
-			if (isProjectOperationCurrent(scope)) setSavedSuiteReview({ key: savedSuiteReviewKey, busy: false, error: error.message });
+			if (isProjectOperationCurrent(scope)) {
+				setSavedSuiteReview({ key: savedSuiteReviewKey, busy: false, error: error.message, reviewGroups: error.reviewGroups });
+			}
 		} finally {
 			savedSuiteReviewRequests.current.delete(savedSuiteReviewKey);
 			setSavedSuiteReview((current) => (current?.key === savedSuiteReviewKey && current.busy ? null : current));
@@ -3897,6 +3918,7 @@ export default function App() {
 					onCheck={impactApplication.checkStatus}
 					onAnalyze={analyzeImpact}
 					onReview={() => {
+						setReviewCaseScope(null);
 						setChangedTestCaseIds(impactApplication.operation.changed_test_case_ids);
 						setActiveGenerateResultTab("test-cases");
 						window.requestAnimationFrame(() => {
@@ -5329,6 +5351,12 @@ export default function App() {
 													</div>
 												</div>
 											)}
+											<ReviewGroupSummary
+												groups={savedSuiteReviewState?.reviewGroups ?? substantiveAssessment?.diagnostics?.groups}
+												attempted={Boolean(savedSuiteReviewState?.reviewGroups)}
+												stale={Boolean(testCaseStageState.stale)}
+												onInspect={(group) => openCaseResults(group.caseIds[0], group)}
+											/>
 											{upstreamChangedForImpact && (
 												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
 													<div>
@@ -5451,6 +5479,7 @@ export default function App() {
 																findings={testCaseFindings}
 																needsOnlySetup={testCasesNeedSetup}
 																assessment={substantiveAssessment}
+																canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}
 																prerequisiteSnapshotId={
 																	projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id
 																}
@@ -5518,9 +5547,11 @@ export default function App() {
 																		setActiveGenerateResultTab("improve");
 																		focusResultContent.current = true;
 																	}}
-																	key={`${sourceCaseSnapshot}:${changedTestCaseIds ? "changed" : "all"}`}
+																	key={`${sourceCaseSnapshot}:${activeReviewCaseScope?.key || (changedTestCaseIds ? "changed" : "all")}`}
 																	changedIds={changedTestCaseIds}
 																	onClearChanged={() => setChangedTestCaseIds(null)}
+																	reviewGroup={activeReviewCaseScope}
+																	onClearReviewGroup={() => openCaseResults(selectedTestCaseId)}
 																	testCases={testCases}
 																	qualityIssues={testCaseReview?.blocking_issues || []}
 																	requirements={requirements}
