@@ -269,7 +269,7 @@ test.describe("Opt-in project workspaces", () => {
 	});
 });
 
-test("historical case links preserve exact query and hash with the workspace shell or rollback", async ({ page }, testInfo) => {
+test("historical case links preserve exact query and hash with the workspace shell or rollback @p1", async ({ page }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { writes, errors, lookups } = await setup(page);
 	const query = new URLSearchParams({ suite: historicalSuite, case: historicalCase.id });
