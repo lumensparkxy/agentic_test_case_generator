@@ -114,6 +114,8 @@ For an out-of-view state, use an expectation such as
 `exact link "Open receipt" is not visible`. The browser waits for zero visible
 exact matches at that step. Hidden and absent matches both satisfy the check.
 Record DOM absence, authorization, and timing as distinct requirements.
+For a CSS class selector, use a typed check such as
+`css ".receipt-row" is visible`. Use exact text for the displayed label.
 
 New browser-intended cases go through the deterministic preview and compiler
 without launching the app. Verified cases are marked **To Be Automated**.

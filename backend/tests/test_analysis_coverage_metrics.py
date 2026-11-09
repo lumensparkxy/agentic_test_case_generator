@@ -282,6 +282,9 @@ class BrowserAssertionReviewTests(unittest.TestCase):
             ('"#email-input" should be visible', "#email-input"),
             ('exact text "#bookings tr" is visible', "#bookings tr"),
             ('exact text "div.notice" is visible', "div.notice"),
+            ('exact text ".receipt-row" is visible', ".receipt-row"),
+            ('exact text ".receipt-row .status" is visible', ".receipt-row .status"),
+            (r'exact text ".\31 st-row" is visible', r".\31 st-row"),
             ('The attachment named "#expense-table tr" is visible', "#expense-table tr"),
             ('One row is present in "#bookings tr" and exact heading "#bookings tr" is visible', "#bookings tr"),
             ('css "#bookings" is visible and exact text "#bookings" is visible', "#bookings"),
@@ -302,6 +305,19 @@ class BrowserAssertionReviewTests(unittest.TestCase):
             "The expense record shows status 'Submitted', amount 150.00 EUR, and displays the attached receipt file 'hotel_receipt.pdf'.",
             'The file name "Hotel receipt.final.pdf" is visible.',
             'The attachment named "receipt-001.pdf" is shown.',
+            'The fixture file ".receipt.example" is visible.',
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)
+
+                self.assertTrue(review["approved"], review["blocking_issues"])
+
+    def test_review_keeps_leading_dots_in_literal_copy(self) -> None:
+        for expected in (
+            'exact text "..." is visible',
+            'exact text ".75" is visible',
+            'exact text "./receipt.pdf" is visible',
+            'css ".receipt-row" is visible',
         ):
             with self.subTest(expected=expected):
                 review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)

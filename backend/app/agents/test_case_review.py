@@ -27,9 +27,9 @@ _QUOTED_LOCATOR_PREFIX_PATTERN = re.compile(
 )
 _TYPED_LOCATOR_PREFIX_PATTERN = re.compile(r"\b(?:css|test id)\s+$", re.IGNORECASE)
 _QUOTED_FILENAME_PREFIX_PATTERN = re.compile(r"\b(?:attachment|file(?:\s*name)?)(?:\s+(?:called|named))?\s+$", re.IGNORECASE)
-_FILENAME_PATTERN = re.compile(r"\w[\w .-]*\.[\w-]+")
+_FILENAME_PATTERN = re.compile(r"(?:\w[\w .-]*\.[\w-]+|\.[\w-]+(?:\.[\w-]+)*)")
 _SELECTOR_TEXT_PATTERN = re.compile(
-    r"^(?:#|\.|\[|css=|xpath=|//|/html\b|[a-z][\w-]*(?:[#.\[]|\[[^\]]+\])|data-testid=|testid=)",
+    r"^(?:#|\.(?:[^\W\d]|[-\\])|\[|css=|xpath=|//|/html\b|[a-z][\w-]*(?:[#.\[]|\[[^\]]+\])|data-testid=|testid=)",
     re.IGNORECASE,
 )
 _IMPLEMENTATION_ONLY_VISIBLE_TEXT_PATTERN = re.compile(
@@ -234,10 +234,10 @@ def _review_browser_assertion_grounding(test_cases: List[Dict[str, Any]], contex
 
             for value in _visible_quoted_values(step_text):
                 normalized = _normalize_assertion_text(value)
-                if is_ambiguous_semantic_visible_text(normalized):
-                    findings.append(f"{step_label}: quoted value `{value}` names a UI role or locator concept instead of exact visible copy.")
-                elif _looks_like_selector_text(normalized):
+                if _looks_like_selector_text(normalized):
                     findings.append(f"{step_label}: raw selector `{value}` is used as visible page copy.")
+                elif is_ambiguous_semantic_visible_text(normalized):
+                    findings.append(f"{step_label}: quoted value `{value}` names a UI role or locator concept instead of exact visible copy.")
                 elif _looks_like_implementation_only_visible_text(normalized):
                     findings.append(f"{step_label}: implementation/runtime concept `{value}` is used as browser visible text.")
 
@@ -318,7 +318,7 @@ def _visible_quoted_values(text: str) -> List[str]:
 
 
 def _normalize_assertion_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip().strip(" .")
+    return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
 def _looks_like_selector_text(value: str) -> bool:
