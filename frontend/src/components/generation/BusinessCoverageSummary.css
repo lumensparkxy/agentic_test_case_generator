@@ -1,0 +1,48 @@
+.business-behaviors {
+	display: grid;
+	gap: var(--space-3);
+	margin-block: var(--space-3);
+}
+
+.business-behavior-requirement {
+	padding: var(--space-3);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+}
+
+.business-behavior-requirement h3,
+.business-behavior h4 {
+	margin-block: 0 var(--space-2);
+}
+
+.business-behavior + .business-behavior,
+.business-behavior-record + .business-behavior-record {
+	margin-block-start: var(--space-3);
+	padding-block-start: var(--space-3);
+	border-block-start: 1px solid var(--border-color);
+}
+
+.business-behavior-record p,
+.business-behavior-record blockquote {
+	margin-block: var(--space-2);
+}
+
+.business-behavior-record blockquote {
+	margin-inline: 0;
+	padding-inline-start: var(--space-2);
+	border-inline-start: 2px solid var(--primary);
+}
+
+.business-behavior-record :is(p, blockquote, li) {
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+.business-behavior-record .ui-link {
+	color: var(--primary-strong);
+}
+
+[id^="saved-case-step-"]:focus {
+	outline: 2px solid var(--primary);
+	outline-offset: -2px;
+}

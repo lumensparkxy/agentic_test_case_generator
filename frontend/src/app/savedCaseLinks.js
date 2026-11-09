@@ -1,9 +1,15 @@
 import { API_CONTRACT_ENDPOINTS } from "../api/generated/api-contracts";
 import { buildProjectPath, PROJECT_DESTINATIONS } from "./workflowRoutes";
 
-export function buildSavedCasePath(projectId, snapshotId, caseId) {
+export function buildSavedCasePath(projectId, snapshotId, caseId, step) {
 	const query = new URLSearchParams({ suite: snapshotId, case: caseId });
-	return `${buildProjectPath(projectId, PROJECT_DESTINATIONS.TEST_CASES)}?${query}`;
+	const fragment = Number.isSafeInteger(step) && step > 0 ? `#saved-case-step-${step}` : "";
+	return `${buildProjectPath(projectId, PROJECT_DESTINATIONS.TEST_CASES)}?${query}${fragment}`;
+}
+
+export function readSavedCaseStep(hash) {
+	const step = Number(/^#saved-case-step-([1-9][0-9]*)$/.exec(hash)?.[1]);
+	return Number.isSafeInteger(step) ? step : null;
 }
 
 export function readSavedCaseLink(search) {

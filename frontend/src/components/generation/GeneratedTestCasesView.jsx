@@ -88,6 +88,7 @@ export default function GeneratedTestCasesView({
 	savedSuite,
 	exactCasePath = "",
 	singleCase = false,
+	savedStep = null,
 	onReport,
 	onReadCase,
 	renderSelectedCaseRepair,
@@ -219,6 +220,15 @@ export default function GeneratedTestCasesView({
 		focusSelectedCase();
 	}, [selected?.id, focusSelectedCase]);
 	const steps = selected?.steps || [];
+	const citedSteps = singleCase && savedStep ? steps.filter((step) => step.step === savedStep) : [];
+	const citedStep = citedSteps.length === 1 ? citedSteps[0] : null;
+	const citedStepRef = useRef(null);
+	useLayoutEffect(() => {
+		const row = citedStepRef.current;
+		if (!row) return;
+		row.focus({ preventScroll: true });
+		row.scrollIntoView({ block: "center" });
+	}, [citedStep]);
 	const findings = selected
 		? qualityIssues.filter((issue) => new RegExp(`\\b${selected.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(issue))
 		: [];
@@ -399,6 +409,7 @@ export default function GeneratedTestCasesView({
 								)}
 							</div>
 							{renderSelectedCaseRepair?.(selected, sharePath)}
+							{singleCase && savedStep && !citedStep && <p role="status">The cited step is unavailable in this saved case.</p>}
 							<div className="test-steps-heading">
 								<h3>Steps and expected results</h3>
 								<span>
@@ -421,7 +432,12 @@ export default function GeneratedTestCasesView({
 									</thead>
 									<tbody>
 										{steps.map((step, index) => (
-											<tr key={`${selected.id}-${index}`}>
+											<tr
+												key={`${selected.id}-${index}`}
+												id={step === citedStep ? `saved-case-step-${step.step}` : undefined}
+												ref={step === citedStep ? citedStepRef : undefined}
+												tabIndex={step === citedStep ? -1 : undefined}
+											>
 												<th scope="row">{step.step ?? index + 1}</th>
 												<td>
 													{step.action}

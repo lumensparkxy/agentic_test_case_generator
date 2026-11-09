@@ -5,7 +5,7 @@ import { buildProjectPath, PROJECT_DESTINATIONS } from "../../app/workflowRoutes
 import { Button, Link } from "../ui/controls";
 import GeneratedTestCasesView from "./GeneratedTestCasesView";
 
-export default function LinkedTestCaseView({ projectId, snapshotId, caseId, request, navigate }) {
+export default function LinkedTestCaseView({ projectId, snapshotId, caseId, savedStep, request, navigate }) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
 	const headingRef = useRef(null);
@@ -74,6 +74,7 @@ export default function LinkedTestCaseView({ projectId, snapshotId, caseId, requ
 					</p>
 					<GeneratedTestCasesView
 						singleCase
+						savedStep={savedStep}
 						projectId={projectId}
 						snapshotId={snapshotId}
 						testCases={[evidence.test_case]}

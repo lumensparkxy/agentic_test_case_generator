@@ -3,7 +3,7 @@ import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import BusinessCoverageSummary, { ExecutionSetupSummary } from "./BusinessCoverageSummary";
 import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
-import { findingCaseIds, improvementFeedback, requiresIndependentReview } from "./improvementFindings";
+import { findingCaseIds, groupImprovementFindings, improvementFeedback, requiresIndependentReview } from "./improvementFindings";
 
 export default function ImproveTestsPanel({
 	review,
@@ -16,6 +16,10 @@ export default function ImproveTestsPanel({
 	onClearReport,
 	summary,
 	assessment,
+	grouped = false,
+	savedSuite,
+	savedSuiteStale,
+	navigate,
 	canReviewSavedSuite,
 	prerequisiteSnapshotId,
 	browserHandoffWarnings,
@@ -91,6 +95,41 @@ export default function ImproveTestsPanel({
 			);
 		}
 	};
+	const savedAssessment = grouped ? savedSuite?.payload?.substantive_assessment : null;
+	const displayedAssessment = savedAssessment || assessment;
+	const findingGroups = grouped ? groupImprovementFindings(review, displayedAssessment, findings) : [];
+	const renderFinding = (finding, editable) => (
+		<div key={finding} className="improve-tests-finding">
+			{editable ? (
+				<label>
+					<Checkbox
+						checked={selected.includes(finding)}
+						onChange={(event) =>
+							setSelected((previous) => (event.target.checked ? [...previous, finding] : previous.filter((item) => item !== finding)))
+						}
+					/>{" "}
+					<span>{finding}</span>
+				</label>
+			) : (
+				<p>{finding}</p>
+			)}
+			{findingCaseIds(finding, testCases).map((id) => (
+				<Button key={id} variant="secondary" size="compact" onClick={() => onViewCase(id)} aria-label={`View test case ${id}`}>
+					View test case {id}
+				</Button>
+			))}
+		</div>
+	);
+	const renderFindingGroups = (editable) =>
+		findingGroups
+			.filter((group) => editable || !group.recordedAssessment)
+			.map(({ label, rows }) => (
+				<section key={label} aria-label={label}>
+					<h3>{label}</h3>
+					{rows.map((finding) => renderFinding(finding, editable))}
+				</section>
+			));
+
 	return (
 		<section className="improve-tests" aria-label="Improve test quality">
 			<DraftRecoveryNotice draft={recovery} />
@@ -129,7 +168,17 @@ export default function ImproveTestsPanel({
 			{(review?.summary || !trustedRepairOnly) && (
 				<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
 			)}
-			<BusinessCoverageSummary assessment={assessment} />
+			<BusinessCoverageSummary
+				assessment={displayedAssessment}
+				grouped={grouped}
+				projectId={projectId}
+				savedSuite={savedAssessment ? savedSuite : null}
+				savedSuiteStale={savedSuiteStale}
+				open={recovery.value.sourceEvidenceOpen === true}
+				onOpen={(sourceEvidenceOpen) => recovery.setValue((old) => ({ ...old, sourceEvidenceOpen }))}
+				navigate={navigate}
+				onViewCase={trustedRepairOnly && !savedSuiteStale ? onViewCase : undefined}
+			/>
 			{reviewOnly && <p>{canReviewSavedSuite ? "Use Review saved suite to check these cases." : assessment.reason}</p>}
 			<ExecutionSetupSummary assessment={assessment} projectId={projectId} prerequisiteSnapshotId={prerequisiteSnapshotId} />
 			{browserHandoffWarnings.length > 0 && (
@@ -191,16 +240,7 @@ export default function ImproveTestsPanel({
 				<div className="improve-tests-findings">
 					<h3>Saved findings</h3>
 					<p>Open a saved test to see if an observable check is available for selected repair.</p>
-					{findings.map((finding) => (
-						<div key={finding} className="improve-tests-finding">
-							<p>{finding}</p>
-							{findingCaseIds(finding, testCases).map((id) => (
-								<Button key={id} variant="secondary" size="compact" onClick={() => onViewCase(id)} aria-label={`View test case ${id}`}>
-									View test case {id}
-								</Button>
-							))}
-						</div>
-					))}
+					{grouped ? renderFindingGroups(false) : findings.map((finding) => renderFinding(finding, false))}
 				</div>
 			)}
 			{!trustedRepairOnly && !target && findings.length > 0 && (
@@ -214,24 +254,7 @@ export default function ImproveTestsPanel({
 							Clear selection
 						</Button>
 					</div>
-					{findings.map((finding) => (
-						<div key={finding} className="improve-tests-finding">
-							<label>
-								<Checkbox
-									checked={selected.includes(finding)}
-									onChange={(event) =>
-										setSelected((previous) => (event.target.checked ? [...previous, finding] : previous.filter((item) => item !== finding)))
-									}
-								/>{" "}
-								<span>{finding}</span>
-							</label>
-							{findingCaseIds(finding, testCases).map((id) => (
-								<Button key={id} variant="secondary" size="compact" onClick={() => onViewCase(id)} aria-label={`View test case ${id}`}>
-									View test case {id}
-								</Button>
-							))}
-						</div>
-					))}
+					{grouped ? renderFindingGroups(true) : findings.map((finding) => renderFinding(finding, true))}
 				</fieldset>
 			)}
 			{!trustedRepairOnly && !reviewOnly && (!needsOnlySetup || target) && (

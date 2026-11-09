@@ -51,7 +51,7 @@ import {
 	TraceabilityMatrixPanel,
 	UseCaseReviewPage,
 } from "./app/workspaceModules";
-import { readSavedCaseLink } from "./app/savedCaseLinks";
+import { readSavedCaseLink, readSavedCaseStep } from "./app/savedCaseLinks";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -1795,9 +1795,11 @@ export default function App() {
 		if (!replacingFocusedLoader && !pendingRouteFocusRef.current) return;
 		const main = document.getElementById("main-content");
 		if (!main || main.dataset.workspaceModulePending) return;
-		const caseFocus = keepPriorityCaseFocus.current && document.activeElement?.closest("#selected-test-case");
+		const active = document.activeElement;
+		const caseFocus = keepPriorityCaseFocus.current && active?.closest("#selected-test-case");
+		const evidenceFocus = active?.matches("[id^='saved-case-step-'], #quality-feedback-heading") && main.contains(active);
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
-		if (!refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
+		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
 			if (document.activeElement === main) main.blur();
 			main.focus();
 		}
@@ -6210,6 +6212,7 @@ export default function App() {
 											request={apiRequest}
 											projectId={navigationProjectId}
 											prerequisiteSearch={new URLSearchParams(location.search).has("prerequisite") ? location.search : ""}
+											focusQualityFeedback={location.hash === "#quality-feedback-heading"}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
 											{...visibleContextForm}
 											setAppLink={PROJECT_WORKSPACES_V2 ? setContextDraftField("appLink") : setAppLink}
@@ -6252,6 +6255,7 @@ export default function App() {
 											key={JSON.stringify([currentUser.sub, navigationProjectId, savedCaseLink.snapshotId, savedCaseLink.caseId])}
 											projectId={navigationProjectId}
 											{...savedCaseLink}
+											savedStep={readSavedCaseStep(location.hash)}
 											request={apiRequest}
 											navigate={navigate}
 										/>
@@ -6539,6 +6543,16 @@ export default function App() {
 																	findings={testCaseFindings}
 																	needsOnlySetup={testCasesNeedSetup}
 																	assessment={substantiveAssessment}
+																	grouped={PROJECT_WORKSPACES_V2 && testReviewRoute}
+																	savedSuite={
+																		savedSuite &&
+																		savedSuite.project_id === currentProjectId &&
+																		savedSuite.snapshot_id === testCaseStageState.current_snapshot_id
+																			? savedSuite
+																			: null
+																	}
+																	savedSuiteStale={Boolean(testCaseStageState.stale)}
+																	navigate={navigate}
 																	canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}
 																	prerequisiteSnapshotId={
 																		projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id

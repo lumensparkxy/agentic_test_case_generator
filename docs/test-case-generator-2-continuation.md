@@ -519,12 +519,17 @@ unchanged rows and versions, including explicit null values. Material
 requirement corrections and unverified drafts cannot use this admission.
 A saved assessment remains readable after the demo flag is off. P5e
 rebinds verified material Sync drafts after approval of the exact corrected
-requirements under [#483](https://github.com/lumensparkxy/agentic_test_case_generator/issues/483).
+requirements (commit `4af2f8f`, [PR #484](https://github.com/lumensparkxy/agentic_test_case_generator/pull/484)).
 The reviewer confirms the deterministic rebind before approving the new
 scenario snapshot. The original drafts and versions remain readable.
 Rebind publishes both successors and one receipt in the same transaction
 and uses no provider. A separate saved review uses the accepted decision
-and verifies both the rebind and original stage receipts.
+and verifies both the rebind and original stage receipts. P5f groups exact
+saved findings by requirement and behavior under
+[#485](https://github.com/lumensparkxy/agentic_test_case_generator/issues/485).
+Separate source quotes and case steps stay visible. Verified citations
+open and focus the exact saved step. Unverified evidence, structural
+blockers, setup and classified project findings retain distinct paths.
 
 Unenrolled paid draft producers remain a release gate.
 P6 error analysis found prior Booking gaps covered by existing regression
@@ -544,8 +549,8 @@ remain open. Controlled local Deliver rehearsal at `acc6dfd` also ran
 one selected authored case against healthy and seeded-fault targets
 through the rendered app and actual Chromium, inspected its exact saved
 case link, and kept Run disabled for zero candidates. That proof is
-separate from model and practitioner gates. Next is grouping saved findings
-and opening exact saved file reports.
+separate from model and practitioner gates. Next is opening exact saved file
+reports from Deliver and the activity indexes.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

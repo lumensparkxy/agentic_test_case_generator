@@ -18,6 +18,27 @@ export function improvementFindings(review, assessment) {
 		),
 	];
 }
+export function groupImprovementFindings(review, assessment, findings) {
+	// The server's combined review copies these exact assessment messages into blocking issues.
+	const assessmentMessages = new Set(
+		[
+			assessment?.reason,
+			...(assessment?.obligations || []).filter((item) => item.status !== "covered").map((item) => `${item.obligation}: ${item.reason}`),
+			...(assessment?.case_grounding || []).flatMap((item) =>
+				(item.prerequisites || [])
+					.filter((gap) => gap.required && !gap.execution_prerequisite_name)
+					.map((gap) => `${gap.status}: ${gap.description}. ${gap.reason}`)
+			),
+		].map((message) => message?.trim())
+	);
+	const blocking = new Set((review?.blocking_issues || []).map((item) => String(item).trim()));
+	return [
+		{ label: "Structural blockers", rows: findings.filter((item) => blocking.has(item) && !assessmentMessages.has(item)) },
+		{ label: "Other review criteria", rows: findings.filter((item) => !blocking.has(item) && !assessmentMessages.has(item)) },
+		{ label: "Assessment findings", rows: findings.filter((item) => assessmentMessages.has(item)), recordedAssessment: true },
+	].filter(({ rows }) => rows.length);
+}
+
 export function findingCaseIds(finding, testCases) {
 	return testCases
 		.filter(({ id }) => id && new RegExp(`(?<![\\w-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(finding))
