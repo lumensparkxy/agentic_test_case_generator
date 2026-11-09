@@ -18,6 +18,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
+from pydantic import ValidationError
 
 from .agents.adk_runtime import json_generation_config, text_generation_config, tool_generation_config
 from .agents.prompting import REAL_WORLD_QA_POLICY, REQUIREMENT_PROMPT_GUARDRAILS, human_feedback_section
@@ -29,6 +30,8 @@ from .utils.genai_response import extract_response_text
 from .utils.llm_json import extract_json, parse_requirements_json_detailed, parse_review_json_detailed
 from .utils.requirements_text import normalize_requirement_payloads
 from .utils.workflow_diagnostics import (
+    RETAINED_REQUIREMENT_DRAFT_WARNING,
+    REVIEW_SCHEMA_INVALID,
     has_retryable_parser_failure,
     mark_retryable_parser_failure,
     public_workflow_diagnostics,
@@ -796,6 +799,11 @@ Human feedback:
             timeout_seconds=timeout_seconds,
             completed_iterations=len(iteration_history),
         )
+    except ValidationError as exc:
+        if is_refinement or exc.title != StructuralChecks.__name__ or not current_requirements:
+            raise
+        _record_parser_failure(diagnostics, "ReviewerAgent", "Structural review output failed schema validation.", retryable=True)
+        diagnostics["failure_reason"] = REVIEW_SCHEMA_INVALID
 
     updated_session = await session_service.get_session(
         app_name="requirement_extractor",
@@ -844,6 +852,17 @@ Human feedback:
             selected_score=final_review["score"],
             requirement_count=len(current_requirements),
         )
+
+    if diagnostics["failure_reason"] == REVIEW_SCHEMA_INVALID:
+        message = RETAINED_REQUIREMENT_DRAFT_WARNING
+        _append_unique_message(diagnostics["warnings"], message)
+        final_review = {
+            **final_review,
+            "approved": False,
+            "score": min(final_review["score"], max(0, threshold - 1)),
+            "summary": message,
+            "blocking_issues": [*final_review["blocking_issues"], message],
+        }
 
     coverage_metrics = _compute_requirement_coverage_metrics(current_requirements, document_count)
 
@@ -926,6 +945,7 @@ def _run_requirement_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
     )
     attempt_total = int(resolved_settings["retry_attempts"] or 0) + 1
     last_error: Optional[Exception] = None
+    retained_review_draft: Optional[Dict[str, Any]] = None
 
     for attempt in range(1, attempt_total + 1):
         run_kwargs = dict(kwargs)
@@ -942,10 +962,14 @@ def _run_requirement_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
             except RuntimeError:
                 result = asyncio.run(_run_requirement_workflow_async(**run_kwargs))
 
+            if not result.get("requirements") and retained_review_draft:
+                result = retained_review_draft
             diagnostics = dict(result.get("workflow_diagnostics") or _new_workflow_diagnostics())
             diagnostics["attempt_count"] = attempt
             result["workflow_diagnostics"] = diagnostics
             result.setdefault("workflow_settings", dict(resolved_settings))
+            if diagnostics.get("failure_reason") == REVIEW_SCHEMA_INVALID:
+                retained_review_draft = result
 
             if diagnostics.get("timed_out") and attempt < attempt_total:
                 _log_requirement_workflow(
@@ -977,6 +1001,11 @@ def _run_requirement_workflow_sync_inner(**kwargs: Any) -> Dict[str, Any]:
             )
             if attempt >= attempt_total:
                 break
+
+    if retained_review_draft:
+        diagnostics = {**retained_review_draft["workflow_diagnostics"], "attempt_count": attempt_total}
+        retained_review_draft["workflow_diagnostics"] = public_workflow_diagnostics(diagnostics)
+        return retained_review_draft
 
     document_count = kwargs.get("document_count", 1)
     diagnostics = _new_workflow_diagnostics(attempt_count=attempt_total)

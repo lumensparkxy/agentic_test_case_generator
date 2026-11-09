@@ -9,6 +9,7 @@ from google.cloud.firestore_v1 import transactional
 from ..agents.requirement_matching_agent import suggest_matches
 from ..contracts.requirement_imports import RequirementImportPreview, ImportApplyInput, ImportHistoryEntry
 from ..contracts.requirements import Requirement
+from ..utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
 from .guidance_service import public_manifest
 from .firestore_repository import get_required_firestore_client
 from .requirement_reconciliation import build_preview, canonical_requirements, digest, reconcile
@@ -335,6 +336,8 @@ def stage_extraction(repo, project_id, actor, revision, response, operation, imp
     preview = build_preview(project_id, project["current_revision"], current, incoming, response.source_name, operation, import_id, matches, failed)
     preview.guidance = response.guidance or public_manifest()
     preview.source_evidence_findings = response.source_evidence_findings
+    if response.workflow_diagnostics.failure_reason == REVIEW_SCHEMA_INVALID:
+        preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
     workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text", "source_evidence_findings"})
     workflow["guidance"] = preview.guidance
     return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit)
@@ -356,6 +359,8 @@ def recompare_import(project_id, import_id, actor):
     preview = build_preview(project_id, project["current_revision"], current, incoming, old.source_name, old.operation, str(uuid4()), matches, failed)
     preview.guidance = old.guidance
     preview.source_evidence_findings = old.source_evidence_findings
+    if RETAINED_REQUIREMENT_DRAFT_WARNING in old.warnings:
+        preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
     result = repo.save(preview, actor, retired, data.get("workflow_payload", {}))
     repo.cancel(project_id, import_id, actor)
     return result

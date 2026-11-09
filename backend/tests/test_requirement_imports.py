@@ -18,6 +18,7 @@ from app.services.requirement_reconciliation import canonical_requirements, buil
 from app.services.requirement_source_evidence import bind_document_evidence
 from app.services import requirement_import_service as service
 from app.services import requirement_import_publication as publication
+from app.utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
 from app.agents.requirement_matching_agent import suggest_matches
 from app.main import app, get_current_user
 from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
@@ -427,6 +428,28 @@ class ImportPersistenceTests(unittest.TestCase):
         repeated = service.recompare_import(PID, staged.import_id, ACTOR)
         self.assertEqual(repeated.source_evidence_findings, staged.source_evidence_findings)
         self.assertEqual(repeated.current_requirements, staged.current_requirements)
+
+    def test_invalid_structural_review_stages_unapproved_draft_without_changing_baseline(self):
+        baseline = deepcopy(self.store[f"qa_projects/{PID}"])
+        incoming = from_document(requirement(1, "The system shall accept a booking with 1 to 6 attendees.")).model_copy(
+            update={"review_status": "Needs Review"}
+        )
+        response = RequirementsWorkflowResponse(
+            source_name="audit-requirements.md",
+            raw_text="",
+            requirements=[incoming],
+            workflow_diagnostics={"status": "partial", "failure_reason": REVIEW_SCHEMA_INVALID},
+        )
+        staged = RequirementImportPreview.model_validate(
+            service.stage_extraction(self.repo, PID, ACTOR, 7, response, "requirements.parse", "retained-draft", {"fingerprint": "draft"}, lambda tx: None)
+        )
+        self.assertEqual(staged.status, "pending")
+        self.assertIn(RETAINED_REQUIREMENT_DRAFT_WARNING, staged.warnings)
+        self.assertEqual(staged.candidates[0].requirement.review_status, "Needs Review")
+        self.assertEqual(staged.candidates[0].requirement.sources, incoming.sources)
+        repeated = service.recompare_import(PID, staged.import_id, ACTOR)
+        self.assertIn(RETAINED_REQUIREMENT_DRAFT_WARNING, repeated.warnings)
+        self.assertEqual(self.store[f"qa_projects/{PID}"], baseline)
 
     def test_empty_extraction_and_stale_staging_fail_without_changes(self):
         before = deepcopy(self.store)

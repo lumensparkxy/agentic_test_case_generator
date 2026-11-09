@@ -53,6 +53,11 @@ the captured revision.
 Reusing the ID with different inputs, or after applying, cancelling or
 superseding the preview, returns HTTP 409.
 
+If structural review returns invalid output after extraction, the comparison
+can retain the valid draft and its source evidence after the configured retry.
+The preview identifies the incomplete review and requires the normal explicit
+apply and requirement review decisions.
+
 Project routes:
 
 - `GET /projects/{project_id}/requirement-imports`: pending previews, newest first.
