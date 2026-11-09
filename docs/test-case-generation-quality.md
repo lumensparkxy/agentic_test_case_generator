@@ -193,6 +193,23 @@ evidence, omitting duplicate Context requirements, redundant guidance metadata,
 null fields and generation bookkeeping. Citations and regression checks use the
 full input and its hash.
 
+Whole-suite reviews of 41 or more cases can use up to eight groups with three
+concurrent workers and a shared 240-second budget. Each group can make two
+requests of up to 90 seconds and 192,000 UTF-8 bytes. Cases that link multiple
+requirements keep them in the same group. Reviewers see the full source and
+shared Context, assess their assigned requirements and cases, and return
+evidence bound to that group's input. The combined assessment keeps the full
+suite hash and requires every group to verify its coverage before approval.
+Grouped prompts can share identical step bodies while preserving each case's
+step numbers and full evidence for citation checks.
+Indivisible or unpartitionable inputs use the bounded whole-suite reviewer.
+Selected-repair review keeps its existing scope and limits.
+
+Completed groups retain verified findings. If any group remains unverified,
+approval stays blocked. A saved-suite review with verified gaps can record the
+findings on a new unapproved snapshot. If the service is unavailable and no
+group confirmed a gap, the original snapshot stays current for retry.
+
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and
 explicitly needing review. Saved-suite review reports an input limit separately

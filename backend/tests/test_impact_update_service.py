@@ -1002,6 +1002,48 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertIn("Verify saved payment", snapshot.payload["generation_tasks"][0]["reason"])
         self.assertNotIn("review_retry_available", snapshot.metadata)
 
+    def test_saved_suite_grouped_review_publishes_verified_gaps_but_not_an_unavailable_review(self):
+        import httpx
+        from app.agents import substantive_review
+        from test_substantive_review_groups import critic_output
+
+        project, path = self._generated_suite_pending_review()
+        original = deepcopy(self.store[path])
+        known_gap = False
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            ids = data["review_group"]["requirement_ids"]
+            if "REQ-004" in ids:
+                raise httpx.ReadTimeout("synthetic unavailable group")
+            if known_gap and "REQ-001" in ids:
+                output["obligations"][0].update(status="unmet", reason="Saved result needs a better assertion.")
+            return json.dumps(output)
+
+        with (
+            patch.object(substantive_review, "GROUP_REVIEW_MIN_CASES", 1),
+            patch.object(substantive_review, "GROUP_REVIEW_TARGET_CASES", 3),
+            patch.object(substantive_review, "_call_critic", side_effect=critic),
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+        ):
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertIn("1 of 4 groups unverified", unavailable.exception.detail)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            known_gap = True
+            updated = self._review_saved_suite(project)
+
+        self.assertFalse(updated.stage_state["test_cases"].approved)
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertEqual(snapshot.payload["test_cases"], original["payload"]["test_cases"])
+        self.assertEqual(snapshot.payload["substantive_assessment"]["diagnostics"]["unverified_group_count"], 1)
+        self.assertIn("1 of 4 groups unverified", " ".join(snapshot.payload["review"]["blocking_issues"]))
+        self.assertEqual([task["source_test_case_id"] for task in snapshot.payload["generation_tasks"]], ["TC-001"])
+        self.assertEqual(self.store[path], original)
+
     def test_generated_suite_retry_reconstructs_selected_workbench_context(self):
         project, _ = self._generated_suite_pending_review()
         suite = project.current_snapshots["test_cases"]
