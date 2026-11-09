@@ -7,19 +7,31 @@ from ..contracts.grounding import EnrichInput
 from .workflow_project_service import get_project
 from .test_case_quality import delivered_coverage, placeholder_reason
 
+_ARTIFACT_FIELDS = {"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
+_REPAIR_METADATA = _ARTIFACT_FIELDS | {"status", "generation_source", "generation_pass_id", "source_shard_id"}
+
 
 def prepare_scoped_refinement(payload, source_inputs, actor):
     selected = set(payload.selected_test_case_ids)
     if not selected:
-        return payload, source_inputs, None
+        return payload, source_inputs, None, None
     if not payload.project_id or len(selected) != len(payload.selected_test_case_ids):
         raise HTTPException(422, "Select unique test cases in a saved project")
     project = get_project(payload.project_id, actor=actor)
     snapshot = project.current_snapshots.get("test_cases")
     state = project.stage_state.get("test_cases")
-    if project.current_revision != payload.base_project_revision or not snapshot or not state or state.stale:
+    if (
+        project.status != "active"
+        or project.current_revision != payload.base_project_revision
+        or not snapshot
+        or not state
+        or state.stale
+        or state.current_snapshot_id != snapshot.snapshot_id
+    ):
         raise HTTPException(409, "The source suite changed. Reload before repairing selected tests.")
     baseline = GenerateTestCasesResponse(**snapshot.payload)
+    if len({case.id for case in baseline.test_cases}) != len(baseline.test_cases):
+        raise HTTPException(409, "The saved suite contains duplicate case IDs. Resolve them before repairing selected tests.")
     cases = [case for case in baseline.test_cases if case.id in selected]
     if {case.id for case in cases} != selected:
         raise HTTPException(422, "Selected test cases are not in the current suite")
@@ -66,7 +78,7 @@ def prepare_scoped_refinement(payload, source_inputs, actor):
             + ", ".join(payload.selected_test_case_ids),
         }
     )
-    return scoped, sources, baseline
+    return scoped, sources, baseline, project
 
 
 def merge_scoped_refinement(response, baseline, selected_ids, sources):
@@ -77,6 +89,7 @@ def merge_scoped_refinement(response, baseline, selected_ids, sources):
     if len(repaired) != len(response.test_cases) or set(repaired) != selected or response.generation_tasks:
         raise HTTPException(422, "Repair must return exactly the selected tests. The saved suite was preserved.")
     original = {case.id: case for case in baseline.test_cases}
+    changed = {}
     for identity, case in repaired.items():
         prior = original[identity]
         if (
@@ -85,9 +98,11 @@ def merge_scoped_refinement(response, baseline, selected_ids, sources):
             or set(case.scenario_refs) != set(prior.scenario_refs)
         ):
             raise HTTPException(422, "Repair needs concrete steps and the selected tests' original source links. The saved suite was preserved.")
-        case.status = "Draft"
-    changed = [identity for identity, case in repaired.items() if case.model_dump() != original[identity].model_dump()]
-    response.test_cases = [repaired.get(case.id, case) for case in baseline.test_cases]
+        if case.model_dump(exclude=_REPAIR_METADATA) != prior.model_dump(exclude=_REPAIR_METADATA):
+            changed[identity] = case.model_copy(update={"status": "Draft", **{key: getattr(prior, key) for key in _ARTIFACT_FIELDS}})
+    if not changed:
+        raise HTTPException(422, "Repair did not change the selected tests. Add specific feedback and try again.")
+    response.test_cases = [changed.get(case.id, case) for case in baseline.test_cases]
     response.coverage_plan = [RequirementCoveragePlan.model_validate(p) for p in sources.get("source_coverage_plan", [])]
     response.requirement_analysis = [RequirementAnalysis.model_validate(a) for a in sources.get("source_requirement_analysis", [])]
     response.coverage_metrics = delivered_coverage(response.test_cases, response.coverage_plan)
@@ -95,5 +110,5 @@ def merge_scoped_refinement(response, baseline, selected_ids, sources):
     response.approved = False
     response.review = ReviewResult(approved=False, summary="Selected tests repaired. Review the changed tests before accepting this suite.")
     response.substantive_assessment = {"status": "unknown", "reason": "The combined suite needs assessment after a scoped repair."}
-    response.scoped_refinement = {"changed": len(changed), "added": 0, "preserved": len(baseline.test_cases) - len(changed), "changed_ids": changed}
+    response.scoped_refinement = {"changed": len(changed), "added": 0, "preserved": len(baseline.test_cases) - len(changed), "changed_ids": list(changed)}
     return response

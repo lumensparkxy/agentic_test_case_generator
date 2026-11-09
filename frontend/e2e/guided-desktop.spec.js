@@ -140,6 +140,41 @@ test(
 	}
 );
 
+test("recovers a dropped selected repair response with the same request identity", { tag: "@p1" }, async ({ page }) => {
+	const { project, api } = await fixture(page, 2);
+	const attempts = [];
+	const original = project.current_snapshots.test_cases;
+	const payload = {
+		...original.payload,
+		test_cases: [original.payload.test_cases[0], { ...original.payload.test_cases[1], title: "Verified checkout receipt" }],
+		scoped_refinement: { changed: 1, added: 0, preserved: 1, changed_ids: ["TC-2"] },
+	};
+	await page.route("**/testcases/refine", async (route) => {
+		const request = route.request();
+		attempts.push({ id: request.headers()["x-request-id"], body: request.postDataJSON() });
+		if (attempts.length === 1) {
+			project.current_snapshots.test_cases = { ...original, snapshot_id: "repair-receipt", payload };
+			project.stage_state.test_cases.current_snapshot_id = "repair-receipt";
+			project.current_revision++;
+			api.setProject(project);
+			return route.abort("failed");
+		}
+		await route.fulfill({ json: payload });
+	});
+	await page.goto(path("test-cases"));
+	await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
+	await page.getByRole("button", { name: "TC-2 Checkout 2", exact: true }).click();
+	await page.getByRole("button", { name: "Report a problem", exact: true }).click();
+	const panel = page.getByRole("region", { name: "Improve test quality" });
+	await panel.getByLabel("What is wrong with this test?").fill("Assert the exact saved receipt.");
+	await panel.getByRole("button", { name: "Repair selected test", exact: true }).click();
+	await expect(panel).toContainText("1 changed · 0 added · 1 preserved");
+	expect(attempts).toHaveLength(2);
+	expect(attempts[0].id).toBeTruthy();
+	expect(attempts[0].body.selected_test_case_ids).toEqual(["TC-2"]);
+	expect(attempts[1]).toEqual(attempts[0]);
+});
+
 test("pasted requirements use reviewed file import and recover without changing source", async ({ page }) => {
 	await fixture(page);
 	let body = "";

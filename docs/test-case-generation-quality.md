@@ -247,6 +247,12 @@ interrupted, the workbench retries the exact payload and request ID once. A
 matching receipt for the current suite returns its saved cases and versions.
 An ID used for different inputs or an earlier suite returns a conflict.
 
+Selected repair uses the same publication and request recovery flow. It versions
+only selected tests whose content changed, and preserves the other case records
+and artifact pointers. A repair with no content change leaves the original suite
+available and asks for more specific feedback. A published repair needs combined
+suite review before approved export.
+
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and
 explicitly needing review. Saved-suite review reports an input limit separately

@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse
+from app.models import AuthUser, GenerateTestCasesInput, GenerateTestCasesResponse, RefineTestCasesInput
 from app.routers import testcases as routes
 from app.routers.testcases import _append_project_generation_snapshots, _refinement_source_inputs
 from app.contracts.billing import BillingAccount, BillingAllocation, BillingUserProfile
@@ -95,7 +95,7 @@ class GenerationSourceSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 "record_usage_event",
             ):
                 stack.enter_context(patch.object(routes, name))
-            stack.enter_context(patch.object(routes, "_bound_generation_receipt", return_value=None))
+            stack.enter_context(patch.object(routes, "_test_case_publication_receipt", return_value=None))
             stack.enter_context(patch.object(routes, "start_workflow_run", return_value="generation-run"))
             stack.enter_context(patch.object(routes, "get_project", return_value=self.project))
             generate = stack.enter_context(patch.object(routes, "generate_test_cases", return_value=self.response.model_dump()))
@@ -424,7 +424,7 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(routes, "_append_project_generation_snapshots", side_effect=drop_reply),
-            patch.object(routes, "_bound_generation_receipt", side_effect=[None, HTTPException(503, "Synthetic receipt read unavailable")]),
+            patch.object(routes, "_test_case_publication_receipt", side_effect=[None, HTTPException(503, "Synthetic receipt read unavailable")]),
         ):
             with self.assertRaises(HTTPException) as unavailable:
                 await self._request()
@@ -442,6 +442,104 @@ class GenerationPublicationTests(unittest.IsolatedAsyncioTestCase):
         self.generate.assert_not_called()
         self.billing.assert_not_called()
         self.assertEqual(self._records("usage_events"), [])
+
+    async def _scoped_repair_fixture(self):
+        cases = [self.result.test_cases[0].model_copy(update={"id": f"TC-{n}", "title": f"Saved case {n}"}) for n in (1, 2, 3)]
+        self.generate.return_value = self.result.model_copy(update={"test_cases": cases}).model_dump()
+        await self._request()
+        project = get_project(self.project.project_id, actor=self.actor)
+        snapshot = project.current_snapshots["test_cases"]
+        saved_rows = self.store[f"{self.project_path}/snapshots/{snapshot.snapshot_id}"]["payload"]["test_cases"]
+        selected = saved_rows[1]
+        original_set = f"test_case_sets/{selected['artifact_set_id']}"
+        legacy_set_id = "legacy-selected-set"
+        legacy_set = f"test_case_sets/{legacy_set_id}"
+        self.store[legacy_set] = {**self.store[original_set], "set_id": legacy_set_id, "item_count": 1}
+        for suffix in (f"/items/{selected['artifact_item_id']}", f"/items/{selected['artifact_item_id']}/versions/{selected['artifact_version_id']}"):
+            self.store[legacy_set + suffix] = {**self.store.pop(original_set + suffix), "set_id": legacy_set_id}
+        selected["artifact_set_id"] = legacy_set_id
+        saved_rows[2] = {key: value for key, value in saved_rows[2].items() if not key.startswith("artifact_")}
+        saved_rows[2]["legacy_description"] = "Keep this exact historical row"
+        repair = RefineTestCasesInput(
+            project_id=self.project.project_id,
+            base_project_revision=project.current_revision,
+            selected_test_case_ids=["TC-2", "TC-3"],
+            requirements=self.payload.requirements,
+            test_cases=saved_rows,
+            template=self.payload.template,
+            feedback="Assert the exact saved receipt.",
+        )
+        candidate = self.result.model_copy(
+            update={
+                "test_cases": [
+                    repair.test_cases[1].model_copy(update={"title": "Repaired case", "artifact_item_id": "foreign", "artifact_set_id": "foreign"}),
+                    repair.test_cases[2].model_copy(update={"status": "Draft", "artifact_item_id": "forged-legacy"}),
+                ]
+            }
+        )
+        return repair, deepcopy(saved_rows), candidate
+
+    async def _refine(self, payload, request_id="repair-once"):
+        request = Request({"type": "http"})
+        request.state.request_id = request_id
+        return await routes.refine_test_cases_endpoint(request, payload, self.actor)
+
+    async def test_selected_repair_commits_only_the_changed_case_and_replays(self):
+        repair, saved_rows, candidate = await self._scoped_repair_fixture()
+        prior_artifacts = {key: deepcopy(value) for key, value in self.store.items() if key.startswith("test_case_sets/")}
+        with patch.object(routes, "refine_test_cases", return_value=candidate.model_dump()) as model:
+            refined = await self._refine(repair)
+            replay = await self._refine(repair)
+        model.assert_called_once()
+        self.assertEqual(refined.test_cases, replay.test_cases)
+        self.assertEqual(refined.scoped_refinement, {"changed": 1, "added": 0, "preserved": 2, "changed_ids": ["TC-2"]})
+        self.assertEqual(refined.substantive_assessment["status"], "unknown")
+        self.assertFalse(refined.approved)
+        current = get_project(self.project.project_id, actor=self.actor)
+        self.assertEqual(current.current_revision, repair.base_project_revision + 1)
+        rows = current.current_snapshots["test_cases"].payload["test_cases"]
+        self.assertEqual([rows[0], rows[2]], [saved_rows[0], saved_rows[2]])
+        self.assertEqual(rows[1]["artifact_set_id"], saved_rows[1]["artifact_set_id"])
+        self.assertEqual(rows[1]["artifact_item_id"], saved_rows[1]["artifact_item_id"])
+        self.assertEqual(rows[1]["artifact_version_number"], saved_rows[1]["artifact_version_number"] + 1)
+        self.assertNotEqual(rows[1]["artifact_version_id"], saved_rows[1]["artifact_version_id"])
+        parent = f"test_case_sets/{rows[1]['artifact_set_id']}"
+        item = f"{parent}/items/{rows[1]['artifact_item_id']}"
+        self.assertEqual({key for key, value in prior_artifacts.items() if self.store[key] != value}, {parent, item})
+        self.assertEqual(
+            {key for key in self.store if key.startswith("test_case_sets/")} - prior_artifacts.keys(), {f"{item}/versions/{rows[1]['artifact_version_id']}"}
+        )
+        self.assertEqual(self.store[item]["current_version_id"], rows[1]["artifact_version_id"])
+        self.assertEqual([(r["status"], r["quantity"]) for r in self._records("usage_events") if r["billing_key"] == "testcases.refine"], [("completed", 1)])
+        self.assertEqual(len([r for r in self._records("billing_consumption") if r["billing_key"] == "testcases.refine"]), 1)
+        self.assertEqual(self.store[self.account_path]["balance_units"], 66)
+
+    async def test_failed_and_stale_repairs_preserve_artifact_pointers_and_billing(self):
+        repair, saved_rows, candidate = await self._scoped_repair_fixture()
+        prefixes = ("test_case_sets/", "billing_consumption/", "billing_wallet_ledger/", self.account_path, self.allocation_path)
+        initial = {key: deepcopy(value) for key, value in self.store.items() if key.startswith(prefixes)}
+        noop = candidate.model_copy(update={"test_cases": repair.test_cases[1:]})
+        with patch.object(routes, "refine_test_cases", return_value=noop.model_dump()), self.assertRaises(HTTPException) as unchanged:
+            await self._refine(repair, "no-content-change")
+        self.assertEqual(unchanged.exception.status_code, 422)
+        self.client.fail_on_create_segment = "/snapshots/"
+        with patch.object(routes, "refine_test_cases", return_value=candidate.model_dump()), self.assertRaises(HTTPException) as failed:
+            await self._refine(repair)
+        self.assertEqual(failed.exception.status_code, 503)
+        self.client.fail_on_create_segment = None
+
+        def change_project(*args, **kwargs):
+            update_project(project_id=self.project.project_id, actor=self.actor, request_id="racing-update", name="New project revision")
+            return candidate.model_dump()
+
+        with patch.object(routes, "refine_test_cases", side_effect=change_project), self.assertRaises(HTTPException) as stale:
+            await self._refine(repair, "stale-repair")
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertEqual({key: value for key, value in self.store.items() if key.startswith(prefixes)}, initial)
+        current = get_project(self.project.project_id, actor=self.actor)
+        self.assertEqual(current.current_snapshots["test_cases"].payload["test_cases"], saved_rows)
+        usage = self._records("usage_events")
+        self.assertEqual([(row["status"], row["quantity"]) for row in usage if row["billing_key"] == "testcases.refine"], [("failed", 0)] * 3)
 
 
 if __name__ == "__main__":

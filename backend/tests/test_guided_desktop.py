@@ -165,20 +165,24 @@ class ScopedRepairTests(unittest.TestCase):
             feedback="Check receipt ID",
         )
         self.project = SimpleNamespace(
+            status="active",
             current_revision=7,
             current_snapshots={
-                "test_cases": SimpleNamespace(payload=self.baseline.model_dump()),
+                "test_cases": SimpleNamespace(snapshot_id="saved-tests", payload=self.baseline.model_dump()),
                 "requirements": SimpleNamespace(
                     snapshot_id="requirements",
                     payload={"requirements": [{"id": f"REQ-{n}", "text": "Canonical booking rule", "review_status": "Approved"} for n in (1, 2)]},
                 ),
             },
-            stage_state={"test_cases": SimpleNamespace(stale=False), "requirements": SimpleNamespace(stale=False, current_snapshot_id="requirements")},
+            stage_state={
+                "test_cases": SimpleNamespace(stale=False, current_snapshot_id="saved-tests"),
+                "requirements": SimpleNamespace(stale=False, current_snapshot_id="requirements"),
+            },
         )
 
     def test_server_baseline_scopes_model_and_preserves_unrelated_test(self):
         with patch.object(repair, "get_project", return_value=self.project):
-            model, sources, original = repair.prepare_scoped_refinement(self.payload, self.sources, None)
+            model, sources, original, _project = repair.prepare_scoped_refinement(self.payload, self.sources, None)
         self.assertEqual([case.id for case in model.test_cases], ["TC-2"])
         self.assertEqual(model.test_cases[0].title, "Booking 2")
         self.assertEqual([r.id for r in model.requirements], ["REQ-2"])
@@ -210,3 +214,11 @@ class ScopedRepairTests(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 repair.merge_scoped_refinement(GenerateTestCasesResponse(test_cases=cases), self.baseline, ["TC-2"], self.sources)
             self.assertEqual(self.baseline.model_dump(), before)
+
+    def test_repair_rejects_version_or_status_only_changes(self):
+        previous = self.baseline.test_cases[1]
+        candidate = previous.model_copy(update={"status": "Draft", "artifact_item_id": "foreign", "generation_pass_id": "different"})
+        with self.assertRaises(HTTPException) as rejected:
+            repair.merge_scoped_refinement(GenerateTestCasesResponse(test_cases=[candidate]), self.baseline, [previous.id], self.sources)
+        self.assertEqual(rejected.exception.status_code, 422)
+        self.assertIn("did not change", rejected.exception.detail)

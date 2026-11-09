@@ -153,7 +153,7 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(generator=generator), ExitStack() as stack:
                 for name in ("validate_generation_baseline", "enforce_billing_access", "start_workflow_run", "_log_failure"):
                     stack.enter_context(patch.object(routes, name))
-                stack.enter_context(patch.object(routes, "_bound_generation_receipt", return_value=None))
+                stack.enter_context(patch.object(routes, "_test_case_publication_receipt", return_value=None))
                 stack.enter_context(patch.object(routes, "_refinement_source_inputs", return_value={}))
                 stack.enter_context(
                     patch.object(
