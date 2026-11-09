@@ -1,0 +1,181 @@
+# Test Case Generator 2.0 implementation record
+
+The baseline is commit `2f6458d3d1bb68197ba2b5572261870277c8cadb`, tree
+`a566f1cf94219e7e924db8fc54e516eb1d81f3a8`. The pre-existing local
+`codex/free-hand` checkout has the same tree. The 2.0 integration branch is
+`codex/version_2_0`. Phase diffs use stacked pull requests over an immutable
+baseline branch. Final approval is required before a merge or targeting main.
+
+[P0 (#449)](https://github.com/lumensparkxy/agentic_test_case_generator/issues/449)
+records the migration decisions and comparison method. The
+[2.0 coordination issue (#448)](https://github.com/lumensparkxy/agentic_test_case_generator/issues/448)
+tracks phase delivery. Prior release evidence and the live acceptance owners
+retain their scope.
+
+## Workspace and route contract
+
+| Workspace | Main decision or action | Existing seams and aliases |
+| --- | --- | --- |
+| Inputs | Review scope | Requirement import, compare/apply, and Context inputs. Requirements and Context links stay resolvable. The legacy Requirements screen contains both import and scope review during migration. |
+| Review | Approve scope, approve scenarios, inspect the suite, or resolve a finding | Scope workbench, scenario review, test reader, traceability, saved-suite review and targeted repair. Keep Use Cases and Test Cases URLs, including their case and snapshot parameters. |
+| Deliver | Export the saved suite or choose eligible browser tests to run | Existing Reports export/evidence and Automation preview/run. Keep historical report and run links bound to their exact evidence. |
+
+Project identity and revision stay visible. Home, Projects, Reviews, Runs, and
+Reports remain cross-project destinations. Project overview remains reachable
+as a status/recovery link. Keep the existing route handlers as evidence
+destinations and project them into the three workspaces. Map workspace entries
+and subsections without redirects that discard query parameters, hashes, or
+history state. Explicit case and snapshot links take precedence over the
+current suite or cached reader selection. Keep review filters, scroll and
+drafts in their existing user/project/snapshot scopes. Resolve counts and
+decisions against one hydrated project revision. Opening a workspace can
+perform reads.
+
+P1 introduces the shell with a reversible frontend build flag, off by default
+for deployment. P2 separates source collection from scope decisions and unifies
+the intake. The legacy routes continue to read the same artifacts when the flag
+is off. Each new workspace route resolves to an existing workbench when the
+flag is off. Keep server admission checks active on both paths.
+
+## Continuation and recovery decisions
+
+[Orchestrator runs](../backend/app/services/orchestrator_run_service.py) persist
+run records, events and checkpoints. The
+[API container](../backend/Dockerfile) runs Uvicorn and the repository ships no
+durable queue consumer. Existing long-running specialist requests and
+[project sync](../backend/app/services/project_sync.py) have different claim
+and receipt paths. Reuse the claim and fencing pattern from
+[impact application](../backend/app/services/impact_application_state.py)
+and the receipt states in
+[execution requests](../backend/app/services/execution_request_service.py).
+Transactional publication guards alone cannot prevent a second provider call
+after a retry or process loss.
+
+P3 will add a deterministic continuation over the existing specialists.
+Prototype a durable transactional intent and worker claim against Firestore
+with a local worker and fault injection. Keep the scheduling transport
+separate from the persisted intent. For a Cloud Run release, use authenticated
+queue delivery to a bounded worker entry point and an outbox reconciler once
+queue identity, timeouts, and runtime permissions can be verified in an
+authorized environment. A browser request, an in-process task, or a Firestore
+record alone does not satisfy restart recovery.
+
+| Event | Authoritative transition and guard |
+| --- | --- |
+| User approves current requirements or scenarios with continuation | Validate actor, decision, source, and base revision. Persist the decision, receipt, intent, and outbox entry atomically. Only the admitted intent can start paid work. |
+| Approval saved, dispatch fails | Preserve approval and retry dispatch for the original intent. Inspect current evidence before starting another attempt. |
+| Duplicate delivery, two tabs, project sync | Reuse the intent identity and claim a shared project lease transactionally before provider work. Fence writes with the active claim token and current source revision. |
+| Stage completes | Read the committed receipt and artifact identity. Advance with the revision produced by that stage. Pause for the next human decision or mark complete. |
+| Process stops or response is lost | Reconcile saved receipts first. Resume known unstarted work or a known checkpoint. An ambiguous paid attempt remains interrupted with usage unknown until deliberate recovery. |
+| Cancellation or source changes | Prevent new stages and late publication. Preserve existing snapshots and previous evidence. An issued provider call can finish and incur cost. |
+| Account or project changes | Reject late UI updates outside the active identity and workspace. Existing server work follows its recorded authorization. |
+| Browser run | Preview and run stay deliberate. No continuation action can start a browser run. |
+
+Bind intent, idempotency key, stage, source snapshot identities, versioned
+settings/guidance, scope, deadline, and budget to the actor and project.
+Inventory nested specialist retries before combining stages. Charge and publish
+under the same source/claim guard where supported. Treat unknown usage as
+unknown and distinguish one committed artifact from one external provider call.
+
+## Quality and delivery policy
+
+Use the existing [saved suite review](../backend/app/services/test_case_suite_review.py),
+[export evidence](../backend/app/services/export_evidence.py), and
+[execution readiness](../backend/app/services/execution_readiness.py) seams.
+The substantive assessment already records design and execution dimensions.
+P4 must derive new fields on the server and migrate consumers together.
+Maintain the conservative legacy approval during the additive transition.
+Audit orchestrator actions, export, execution, refinement, billing and clients
+before changing any writer. Preserve the structural result before combined
+assessment. Base export scope on the generation's approved subset and record
+exclusions separately. Derive execution outcomes from matching saved runs.
+
+| Dimension | Source and effect |
+| --- | --- |
+| Source freshness | Compare snapshot source IDs/revisions and existing stale state. Historical evidence remains readable. |
+| Requirement and scenario decisions | Require approved scope and the human decision on the exact current plan for the standard path. |
+| Design assessment | Complete requires valid delivered cases and a complete assessment for the exact suite. Structural failures, missing cases and placeholders still block design completion. Absent legacy evidence is unknown. |
+| Human suite acceptance | Use an exact-snapshot human decision only where recorded. Missing means unavailable. |
+| Execution readiness | Derive per target from preview, prerequisites and server admission. A design can be complete while browser execution is blocked, manual, or unsupported. |
+| Execution result | Use the actual run bound to the saved suite and target. Record no run or unknown where applicable. |
+
+A current, complete manual design with valid upstream decisions can qualify
+for design export under the new policy, independently of execution setup.
+Incomplete or unverifiable designs use the existing reasoned draft path.
+Stale current exports and placeholder pseudo-tests remain blocked. Execution
+keeps its existing server gates. Runtime project corrections remain scoped to
+project data and dependent drafts.
+
+## Baseline evidence
+
+[Desktop workspace sketches](test-case-generator-2-workspaces.md) show the
+intended layout and behavior across the phases.
+
+| Check | Result at the baseline |
+| --- | --- |
+| Strict offline requirements | 2/2 fixtures pass. |
+| Strict offline generation | 2/2 safe-fallback fixtures pass, with zero generated cases. |
+| Strict offline orchestrator | 3/3 lifecycle fixtures pass. |
+| Critical backend selection | 186/186 pass. |
+| Focused recovery and policy tests | 153/153 pass across orchestrator, sync, repair, decisions, generation recovery, execution admission and export. |
+| Desktop Chromium | 16/16 mocked tests pass across create/import/review, 1366/1440/1920 reader recovery, selected repair, saved evidence, preview and export. |
+| Frontend build | Passes with the existing Vite chunk-size warning. |
+| Controlled browser faults | Authored controls pass on healthy targets and detect the seeded faults at their intended assertions. This validates the controls for later candidate evaluation. |
+
+Run the corresponding offline commands in
+[Testing Patterns](codebase/TESTING.md). The mocked desktop baseline used
+a disposable JWT and loopback Vite. It did not use Firebase, call a model,
+or run a live project. Product walkthrough screenshots and the command log
+remain outside Git. Paired candidate measurements must use the same
+starting state, fixture, end state, and counting method.
+
+### Paired desktop starting point
+
+The 1440 × 900 mocked Chromium journey starts after both pasted requirements
+and context are saved, with scope awaiting approval. It ends with the selected
+saved case inspected and JSON export enabled. Count one deliberate action for
+each click, keyboard activation, or committed text edit.
+
+The baseline took **11 actions**, four workbench transitions and two explicit
+approvals. The sequence was Requirements, bulk review, approve non-rejected,
+Use Cases, generate plan, open scenario decision, approve plan, Test Cases,
+start generation, inspect case, Reports. The 30% gate allows at most **7
+actions** for this paired fixture. The core span was 1.723 seconds including
+scripted waits and screenshots under mocked responses. Measure live waiting
+and practitioner time separately.
+
+Scenario approval recorded snapshot `snapshot-use-cases-v3` at revision 4.
+The JSON download matched the saved mocked suite including the literal test
+data `  QA–01  `. Selected repair preserved the other case. The execution
+preview classified both cases as manual and left Run disabled. The browser
+recorded zero page errors, unmocked API calls, or run requests.
+
+To replay the walkthrough, copy `p0/desktop/baseline-count.mjs` from the P0
+evidence into `frontend/e2e` in an isolated checkout at the pinned baseline.
+Run loopback Vite with `VITE_API_BASE=http://127.0.0.1:43998` on port 43999.
+From `frontend/`, run:
+
+```sh
+JWT_SECRET_KEY=tcg-2-mocked-browser-fixture-signing-secret \
+E2E_BASE_URL=http://127.0.0.1:43999 node e2e/baseline-count.mjs
+```
+
+[The frozen evaluation protocol](test-case-generator-2-evaluation.md) defines
+the corpus, measurement rules and thresholds for the paired comparison.
+
+## Continuation state
+
+P0 pins the baseline and records the prospective gates. Next is P1 on the
+2.0 stack. The production queue identity and timeout policy remain
+unverified. Live provider pairs require a bounded budget and approved
+environment. Independent practitioner validation stays with
+[#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354).
+[#251](https://github.com/lumensparkxy/agentic_test_case_generator/issues/251)
+retains live journey and source-change acceptance,
+[#280](https://github.com/lumensparkxy/agentic_test_case_generator/issues/280)
+and [#274](https://github.com/lumensparkxy/agentic_test_case_generator/issues/274)
+retain the held guidance decisions, and
+[#318](https://github.com/lumensparkxy/agentic_test_case_generator/issues/318)
+retains the embedded-browser diagnosis. Repository defaults use Gemini 3.8
+Flash with guidance skills and memory off. The baseline does not establish
+deployed settings.

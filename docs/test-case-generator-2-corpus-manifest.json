@@ -1,0 +1,123 @@
+{
+  "authorized_live_usd": 0,
+  "baseline": "2f6458d3d1bb68197ba2b5572261870277c8cadb",
+  "content_hashes": {
+    "adjudication_inputs": "ac6189018b2be8eab422384559350efc3e729f6ae2b87cdb6460eb8ae85a1764",
+    "calibration_inputs": "f5dfc4a50f3a324d108ca35100029664c988acf13a0e896b86a37aa2fca9938d",
+    "held_out_inputs": "9499a1f5692ba315a25ab99cc0154a65a4a9b614d9fcd58d7bf8c4599da813ac",
+    "pair_order": "a50a1dcdc134c98e92eaf0d46bdea175afcc670ba51ada363d912af7cfa889e5"
+  },
+  "held_guidance_changes": false,
+  "model": "gemini-3.8-flash",
+  "protocol": "tcg-2.0-paired-v1",
+  "smoke": [
+    "W01-booking-state",
+    "W05-missing-prerequisites"
+  ],
+  "workflow_count": 12,
+  "workflow_index": {
+    "W01-booking-state": {
+      "cohort": "browser",
+      "generation_input_sha256": "cf95c1bbe8eb1ab0ee1d43b455b107124d9588fbb1ebe229e431e12c3711eeac",
+      "source_sha256": {
+        "backend/tests/fixtures/room-booking-requirements.md": "11db79b4c17a744dc0b76040b0cdc9cda3cc968768ee0baa74ce0a826fd0ae76",
+        "frontend/e2e/fixtures/room-booking-browser-context.txt": "d945d668b135cfa0abf53f46a615fed18dc3ff98fb7009b37b7313fd2ee10d9a",
+        "scripts/fixtures/room_booking.html": "baf49e8ccbcf7e4bb15e402f294d113ccdddbb5f9101661bd11694da19f46da7",
+        "scripts/room_booking_fixture.py": "e451a62c97c79e7a86f2eec2101e3de486d3956e0292515e37b7952fb6f6cbac"
+      },
+      "split": "calibration"
+    },
+    "W02-authorization": {
+      "cohort": "design",
+      "generation_input_sha256": "fdf9d0c25401a843975f8ecfd42329ad2b2df5fff37396d234ed749897ab195b",
+      "source_sha256": {
+        "scripts/benchmark_inputs/auth_profile_search.json": "549902cc5b54f9ca853f65e56ed7bb09fcf839bf674872371ae63a037d196c6a"
+      },
+      "split": "calibration"
+    },
+    "W03-expense-rules": {
+      "cohort": "design",
+      "generation_input_sha256": "df3a512b9df1ad0f98e69bc125dd1702f01e4a7523b68263a42f9f6871c0a2d2",
+      "source_sha256": {
+        "scripts/benchmark_inputs/expense_workflow_permissions.json": "e644d659c9c1c3b1afa4a57843346f97c608177175089ee7d521d6e2261689b8"
+      },
+      "split": "calibration"
+    },
+    "W04-source-conflict": {
+      "cohort": "design",
+      "generation_input_sha256": "16cd7609310a42e5bd439a441e84f7d1154aeec20bc519036f737b97fc061f56",
+      "source_sha256": {
+        "scripts/evaluate_argon.py": "daaeb49a003e11fc6e29912f0e72aa892f5b459ad4b9b7ad1f7b12e74a036b68"
+      },
+      "split": "calibration"
+    },
+    "W05-missing-prerequisites": {
+      "cohort": "manual",
+      "generation_input_sha256": "2730a68f464bb5f3c90c48d6724766b8df61af2ec7935136ba44ccbaa654f327",
+      "source_sha256": {
+        "scripts/quality_fixtures/corpus.json": "adb9acf81aff6f7a2aa32f2b6edda66401dce15b74fba4bc20e003ece8ae41ad"
+      },
+      "split": "calibration"
+    },
+    "W06-long-context": {
+      "cohort": "design",
+      "generation_input_sha256": "a3dfedf9176da1c13735b9b943491e2ad29ab2a63176d6a8dab485b76a6b4561",
+      "source_sha256": {
+        "scripts/evaluate_argon.py": "daaeb49a003e11fc6e29912f0e72aa892f5b459ad4b9b7ad1f7b12e74a036b68"
+      },
+      "split": "calibration"
+    },
+    "W07-literal-payload": {
+      "cohort": "browser",
+      "generation_input_sha256": "ad4b052bbf5445363d71a2ecdf69d6066ca15b8a9522b3030a7cabf46cf34d61",
+      "source_sha256": {
+        "scripts/browser_benchmark_fixtures.py": "c751d7efaaca1aa6d9f5873d5ce08bcf547f008b1aef21fc3ea02dc70dc298f2"
+      },
+      "split": "held_out"
+    },
+    "W08-retry-identity": {
+      "cohort": "manual",
+      "generation_input_sha256": "352a2a7016cd4209f6f276964a8ebb58db9a96516fbd8e243c3ed04edc3be9ab",
+      "source_sha256": {
+        "backend/tests/fixtures/room-booking-requirements.md": "11db79b4c17a744dc0b76040b0cdc9cda3cc968768ee0baa74ce0a826fd0ae76",
+        "frontend/e2e/fixtures/room-booking-browser-context.txt": "d945d668b135cfa0abf53f46a615fed18dc3ff98fb7009b37b7313fd2ee10d9a",
+        "scripts/fixtures/room_booking.html": "baf49e8ccbcf7e4bb15e402f294d113ccdddbb5f9101661bd11694da19f46da7",
+        "scripts/response_loss_proxy.py": "438a4f8d457c1b2f594595875a56cc5ef0a496730e460d6ed1df06ff0d32f0ac",
+        "scripts/room_booking_fixture.py": "e451a62c97c79e7a86f2eec2101e3de486d3956e0292515e37b7952fb6f6cbac"
+      },
+      "split": "calibration"
+    },
+    "W09-invoice-handoff": {
+      "cohort": "design",
+      "generation_input_sha256": "1ee0e6b937eebf986410218e5ef133de31619b1c280bcb3de2f076d23b82fc79",
+      "source_sha256": {},
+      "split": "held_out"
+    },
+    "W10-external-audit": {
+      "cohort": "manual",
+      "generation_input_sha256": "927fbfa76c87920f4aec88c2bfe5217d46ba6177701d1622f21465956d3b254c",
+      "source_sha256": {
+        "scripts/browser_benchmark_fixtures.py": "c751d7efaaca1aa6d9f5873d5ce08bcf547f008b1aef21fc3ea02dc70dc298f2"
+      },
+      "split": "held_out"
+    },
+    "W11-source-update": {
+      "cohort": "browser",
+      "generation_input_sha256": "78153f5999ec69d4786a403d9729cf407deddc0c4d8c164dbe0cbc053ddbb855",
+      "source_sha256": {
+        "backend/tests/fixtures/room-booking-requirements.md": "11db79b4c17a744dc0b76040b0cdc9cda3cc968768ee0baa74ce0a826fd0ae76",
+        "frontend/e2e/fixtures/room-booking-browser-context.txt": "d945d668b135cfa0abf53f46a615fed18dc3ff98fb7009b37b7313fd2ee10d9a",
+        "frontend/e2e/support/booking-revision.js": "63840dda8339dd1e10d8568e70e71ce29e3fbf3138714456ceb95a75348cb31b",
+        "scripts/fixtures/room_booking.html": "baf49e8ccbcf7e4bb15e402f294d113ccdddbb5f9101661bd11694da19f46da7",
+        "scripts/room_booking_fixture.py": "e451a62c97c79e7a86f2eec2101e3de486d3956e0292515e37b7952fb6f6cbac"
+      },
+      "split": "calibration"
+    },
+    "W12-archive-workbench": {
+      "cohort": "design",
+      "generation_input_sha256": "424c81641a3b46c788a234d3b24c804a1335ebb4b5e001ed3ee7aa012ce170e5",
+      "source_sha256": {},
+      "split": "held_out"
+    }
+  }
+}
