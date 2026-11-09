@@ -219,6 +219,23 @@ const getRequirementSourceMetricMeta = (coverageMetrics) => {
 
 const normalizeImpactText = (value) => `${value || ""}`.trim().replace(/\s+/g, " ").toLowerCase();
 
+const contextSourceInputs = (context) => {
+	const normalizeLink = (link) => {
+		try {
+			return new URL(link).href;
+		} catch {
+			return link || null;
+		}
+	};
+	return JSON.stringify([
+		normalizeLink(context.app_link),
+		normalizeLink(context.prototype_link),
+		(context.diagram_links || []).map(normalizeLink),
+		(context.image_links || []).map(normalizeLink),
+		context.notes || null,
+	]);
+};
+
 const estimateChangedRequirementCount = (snapshots) => {
 	const requirements = snapshots?.requirements?.payload?.requirements || [];
 	const coveragePlan = snapshots?.test_cases?.payload?.coverage_plan || [];
@@ -267,6 +284,7 @@ export default function App() {
 	const workflowMainRef = useRef(null);
 	const requirementImportControl = useRef(null);
 	const requirementExtractionAttempts = useRef(new Map());
+	const contextAnalysisAttempt = useRef(null);
 	const requirementReviewHeading = useRef(null);
 	const [requirementSetup, setRequirementSetup] = useState(null);
 	const [requirementFocus, setRequirementFocus] = useState(null);
@@ -984,7 +1002,8 @@ export default function App() {
 						.filter(Boolean)
 				: null,
 			notes: contextNotes || null,
-			execution_prerequisites: enrichedContext?.execution_prerequisites || [],
+			execution_prerequisites:
+				enrichedContext?.execution_prerequisites || currentProject?.current_snapshots?.context?.payload?.execution_prerequisites || [],
 			project_id: currentProjectId || null,
 			base_project_revision: currentProjectRevision,
 		};
@@ -4076,19 +4095,50 @@ export default function App() {
 		setContextAnalysisError("");
 		setStatus("Analyzing context artifacts...");
 		try {
-			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildContextPayload()),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to analyze context");
-				throw new Error(errorMessage);
+			const payload = buildContextPayload();
+			if (payload.grounded_context && contextSourceInputs(payload) !== contextSourceInputs(enrichedContext)) {
+				payload.grounded_context = null;
 			}
-			const data = await res.json();
+			const fingerprint = JSON.stringify([operationScope, payload]);
+			if (contextAnalysisAttempt.current?.fingerprint !== fingerprint) {
+				contextAnalysisAttempt.current = { fingerprint, requestId: createRequestId() };
+			}
+			const attempt = contextAnalysisAttempt.current;
+			const clearAttempt = () => {
+				if (contextAnalysisAttempt.current === attempt) contextAnalysisAttempt.current = null;
+			};
+			const options = {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.requestId },
+				body: JSON.stringify(payload),
+			};
+			const send = async () => {
+				try {
+					const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, options);
+					if (res.ok) return await res.json();
+					if ([502, 503, 504].includes(res.status)) {
+						const error = await res
+							.clone()
+							.json()
+							.catch(() => null);
+						if (!error?.detail || error.detail.code === "context_publication_unconfirmed") return null;
+					}
+					clearAttempt();
+					throw new Error(await parseApiError(res, "Failed to analyze context"));
+				} catch (error) {
+					if (error instanceof TypeError || error instanceof SyntaxError) return null;
+					throw error;
+				}
+			};
+			let data = await send();
+			if (!data && isProjectOperationCurrent(operationScope)) {
+				data = await send();
+			}
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
+			if (!data) throw new Error("Context analysis could not be confirmed. Retry with the same inputs.");
+			clearAttempt();
 			setEnrichedContext(data);
 			setSelectedArtifactSourceIds((data.grounded_context?.artifact_sources || []).map((source) => source.id));
 			await refreshCurrentProject({ hydrate: false, operationScope });
@@ -4099,7 +4149,6 @@ export default function App() {
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Context analysis failed: ${error.message}`);
-				resetContextAnalysis();
 				setContextAnalysisError(error.message);
 			}
 		} finally {

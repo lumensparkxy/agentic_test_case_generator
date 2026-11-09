@@ -211,6 +211,12 @@ def find_idempotent_stage_snapshot(project_id, stage, operation, key, *, actor, 
     return QaProjectStageSnapshot.model_validate(value)
 
 
+def get_project_summary(project_id: str, *, actor: AuthUser) -> QaProjectSummary:
+    payload = _get_project_payload(project_id)
+    _require_owner(payload, actor)
+    return _summary_from_payload(payload)
+
+
 def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = False) -> QaProjectDetail:
     payload = _get_project_payload(project_id)
     _require_owner(payload, actor)
