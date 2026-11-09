@@ -14,7 +14,8 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.main import app, get_current_user
-from app.models import AuthUser
+from app.agents.export_agent import export_to_excel
+from app.models import AuthUser, TestCase
 from app.contracts.projects import QaProjectDetail
 from app.routers import export as routes
 from app.services import workflow_project_service as projects
@@ -444,3 +445,86 @@ class ExportPublicationTests(unittest.TestCase):
             render.assert_not_called()
         self.assertFalse(self.audit("usage_events"))
         self.assertFalse(self.audit("workflow_runs"))
+
+
+class ExcelExportValueTests(unittest.TestCase):
+    def workbook(self, *, cases, audit=None):
+        return load_workbook(io.BytesIO(export_to_excel(cases, audit_metadata=audit)))
+
+    def continued_value(self, workbook, sheet_name, address):
+        source = workbook[sheet_name][address]
+        detail = workbook["Long Values"]
+        self.assertTrue(source.value.startswith("See Long Values"))
+        self.assertIsNone(source.hyperlink.target)
+        matching = [row for row in detail.iter_rows(min_row=2) if row[0].value == sheet_name and row[1].value == address]
+        self.assertTrue(matching)
+        self.assertEqual(source.hyperlink.location, f"'Long Values'!A{matching[0][0].row}")
+        self.assertEqual([row[2].value for row in matching], list(range(1, len(matching) + 1)))
+        for row in matching:
+            self.assertEqual(row[4].data_type, "s")
+            self.assertLessEqual(len(row[4].value.encode("utf-16-le")) // 2, 32_767)
+            self.assertLessEqual(row[4].value.count("\n"), 253)
+        text = "".join(row[4].value for row in matching)
+        return json.loads(text) if matching[0][3].value == "JSON string" else text
+
+    def test_long_audit_source_coverage_and_steps_reassemble_exactly(self):
+        versions = [
+            {
+                "case_id": f"TC-{index:03d}",
+                "artifact_item_id": f"{index:036d}",
+                "artifact_version_id": f"{index + 1:036d}",
+                "artifact_version_number": 2,
+            }
+            for index in range(260)
+        ]
+        excerpt = "=Évidence 東京 " * 3_100
+        scenario_ids = [f"SCN-{index:03d}-" + "x" * 140 for index in range(260)]
+        action = "🧪" * 33_000
+        case = TestCase(id="TC-long", title="Checkout", steps=[{"step": 1, "action": action, "expected": "Final outcome"}])
+        audit = {
+            "case_versions": versions,
+            "source_mappings": [
+                {
+                    "normalized_requirement_id": "REQ-1",
+                    "original_requirement_ids": ["ROOM-1"],
+                    "sources": [{"source_id": "SOURCE-1", "excerpt": excerpt, "excerpt_verified": True}],
+                }
+            ],
+            "coverage": {"scenarios": {"referenced_ids": scenario_ids}},
+        }
+        workbook = self.workbook(cases=[case], audit=audit)
+        self.assertEqual(workbook.sheetnames, ["Test Cases", "Audit", "Sources", "Coverage", "Long Values"])
+        self.assertEqual(json.loads(self.continued_value(workbook, "Audit", "B2")), versions)
+        self.assertEqual(json.loads(self.continued_value(workbook, "Audit", "B3")), audit["source_mappings"])
+        self.assertEqual(json.loads(self.continued_value(workbook, "Audit", "B4")), audit["coverage"])
+        self.assertEqual(self.continued_value(workbook, "Sources", "F2"), excerpt)
+        self.assertIs(workbook["Sources"]["E2"].value, True)
+        self.assertEqual(json.loads(self.continued_value(workbook, "Coverage", "E3")), scenario_ids)
+        self.assertEqual(self.continued_value(workbook, "Test Cases", "H2"), f"1. {action}\n   → Final outcome")
+        self.assertFalse(any(cell.data_type == "f" for sheet in workbook for row in sheet for cell in row))
+
+    def test_cell_limits_and_reversible_xml_escape_preserve_text(self):
+        base = TestCase(id="TC", title="#N/A", steps=[])
+        at_boundary = "🧪" * 16_383 + "x"
+        multiline = "\n".join(["line"] * 255)
+        escaped = "Source\x0bscanner _x000D_ \uffff 🧪"
+        formula_fragment = "x" * 48_000 + "=SUM(1,2)"
+        cases = [
+            base.model_copy(update={"description": at_boundary}),
+            base.model_copy(update={"description": at_boundary + "🧪"}),
+            base.model_copy(update={"description": multiline.removesuffix("\nline")}),
+            base.model_copy(update={"description": multiline}),
+            base.model_copy(update={"description": escaped}),
+            base.model_copy(update={"description": formula_fragment}),
+        ]
+        workbook = self.workbook(cases=cases)
+        sheet = workbook["Test Cases"]
+        self.assertEqual((sheet["B2"].value, sheet["B2"].data_type), ("#N/A", "s"))
+        self.assertEqual(sheet["C2"].value, at_boundary)
+        self.assertIsNone(sheet["C2"].hyperlink)
+        self.assertEqual(sheet["C4"].value.count("\n"), 253)
+        self.assertIsNone(sheet["C4"].hyperlink)
+        for address, expected in (("C3", at_boundary + "🧪"), ("C5", multiline), ("C6", escaped), ("C7", formula_fragment)):
+            self.assertEqual(self.continued_value(workbook, "Test Cases", address), expected)
+        fragments = [row[-1] for row in workbook["Long Values"].iter_rows(min_row=2) if row[1].value == "C7"]
+        self.assertEqual((fragments[-1].value, fragments[-1].data_type), ("=SUM(1,2)", "s"))

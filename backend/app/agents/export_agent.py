@@ -1,8 +1,18 @@
 import json
 import csv
 import io
+import re
+from itertools import count
 from typing import Any, List
 from ..models import JiraExportInput, JiraExportResponse, TestCase
+
+
+_EXCEL_CELL_UNITS = 32_767
+_EXCEL_CELL_LINE_FEEDS = 253
+# Calc inserts a line break into uninterrupted runs near 16K UTF-16 units on re-save.
+_EXCEL_CONTINUATION_UNITS = 16_000
+_EXCEL_ESCAPE_MARKER = re.compile(r"_(?=x[0-9a-f]{4}_)", re.IGNORECASE)
+_XML_UNSAFE_TEXT = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
 
 
 def export_to_jira(payload: JiraExportInput) -> JiraExportResponse:
@@ -37,6 +47,21 @@ def _audit_cells(metadata: dict[str, Any] | None) -> dict[str, Any]:
         else value
         for key, value in (metadata or {}).items()
     }
+
+
+def _excel_text_parts(value: str):
+    """Split within Excel's limits while keeping each Unicode character intact."""
+    start = units = line_feeds = 0
+    for index, char in enumerate(value):
+        width = 2 if ord(char) > 0xFFFF else 1
+        newline = char == "\n"
+        if units + width > _EXCEL_CONTINUATION_UNITS or line_feeds + newline > _EXCEL_CELL_LINE_FEEDS:
+            yield value[start:index]
+            start = index
+            units = line_feeds = 0
+        units += width
+        line_feeds += newline
+    yield value[start:]
 
 
 def export_to_csv(test_cases: List[TestCase], *, audit_metadata: dict[str, Any] | None = None) -> str:
@@ -101,10 +126,49 @@ def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any
     """Export test cases to Excel format (XLSX)."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+    from openpyxl.worksheet.hyperlink import Hyperlink
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Test Cases"
+    detail_sheets = []
+    if audit_metadata is not None:
+        audit, sources, coverage = (wb.create_sheet(name) for name in ("Audit", "Sources", "Coverage"))
+        detail_sheets.extend((audit, sources, coverage))
+
+    long_values = None
+    detail_row = 2
+
+    def write_cell(cell, value):
+        if not isinstance(value, str):
+            cell.value = value
+            return
+
+        escaped = bool(_XML_UNSAFE_TEXT.search(value) or _EXCEL_ESCAPE_MARKER.search(value))
+        safe_text = _spreadsheet_text(value)
+        if not escaped and len(safe_text.encode("utf-16-le")) <= _EXCEL_CELL_UNITS * 2 and safe_text.count("\n") <= _EXCEL_CELL_LINE_FEEDS:
+            cell.value = safe_text
+            cell.data_type = "s"
+            return
+
+        nonlocal long_values, detail_row
+        if long_values is None:
+            long_values = wb.create_sheet("Long Values")
+            long_values.append(["Source sheet", "Cell", "Part", "Encoding", "Text"])
+            detail_sheets.append(long_values)
+
+        encoding = "JSON string" if escaped else "Text"
+        text = _EXCEL_ESCAPE_MARKER.sub(lambda _: r"\u005f", json.dumps(value, ensure_ascii=True)) if escaped else value
+        parts = list(_excel_text_parts(text))
+        label = f"See Long Values ({len(parts)} {'part' if len(parts) == 1 else 'parts'})"
+        cell.value = label
+        cell.style = "Hyperlink"
+        cell.hyperlink = Hyperlink(ref=cell.coordinate, location=f"'Long Values'!A{detail_row}", display=label)
+        for part_number, part in enumerate(parts, start=1):
+            long_values.append([cell.parent.title, cell.coordinate, part_number, encoding, part])
+            long_values.cell(row=detail_row, column=5).data_type = "s"
+            long_values.row_dimensions[detail_row].height = 48
+            detail_row += 1
 
     # Define headers
     headers = [
@@ -169,7 +233,8 @@ def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any
         ]
 
         for col, value in enumerate(data, 1):
-            cell = ws.cell(row=row_idx, column=col, value=_spreadsheet_text(value))
+            cell = ws.cell(row=row_idx, column=col)
+            write_cell(cell, value)
             cell.border = thin_border
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
@@ -186,45 +251,44 @@ def export_to_excel(test_cases: List[TestCase], *, audit_metadata: dict[str, Any
     ws.freeze_panes = "A2"
 
     if audit_metadata is not None:
-        audit = wb.create_sheet("Audit")
         audit.append(["Field", "Value"])
-        for key, value in _audit_cells(audit_metadata).items():
-            audit.append([key.removeprefix("Audit "), _spreadsheet_text(value)])
-        sources = wb.create_sheet("Sources")
+        for row, (key, value) in enumerate(_audit_cells(audit_metadata).items(), start=2):
+            write_cell(audit.cell(row, 1), key.removeprefix("Audit "))
+            write_cell(audit.cell(row, 2), value)
         sources.append(["Normalized requirement", "Original IDs", "Source ID", "Source version", "Verified excerpt", "Excerpt"])
+        source_rows = count(start=2)
         for mapping in audit_metadata.get("source_mappings", []):
             for source in mapping.get("sources") or [{}]:
-                sources.append(
-                    [
-                        _spreadsheet_text(value)
-                        for value in [
-                            mapping["normalized_requirement_id"],
-                            json.dumps(mapping["original_requirement_ids"], ensure_ascii=False),
-                            source.get("source_id"),
-                            source.get("source_version"),
-                            source.get("excerpt_verified"),
-                            source.get("excerpt"),
-                        ]
-                    ]
-                )
-        coverage = wb.create_sheet("Coverage")
+                row = next(source_rows)
+                values = [
+                    mapping["normalized_requirement_id"],
+                    json.dumps(mapping["original_requirement_ids"], ensure_ascii=False),
+                    source.get("source_id"),
+                    source.get("source_version"),
+                    source.get("excerpt_verified"),
+                    source.get("excerpt"),
+                ]
+                for col, value in enumerate(values, start=1):
+                    write_cell(sources.cell(row, col), value)
         coverage.append(["Kind", "Total", "Covered IDs", "Missing IDs", "Referenced IDs"])
-        for kind in ("requirements", "scenarios"):
+        for row, kind in enumerate(("requirements", "scenarios"), start=2):
             item = audit_metadata.get("coverage", {}).get(kind, {})
-            coverage.append(
-                [kind, item.get("total"), *[json.dumps(item.get(key), ensure_ascii=False) for key in ("covered_ids", "missing_ids", "referenced_ids")]]
-            )
+            values = [kind, item.get("total"), *[json.dumps(item.get(key), ensure_ascii=False) for key in ("covered_ids", "missing_ids", "referenced_ids")]]
+            for col, value in enumerate(values, start=1):
+                write_cell(coverage.cell(row, col), value)
         coverage.append(["Behavioral assessment", "Unknown unless separately evaluated; references are not behavioral coverage."])
-        for sheet in (audit, sources, coverage):
-            sheet.freeze_panes = "A2"
-            for cell in sheet[1]:
-                cell.font = header_font
-                cell.fill = header_fill
-            for row in sheet.iter_rows(min_row=2):
-                for cell in row:
-                    cell.alignment = Alignment(wrap_text=True, vertical="top")
-            for column in range(1, sheet.max_column + 1):
-                sheet.column_dimensions[openpyxl.utils.get_column_letter(column)].width = 40 if column == 1 else 70
+
+    for sheet in detail_sheets:
+        sheet.freeze_panes = "A2"
+        for cell in sheet[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+        widths = [20, 10, 8, 17, 100] if sheet is long_values else [40, *([70] * (sheet.max_column - 1))]
+        for column, width in enumerate(widths, start=1):
+            sheet.column_dimensions[openpyxl.utils.get_column_letter(column)].width = width
 
     # Save to bytes
     output = io.BytesIO()

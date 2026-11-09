@@ -14,6 +14,16 @@ or leading control whitespace, is prefixed with an apostrophe in CSV/XLSX.
 JSON preserves the original text. XLSX requires openpyxl; the server no longer
 mislabels CSV bytes as an Excel workbook when that dependency is missing.
 
+Cells that exceed Excel's character or line-feed limit link to a `Long Values`
+sheet. To recover the complete value, select the rows with the source sheet and
+cell, then concatenate the `Text` cells in ascending `Part` order with zero
+separators. `Text` encoding gives the original value directly. For a
+`JSON string` encoding, decode the joined text as one JSON string to recover
+characters that Excel XML cannot safely store literally. The links stay within
+the workbook and the fragments are literal text. Select a `Text` cell to read
+or copy its full part from the formula bar.
+See [Excel specifications](https://support.microsoft.com/en-us/excel/excel-specifications-and-limits).
+
 Project exports require an active project and the current project revision. Optional
 `source_snapshot_id` identifies the expected current test-case snapshot; older
 clients may omit it, but their full case array must still match the current saved
