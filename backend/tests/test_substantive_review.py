@@ -139,6 +139,11 @@ class SubstantiveReviewTests(unittest.TestCase):
         separate = case.model_copy(update={"id": "TC-LIST", "steps": case.steps[-2:]})
         data, _, _ = review_input([stale, separate], [requirement], context)
         self.assertEqual(len(known_regression_findings(data)[0]), 1)
+        scoped_error = case.model_copy(deep=True)
+        scoped_error.steps[4].expected = 'css "#error" text should equal "Enter a whole number from 1 to 8"'
+        self.assertEqual(findings(scoped_error), [])
+        scoped_error.steps.pop(5)
+        self.assertEqual(len(findings(scoped_error)), 1)
         self.assertEqual(findings(stale.model_copy(update={"automation_status": "Manual"})), [])
         self.assertEqual(findings(stale, {**context, "notes": "No declared rejection."}), [])
         requirement.text = "Show an inline error when the attendee count is above the maximum."

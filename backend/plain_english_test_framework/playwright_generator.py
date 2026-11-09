@@ -75,6 +75,7 @@ SUPPORTED_ACTIONS = {
     "assert_visible",
     "assert_hidden",
     "assert_text_equals",
+    "assert_scoped_text_equals",
     "assert_value_equals",
     "assert_value_contains",
     "assert_url",
@@ -222,6 +223,11 @@ def _render_action(step: Mapping[str, Any], *, enforce_target_origin: bool = Fal
         return f"await expect({locator}.filter({{ visible: true }})).toHaveCount(0);"
     if action == "assert_text_equals":
         return f"await expect({_render_locator(step['locator'])}).toHaveText({_js_string(_to_playwright_text(step['expected']))});"
+    if action == "assert_scoped_text_equals":
+        # Playwright normalizes whitespace when the expectation is a string.
+        literal = re.escape(_to_playwright_text(step["expected"]))
+        pattern = _js_string(f"^{literal}$")
+        return f"await expect({_render_locator(step['locator'])}).toHaveText(new RegExp({pattern}));"
     if action == "assert_value_equals":
         return f"await expect({_render_locator(step['locator'])}).toHaveValue({_js_string(_to_playwright_text(step['expected']))});"
     if action == "assert_value_contains":

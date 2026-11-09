@@ -425,6 +425,7 @@
             "action": {
               "enum": [
                 "assert_text_equals",
+                "assert_scoped_text_equals",
                 "assert_value_equals",
                 "assert_value_contains"
               ]

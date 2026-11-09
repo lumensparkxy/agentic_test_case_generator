@@ -771,7 +771,7 @@ class ExecutionServiceTests(unittest.TestCase):
     def test_scoped_text_checks_compile_to_exact_single_locator_assertions(self) -> None:
         case = _browser_case()
         case.steps = [
-            TestStep(step=1, action='Open "https://example.test/login"', expected='css "#login-message" text should equal "Ready"'),
+            TestStep(step=1, action='Open "https://example.test/login"', expected='css "#login-message" text should equal "  Ready .+ [x]  "'),
             TestStep(step=2, action=r'Verify test id "summary" text should equal "Keep \"quotes\""', expected=""),
             TestStep(step=3, action="Inspect the diagnostic", expected='test id "diagnostic" text should equal ""'),
         ]
@@ -782,14 +782,14 @@ class ExecutionServiceTests(unittest.TestCase):
             environment=ResolvedEnvironment("web", {"baseUrl": "https://example.test"}, "https://example.test", None),
         )
         assertions = ir.raw["cases"][0]["steps"][1:]
-        self.assertEqual([step["action"] for step in assertions], ["assert_text_equals"] * 3)
+        self.assertEqual([step["action"] for step in assertions], ["assert_scoped_text_equals"] * 3)
         self.assertEqual(assertions[0]["locator"], {"strategy": "css", "value": "#login-message"})
         self.assertEqual(assertions[1]["locator"], {"strategy": "test_id", "value": "summary"})
-        self.assertEqual([step["expected"] for step in assertions], ["Ready", 'Keep "quotes"', ""])
+        self.assertEqual([step["expected"] for step in assertions], ["  Ready .+ [x]  ", 'Keep "quotes"', ""])
         generated = generate_playwright_spec(ir).contents
-        self.assertIn('await expect(page.locator("#login-message")).toHaveText("Ready");', generated)
-        self.assertIn(r'await expect(page.getByTestId("summary")).toHaveText("Keep \"quotes\"");', generated)
-        self.assertIn('await expect(page.getByTestId("diagnostic")).toHaveText("");', generated)
+        self.assertIn(r'await expect(page.locator("#login-message")).toHaveText(new RegExp("^\\ \\ Ready\\ \\.\\+\\ \\[x\\]\\ \\ $"));', generated)
+        self.assertIn(r'await expect(page.getByTestId("summary")).toHaveText(new RegExp("^Keep\\ \"quotes\"$"));', generated)
+        self.assertIn('await expect(page.getByTestId("diagnostic")).toHaveText(new RegExp("^$"));', generated)
 
     def test_quoted_fills_preserve_exact_values_through_browser_codegen(self) -> None:
         target = "https://example.test/"

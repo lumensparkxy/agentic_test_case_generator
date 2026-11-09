@@ -93,6 +93,13 @@ fill and check name the same field, both use its exact label. Preview marks
 unrepresentable field-value checks unsupported so the case cannot run with that
 assertion omitted.
 
+For exact saved text, use `css "#saved-value" text should equal "literal"`
+or `test id "saved-value" text should equal "literal"` with an observed
+locator. The comparison includes edge spaces, repeated spaces, and line
+breaks in the actual text. An empty expectation requires empty text. Use a
+separate check when the element must also be visible. Legacy unscoped label
+text checks continue to normalize whitespace.
+
 Supply `target_base_url` or explicitly configure `EXECUTION_DEFAULT_BASE_URL`.
 The runtime's implicit localhost fallback does not authorize an API run. This
 also applies to non-project API requests, which require explicit selection but

@@ -481,7 +481,7 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "id": _slug_identifier(f"assert text {target}"),
             "sourceStepIndex": source_step_index,
             "original": original,
-            "action": "assert_text_equals",
+            "action": "assert_scoped_text_equals",
             "locator": _locator_for_kind(match["kind"], target),
             "expected": expected,
         }

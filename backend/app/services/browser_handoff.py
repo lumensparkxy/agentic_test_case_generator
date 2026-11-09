@@ -29,7 +29,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - To clear a populated field, use action 'Enter "" into field "observed accessible label"' and check the empty value. For an initially blank field, inspect it and check the empty value without a fill step.
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
-- When the same text can appear in multiple elements, scope its check to a declared unique locator. Use expected 'css "#observed-status" text should equal "source copy"' or 'test id "observed-status" text should equal "source copy"'. Use a separate visibility check when visibility itself is required. Never choose the first match or invent a locator.
+- When the same text can appear in multiple elements, scope its check to a declared unique locator. Use expected 'css "#observed-status" text should equal "source copy"' or 'test id "observed-status" text should equal "source copy"'. Match the full observed text, including spaces. Use a separate visibility check when visibility itself is required. Never choose the first match or invent a locator.
 - For a source requirement that says a saved record displays submitted values, check each value on that same record after submission. A form value or confirmation alone leaves this outcome untested. A 'Browser result css "#saved-value" on "https://app.example/" shows field "Name" after button "Save"' declaration supplies an observed result locator. Use a scoped text check with the exact prior selected label or entered literal. For a text entry, include its exact field-value check before submission.
 - A 'Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible' declaration supplies an observed collection and its loaded indicator. Check the indicator, then assert the grounded starting count with expected 'css "#records tr" count should be 1' before the named submit action. Assert the exact error, then reopen the same URL with 'Open "https://app.example/"'. Check the indicator and the same count in that fresh page. Use the actual supplied selector and actor's starting count.
 - For a named role or exact text that should be out of view, write 'exact link "observed link" is not visible' or 'exact text "source copy" is not visible'. Use a separate step at the state where visibility matters. This check allows hidden and absent matches. Keep DOM presence, timing, and authorization requirements separate.
@@ -139,7 +139,7 @@ def _rejection_has_missing_readback(steps: list[dict[str, Any]], rule: Rejection
     for index, step in enumerate(steps):
         error_locator = step.get("locator", {})
         error = step["action"] == "assert_visible" and error_locator.get("strategy") == "text" and error_locator.get("value") == rule.message
-        error = error or (step["action"] == "assert_text_equals" and step.get("expected") == rule.message)
+        error = error or (step["action"] in {"assert_text_equals", "assert_scoped_text_equals"} and step.get("expected") == rule.message)
         if not error:
             continue
         submit_index = next((at for at in reversed(boundaries) if at < index), None)
@@ -374,9 +374,9 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 if not verified:
                     return "A dropdown field-value check lacks an explicitly declared DOM value."
                 continue
-        if action in {"assert_text_equals", "assert_title", "assert_attribute_equals", "assert_value_equals", "assert_value_contains"}:
+        if value_action or action in {"assert_text_equals", "assert_scoped_text_equals", "assert_title", "assert_attribute_equals"}:
             expected = step["expected"]
-            if action == "assert_text_equals" and binding and submission and submission[0] == binding[0] and binding[1] in submission[1]:
+            if action == "assert_scoped_text_equals" and binding and submission and submission[0] == binding[0] and binding[1] in submission[1]:
                 if expected != submission[1][binding[1]]:
                     return "The saved-result text does not match the exact submitted input."
                 continue
