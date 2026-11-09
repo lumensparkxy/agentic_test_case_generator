@@ -44,6 +44,7 @@ class ProjectSyncAdmissionApiTests(TestCase):
         with (
             patch.object(routes.admission, "draft_admission_client", return_value=firestore),
             patch.object(routes.admission, "read_project_sync_admission", return_value={"blocked": True, "attempt": attempt}) as read,
+            patch.object(routes.project_sync_rebind, "sync_rebind_status", return_value=None),
             patch.object(routes.admission, "release_draft_attempt", return_value=True) as release,
         ):
             status = self.client.get(f"{_PATH}/admission")

@@ -135,7 +135,7 @@ jobs:
           VITE_PID=$!
           trap 'kill $VITE_PID' EXIT
           node -e "const http=require('http');let attempts=0;const check=()=>http.get(process.env.E2E_BASE_URL,res=>{res.resume();process.exit(0)}).on('error',()=>{if(++attempts>60)process.exit(1);setTimeout(check,1000)});check();"
-          npm run test:e2e -- e2e/approval-continuation.spec.js e2e/project-sync-admission.spec.js e2e/project-sync-suite-review.spec.js e2e/selected-case-repair.spec.js e2e/scoped-scenario-refresh.spec.js e2e/scoped-impact-application.spec.js --output continuation-test-results
+          npm run test:e2e -- e2e/approval-continuation.spec.js e2e/project-sync-admission.spec.js e2e/project-sync-suite-review.spec.js e2e/project-sync-rebind.spec.js e2e/selected-case-repair.spec.js e2e/scoped-scenario-refresh.spec.js e2e/scoped-impact-application.spec.js --output continuation-test-results
 
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() }}

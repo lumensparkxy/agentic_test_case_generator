@@ -9,7 +9,8 @@ from copy import deepcopy
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import test_workflow_project_service as fixtures
 from fastapi import HTTPException
-from app.contracts.project_sync import AcceptProjectFinding, RequirementCorrection
+from app.contracts.project_sync import AcceptProjectFinding, ProjectSyncRebindInput, RequirementCorrection
+from app.contracts.requirement_imports import RequirementReviewsInput
 from app.contracts.quality_feedback import QualityFindingInput
 from app.contracts.knowledge import KnowledgeMutation
 from app.contracts.billing import BillingAccount, BillingAllocation, BillingUserProfile
@@ -17,6 +18,7 @@ from app.agents.adk_runtime import _model_reservation
 from app.agents.substantive_review import bind_reviewed_inputs, review_input, validate_assessment
 from app.services import workflow_project_service as projects, project_sync as sync, test_case_suite_review as suite_review
 from app.services import project_draft_admission as admission, approval_continuation
+from app.services import project_sync_rebind as rebind, requirement_import_service as imports
 from app.services.audit_service import record_usage_event
 from app.services.billing_repository import build_allocation_id
 from app.services.billing_service import BillingAccessContext, record_billing_consumption
@@ -69,7 +71,7 @@ class ProjectSyncTests(unittest.TestCase):
 
     tearDown = fixtures.WorkflowProjectServiceTests.tearDown
 
-    def fixture(self, *, context_only=False):
+    def fixture(self, *, context_only=False, versioned=False):
         project = projects.create_project(name="Sync", description=None, actor=self.actor, request_id="create")
         self.pid = project.project_id
         requirements = [{"id": "R1", "text": "Limit is 8", "review_status": "Approved"}, {"id": "R2", "text": "Show receipt", "review_status": "Approved"}]
@@ -79,7 +81,7 @@ class ProjectSyncTests(unittest.TestCase):
             "linked_requirement_ids": ["R2"],
             "steps": [{"step": 1, "action": "Submit", "expected": "Receipt appears"}],
         }
-        if context_only:
+        if context_only or versioned:
             self.preserved.update(
                 scenario_refs=["S2"],
                 artifact_set_id="old-set",
@@ -596,6 +598,173 @@ class ProjectSyncTests(unittest.TestCase):
                 request_id="material-review",
             )
         provider.assert_not_called()
+
+    def prepare_material_rebind(self, *, continuation=None):
+        from test_use_case_review_service import _run_transaction
+
+        self.fixture(versioned=True)
+        self.enable_demo()
+        self.enterContext(patch.object(rebind, "get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch.object(imports, "transactional", side_effect=_run_transaction))
+        self.enterContext(patch.object(imports, "get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch("app.services.use_case_review_service.get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch("app.services.use_case_review_service.transactional", side_effect=_run_transaction))
+
+        def generate(payload, **kwargs):
+            return {**self.generator(payload, **kwargs), "workflow_diagnostics": {"status": "completed"}}
+
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(self.planner)),
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(generate)),
+        ):
+            drafted = sync.accept_finding(self.pid, self.actor, self.payload, "material-for-rebind")
+        change_id = drafted.project_sync["id"]
+        self.assertEqual(drafted.project_sync["status"], "ready_for_review")
+        self.assertTrue(drafted.material_requirements_review_required)
+        self.assertEqual(rebind.sync_rebind_status(self.transaction_client, self.pid, self.actor).state, "needs_requirement_approval")
+        with self.assertRaises(HTTPException):
+            rebind.rebind_sync_drafts(
+                self.pid, self.actor, ProjectSyncRebindInput(change_id=change_id, base_project_revision=drafted.current_revision), "too-early"
+            )
+        requirements = drafted.current_snapshots["requirements"]
+        row = next(row for row in requirements.payload["requirements"] if row["id"] == "R1")
+        review = RequirementReviewsInput(
+            base_project_revision=drafted.current_revision,
+            idempotency_key="approve-corrected-material",
+            reviews=[{"requirement_uid": row["requirement_uid"], "review_status": "Approved", "quality_flags": ["reviewed"]}],
+        )
+        approved = imports.RequirementImportRepository().review(self.pid, self.actor, review, "ordinary-corrected-material", continuation=continuation)
+        self.assertEqual(approved.current_snapshots["requirements"].source_snapshot_id, requirements.snapshot_id)
+        self.assertEqual(approved.current_snapshots["context"], drafted.current_snapshots["context"])
+        self.assertTrue(approved.material_scope_pending_rebind)
+        self.assertFalse(approved.material_requirements_review_required)
+        self.assertTrue(approved.stage_state["use_cases"].stale)
+        self.assertTrue(approved.stage_state["test_cases"].stale)
+        self.assertEqual(rebind.sync_rebind_status(self.transaction_client, self.pid, self.actor).state, "available")
+        return drafted, approved, ProjectSyncRebindInput(change_id=change_id, base_project_revision=approved.current_revision)
+
+    def test_material_rebind_preserves_raw_drafts_replays_lost_ack_and_requires_fresh_scenario_approval(self):
+        from test_use_case_review_service import FakeTransaction
+
+        drafted, approved, payload = self.prepare_material_rebind()
+        plan = drafted.current_snapshots["use_cases"]
+        suite = projects.get_project_stage_snapshot(self.pid, drafted.current_snapshots["test_cases"].snapshot_id, actor=self.actor)
+        before = deepcopy(self.store)
+        original_commit = FakeTransaction.commit
+
+        def lose_ack(transaction):
+            rebind_writes = any("/sync_rebind_receipts/" in ref.path for _, ref, _ in transaction.pending)
+            original_commit(transaction)
+            if rebind_writes:
+                raise RuntimeError("Synthetic rebind commit acknowledgement lost")
+
+        with patch.object(FakeTransaction, "commit", new=lose_ack):
+            receipt = rebind.rebind_sync_drafts(self.pid, self.actor, payload, "exact-material-rebind")
+        self.assertEqual(receipt.project_revision, approved.current_revision + 1)
+        saved = projects.get_project(self.pid, actor=self.actor)
+        self.assertEqual(saved.project_sync["status"], "ready_for_review")
+        self.assertEqual(saved.project_sync["review_rebind"], receipt.model_dump(mode="json"))
+        self.assertEqual(saved.project_sync["stage_receipts"], drafted.project_sync["stage_receipts"])
+        self.assertEqual(saved.current_snapshots["use_cases"].payload, plan.payload)
+        rebound = projects.get_project_stage_snapshot(self.pid, receipt.test_cases_snapshot_id, actor=self.actor)
+        self.assertEqual(rebound.payload, suite.payload)
+        self.assertEqual(rebound.source_snapshot_id, receipt.use_cases_snapshot_id)
+        self.assertFalse(rebound.approved)
+        self.assertEqual(self.consume.call_count, 1)
+        self.assertEqual(
+            {path: value for path, value in self.store.items() if path.startswith("test_case_sets/")},
+            {path: value for path, value in before.items() if path.startswith("test_case_sets/")},
+        )
+        self.assertFalse(saved.current_snapshots["test_cases"].metadata.get("review_retry_available"))
+        with self.assertRaises(HTTPException) as named:
+            review_use_case_snapshot(
+                project_id=self.pid,
+                snapshot_id=receipt.use_cases_snapshot_id,
+                base_project_revision=saved.current_revision,
+                decision="approve",
+                comment=None,
+                actor=self.actor,
+                request_id="rebound-named-approval",
+                continuation=approval_continuation.ContinuationOptions(settings_fingerprint="a" * 64),
+                require_prepared_journey=True,
+            )
+        self.assertEqual(named.exception.detail["code"], "sync_rebind_ordinary_approval_required")
+        review_use_case_snapshot(
+            project_id=self.pid,
+            snapshot_id=receipt.use_cases_snapshot_id,
+            base_project_revision=saved.current_revision,
+            decision="approve",
+            comment=None,
+            actor=self.actor,
+            request_id="rebound-ordinary-approval",
+        )
+        latest = projects.get_project(self.pid, actor=self.actor)
+        self.assertTrue(latest.current_snapshots["test_cases"].metadata["review_retry_available"])
+        self.assertEqual(rebind.sync_rebind_status(self.transaction_client, self.pid, self.actor).state, "bound")
+        self.assertEqual(rebind.rebind_sync_drafts(self.pid, self.actor, payload, "exact-material-rebind"), receipt)
+        with self.assertRaises(HTTPException) as different:
+            rebind.rebind_sync_drafts(
+                self.pid, self.actor, payload.model_copy(update={"base_project_revision": payload.base_project_revision + 1}), "exact-material-rebind"
+            )
+        self.assertEqual(different.exception.detail["code"], "sync_rebind_request_mismatch")
+        self.assertEqual(sum("/sync_rebind_receipts/" in path for path in self.store), 1)
+        with patch.dict("os.environ", {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
+            self.assertEqual(rebind.read_sync_rebind_receipt(self.pid, self.actor, "exact-material-rebind"), receipt)
+        self.assertEqual(projects.get_project_stage_snapshot(self.pid, suite.snapshot_id, actor=self.actor), suite)
+
+    def test_material_rebind_rejects_changed_facts_competing_lease_and_failed_transaction(self):
+        _, approved, payload = self.prepare_material_rebind()
+        header = f"qa_projects/{self.pid}"
+        snapshot_path = f"{header}/snapshots/{approved.current_snapshots['requirements'].snapshot_id}"
+        intact = deepcopy(self.store)
+        edits = {
+            "text": lambda rows: rows[0].update(text="Limit is seven."),
+            "citation": lambda rows: rows[0]["sources"][0].update(excerpt="A different rule."),
+            "order": lambda rows: rows.reverse(),
+            "disposition": lambda rows: rows[0].update(clarification_status="deferred"),
+            "version": lambda rows: rows[0].update(content_version=99),
+            "identity": lambda rows: rows[0].update(requirement_uid="foreign"),
+        }
+        for name, edit in edits.items():
+            with self.subTest(name=name):
+                self.store.clear()
+                self.store.update(deepcopy(intact))
+                edit(self.store[snapshot_path]["payload"]["requirements"])
+                before = deepcopy(self.store)
+                self.assertEqual(rebind.sync_rebind_status(self.transaction_client, self.pid, self.actor).state, "unavailable")
+                with self.assertRaises(HTTPException):
+                    rebind.rebind_sync_drafts(self.pid, self.actor, payload, f"changed-{name}")
+                self.assertEqual(self.store, before)
+        for path in (
+            f"{header}/project_changes/{payload.change_id}/draft_stages/test_cases",
+            f"{header}/project_changes/{payload.change_id}/draft_stages/use_cases",
+        ):
+            self.store.clear()
+            self.store.update(deepcopy(intact))
+            self.store.pop(path)
+            self.assertEqual(rebind.sync_rebind_status(self.transaction_client, self.pid, self.actor).state, "unavailable")
+            with self.assertRaises(HTTPException):
+                rebind.rebind_sync_drafts(self.pid, self.actor, payload, "missing-draft")
+        self.store.clear()
+        self.store.update(deepcopy(intact))
+        lease = approval_continuation.project_lease_ref(self.transaction_client.collection("qa_projects").document(self.pid))
+        lease.set({"kind": "draft", "run_id": "competing", "fence": 3, "dispatched": True, "expires_at": projects._utcnow() + timedelta(seconds=60)})
+        with self.assertRaises(HTTPException) as busy:
+            rebind.rebind_sync_drafts(self.pid, self.actor, payload, "competing-provider")
+        self.assertEqual(busy.exception.detail["code"], "project_draft_busy")
+        self.store.clear()
+        self.store.update(deepcopy(intact))
+        self.transaction_client.fail_on_create_segment = "/sync_rebind_receipts/"
+        with self.assertRaises(RuntimeError):
+            rebind.rebind_sync_drafts(self.pid, self.actor, payload, "rollback-material")
+        self.assertEqual(self.store, intact)
+
+    def test_named_material_requirement_approval_saves_the_decision_without_outbox(self):
+        _, approved, _ = self.prepare_material_rebind(continuation=approval_continuation.ContinuationOptions(settings_fingerprint="a" * 64))
+        receipt = self.store[f"qa_projects/{self.pid}/requirement_import_receipts/{imports.digest('approve-corrected-material')}"]
+        self.assertEqual(receipt["continuation_blocked_reason"], "sync_rebind_required")
+        self.assertTrue(approved.stage_state["requirements"].approved)
+        self.assertFalse(any(path.startswith(f"{approval_continuation.OUTBOX_COLLECTION}/") for path in self.store))
 
     def test_demo_billing_rollback_preserves_plan_and_retry_uses_new_identity(self):
         before = self.fixture()

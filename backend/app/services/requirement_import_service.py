@@ -313,6 +313,8 @@ class RequirementImportRepository:
             )
             receipt_data = {"fingerprint": fingerprint, "snapshot_id": sid}
             if continuation is not None:
+                from .project_sync_rebind import material_requirements_review_required, material_scope_pending_rebind
+
                 receipt_data["continuation_options_fingerprint"] = continuation_fingerprint
                 context_state = stage_state.get("context") or {}
                 context_id = context_state.get("current_snapshot_id")
@@ -328,6 +330,8 @@ class RequirementImportRepository:
                     receipt_data["continuation_blocked_reason"] = "requirements_not_current"
                 elif not scope:
                     receipt_data["continuation_blocked_reason"] = "requirements_not_eligible"
+                elif material_requirements_review_required(project) or material_scope_pending_rebind(project, snapshot):
+                    receipt_data["continuation_blocked_reason"] = "sync_rebind_required"
                 elif context_state.get("stale") or (context_id and not preserve_context):
                     receipt_data["continuation_blocked_reason"] = "context_not_current"
                 else:

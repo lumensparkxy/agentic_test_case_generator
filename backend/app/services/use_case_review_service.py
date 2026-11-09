@@ -375,6 +375,9 @@ def _apply_review_transaction(
             current_snapshot_id=current_snapshot_id,
         )
 
+    if require_prepared_journey and snapshot_payload.get("operation") == "project.sync.rebind":
+        raise HTTPException(409, {"code": "sync_rebind_ordinary_approval_required", "message": "Approve this rebound plan in the ordinary scenario review."})
+
     resulting_revision = current_revision + 1
     approved = decision == "approve"
     review_metadata = dict(use_cases_state.get("metadata") or {})

@@ -4,6 +4,7 @@
 export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	projectChangeAccept: Object.freeze({ method: "POST", path: "/projects/{project_id}/changes/accept" }),
 	projectChangeResume: Object.freeze({ method: "POST", path: "/projects/{project_id}/changes/resume" }),
+	projectSyncRebindDrafts: Object.freeze({ method: "POST", path: "/projects/{project_id}/changes/rebind-drafts" }),
 	projectSyncAdmission: Object.freeze({ method: "GET", path: "/projects/{project_id}/changes/admission" }),
 	projectSyncAdmissionRelease: Object.freeze({ method: "POST", path: "/projects/{project_id}/changes/admission/{operation_id}/release" }),
 	workspaceSummary: Object.freeze({ method: "GET", path: "/workspace/summary" }),

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_CONTRACT_ENDPOINTS } from "../../api/generated/api-contracts";
+import RouteLink from "../../app/RouteLink";
+import { buildSavedCasePath } from "../../app/savedCaseLinks";
+import useReviewDraft from "../../hooks/useReviewDraft";
+import { createRequestId } from "../../services/apiClient";
+import { hasApprovedGenerationScope } from "../../utils/requirementScope";
 import { Button, Checkbox, Select, Textarea } from "../ui/controls";
 import { Disclosure, Surface } from "../ui/surfaces";
 
@@ -26,9 +31,37 @@ async function read(request, path, body, requestId) {
 	return value;
 }
 
-export function ProjectSyncStatus({ project, request, onUpdated, compact = false }) {
+function rebindReceiptMatches(receipt, operation) {
+	return Boolean(
+		operation &&
+		receipt?.request_id === operation.requestId &&
+		receipt.change_id === operation.changeId &&
+		receipt.base_project_revision === operation.revision &&
+		receipt.project_revision === operation.revision + 1 &&
+		receipt.requirements_snapshot_id === operation.requirementsId &&
+		receipt.context_snapshot_id === operation.contextId &&
+		receipt.previous_use_cases_snapshot_id === operation.planId &&
+		receipt.previous_test_cases_snapshot_id === operation.suiteId &&
+		receipt.use_cases_snapshot_id &&
+		receipt.use_cases_snapshot_id !== operation.planId &&
+		receipt.test_cases_snapshot_id &&
+		receipt.test_cases_snapshot_id !== operation.suiteId
+	);
+}
+
+export function ProjectSyncStatus({ project, request, onUpdated, compact = false, rebind = null }) {
 	const projectId = project?.project_id;
 	const sync = project?.project_sync;
+	const revision = project?.current_revision;
+	const rebindDraft = useReviewDraft({
+		identity: SYNC_RECOVERY ? rebind?.identity : "",
+		projectId,
+		snapshotId: "project-sync-rebind-v1",
+		name: "project-sync-rebind",
+		initialValue: null,
+	});
+	const pendingRebind = rebindDraft.value;
+	const rebindRequestId = rebind && pendingRebind?.requestId;
 	const readAdmission = SYNC_RECOVERY && Boolean(projectId && sync);
 	const requestRef = useRef(request);
 	requestRef.current = request;
@@ -38,33 +71,39 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 	const [admission, setAdmission] = useState(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
+	const [rebindAction, setRebindAction] = useState(null);
 	const current = admission?.projectId === projectId ? admission : null;
 
-	const refreshAdmission = useCallback(async () => {
-		if (!readAdmission || !active.current) return null;
-		pendingRead.current?.abort();
-		const controller = new AbortController();
-		pendingRead.current = controller;
-		try {
-			const path = API_CONTRACT_ENDPOINTS.projectSyncAdmission.path.replace("{project_id}", encodeURIComponent(projectId));
-			const data = await read((url) => requestRef.current(url, { method: "GET", signal: controller.signal }), path);
-			if (typeof data?.enabled !== "boolean") throw new Error("Draft refresh status is unavailable.");
-			if (controller.signal.aborted || !active.current) return null;
-			setAdmission({ projectId, data, error: "" });
-			return data;
-		} catch {
-			if (!controller.signal.aborted && active.current) {
-				setAdmission((previous) => ({
-					projectId,
-					data: previous?.projectId === projectId ? previous.data : null,
-					error: "Could not check draft refresh status. Check progress again.",
-				}));
+	const refreshAdmission = useCallback(
+		async (requestId = rebindRequestId) => {
+			if (!readAdmission || !active.current) return null;
+			pendingRead.current?.abort();
+			const controller = new AbortController();
+			pendingRead.current = controller;
+			try {
+				const path = API_CONTRACT_ENDPOINTS.projectSyncAdmission.path.replace("{project_id}", encodeURIComponent(projectId));
+				const query = requestId ? `?${new URLSearchParams({ request_id: requestId })}` : "";
+				const data = await read((url) => requestRef.current(url, { method: "GET", signal: controller.signal }), `${path}${query}`);
+				if (typeof data?.enabled !== "boolean") throw new Error("Draft refresh status is unavailable.");
+				if (controller.signal.aborted || !active.current) return null;
+				setAdmission({ projectId, revision, requestId, data, error: "" });
+				return data;
+			} catch {
+				if (!controller.signal.aborted && active.current) {
+					setAdmission((previous) => ({
+						projectId,
+						data: previous?.projectId === projectId ? previous.data : null,
+						error: "Could not check draft refresh status. Check progress again.",
+					}));
+				}
+				return null;
+			} finally {
+				if (pendingRead.current === controller) pendingRead.current = null;
 			}
-			return null;
-		} finally {
-			if (pendingRead.current === controller) pendingRead.current = null;
-		}
-	}, [projectId, readAdmission]);
+		},
+		[projectId, readAdmission, rebindRequestId, revision]
+	);
+
 	useEffect(() => {
 		active.current = true;
 		return () => {
@@ -72,9 +111,11 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 		};
 	}, []);
 	useEffect(() => {
+		if (pendingAction.current && rebindRequestId) return;
 		void refreshAdmission();
-		return () => pendingRead.current?.abort();
-	}, [refreshAdmission, project?.current_revision]);
+		const controller = pendingRead.current;
+		return () => controller?.abort();
+	}, [refreshAdmission, rebindRequestId]);
 
 	if (!sync) return null;
 	const useRecovery = readAdmission && current?.data?.enabled !== false;
@@ -126,6 +167,162 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 			}
 		}
 	};
+	const snapshots = project.current_snapshots || {};
+	const states = project.stage_state || {};
+	const projectedRebind = rebind && current?.data?.rebind;
+	const rebindProjection = projectedRebind?.change_id && projectedRebind.change_id === sync.id ? projectedRebind : null;
+	const freshRebindProjection = Boolean(current && current.revision === revision && !current.error);
+	const acknowledged = rebindReceiptMatches(rebindAction?.receipt, pendingRebind) ? rebindAction.receipt : null;
+	const rebindReceipt = [current?.data?.rebind_receipt, acknowledged, sync.review_rebind].find((receipt) =>
+		rebindReceiptMatches(receipt, pendingRebind)
+	);
+	const awaitingRebind = Boolean(pendingRebind && !rebindReceipt);
+	const exactPendingSource =
+		awaitingRebind &&
+		pendingRebind.changeId === sync.id &&
+		pendingRebind.revision === revision &&
+		pendingRebind.requirementsId === snapshots.requirements?.snapshot_id &&
+		pendingRebind.contextId === snapshots.context?.snapshot_id &&
+		pendingRebind.planId === snapshots.use_cases?.snapshot_id &&
+		pendingRebind.suiteId === snapshots.test_cases?.snapshot_id;
+	const boundPlan = snapshots.use_cases;
+	const boundSuite = snapshots.test_cases;
+	const currentReboundReceipt = [rebindReceipt, awaitingRebind ? null : sync.review_rebind].find((receipt) =>
+		Boolean(
+			rebind &&
+			receipt?.change_id &&
+			receipt.change_id === sync.id &&
+			receipt.project_revision <= revision &&
+			receipt.requirements_snapshot_id === snapshots.requirements?.snapshot_id &&
+			receipt.context_snapshot_id === snapshots.context?.snapshot_id &&
+			boundPlan?.snapshot_id &&
+			boundPlan.project_id === projectId &&
+			boundPlan.operation === "project.sync.rebind" &&
+			boundPlan.snapshot_id === states.use_cases?.current_snapshot_id &&
+			!states.use_cases.stale &&
+			boundPlan.metadata?.change_id === sync.id &&
+			boundPlan.snapshot_id === receipt.use_cases_snapshot_id &&
+			boundSuite?.snapshot_id &&
+			boundSuite.project_id === projectId &&
+			boundSuite.snapshot_id === states.test_cases?.current_snapshot_id &&
+			!states.test_cases.stale &&
+			(boundSuite.operation === "project.sync.rebind"
+				? boundSuite.snapshot_id === receipt.test_cases_snapshot_id &&
+					boundSuite.source_snapshot_id === boundPlan.snapshot_id &&
+					boundSuite.metadata?.change_id === sync.id
+				: boundSuite.operation === "test_cases.review" &&
+					boundSuite.source_snapshot_id === receipt.test_cases_snapshot_id &&
+					boundSuite.metadata?.sync_review_binding?.use_cases_snapshot_id === boundPlan.snapshot_id)
+		)
+	);
+	const currentReboundPlan = Boolean(currentReboundReceipt);
+	const originalEvidenceReceipt = rebindReceipt || currentReboundReceipt;
+	const originalCaseId = rebindReceipt
+		? pendingRebind?.caseId
+		: currentReboundReceipt && boundSuite.payload?.test_cases?.find((item) => item.id && item.status !== "Deprecated")?.id;
+
+	const offerRebind = rebindProjection?.state === "available" && (!awaitingRebind || exactPendingSource);
+	const canDismissRebind = Boolean(
+		awaitingRebind &&
+		!exactPendingSource &&
+		freshRebindProjection &&
+		current?.requestId === pendingRebind.requestId &&
+		!current.data.rebind_receipt &&
+		!current.data.blocked &&
+		!attempt
+	);
+
+	const canRebind = Boolean(
+		offerRebind &&
+		freshRebindProjection &&
+		current?.data?.enabled &&
+		!current.data.blocked &&
+		!attempt &&
+		!busy &&
+		project.status === "active" &&
+		Number.isInteger(revision) &&
+		hasApprovedGenerationScope(project) &&
+		snapshots.requirements?.operation === "requirements.review" &&
+		snapshots.context?.snapshot_id &&
+		boundPlan?.snapshot_id &&
+		boundSuite?.snapshot_id
+	);
+	const showRebind = Boolean(rebind && (rebindProjection || pendingRebind || currentReboundReceipt || rebind.material));
+	const rebindStatus = rebindAction?.busy
+		? "Checking draft rebind…"
+		: currentReboundPlan
+			? "Drafts rebound to the approved requirements"
+			: rebindReceipt
+				? rebindReceipt.project_revision > revision
+					? "Draft rebind saved. Check status to load the current drafts."
+					: "Draft rebind saved for an earlier revision"
+				: awaitingRebind
+					? exactPendingSource
+						? "Could not confirm the draft rebind. Check status to recover the saved result."
+						: "This draft rebind request uses earlier project inputs."
+					: rebindProjection?.state === "needs_requirement_approval"
+						? "Corrected requirements need approval"
+						: rebindProjection?.state === "available"
+							? "Approved correction ready to rebind"
+							: !freshRebindProjection && !current?.error
+								? "Checking draft rebind eligibility…"
+								: "Saved drafts need verified current sources";
+
+	const runRebind = async (submit = false) => {
+		if (!rebind || pendingAction.current || (submit && !canRebind)) return;
+		pendingAction.current = true;
+		setBusy(true);
+		setRebindAction({ busy: true, receipt: acknowledged });
+		const operation =
+			submit && !exactPendingSource
+				? {
+						requestId: createRequestId(),
+						changeId: sync.id,
+						revision,
+						requirementsId: snapshots.requirements.snapshot_id,
+						contextId: snapshots.context.snapshot_id,
+						planId: boundPlan.snapshot_id,
+						suiteId: boundSuite.snapshot_id,
+						caseId: boundSuite.payload?.test_cases?.find((item) => item.id && item.status !== "Deprecated")?.id,
+					}
+				: pendingRebind;
+		if (submit && operation !== pendingRebind) rebindDraft.setValue(operation);
+		let receipt = rebindReceiptMatches(acknowledged, operation) ? acknowledged : null;
+		let failure = "";
+		try {
+			if (submit) {
+				const path = API_CONTRACT_ENDPOINTS.projectSyncRebindDrafts.path.replace("{project_id}", encodeURIComponent(projectId));
+				const received = await read(
+					rebind.request || request,
+					path,
+					{ change_id: operation.changeId, base_project_revision: operation.revision },
+					operation.requestId
+				);
+				if (rebindReceiptMatches(received, operation)) receipt = received;
+			}
+		} catch (e) {
+			if (!(e instanceof TypeError || e instanceof SyntaxError)) failure = e.message;
+		}
+		try {
+			if (!active.current) return;
+			const status = await refreshAdmission(operation?.requestId || "");
+			if (!active.current) return;
+			if (rebindReceiptMatches(status?.rebind_receipt, operation)) receipt = status.rebind_receipt;
+			const latest = await rebind.onUpdated();
+			if (!active.current) return;
+			if (receipt)
+				failure = latest?.current_revision >= receipt.project_revision ? "" : "Drafts were saved. Check rebind status to load the project.";
+			else if (!status) failure ||= "Could not check draft rebind status. Check rebind status again.";
+			else if (!latest) failure ||= "Could not load the latest project. Check rebind status again.";
+			setRebindAction({ receipt, error: failure });
+		} catch {
+			if (active.current) setRebindAction({ receipt, error: "Could not load the latest project. Check rebind status again." });
+		} finally {
+			pendingAction.current = false;
+			if (active.current) setBusy(false);
+		}
+	};
+
 	const reviewedSuite = project.current_snapshots?.test_cases;
 	const suiteState = project.stage_state?.test_cases;
 	const reviewBinding = reviewedSuite?.metadata?.sync_review_binding;
@@ -234,6 +431,71 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 						)}
 					</div>
 				</>
+			)}
+			{showRebind && (
+				<section className="generation-gate-card" aria-label="Project Sync draft rebind">
+					<div>
+						<strong role="status">{rebindStatus}</strong>
+						{currentReboundPlan ? (
+							<p>Review the rebound scenarios before assessing the saved suite. The original drafts and case versions remain available.</p>
+						) : rebindProjection?.state === "needs_requirement_approval" && !awaitingRebind ? (
+							<p>Approve the corrected requirements in Scope before rebinding the saved drafts.</p>
+						) : rebindProjection?.state === "available" && !awaitingRebind ? (
+							<p>
+								Bind the saved scenario and test drafts to this exact requirements approval. The saved cases and their versions stay the
+								same.
+							</p>
+						) : null}
+						{rebindAction?.error && <p role="alert">{rebindAction.error}</p>}
+						{current?.data?.blocked && !currentReboundPlan && (
+							<p>Another draft operation is active. Check rebind status after it finishes.</p>
+						)}
+					</div>
+					<div className="workbench-actions">
+						{currentReboundPlan && (
+							<RouteLink className="route-primary-link" to={rebind.scenariosPath} navigate={rebind.navigate}>
+								Review rebound scenarios
+							</RouteLink>
+						)}
+						{rebindProjection?.state === "needs_requirement_approval" && !rebind.scopeCurrent && !awaitingRebind && (
+							<RouteLink to={rebind.scopePath} navigate={rebind.navigate}>
+								Review corrected requirements
+							</RouteLink>
+						)}
+						{offerRebind && (
+							<Button size="compact" disabled={!canRebind} onClick={() => void runRebind(true)}>
+								{awaitingRebind ? "Retry draft rebind" : "Rebind saved drafts"}
+							</Button>
+						)}
+						{canDismissRebind && (
+							<Button
+								variant="secondary"
+								size="compact"
+								disabled={busy}
+								onClick={() => {
+									rebindDraft.clear();
+									setRebindAction(null);
+								}}
+							>
+								Dismiss earlier rebind request
+							</Button>
+						)}
+						{(!currentReboundPlan || rebindAction?.error) && (
+							<Button variant="secondary" size="compact" disabled={busy} onClick={() => void runRebind()}>
+								Check rebind status
+							</Button>
+						)}
+						{originalEvidenceReceipt?.previous_test_cases_snapshot_id && originalCaseId && (
+							<RouteLink
+								className="route-secondary-link"
+								to={buildSavedCasePath(projectId, originalEvidenceReceipt.previous_test_cases_snapshot_id, originalCaseId)}
+								navigate={rebind.navigate}
+							>
+								Open original saved case
+							</RouteLink>
+						)}
+					</div>
+				</section>
 			)}
 			{!useRecovery && resumable && (
 				<Button disabled={busy} onClick={() => void refreshStatus("resume")}>

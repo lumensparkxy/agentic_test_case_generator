@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Literal
 
 from .impact import ImpactApplication
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .execution import ExecutionCaseStatus, ExecutionIssue
 from .requirements import (
@@ -137,12 +137,16 @@ class QaProjectTestingIntent(BaseModel):
 
 
 class QaProjectDetail(QaProjectSummary):
+    _project_sync_rebind: dict[str, Any] | None = PrivateAttr(default=None)
+
     input_revision: int = 0
     suite_quality: SuiteQualityProjection | None = None
     design_delivery_enabled: bool = False
     reviewed_design_available: bool = False
     testing_intent: Optional[QaProjectTestingIntent] = None
     project_sync: Optional[Dict[str, Any]] = None
+    material_requirements_review_required: bool = False
+    material_scope_pending_rebind: bool = False
     project_decisions: List[Dict[str, Any]] = Field(default_factory=list)
     impact_application: Optional[ImpactApplication] = None
     current_snapshots: Dict[ProjectStageName, QaProjectStageSnapshot] = Field(default_factory=dict)

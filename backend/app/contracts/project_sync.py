@@ -63,10 +63,37 @@ class ProjectSyncAdmissionAttempt(BaseModel):
     request_id: str
 
 
+class ProjectSyncRebindInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_id: str = Field(pattern=r"^change_[0-9a-f]{24}$")
+    base_project_revision: int = Field(strict=True, ge=0)
+
+
+class ProjectSyncRebindReceipt(BaseModel):
+    request_id: str
+    change_id: str
+    base_project_revision: int
+    project_revision: int
+    requirements_snapshot_id: str
+    context_snapshot_id: str
+    previous_use_cases_snapshot_id: str
+    previous_test_cases_snapshot_id: str
+    use_cases_snapshot_id: str
+    test_cases_snapshot_id: str
+
+
+class ProjectSyncRebindStatus(BaseModel):
+    change_id: str
+    state: Literal["needs_requirement_approval", "available", "unavailable", "bound"]
+
+
 class ProjectSyncAdmissionStatus(BaseModel):
     enabled: bool
     blocked: bool = False
     attempt: ProjectSyncAdmissionAttempt | None = None
+    rebind: ProjectSyncRebindStatus | None = None
+    rebind_receipt: ProjectSyncRebindReceipt | None = None
 
 
 class ProjectSyncAdmissionReleaseInput(BaseModel):

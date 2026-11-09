@@ -31,6 +31,7 @@ export default function UseCaseReviewPage({
 	generateOnApproval = false,
 	scopedRefresh = null,
 	openRefreshScope = false,
+	materialSyncState = null,
 	onBack,
 	onNext,
 }) {
@@ -68,7 +69,7 @@ export default function UseCaseReviewPage({
 		matchingHumanDecision === "approve" &&
 		(snapshot?.metadata?.source_requirements_snapshot_id || snapshot?.source_snapshot_id) &&
 		contextReady;
-	const scopeAvailable = scopedRefresh ? scopedRefresh.eligible : legacyScopeAvailable;
+	const scopeAvailable = !materialSyncState && (scopedRefresh ? scopedRefresh.eligible : legacyScopeAvailable);
 	const refreshCanOpen = Boolean(scopeAvailable && (!scopedRefresh || scopedRefresh.canStart));
 	const openedFromScope = refreshDialogScope === undefined && openRefreshScope;
 	const refreshOpen = openedFromScope || refreshDialogScope === refreshScope;
@@ -120,7 +121,7 @@ export default function UseCaseReviewPage({
 									Review refresh scope
 								</Button>
 							)}
-							{!scopedRefresh && (
+							{!scopedRefresh && !materialSyncState && (
 								<Button
 									variant={effectiveStageState?.stale && !scopeAvailable ? "primary" : "secondary"}
 									size="compact"
@@ -140,6 +141,14 @@ export default function UseCaseReviewPage({
 				}
 			/>
 			{continuationPanel}
+			{materialSyncState === "requires_rebind" && (
+				<p role="status">
+					The saved scenario draft needs to be rebound after requirements approval.{" "}
+					<RouteLink to={scopePath} navigate={navigate}>
+						Review corrected scope
+					</RouteLink>
+				</p>
+			)}
 			<ScenarioRefreshStatus
 				refresh={scopedRefresh}
 				snapshotId={snapshot?.snapshot_id}

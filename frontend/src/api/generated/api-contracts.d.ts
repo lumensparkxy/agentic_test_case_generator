@@ -11,6 +11,7 @@ export interface ApiOperation<Request, Response, Method extends string, Path ext
 export interface ApiContractOperations {
 	projectChangeAccept: ApiOperation<ProjectChangeAcceptRequest, ProjectChangeAcceptResponse, "POST", "/projects/{project_id}/changes/accept">;
 	projectChangeResume: ApiOperation<ProjectChangeResumeRequest, ProjectChangeResumeResponse, "POST", "/projects/{project_id}/changes/resume">;
+	projectSyncRebindDrafts: ApiOperation<ProjectSyncRebindDraftsRequest, ProjectSyncRebindDraftsResponse, "POST", "/projects/{project_id}/changes/rebind-drafts">;
 	projectSyncAdmission: ApiOperation<ProjectSyncAdmissionRequest, ProjectSyncAdmissionResponse, "GET", "/projects/{project_id}/changes/admission">;
 	projectSyncAdmissionRelease: ApiOperation<ProjectSyncAdmissionReleaseRequest, ProjectSyncAdmissionReleaseResponse, "POST", "/projects/{project_id}/changes/admission/{operation_id}/release">;
 	workspaceSummary: ApiOperation<WorkspaceSummaryGetRequest, WorkspaceSummaryGetResponse, "GET", "/workspace/summary">;
@@ -68,7 +69,11 @@ export type ProjectChangeAcceptRequest = AcceptProjectFinding;
 export type ProjectChangeAcceptResponse = QaProjectDetail;
 export type ProjectChangeResumeRequest = ResumeProjectSync;
 export type ProjectChangeResumeResponse = QaProjectDetail;
-export type ProjectSyncAdmissionRequest = undefined;
+export type ProjectSyncRebindDraftsRequest = ProjectSyncRebindInput;
+export type ProjectSyncRebindDraftsResponse = ProjectSyncRebindReceipt;
+export type ProjectSyncAdmissionRequest = {
+	request_id?: string | null;
+};
 export type ProjectSyncAdmissionResponse = ProjectSyncAdmissionStatus;
 export type ProjectSyncAdmissionReleaseRequest = ProjectSyncAdmissionReleaseInput;
 export type ProjectSyncAdmissionReleaseResponse = ProjectSyncAdmissionReleaseResult;
@@ -853,6 +858,31 @@ export interface ProjectSyncAdmissionStatus {
 	attempt?: ProjectSyncAdmissionAttempt | null;
 	blocked?: boolean;
 	enabled: boolean;
+	rebind?: ProjectSyncRebindStatus | null;
+	rebind_receipt?: ProjectSyncRebindReceipt | null;
+}
+
+export interface ProjectSyncRebindInput {
+	base_project_revision: number;
+	change_id: string;
+}
+
+export interface ProjectSyncRebindReceipt {
+	base_project_revision: number;
+	change_id: string;
+	context_snapshot_id: string;
+	previous_test_cases_snapshot_id: string;
+	previous_use_cases_snapshot_id: string;
+	project_revision: number;
+	request_id: string;
+	requirements_snapshot_id: string;
+	test_cases_snapshot_id: string;
+	use_cases_snapshot_id: string;
+}
+
+export interface ProjectSyncRebindStatus {
+	change_id: string;
+	state: "needs_requirement_approval" | "available" | "unavailable" | "bound";
 }
 
 export interface QaProjectCaseSourceRequirement {
@@ -874,6 +904,8 @@ export interface QaProjectDetail {
 	execution_runs?: Array<QaProjectExecutionRun>;
 	impact_application?: ImpactApplication | null;
 	input_revision?: number;
+	material_requirements_review_required?: boolean;
+	material_scope_pending_rebind?: boolean;
 	name: string;
 	owner_user_id: string;
 	project_decisions?: Array<Record<string, unknown>>;

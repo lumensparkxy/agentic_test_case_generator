@@ -21,7 +21,7 @@ from .guidance_runtime import prepare_run
 from .guidance_service import enabled, guidance_scope, public_manifest
 from .orchestrator_service import _use_cases_human_approved
 from .project_draft_admission import REPAIR_OPERATION, SCOPED_IMPACT_OPERATION, claim_draft_attempt, draft_admission_client, read_draft_attempt_result
-from .project_sync_review import SYNC_DRAFT_OPERATION, verify_sync_review
+from .project_sync_review import SYNC_REVIEW_OPERATIONS, verify_sync_review
 from .requirement_scope import approved_generation_requirements
 from .suite_quality import build_suite_design_proof
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
@@ -338,7 +338,7 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         raise HTTPException(409, "The saved test suite changed. Reload the current suite before reviewing.")
     generated_retry = generated_suite_review_retryable(current)
     pending_review = (current.payload.get("substantive_assessment") or {}).get("status") == "unknown"
-    sync_review = current.operation == SYNC_DRAFT_OPERATION
+    sync_review = current.operation in SYNC_REVIEW_OPERATIONS
     if not generated_retry and ((current.operation not in REVIEWABLE_OPERATIONS and not sync_review) or not pending_review):
         raise HTTPException(409, "The current suite has no pending saved-suite assessment.")
     if project.stage_state["test_cases"].stale and current.operation != "quality.feedback.apply":

@@ -848,7 +848,7 @@ export default function App() {
 		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
 	const activeGenerateResultTab = openingPriorityCase ? "test-cases" : traceabilityReturn ? "traceability" : selectedGenerateResultTab;
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
-	const syncDraftSuite = savedSuite?.operation === "project.sync.draft";
+	const syncDraftSuite = ["project.sync.draft", "project.sync.rebind"].includes(savedSuite?.operation);
 	const showSyncDraftReview = Boolean(
 		APPROVAL_CONTINUATION_ENABLED &&
 		syncDraftSuite &&
@@ -867,6 +867,11 @@ export default function App() {
 		!useCasesStageState.stale
 	);
 	const syncChange = currentProject?.project_sync;
+	const materialSync =
+		APPROVAL_CONTINUATION_ENABLED &&
+		(currentProject?.material_requirements_review_required === true || currentProject?.material_scope_pending_rebind === true);
+	const reboundSyncPlan = APPROVAL_CONTINUATION_ENABLED && projectSnapshots.use_cases?.operation === "project.sync.rebind";
+	const materialSyncRebindRequired = materialSync && (!reboundSyncPlan || useCasesStageState.stale);
 	const syncDraftChangeId = savedSuite?.metadata?.change_id;
 	const syncDraftSuperseded =
 		showSyncDraftReview &&
@@ -2222,6 +2227,7 @@ export default function App() {
 	const savedScenarioId = projectSnapshots.use_cases?.snapshot_id;
 	const scenarioRefreshPredecessor =
 		canRecoverScenarioRefresh &&
+		!materialSyncRebindRequired &&
 		savedScenarioId &&
 		useCasesStageState.current_snapshot_id === savedScenarioId &&
 		useCasesStageState.stale &&
@@ -4832,6 +4838,7 @@ export default function App() {
 		approvalContinuation.pendingRequest?.stage === "generate_tests" &&
 		approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
 	const generateOnScenarioApproval =
+		!["project.sync.draft", "project.sync.rebind"].includes(projectSnapshots.use_cases?.operation) &&
 		!projectSnapshots.use_cases?.metadata?.use_case_refresh &&
 		approvalContinuation.testsAvailable &&
 		preparedScenarioId &&
@@ -4926,6 +4933,26 @@ export default function App() {
 		approvalContinuation.stage === "prepare_scenarios" &&
 		approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
+	const rebindReview =
+		APPROVAL_CONTINUATION_ENABLED &&
+		(reviewScope || (testReviewRoute && !savedCaseLink)) &&
+		currentUser?.sub &&
+		currentProject?.owner_user_id === currentUser.sub
+			? {
+					identity: currentUser.sub,
+					material: materialSync,
+					scopeCurrent: reviewScope,
+					scopePath: buildProjectWorkspacePath(navigationProjectId, "review"),
+					scenariosPath,
+					navigate,
+					request: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
+					onUpdated: () => {
+						const operationScope = captureProjectOperationScope();
+						if (operationScope?.projectId !== navigationProjectId || operationScope?.userId !== currentUser.sub) return null;
+						return refreshCurrentProject({ hydrate: "if-changed", operationScope });
+					},
+				}
+			: null;
 	const openTraceabilityCase = (path, target) => {
 		navigate(`${location.pathname}${location.search}${location.hash}`, {
 			replace: true,
@@ -5248,6 +5275,9 @@ export default function App() {
 								generateOnApproval={generateOnScenarioApproval}
 								scopedRefresh={useScopedScenarioRefreshFlow ? scenarioRefresh : null}
 								openRefreshScope={openRefreshScope}
+								materialSyncState={
+									materialSyncRebindRequired ? "requires_rebind" : reboundSyncPlan && !useCasesStageState.stale ? "rebound" : null
+								}
 								contextRefreshRequired={contextRefreshRequired}
 								onReloadLatest={() => reloadLatestUseCases(currentProject.project_id)}
 								onBack={PROJECT_WORKSPACES_V2 ? openScope : goPrev}
@@ -5317,9 +5347,9 @@ export default function App() {
 												) : null}
 											</div>
 										) : reviewScope && !imports.preview ? (
-											!useScopedScenarioRefreshFlow &&
-											approvalContinuation.available &&
-											(!useCasesStageState.current_snapshot_id || useCasesStageState.stale) ? (
+											materialSyncRebindRequired || (reboundSyncPlan && !useCasesStageState.stale) ? null : !useScopedScenarioRefreshFlow &&
+											  approvalContinuation.available &&
+											  (!useCasesStageState.current_snapshot_id || useCasesStageState.stale) ? (
 												<Button
 													size="compact"
 													onClick={() => void saveRequirementReviews(proposedScopeApproval, { prepareScenarios: true })}
@@ -5377,10 +5407,11 @@ export default function App() {
 								{(reviewScope || (testReviewRoute && !savedCaseLink && continuationResultStage === "test_cases")) && continuationPanel}
 								{!inputsSources && !savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
-										key={`sync-${navigationProjectId}`}
+										key={`sync-${navigationProjectId}-${rebindReview?.identity || "legacy"}`}
 										compact={compactReview}
 										project={currentProject}
 										request={apiRequest}
+										rebind={rebindReview}
 										onUpdated={() => openProject(navigationProjectId, { silent: true })}
 									/>
 								)}

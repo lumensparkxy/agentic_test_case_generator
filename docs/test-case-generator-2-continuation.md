@@ -512,12 +512,19 @@ recovery. The separate assessment confirms exact current source lineage
 and leaves reviewed-design export unavailable because the fixture Context
 does not supply the response-loss test mechanism needed by TC-013.
 P5d binds saved-suite assessment to an exact Context-only Project Sync
-draft under [#481](https://github.com/lumensparkxy/agentic_test_case_generator/issues/481).
+draft (commit `acc6dfd`, [PR #482](https://github.com/lumensparkxy/agentic_test_case_generator/pull/482)).
 After separate approval of the matching plan, Review can assess the exact
 saved cases with the accepted project decision. Reassessment retains
 unchanged rows and versions, including explicit null values. Material
 requirement corrections and unverified drafts cannot use this admission.
-A saved assessment remains readable after the demo flag is off.
+A saved assessment remains readable after the demo flag is off. P5e
+rebinds verified material Sync drafts after approval of the exact corrected
+requirements under [#483](https://github.com/lumensparkxy/agentic_test_case_generator/issues/483).
+The reviewer confirms the deterministic rebind before approving the new
+scenario snapshot. The original drafts and versions remain readable.
+Rebind publishes both successors and one receipt in the same transaction
+and uses no provider. A separate saved review uses the accepted decision
+and verifies both the rebind and original stage receipts.
 
 Unenrolled paid draft producers remain a release gate.
 P6 error analysis found prior Booking gaps covered by existing regression
@@ -527,9 +534,18 @@ Both pairs matched exact saved case content and JSON projection. W05
 retained the deferred requirement and unavailable Supervisor setup.
 Candidate worker reservations stayed at 7 and 24 requests per arm. A
 total of 12 SDK mock requests used authored specialist responses. This
-measures the route, persistence and export seams. Live model outcomes
-and independent adjudication remain open. Next is the exact saved file
-report reader and the controlled Deliver journey.
+measures the route, persistence and export seams. A second rehearsal
+ran the actual native W05 and W01 planners, writers and critics through
+the SDK. Both pairs matched the exact authored case projection and source
+bindings. A dry SQLite broker recorded 26 synthetic requests across four
+arms. It exercised pair reservation and restart handling without provider
+egress or credentials. Live model outcomes and independent adjudication
+remain open. Controlled local Deliver rehearsal at `acc6dfd` also ran
+one selected authored case against healthy and seeded-fault targets
+through the rendered app and actual Chromium, inspected its exact saved
+case link, and kept Run disabled for zero candidates. That proof is
+separate from model and practitioner gates. Next is grouping saved findings
+and opening exact saved file reports.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

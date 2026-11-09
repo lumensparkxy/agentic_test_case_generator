@@ -29,6 +29,13 @@ class SelectedOperation(NamedTuple):
 SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
     SelectedOperation("projectChangeAccept", "post", "/projects/{project_id}/changes/accept", "ProjectChangeAcceptRequest", "ProjectChangeAcceptResponse"),
     SelectedOperation("projectChangeResume", "post", "/projects/{project_id}/changes/resume", "ProjectChangeResumeRequest", "ProjectChangeResumeResponse"),
+    SelectedOperation(
+        "projectSyncRebindDrafts",
+        "post",
+        "/projects/{project_id}/changes/rebind-drafts",
+        "ProjectSyncRebindDraftsRequest",
+        "ProjectSyncRebindDraftsResponse",
+    ),
     SelectedOperation("projectSyncAdmission", "get", "/projects/{project_id}/changes/admission", "ProjectSyncAdmissionRequest", "ProjectSyncAdmissionResponse"),
     SelectedOperation(
         "projectSyncAdmissionRelease",

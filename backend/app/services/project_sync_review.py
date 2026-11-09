@@ -1,4 +1,4 @@
-"""Verify the exact Context-only Project Sync draft chain before saved-suite review."""
+"""Verify the exact Project Sync draft chain before saved-suite review."""
 
 from dataclasses import dataclass
 import re
@@ -21,6 +21,8 @@ from .test_case_quality import case_source_hash
 from .versioning_service import TEST_CASE_SETS_COLLECTION
 
 SYNC_DRAFT_OPERATION = "project.sync.draft"
+SYNC_REBIND_OPERATION = "project.sync.rebind"
+SYNC_REVIEW_OPERATIONS = {SYNC_DRAFT_OPERATION, SYNC_REBIND_OPERATION}
 _SOURCE_STAGES = ("requirements", "context", "use_cases", "test_cases", "reports")
 
 
@@ -33,6 +35,7 @@ class _Lineage:
     plan_receipt: dict
     draft_receipt: dict
     review: dict
+    rebind: dict | None = None
 
     def binding(self, rows):
         return {
@@ -45,6 +48,7 @@ class _Lineage:
             "scenario_review_id": self.review["review_id"],
             "project_input_manifest_hash": case_source_hash(self.manifest.model_dump(mode="json")),
             "draft_saved_rows_hash": case_source_hash(rows),
+            **({"rebind_receipt_hash": case_source_hash(self.rebind)} if self.rebind is not None else {}),
         }
 
 
@@ -53,7 +57,7 @@ def _unavailable():
         409,
         {
             "code": "sync_review_lineage_unavailable",
-            "message": "Review needs the exact current Context-only update, its saved drafts and the approved scenario plan.",
+            "message": "Review needs the exact current correction, its saved drafts and the approved scenario plan.",
         },
     )
 
@@ -120,27 +124,8 @@ def _snapshot_matches(snapshot, receipt, record, manifest, actor_id, *, upstream
     )
 
 
-def _lineage(project):
-    record = project.project_sync
-    baseline, context, plan = (_current(project, stage) for stage in ("requirements", "context", "use_cases"))
-    if (
-        not record
-        or record.get("draft_admission_version") != 1
-        or record.get("status") != "ready_for_review"
-        or not isinstance(record.get("id"), str)
-        or re.fullmatch(r"change_[0-9a-f]{24}", record["id"]) is None
-        or not all((baseline, context, plan))
-        or context.operation != "quality.feedback.apply"
-        or context.metadata.get("change_id") != record["id"]
-        or context.actor_user_id != project.owner_user_id
-        or baseline.project_revision >= context.project_revision
-        or record["stages"].get("requirements") != "preserved"
-        or record["stages"].get("context") != "draft"
-        or any(record["stages"].get(stage) != "draft" for stage in ("use_cases", "test_cases"))
-    ):
-        raise _unavailable()
-    manifest = ProjectInputManifest.model_validate(record["input_manifest"])
-    current_manifest = manifest_from_payload(
+def _current_manifest(project):
+    return manifest_from_payload(
         {
             "project_id": project.project_id,
             "input_revision": project.input_revision,
@@ -148,11 +133,30 @@ def _lineage(project):
             "project_decisions": project.project_decisions,
         }
     )
+
+
+def completed_sync_pair(project, record, context):
+    """Validate the immutable two-stage publication chain, before any later approval."""
+    if (
+        not record
+        or record.get("draft_admission_version") != 1
+        or record.get("status") != "ready_for_review"
+        or not isinstance(record.get("id"), str)
+        or re.fullmatch(r"change_[0-9a-f]{24}", record["id"]) is None
+        or not context
+        or context.operation != "quality.feedback.apply"
+        or context.metadata.get("change_id") != record["id"]
+        or context.actor_user_id != project.owner_user_id
+        or record["stages"].get("context") != "draft"
+        or any(record["stages"].get(stage) != "draft" for stage in ("use_cases", "test_cases"))
+    ):
+        raise _unavailable()
+    manifest = ProjectInputManifest.model_validate(record["input_manifest"])
     decisions = [decision.model_dump(mode="json") for decision in manifest.decisions]
     if (
-        manifest != current_manifest
-        or manifest.requirements_snapshot_id != baseline.snapshot_id
+        manifest.project_id != project.project_id
         or manifest.context_snapshot_id != context.snapshot_id
+        or not _id(manifest.requirements_snapshot_id)
         or record.get("decision") not in decisions
         or record["decision"].get("id") != record["id"]
         or record["decision"].get("accepted_by") != project.owner_user_id
@@ -166,17 +170,51 @@ def _lineage(project):
     draft_sources = _source_ids(draft_receipt["source_snapshot_ids"])
     expected = _source_ids({stage: value for stage, value in record["expected_snapshots"].items() if stage in _SOURCE_STAGES})
     if (
-        plan_sources["requirements"] != baseline.snapshot_id
+        plan_sources["requirements"] != manifest.requirements_snapshot_id
         or plan_sources["context"] != context.snapshot_id
         or not _id(plan_sources["test_cases"])
-        or draft_sources != {**plan_sources, "use_cases": plan.snapshot_id}
+        or draft_sources != {**plan_sources, "use_cases": plan_receipt["snapshot_id"]}
         or expected != {**draft_sources, "test_cases": draft_receipt["snapshot_id"]}
         or plan_receipt["base_revision"] != context.project_revision
         or draft_receipt["base_revision"] != plan_receipt["result_revision"]
         or record["project_revision"] != draft_receipt["result_revision"]
-        or not _snapshot_matches(plan, plan_receipt, record, manifest, project.owner_user_id, upstream=baseline.snapshot_id, previous=plan_sources["use_cases"])
     ):
         raise _unavailable()
+    return manifest, plan_receipt, draft_receipt
+
+
+def _lineage(project):
+    record = project.project_sync
+    if project._project_sync_rebind and record:
+        record = {**record, "review_rebind": project._project_sync_rebind}
+    baseline, context, plan = (_current(project, stage) for stage in ("requirements", "context", "use_cases"))
+    if not baseline or not plan:
+        raise _unavailable()
+    original_manifest, plan_receipt, draft_receipt = completed_sync_pair(project, record, context)
+    manifest = _current_manifest(project)
+    rebind = None
+    if plan.operation == SYNC_REBIND_OPERATION:
+        from .project_sync_rebind import validate_rebound_plan
+
+        rebind = validate_rebound_plan(project, record, baseline, plan, manifest, original_manifest, plan_receipt, draft_receipt)
+        draft_id, draft_revision = rebind["test_cases_snapshot_id"], rebind["project_revision"]
+    else:
+        if (
+            record["stages"].get("requirements") != "preserved"
+            or original_manifest != manifest
+            or baseline.project_revision >= context.project_revision
+            or not _snapshot_matches(
+                plan,
+                plan_receipt,
+                record,
+                manifest,
+                project.owner_user_id,
+                upstream=baseline.snapshot_id,
+                previous=_source_ids(plan_receipt["source_snapshot_ids"])["use_cases"],
+            )
+        ):
+            raise _unavailable()
+        draft_id, draft_revision = draft_receipt["snapshot_id"], draft_receipt["result_revision"]
     state = project.stage_state["use_cases"]
     review = _matching_use_case_human_review(state)
     reviews = current_scenario_reviews(plan.payload, state.metadata, plan.snapshot_id)
@@ -186,47 +224,54 @@ def _lineage(project):
         or not _id(review.get("review_id"))
         or review.get("reviewer_user_id") != project.owner_user_id
         or type(approval_revision) is not int
-        or not draft_receipt["result_revision"] < approval_revision <= project.current_revision
+        or not draft_revision < approval_revision <= project.current_revision
         or not reviews
         or any(item["status"] != "approved" for item in reviews.values())
     ):
         raise _unavailable()
-    return _Lineage(record, manifest, plan, draft_receipt["snapshot_id"], plan_receipt, draft_receipt, review)
+    return _Lineage(record, manifest, plan, draft_id, plan_receipt, draft_receipt, review, rebind)
 
 
 def _validate_draft(project, suite, lineage):
-    from .suite_quality import _case_rows, _case_scope_gaps, _versioned_cases
-
     current = _current(project, "test_cases")
     state = project.stage_state.get("test_cases")
-    source_ids = _source_ids(lineage.draft_receipt["source_snapshot_ids"])
+    if not current or not state or state.approved or current.snapshot_id != suite.snapshot_id or suite.snapshot_id != lineage.draft_id:
+        raise _unavailable()
+    if lineage.rebind is not None:
+        from .project_sync_rebind import validate_rebound_suite
+
+        validate_rebound_suite(project, lineage.rebind, suite)
+    else:
+        _validate_original_snapshot(project, suite, lineage.record, lineage.manifest, lineage.draft_receipt, lineage.plan.snapshot_id)
+    return validate_sync_suite_scope(project, suite, lineage.plan, lineage.record)
+
+
+def _validate_original_snapshot(project, suite, record, manifest, receipt, plan_id):
     if (
-        not current
-        or not state
-        or state.approved
-        or current.snapshot_id != suite.snapshot_id
-        or suite.stage != "test_cases"
+        suite.stage != "test_cases"
         or suite.project_id != project.project_id
         or not _id(suite.source_event_id)
         or not _snapshot_matches(
-            suite,
-            lineage.draft_receipt,
-            lineage.record,
-            lineage.manifest,
-            project.owner_user_id,
-            upstream=lineage.plan.snapshot_id,
-            previous=source_ids["test_cases"],
+            suite, receipt, record, manifest, project.owner_user_id, upstream=plan_id, previous=_source_ids(receipt["source_snapshot_ids"])["test_cases"]
         )
-        or (suite.payload.get("substantive_assessment") or {}).get("status") != "unknown"
+    ):
+        raise _unavailable()
+
+
+def validate_sync_suite_scope(project, suite, plan, record):
+    from .suite_quality import _case_rows, _case_scope_gaps, _versioned_cases
+
+    if (
+        (suite.payload.get("substantive_assessment") or {}).get("status") != "unknown"
         or not isinstance(suite.payload.get("test_cases"), list)
         or suite.payload.get("generation_tasks") != []
     ):
         raise _unavailable()
     requirements = approved_generation_requirements(project)
-    groups = [RequirementCoveragePlan.model_validate(row, extra="forbid") for row in lineage.plan.payload["coverage_plan"]]
-    analysis = [RequirementAnalysis.model_validate(row, extra="forbid") for row in lineage.plan.payload["requirement_analysis"]]
+    groups = [RequirementCoveragePlan.model_validate(row, extra="forbid") for row in plan.payload["coverage_plan"]]
+    analysis = [RequirementAnalysis.model_validate(row, extra="forbid") for row in plan.payload["requirement_analysis"]]
     texts = {row.id: row.text for row in requirements}
-    affected = lineage.record.get("affected_requirement_ids")
+    affected = record.get("affected_requirement_ids")
     if (
         not texts
         or not isinstance(affected, list)
@@ -237,8 +282,8 @@ def _validate_draft(project, suite, lineage):
         or {group.requirement_id: group.requirement_text for group in groups} != texts
         or len(analysis) != len(texts)
         or {row.requirement_id: row.requirement_text for row in analysis} != texts
-        or suite.payload["coverage_plan"] != lineage.plan.payload["coverage_plan"]
-        or suite.payload["requirement_analysis"] != lineage.plan.payload["requirement_analysis"]
+        or suite.payload["coverage_plan"] != plan.payload["coverage_plan"]
+        or suite.payload["requirement_analysis"] != plan.payload["requirement_analysis"]
     ):
         raise _unavailable()
     scenarios = {scenario.id: scenario for group in groups for scenario in group.scenarios}
@@ -253,8 +298,8 @@ def _validate_draft(project, suite, lineage):
     return set(affected)
 
 
-def _verify_case_versions(transaction, client, project_doc, lineage, suite, affected):
-    source_id = lineage.draft_receipt["source_snapshot_ids"]["test_cases"]
+def _verify_case_versions(transaction, client, project_doc, draft_receipt, suite, affected):
+    source_id = draft_receipt["source_snapshot_ids"]["test_cases"]
     old = project_doc.collection("snapshots").document(source_id).get(transaction=transaction).to_dict()
     if (
         not old
@@ -299,6 +344,35 @@ def _verify_case_versions(transaction, client, project_doc, lineage, suite, affe
             raise _unavailable()
 
 
+def verify_original_sync_pair(transaction, client, project, project_doc, record, context, plan, suite, affected):
+    manifest, plan_receipt, draft_receipt = completed_sync_pair(project, record, context)
+    if not _snapshot_matches(
+        plan,
+        plan_receipt,
+        record,
+        manifest,
+        project.owner_user_id,
+        upstream=manifest.requirements_snapshot_id,
+        previous=_source_ids(plan_receipt["source_snapshot_ids"])["use_cases"],
+    ):
+        raise _unavailable()
+    _validate_original_snapshot(project, suite, record, manifest, draft_receipt, plan.snapshot_id)
+    for snapshot, receipt in ((plan, plan_receipt), (suite, draft_receipt)):
+        verify_completed_sync_stage(
+            transaction,
+            project_doc,
+            record,
+            snapshot.stage,
+            actor_id=project.owner_user_id,
+            snapshot_id=receipt["snapshot_id"],
+            result_revision=receipt["result_revision"],
+        )
+        persisted = project_doc.collection("snapshots").document(snapshot.snapshot_id).get(transaction=transaction, field_paths=("payload",)).to_dict()
+        if not persisted or persisted.get("payload") != snapshot.payload:
+            raise _unavailable()
+    _verify_case_versions(transaction, client, project_doc, draft_receipt, suite, affected)
+
+
 def verify_sync_review(client, project, suite, actor, *, transaction=None):
     """Verify public records, private completion receipts and raw version identities."""
     try:
@@ -317,13 +391,14 @@ def verify_sync_review(client, project, suite, actor, *, transaction=None):
             record = project_doc.collection("project_changes").document(lineage.record["id"]).get(transaction=tx).to_dict()
             if current.get("project_sync") != lineage.record or record != lineage.record or manifest_from_payload(current) != lineage.manifest:
                 raise _unavailable()
-            for snapshot, receipt in ((lineage.plan, lineage.plan_receipt), (suite, lineage.draft_receipt)):
-                verify_completed_sync_stage(
-                    tx, project_doc, record, snapshot.stage, actor_id=actor.sub, snapshot_id=receipt["snapshot_id"], result_revision=receipt["result_revision"]
-                )
-                persisted = project_doc.collection("snapshots").document(snapshot.snapshot_id).get(transaction=tx, field_paths=("payload",)).to_dict()
-                if not persisted or persisted.get("payload") != snapshot.payload:
-                    raise _unavailable()
+            context = project.current_snapshots["context"]
+            if lineage.rebind is not None:
+                from .project_sync_rebind import verify_rebound_history
+
+                old_plan, old_suite = verify_rebound_history(tx, project_doc, project, lineage.record, lineage.rebind, lineage.plan, suite)
+            else:
+                old_plan, old_suite = lineage.plan, suite
+            verify_original_sync_pair(tx, client, project, project_doc, record, context, old_plan, old_suite, affected)
             review = project_doc.collection("use_case_reviews").document(lineage.review["review_id"]).get(transaction=tx).to_dict()
             if (
                 not review
@@ -339,7 +414,6 @@ def verify_sync_review(client, project, suite, actor, *, transaction=None):
                 or review.get("continuation_options_fingerprint")
             ):
                 raise _unavailable()
-            _verify_case_versions(tx, client, project_doc, lineage, suite, affected)
             return lineage.binding(suite.payload["test_cases"]), lineage.manifest
 
         return read(transaction) if transaction is not None else projects.transactional(read)(client.transaction())

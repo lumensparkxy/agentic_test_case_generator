@@ -382,11 +382,23 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
             raise ProjectConflictError(application.result_project_revision)
         return get_project(project_id, actor=actor, _application_retry=True)
     sync = payload.get("project_sync")
+    material_review_required = False
+    pending_rebind = False
+    rebound = None
     if sync:
         from .project_inputs import manifest_from_payload
+        from .project_sync_rebind import material_requirements_review_required, material_scope_pending_rebind, public_sync_record
 
-        if sync.get("input_manifest") != manifest_from_payload(payload).model_dump(mode="json"):
+        rebound = sync.get("review_rebind")
+        if not isinstance(rebound, dict):
+            rebound = None
+        expected_inputs = rebound.get("input_manifest") if rebound else sync.get("input_manifest")
+        if expected_inputs != manifest_from_payload(payload).model_dump(mode="json"):
             sync = {**sync, "status": "superseded", "error": "Project sources changed. Review the current sources before starting another update."}
+        material_review_required = material_requirements_review_required(payload)
+        if baseline := current_snapshots.get("requirements"):
+            pending_rebind = material_scope_pending_rebind(payload, baseline.model_dump())
+        sync = public_sync_record(sync)
     from .export_evidence import design_delivery_enabled, reviewed_design_available
 
     detail = QaProjectDetail(
@@ -394,6 +406,8 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
         design_delivery_enabled=design_delivery_enabled(),
         testing_intent=payload.get("testing_intent"),
         project_sync=sync,
+        material_requirements_review_required=material_review_required,
+        material_scope_pending_rebind=pending_rebind,
         project_decisions=payload.get("project_decisions") or [],
         impact_application=application,
         **summary.model_dump(),
@@ -401,12 +415,12 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
         timeline=timeline[:100],
         execution_runs=execution_runs[:100],
     )
+    detail._project_sync_rebind = rebound
     if raw_test_suite is not None:
         from .suite_quality import resolve_suite_quality
+        from .project_sync_review import SYNC_REVIEW_OPERATIONS, sync_review_available
 
-        if raw_test_suite.operation == "project.sync.draft":
-            from .project_sync_review import sync_review_available
-
+        if raw_test_suite.operation in SYNC_REVIEW_OPERATIONS:
             view = detail.current_snapshots["test_cases"]
             view.metadata = {key: value for key, value in view.metadata.items() if key != "review_retry_available"}
             if sync_review_available(detail, raw_test_suite, actor):
