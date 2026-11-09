@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { seedAuthenticatedSession } from "./support/auth.js";
+import { expectNoDocumentOverflow, expectVisuallyContained } from "./support/layout.js";
 import {
 	USE_CASE_PROJECT_ID,
 	applyUseCaseReviewDecision,
@@ -65,7 +66,10 @@ function preparedPlan(project) {
 	return plan;
 }
 
-function saveSuite(project, { snapshotId = readySuiteId, sourceId = readyPlanId, title = readyTest, stale = false, version = 2 } = {}) {
+function saveSuite(
+	project,
+	{ snapshotId = readySuiteId, sourceId = readyPlanId, title = readyTest, stale = false, version = 2, cases } = {}
+) {
 	const reason = "Independent assessment provider unavailable; review is required.";
 	project.current_snapshots.test_cases = {
 		snapshot_id: snapshotId,
@@ -78,7 +82,9 @@ function saveSuite(project, { snapshotId = readySuiteId, sourceId = readyPlanId,
 		approved: false,
 		metadata: { review_retry_available: true },
 		payload: {
-			test_cases: [{ id: "TC-001", title, tags: ["REQ-101"], steps: [{ step: 1, action: "Submit payment", expected: testExpected }] }],
+			test_cases: cases ?? [
+				{ id: "TC-001", title, tags: ["REQ-101"], steps: [{ step: 1, action: "Submit payment", expected: testExpected }] },
+			],
 			review: { approved: false, score: 100, threshold: 90, blocking_issues: [reason], unmet_criteria: [] },
 			substantive_assessment: { status: "unknown", reason, diagnostics: { failure_reason: "provider_unavailable" } },
 			workflow_diagnostics: { status: "partial" },
@@ -98,6 +104,7 @@ async function fixture(
 		testsEnabled = prepared,
 		loseTestReply = false,
 		savedReview,
+		completedCases,
 	} = {}
 ) {
 	const project = prepared ? useCaseProjectFixture() : pendingProject();
@@ -113,10 +120,10 @@ async function fixture(
 				stale: true,
 				version: 1,
 			});
-		if (savedReview) {
+		if (savedReview || completedCases) {
 			Object.assign(project, applyUseCaseReviewDecision(project, { decision: "approve" }));
 			project.current_revision++;
-			saveSuite(project);
+			saveSuite(project, { cases: completedCases });
 		}
 	}
 	const other = useCaseProjectFixture({ project_id: "continuation-second-project", name: "Separate checkout", snapshot: null });
@@ -132,7 +139,18 @@ async function fixture(
 				result_snapshot_id: readyPlanId,
 			}
 		: priorRun || null;
-	let testRun = null;
+	let testRun = completedCases
+		? {
+				run_id: "checkout-test-generation",
+				stage: "generate_tests",
+				state: "completed",
+				project_revision: project.current_revision,
+				request_id: "checkout-scenario-approval",
+				reason: null,
+				source_snapshot_id: readyPlanId,
+				result_snapshot_id: readySuiteId,
+			}
+		: null;
 	let reviewAttempt = savedReview?.attempt || null;
 	let failSavedReviewStatus = false;
 	let hideTestRun = loseTestReply;
@@ -414,6 +432,17 @@ async function fixture(
 			project.current_revision++;
 			saveSuite(project);
 		},
+		advanceRevision: () => {
+			project.current_revision++;
+		},
+		markSuiteStale: () => {
+			project.current_revision++;
+			project.stage_state.test_cases.stale = true;
+		},
+		replaceSuite: (options) => {
+			project.current_revision++;
+			saveSuite(project, options);
+		},
 		interruptSavedReview: () => {
 			reviewAttempt = { ...reviewAttempt, state: "interrupted" };
 		},
@@ -433,6 +462,85 @@ test.describe("Recoverable approval continuation", () => {
 		process.env.E2E_PROJECT_WORKSPACES_V2 !== "true" || process.env.E2E_APPROVAL_CONTINUATION_ENABLED !== "true",
 		"Requires VITE_PROJECT_WORKSPACES_V2=true and VITE_APPROVAL_CONTINUATION_ENABLED=true"
 	);
+
+	test("opens an exact priority case in the current reader without discarding saved filters", async ({ page }, testInfo) => {
+		const cases = Array.from({ length: 200 }, (_, index) => {
+			const number = index + 1;
+			return {
+				id: `TC-${String(number).padStart(3, "0")}`,
+				title: number === 200 ? "Supervisor prevents an unauthorized high-value purchase" : `Verify checkout receipt ${number}`,
+				priority: number === 200 ? "Critical" : "Medium",
+				linked_requirement_ids: [number === 200 ? "REQ-202" : "REQ-101"],
+				steps: [{ step: 1, action: `Submit fixture purchase ${number}`, expected: `Recorded outcome for fixture purchase ${number}` }],
+			};
+		});
+		const target = cases.at(-1);
+		const api = await fixture(page, { prepared: true, completedCases: cases });
+		const sections = page.getByRole("navigation", { name: "Workspace sections", exact: true });
+		const queue = testProgress(page).getByRole("list", { name: "Priority saved tests", exact: true });
+		const directCase = queue.getByRole("link", { name: new RegExp(`${target.id}.*${target.title}`) });
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		const caseHeading = reader.getByRole("heading", { name: target.title, exact: true });
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		const filter = "Verify checkout receipt 1";
+		await page.setViewportSize({ width: 1366, height: 900 });
+		await page.goto(`${root}/review/tests`);
+		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
+		await search.fill(filter);
+		await sections.getByRole("link", { name: "Scenarios", exact: true }).click();
+		await expect(queue.getByRole("link")).toHaveCount(6);
+		await expect(directCase).toBeVisible();
+		const share = new URL(await directCase.getAttribute("href"), page.url());
+		expect(Object.fromEntries(share.searchParams)).toEqual({ suite: readySuiteId, case: target.id });
+		await expect(openTests(page)).toBeVisible();
+		await expectVisuallyContained(queue, testProgress(page));
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1366);
+		await page.screenshot({ path: testInfo.outputPath("priority-saved-tests.png") });
+
+		await directCase.press("Enter");
+		await expect(page).toHaveURL(`${root}/review/tests`);
+		await expect(caseHeading).toBeFocused();
+		await expect(reader).toContainText(target.steps[0].expected);
+		await expect(search).toHaveValue(filter);
+		await expect(reader).toContainText("This case is outside the current filters.");
+		await expect(reader.getByRole("button", { name: "Report a problem", exact: true })).toBeEnabled();
+		await expect(page.getByRole("tab", { name: /Traceability Matrix/ })).toBeVisible();
+		await expect(page.getByRole("tab", { name: /Improve tests/ })).toBeVisible();
+		await expectNoDocumentOverflow(page, "Selected priority case");
+		await page.screenshot({ path: testInfo.outputPath("priority-saved-case-reader.png") });
+
+		await page.goBack();
+		await expect(page).toHaveURL(`${root}/review/scenarios`);
+		await expect(directCase).toBeVisible();
+		await page.goForward();
+		await expect(caseHeading).toBeFocused();
+		await expect(search).toHaveValue(filter);
+
+		await page.goBack();
+		api.advanceRevision();
+		await page.reload();
+		await expect(directCase).toBeVisible();
+		api.markSuiteStale();
+		await page.reload();
+		await expect(testProgress(page)).toContainText("A test suite was saved. Check test generation status to load the current evidence.");
+		await expect(queue).toHaveCount(0);
+		await expect(openTests(page)).toHaveCount(0);
+
+		const replacement = { ...target, title: "Replacement case with the same identifier" };
+		api.replaceSuite({ snapshotId: "checkout-replacement-suite", version: 3, cases: [replacement] });
+		await page.reload();
+		await expect(testProgress(page)).toContainText("A test suite was saved. Check test generation status to load the current evidence.");
+		await expect(queue).toHaveCount(0);
+		await page.goForward();
+		await expect(page).toHaveURL(`${root}/review/tests`);
+		await expect(page.locator("#main-content")).toBeFocused();
+		await expect(caseHeading).toHaveCount(0);
+		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
+		await expect(reader.getByRole("heading", { name: replacement.title, exact: true })).toBeVisible();
+		expect(api.writes).toEqual([]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
 
 	test("recovers a lost approval acknowledgement and opens the exact prepared plan without another write", async ({ page }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });

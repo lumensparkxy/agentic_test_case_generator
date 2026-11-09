@@ -23,6 +23,7 @@ import ProjectWorkspaceNavigation from "./components/layout/ProjectWorkspaceNavi
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
 import SuiteQualitySummary, { findExactSuiteRun } from "./components/generation/SuiteQualitySummary";
+import { findActiveSavedCase, prioritySavedCases } from "./components/generation/prioritySavedCases";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browserPopupRedirectResolver, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
@@ -793,6 +794,28 @@ export default function App() {
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
 	const savedSuite = projectSnapshots.test_cases;
+	const [priorityCaseState, setPriorityCaseState] = useState(null);
+	const caseEntryState = priorityCaseState?.location === location ? priorityCaseState : null;
+	const requestedPriorityCase = location.state?.priorityTestCase;
+	const priorityCase =
+		APPROVAL_CONTINUATION_ENABLED &&
+		!caseEntryState?.dismissed &&
+		!viewingSavedCase &&
+		route.kind === "project" &&
+		route.destination === PROJECT_DESTINATIONS.TEST_CASES &&
+		currentProjectId === route.projectId &&
+		currentUser?.sub &&
+		requestedPriorityCase?.identity === currentUser.sub &&
+		requestedPriorityCase.projectId === currentProjectId &&
+		requestedPriorityCase.snapshotId === savedSuite?.snapshot_id &&
+		savedSuite?.project_id === currentProjectId &&
+		testCaseStageState.current_snapshot_id === savedSuite.snapshot_id &&
+		!testCaseStageState.stale
+			? findActiveSavedCase(savedSuite, requestedPriorityCase.caseId)
+			: null;
+	const openingPriorityCase = Boolean(priorityCase && !caseEntryState?.opened);
+	const keepPriorityCaseFocus = useRef(false);
+	keepPriorityCaseFocus.current = Boolean(priorityCase);
 	const traceabilityCase =
 		restoredTraceabilityLocation !== location &&
 		!viewingSavedCase &&
@@ -804,7 +827,7 @@ export default function App() {
 		traceabilityCase && snapshotId && traceabilityCase.projectId === projectId && traceabilityCase.snapshotId === snapshotId;
 	const traceabilityReturn =
 		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
-	const activeGenerateResultTab = traceabilityReturn ? "traceability" : selectedGenerateResultTab;
+	const activeGenerateResultTab = openingPriorityCase ? "test-cases" : traceabilityReturn ? "traceability" : selectedGenerateResultTab;
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const savedSuiteReviewPending =
 		persistedTestCaseCount > 0 &&
@@ -864,6 +887,8 @@ export default function App() {
 	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
 	const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
+	const selectedPriorityCaseExpired =
+		caseEntryState?.opened && !caseEntryState.dismissed && requestedPriorityCase?.caseId === selectedTestCaseId && !priorityCase;
 	const [findingCaseSelection, setFindingCaseSelection] = useState(null);
 	const [reviewCaseScope, setReviewCaseScope] = useState(null);
 
@@ -891,11 +916,21 @@ export default function App() {
 	}, [sourceCaseSnapshot]);
 	useEffect(() => {
 		if (focusResultContent.current) {
-			document.getElementById("generate-result-panel")?.focus();
+			if (!openingPriorityCase) document.getElementById("generate-result-panel")?.focus();
 			focusResultContent.current = false;
 		}
-	}, [activeGenerateResultTab]);
+	}, [activeGenerateResultTab, openingPriorityCase]);
+	const dismissPriorityCase = () => {
+		if (priorityCase) setPriorityCaseState({ location, opened: true, dismissed: true });
+	};
+	const finishPriorityCaseEntry = () => {
+		if (!priorityCase) return;
+		setSelectedTestCaseId(priorityCase.id);
+		setActiveGenerateResultTab("test-cases");
+		setPriorityCaseState({ location, opened: true });
+	};
 	const openCaseResults = (id = null, group = null, { fromFinding = false } = {}) => {
+		dismissPriorityCase();
 		setSelectedTestCaseId(id);
 		setFindingCaseSelection(fromFinding ? { id, source: sourceCaseSnapshot } : null);
 		setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
@@ -1657,8 +1692,11 @@ export default function App() {
 		if (!replacingFocusedLoader && !pendingRouteFocusRef.current) return;
 		const main = document.getElementById("main-content");
 		if (!main || main.dataset.workspaceModulePending) return;
-		if (document.activeElement === main) main.blur();
-		main.focus();
+		const caseFocus = keepPriorityCaseFocus.current && document.activeElement?.closest("#selected-test-case");
+		if (!caseFocus || !main.contains(caseFocus)) {
+			if (document.activeElement === main) main.blur();
+			main.focus();
+		}
 		pendingRouteFocusRef.current = false;
 	}, []);
 
@@ -1781,7 +1819,9 @@ export default function App() {
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
-		if (!isTraceabilityReturn(project?.project_id, snapshots.test_cases?.snapshot_id)) {
+		const keepsPriorityCase =
+			priorityCase && project?.project_id === currentProjectId && snapshots.test_cases?.snapshot_id === savedSuite?.snapshot_id;
+		if (!keepsPriorityCase && !isTraceabilityReturn(project?.project_id, snapshots.test_cases?.snapshot_id)) {
 			setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
 		}
 		resetExportWorkflowState();
@@ -4569,6 +4609,38 @@ export default function App() {
 			(run) => run.stage === "prepare_scenarios" && run.state === "awaiting_user" && run.result_snapshot_id === preparedScenarioId
 		) &&
 		!approvalContinuation.runs.some((run) => run.stage === "generate_tests" && run.source_snapshot_id === preparedScenarioId);
+	const continuationResultCurrent =
+		approvalContinuation.run?.result_snapshot_id === projectSnapshots[continuationResultStage]?.snapshot_id &&
+		!projectStageState[continuationResultStage]?.stale;
+	const canOpenPriorityCases =
+		APPROVAL_CONTINUATION_ENABLED &&
+		route.workspace === "review" &&
+		route.section === "scenarios" &&
+		navigationProjectId === currentProjectId &&
+		currentUser?.sub &&
+		!approvalContinuation.unresolved &&
+		!approvalContinuation.blockedReason &&
+		approvalContinuation.run?.stage === "generate_tests" &&
+		approvalContinuation.run.state === "completed" &&
+		Boolean(approvalContinuation.run.result_snapshot_id) &&
+		continuationResultCurrent &&
+		savedSuite?.project_id === currentProjectId &&
+		testCaseStageState.current_snapshot_id === savedSuite.snapshot_id;
+	const priorityCases = useMemo(() => (canOpenPriorityCases ? prioritySavedCases(savedSuite) : []), [canOpenPriorityCases, savedSuite]);
+	const openPriorityCase = (caseId) => {
+		if (!priorityCases.some((item) => item.id === caseId)) return;
+		GeneratedTestCasesView.preload();
+		navigate(testsPath, {
+			state: {
+				priorityTestCase: {
+					identity: currentUser.sub,
+					projectId: currentProjectId,
+					snapshotId: savedSuite.snapshot_id,
+					caseId,
+				},
+			},
+		});
+	};
 	const continuationPanel = APPROVAL_CONTINUATION_ENABLED ? (
 		<ApprovalContinuationPanel
 			continuation={approvalContinuation}
@@ -4582,10 +4654,10 @@ export default function App() {
 					void refreshCurrentProject({ hydrate: true, operationScope });
 			}}
 			saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
-			resultCurrent={
-				approvalContinuation.run?.result_snapshot_id === projectSnapshots[continuationResultStage]?.snapshot_id &&
-				!projectStageState[continuationResultStage]?.stale
-			}
+			resultCurrent={continuationResultCurrent}
+			projectId={currentProjectId}
+			priorityCases={priorityCases}
+			onOpenPriorityCase={openPriorityCase}
 		/>
 	) : null;
 	const proposedScopeApproval =
@@ -6197,10 +6269,14 @@ export default function App() {
 																	qualityIssues={testCaseReview?.blocking_issues || []}
 																	requirements={requirements}
 																	substantiveAssessment={substantiveAssessment}
-																	selectedId={selectedTestCaseId}
+																	selectedId={selectedPriorityCaseExpired ? null : selectedTestCaseId}
 																	setSelectedId={setSelectedTestCaseId}
 																	findingCaseId={findingCaseSelection?.source === sourceCaseSnapshot ? findingCaseSelection.id : null}
 																	onDismissFindingCase={() => setFindingCaseSelection(null)}
+																	priorityCaseId={priorityCase?.id}
+																	focusPriorityCase={openingPriorityCase}
+																	onPriorityCaseOpened={finishPriorityCaseEntry}
+																	onDismissPriorityCase={dismissPriorityCase}
 																/>
 																<div className="workbench-support">
 																	{guidanceSummary("test_cases")}

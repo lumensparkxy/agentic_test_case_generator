@@ -384,9 +384,17 @@ saved plan and test cases matched the frozen fixture. The reviewer made both
 approvals, selected the non-default case TC-202 and reached enabled JSON
 export. A separate export inspection matched the two saved cases. The
 recorded core span was 5.902 seconds including scripted polling and
-screenshots. These are mocked timings. The action count remains above the
-seven-action threshold. Direct selection of a saved case from the completed
-generation status is a P5 candidate for the remaining action.
+screenshots. The eight-action path remained above the seven-action threshold.
+
+At P5a, the paired replay took **7 actions** and four workbench transitions,
+a **36.4% reduction** from P0. Choosing TC-202 directly from the completed
+result opened the editable reader and focused the case. Both approvals
+remained explicit. The four frozen content hashes matched. The mock suite
+envelope includes its project ID to reflect the existing server contract.
+The separate JSON download matched both saved cases, including literal
+test data. The scripted core span was 5.916 seconds and the seven action
+blocks took 0.764 seconds. These timings include fixture and automation
+work. Practitioner time and live waiting require separate evidence.
 
 [The frozen evaluation protocol](test-case-generator-2-evaluation.md) defines
 the corpus, measurement rules and thresholds for the paired comparison.
@@ -417,15 +425,21 @@ P4a binds independent design evidence to the exact saved suite (commit
 P4b adds explicit reviewed-design file delivery (commit `2ee40a4`,
 [PR #470](https://github.com/lumensparkxy/agentic_test_case_generator/pull/470)).
 P4c exposes exact suite quality, reviewed-design delivery eligibility and
-saved report classification in Review, Deliver and project status under
-[#471](https://github.com/lumensparkxy/agentic_test_case_generator/issues/471).
+saved report classification in Review, Deliver and project status (commit
+`fb6a06d`, [PR #472](https://github.com/lumensparkxy/agentic_test_case_generator/pull/472)).
 The browser fixture exports an exact manual design while browser setup
 is blocked. Unknown, stale and legacy evidence retains its existing
 export gate. Exact historical case and run links remain available. P7
 still owns opening the exact historical file report from its index row.
-Next is direct case selection and focused test review, followed by
-targeted repair under shared admission. Direct draft producers remain
-a release gate.
+P5a opens priority cases from the exact completed suite under
+[#473](https://github.com/lumensparkxy/agentic_test_case_generator/issues/473).
+The desktop browser verifies a 200-case suite, saved filters, keyboard
+focus, Back and Forward, stale/replaced suites, and existing case links.
+Next is targeted repair under shared admission. Direct draft producers
+remain a release gate. P6 error analysis found prior Booking gaps covered
+by existing regression checks and no verified new prompt change. The
+next quality packet needs a credential-free rehearsal of the paired
+workbench and hard provider transport limits.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

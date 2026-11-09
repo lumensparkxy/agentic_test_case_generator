@@ -93,6 +93,10 @@ export default function GeneratedTestCasesView({
 	setSelectedId,
 	findingCaseId,
 	onDismissFindingCase,
+	priorityCaseId,
+	focusPriorityCase = false,
+	onPriorityCaseOpened,
+	onDismissPriorityCase,
 	qualityIssues = [],
 	requirements = [],
 	substantiveAssessment = null,
@@ -109,8 +113,12 @@ export default function GeneratedTestCasesView({
 		initialValue: { query: "", selectedId: "", scrollTop: 0, changedIds: null },
 	});
 	const query = recovery.value.query ?? "";
-	const setQuery = (query) => {
+	const dismissOpenedCase = () => {
+		if (priorityCaseId) onDismissPriorityCase();
 		if (findingCaseId) onDismissFindingCase();
+	};
+	const setQuery = (query) => {
+		dismissOpenedCase();
 		recovery.setValue((old) => ({ ...old, query }));
 	};
 	const listRef = useRef(null);
@@ -135,7 +143,7 @@ export default function GeneratedTestCasesView({
 	const activeFilterCount = Number(Boolean(priority)) + Number(Boolean(automationIntent));
 	const hasCaseFilters = activeFilterCount > 0;
 	const saveFilters = (filters, clearSearch = false) => {
-		if (findingCaseId) onDismissFindingCase();
+		dismissOpenedCase();
 		recovery.setValue((old) => ({
 			...old,
 			query: clearSearch ? "" : old.query,
@@ -172,14 +180,15 @@ export default function GeneratedTestCasesView({
 		});
 	}, [testCases, groupIds, visibleChanges, priority, automationIntent, normalizedQuery]);
 	const findingCase = findingCaseId ? testCases.find((tc) => tc.id === findingCaseId) : null;
+	const priorityCase = priorityCaseId ? testCases.find((tc) => tc.id === priorityCaseId) : null;
 	const selected = singleCase
 		? testCases[0]
-		: findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
+		: priorityCase || findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
 	const selectedIndex = singleCase ? -1 : cases.indexOf(selected);
 	const resolveCasePath = useMemo(() => createSavedCasePathResolver(projectId, savedSuite), [projectId, savedSuite]);
 	const sharePath = useMemo(() => exactCasePath || resolveCasePath(selected), [exactCasePath, resolveCasePath, selected]);
 	const selectCase = (id) => {
-		if (findingCaseId) onDismissFindingCase();
+		dismissOpenedCase();
 		setSelectedId(id);
 		recovery.setValue((old) => ({ ...old, selectedId: id }));
 	};
@@ -187,6 +196,12 @@ export default function GeneratedTestCasesView({
 		titleRef.current?.focus({ preventScroll: true });
 		detailRef.current?.scrollIntoView({ block: "start", behavior: "instant" });
 	}, []);
+	useLayoutEffect(() => {
+		if (!focusPriorityCase || !priorityCase || !titleRef.current) return;
+		recovery.setValue((old) => ({ ...old, selectedId: priorityCase.id }));
+		focusSelectedCase();
+		onPriorityCaseOpened();
+	}, [focusPriorityCase, priorityCase?.id, focusSelectedCase]);
 	const moveToCase = (index) => {
 		const next = cases[index];
 		if (!next) return;
@@ -344,8 +359,12 @@ export default function GeneratedTestCasesView({
 				<section ref={detailRef} className="test-review-detail" id="selected-test-case" aria-label="Selected test case" aria-live="polite">
 					{selected ? (
 						<>
-							{findingCase && selectedIndex < 0 && (
-								<p className="test-detail-meta">Opened from Improve tests. This case is outside the current filters.</p>
+							{(priorityCase || findingCase) && selectedIndex < 0 && (
+								<p className="test-detail-meta">
+									{priorityCase
+										? "Opened from the generation result. This case is outside the current filters."
+										: "Opened from Improve tests. This case is outside the current filters."}
+								</p>
 							)}
 							<div className="test-case-identity">
 								<Badge icon={null} tone="info" className="case-id">

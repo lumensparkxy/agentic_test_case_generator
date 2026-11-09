@@ -1,6 +1,9 @@
 import RouteLink from "../../app/RouteLink";
+import { buildSavedCasePath } from "../../app/savedCaseLinks";
+import { List, ListItem } from "../ui/collections";
 import { Button } from "../ui/controls";
 import { Surface } from "../ui/surfaces";
+import "./ApprovalContinuationPanel.css";
 
 const SCENARIO_STATUS = {
 	queued: "Scope approved. Scenario preparation is queued.",
@@ -32,7 +35,18 @@ const BLOCKER = {
 	journey_budget_exhausted: "The automatic request budget for this scenario plan has been allocated.",
 };
 
-export default function ApprovalContinuationPanel({ continuation, scenariosPath, testsPath, navigate, onCheck, saving, resultCurrent }) {
+export default function ApprovalContinuationPanel({
+	continuation,
+	scenariosPath,
+	testsPath,
+	navigate,
+	onCheck,
+	saving,
+	resultCurrent,
+	projectId,
+	priorityCases = [],
+	onOpenPriorityCase,
+}) {
 	const { run, active, unresolved, blockedReason, error, cancelling, cancel, stage } = continuation;
 	if (!run && !unresolved && !blockedReason && !error && !saving) return null;
 
@@ -79,6 +93,25 @@ export default function ApprovalContinuationPanel({ continuation, scenariosPath,
 					</RouteLink>
 				)}
 			</div>
+			{generatingTests && resultReady && resultCurrent && priorityCases.length > 0 && (
+				<div>
+					<h3 className="section-subtitle">Priority saved tests</h3>
+					<List className="priority-saved-tests" variant="grouped" role="list" aria-label="Priority saved tests">
+						{priorityCases.map((item) => (
+							<ListItem key={item.id}>
+								<RouteLink
+									to={buildSavedCasePath(projectId, run.result_snapshot_id, item.id)}
+									navigate={() => onOpenPriorityCase(item.id)}
+									aria-label={`${item.id} ${item.title}`}
+								>
+									<strong>{item.id}</strong>
+									{item.title}
+								</RouteLink>
+							</ListItem>
+						))}
+					</List>
+				</div>
+			)}
 		</Surface>
 	);
 }

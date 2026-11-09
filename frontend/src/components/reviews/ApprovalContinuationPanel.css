@@ -1,0 +1,32 @@
+.priority-saved-tests {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+	gap: 0.4rem 0.8rem;
+}
+
+.priority-saved-tests > li {
+	min-width: 0;
+}
+
+.priority-saved-tests a {
+	display: block;
+	box-sizing: border-box;
+	height: 100%;
+	padding: 0.35rem 0.55rem;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background: var(--card-bg);
+	color: var(--text-main);
+	overflow-wrap: anywhere;
+	text-decoration: none;
+}
+
+.priority-saved-tests a:hover {
+	border-color: var(--primary);
+	background: var(--primary-tonal);
+}
+
+.priority-saved-tests strong {
+	margin-inline-end: 0.4rem;
+	color: var(--primary-strong);
+}
