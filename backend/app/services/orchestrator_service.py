@@ -16,11 +16,14 @@ from ..models import (
     OrchestratorStatusResponse,
     ProjectStageName,
     QaProjectDetail,
+    QaProjectStageSnapshot,
     QaProjectStageState,
 )
 from ..agents.specialist_registry import agent_contract_metadata_for_action
-from .execution_readiness import PREVIEW_SOURCE_BLOCKER_CODES
+from .execution_readiness import PREVIEW_SOURCE_BLOCKER_CODES, preview_has_verified_receipt
 from .workflow_project_service import get_project
+
+_PREVIEW_EVIDENCE_BLOCKER_CODES = PREVIEW_SOURCE_BLOCKER_CODES | {"incomplete_suite", "stale_source"}
 
 ORCHESTRATOR_STAGES: tuple[OrchestratorStageName, ...] = (
     "requirements",
@@ -208,62 +211,79 @@ def _impact_apply_blockers(project: QaProjectDetail) -> list[OrchestratorBlocker
     return blockers
 
 
-def _latest_execution_status(project: QaProjectDetail) -> Optional[str]:
-    if project.execution_runs:
-        return str(project.execution_runs[0].status or "").lower()
-    execution_state = _project_state(project, "execution")
-    if execution_state and execution_state.metadata.get("status"):
-        return str(execution_state.metadata.get("status") or "").lower()
-    payload = _snapshot_payload(project, "execution")
-    if payload.get("status"):
-        return str(payload.get("status") or "").lower()
-    return None
-
-
-def _execution_operation(project: QaProjectDetail) -> Optional[str]:
-    execution_state = _project_state(project, "execution")
-    if execution_state and execution_state.operation:
-        return execution_state.operation
-    snapshot = project.current_snapshots.get("execution")
-    return snapshot.operation if snapshot else None
-
-
-def _execution_preview_action(project: QaProjectDetail, test_snapshot_id: Optional[str]) -> Literal["automate", "execute", "report"]:
+def _current_execution_snapshot(project: QaProjectDetail) -> Optional[QaProjectStageSnapshot]:
     state = _project_state(project, "execution")
-    if state and state.stale:
-        return "automate"
-    preview = project.current_snapshots.get("execution")
-    if not preview or not state:
-        return "execute"
-    if state.current_snapshot_id != preview.snapshot_id or preview.operation != "automation.execution.preview":
-        return "automate"
-    source_snapshot_id = preview.source_snapshot_id
-    if source_snapshot_id and source_snapshot_id != test_snapshot_id:
-        return "automate"
+    snapshot = project.current_snapshots.get("execution")
+    if not state or state.stale or not snapshot or state.current_snapshot_id != snapshot.snapshot_id:
+        return None
+    if snapshot.metadata.get("historical"):
+        return None
+    tests = _project_state(project, "test_cases")
+    if snapshot.source_snapshot_id and (not tests or tests.stale or tests.current_snapshot_id != snapshot.source_snapshot_id):
+        return None
+    return snapshot
+
+
+def _current_execution_status(project: QaProjectDetail) -> Optional[str]:
+    snapshot = _current_execution_snapshot(project)
+    if not snapshot or snapshot.operation != "automation.execution.run":
+        return None
+    state = _project_state(project, "execution")
+    status = snapshot.payload.get("status") or snapshot.metadata.get("status") or state.metadata.get("status")
+    if not status:
+        run = next(
+            (
+                run
+                for run in project.execution_runs
+                if not run.historical and run.snapshot_id == snapshot.snapshot_id and run.source_snapshot_id == snapshot.source_snapshot_id
+            ),
+            None,
+        )
+        status = run.status if run else None
+    return status.lower() if isinstance(status, str) else None
+
+
+def _execution_preview_action(preview: QaProjectStageSnapshot) -> Literal["automate", "execute", "report"]:
     readiness = preview.payload.get("readiness")
     blockers = readiness.get("blockers") if isinstance(readiness, dict) else None
     if isinstance(blockers, list) and any(
-        isinstance(blocker, dict) and isinstance(blocker.get("code"), str) and blocker["code"] in PREVIEW_SOURCE_BLOCKER_CODES for blocker in blockers
+        isinstance(blocker, dict) and isinstance(blocker.get("code"), str) and blocker["code"] in _PREVIEW_EVIDENCE_BLOCKER_CODES for blocker in blockers
+    ):
+        return "automate"
+    warnings = preview.payload.get("warnings")
+    if preview.payload.get("reviewed_full_suite") is False or (
+        isinstance(warnings, list)
+        and any(
+            isinstance(warning, str) and warning.startswith("Only the first") and warning.endswith("test cases were reviewed for execution.")
+            for warning in warnings
+        )
     ):
         return "automate"
 
     summary = preview.payload.get("summary")
     counts = preview.payload.get("candidate_counts")
     candidates = preview.payload.get("candidates")
-    if not isinstance(summary, dict) or not isinstance(counts, dict) or not isinstance(candidates, dict):
-        # Older previews may not retain candidate groups. Keep the existing path.
-        return "execute"
+    verified = preview_has_verified_receipt(preview.metadata)
+    readiness_blocked = isinstance(readiness, dict) and readiness.get("run_allowed") is False
+    if counts is None and not verified:
+        executable = summary.get("executable") if isinstance(summary, dict) else None
+        return "execute" if not readiness_blocked and type(executable) is int and executable > 0 else "automate"
+    if not isinstance(summary, dict) or not isinstance(counts, dict) or (not verified and not isinstance(candidates, dict)):
+        return "automate"
     for bucket in ("executable", "manual", "unsupported", "invalid"):
-        items = candidates.get(bucket)
         count = counts.get(bucket)
-        if not isinstance(items, list) or type(count) is not int or type(summary.get(bucket)) is not int:
+        if type(count) is not int or count < 0 or type(summary.get(bucket)) is not int or summary[bucket] != count:
             return "automate"
-        if count != len(items) or summary[bucket] != count:
-            return "automate"
+        if not verified:
+            items = candidates.get(bucket)
+            if not isinstance(items, list) or count != len(items):
+                return "automate"
 
-    if source_snapshot_id and summary["executable"] == 0:
-        return "report"
-    return "execute"
+    if summary["executable"] == 0:
+        return "report" if preview.source_snapshot_id else "automate"
+    if verified and (not preview.source_snapshot_id or not isinstance(readiness, dict) or readiness.get("run_allowed") is not True):
+        return "automate"
+    return "automate" if readiness_blocked else "execute"
 
 
 def _changed_upstream_stages(project: QaProjectDetail) -> list[OrchestratorStageName]:
@@ -293,7 +313,7 @@ def _changed_upstream_stages(project: QaProjectDetail) -> list[OrchestratorStage
     return changed
 
 
-def _real_stage_status(stage: ProjectStageName, state: Optional[QaProjectStageState]) -> OrchestratorStageStatus:
+def _real_stage_status(project: QaProjectDetail, stage: ProjectStageName, state: Optional[QaProjectStageState]) -> OrchestratorStageStatus:
     if state is None or not state.current_snapshot_id:
         return "not_started"
     if state.stale:
@@ -301,10 +321,9 @@ def _real_stage_status(stage: ProjectStageName, state: Optional[QaProjectStageSt
     if stage == "impact_analysis":
         return "completed"
     if stage == "execution":
-        status_value = str(state.metadata.get("status") or "").lower()
-        if status_value == "failed":
+        if _current_execution_status(project) == "failed":
             return "failed"
-        if state.operation == "automation.execution.preview":
+        if state.operation == "automation.execution.preview" or _current_execution_snapshot(project) is None:
             return "ready"
     if stage == "use_cases" and not _use_cases_human_approved(state):
         return "attention_required"
@@ -315,7 +334,7 @@ def _real_stage_status(stage: ProjectStageName, state: Optional[QaProjectStageSt
 
 def _real_stage(project: QaProjectDetail, stage: ProjectStageName) -> OrchestratorStageState:
     state = _project_state(project, stage)
-    status = _real_stage_status(stage, state)
+    status = _real_stage_status(project, stage, state)
     blockers: list[OrchestratorBlocker] = []
     if state and state.stale:
         blockers.append(
@@ -350,7 +369,8 @@ def _real_stage(project: QaProjectDetail, stage: ProjectStageName) -> Orchestrat
 
 def _automation_stage(project: QaProjectDetail) -> OrchestratorStageState:
     test_case_state = _project_state(project, "test_cases")
-    operation = _execution_operation(project)
+    snapshot = _current_execution_snapshot(project)
+    operation = snapshot.operation if snapshot else None
     blockers: list[OrchestratorBlocker] = []
     test_case_metadata = dict(test_case_state.metadata or {}) if test_case_state else {}
     if operation in {"automation.execution.preview", "automation.execution.run"}:
@@ -397,12 +417,12 @@ def _automation_stage(project: QaProjectDetail) -> OrchestratorStageState:
 
 def _review_stage(project: QaProjectDetail) -> OrchestratorStageState:
     blockers = _review_blockers(project)
-    execution_status = _latest_execution_status(project)
+    execution_status = _current_execution_status(project)
     if execution_status == "failed":
         blockers.append(
             _blocker(
                 "failed_execution",
-                "Latest execution failed and requires review before reporting.",
+                "The current execution failed and requires review before reporting.",
                 stage="review",
                 source_stage="execution",
             )
@@ -501,7 +521,6 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
     use_cases_state = _project_state(project, "use_cases")
     impact_state = _project_state(project, "impact_analysis")
     test_case_state = _project_state(project, "test_cases")
-    execution_state = _project_state(project, "execution")
     reports_state = _project_state(project, "reports")
     generation_blockers = _approval_blockers_for_generation(project)
     full_regenerate_blockers = _approval_blockers_for_generation(project, require_approved_use_cases=False)
@@ -602,13 +621,10 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
             actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    preview_action = (
-        _execution_preview_action(project, test_case_state.current_snapshot_id)
-        if test_case_state and _execution_operation(project) == "automation.execution.preview"
-        else None
-    )
-    # A saved manual-only suite can report even if it predates the Use Cases stage.
-    if (not use_cases_state or not use_cases_state.current_snapshot_id) and preview_action != "report":
+    execution = _current_execution_snapshot(project)
+    preview_action = _execution_preview_action(execution) if test_case_state and execution and execution.operation == "automation.execution.preview" else None
+    # An existing suite can continue through execution or reporting even if it predates Use Cases.
+    if not has_baseline_test_suite and (not use_cases_state or not use_cases_state.current_snapshot_id):
         actions.append(
             _action(
                 "generate",
@@ -679,7 +695,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    execution_status = _latest_execution_status(project)
+    execution_status = _current_execution_status(project)
     report_stale = bool(reports_state and reports_state.current_snapshot_id and reports_state.stale)
     if execution_status == "failed":
         actions.append(
@@ -687,7 +703,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 "review",
                 "Review Failed Execution",
                 "review",
-                reason="The latest execution failed and should be reviewed before reporting.",
+                reason="The current execution failed and should be reviewed before reporting.",
                 primary=True,
             )
         )
@@ -703,7 +719,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    if report_stale:
+    if report_stale and preview_action is None:
         actions.append(
             _action(
                 "report",
@@ -730,7 +746,11 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
             actions.append(
                 _action(
                     "report",
-                    "Review Reports" if reports_state and reports_state.current_snapshot_id and reports_state.approved else "Create Test Case Report",
+                    "Regenerate Evidence Report"
+                    if report_stale
+                    else "Review Reports"
+                    if reports_state and reports_state.current_snapshot_id and reports_state.approved
+                    else "Create Test Case Report",
                     "reports",
                     reason="The current preview found zero executable candidates. Open Reports for test-case export options.",
                     primary=True,
@@ -751,7 +771,7 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
                 "review",
                 "Review Evidence",
                 "review",
-                reason="Review automation readiness and current coverage before execution.",
+                reason="Review automation readiness and current coverage.",
                 secondary=True,
             )
         )
@@ -780,13 +800,13 @@ def _build_actions(project: QaProjectDetail, *, has_baseline_test_suite: bool, u
         actions.append(_full_regenerate_action(full_regenerate_blockers))
         return actions
 
-    if preview_action == "automate" or not execution_state or not execution_state.current_snapshot_id:
+    if preview_action == "automate" or execution is None:
         actions.append(
             _action(
                 "automate",
                 "Preview Automation",
                 "automation",
-                reason="Refresh the preview to check the current test suite."
+                reason="Review the target and refresh execution readiness for the current test suite."
                 if preview_action == "automate"
                 else "Approved test cases are ready for automation preview.",
                 primary=True,

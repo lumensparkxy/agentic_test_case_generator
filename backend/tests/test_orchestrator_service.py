@@ -13,7 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.main import app, get_current_user
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
-from app.models import AuthUser, OrchestratorStatusResponse
+from app.models import AuthUser, OrchestratorStatusResponse, QaProjectExecutionRun
 from app.services.orchestrator_service import build_orchestrator_status, get_project_orchestrator_status
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 from app.services.workspace_summary_service import build_workspace_summary
@@ -514,10 +514,29 @@ class OrchestratorServiceTests(unittest.TestCase):
         project = self._seed_baseline_suite()
         test_snapshot_id = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
         for label, payload, source_id, stale, expected in (
-            ("legacy", {"summary": {}}, None, False, "execute"),
+            ("unclassified legacy preview", {"summary": {}}, None, False, "automate"),
             ("mismatch", {"summary": counts, "candidate_counts": counts, "candidates": {**buckets, "executable": [{}]}}, test_snapshot_id, False, "automate"),
             ("outdated source", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, "older-tests", False, "automate"),
             ("stale", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, test_snapshot_id, True, "automate"),
+            (
+                "partial classification",
+                {"summary": counts, "candidate_counts": counts, "candidates": buckets, "reviewed_full_suite": False},
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
+            (
+                "legacy classification limit",
+                {
+                    "summary": counts,
+                    "candidate_counts": counts,
+                    "candidates": buckets,
+                    "warnings": ["Only the first 1 test cases were reviewed for execution."],
+                },
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
             (
                 "unverified saved cases",
                 {
@@ -525,6 +544,18 @@ class OrchestratorServiceTests(unittest.TestCase):
                     "candidate_counts": counts,
                     "candidates": buckets,
                     "readiness": {"run_allowed": False, "blockers": [{"code": "case_snapshot_mismatch", "message": "The cases could not be verified."}]},
+                },
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
+            (
+                "unfinished suite",
+                {
+                    "summary": counts,
+                    "candidate_counts": counts,
+                    "candidates": buckets,
+                    "readiness": {"run_allowed": False, "blockers": [{"code": "incomplete_suite", "message": "Resolve unfinished generation tasks."}]},
                 },
                 test_snapshot_id,
                 False,
@@ -547,6 +578,98 @@ class OrchestratorServiceTests(unittest.TestCase):
                 detail.stage_state["execution"].stale = stale
                 status = build_orchestrator_status(detail)
                 self.assertEqual(status.next_actions[0].action, expected)
+
+    def test_current_preview_outranks_failed_run_history_and_stale_report(self) -> None:
+        project = self._seed_baseline_suite()
+        suite = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        preview = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"summary": {"executable": 1}},
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="req-preview",
+            approved=True,
+            source_snapshot_id=suite,
+            title="Current execution preview",
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="reports",
+            payload={"format": "json"},
+            operation="export.json",
+            actor=self.actor,
+            request_id="req-report",
+            approved=True,
+            title="Older report",
+        )
+        detail = get_project(project.project_id, actor=self.actor)
+        detail.stage_state["reports"].stale = True
+        detail.execution_runs = [
+            QaProjectExecutionRun(
+                run_record_id="prior-failure",
+                project_id=detail.project_id,
+                run_id="run-failure",
+                target_environment="staging",
+                project_revision=preview.project_revision - 1,
+                status="failed",
+                snapshot_id="older-execution",
+                source_snapshot_id=suite,
+                actor_user_id=self.actor.sub,
+                created_at=preview.created_at,
+            )
+        ]
+        status = build_orchestrator_status(detail)
+        self.assertEqual(status.next_actions[0].action, "execute")
+        self.assertEqual(status.stages["reports"].status, "stale")
+        self.assertNotIn("failed_execution", [blocker.code for blocker in status.stages["review"].blockers])
+
+        detail.current_snapshots["execution"].payload["readiness"] = {"run_allowed": False, "blockers": [{"code": "target_required"}]}
+        status = build_orchestrator_status(detail)
+        self.assertEqual(status.next_actions[0].action, "automate")
+
+        detail.stage_state["execution"].stale = True
+        status = build_orchestrator_status(detail)
+        self.assertEqual(status.next_actions[0].label, "Regenerate Evidence Report")
+
+    def test_only_matching_current_run_record_can_report_execution_failure(self) -> None:
+        project = self._seed_baseline_suite()
+        suite = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "run-1"},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="req-run",
+            approved=False,
+            source_snapshot_id=suite,
+            title="Execution run",
+        )
+        detail = get_project(project.project_id, actor=self.actor)
+        run = QaProjectExecutionRun(
+            run_record_id="run-record-1",
+            project_id=detail.project_id,
+            run_id="run-1",
+            target_environment="staging",
+            project_revision=snapshot.project_revision,
+            status="failed",
+            snapshot_id=snapshot.snapshot_id,
+            source_snapshot_id=suite,
+            actor_user_id=self.actor.sub,
+            created_at=snapshot.created_at,
+        )
+        for changes in ({"snapshot_id": "older-run"}, {"source_snapshot_id": "older-suite"}, {"historical": True}):
+            with self.subTest(changes=changes):
+                detail.execution_runs = [run.model_copy(update=changes)]
+                status = build_orchestrator_status(detail)
+                self.assertNotEqual(status.stages["execution"].status, "failed")
+                self.assertNotIn("failed_execution", [blocker.code for blocker in status.stages["review"].blockers])
+
+        detail.execution_runs = [run]
+        self.assertEqual(build_orchestrator_status(detail).next_actions[0].label, "Review Failed Execution")
+        detail.stage_state["execution"].stale = True
+        self.assertEqual(build_orchestrator_status(detail).next_actions[0].action, "automate")
 
     def test_existing_approved_suite_without_use_cases_can_report_manual_preview(self) -> None:
         project = self._create_project()

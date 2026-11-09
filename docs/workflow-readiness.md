@@ -28,12 +28,18 @@ and the compiler returns the same evidence before returning the result again.
 This leaves the saved revision and usage unchanged. A prior preview remains
 visible during recovery, with Run disabled until a current preview is confirmed.
 
-A saved preview for the current approved test suite that consistently reports
-zero executable candidates leads to Reports. Test-case evidence can be exported
-for manual testing, including for saved suites that predate the Use Cases stage.
-Older previews with a recorded source or revision conflict prompt a fresh preview.
-The Reports navigation shows Complete for current approved evidence and Needs
-attention for draft or stale evidence, including after reload.
+Home and the project overview use the same current execution evidence. A ready
+preview for the approved test suite recommends Execute even when an earlier
+report is stale. A complete preview with zero executable candidates leads to
+Reports, including for approved suites that predate the Use Cases stage. A
+partial classification, inconsistent counts, or a blocked runnable preview
+leads back to Automation. Home reads compact preview facts and reads candidate
+buckets separately when an older preview needs them to verify its counts.
+
+A failed current run prompts evidence review. Earlier and historical failures
+remain available in Runs. A stale report with no newer preview still offers
+regeneration. The Reports navigation shows Complete for current approved
+evidence and Needs attention for draft or stale evidence, including after reload.
 
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,

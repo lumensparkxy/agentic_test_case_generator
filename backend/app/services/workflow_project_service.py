@@ -22,6 +22,7 @@ from .guidance_service import public_manifest
 from .scenario_review_state import carry_scenario_reviews
 from .audit_service import build_actor_snapshot
 from .execution_result_storage import execution_result_writes, restore_execution_results
+from .execution_readiness import preview_has_verified_receipt
 from .firestore_repository import get_required_firestore_collection, get_required_firestore_client
 
 QA_PROJECTS_COLLECTION = "qa_projects"
@@ -327,13 +328,22 @@ def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[Qa
 def _workspace_snapshot_for(project_id: str, snapshot_id: str, stage: ProjectStageName) -> Optional[QaProjectStageSnapshot]:
     # Coverage plans are arrays, so Firestore cannot project just nested scenario IDs.
     # Read the current use-case plan to count legacy artifacts without rewriting them.
-    fields = WORKSPACE_SNAPSHOT_FIELDS + (("payload.coverage_plan",) if stage == "use_cases" else ())
-    payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get(field_paths=fields))
+    fields = WORKSPACE_SNAPSHOT_FIELDS
+    if stage == "use_cases":
+        fields += ("payload.coverage_plan",)
+    if stage == "execution":
+        fields += ("payload.candidate_counts", "payload.readiness", "payload.reviewed_full_suite", "payload.warnings")
+    reference = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
+    payload = _document_to_dict(reference.get(field_paths=fields))
     if not payload:
         return None
     snapshot = QaProjectStageSnapshot.model_validate(payload)
     if snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id:
         return None
+    if snapshot.operation == "automation.execution.preview" and "candidate_counts" in snapshot.payload and not preview_has_verified_receipt(snapshot.metadata):
+        # Legacy counts need their compact bucket lists to establish a complete preview.
+        buckets = _document_to_dict(reference.get(field_paths=("payload.candidates",))) or {}
+        snapshot.payload.update(buckets.get("payload") or {})
     return snapshot
 
 
@@ -357,6 +367,7 @@ def _workspace_execution_runs(
                 "run_id",
                 "target_environment",
                 "project_revision",
+                "historical",
                 "test_case_count",
                 "status",
                 "summary",

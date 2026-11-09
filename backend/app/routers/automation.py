@@ -356,7 +356,10 @@ def _publish_execution_preview(payload, response, actor, request_id, run_id, key
         return append_stage_snapshot(
             project_id=payload.project_id,
             stage="execution",
-            payload=_preview_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
+            payload={
+                **_preview_project_payload(response, target_environment=target_environment, target_base_url=target_base_url),
+                "reviewed_full_suite": sum(counts.values()) == sum(case.status != "Deprecated" for case in payload.test_cases),
+            },
             operation=_PREVIEW_OPERATION,
             actor=actor,
             request_id=request_id,

@@ -22,6 +22,7 @@ from app.models import (
     QaProjectStageSnapshot,
     QaProjectStageState,
 )
+from app.services.orchestrator_service import build_orchestrator_status
 from app.services.workspace_summary_service import build_workspace_summary, get_workspace_summary
 from app.services.workflow_project_service import list_workspace_projects
 
@@ -137,6 +138,7 @@ class FakeDocument:
         self.query_log = query_log
 
     def get(self, field_paths: Optional[tuple[str, ...]] = None) -> FakeSnapshot:
+        self.query_log.append(("get", self.path, field_paths))
         payload = self.store.get(self.path)
         if payload is not None and field_paths is not None:
             projected = {}
@@ -352,6 +354,65 @@ class WorkspaceSummaryServiceTests(unittest.TestCase):
                     self.assertEqual(result.continue_working.count, expected_count)
                     self.assertNotIn("coverage_plan", item.model_dump())
                     self.assertNotIn("private_unneeded_payload", projects[0].current_snapshots["use_cases"].payload)
+
+    def test_workspace_uses_compact_current_preview_evidence(self) -> None:
+        project = _project(
+            "preview",
+            stage_state={
+                "requirements": _stage_state("requirements-1", updated_at=BASE_TIME, approved=True),
+                "test_cases": _stage_state("suite-1", updated_at=BASE_TIME, approved=True),
+                "execution": _stage_state("preview-1", updated_at=BASE_TIME, approved=True, operation="automation.execution.preview"),
+            },
+        )
+        actor = AuthUser(sub="user-1", email="user@example.com", name="User")
+        preview_path = "qa_projects/preview/snapshots/preview-1"
+        store = {"qa_projects/preview": project.model_dump(exclude={"current_snapshots", "timeline", "execution_runs"})}
+        query_log = []
+        collection = FakeCollection("qa_projects", store, query_log)
+
+        with patch("app.services.workflow_project_service.get_required_firestore_collection", return_value=collection):
+            for verified, executable, readiness, expected in (
+                (True, 0, False, "report"),
+                (False, 0, False, "report"),
+                (True, 1, True, "execute"),
+                (True, 1, False, "automate"),
+            ):
+                with self.subTest(verified=verified, executable=executable, readiness=readiness):
+                    counts = {"executable": executable, "manual": 1 - executable, "unsupported": 0, "invalid": 0}
+                    preview = _snapshot(
+                        project_id="preview",
+                        stage="execution",
+                        snapshot_id="preview-1",
+                        created_at=BASE_TIME,
+                        operation="automation.execution.preview",
+                        source_snapshot_id="suite-1",
+                        metadata={"preview_response_fingerprint": "f" * 64} if verified else None,
+                        payload={
+                            "summary": counts,
+                            "candidate_counts": counts,
+                            "candidates": {bucket: [{"id": "TC-1"}] * count for bucket, count in counts.items()},
+                            "readiness": {"run_allowed": readiness},
+                            "reviewed_full_suite": True,
+                            "specs": [{"id": "TC-1"}],
+                            "results": [{"id": "TC-1"}],
+                        },
+                    )
+                    store[preview_path] = preview.model_dump()
+                    project.current_snapshots["execution"] = preview
+                    query_log.clear()
+
+                    projects = list_workspace_projects(actor=actor, include_archived=False, project_limit=20, execution_run_limit=20)
+                    summary = build_workspace_summary(projects, work_items_limit=50, runs_limit=20, reports_limit=20)
+                    self.assertEqual(build_orchestrator_status(project).next_actions[0].action, expected)
+                    self.assertEqual(summary.continue_working.action, expected)
+                    compact = projects[0].current_snapshots["execution"].payload
+                    self.assertNotIn("specs", compact)
+                    self.assertNotIn("results", compact)
+                    self.assertEqual("candidates" in compact, not verified)
+                    reads = [fields for op, path, *args in query_log if op == "get" and path == preview_path for fields in args]
+                    self.assertEqual(len(reads), 1 if verified else 2)
+                    if not verified:
+                        self.assertEqual(reads[-1], ("payload.candidates",))
 
     def test_work_items_are_deduplicated_ranked_and_used_for_continue_working(self) -> None:
         enabled_project = _project("project-a", updated_at=BASE_TIME)

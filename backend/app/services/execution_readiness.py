@@ -21,6 +21,11 @@ PREVIEW_SOURCE_BLOCKER_CODES = frozenset(
 )
 
 
+def preview_has_verified_receipt(metadata: dict) -> bool:
+    fingerprint = metadata.get("preview_response_fingerprint")
+    return isinstance(fingerprint, str) and len(fingerprint) == 64
+
+
 def assess_execution(
     payload: ExecutionPreviewInput,
     *,
