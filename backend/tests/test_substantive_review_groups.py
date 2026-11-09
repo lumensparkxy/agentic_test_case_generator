@@ -356,3 +356,161 @@ class GroupedSubstantiveReviewTests(unittest.TestCase):
         self.assertFalse(result["approved"])
         self.assertEqual(result["substantive_assessment"]["model_status"], "unknown")
         self.assertEqual(result["substantive_assessment"]["diagnostics"]["unverified_group_count"], 1)
+
+
+class IndexedSubstantiveReviewTests(unittest.TestCase):
+    def setUp(self):
+        source = {
+            "source_id": "ordering-spec",
+            "source_version": "version-1",
+            "import_id": "import-1",
+            "label": "Ordering rules",
+            "excerpt": "Accept 1 through 8 seats and show the saved receipt.",
+            "excerpt_verified": True,
+            "original_requirement_ids": ["ORDER-1"],
+        }
+        self.requirements = [
+            Requirement(id="A", text="Accept 1 through 8 seats.", sources=[source]),
+            Requirement(id="B", text="Show the saved receipt.", sources=[source]),
+            Requirement(id="C", text="Reject unauthorized orders."),
+        ]
+        self.cases = [scenario_case(f"{key}{index:03d}", [key]) for key, count in (("A", 140), ("B", 30), ("C", 30)) for index in range(1, count + 1)]
+        self.obligations = {"A": ["Accept one seat", "Accept eight seats"], "B": ["Show receipt"], "C": ["Reject unauthorized order"]}
+        self.proof = {"Accept one seat": "TC-A002", "Accept eight seats": "TC-B001", "Show receipt": "TC-B002", "Reject unauthorized order": "TC-C001"}
+
+    def _fixture_output(self, prompt):
+        data, output = critic_output(prompt)
+        group = data["review_group"]
+        if group["mode"] == "obligation_inventory":
+            self.assertEqual(data["test_cases"], [])
+            output["obligations"] = [
+                {"requirement_id": key, "obligation": title, "source_field": "text", "status": "unknown", "reason": title, "evidence": []}
+                for key, titles in self.obligations.items()
+                for title in titles
+            ]
+        else:
+            cases = {row["id"]: row for row in data["test_cases"]}
+            shared = data.get("shared_steps", {})
+            judgments = []
+            for obligation in group["obligations"]:
+                proof_id = self.proof[obligation["obligation"]]
+                steps = cases.get(proof_id, {}).get("steps", [])
+                last_result = next((row["step"] for row in reversed(steps) if (shared.get(row.get("step_ref")) or row).get("expected")), None)
+                judgments.append(
+                    {
+                        **obligation,
+                        "status": "covered" if last_result else "unmet",
+                        "reason": "Verified exact result" if last_result else "No observable result in this batch",
+                        "evidence": [{"test_case_id": proof_id, "step": last_result}] if last_result else [],
+                    }
+                )
+            output["obligations"] = judgments
+        return data, output
+
+    def _assess(self, critic, cases=None, progress=None):
+        with patch.object(review, "_call_critic", side_effect=critic):
+            return review.assess_delivered_suite(
+                self.cases if cases is None else cases, self.requirements, None, settings=SimpleNamespace(model_name="fixture"), progress=progress
+            )
+
+    def test_skewed_suite_combines_exact_proof_and_grounding_within_bounds(self):
+        def critic(settings, prompt, *, timeout_seconds):
+            data, output = self._fixture_output(prompt)
+            self.assertLessEqual(len(prompt.encode()), review.GROUP_REVIEW_MAX_BYTES)
+            self.assertLessEqual(timeout_seconds, review.GROUP_REVIEW_ATTEMPT_SECONDS)
+            if data["review_group"]["mode"] == "case_batch":
+                self.assertLessEqual(len(data["test_cases"]), review.GROUP_REVIEW_MAX_CASES)
+            return json.dumps(output)
+
+        result = self._assess(critic)
+        self.assertEqual(result["status"], "assessed_complete")
+        self.assertEqual(result["diagnostics"]["indexed_obligation_count"], 4)
+        self.assertEqual(result["diagnostics"]["inventory_attempt_count"], 1)
+        self.assertEqual(result["diagnostics"]["attempt_count"], 1 + len(result["diagnostics"]["groups"]))
+        self.assertLessEqual(len(result["diagnostics"]["groups"]), review.GROUP_REVIEW_MAX_GROUPS)
+        self.assertEqual([row["test_case_id"] for row in result["case_grounding"]], [case.id for case in self.cases])
+        self.assertEqual({row["obligation"]: row["evidence"][0]["test_case_id"] for row in result["obligations"]}, self.proof)
+        max_proof = next(row["evidence"][0] for row in result["obligations"] if row["obligation"] == "Accept eight seats")
+        case = next(case for case in self.cases if case.id == max_proof["test_case_id"])
+        self.assertEqual(max_proof, {"test_case_id": case.id, **case.steps[0].model_dump(exclude={"test_data"})})
+        self.assertEqual(review.assessment_tasks(result, self.cases), [])
+
+    def test_batch_local_absence_becomes_a_gap_only_after_full_scope_is_verified(self):
+        cases = [
+            case.model_copy(update={"steps": [case.steps[0].model_copy(update={"expected": ""})]}) if case.id == "TC-B001" else case for case in self.cases
+        ]
+        result = self._assess(lambda settings, prompt, **kwargs: json.dumps(self._fixture_output(prompt)[1]), cases)
+        self.assertEqual(result["design_status"], "incomplete")
+        self.assertEqual(result["diagnostics"]["unverified_group_count"], 0)
+        tasks = review.assessment_tasks(result, cases)
+        self.assertEqual(len(tasks), 1)
+        self.assertIn("Accept eight seats", tasks[0]["reason"])
+        self.assertEqual(tasks[0]["requirement_ids"], ["A"])
+
+    def test_interrupted_batch_preserves_inventory_and_retries_only_missing_scope(self):
+        calls = []
+        checkpoints = {}
+        progress = SimpleNamespace(load=lambda binding, keys: dict(checkpoints), save=checkpoints.__setitem__)
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = self._fixture_output(prompt)
+            ids = {row["id"] for row in data["test_cases"]}
+            calls.append(ids)
+            if "TC-B001" in ids and outage:
+                raise httpx.ReadTimeout("synthetic unavailable proof batch")
+            return json.dumps(output)
+
+        initial = self._assess(critic, progress=progress)
+        self.assertEqual(initial["status"], "unknown")
+        self.assertEqual(initial["diagnostics"]["unverified_group_count"], 1)
+        self.assertEqual(review.assessment_tasks(initial, self.cases), [])
+        self.assertIn("inventory", checkpoints)
+        self.assertEqual(len(checkpoints), len(initial["diagnostics"]["groups"]))
+        outage = False
+        calls.clear()
+        recovered = self._assess(critic, progress=progress)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("TC-B001", calls[0])
+        self.assertEqual(recovered["status"], "assessed_complete")
+        self.assertTrue(recovered["diagnostics"]["reused_inventory"])
+        self.assertEqual(recovered["diagnostics"]["reused_group_count"], len(initial["diagnostics"]["groups"]) - 1)
+
+    def test_invalid_inventory_and_missing_batch_obligation_fail_closed(self):
+        for defect in ("inventory", "batch"):
+            with self.subTest(defect=defect):
+                modes = []
+
+                def critic(settings, prompt, **kwargs):
+                    data, output = self._fixture_output(prompt)
+                    mode = data["review_group"]["mode"]
+                    modes.append(mode)
+                    if defect == "inventory" and mode == "obligation_inventory":
+                        output["obligations"].append({**output["obligations"][0], "reason": "A repeated obligation"})
+                    if defect == "batch" and any(case["id"] == "TC-B001" for case in data["test_cases"]):
+                        output["obligations"][0]["obligation"] = "An unindexed verdict"
+                    return json.dumps(output)
+
+                result = self._assess(critic)
+                self.assertEqual(result["status"], "unknown")
+                if defect == "inventory":
+                    self.assertEqual(modes, ["obligation_inventory", "obligation_inventory"])
+                    self.assertEqual(result["diagnostics"]["phase"], "obligation_inventory")
+                else:
+                    unknown = next(group for group in result["diagnostics"]["groups"] if group["status"] == "unknown")
+                    self.assertIn("TC-B001", unknown["case_ids"])
+                    self.assertEqual(unknown["validation_error"], "incomplete_obligation_review")
+
+    def test_declared_execution_blocker_still_blocks_complete_batched_design(self):
+        case = self.cases[0]
+        blocked = TestCase.model_validate(
+            {
+                **case.model_dump(),
+                "execution_prerequisites": [{"name": "account", "kind": "credential", "status": "missing", "description": "Provision an account"}],
+            }
+        )
+        result = self._assess(lambda settings, prompt, **kwargs: json.dumps(self._fixture_output(prompt)[1]), [blocked, *self.cases[1:]])
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["design_status"], "assessed_complete")
+        self.assertEqual(result["execution_blockers"], [{"test_case_id": case.id, "prerequisite_name": "account"}])
+        self.assertEqual(review.assessment_tasks(result, [blocked, *self.cases[1:]]), [])

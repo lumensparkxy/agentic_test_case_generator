@@ -205,8 +205,17 @@ step numbers and full evidence for citation checks.
 Requirements derived from the same verified source version and original ID
 can cite related cases across groups. Exact duplicate reference cases share
 one representative, while each original case is grounded in its own group.
-Indivisible or unpartitionable inputs use the bounded whole-suite reviewer.
-Selected-repair review keeps its existing scope and limits.
+A large linked scope that exceeds the ordinary group limits can use a source
+obligation inventory followed by bounded case batches. The inventory gets up to
+60 seconds inside the same 240-second budget. Each batch assesses the exact
+indexed obligations for its linked scope and grounds its assigned cases. Cases
+linked to the same verified source can supply proof in separate batches. The
+combined assessment uses a coherent case for each covered obligation. The
+reviewer reports an indexed coverage gap after all its assigned batches finish
+without verified proof. If batching cannot start, the bounded whole-suite
+reviewer still applies. If the indexed content exceeds the batch limits,
+review reports an input limit. Selected-repair review keeps its existing
+scope and limits.
 
 Completed groups retain verified findings. If any group remains unverified,
 approval stays blocked. A saved-suite review with verified gaps can record the
@@ -225,6 +234,7 @@ in one private Firestore record per project, capped at 768 KiB and eligible for
 24 hours. The next grouped review replaces expired or incompatible progress.
 Publishing the reviewed snapshot removes its progress in the same transaction.
 Groups beyond the storage cap can still complete in the current attempt.
+For a batched review, retry also revalidates and reuses the source inventory.
 
 Missing credentials, empty output, oversized inputs, malformed evidence or
 provider failure preserve cases but leave coverage `unknown`, unapproved and

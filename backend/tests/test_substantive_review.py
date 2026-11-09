@@ -642,20 +642,42 @@ class SubstantiveReviewTests(unittest.TestCase):
         data, digest, encoded = review_input(cases, [req], context)
         self.assertGreater(len(encoded.encode("utf-8")), MAX_INPUT_BYTES)
         self.assertLessEqual(len(review_prompt(data, digest).encode("utf-8")), MAX_INPUT_BYTES)
-        output["input_hash"] = digest
-        output["obligations"][0]["evidence"][0]["test_case_id"] = cases[0].id
-        output["case_grounding"] = [{"test_case_id": case.id, "reason": "Grounded fixture", "prerequisites": []} for case in cases]
-        with patch("app.agents.substantive_review._call_critic", return_value=json.dumps(output)) as critic:
+        omitted = False
+
+        def critic(settings, prompt, **kwargs):
+            instructions, _, encoded = prompt.rpartition("\nDATA:\n")
+            sent = json.loads(encoded)
+            group_cases = sent["test_cases"]
+            finding = output["obligations"][0]
+            if group_cases:
+                finding = {**finding, "evidence": [{"test_case_id": group_cases[0]["id"], "step": 1}]}
+            else:
+                finding = {**finding, "status": "unknown", "evidence": []}
+            return json.dumps(
+                {
+                    "input_hash": instructions.split("Copy input_hash exactly as ", 1)[1].split(".", 1)[0],
+                    "obligations": [finding],
+                    "case_grounding": [
+                        {"test_case_id": row["id"], "reason": "Grounded fixture", "prerequisites": []}
+                        for row in group_cases
+                        if not omitted or row["id"] != cases[-1].id
+                    ],
+                }
+            )
+
+        with patch("app.agents.substantive_review._call_critic", side_effect=critic) as provider:
             reviewed = assess_delivered_suite(cases, [req], context, settings=object())
             self.assertEqual(reviewed["status"], "assessed_complete")
             self.assertEqual(len(reviewed["case_grounding"]), len(cases))
-            sent = json.loads(critic.call_args.args[1].rsplit("\nDATA:\n", 1)[1])
-            self.assertEqual([row["id"] for row in sent["test_cases"]], [case.id for case in cases])
-            output["case_grounding"].pop()
-            critic.return_value = json.dumps(output)
+            sent = [json.loads(call.args[1].rsplit("\nDATA:\n", 1)[1]) for call in provider.call_args_list]
+            self.assertEqual(sorted(row["id"] for packet in sent for row in packet["test_cases"]), [case.id for case in cases])
+            omitted = True
             incomplete = assess_delivered_suite(cases, [req], context, settings=object())
             self.assertEqual(incomplete["status"], "unknown")
-            self.assertEqual(incomplete["diagnostics"]["validation_error"], "incomplete_case_review")
+            missing = [group for group in incomplete["diagnostics"]["groups"] if group["status"] == "unknown"]
+            self.assertEqual(len(missing), 1)
+            self.assertIn(cases[-1].id, missing[0]["case_ids"])
+            self.assertEqual(missing[0]["validation_error"], "incomplete_case_review")
 
     def test_prompt_budget_counts_utf8_and_repair_instructions(self):
         req, case, _, _, _ = fixture(retry=False)
