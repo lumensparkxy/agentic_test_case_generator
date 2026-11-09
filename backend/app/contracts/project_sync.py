@@ -1,5 +1,7 @@
 """Project decisions are source data, separate from optional behavioural guidance."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -50,3 +52,28 @@ class AcceptProjectFinding(BaseModel):
 class ResumeProjectSync(BaseModel):
     model_config = ConfigDict(extra="forbid")
     change_id: str = Field(min_length=1, max_length=160)
+
+
+class ProjectSyncAdmissionAttempt(BaseModel):
+    operation_id: str
+    fence: int = Field(ge=1)
+    state: Literal["running", "interrupted"]
+    change_id: str
+    stage: Literal["use_cases", "test_cases"]
+    request_id: str
+
+
+class ProjectSyncAdmissionStatus(BaseModel):
+    enabled: bool
+    blocked: bool = False
+    attempt: ProjectSyncAdmissionAttempt | None = None
+
+
+class ProjectSyncAdmissionReleaseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fence: int = Field(strict=True, ge=1)
+
+
+class ProjectSyncAdmissionReleaseResult(BaseModel):
+    released: Literal[True] = True

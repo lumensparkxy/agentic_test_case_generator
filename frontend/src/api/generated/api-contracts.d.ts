@@ -11,6 +11,8 @@ export interface ApiOperation<Request, Response, Method extends string, Path ext
 export interface ApiContractOperations {
 	projectChangeAccept: ApiOperation<ProjectChangeAcceptRequest, ProjectChangeAcceptResponse, "POST", "/projects/{project_id}/changes/accept">;
 	projectChangeResume: ApiOperation<ProjectChangeResumeRequest, ProjectChangeResumeResponse, "POST", "/projects/{project_id}/changes/resume">;
+	projectSyncAdmission: ApiOperation<ProjectSyncAdmissionRequest, ProjectSyncAdmissionResponse, "GET", "/projects/{project_id}/changes/admission">;
+	projectSyncAdmissionRelease: ApiOperation<ProjectSyncAdmissionReleaseRequest, ProjectSyncAdmissionReleaseResponse, "POST", "/projects/{project_id}/changes/admission/{operation_id}/release">;
 	workspaceSummary: ApiOperation<WorkspaceSummaryGetRequest, WorkspaceSummaryGetResponse, "GET", "/workspace/summary">;
 	projectsCreate: ApiOperation<ProjectsCreateRequest, ProjectsCreateResponse, "POST", "/projects">;
 	projectsList: ApiOperation<ProjectsListRequest, ProjectsListResponse, "GET", "/projects">;
@@ -59,6 +61,10 @@ export type ProjectChangeAcceptRequest = AcceptProjectFinding;
 export type ProjectChangeAcceptResponse = QaProjectDetail;
 export type ProjectChangeResumeRequest = ResumeProjectSync;
 export type ProjectChangeResumeResponse = QaProjectDetail;
+export type ProjectSyncAdmissionRequest = undefined;
+export type ProjectSyncAdmissionResponse = ProjectSyncAdmissionStatus;
+export type ProjectSyncAdmissionReleaseRequest = ProjectSyncAdmissionReleaseInput;
+export type ProjectSyncAdmissionReleaseResponse = ProjectSyncAdmissionReleaseResult;
 export type WorkspaceSummaryGetRequest = {
 	include_archived?: boolean;
 	projects_limit?: number;
@@ -793,6 +799,29 @@ export interface OrchestratorStatusResponse {
 	project_revision?: number;
 	stages?: Record<string, OrchestratorStageState>;
 	upstream_changed?: boolean;
+}
+
+export interface ProjectSyncAdmissionAttempt {
+	change_id: string;
+	fence: number;
+	operation_id: string;
+	request_id: string;
+	stage: "use_cases" | "test_cases";
+	state: "running" | "interrupted";
+}
+
+export interface ProjectSyncAdmissionReleaseInput {
+	fence: number;
+}
+
+export interface ProjectSyncAdmissionReleaseResult {
+	released?: true;
+}
+
+export interface ProjectSyncAdmissionStatus {
+	attempt?: ProjectSyncAdmissionAttempt | null;
+	blocked?: boolean;
+	enabled: boolean;
 }
 
 export interface QaProjectCaseSourceRequirement {

@@ -213,14 +213,41 @@ attempt. The release names its operation and fence. Requests already sent
 may finish. Further provider calls, checkpoint writes and result publication
 from the old claim lose authority. Rechecking status never starts work.
 
-Until shared admission covers the remaining producers, the opted-in local
-demo defers paid draft refresh from Project Sync and direct scenario, suite,
-refinement, impact and generated-report entry points. Project Sync can
-still save an explicit correction. Deterministic impact analysis, execution
-preview and deliberate browser runs keep their existing admission. The
-shared lease covers competing project draft providers. Source intake uses
-its existing extraction policy. Flag-off and standalone flows retain their
-existing paths.
+The opted-in demo still defers paid work from the unenrolled foreground
+scenario, suite, refinement, impact and generated-report producers.
+Deterministic impact analysis, execution preview and deliberate browser
+runs keep their existing admission. Source intake uses its existing
+extraction policy. Legacy and standalone paths keep their existing
+behavior outside the demo.
+
+### Bounded Project Sync refresh
+
+An accepted correction saves revised sources and marks the prior drafts
+stale. The initial acceptance can then start bounded scoped refresh. A busy
+project keeps the accepted correction and previous artifacts while it waits
+for a deliberate resume. Replaying the acceptance reads the saved change
+without starting more provider work.
+
+The two draft stages take the same project fence in turn. They reserve at
+most seven and 24 provider requests respectively and bind the exact
+corrected sources, scoped change, prior checkpoint, settings and revision.
+The Test Cases stage verifies the committed scenario draft before starting.
+A pre-dispatch restart keeps the canonical stage request. An uncertain
+dispatch requires exact owner acknowledgement followed by a separate
+retry. Status checks perform reads. Source changes revoke publication
+authority, and the original artifact history stays accessible.
+
+The Test Cases draft, preserved and updated version references, usage
+event, application billing and completion receipt commit together. The
+exact committed result remains replayable after acknowledgement loss.
+Refreshed drafts remain provisional pending the existing reviews. Optional
+POM generation stays deferred and the existing report is preserved.
+
+A frontend rollback can hide the new actions while retaining server
+fences. Drain or explicitly resolve local draft attempts before changing
+the backend demo flag. Enrolled Sync records stay protected from the
+legacy refresh loop. Hosted activation still needs a verified queue,
+uniform provider admission and an authorized deployment.
 
 ## Quality and delivery policy
 
@@ -335,10 +362,13 @@ P3c adds the exact-plan Test Cases worker (head `86c194b`,
 [PR #460](https://github.com/lumensparkxy/agentic_test_case_generator/pull/460)).
 P3d connects the second named approval, budget and Review recovery (commit
 `2864d34`, [PR #462](https://github.com/lumensparkxy/agentic_test_case_generator/pull/462)).
-P3e shares provider admission with saved-suite assessment under
-[#463](https://github.com/lumensparkxy/agentic_test_case_generator/issues/463).
-Next is enrolling Project Sync and the remaining foreground draft producers
-before any hosted activation.
+P3e shares provider admission with saved-suite assessment (commit
+`4a76f0c`, [PR #464](https://github.com/lumensparkxy/agentic_test_case_generator/pull/464)).
+P3f enrolls bounded Project Sync refresh under
+[#465](https://github.com/lumensparkxy/agentic_test_case_generator/issues/465).
+Next is exact saved-suite quality evidence for P4. Direct draft producers
+remain a release gate. Targeted repair will join the shared admission path
+when the Review workflow consumes it.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

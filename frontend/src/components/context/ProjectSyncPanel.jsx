@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { API_CONTRACT_ENDPOINTS } from "../../api/generated/api-contracts";
 import { Button, Checkbox, Select, Textarea } from "../ui/controls";
 import { Disclosure, Surface } from "../ui/surfaces";
 
 const words = (value) => value?.replaceAll("_", " ");
+const SYNC_RECOVERY =
+	import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true" && import.meta.env.VITE_APPROVAL_CONTINUATION_ENABLED === "true";
+
 async function read(request, path, body, requestId) {
 	const response = await request(
 		path,
@@ -23,17 +27,112 @@ async function read(request, path, body, requestId) {
 }
 
 export function ProjectSyncStatus({ project, request, onUpdated, compact = false }) {
+	const projectId = project?.project_id;
+	const sync = project?.project_sync;
+	const readAdmission = SYNC_RECOVERY && Boolean(projectId && sync);
+	const requestRef = useRef(request);
+	requestRef.current = request;
+	const active = useRef(false);
+	const pendingRead = useRef(null);
+	const pendingAction = useRef(false);
+	const [admission, setAdmission] = useState(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
-	const sync = project?.project_sync;
+	const current = admission?.projectId === projectId ? admission : null;
+
+	const refreshAdmission = useCallback(async () => {
+		if (!readAdmission || !active.current) return null;
+		pendingRead.current?.abort();
+		const controller = new AbortController();
+		pendingRead.current = controller;
+		try {
+			const path = API_CONTRACT_ENDPOINTS.projectSyncAdmission.path.replace("{project_id}", encodeURIComponent(projectId));
+			const data = await read((url) => requestRef.current(url, { method: "GET", signal: controller.signal }), path);
+			if (typeof data?.enabled !== "boolean") throw new Error("Draft refresh status is unavailable.");
+			if (controller.signal.aborted || !active.current) return null;
+			setAdmission({ projectId, data, error: "" });
+			return data;
+		} catch {
+			if (!controller.signal.aborted && active.current) {
+				setAdmission((previous) => ({
+					projectId,
+					data: previous?.projectId === projectId ? previous.data : null,
+					error: "Could not check draft refresh status. Check progress again.",
+				}));
+			}
+			return null;
+		} finally {
+			if (pendingRead.current === controller) pendingRead.current = null;
+		}
+	}, [projectId, readAdmission]);
+	useEffect(() => {
+		active.current = true;
+		return () => {
+			active.current = false;
+		};
+	}, []);
+	useEffect(() => {
+		void refreshAdmission();
+		return () => pendingRead.current?.abort();
+	}, [refreshAdmission, project?.current_revision]);
+
 	if (!sync) return null;
+	const useRecovery = readAdmission && current?.data?.enabled !== false;
+	const attempt = useRecovery ? current?.data?.attempt : null;
+	const waitingForDraft = useRecovery && current?.data?.blocked && !attempt;
+	const refreshing = useRecovery ? attempt?.state === "running" && attempt.change_id === sync.id : sync.status === "running";
+	const resumable = ["pending", "partial", "running"].includes(sync.status);
+	const canResume = resumable && (!useRecovery || (current?.data?.enabled && !attempt && !waitingForDraft && !current.error && !error));
+	const showRecovery = useRecovery && (resumable || attempt || !current?.data || current.error || error);
+	const refreshStatus = async (action) => {
+		if (pendingAction.current || (action === "resume" && !canResume) || (action === "release" && (!attempt || current?.error || error)))
+			return;
+		pendingAction.current = true;
+		setBusy(true);
+		setError("");
+		let failure = "";
+		try {
+			if (action === "resume") {
+				await read(request, `/projects/${encodeURIComponent(projectId)}/changes/resume`, { change_id: sync.id });
+			} else if (action === "release") {
+				const path = API_CONTRACT_ENDPOINTS.projectSyncAdmissionRelease.path
+					.replace("{project_id}", encodeURIComponent(projectId))
+					.replace("{operation_id}", encodeURIComponent(attempt.operation_id));
+				const response = await read(request, path, { fence: attempt.fence });
+				if (response?.released !== true) failure = "The release was not confirmed. Check the current attempt.";
+			}
+		} catch (e) {
+			if (action === "release") failure = "The release was not confirmed. Check the current attempt.";
+			else if (!useRecovery || !(e instanceof TypeError || e instanceof SyntaxError)) failure = e.message;
+		}
+		try {
+			if (!active.current) return;
+			if (!useRecovery) {
+				if (!failure) await onUpdated?.();
+			} else {
+				const status = await refreshAdmission();
+				if (!active.current) return;
+				const latest = await onUpdated?.();
+				if (!latest) failure = "Could not load the latest project update. Check progress again.";
+				else if (status && ((action === "release" && !status.attempt) || latest.project_sync?.status === "ready_for_review")) failure = "";
+			}
+		} catch {
+			failure = "Could not load the latest project update. Check progress again.";
+		} finally {
+			pendingAction.current = false;
+			if (active.current) {
+				setError(failure);
+				setBusy(false);
+			}
+		}
+	};
 	const title =
 		sync.status === "ready_for_review"
 			? "Updated drafts are ready for review"
-			: sync.status === "running"
-				? "Updating project drafts"
-				: sync.status === "superseded"
-					? "Project sources have changed"
+			: sync.status === "superseded"
+				? "Project sources have changed"
+				: refreshing
+					? "Updating project drafts"
 					: "Project update needs attention";
 	const details = (
 		<>
@@ -65,23 +164,57 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 					{details}
 				</>
 			)}
-			{(sync.error || error) && <p role="alert">{error || sync.error}</p>}
-			{["pending", "partial", "running"].includes(sync.status) && (
-				<Button
-					disabled={busy}
-					onClick={async () => {
-						setBusy(true);
-						setError("");
-						try {
-							await read(request, `/projects/${project.project_id}/changes/resume`, { change_id: sync.id });
-							await onUpdated?.();
-						} catch (e) {
-							setError(e.message);
-						} finally {
-							setBusy(false);
-						}
-					}}
-				>
+			{(sync.error || current?.error || error) && <p role="alert">{error || current?.error || sync.error}</p>}
+			{showRecovery && (
+				<>
+					{!current?.data && !current?.error && <p role="status">Checking draft refresh status…</p>}
+					{waitingForDraft && <p role="status">Correction saved. Another draft operation is active for this project.</p>}
+					{attempt && (
+						<>
+							<p role="status">
+								{attempt.state === "interrupted"
+									? "The draft refresh was interrupted. The provider may already have received the request. Acknowledge and release this attempt before resuming."
+									: "A draft refresh is running. Already issued provider requests may finish after cancellation. A cancelled attempt cannot publish further results."}
+							</p>
+							{(attempt.change_id !== sync.id || sync.status === "superseded") && (
+								<p>This attempt uses an earlier correction or source revision.</p>
+							)}
+							<Disclosure>
+								<summary>Draft refresh details</summary>
+								<p>Stage {attempt.stage === "use_cases" ? "Scenarios" : "Test Cases"}</p>
+								<p>
+									Correction <code>{attempt.change_id}</code>
+								</p>
+								<p>
+									Request <code>{attempt.request_id}</code>
+								</p>
+							</Disclosure>
+						</>
+					)}
+					<div className="workbench-actions">
+						<Button variant="secondary" size="compact" disabled={busy} onClick={() => void refreshStatus("check")}>
+							Check refresh progress
+						</Button>
+						{attempt && (
+							<Button
+								variant="secondary"
+								size="compact"
+								disabled={Boolean(busy || current?.error || error)}
+								onClick={() => void refreshStatus("release")}
+							>
+								{attempt.state === "interrupted" ? "Acknowledge and release" : "Cancel draft refresh"}
+							</Button>
+						)}
+						{resumable && (
+							<Button size="compact" disabled={busy || !canResume} onClick={() => void refreshStatus("resume")}>
+								{busy ? "Checking project update…" : "Resume remaining stages"}
+							</Button>
+						)}
+					</div>
+				</>
+			)}
+			{!useRecovery && resumable && (
+				<Button disabled={busy} onClick={() => void refreshStatus("resume")}>
 					{busy ? "Refreshing drafts…" : sync.status === "running" ? "Check refresh progress" : "Resume remaining stages"}
 				</Button>
 			)}
@@ -113,9 +246,12 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 	const load = async () => {
 		try {
 			const value = await read(request, `/projects/${project.project_id}/quality-findings`);
-			if (alive.current) setFindings(value.findings || []);
+			const rows = value.findings || [];
+			if (alive.current) setFindings(rows);
+			return rows;
 		} catch (e) {
 			if (alive.current) setError(e.message);
+			return null;
 		}
 	};
 	useEffect(() => {
@@ -230,7 +366,11 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 				</Disclosure>
 			</section>
 			<h3>Resolve a finding across the project</h3>
-			<p>Confirm the business rule once. Agents will refresh affected scenarios, tests and existing script drafts together.</p>
+			<p>
+				{SYNC_RECOVERY
+					? "Confirm the business rule once. Review affected scenario and test drafts after refresh."
+					: "Confirm the business rule once. Agents will refresh affected scenarios, tests and existing script drafts together."}
+			</p>
 			{error && <p role="alert">{error}</p>}
 			<label>
 				Finding to resolve
@@ -284,6 +424,26 @@ export default function ProjectSyncPanel({ project, request, onUpdated }) {
 								attempt.current = null;
 							}
 						} catch (e) {
+							if (SYNC_RECOVERY && alive.current) {
+								try {
+									const latest = await onUpdated?.();
+									const rows = latest && alive.current ? await load() : null;
+									const accepted = rows?.some(
+										(item) =>
+											item.id === payload.finding_id &&
+											item.status === "accepted" &&
+											item.decision === payload.decision &&
+											item.change_id === latest.project_sync?.id
+									);
+									if (alive.current && accepted) {
+										setSelectedId("");
+										attempt.current = null;
+										return;
+									}
+								} catch {
+									// Keep the original request identity for a deliberate retry.
+								}
+							}
 							if (alive.current) setError(e.message);
 						} finally {
 							if (alive.current) setBusy(false);

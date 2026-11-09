@@ -18,7 +18,7 @@ OPERATION = "test_cases.review"
 DEMO_HOST = "127.0.0.1:44124"
 
 
-class DraftAdmissionTests(TestCase):
+class _AdmissionFixture:
     def setUp(self):
         self.now = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
         self.client = _Client({})
@@ -141,6 +141,8 @@ class DraftAdmissionTests(TestCase):
         self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(error.exception.detail["code"], code)
 
+
+class DraftAdmissionTests(_AdmissionFixture, TestCase):
     def test_flag_off_skips_client_lookup_and_demo_mismatch_fails_closed(self):
         with patch.object(admission, "get_required_firestore_client", return_value=self.client) as lookup:
             self.assertIs(admission.draft_admission_client(), self.client)
@@ -307,3 +309,187 @@ class DraftAdmissionTests(TestCase):
         with patch.object(admission, "transactional", return_value=fail_with(ServiceUnavailable("synthetic outage"))):
             with self.assertRaises(ValueError):
                 self.claim()
+
+
+SYNC_CHANGE = "change_" + "a" * 24
+SYNC_SOURCES = {"requirements": "scope-v1", "context": "context-v1", "use_cases": "plan-v1", "test_cases": "suite-v1", "reports": None}
+
+
+class ProjectSyncAdmissionTests(_AdmissionFixture, TestCase):
+    # Use the same clock and independent continuation worker fixture.
+    def setUp(self):
+        super().setUp()
+        self.project.update(
+            {
+                "project_sync": {
+                    "id": SYNC_CHANGE,
+                    "project_revision": 8,
+                    "stages": {"use_cases": "pending", "test_cases": "pending", "automation": "not_requested"},
+                    "expected_snapshots": {stage: source for stage, source in SYNC_SOURCES.items() if source is not None},
+                },
+                "stage_state": {
+                    stage: {"current_snapshot_id": source, "stale": stage in {"use_cases", "test_cases"}}
+                    for stage, source in SYNC_SOURCES.items()
+                    if source is not None
+                },
+            }
+        )
+
+    def sync_claim(self, stage="use_cases", request_id="accept-change", *, sources=SYNC_SOURCES, revision=8, fingerprint="b" * 64, cap=None):
+        return admission.claim_draft_attempt(
+            self.client,
+            project_id=self.project.id,
+            actor_id="owner",
+            request_id=request_id,
+            operation=f"project.sync.{stage}",
+            source_snapshot_ids=sources,
+            base_revision=revision,
+            max_requests=cap if cap is not None else (7 if stage == "use_cases" else 24),
+            deadline_seconds=240,
+            change_id=SYNC_CHANGE,
+            settings_fingerprint=fingerprint,
+        )
+
+    def sync_state(self):
+        return admission.read_project_sync_admission(self.client, self.project.id, "owner")
+
+    def release_sync(self, claim):
+        return admission.release_draft_attempt(self.client, self.project.id, "owner", claim.operation_id, claim.fence, project_sync=True)
+
+    def sync_snapshot(self, claim, stage="use_cases", *, sources=SYNC_SOURCES, revision=8):
+        return {
+            "snapshot_id": "new-plan" if stage == "use_cases" else "new-suite",
+            "project_id": self.project.id,
+            "actor_user_id": "owner",
+            "request_id": claim.request_id,
+            "stage": stage,
+            "operation": "project.sync.draft",
+            "project_revision": revision + 1,
+            "source_snapshot_id": sources["requirements" if stage == "use_cases" else "use_cases"],
+            "metadata": {"change_id": SYNC_CHANGE, "source_snapshot_ids": {stage: source for stage, source in sources.items() if source}},
+        }
+
+    def publish_sync(self, claim, snapshot, *, revision=8, sources=SYNC_SOURCES, fingerprint="b" * 64, fail=False):
+        stage = snapshot["stage"]
+        project = self.project.get().to_dict()
+        sync = project["project_sync"]
+        stage_state = project["stage_state"]
+        sync.update(project_revision=revision + 1)
+        sync["stages"][stage] = "draft"
+        sync["expected_snapshots"][stage] = snapshot["snapshot_id"]
+        receipts = sync.setdefault("stage_receipts", {})
+        receipts[stage] = {
+            "snapshot_id": snapshot["snapshot_id"],
+            "request_id": claim.request_id,
+            "base_revision": revision,
+            "result_revision": revision + 1,
+            "source_snapshot_ids": {stage: source for stage, source in sources.items() if source},
+            "settings_fingerprint": fingerprint,
+        }
+        stage_state[stage] = {"current_snapshot_id": snapshot["snapshot_id"], "stale": False}
+
+        def commit(transaction):
+            finish = claim.prepare_publication(transaction, snapshot)
+            # Simulate a billing read and write before the callback. The fake
+            # rejects any subsequent read in a transaction with staged writes.
+            billing = self.project.collection("billing_stub").document(stage)
+            billing.get(transaction=transaction)
+            transaction.create(billing, {"event_id": f"usage-{stage}"})
+            finish()
+            if fail:
+                raise RuntimeError("synthetic publication failure")
+            transaction.create(self.project.collection("snapshots").document(snapshot["snapshot_id"]), snapshot)
+            transaction.update(self.project, {"current_revision": revision + 1, "project_sync": sync, "stage_state": stage_state})
+
+        _run_transaction(commit)(self.client.transaction())
+
+    def test_sync_reuses_canonical_identity_before_dispatch_and_remembers_alias_after_release(self):
+        first = self.sync_claim()
+        self.assertEqual(self.sync_state()["attempt"]["change_id"], SYNC_CHANGE)
+        self.assertIsNone(self.state(), "saved-review status must not expose Sync attempts")
+        self.assert_conflict("project_draft_release_mismatch", lambda: self.release(first))
+        self.now += timedelta(seconds=61)
+        self.assertEqual(self.sync_state(), {"blocked": False, "attempt": None})
+        alias = self.sync_claim(request_id="resume-known-unstarted")
+        self.assertEqual((alias.operation_id, alias.request_id), (first.operation_id, first.request_id))
+        self.assertGreater(alias.fence, first.fence)
+        self.assert_conflict("project_draft_claim_lost", first.reserve)
+        self.assert_conflict("project_draft_release_mismatch", lambda: self.release_sync(first))
+        alias.reserve()
+        self.assertEqual(self.attempt(alias)["provider_requests_reserved"], 7)
+        self.now += timedelta(seconds=61)
+        self.assertEqual(self.sync_state()["attempt"]["state"], "interrupted")
+        self.assert_conflict("project_draft_recovery_required", lambda: self.sync_claim(request_id="unauthorized-retry"))
+        self.assertTrue(self.release_sync(alias))
+        for old_key in (first.request_id, "resume-known-unstarted"):
+            self.assert_conflict("project_draft_recovery_required", lambda: self.sync_claim(request_id=old_key))
+        fresh = self.sync_claim(request_id="deliberate-retry")
+        self.assertNotEqual(fresh.operation_id, first.operation_id)
+        self.assertEqual(fresh.request_id, "deliberate-retry")
+        self.assertGreater(fresh.fence, alias.fence)
+
+    def test_sync_publication_replay_requires_exact_checkpoint_before_next_stage(self):
+        first = self.sync_claim()
+        first.reserve()
+        result = self.sync_snapshot(first)
+        bad = {**result, "metadata": {**result["metadata"], "change_id": "wrong"}}
+        self.assert_conflict("project_draft_result_mismatch", lambda: self.publish_sync(first, bad))
+        before = deepcopy(self.client.store)
+        with self.assertRaisesRegex(RuntimeError, "synthetic publication failure"):
+            self.publish_sync(first, result, fail=True)
+        self.assertEqual(self.client.store, before)
+        self.publish_sync(first, result)
+        self.assertEqual(first.read_result(), "new-plan")
+        self.assertEqual(self.sync_claim(request_id="different-replay-key").result_snapshot_id, "new-plan")
+        self.assertEqual(self.sync_state(), {"blocked": False, "attempt": None})
+        sources = {**SYNC_SOURCES, "use_cases": "new-plan"}
+        raw = self.project.get().to_dict()["project_sync"]
+        bad_checkpoint = deepcopy(raw)
+        bad_checkpoint["stage_receipts"]["use_cases"]["request_id"] = "foreign"
+        self.project.update({"project_sync": bad_checkpoint})
+        with self.assertRaises(HTTPException) as mismatch:
+            self.sync_claim("test_cases", sources=sources, revision=9)
+        self.assertEqual(mismatch.exception.status_code, 503)
+        self.project.update({"project_sync": raw})
+        second = self.sync_claim("test_cases", sources=sources, revision=9)
+        self.assertEqual(second.request_id, first.request_id)
+        self.assertNotEqual(second.operation_id, first.operation_id)
+        second.reserve()
+        self.assertEqual(self.attempt(second)["provider_requests_reserved"], 24)
+        self.publish_sync(second, self.sync_snapshot(second, "test_cases", sources=sources, revision=9), sources=sources, revision=9)
+        self.assertEqual(second.read_result(), "new-suite")
+
+    def test_sync_sources_and_settings_cannot_drift_and_release_survives_supersession(self):
+        with self.assertRaises(ValueError):
+            self.sync_claim(cap=8)
+        with self.assertRaises(ValueError):
+            self.sync_claim(sources={**SYNC_SOURCES, "context": None})
+        self.assert_conflict("project_draft_sources_changed", lambda: self.sync_claim(sources={**SYNC_SOURCES, "reports": "wrong"}))
+        self.assert_conflict("project_draft_sources_changed", lambda: self.sync_claim("test_cases"))
+        first = self.sync_claim()
+        self.assert_conflict("project_draft_request_mismatch", lambda: self.sync_claim(fingerprint="c" * 64))
+        first.reserve()
+        project = self.project.get().to_dict()
+        self.project.update({"current_revision": 9, "project_sync": {**project["project_sync"], "id": "change_" + "f" * 24}})
+        self.assert_conflict("project_draft_claim_lost", first.reserve)
+        self.assert_conflict("project_draft_claim_lost", lambda: self.publish_sync(first, self.sync_snapshot(first)))
+        self.assertEqual(self.sync_state()["attempt"]["state"], "interrupted")
+        self.assertTrue(self.release_sync(first))
+        self.assertEqual(self.attempt(first)["reason"], "provider_outcome_acknowledged")
+
+    def test_sync_and_assessment_never_release_each_others_attempts(self):
+        states = self.project.get().to_dict()["stage_state"]
+        states["use_cases"]["stale"] = False
+        states["test_cases"]["stale"] = False
+        self.project.update({"stage_state": states})
+        assessment = self.claim(sources={stage: source for stage, source in SYNC_SOURCES.items() if stage != "reports"})
+        self.assertEqual(self.sync_state(), {"blocked": True, "attempt": None})
+        self.assert_conflict("project_draft_busy", self.sync_claim)
+        self.assert_conflict("project_draft_release_mismatch", lambda: self.release_sync(assessment))
+        self.assertTrue(self.release(assessment))
+        sync = self.sync_claim()
+        self.assert_conflict(
+            "project_draft_busy",
+            lambda: self.claim("different-assessment", sources={stage: source for stage, source in SYNC_SOURCES.items() if stage != "reports"}),
+        )
+        self.assert_conflict("project_draft_release_mismatch", lambda: self.release(sync))

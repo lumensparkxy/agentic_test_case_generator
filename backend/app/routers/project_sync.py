@@ -1,8 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.concurrency import run_in_threadpool
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, QaProjectDetail
-from ..contracts.project_sync import AcceptProjectFinding, ResumeProjectSync
+from ..contracts.project_sync import (
+    AcceptProjectFinding,
+    ProjectSyncAdmissionReleaseInput,
+    ProjectSyncAdmissionReleaseResult,
+    ProjectSyncAdmissionStatus,
+    ResumeProjectSync,
+)
+from ..services import project_draft_admission as admission
 from ..services import project_sync
 from ..services.workflow_project_service import project_error_to_http
 from .knowledge import feedback_request_id
@@ -40,5 +49,34 @@ async def accept(project_id: str, payload: AcceptProjectFinding, request: Reques
 
 
 @router.post("/projects/{project_id}/changes/resume", response_model=QaProjectDetail)
-async def resume(project_id: str, payload: ResumeProjectSync, actor: AuthUser = Depends(get_current_user)):
-    return await perform(project_sync.resume_sync, project_id, actor, payload.change_id)
+async def resume(project_id: str, payload: ResumeProjectSync, request: Request, actor: AuthUser = Depends(get_current_user)):
+    request_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+    return await perform(project_sync.resume_sync, project_id, actor, payload.change_id, request_id)
+
+
+@router.get("/projects/{project_id}/changes/admission", response_model=ProjectSyncAdmissionStatus)
+async def read_sync_admission(project_id: str, actor: AuthUser = Depends(get_current_user)):
+    def status():
+        client = admission.draft_admission_client(read_only=True)
+        if client is None:
+            return ProjectSyncAdmissionStatus(enabled=False)
+        return ProjectSyncAdmissionStatus(enabled=True, **admission.read_project_sync_admission(client, project_id, actor.sub))
+
+    return await perform(status)
+
+
+@router.post("/projects/{project_id}/changes/admission/{operation_id}/release", response_model=ProjectSyncAdmissionReleaseResult)
+async def release_sync_admission(
+    project_id: str,
+    operation_id: Annotated[str, Path(pattern=r"^draft_[0-9a-f]{64}$")],
+    payload: ProjectSyncAdmissionReleaseInput,
+    actor: AuthUser = Depends(get_current_user),
+):
+    def release():
+        client = admission.draft_admission_client()
+        if client is None:
+            raise HTTPException(409, "Project Sync recovery is disabled in this environment.")
+        admission.release_draft_attempt(client, project_id, actor.sub, operation_id, payload.fence, project_sync=True)
+        return ProjectSyncAdmissionReleaseResult()
+
+    return await perform(release)

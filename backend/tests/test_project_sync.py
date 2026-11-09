@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import timedelta
 import sys
 import unittest
 from unittest.mock import patch
@@ -10,12 +11,19 @@ from fastapi import HTTPException
 from app.contracts.project_sync import AcceptProjectFinding, RequirementCorrection
 from app.contracts.quality_feedback import QualityFindingInput
 from app.contracts.knowledge import KnowledgeMutation
+from app.contracts.billing import BillingAccount, BillingAllocation, BillingUserProfile
+from app.agents.adk_runtime import _model_reservation
 from app.services import workflow_project_service as projects, project_sync as sync
+from app.services import project_draft_admission as admission, approval_continuation
+from app.services.audit_service import record_usage_event
+from app.services.billing_repository import build_allocation_id
+from app.services.billing_service import BillingAccessContext, record_billing_consumption
 from app.services.quality_feedback import capture_finding
 from app.services.guidance_runtime import prepare_run
 from app.services.guidance_service import guidance_scope, guidance_text, submit_with_guidance
 from app.services.behaviour_maintenance import maintenance_scope
 from app.services.knowledge_service import mutate_knowledge
+from app.services.versioning_service import persist_test_case_versions
 
 
 class ProjectSyncEndpointTests(unittest.TestCase):
@@ -158,6 +166,61 @@ class ProjectSyncTests(unittest.TestCase):
             "generation_evidence": {"request_id": kwargs["request_id"]},
         }
 
+    def enable_demo(self):
+        from test_use_case_review_service import _run_transaction
+
+        host = "127.0.0.1:44129"
+        self.transaction_client.project = admission.DEMO_PROJECT_ID
+        self.transaction_client._emulator_host = host
+        self.enterContext(
+            patch.dict(
+                "os.environ",
+                {"TCG_APPROVAL_SCENARIOS_ENABLED": "true", "FIREBASE_PROJECT_ID": admission.DEMO_PROJECT_ID, "FIRESTORE_EMULATOR_HOST": host},
+            )
+        )
+        self.enterContext(patch.object(admission, "transactional", side_effect=_run_transaction))
+        self.enterContext(patch.object(admission, "get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(
+            patch(
+                "app.services.versioning_service.get_optional_firestore_collection", side_effect=lambda name, **kwargs: self.transaction_client.collection(name)
+            )
+        )
+        self.enterContext(patch.object(sync, "persist_test_case_versions", wraps=persist_test_case_versions))
+        self.enterContext(patch.object(sync, "record_usage_event", wraps=record_usage_event))
+        self.enterContext(patch("app.services.billing_service.calculate_units_for_quantity", return_value=7))
+        self.consume = self.enterContext(patch.object(sync, "record_billing_consumption", wraps=record_billing_consumption))
+        account = BillingAccount(account_id="enterprise", scope_key="org:fixture", scope_type="organization", plan_tier="enterprise", balance_units=80)
+        allocation = BillingAllocation(
+            allocation_id=build_allocation_id(account.account_id, self.actor.sub),
+            account_id=account.account_id,
+            user_id=self.actor.sub,
+            allocated_units=100,
+            consumed_units=9,
+        )
+        self.account_path = f"billing_accounts/{account.account_id}"
+        self.allocation_path = f"billing_allocations/{allocation.allocation_id}"
+        self.store[self.account_path] = account.model_dump()
+        self.store[self.allocation_path] = allocation.model_dump()
+        self.billing = self.enterContext(
+            patch.object(
+                sync,
+                "enforce_billing_access",
+                return_value=BillingAccessContext(
+                    account=account, profile=BillingUserProfile(user_id=self.actor.sub), pricing_entry=None, allocation=allocation, shadow_mode=False
+                ),
+            )
+        )
+
+    def demo_provider(self, adapter):
+        def dispatch(payload, **kwargs):
+            reserve = _model_reservation.get()
+            self.assertIsNotNone(reserve)
+            self.assertGreater(reserve(), 0)
+            self.assertEqual(payload.workflow_settings.retry_attempts, 0)
+            return adapter(payload, **kwargs)
+
+        return dispatch
+
     def test_refreshed_tests_do_not_keep_old_analysis_or_review_evidence(self):
         before = self.fixture()
         with (
@@ -207,21 +270,24 @@ class ProjectSyncTests(unittest.TestCase):
 
     def test_demo_accept_and_exact_replay_preserve_correction_without_dispatch(self):
         before = self.fixture()
+        self.enable_demo()
+        root = self.transaction_client.collection("qa_projects").document(self.pid)
+        approval_continuation.project_lease_ref(root).set(
+            {"kind": "draft", "run_id": "other", "fence": 1, "expires_at": projects._utcnow() + timedelta(minutes=1), "dispatched": True}
+        )
         with (
-            patch.object(sync, "draft_admission_client", return_value=self.transaction_client),
-            patch.object(sync, "enforce_billing_access") as billing,
             patch.object(sync, "_generate_stage") as dispatch,
         ):
             accepted = sync.accept_finding(self.pid, self.actor, self.payload, "accept")
             before_replay = deepcopy(self.store)
             self.assertEqual(sync.accept_finding(self.pid, self.actor, self.payload, "accept"), accepted)
             with self.assertRaises(HTTPException) as deferred:
-                sync.resume_sync(self.pid, self.actor, accepted.project_sync["id"])
-            billing.assert_not_called()
+                sync.resume_sync(self.pid, self.actor, accepted.project_sync["id"], "resume")
+            self.billing.assert_not_called()
             dispatch.assert_not_called()
 
         self.assertEqual(deferred.exception.status_code, 409)
-        self.assertEqual(deferred.exception.detail["code"], "project_draft_refresh_deferred")
+        self.assertEqual(deferred.exception.detail["code"], "project_draft_busy")
         self.assertEqual(self.store, before_replay)
         self.assertEqual(accepted.current_revision, before.current_revision + 1)
         self.assertEqual(accepted.project_sync["status"], "pending")
@@ -229,6 +295,168 @@ class ProjectSyncTests(unittest.TestCase):
         self.assertEqual(accepted.current_snapshots["requirements"].payload["requirements"][0]["text"], "Limit is 6")
         self.assertEqual(accepted.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
         self.assertTrue(accepted.stage_state["test_cases"].stale)
+
+    def test_demo_resumes_earlier_pending_correction_and_reuses_unstarted_stage(self):
+        self.fixture()
+        self.enable_demo()
+        self.billing.side_effect = [HTTPException(402, "Synthetic entitlement unavailable"), self.billing.return_value, self.billing.return_value]
+        with patch.object(sync, "approval_scenarios_enabled", return_value=False):
+            accepted = sync.accept_finding(self.pid, self.actor, self.payload, "prior-accept")
+        change_id = accepted.project_sync["id"]
+        root = f"qa_projects/{self.pid}"
+        self.store[root]["project_sync"].pop("draft_admission_version")
+        self.store[f"{root}/project_changes/{change_id}"].pop("draft_admission_version")
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(self.planner)) as planner,
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(self.generator)) as generator,
+        ):
+            with self.assertRaises(HTTPException) as blocked:
+                sync.resume_sync(self.pid, self.actor, change_id, "unstarted-attempt")
+            self.assertEqual(blocked.exception.status_code, 402)
+            enrolled = projects.get_project(self.pid, actor=self.actor)
+            self.assertEqual(enrolled.current_revision, accepted.current_revision)
+            self.assertEqual(enrolled.project_sync["draft_admission_version"], 1)
+            planner.assert_not_called()
+            completed = sync.resume_sync(self.pid, self.actor, change_id, "resume-demo")
+        self.assertEqual(planner.call_args.kwargs["request_id"], "unstarted-attempt")
+        self.assertEqual(generator.call_args.kwargs["request_id"], "resume-demo")
+        self.assertEqual(completed.project_sync["status"], "ready_for_review")
+        self.assertEqual(completed.current_revision, accepted.current_revision + 2)
+
+    def test_demo_stages_publish_and_recover_lost_suite_reply_with_one_charge(self):
+        before = self.fixture()
+        self.enable_demo()
+        suite = before.current_snapshots["test_cases"]
+        self.preserved.update(artifact_set_id="old-set", artifact_item_id="receipt-item", artifact_version_id="receipt-v1", artifact_version_number=1)
+        self.store[f"qa_projects/{self.pid}/snapshots/{suite.snapshot_id}"]["payload"]["test_cases"][1] = self.preserved
+        report = projects.append_stage_snapshot(
+            project_id=self.pid,
+            actor=self.actor,
+            request_id="previous-pom",
+            operation="automation.playwright.generate",
+            stage="reports",
+            payload={"artifact_kind": "generated_code", "files": ["old.py"]},
+        )
+        self.payload.base_project_revision = report.project_revision
+        original_commit = projects._commit_project_revision
+
+        def lose_suite_reply(*args, **kwargs):
+            committed = original_commit(*args, **kwargs)
+            if (kwargs.get("snapshot") or {}).get("stage") == "test_cases":
+                raise RuntimeError("Synthetic commit acknowledgement lost")
+            return committed
+
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(self.planner)) as planner,
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(self.generator)) as generator,
+            patch.object(sync, "generate_playwright_pom") as automation,
+            patch.object(projects, "_commit_project_revision", side_effect=lose_suite_reply),
+        ):
+            result = sync.accept_finding(self.pid, self.actor, self.payload, "accept-demo")
+            self.assertEqual(sync.accept_finding(self.pid, self.actor, self.payload, "accept-demo"), result)
+            self.assertEqual(sync.resume_sync(self.pid, self.actor, result.project_sync["id"], "resume-demo"), result)
+        planner.assert_called_once()
+        generator.assert_called_once()
+        automation.assert_not_called()
+        self.consume.assert_called_once()
+        self.assertIsNotNone(self.consume.call_args.kwargs["transaction"])
+        self.assertEqual(result.current_revision, report.project_revision + 3)
+        self.assertEqual(result.project_sync["status"], "ready_for_review")
+        self.assertEqual(result.project_sync["stages"]["automation"], "deferred")
+        self.assertEqual(result.current_snapshots["reports"], report)
+        self.assertEqual(result.execution_runs, [])
+        plan = result.current_snapshots["use_cases"]
+        self.assertEqual(plan.payload["coverage_plan"][0], before.current_snapshots["use_cases"].payload["coverage_plan"][0])
+        latest = result.current_snapshots["test_cases"]
+        self.assertFalse(latest.approved)
+        self.assertEqual(latest.source_snapshot_id, plan.snapshot_id)
+        self.assertEqual(latest.metadata["source_snapshot_ids"]["test_cases"], suite.snapshot_id)
+        self.assertEqual(latest.metadata["source_snapshot_ids"]["reports"], report.snapshot_id)
+        self.assertEqual(result.project_sync["stage_receipts"]["test_cases"]["base_revision"], plan.project_revision)
+        self.assertEqual(latest.payload["test_cases"][0], self.preserved)
+        generated = latest.payload["test_cases"][1]
+        version = self.store[f"test_case_sets/{generated['artifact_set_id']}/items/{generated['artifact_item_id']}/versions/{generated['artifact_version_id']}"]
+        self.assertEqual(version["source_event_id"], latest.source_event_id)
+        self.assertEqual(self.store[self.account_path]["balance_units"], 73)
+        self.assertEqual(self.store[self.allocation_path]["consumed_units"], 16)
+        for collection in ("usage_events", "billing_consumption", "billing_wallet_ledger"):
+            self.assertEqual(sum(path.startswith(f"{collection}/") for path in self.store), 1)
+
+    def test_demo_billing_rollback_preserves_plan_and_retry_uses_new_identity(self):
+        before = self.fixture()
+        self.enable_demo()
+
+        def fail_after_staging_debit(**kwargs):
+            record_billing_consumption(**kwargs)
+            raise RuntimeError("Synthetic debit rollback")
+
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(self.planner)) as planner,
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(self.generator)) as generator,
+        ):
+            with patch.object(sync, "record_billing_consumption", side_effect=fail_after_staging_debit):
+                partial = sync.accept_finding(self.pid, self.actor, self.payload, "accept-demo")
+            self.assertEqual(partial.project_sync["status"], "partial")
+            self.assertEqual(partial.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
+            self.assertEqual(self.store[self.account_path]["balance_units"], 80)
+            self.assertEqual(self.store[self.allocation_path]["consumed_units"], 9)
+            self.assertFalse(
+                any(path.startswith(("usage_events/", "billing_consumption/", "billing_wallet_ledger/", "test_case_sets/")) for path in self.store)
+            )
+            self.assertEqual(sync.accept_finding(self.pid, self.actor, self.payload, "accept-demo"), partial)
+            held = admission.read_project_sync_admission(self.transaction_client, self.pid, self.actor.sub)["attempt"]
+            self.assertEqual((held["state"], held["stage"]), ("interrupted", "test_cases"))
+            with patch.dict("os.environ", {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
+                self.assertEqual(sync.accept_finding(self.pid, self.actor, self.payload, "accept-demo"), partial)
+                with self.assertRaises(HTTPException) as rolled_back:
+                    sync.resume_sync(self.pid, self.actor, partial.project_sync["id"], "flag-off")
+                self.assertEqual(rolled_back.exception.detail["code"], "project_draft_refresh_deferred")
+            generator.assert_called_once()
+            with self.assertRaises(HTTPException) as blocked:
+                sync.resume_sync(self.pid, self.actor, partial.project_sync["id"], "retry-demo")
+            self.assertEqual(blocked.exception.detail["code"], "project_draft_recovery_required")
+            admission.release_draft_attempt(self.transaction_client, self.pid, self.actor.sub, held["operation_id"], held["fence"], project_sync=True)
+            with self.assertRaises(HTTPException) as old:
+                sync.resume_sync(self.pid, self.actor, partial.project_sync["id"], "accept-demo")
+            self.assertEqual(old.exception.detail["code"], "project_draft_recovery_required")
+            completed = sync.resume_sync(self.pid, self.actor, partial.project_sync["id"], "retry-after-release")
+        planner.assert_called_once()
+        self.assertEqual(generator.call_count, 2)
+        self.assertEqual(completed.current_snapshots["use_cases"], partial.current_snapshots["use_cases"])
+        self.assertEqual(completed.current_snapshots["test_cases"].request_id, "retry-after-release")
+        self.assertEqual(self.store[self.account_path]["balance_units"], 73)
+        self.assertEqual(sum(path.startswith("billing_consumption/") for path in self.store), 1)
+
+    def test_demo_source_change_fences_late_suite_reply_without_debit(self):
+        before = self.fixture()
+        self.enable_demo()
+
+        def replace_context(payload, **kwargs):
+            projects.append_stage_snapshot(
+                project_id=self.pid,
+                actor=self.actor,
+                request_id="new-context",
+                operation="context.enrich",
+                stage="context",
+                payload={"notes": "Context changed after provider dispatch"},
+            )
+            return self.generator(payload, **kwargs)
+
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(self.planner)) as planner,
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(replace_context)) as generator,
+        ):
+            superseded = sync.accept_finding(self.pid, self.actor, self.payload, "accept-demo")
+            with self.assertRaises(HTTPException) as stale:
+                sync.resume_sync(self.pid, self.actor, superseded.project_sync["id"], "retry-demo")
+            self.assertEqual(stale.exception.status_code, 409)
+        planner.assert_called_once()
+        generator.assert_called_once()
+        self.consume.assert_not_called()
+        self.assertEqual(superseded.project_sync["status"], "superseded")
+        self.assertEqual(superseded.current_snapshots["test_cases"], before.current_snapshots["test_cases"])
+        self.assertEqual(self.store[self.account_path]["balance_units"], 80)
+        self.assertFalse(any(path.startswith(("usage_events/", "billing_consumption/", "billing_wallet_ledger/", "test_case_sets/")) for path in self.store))
 
     def test_partial_resumes_only_failed_stage(self):
         self.fixture()
