@@ -6,19 +6,25 @@ critic result can pass; neither verdict grants human approval.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from hashlib import sha256
 import json
 import re
+from urllib.parse import urlsplit
 
 from google.adk.agents import Agent
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from .adk_runtime import json_generation_config
+from .scenario_boundary_coverage import inclusive_input_ranges, verified_boundary_endpoints
+from ..contracts.requirements import ScenarioBoundaryEvidence
+from ..services.browser_handoff import declared_browser_pages
 
 STATE_SCENARIO_ASSESSMENT = "scenario_semantic_assessment"
-RUBRIC_VERSION = "scenario_semantics_v3"
+RUBRIC_VERSION = "scenario_semantics_v4"
 CRITERIA = ("specific_trigger", "observable_outcome", "distinct_behavior", "source_grounding")
 _ROUTE = re.compile(r"(?<![\w/])/(?:[\w{}:.-]+/)*[\w{}:.-]+/?")
+_ABSOLUTE_URL = re.compile(r"""https?://[^\s"'\\]+""", re.I)
 
 
 def _routes(text):
@@ -69,6 +75,7 @@ class CriticRow(BaseModel):
     observable_outcome: Criterion
     distinct_behavior: Criterion
     source_grounding: Criterion
+    boundary_evidence: list[ScenarioBoundaryEvidence] = Field(default_factory=list, max_length=20)
 
 
 class CriticOutput(BaseModel):
@@ -92,12 +99,30 @@ def assessment_input(plan, requirements, context_text):
 
 def parse_critic_output(raw):
     try:
-        return [item.model_dump() for item in CriticOutput.model_validate_json(raw).assessments]
+        return [item.model_dump(exclude_unset=True) for item in CriticOutput.model_validate_json(raw).assessments]
     except ValueError, TypeError:
         return []
 
 
-def build_scenario_critic(model, input_provider, source_text):
+def build_scenario_critic(model, input_provider, source_text, *, input_ranges=()):
+    boundary_instructions = ""
+    boundary_example = ""
+    if input_ranges:
+        boundary_example = (
+            ', "boundary_evidence": [{"range_id": "copy the listed ID", "endpoint": "copy the listed value", '
+            '"input_quote": "exact field and input excerpt", "outcome_quote": "exact observable acceptance excerpt"}]'
+        )
+        boundary_instructions = f"""
+Also verify coverage of these explicit inclusive input ranges across the complete plan:
+{json.dumps([asdict(interval) for interval in input_ranges], ensure_ascii=False)}
+Include "boundary_evidence" on every assessment row. Use [] for unrelated rows. For each listed endpoint, look across all scenario groups
+for an essential scenario that actually uses that value and checks the source-defined accepted outcome. Quote the named input and exact value
+and the observable acceptance directly from that scenario's title or objective. Use separate scenarios for the lower and upper endpoints.
+A related success requirement can own the scenario when it exercises the same input and checks its source-backed outcome.
+Exclude generic ranges, validation errors, setup-only values, unrelated inputs, record counts and optional scenarios.
+Before returning, check that each endpoint with a qualifying scenario has a boundary_evidence entry in the corresponding row.
+"""
+
     def instruction(context):
         # Provider normalizes the final plan, including server-added scenarios.
         rows = input_provider(context.state)
@@ -112,8 +137,9 @@ Assess four criteria with a boolean passed and a short evidence-based reason:
 - source_grounding: the tested business rule must belong to this scenario's mapped requirement. Context may supply fixtures and setup but does not assign every described behavior to every requirement. If another requirement owns the rule (for example retry recovery versus ordinary successful creation), flag the incorrect mapping and identify the owner. Expected behavior and mandatory technical prescriptions must follow the supplied facts. Invented routes, mandatory debouncing, statuses, permissions, or timing policies are unsupported assumptions. Explain what to confirm or remove. Clearly marked optional exploratory assumptions may remain but cannot establish required coverage.
 Read the FULL title and objective. A generic title alone is not a defect. Do not infer adequacy from category counts, priority, IDs, or a structural score.
 For each failure identify the missing element and a useful correction without inventing a product fact.
+{boundary_instructions}
 Return ONLY a JSON object of this shape (one assessment per scenario, all four criteria required):
-{{"assessments": [{{"requirement_id": "REQ-001", "scenario_id": "REQ-001-SCN-01", "content_hash": "copy the provided hash", "specific_trigger": {{"passed": true, "reason": "evidence or correction"}}, "observable_outcome": {{"passed": true, "reason": "evidence or correction"}}, "distinct_behavior": {{"passed": true, "reason": "evidence or correction"}}, "source_grounding": {{"passed": true, "reason": "evidence or correction"}}}}]}}
+{{"assessments": [{{"requirement_id": "REQ-001", "scenario_id": "REQ-001-SCN-01", "content_hash": "copy the provided hash", "specific_trigger": {{"passed": true, "reason": "evidence or correction"}}, "observable_outcome": {{"passed": true, "reason": "evidence or correction"}}, "distinct_behavior": {{"passed": true, "reason": "evidence or correction"}}, "source_grounding": {{"passed": true, "reason": "evidence or correction"}}{boundary_example}}}]}}
 Do not rewrite scenarios or add requirements.
 
 SOURCE FACTS (requirements and supplied context only, not generated analysis):
@@ -148,12 +174,13 @@ def _generic_title(title):
     )
 
 
-def local_findings(plan, source_text):
+def local_findings(plan, source_text, *, declared_paths=()):
     """Known regression warnings only; never used as proof of semantic success."""
     findings = {}
     source = source_text.lower()
-    source_routes = _routes(source_text)
-    source_facts = _ROUTE.sub(" ", source_text)
+    relative_source = _ABSOLUTE_URL.sub(" ", source_text)
+    source_routes = _routes(relative_source) | set(declared_paths)
+    source_facts = _ROUTE.sub(" ", relative_source)
     source_values = {token.rstrip(".") for token in re.findall(r"(?<![\w.-])[A-Za-z0-9_][A-Za-z0-9_.-]*", source_facts)}
     by_objective = {}
     for group in plan:
@@ -199,25 +226,39 @@ def local_findings(plan, source_text):
 def assess_scenarios(plan, requirements, context_text, critic_rows=None):
     inputs = assessment_input(plan, requirements, context_text)
     source_text = "\n".join(r.text for r in requirements) + "\n" + context_text
-    known = local_findings(plan, source_text)
+    try:
+        context = json.loads(context_text)
+    except ValueError, RecursionError:
+        context = None
+    pages = set()
+    if isinstance(context, dict) and isinstance(context.get("notes"), str) and isinstance(context.get("app_link"), str):
+        pages = declared_browser_pages(context["notes"], context["app_link"])
+    known = local_findings(plan, source_text, declared_paths=(urlsplit(page).path for page in pages))
+    input_ranges = {interval.range_id: interval for interval in inclusive_input_ranges(requirements)}
+    covered_endpoints = set()
     indexed = {}
     for raw in critic_rows or []:
         try:
-            row = CriticRow.model_validate(raw).model_dump()
+            row = CriticRow.model_validate(raw)
         except ValueError, TypeError:
             continue
-        indexed.setdefault((row["requirement_id"], row["scenario_id"]), []).append(row)
+        indexed.setdefault((row.requirement_id, row.scenario_id), []).append(row)
     items = []
     for entry in inputs:
         scenario = entry["scenario"]
         key = (entry["requirement_id"], scenario["id"])
         candidates = indexed.get(key, [])
-        exact = candidates[0] if len(candidates) == 1 and candidates[0]["content_hash"] == entry["content_hash"] else None
+        exact = candidates[0] if len(candidates) == 1 and candidates[0].content_hash == entry["content_hash"] else None
         warnings = list(known[key])
-        checks = {name: exact[name] for name in CRITERIA} if exact else {}
+        checks = {name: getattr(exact, name).model_dump() for name in CRITERIA} if exact else {}
         if exact:
             warnings.extend(value["reason"] for value in checks.values() if not value["passed"])
         status = "needs_review" if warnings else "passed" if exact else "unavailable"
+        boundary_evidence = []
+        if status == "passed" and input_ranges:
+            verified = verified_boundary_endpoints(scenario, exact.boundary_evidence, input_ranges)
+            covered_endpoints.update((claim.range_id, claim.endpoint) for claim in verified)
+            boundary_evidence = [claim.model_dump() for claim in verified]
         items.append(
             {
                 "requirement_id": key[0],
@@ -227,11 +268,36 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
                 "review_available": bool(exact),
                 "checks": checks,
                 "warnings": warnings,
+                "boundary_evidence": boundary_evidence,
             }
         )
     available = sum(item["review_available"] for item in items)
     failed = sum(item["status"] == "needs_review" for item in items)
-    status = "needs_review" if failed else "passed" if items and available == len(items) else "unavailable"
+    requirement_findings = []
+    for interval in input_ranges.values():
+        missing = [endpoint for endpoint in interval.endpoints if (interval.range_id, endpoint) not in covered_endpoints]
+        if missing:
+            requirement_findings.append(
+                {
+                    "range_id": interval.range_id,
+                    "requirement_id": interval.requirement_id,
+                    "source_excerpt": interval.source_excerpt,
+                    "missing_endpoints": missing,
+                }
+            )
+    status = "needs_review" if failed or requirement_findings else "passed" if items and available == len(items) else "unavailable"
+    summary = (
+        f"{failed} scenario(s) need attention. {available} of {len(items)} received a semantic assessment."
+        if failed
+        else "All delivered scenarios passed the advisory semantic rubric. Human review is still required."
+        if status == "passed"
+        else f"Semantic assessment unavailable for {len(items) - available} of {len(items)} scenarios. No semantic pass is established."
+        if status == "unavailable"
+        else f"{available} of {len(items)} scenarios received a semantic assessment."
+    )
+    if requirement_findings:
+        missing_count = sum(len(finding["missing_endpoints"]) for finding in requirement_findings)
+        summary += f" {missing_count} accepted boundary input(s) need verified scenario coverage."
     return {
         "rubric_version": RUBRIC_VERSION,
         "status": status,
@@ -239,13 +305,8 @@ def assess_scenarios(plan, requirements, context_text, critic_rows=None):
         "scenario_count": len(items),
         "flagged_count": failed,
         "items": items,
-        "summary": (
-            f"{failed} scenario(s) need attention. {available} of {len(items)} received a semantic assessment."
-            if failed
-            else "All delivered scenarios passed the advisory semantic rubric. Human review is still required."
-            if status == "passed"
-            else f"Semantic assessment unavailable for {len(items) - available} of {len(items)} scenarios. No semantic pass is established."
-        ),
+        "requirement_findings": requirement_findings,
+        "summary": summary,
     }
 
 

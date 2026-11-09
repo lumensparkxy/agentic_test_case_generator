@@ -13,7 +13,7 @@ const getRunStatusIcon = (status) => {
 	if (["completed", "passed", "success", "succeeded"].includes(normalized)) return CheckCircle2;
 	if (["failed", "error", "invalid"].includes(normalized)) return XCircle;
 	if (["queued", "pending", "running", "in_progress"].includes(normalized)) return Clock3;
-	if (["cancelled", "canceled", "disabled", "blocked"].includes(normalized)) return CircleAlert;
+	if (["cancelled", "canceled", "disabled", "blocked", "flaky"].includes(normalized)) return CircleAlert;
 	return Circle;
 };
 

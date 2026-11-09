@@ -301,6 +301,11 @@
 	padding-left: 1.1rem;
 }
 
+.execution-source-expectation {
+	margin-top: 0.25rem;
+	overflow-wrap: anywhere;
+}
+
 .jira-sync-results-summary {
 	padding: 0.95rem 1rem;
 	border-radius: var(--radius-md);

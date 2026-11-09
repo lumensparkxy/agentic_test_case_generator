@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
@@ -39,6 +39,10 @@ from .billing_catalog import (
     get_minimum_start_units,
 )
 from .billing_repository import (
+    BILLING_ACCOUNTS_COLLECTION,
+    BILLING_ALLOCATIONS_COLLECTION,
+    BILLING_CONSUMPTION_COLLECTION,
+    BILLING_LEDGER_COLLECTION,
     append_billing_ledger_entry,
     append_consumption_record,
     build_allocation_id,
@@ -373,43 +377,90 @@ def record_billing_consumption(
     quantity: int,
     unit: str,
     metadata: Optional[dict] = None,
+    transaction=None,
+    firestore_client=None,
 ) -> BillingConsumptionRecord:
-    existing_record = get_consumption_record_by_source_event(billing_context.account.account_id, source_event_id)
+    admitted = billing_context.account
+    receipt = None
+    if transaction is not None:
+        # Project publication owns this transaction. Read all billing state
+        # before staging any writes, using the balance current at commit.
+        receipt = firestore_client.collection(BILLING_CONSUMPTION_COLLECTION).document(source_event_id)
+        stored = receipt.get(transaction=transaction).to_dict()
+        existing_record = BillingConsumptionRecord.model_validate(stored) if stored is not None else None
+    else:
+        existing_record = get_consumption_record_by_source_event(admitted.account_id, source_event_id)
     if existing_record is not None:
+        if existing_record.account_id != admitted.account_id or existing_record.source_event_id != source_event_id:
+            raise RuntimeError("Billing receipt does not match the publication")
         return existing_record
 
-    settings = get_billing_settings()
     units_charged = calculate_units_for_quantity(billing_key=billing_key, quantity=quantity)
-    is_paid_account = billing_context.account.plan_tier in {"premium", "enterprise"}
+    is_paid_account = admitted.plan_tier in {"premium", "enterprise"}
     applied = bool(is_paid_account and not billing_context.shadow_mode and units_charged > 0)
+    account_ref = allocation_ref = None
+    current = billing_context
+    if transaction is not None and applied:
+        account_ref = firestore_client.collection(BILLING_ACCOUNTS_COLLECTION).document(admitted.account_id)
+        saved = account_ref.get(transaction=transaction).to_dict()
+        account = BillingAccount.model_validate(saved) if saved is not None else None
+        if (
+            not account
+            or account.account_state == "suspended"
+            or (account.plan_tier, account.scope_type, account.pricing_version) != (admitted.plan_tier, admitted.scope_type, admitted.pricing_version)
+        ):
+            raise HTTPException(409, "Billing eligibility changed during generation. Check your account and try again.")
+        allocation = None
+        if account.scope_type == "organization":
+            allocation_ref = firestore_client.collection(BILLING_ALLOCATIONS_COLLECTION).document(build_allocation_id(account.account_id, current_user.sub))
+            saved = allocation_ref.get(transaction=transaction).to_dict()
+            if saved is None:
+                raise HTTPException(409, "Billing allocation changed during generation. Check your account and try again.")
+            allocation = BillingAllocation.model_validate(saved)
+        current = replace(billing_context, account=account, allocation=allocation)
 
-    consumption_record = append_consumption_record(
-        BillingConsumptionRecord(
-            consumption_id=str(uuid4()),
-            account_id=billing_context.account.account_id,
-            actor_user_id=current_user.sub,
-            source_event_id=source_event_id,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            billing_key=billing_key,
-            quantity=max(0, int(quantity or 0)),
-            unit=unit,
-            units_charged=units_charged,
-            pricing_version=billing_context.account.pricing_version,
-            applied=applied,
-            metadata={
-                "plan_tier": billing_context.account.plan_tier,
-                "shadow_mode": billing_context.shadow_mode,
-                **(metadata or {}),
-            },
-            created_at=_utcnow(),
-        )
+    consumption_record = BillingConsumptionRecord(
+        consumption_id=receipt.id if receipt is not None else str(uuid4()),
+        account_id=admitted.account_id,
+        actor_user_id=current_user.sub,
+        source_event_id=source_event_id,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        billing_key=billing_key,
+        quantity=max(0, int(quantity or 0)),
+        unit=unit,
+        units_charged=units_charged,
+        pricing_version=admitted.pricing_version,
+        applied=applied,
+        metadata={"plan_tier": admitted.plan_tier, "shadow_mode": billing_context.shadow_mode, **(metadata or {})},
+        created_at=_utcnow(),
     )
+    if transaction is not None:
+        transaction.create(receipt, consumption_record.model_dump(exclude_none=True))
+    else:
+        consumption_record = append_consumption_record(consumption_record)
 
     if not applied:
         return consumption_record
 
-    projected_balance_units = int(billing_context.account.balance_units or 0) - units_charged
+    updated_account, updated_allocation, ledger_entry = _consumption_wallet_effects(current, consumption_record)
+    if transaction is not None:
+        transaction.update(account_ref, updated_account.model_dump(include={"balance_units", "account_state", "updated_at"}))
+        if updated_allocation is not None:
+            transaction.update(allocation_ref, updated_allocation.model_dump(include={"consumed_units", "updated_at"}))
+        ledger_ref = firestore_client.collection(BILLING_LEDGER_COLLECTION).document(source_event_id)
+        transaction.create(ledger_ref, ledger_entry.model_copy(update={"entry_id": source_event_id}).model_dump(exclude_none=True))
+    else:
+        billing_context.account = upsert_billing_account(updated_account)
+        if updated_allocation is not None:
+            billing_context.allocation = upsert_billing_allocation(updated_allocation)
+        append_billing_ledger_entry(ledger_entry)
+    return consumption_record
+
+
+def _consumption_wallet_effects(billing_context, record):
+    settings = get_billing_settings()
+    projected_balance_units = int(billing_context.account.balance_units or 0) - record.units_charged
     overdraft_units = max(0, -projected_balance_units)
     if overdraft_units > settings.max_overdraft_units:
         projected_state = "suspended"
@@ -418,53 +469,33 @@ def record_billing_consumption(
     else:
         projected_state = "active"
 
-    updated_account = upsert_billing_account(
-        BillingAccount(
-            **{
-                **billing_context.account.model_dump(),
-                "balance_units": projected_balance_units,
-                "account_state": projected_state,
-                "updated_at": _utcnow(),
-            }
-        )
+    updated_account = billing_context.account.model_copy(
+        update={"balance_units": projected_balance_units, "account_state": projected_state, "updated_at": _utcnow()}
     )
 
+    updated_allocation = None
     if updated_account.scope_type == "organization" and billing_context.allocation is not None:
-        updated_allocation = upsert_billing_allocation(
-            BillingAllocation(
-                **{
-                    **billing_context.allocation.model_dump(),
-                    "consumed_units": int(billing_context.allocation.consumed_units or 0) + units_charged,
-                    "updated_at": _utcnow(),
-                }
-            )
+        updated_allocation = billing_context.allocation.model_copy(
+            update={"consumed_units": int(billing_context.allocation.consumed_units or 0) + record.units_charged, "updated_at": _utcnow()}
         )
-        billing_context.allocation = updated_allocation
 
-    append_billing_ledger_entry(
-        BillingLedgerEntry(
-            entry_id=str(uuid4()),
-            account_id=updated_account.account_id,
-            entry_type="consumption",
-            units_delta=-units_charged,
-            reason=f"Consumption for {billing_key}",
-            actor_user_id=current_user.sub,
-            target_user_id=current_user.sub,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=source_event_id,
-            billing_key=billing_key,
-            pricing_version=updated_account.pricing_version,
-            metadata={
-                "quantity": max(0, int(quantity or 0)),
-                "unit": unit,
-                "overdraft_units": overdraft_units,
-            },
-            created_at=_utcnow(),
-        )
+    ledger_entry = BillingLedgerEntry(
+        entry_id=str(uuid4()),
+        account_id=updated_account.account_id,
+        entry_type="consumption",
+        units_delta=-record.units_charged,
+        reason=f"Consumption for {record.billing_key}",
+        actor_user_id=record.actor_user_id,
+        target_user_id=record.actor_user_id,
+        request_id=record.request_id,
+        workflow_run_id=record.workflow_run_id,
+        source_event_id=record.source_event_id,
+        billing_key=record.billing_key,
+        pricing_version=updated_account.pricing_version,
+        metadata={"quantity": record.quantity, "unit": record.unit, "overdraft_units": overdraft_units},
+        created_at=_utcnow(),
     )
-    billing_context.account = updated_account
-    return consumption_record
+    return updated_account, updated_allocation, ledger_entry
 
 
 def get_my_billing_ledger(*, current_user: AuthUser) -> BillingLedgerResponse:

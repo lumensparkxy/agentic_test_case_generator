@@ -653,9 +653,47 @@ button.small {
 }
 
 .traceability-case-tag {
+	background: #f1f5f9;
+	color: #334155;
+	border: 1px solid #cbd5e1;
+}
+
+.traceability-case-link .traceability-case-tag {
 	background: #eff6ff;
 	color: #1d4ed8;
 	border: 1px solid #bfdbfe;
+}
+
+.traceability-case-link {
+	display: inline-flex;
+	max-width: 100%;
+	border-radius: 9999px;
+}
+
+.traceability-case-items {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 6px;
+}
+
+.traceability-case-overflow {
+	margin-block-start: 6px;
+}
+
+.traceability-case-overflow > summary {
+	width: fit-content;
+}
+
+.traceability-more-cases {
+	max-block-size: 10rem;
+	overflow: auto;
+	margin-block-start: 4px;
+	padding: 5px;
+}
+
+.traceability-more-cases:focus-visible {
+	outline: var(--focus-outline);
+	outline-offset: 1px;
 }
 
 .traceability-missing-text {
@@ -700,6 +738,33 @@ button.small {
 .traceability-links {
 	margin-top: 0;
 	margin-bottom: 0.75rem;
+}
+
+.test-review-groups {
+	margin-block: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+}
+.test-review-groups > p:first-child {
+	margin-top: 0;
+}
+.test-review-group {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.test-review-group p {
+	margin-block: var(--space-1);
+	overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+	.test-review-group {
+		flex-direction: column;
+		align-items: flex-start;
+	}
 }
 
 .improve-tests {

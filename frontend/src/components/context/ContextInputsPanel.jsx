@@ -7,6 +7,7 @@ import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
 	request,
 	projectId,
+	prerequisiteSearch,
 	project,
 	onProjectUpdated,
 	appLink,
@@ -38,19 +39,39 @@ export default function ContextInputsPanel({
 			<div className="panel-form two-cols">
 				<Field className="form-group">
 					<label>Application link</label>
-					<Input placeholder="https://your-app" value={appLink} onChange={(e) => setAppLink(e.target.value)} />
+					<Input
+						placeholder="https://your-app"
+						value={appLink}
+						onChange={(e) => setAppLink(e.target.value)}
+						disabled={isAnalyzingContext}
+					/>
 				</Field>
 				<Field className="form-group">
 					<label>Prototype link</label>
-					<Input placeholder="https://prototype" value={prototypeLink} onChange={(e) => setPrototypeLink(e.target.value)} />
+					<Input
+						placeholder="https://prototype"
+						value={prototypeLink}
+						onChange={(e) => setPrototypeLink(e.target.value)}
+						disabled={isAnalyzingContext}
+					/>
 				</Field>
 				<Field className="form-group">
 					<label>Diagram links</label>
-					<Input placeholder="Link1; Link2" value={diagramLinks} onChange={(e) => setDiagramLinks(e.target.value)} />
+					<Input
+						placeholder="Link1; Link2"
+						value={diagramLinks}
+						onChange={(e) => setDiagramLinks(e.target.value)}
+						disabled={isAnalyzingContext}
+					/>
 				</Field>
 				<Field className="form-group">
 					<label>Image links</label>
-					<Input placeholder="Link1; Link2" value={imageLinks} onChange={(e) => setImageLinks(e.target.value)} />
+					<Input
+						placeholder="Link1; Link2"
+						value={imageLinks}
+						onChange={(e) => setImageLinks(e.target.value)}
+						disabled={isAnalyzingContext}
+					/>
 				</Field>
 			</div>
 			<div className="context-notes">
@@ -67,7 +88,7 @@ export default function ContextInputsPanel({
 						{isAnalyzingContext ? "⏳ Analyzing..." : "Analyze Context"}
 					</Button>
 					{enrichedContext && (
-						<Button className="secondary" onClick={resetContextAnalysis}>
+						<Button className="secondary" onClick={resetContextAnalysis} disabled={isAnalyzingContext}>
 							Clear Analysis
 						</Button>
 					)}
@@ -86,6 +107,7 @@ export default function ContextInputsPanel({
 										<label>
 											<Checkbox
 												type="checkbox"
+												disabled={isAnalyzingContext}
 												checked={selectedArtifactSourceIds.includes(source.id)}
 												onChange={(e) => {
 													setSelectedArtifactSourceIds((prev) =>
@@ -108,7 +130,7 @@ export default function ContextInputsPanel({
 								<List className="analysis-detail-list">
 									{enrichedContext.grounded_context.ui_elements.slice(0, 6).map((el) => (
 										<ListItem key={el.id}>
-											{el.element_type}: {el.label || el.id}
+											{el.element_type}: {el.name || el.label || el.id}
 										</ListItem>
 									))}
 								</List>
@@ -136,7 +158,13 @@ export default function ContextInputsPanel({
 				<ProjectSyncPanel key={`sync-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
 			{projectId && request && (
-				<QualityFeedbackPanel key={`feedback-${projectId}`} request={request} projectId={projectId} onUpdated={onProjectUpdated} />
+				<QualityFeedbackPanel
+					key={`feedback-${projectId}:${prerequisiteSearch}`}
+					request={request}
+					projectId={projectId}
+					prerequisiteSearch={prerequisiteSearch}
+					onUpdated={onProjectUpdated}
+				/>
 			)}
 			{projectId && request && (
 				<Disclosure className="context-knowledge-details">

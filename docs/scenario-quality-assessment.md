@@ -9,31 +9,36 @@ Use Cases retain three separate decisions:
   categories must be allowed, and identifiers/requirement links valid. There is
   no mandatory Happy Path/non-happy-path pair or scenario-count quota. A single
   source behavior may be represented by one scenario in its appropriate category.
-- **Semantic assessment** reviews the full title and objective for a concrete
-  trigger, observable outcome, distinct behavior within the requirement, and
-  grounding in supplied requirements/context. Results are advisory findings,
-  not proof that a scenario or product behavior is correct.
+- **Semantic assessment** reviews each full title and objective for a concrete
+  trigger, observable outcome, distinct behavior across the plan, and
+  grounding in supplied requirements and Context. It also checks the plan for
+  evidence at explicit inclusive input boundaries. Results are advisory.
 - **Human review** remains an independent decision for the exact saved snapshot.
   Generation always creates a new unapproved snapshot. Existing revision,
   stale-input and idempotency guards still govern human decisions.
 
 ## Generation and limits
 
-One semantic critic follows the existing analysis and coverage planner in each
-Use Cases shard (at most three concurrent shards). It assesses the normalized
-plan, including fallback when model output is missing, within the existing shared shard
-wall-clock timeout and provider retry budget. It has no tools or repair loop.
-The critic receives the shard's source requirements and supplied context, not
-model-generated requirement analysis as a source of new facts. A business rule
-available only in a different shard can therefore require human reconciliation.
+One semantic critic assesses the delivered normalized plan. A single full
+shard runs it after planning. Multiple shards and scoped refresh run the critic
+once on the combined plan. Planning uses at most three concurrent shards.
+The critic receives the source requirements and supplied Context and works
+within the existing timeout and retry budget.
 
-The planner covers distinct source behaviors and applicable input partitions,
-checks generated analysis against source facts, and avoids repeating the same
-trigger/outcome under different categories. It must not invent states or
-implementation mechanisms to fill a plan. These instructions and structural
-checks do not prove source coverage or semantic correctness: the independent
-critic and explicit reviewer decision remain necessary, and no model-authored
-scenario is silently deleted after generation to force a passing verdict.
+The planner covers distinct source behaviors and input partitions and checks
+generated analysis against source facts. For an explicitly inclusive numeric
+input range, it plans separate must-have scenarios at the exact accepted
+endpoints alongside the stated invalid partitions. If a companion requirement
+defines the same input's successful outcome, it can own the positive scenarios.
+
+The coverage check recognizes direct affirmative numeric interval clauses such
+as “must be between 1 and 8 inclusive” and “accepts from -2.5 to 3.5
+(inclusive).” It uses the saved requirement text. The critic cites the exact
+input and acceptance outcome from a required scenario that passes its individual
+review. An error that quotes the range or a generic successful input cannot
+earn endpoint coverage. Missing verified inputs appear above the scenario table
+with the owning requirement ID and exact interval. The human decision remains
+independent.
 
 Known local checks flag category scaffolding, identical scenario content, and
 unsupplied route/debouncing prescriptions. They do not award a semantic pass or
@@ -50,16 +55,15 @@ meaning, actor permissions or expected behavior. The independent critic still
 reviews those semantics; absence of a local warning never grants approval.
 
 `review.structural_checks` retains the structural result.
-`review.semantic_assessment` records rubric version `scenario_semantics_v2`,
+`review.semantic_assessment` records rubric version `scenario_semantics_v4`,
 status (`passed`, `needs_review`, `unavailable`), assessed/total/flagged counts,
-and per-scenario checks, reasons and warnings. A SHA-256 binding covers the
-normalized scenario, requirement text and supplied context. Missing, ambiguous,
+per-scenario checks, reasons, warnings and verified boundary evidence, and `requirement_findings` for
+unverified boundary inputs. A SHA-256 binding covers the complete normalized
+plan, source requirements and supplied Context. Missing, ambiguous,
 malformed or mismatched critic records cannot pass. Known warnings remain
 visible even when the model assessment is unavailable. No semantic coverage
 percentage is inferred from category counts.
-Version 2 corrects route-template instances and rejects substring/case-only
-route matches. Existing version 1 assessments are retained as recorded; this
-change does not rewrite snapshots or human review decisions.
+Earlier assessments remain as recorded with their original rubric version.
 
 The legacy top-level score remains structural for compatibility; top-level
 machine `approved` now requires both structural and semantic success. It does

@@ -16,6 +16,7 @@ from google.genai import types
 
 from .literal_instructions import literal_source_agent
 from .scenario_assessment import STATE_SCENARIO_ASSESSMENT, assessment_input, assess_scenarios, build_scenario_critic, combine_review, parse_critic_output
+from .scenario_boundary_coverage import inclusive_input_ranges
 from .analysis_agent import build_requirement_analysis_agent, fallback_requirement_analysis, normalize_requirement_analysis
 from .test_case_agent import (
     STATE_COVERAGE_PLAN,
@@ -63,6 +64,12 @@ class _UseCaseShardResult:
     used_fallback: bool = False
     failed: bool = False
     semantic_rows: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RetainedUseCaseGroup:
+    analysis: dict[str, Any]
+    plan: dict[str, Any]
 
 
 def _new_use_case_diagnostics(
@@ -124,7 +131,9 @@ def _use_case_workflow_context(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None, *, review_in_shard=True):
+def _build_use_case_pipeline(
+    model, requirements_text, context_text, semantic_input, shard_index, human_feedback=None, *, review_in_shard=True, input_ranges=()
+):
     # Source braces (routes, JSON, artifact-like strings) are literal data. Only
     # our own templates may expand ADK session state.
     source_text = requirements_text + "\n" + context_text
@@ -136,7 +145,7 @@ def _build_use_case_pipeline(model, requirements_text, context_text, semantic_in
                 build_requirement_analysis_agent(model, requirements, context, output_key=STATE_REQUIREMENT_ANALYSIS, human_feedback=human_feedback),
                 _build_coverage_planner_agent(model, requirements, context, human_feedback=human_feedback),
             ]
-            + ([build_scenario_critic(model, semantic_input, source_text)] if review_in_shard else []),
+            + ([build_scenario_critic(model, semantic_input, source_text, input_ranges=input_ranges)] if review_in_shard else []),
             description="Plans requirement analysis and scenario coverage without generating test cases",
         )
 
@@ -164,7 +173,16 @@ async def _run_single_use_case_shard_workflow_async(
         plan, _ = _canonicalize_coverage_scenario_ids(_normalize_coverage_plan(raw_plan or [], shard.requirements))
         return assessment_input(plan, shard.requirements, context_text)
 
-    root_agent = _build_use_case_pipeline(model, requirements_text, context_text, semantic_input, shard.index, human_feedback, review_in_shard=review_in_shard)
+    root_agent = _build_use_case_pipeline(
+        model,
+        requirements_text,
+        context_text,
+        semantic_input,
+        shard.index,
+        human_feedback,
+        review_in_shard=review_in_shard,
+        input_ranges=inclusive_input_ranges(shard.requirements) if review_in_shard else (),
+    )
     session_service = InMemorySessionService()
     runner = Runner(
         agent=root_agent,
@@ -329,7 +347,7 @@ async def _review_merged_use_cases_async(*, coverage_plan, requirements, context
     async def consume():
         rows = assessment_input(coverage_plan, requirements, context_text)
         source_text = json.dumps([{"id": r.id, "text": r.text} for r in requirements], ensure_ascii=False) + "\n" + context_text
-        critic = build_scenario_critic(model, lambda _state: rows, source_text)
+        critic = build_scenario_critic(model, lambda _state: rows, source_text, input_ranges=inclusive_input_ranges(requirements))
         sessions = InMemorySessionService()
         runner = Runner(agent=critic, app_name="use_case_semantic_review", session_service=sessions)
         user_id = str(actor_user_id or "use-case-review")
@@ -393,6 +411,7 @@ def _run_shard_with_fallback(
     workflow_settings: Optional[WorkflowSettings],
     actor_user_id: Optional[str],
     all_requirements: Optional[List[Requirement]] = None,
+    skip_shard_review: bool = False,
 ) -> _UseCaseShardResult:
     requirements_text, context_text, _template_text = _prepare_workflow_inputs(
         shard.requirements,
@@ -400,8 +419,8 @@ def _run_shard_with_fallback(
         type("_Template", (), {"name": "Use Case Planning", "format": "structured", "fields": ["requirement_analysis", "coverage_plan"]})(),
     )
     catalogue = all_requirements or shard.requirements
-    review_in_shard = len(catalogue) == len(shard.requirements)
-    if not review_in_shard:
+    review_in_shard = not skip_shard_review and len(catalogue) == len(shard.requirements)
+    if len(catalogue) != len(shard.requirements):
         requirements_text = (
             "OUTPUT SCOPE: Analyze and generate groups ONLY for these assigned requirements:\n"
             + requirements_text
@@ -627,20 +646,26 @@ def _run_use_case_workflow_sync_inner(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    retained_groups: Optional[dict[str, RetainedUseCaseGroup]] = None,
 ) -> Dict[str, Any]:
     resolved_settings = _resolve_test_case_workflow_settings(workflow_settings)
     threshold = int(resolved_settings["approval_threshold"] or DEFAULT_TEST_CASE_THRESHOLD)
-    shards = _plan_use_case_shards(requirements)
-    worker_count = 1 if len(shards) == 1 else min(DEFAULT_USE_CASE_WORKER_COUNT, len(shards))
+    scoped = retained_groups is not None
+    retained_groups = retained_groups or {}
+    planning_requirements = [requirement for requirement in requirements if requirement.id not in retained_groups]
+    shards = _plan_use_case_shards(planning_requirements) if planning_requirements else []
+    worker_count = min(DEFAULT_USE_CASE_WORKER_COUNT, len(shards))
     diagnostics = _new_use_case_diagnostics(shard_count=len(shards), worker_count=worker_count)
 
     _log_test_case_workflow(
         "use_case_workflow_started",
         requirement_count=len(requirements),
+        planning_requirement_count=len(planning_requirements),
         shard_count=len(shards),
         worker_count=worker_count,
     )
 
+    shard_results = []
     if len(shards) == 1:
         shard_results = [
             _run_shard_with_fallback(
@@ -651,9 +676,10 @@ def _run_use_case_workflow_sync_inner(
                 workflow_settings=WorkflowSettings(**resolved_settings),
                 actor_user_id=actor_user_id,
                 all_requirements=requirements,
+                skip_shard_review=scoped,
             )
         ]
-    else:
+    elif shards:
         result_by_index: Dict[int, _UseCaseShardResult] = {}
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_by_shard = {
@@ -684,7 +710,14 @@ def _run_use_case_workflow_sync_inner(
         shard_results = [result_by_index[shard.index] for shard in shards]
 
     _merge_shard_diagnostics(diagnostics, shard_results)
-    requirement_analysis, coverage_plan, merge_warnings = _merge_use_case_shards(shard_results, requirements)
+    requirement_analysis, coverage_plan, merge_warnings = _merge_use_case_shards(shard_results, planning_requirements)
+    if retained_groups:
+        groups = {
+            **retained_groups,
+            **{analysis["requirement_id"]: RetainedUseCaseGroup(analysis, plan) for analysis, plan in zip(requirement_analysis, coverage_plan, strict=True)},
+        }
+        requirement_analysis = [groups[requirement.id].analysis for requirement in requirements]
+        coverage_plan = [groups[requirement.id].plan for requirement in requirements]
     diagnostics["merge_warnings"] = merge_warnings
     for warning in merge_warnings:
         _append_unique_message(diagnostics["warnings"], warning)
@@ -698,7 +731,7 @@ def _run_use_case_workflow_sync_inner(
     )
     semantic_rows = [row for result in shard_results for row in result.semantic_rows]
     _, context_text, _ = _prepare_workflow_inputs(requirements, context, type("_Template", (), {"name": "Use Cases", "format": "json", "fields": []})())
-    if len(shards) > 1:
+    if len(shards) > 1 or scoped:
         semantic_rows = []
         if not diagnostics["used_fallback"]:
             semantic_rows, failure = _review_merged_use_cases_sync(
@@ -830,6 +863,7 @@ def generate_use_cases(
     request_id: Optional[str] = None,
     workflow_run_id: Optional[str] = None,
     operation: Optional[str] = None,
+    retained_groups: Optional[dict[str, RetainedUseCaseGroup]] = None,
 ) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
 
@@ -850,6 +884,10 @@ def generate_use_cases(
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             operation=operation,
+            **({"retained_groups": retained_groups} if retained_groups is not None else {}),
         )
+        if retained_groups is not None:
+            # The combined critic has already assessed these exact rows, including legacy scenario IDs.
+            return {key: value for key, value in workflow.items() if key not in {"semantic_rows", "context_text"}}
 
     return _build_use_case_response(workflow, payload.requirements)

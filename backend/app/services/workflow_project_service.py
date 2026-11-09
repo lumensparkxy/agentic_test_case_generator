@@ -1,12 +1,17 @@
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-from google.cloud.firestore_v1 import FieldFilter, Query, transactional
+from google.api_core.exceptions import GoogleAPICallError
+from google.cloud.firestore_v1 import Client, CollectionReference, DocumentReference, FieldFilter, Query, transactional
+from pydantic import ValidationError
 
+from ..contracts.projects import QaProjectCaseSourceRequirement, QaProjectExecutionRunDetail, QaProjectTestCaseEvidence
+from ..contracts.test_cases import TestCase
 from ..models import (
     AuthUser,
     ProjectStageName,
@@ -20,9 +25,13 @@ from ..models import (
 from .guidance_service import public_manifest
 from .scenario_review_state import carry_scenario_reviews
 from .audit_service import build_actor_snapshot
+from .execution_result_storage import execution_result_writes, restore_execution_results
+from .execution_readiness import preview_has_verified_receipt
 from .firestore_repository import get_required_firestore_collection, get_required_firestore_client
 
 QA_PROJECTS_COLLECTION = "qa_projects"
+_EXECUTION_PREVIEW_OPERATION = "automation.execution.preview"
+_LEGACY_REPORT_STALE_PREFIX = "execution changed in project revision "
 PROJECT_STAGES: tuple[ProjectStageName, ...] = (
     "requirements",
     "context",
@@ -163,23 +172,162 @@ def _summary_from_payload(payload: dict[str, Any]) -> QaProjectSummary:
     )
 
 
-def _stream_collection(collection_ref: Any) -> list[dict[str, Any]]:
+def _stream_collection(collection_ref: Any, *, suppress_errors: bool = True) -> list[dict[str, Any]]:
     try:
         return [dict(snapshot.to_dict() or {}) for snapshot in collection_ref.stream()]
     except Exception as exc:  # pragma: no cover - defensive around external store
         logging.warning("Project subcollection stream skipped: %s", exc)
+        if not suppress_errors:
+            raise
         return []
 
 
 def _snapshot_for(project_id: str, snapshot_id: str) -> Optional[QaProjectStageSnapshot]:
     try:
-        payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get())
+        ref = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
+        payload = _document_to_dict(ref.get())
     except Exception as exc:  # pragma: no cover - defensive around external store
         logging.warning("Project snapshot load skipped for %s: %s", snapshot_id, exc)
         return None
     if not payload:
         return None
+    restore_execution_results(ref, payload)
     return QaProjectStageSnapshot.model_validate(payload)
+
+
+def find_idempotent_stage_snapshot(project_id, stage, operation, key, *, actor, require_current=True):
+    """Read a publication receipt without treating a storage failure as absence."""
+    project_doc = _get_project_doc(project_id)
+    project = _document_to_dict(project_doc.get())
+    if project is None:
+        raise ProjectNotFoundError(project_id)
+    _require_owner(project, actor)
+    snapshot_id = _stable_document_id("snapshot", project_id, stage, operation, key)
+    value = _document_to_dict(project_doc.collection("snapshots").document(snapshot_id).get())
+    if value is None:
+        return None
+    if not require_current:
+        return QaProjectStageSnapshot.model_validate(value)
+    # Read the header after the receipt. A publication may have committed
+    # between the ownership read and the receipt read.
+    current = _document_to_dict(project_doc.get())
+    if current is None:
+        raise ProjectNotFoundError(project_id)
+    _require_owner(current, actor)
+    state = _stage_state_from_payload(current).get(stage) or {}
+    if (current.get("status") or "active") != "active" or state.get("current_snapshot_id") != snapshot_id or state.get("stale"):
+        raise ProjectConflictError(int(current.get("current_revision") or 0))
+    return QaProjectStageSnapshot.model_validate(value)
+
+
+def get_project_summary(project_id: str, *, actor: AuthUser) -> QaProjectSummary:
+    payload = _get_project_payload(project_id)
+    _require_owner(payload, actor)
+    return _summary_from_payload(payload)
+
+
+def _restore_preview_staled_report(
+    project_doc: Any,
+    summary: QaProjectSummary,
+    snapshots: dict[ProjectStageName, QaProjectStageSnapshot],
+    latest_run: Optional[QaProjectExecutionRun],
+) -> None:
+    """Recover legacy report freshness only when its saved evidence still matches."""
+    report_state = summary.stage_state.get("reports")
+    if not report_state or not report_state.stale or not (report_state.stale_reason or "").startswith(_LEGACY_REPORT_STALE_PREFIX):
+        return
+    stale_revision = (report_state.stale_reason or "").removeprefix(_LEGACY_REPORT_STALE_PREFIX)
+    if not stale_revision.isascii() or not stale_revision.isdecimal() or len(stale_revision) > 19:
+        return
+    stale_revision = int(stale_revision)
+    report = snapshots.get("reports")
+    preview = snapshots.get("execution")
+    preview_state = summary.stage_state.get("execution")
+    suite = snapshots.get("test_cases")
+    if (
+        not report
+        or not preview
+        or not suite
+        or report.stage != "reports"
+        or report.project_id != summary.project_id
+        or report.snapshot_id != report_state.current_snapshot_id
+        or report.approved != report_state.approved
+        or not preview_state
+        or preview_state.stale
+        or preview_state.current_snapshot_id != preview.snapshot_id
+        or preview.stage != "execution"
+        or preview.operation != _EXECUTION_PREVIEW_OPERATION
+        or preview.project_id != summary.project_id
+        or preview.source_snapshot_id != suite.snapshot_id
+        or not report.project_revision < stale_revision <= preview.project_revision
+    ):
+        return
+
+    for stage in ("requirements", "context", "use_cases", "impact_analysis", "test_cases"):
+        source_state = summary.stage_state.get(stage)
+        if source_state and source_state.current_snapshot_id:
+            source = snapshots.get(stage)
+            if (
+                source_state.stale
+                or not source
+                or source.project_id != summary.project_id
+                or source.snapshot_id != source_state.current_snapshot_id
+                or source.project_revision > report.project_revision
+                or (source_state.updated_at is not None and source_state.updated_at > report.created_at)
+            ):
+                return
+
+    if report.operation in {"export.json", "export.csv", "export.excel"}:
+        sources = report.metadata.get("source_snapshot_ids")
+        run_ids = report.metadata.get("execution_run_ids", [])
+        if (
+            report.source_snapshot_id != suite.snapshot_id
+            or not isinstance(sources, dict)
+            or sources.get("test_cases") != suite.snapshot_id
+            or any(stage not in snapshots or snapshots[stage].snapshot_id != source_id for stage, source_id in sources.items() if stage != "execution")
+            or not isinstance(run_ids, list)
+            or (not latest_run and bool(run_ids))
+            or (latest_run and (latest_run.project_revision > report.project_revision or latest_run.created_at > report.created_at))
+            or (
+                latest_run
+                and latest_run.source_snapshot_id == suite.snapshot_id
+                and (run_ids[:1] != [latest_run.run_id] or sources.get("execution") != latest_run.snapshot_id)
+            )
+        ):
+            return
+    elif report.operation == "reports.execution_summary":
+        if (
+            not latest_run
+            or latest_run.historical
+            or latest_run.source_snapshot_id != suite.snapshot_id
+            or not latest_run.snapshot_id
+            or latest_run.snapshot_id != report.source_snapshot_id
+            or latest_run.run_id != report.payload.get("run_id")
+            or latest_run.status != report.payload.get("status")
+            or latest_run.project_revision > report.project_revision
+        ):
+            return
+    else:
+        return
+
+    if stale_revision != preview.project_revision:
+        # A later preview preserves the old flag. Verify the original cause using a field mask.
+        query = (
+            project_doc.collection("snapshots")
+            .where(filter=FieldFilter("project_revision", "==", stale_revision))
+            .where(filter=FieldFilter("operation", "==", _EXECUTION_PREVIEW_OPERATION))
+            .select(("project_id", "stage", "source_snapshot_id"))
+            .limit(1)
+        )
+        try:
+            cause = _document_to_dict(next(iter(query.stream()), None)) or {}
+        except GoogleAPICallError:
+            return
+        if cause.get("project_id") != summary.project_id or cause.get("stage") != "execution" or cause.get("source_snapshot_id") != suite.snapshot_id:
+            return
+
+    report_state.stale = False
+    report_state.stale_reason = None
 
 
 def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = False) -> QaProjectDetail:
@@ -201,9 +349,11 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
                         "retired_requirements": [r.model_dump(mode="json") for r in retired],
                     }
                 if stage == "test_cases":
-                    from .test_case_quality import project_test_case_view
+                    from .test_case_quality import generated_suite_review_retryable, project_test_case_view
 
                     snapshot.payload = project_test_case_view(snapshot.payload)
+                    if generated_suite_review_retryable(snapshot):
+                        snapshot.metadata = {**snapshot.metadata, "review_retry_available": True}
                     if snapshot.payload.get("generation_tasks"):
                         snapshot.approved = False
                         summary.stage_state[stage].approved = False
@@ -211,11 +361,15 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
 
     project_doc = _get_project_doc(project_id)
     timeline = [QaProjectTimelineEvent.model_validate(item) for item in _stream_collection(project_doc.collection("timeline")) if item.get("event_id")]
-    timeline.sort(key=lambda item: item.occurred_at, reverse=True)
-    execution_runs = [
-        QaProjectExecutionRun.model_validate(item) for item in _stream_collection(project_doc.collection("execution_runs")) if item.get("run_record_id")
-    ]
+    timeline.sort(key=lambda item: (item.occurred_at, item.project_revision), reverse=True)
+    try:
+        run_rows = _stream_collection(project_doc.collection("execution_runs"), suppress_errors=False)
+    except Exception:  # An unavailable history cannot prove that a legacy report is current.
+        run_rows = None
+    execution_runs = [QaProjectExecutionRun.model_validate(item) for item in run_rows or [] if item.get("run_record_id")]
     execution_runs.sort(key=lambda item: item.created_at, reverse=True)
+    if run_rows is not None:
+        _restore_preview_staled_report(project_doc, summary, current_snapshots, execution_runs[0] if execution_runs else None)
     from .impact_application_state import read_current
 
     application = read_current(project_doc, current_snapshots)
@@ -252,6 +406,102 @@ def get_project_stage_snapshot(project_id: str, snapshot_id: str, *, actor: Auth
     return snapshot
 
 
+def get_project_execution_run(project_id: str, run_record_id: str, *, actor: AuthUser) -> QaProjectExecutionRunDetail:
+    _require_owner(_get_project_payload(project_id), actor)
+    project_doc = _get_project_doc(project_id)
+    payload = _document_to_dict(project_doc.collection("execution_runs").document(run_record_id).get())
+    if not payload or payload.get("project_id") != project_id or payload.get("run_record_id") != run_record_id:
+        raise ProjectNotFoundError(run_record_id)
+    run = QaProjectExecutionRun.model_validate(payload)
+    snapshot = _snapshot_for(project_id, run.snapshot_id) if run.snapshot_id else None
+    results = None
+    issues = []
+    if (
+        snapshot
+        and snapshot.snapshot_id == run.snapshot_id
+        and snapshot.project_id == project_id
+        and snapshot.stage == "execution"
+        and snapshot.operation == "automation.execution.run"
+        and snapshot.source_snapshot_id == run.source_snapshot_id
+        and snapshot.payload.get("run_id") == run.run_id
+    ):
+        if isinstance(snapshot.payload.get("results"), list):
+            results = snapshot.payload["results"]
+        if isinstance(snapshot.payload.get("issues"), list):
+            issues = snapshot.payload["issues"]
+    return QaProjectExecutionRunDetail(**run.model_dump(), results=results, issues=issues)
+
+
+def get_project_test_case_evidence(project_id: str, snapshot_id: str, case_id: str, *, actor: AuthUser) -> QaProjectTestCaseEvidence:
+    project = _get_project_payload(project_id)
+    _require_owner(project, actor)
+    snapshot = _snapshot_for(project_id, snapshot_id)
+    if not snapshot or snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id or snapshot.stage != "test_cases":
+        raise ProjectNotFoundError(snapshot_id)
+    cases = snapshot.payload.get("test_cases")
+    matches = [case for case in cases if isinstance(case, dict) and case.get("id") == case_id] if isinstance(cases, list) else []
+    if len(matches) != 1:
+        raise ProjectNotFoundError(case_id)
+    try:
+        test_case = TestCase.model_validate(matches[0])
+    except ValidationError as exc:
+        raise ProjectNotFoundError(case_id) from exc
+
+    state = _stage_state_from_payload(project).get("test_cases", {})
+    historical = state.get("current_snapshot_id") != snapshot_id
+    return QaProjectTestCaseEvidence(
+        project_id=project_id,
+        snapshot_id=snapshot_id,
+        suite_version=snapshot.version,
+        project_revision=snapshot.project_revision,
+        historical=historical,
+        stale=not historical and bool(state.get("stale")),
+        test_case=test_case,
+        requirements=_case_source_requirements(snapshot, test_case),
+        obligations=_case_obligations(snapshot, case_id),
+    )
+
+
+def _case_source_requirements(snapshot: QaProjectStageSnapshot, test_case: TestCase) -> list[QaProjectCaseSourceRequirement]:
+    linked = {item.strip() for item in test_case.linked_requirement_ids}
+    linked.update(tag.strip() for tag in test_case.tags or [] if re.fullmatch(r"REQ-[A-Za-z0-9_-]+", tag.strip(), re.IGNORECASE))
+    if not linked:
+        return []
+    source_ids = snapshot.metadata.get("source_snapshot_ids")
+    source_id = snapshot.metadata.get("source_requirements_snapshot_id") or (source_ids.get("requirements") if isinstance(source_ids, dict) else None)
+    source = _snapshot_for(snapshot.project_id, source_id) if isinstance(source_id, str) and source_id else None
+    if not source or source.project_id != snapshot.project_id or source.snapshot_id != source_id or source.stage != "requirements":
+        return []
+    requirements = source.payload.get("requirements")
+    if not isinstance(requirements, list):
+        return []
+    return [
+        QaProjectCaseSourceRequirement(id=row["id"], text=row["text"])
+        for row in requirements
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"] in linked and isinstance(row.get("text"), str)
+    ]
+
+
+def _case_obligations(snapshot: QaProjectStageSnapshot, case_id: str) -> list[dict[str, Any]]:
+    assessment = snapshot.payload.get("substantive_assessment")
+    recorded = assessment.get("obligations") if isinstance(assessment, dict) else None
+    if not isinstance(recorded, list):
+        return []
+    obligations = []
+    for item in recorded:
+        rows = item.get("evidence") if isinstance(item, dict) else None
+        if not isinstance(rows, list):
+            continue
+        evidence = [
+            {key: row[key] for key in ("test_case_id", "step", "action", "expected") if key in row}
+            for row in rows
+            if isinstance(row, dict) and row.get("test_case_id") == case_id
+        ]
+        if evidence:
+            obligations.append({**{key: item[key] for key in ("obligation", "status", "source_quote", "reason") if key in item}, "evidence": evidence})
+    return obligations
+
+
 def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[QaProjectSummary]:
     projects: list[QaProjectSummary] = []
     for item in _stream_collection(_collection()):
@@ -264,17 +514,63 @@ def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[Qa
     return projects
 
 
-def _workspace_snapshot_for(project_id: str, snapshot_id: str, stage: ProjectStageName) -> Optional[QaProjectStageSnapshot]:
+def _workspace_snapshot_fields(stage: ProjectStageName) -> tuple[str, ...]:
     # Coverage plans are arrays, so Firestore cannot project just nested scenario IDs.
     # Read the current use-case plan to count legacy artifacts without rewriting them.
-    fields = WORKSPACE_SNAPSHOT_FIELDS + (("payload.coverage_plan",) if stage == "use_cases" else ())
-    payload = _document_to_dict(_get_project_doc(project_id).collection("snapshots").document(snapshot_id).get(field_paths=fields))
-    if not payload:
-        return None
-    snapshot = QaProjectStageSnapshot.model_validate(payload)
-    if snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id:
-        return None
-    return snapshot
+    fields = WORKSPACE_SNAPSHOT_FIELDS
+    if stage == "use_cases":
+        fields += ("payload.coverage_plan",)
+    if stage == "execution":
+        fields += ("payload.candidate_counts", "payload.readiness", "payload.reviewed_full_suite", "payload.warnings")
+    return fields
+
+
+def _workspace_snapshots(
+    client: Client,
+    projects: CollectionReference,
+    summaries: list[QaProjectSummary],
+) -> dict[tuple[str, str, ProjectStageName], QaProjectStageSnapshot]:
+    batches: dict[tuple[str, ...], dict[tuple[str, str, ProjectStageName], DocumentReference]] = {}
+    for summary in summaries:
+        collection = projects.document(summary.project_id).collection("snapshots")
+        for stage, state in summary.stage_state.items():
+            if state.current_snapshot_id:
+                pointer = (summary.project_id, state.current_snapshot_id, stage)
+                batches.setdefault(_workspace_snapshot_fields(stage), {})[pointer] = collection.document(state.current_snapshot_id)
+
+    snapshots = {}
+    legacy_previews: dict[str, tuple[DocumentReference, QaProjectStageSnapshot]] = {}
+    for fields, pointers in batches.items():
+        references = {reference.path: reference for reference in pointers.values()}
+        payloads = {
+            document.reference.path: payload
+            for document in client.get_all(list(references.values()), field_paths=fields)
+            if (payload := _document_to_dict(document))
+        }
+        for pointer, reference in pointers.items():
+            payload = payloads.get(reference.path)
+            if not payload:
+                continue
+            snapshot = QaProjectStageSnapshot.model_validate(payload)
+            if (snapshot.project_id, snapshot.snapshot_id, snapshot.stage) != pointer:
+                continue
+            snapshots[pointer] = snapshot
+            if (
+                snapshot.operation == _EXECUTION_PREVIEW_OPERATION
+                and "candidate_counts" in snapshot.payload
+                and not preview_has_verified_receipt(snapshot.metadata)
+            ):
+                legacy_previews[reference.path] = (reference, snapshot)
+
+    if legacy_previews:
+        # Legacy counts need their compact bucket lists to establish a complete preview.
+        references = [reference for reference, _ in legacy_previews.values()]
+        for document in client.get_all(references, field_paths=("payload.candidates",)):
+            entry = legacy_previews.get(document.reference.path)
+            if entry and (buckets := _document_to_dict(document)):
+                _, preview = entry
+                preview.payload.update(buckets.get("payload") or {})
+    return snapshots
 
 
 def _workspace_execution_runs(
@@ -297,6 +593,7 @@ def _workspace_execution_runs(
                 "run_id",
                 "target_environment",
                 "project_revision",
+                "historical",
                 "test_case_count",
                 "status",
                 "summary",
@@ -337,7 +634,9 @@ def list_workspace_projects(
     unbounded collection scan.
     """
 
-    query = _collection().where(filter=FieldFilter("owner_user_id", "==", actor.sub))
+    client = get_required_firestore_client(unavailable_message=f"Firestore client unavailable for {QA_PROJECTS_COLLECTION} persistence")
+    collection = client.collection(QA_PROJECTS_COLLECTION)
+    query = collection.where(filter=FieldFilter("owner_user_id", "==", actor.sub))
     if not include_archived:
         query = query.where(filter=FieldFilter("status", "==", "active"))
     query = (
@@ -358,7 +657,7 @@ def list_workspace_projects(
         .limit(project_limit)
     )
 
-    projects: list[QaProjectDetail] = []
+    summaries: list[QaProjectSummary] = []
     for snapshot in query.stream():
         payload = dict(snapshot.to_dict() or {})
         if not payload or payload.get("owner_user_id") != actor.sub:
@@ -366,13 +665,17 @@ def list_workspace_projects(
         if not include_archived and payload.get("status") == "archived":
             continue
 
-        summary = _summary_from_payload(payload)
+        summaries.append(_summary_from_payload(payload))
+
+    snapshots = _workspace_snapshots(client, collection, summaries)
+    projects: list[QaProjectDetail] = []
+    for summary in summaries:
         current_snapshots: dict[ProjectStageName, QaProjectStageSnapshot] = {}
         for stage, state in summary.stage_state.items():
             if not state.current_snapshot_id:
                 continue
-            current_snapshot = _workspace_snapshot_for(summary.project_id, state.current_snapshot_id, stage)
-            if current_snapshot is not None and current_snapshot.stage == stage:
+            current_snapshot = snapshots.get((summary.project_id, state.current_snapshot_id, stage))
+            if current_snapshot is not None:
                 if stage == "test_cases":
                     from .test_case_quality import project_test_case_view
 
@@ -382,13 +685,14 @@ def list_workspace_projects(
                         summary.stage_state[stage].approved = False
                 current_snapshots[stage] = current_snapshot
 
-        project_doc = _get_project_doc(summary.project_id)
+        project_doc = collection.document(summary.project_id)
         execution_runs = _workspace_execution_runs(
             project_doc,
             actor=actor,
             project_id=summary.project_id,
             limit=execution_run_limit,
         )
+        _restore_preview_staled_report(project_doc, summary, current_snapshots, execution_runs[0] if execution_runs else None)
         projects.append(
             QaProjectDetail(
                 **summary.model_dump(),
@@ -442,7 +746,9 @@ def create_project(*, name: str, description: Optional[str], actor: AuthUser, re
     return get_project(project_id, actor=actor)
 
 
-def _commit_project_revision(project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=(), transaction_guard=None):
+def _commit_project_revision(
+    project_id, actor, expected_revision, update, event, snapshot=None, pending_writes=(), transaction_guard=None, preceding_snapshots=()
+):
     """Serialize every revision writer with reviewed imports; publish all evidence or none."""
     client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
     doc = client.collection(QA_PROJECTS_COLLECTION).document(project_id)
@@ -471,6 +777,9 @@ def _commit_project_revision(project_id, actor, expected_revision, update, event
             transaction_guard(transaction, snapshot)
         for reference, value, merge in pending_writes:
             transaction.set(reference, value, merge=merge)
+        for preceding, preceding_event in preceding_snapshots:
+            transaction.create(doc.collection("snapshots").document(preceding["snapshot_id"]), preceding)
+            transaction.create(doc.collection("timeline").document(preceding_event["event_id"]), preceding_event)
         if snapshot:
             transaction.create(snapshot_ref, snapshot)
         transaction.update(doc, update)
@@ -525,38 +834,27 @@ def update_project(
     return get_project(project_id, actor=actor)
 
 
-def append_stage_snapshot(
+def _stage_snapshot_change(
+    stage_state,
     *,
-    project_id: str,
-    stage: ProjectStageName,
-    payload: dict[str, Any],
-    operation: str,
-    actor: AuthUser,
-    request_id: str,
-    workflow_run_id: Optional[str] = None,
-    source_event_id: Optional[str] = None,
-    approved: bool = False,
-    source_snapshot_id: Optional[str] = None,
-    title: Optional[str] = None,
-    metadata: Optional[dict[str, Any]] = None,
-    base_project_revision: Optional[int] = None,
-    idempotency_key: Optional[str] = None,
-    pending_writes: tuple | list = (),
-    transaction_guard=None,
-) -> QaProjectStageSnapshot:
-    project_payload = _get_project_payload(project_id)
-    _require_owner(project_payload, actor)
-    snapshot_id = _stable_document_id("snapshot", project_id, stage, operation, idempotency_key) if idempotency_key else str(uuid4())
-    if idempotency_key:
-        existing_snapshot = _snapshot_for(project_id, snapshot_id)
-        if existing_snapshot is not None:
-            return existing_snapshot
-    _check_revision(project_payload, base_project_revision)
-
-    now = _utcnow()
-    current_revision = int(project_payload.get("current_revision") or 0)
-    next_revision = current_revision + 1
-    stage_state = _stage_state_from_payload(project_payload)
+    project_id,
+    stage,
+    snapshot_id,
+    payload,
+    operation,
+    actor,
+    request_id,
+    workflow_run_id,
+    source_event_id,
+    approved,
+    source_snapshot_id,
+    title,
+    metadata,
+    next_revision,
+    now,
+    idempotency_key=None,
+):
+    """Prepare a snapshot and its timeline event against a prospective stage state."""
     previous_state = stage_state.get(stage) or {}
     version = int(previous_state.get("version") or 0) + 1
     guidance = public_manifest()
@@ -582,11 +880,6 @@ def append_stage_snapshot(
         "created_at": now,
     }
 
-    if stage == "execution":
-        from .quality_feedback import execution_finding_writes
-
-        pending_writes = [*pending_writes, *execution_finding_writes(project_id, snapshot_payload)]
-
     stage_metadata = dict(metadata or {})
     if stage == "use_cases":
         previous_snapshot = _snapshot_for(project_id, previous_state.get("current_snapshot_id")) if previous_state.get("current_snapshot_id") else None
@@ -608,13 +901,119 @@ def append_stage_snapshot(
         "source_snapshot_id": source_snapshot_id,
         "metadata": _serialize_value(stage_metadata),
     }
-    for downstream_stage in DOWNSTREAM_STAGES[stage]:
+    # A preview classifies the same suite without adding or replacing run evidence.
+    downstream_stages = () if stage == "execution" and operation == _EXECUTION_PREVIEW_OPERATION else DOWNSTREAM_STAGES[stage]
+    for downstream_stage in downstream_stages:
         if downstream_stage not in stage_state:
             continue
         downstream = dict(stage_state[downstream_stage])
         downstream["stale"] = True
         downstream["stale_reason"] = f"{stage} changed in project revision {next_revision}"
         stage_state[downstream_stage] = downstream
+
+    event = {
+        "event_id": str(uuid4()),
+        "project_id": project_id,
+        "event_type": "stage.snapshot_created",
+        "stage": stage,
+        "summary": title or f"{stage.replace('_', ' ').title()} v{version} saved",
+        "project_revision": next_revision,
+        "snapshot_id": snapshot_id,
+        "actor_user_id": actor.sub,
+        "metadata": {"operation": operation, **_serialize_value(metadata or {})},
+        "occurred_at": now,
+    }
+    return snapshot_payload, event
+
+
+def append_stage_snapshot(
+    *,
+    project_id: str,
+    stage: ProjectStageName,
+    payload: dict[str, Any],
+    operation: str,
+    actor: AuthUser,
+    request_id: str,
+    workflow_run_id: Optional[str] = None,
+    source_event_id: Optional[str] = None,
+    approved: bool = False,
+    source_snapshot_id: Optional[str] = None,
+    title: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
+    base_project_revision: Optional[int] = None,
+    idempotency_key: Optional[str] = None,
+    pending_writes: tuple | list = (),
+    transaction_guard=None,
+    use_case_draft_payload: Optional[dict[str, Any]] = None,
+) -> QaProjectStageSnapshot:
+    project_payload = _get_project_payload(project_id)
+    _require_owner(project_payload, actor)
+    snapshot_id = _stable_document_id("snapshot", project_id, stage, operation, idempotency_key) if idempotency_key else str(uuid4())
+    if idempotency_key:
+        existing_snapshot = _snapshot_for(project_id, snapshot_id)
+        if existing_snapshot is not None:
+            return existing_snapshot
+    _check_revision(project_payload, base_project_revision)
+
+    now = _utcnow()
+    current_revision = int(project_payload.get("current_revision") or 0)
+    next_revision = current_revision + 1
+    stage_state = _stage_state_from_payload(project_payload)
+    preceding_snapshots = ()
+    if use_case_draft_payload is not None:
+        if stage != "test_cases" or not source_snapshot_id:
+            raise ValueError("A Use Cases draft must be linked to its Test Cases snapshot")
+        preceding_snapshots = (
+            _stage_snapshot_change(
+                stage_state,
+                project_id=project_id,
+                stage="use_cases",
+                snapshot_id=source_snapshot_id,
+                payload=use_case_draft_payload,
+                operation=f"{operation}.use_cases",
+                actor=actor,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                source_event_id=source_event_id,
+                approved=False,
+                source_snapshot_id=None,
+                title="Use cases updated",
+                metadata={
+                    "requirement_analysis_count": len(use_case_draft_payload.get("requirement_analysis") or []),
+                    "coverage_plan_count": len(use_case_draft_payload.get("coverage_plan") or []),
+                },
+                next_revision=next_revision,
+                now=now,
+            ),
+        )
+        next_revision += 1
+
+    snapshot_payload, event = _stage_snapshot_change(
+        stage_state,
+        project_id=project_id,
+        stage=stage,
+        snapshot_id=snapshot_id,
+        payload=payload,
+        operation=operation,
+        actor=actor,
+        request_id=request_id,
+        workflow_run_id=workflow_run_id,
+        source_event_id=source_event_id,
+        approved=approved,
+        source_snapshot_id=source_snapshot_id,
+        title=title,
+        metadata=metadata,
+        next_revision=next_revision,
+        now=now,
+        idempotency_key=idempotency_key,
+    )
+    if stage == "execution":
+        from .quality_feedback import execution_finding_writes
+
+        pending_writes = [*pending_writes, *execution_finding_writes(project_id, snapshot_payload)]
+        if operation == "automation.execution.run":
+            snapshot_ref = _get_project_doc(project_id).collection("snapshots").document(snapshot_id)
+            pending_writes.extend(execution_result_writes(snapshot_ref, snapshot_payload))
 
     committed = _commit_project_revision(
         project_id,
@@ -626,22 +1025,14 @@ def append_stage_snapshot(
             "stage_state": stage_state,
             "latest_stage": stage,
         },
-        {
-            "event_id": str(uuid4()),
-            "project_id": project_id,
-            "event_type": "stage.snapshot_created",
-            "stage": stage,
-            "summary": title or f"{stage.replace('_', ' ').title()} v{version} saved",
-            "project_revision": next_revision,
-            "snapshot_id": snapshot_id,
-            "actor_user_id": actor.sub,
-            "metadata": {"operation": operation, **_serialize_value(metadata or {})},
-            "occurred_at": now,
-        },
+        event,
         snapshot=snapshot_payload,
         pending_writes=pending_writes,
         transaction_guard=transaction_guard,
+        preceding_snapshots=preceding_snapshots,
     )
+    if stage == "execution" and operation == "automation.execution.run":
+        restore_execution_results(snapshot_ref, committed)
     return QaProjectStageSnapshot.model_validate(committed)
 
 
@@ -659,16 +1050,18 @@ def record_execution_run(
     workflow_run_id: Optional[str],
     source_event_id: Optional[str],
     project_revision: int,
+    historical: bool = False,
     target_base_url: Optional[str] = None,
     source_snapshot_id: Optional[str] = None,
     selected_test_case_ids: Optional[list[str]] = None,
     artifacts_root: Optional[str] = None,
     playwright_report_paths: Optional[list[str]] = None,
     idempotency_key: Optional[str] = None,
+    transaction=None,
 ) -> QaProjectExecutionRun:
     now = _utcnow()
     run_record_id = _stable_document_id("execution", project_id, idempotency_key) if idempotency_key else str(uuid4())
-    if idempotency_key:
+    if idempotency_key and transaction is None:
         existing = _document_to_dict(_get_project_doc(project_id).collection("execution_runs").document(run_record_id).get())
         if existing is not None:
             return QaProjectExecutionRun.model_validate(existing)
@@ -681,6 +1074,7 @@ def record_execution_run(
         "artifacts_root": artifacts_root,
         "playwright_report_paths": _serialize_value(playwright_report_paths or []),
         "project_revision": project_revision,
+        "historical": historical,
         "test_case_count": test_case_count,
         "status": status_value,
         "summary": _serialize_value(summary),
@@ -695,31 +1089,35 @@ def record_execution_run(
         "created_at": now,
     }
     project_doc = _get_project_doc(project_id)
-    project_doc.collection("execution_runs").document(run_record_id).set(payload)
-    _record_timeline_event(
-        project_doc,
-        {
-            "event_id": str(uuid4()),
-            "project_id": project_id,
-            "event_type": "execution.run_recorded",
-            "stage": "execution",
-            "summary": f"{target_environment} execution {status_value}",
-            "project_revision": project_revision,
-            "snapshot_id": snapshot_id,
-            "run_id": run_id,
-            "actor_user_id": actor.sub,
-            "metadata": {
-                "summary": _serialize_value(summary),
-                "target_environment": target_environment,
-                "target_base_url": target_base_url,
-                "artifacts_root": artifacts_root,
-                "playwright_report_paths": _serialize_value(playwright_report_paths or []),
-                "source_snapshot_id": source_snapshot_id,
-                "selected_test_case_ids": _serialize_value(selected_test_case_ids or []),
-            },
-            "occurred_at": now,
+    run_ref = project_doc.collection("execution_runs").document(run_record_id)
+    event = {
+        "event_id": str(uuid4()),
+        "project_id": project_id,
+        "event_type": "execution.run_recorded",
+        "stage": "execution",
+        "summary": f"{target_environment} execution {status_value}",
+        "project_revision": project_revision,
+        "snapshot_id": snapshot_id,
+        "run_id": run_id,
+        "actor_user_id": actor.sub,
+        "metadata": {
+            "summary": _serialize_value(summary),
+            "historical": historical,
+            "target_environment": target_environment,
+            "target_base_url": target_base_url,
+            "artifacts_root": artifacts_root,
+            "playwright_report_paths": _serialize_value(playwright_report_paths or []),
+            "source_snapshot_id": source_snapshot_id,
+            "selected_test_case_ids": _serialize_value(selected_test_case_ids or []),
         },
-    )
+        "occurred_at": now,
+    }
+    if transaction is None:
+        run_ref.set(payload)
+        _record_timeline_event(project_doc, event)
+    else:
+        transaction.create(run_ref, payload)
+        transaction.create(project_doc.collection("timeline").document(event["event_id"]), event)
     return QaProjectExecutionRun.model_validate(payload)
 
 

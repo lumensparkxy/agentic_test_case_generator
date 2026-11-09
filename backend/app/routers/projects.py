@@ -1,9 +1,10 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
-from ..contracts.projects import QaProjectUseCaseGenerationInput
+from ..contracts.execution import ExecutionRequestReceipt
+from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
 from ..services.use_case_generation_service import generate_project_use_cases
 from ..auth.jwt_auth import get_current_user
 from ..models import (
@@ -22,13 +23,17 @@ from ..models import (
     UseCaseReviewResponse,
 )
 from ..services.impact_update_service import analyze_project_impact, apply_project_impact_update, impact_error_to_http
+from ..services.execution_request_service import public_execution_request, read_execution_request
 from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
+from ..services.test_case_suite_review import review_saved_test_cases
 from ..services.use_case_review_service import review_use_case_snapshot, use_case_review_error_to_http
 from ..services.workflow_project_service import (
     append_stage_snapshot,
     create_project,
     get_project,
+    get_project_execution_run,
+    get_project_test_case_evidence,
     list_projects,
     project_error_to_http,
     update_project,
@@ -116,6 +121,46 @@ async def get_qa_project_timeline(
         raise project_error_to_http(exc) from exc
 
 
+@router.get("/projects/{project_id}/execution-runs/{run_record_id}", response_model=QaProjectExecutionRunDetail)
+async def get_qa_project_execution_run(
+    project_id: str,
+    run_record_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectExecutionRunDetail:
+    try:
+        return await run_in_threadpool(get_project_execution_run, project_id, run_record_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/test-case-evidence", response_model=QaProjectTestCaseEvidence)
+async def get_qa_project_test_case_evidence(
+    project_id: str,
+    snapshot_id: str = Query(min_length=1, max_length=160, pattern=r"^[^/]+$"),
+    case_id: str = Query(min_length=1),
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectTestCaseEvidence:
+    try:
+        return await run_in_threadpool(get_project_test_case_evidence, project_id, snapshot_id, case_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/execution-requests/{request_id}", response_model=ExecutionRequestReceipt)
+async def get_qa_project_execution_request(
+    project_id: str,
+    request_id: str = Path(max_length=160),
+    current_user: AuthUser = Depends(get_current_user),
+) -> ExecutionRequestReceipt:
+    try:
+        record = await run_in_threadpool(read_execution_request, project_id, request_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+    if not record:
+        raise HTTPException(404, "Execution request has no saved receipt.")
+    return public_execution_request(record)
+
+
 @router.get("/projects/{project_id}/orchestrator/status", response_model=OrchestratorStatusResponse)
 async def get_qa_project_orchestrator_status(
     project_id: str,
@@ -176,6 +221,28 @@ async def apply_qa_project_impact_update(
         )
     except Exception as exc:
         raise impact_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/test-cases/review", response_model=QaProjectDetail)
+async def review_qa_project_test_cases(
+    project_id: str,
+    request: Request,
+    payload: QaProjectTestCaseReviewInput,
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectDetail:
+    try:
+        return await run_in_threadpool(
+            review_saved_test_cases,
+            project_id=project_id,
+            snapshot_id=payload.snapshot_id,
+            base_project_revision=payload.base_project_revision,
+            actor=current_user,
+            request_id=_get_request_id(request),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
 
 
 @router.post("/projects/{project_id}/use-cases", response_model=QaProjectDetail)
@@ -257,6 +324,7 @@ async def generate_qa_project_use_cases(
             actor=current_user,
             request_id=_get_request_id(request),
             base_project_revision=payload.base_project_revision,
+            refresh_requirement_ids=payload.refresh_requirement_ids,
             memory_bypass=request.headers.get("X-Knowledge-Bypass", "").lower() == "true",
         )
     except HTTPException:

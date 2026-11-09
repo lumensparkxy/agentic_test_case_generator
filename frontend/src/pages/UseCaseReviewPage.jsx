@@ -1,5 +1,6 @@
+import { useState } from "react";
 import ClarificationScopeNotice from "../components/context/ClarificationScopeNotice";
-import { hasApprovedGenerationScope } from "../utils/requirementScope";
+import { generationRequirementRows, hasApprovedGenerationScope } from "../utils/requirementScope";
 import useUseCaseGeneration from "../hooks/useUseCaseGeneration";
 import GuidanceUsed from "../components/knowledge/GuidanceUsed";
 import GenerationGuidance from "../components/knowledge/GenerationGuidance";
@@ -10,6 +11,7 @@ import ProjectPageHeader from "../components/layout/ProjectPageHeader";
 import RouteLink from "../app/RouteLink";
 import { PROJECT_DESTINATIONS, buildProjectPath } from "../app/workflowRoutes";
 import UseCaseReviewWorkbench from "../components/reviews/UseCaseReviewWorkbench";
+import UseCaseRefreshDialog from "../components/reviews/UseCaseRefreshDialog";
 import useUseCaseReview from "../hooks/useUseCaseReview";
 
 export default function UseCaseReviewPage({
@@ -25,6 +27,8 @@ export default function UseCaseReviewPage({
 	onNext,
 }) {
 	const projectId = project?.project_id || "";
+	const [refreshDialogScope, setRefreshDialogScope] = useState(null);
+	const refreshScope = `${identity}:${projectId}:${project?.current_revision}`;
 	const generation = useUseCaseGeneration({ project, identity, request, onGenerated });
 	const snapshot = project?.current_snapshots?.use_cases || null;
 	const stageState = project?.stage_state?.use_cases || null;
@@ -45,6 +49,16 @@ export default function UseCaseReviewPage({
 	const effectiveStageState = responseStageState?.current_snapshot_id === snapshot?.snapshot_id ? responseStageState : stageState;
 	const latestHumanReview = effectiveStageState?.metadata?.latest_human_review;
 	const matchingHumanDecision = latestHumanReview?.snapshot_id === snapshot?.snapshot_id ? latestHumanReview?.decision || "" : "";
+	const contextSnapshot = project?.current_snapshots?.context;
+	const contextState = project?.stage_state?.context;
+	const contextReady = !contextSnapshot || (contextState?.current_snapshot_id === contextSnapshot.snapshot_id && !contextState.stale);
+	const scopeAvailable =
+		effectiveStageState?.stale &&
+		effectiveStageState.approved &&
+		matchingHumanDecision === "approve" &&
+		(snapshot?.metadata?.source_requirements_snapshot_id || snapshot?.source_snapshot_id) &&
+		contextReady;
+	const generationBusy = generation.isBusy || review.isSubmitting || review.isReloading;
 	const reviewStatus = effectiveStageState?.stale
 		? { label: "Regeneration needed", tone: "stale" }
 		: matchingHumanDecision === "approve"
@@ -78,11 +92,16 @@ export default function UseCaseReviewPage({
 							>
 								{reviewStatus.label}
 							</Badge>
+							{scopeAvailable && (
+								<Button size="compact" onClick={() => setRefreshDialogScope(refreshScope)} disabled={!generationAllowed || generationBusy}>
+									Review refresh scope
+								</Button>
+							)}
 							<Button
-								variant={effectiveStageState?.stale ? "primary" : "secondary"}
+								variant={effectiveStageState?.stale && !scopeAvailable ? "primary" : "secondary"}
 								size="compact"
-								onClick={generation.generate}
-								disabled={!generationAllowed || generation.isBusy || review.isSubmitting || review.isReloading}
+								onClick={() => void generation.generate()}
+								disabled={!generationAllowed || generationBusy}
 							>
 								{generation.isBusy ? "Generating Use Cases…" : "Regenerate Use Cases"}
 							</Button>
@@ -95,6 +114,19 @@ export default function UseCaseReviewPage({
 					) : null
 				}
 			/>
+			{scopeAvailable && generationAllowed && refreshDialogScope === refreshScope && (
+				<UseCaseRefreshDialog
+					requirements={generationRequirementRows(requirementsSnapshot?.payload?.requirements || [])}
+					priorPlan={snapshot.payload.coverage_plan || []}
+					priorIdentities={snapshot.metadata?.source_requirement_identities}
+					contextChanged={(snapshot.metadata?.source_context_snapshot_id || null) !== (contextSnapshot?.snapshot_id || null)}
+					onClose={() => setRefreshDialogScope(null)}
+					onConfirm={(ids) => {
+						setRefreshDialogScope(null);
+						void generation.generate(ids);
+					}}
+				/>
+			)}
 
 			<ClarificationScopeNotice project={project} onOpen={() => navigate(buildProjectPath(projectId, "context"))} />
 			{!requirementsReady && snapshot ? (
@@ -146,7 +178,7 @@ export default function UseCaseReviewPage({
 					</p>
 					<div className="use-case-no-snapshot-actions">
 						{requirementsReady ? (
-							<Button onClick={generation.generate} disabled={!generationAllowed || generation.isBusy}>
+							<Button onClick={() => void generation.generate()} disabled={!generationAllowed || generation.isBusy}>
 								{generation.isBusy ? "Generating Use Cases…" : "Generate Use Cases"}
 							</Button>
 						) : (
@@ -191,7 +223,7 @@ export default function UseCaseReviewPage({
 				<Button variant="secondary" onClick={onBack} title="Back to Context">
 					Back
 				</Button>
-				<Button variant="secondary" onClick={onNext} title="Next to Test Cases">
+				<Button onClick={onNext} title="Next to Test Cases">
 					Next
 				</Button>
 			</nav>

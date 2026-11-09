@@ -55,6 +55,12 @@ function RunRow({ run, onOpenProject }) {
 						<dt>Failed</dt>
 						<dd>{exactCount(run.failed_count)}</dd>
 					</div>
+					{run.flaky_count > 0 && (
+						<div>
+							<dt>Flaky</dt>
+							<dd>{exactCount(run.flaky_count)}</dd>
+						</div>
+					)}
 					<div>
 						<dt>Invalid</dt>
 						<dd>{exactCount(run.invalid_count)}</dd>
@@ -63,10 +69,11 @@ function RunRow({ run, onOpenProject }) {
 			</div>
 			<ProjectOpenLink
 				projectId={run.project_id}
-				destination={PROJECT_DESTINATIONS.AUTOMATION}
+				destination={PROJECT_DESTINATIONS.REPORTS}
+				runRecordId={run.run_record_id}
 				onOpenProject={onOpenProject}
 				className="workspace-open-link activity-index-open-link"
-				ariaLabel={`Open automation evidence for ${run.project_name || "project"}`}
+				ariaLabel={`Open evidence for run ${runIdentity}`}
 			>
 				Open evidence
 			</ProjectOpenLink>

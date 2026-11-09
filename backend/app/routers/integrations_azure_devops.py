@@ -44,7 +44,9 @@ from ..services.billing_service import enforce_billing_access, record_billing_co
 from ..services.versioning_service import persist_requirement_versions
 
 from ..contracts.requirement_imports import RequirementImportPreview
-from ..services.requirement_import_service import require_review_client, stage_import
+from ..services.requirement_import_service import require_review_client
+from ..services.requirement_import_publication import ExtractionPublicationUnconfirmed, ProjectRequirementExtraction
+from ..services.requirement_reconciliation import digest
 
 router = APIRouter()
 
@@ -296,15 +298,23 @@ async def azure_devops_import_requirements_endpoint(
 ) -> RequirementsWorkflowResponse | RequirementImportPreview:
     await run_in_threadpool(require_review_client, payload.project_id, payload.base_project_revision, payload.import_mode, current_user)
     request_id = _get_request_id(request)
+    operation = "requirements.import.azure_devops"
+    event_type = "requirements.imported.azure_devops"
+    extraction = None
     if payload.project_id:
         await run_in_threadpool(project_for, payload.project_id, current_user)
+        fingerprint = digest([operation, payload.model_dump(mode="json"), request.headers.get("X-Knowledge-Bypass", "").lower() == "true"])
+        extraction = ProjectRequirementExtraction(payload.project_id, payload.base_project_revision, current_user, request_id, operation, fingerprint)
+        saved = await run_in_threadpool(extraction.find_preview)
+        if saved is not None:
+            return saved
     billing_context = await run_in_threadpool(
         enforce_billing_access,
         current_user=current_user,
         billing_key="requirements.parse",
     )
     workflow_run_id = start_workflow_run(
-        operation="requirements.import.azure_devops",
+        operation=operation,
         actor=current_user,
         request_id=request_id,
         metadata={
@@ -315,6 +325,7 @@ async def azure_devops_import_requirements_endpoint(
             "include_children": payload.include_children,
         },
     )
+    published = False
     try:
         workflow = await run_in_threadpool(
             import_requirements_from_azure_devops,
@@ -335,22 +346,42 @@ async def azure_devops_import_requirements_endpoint(
             workflow_settings=workflow.get("workflow_settings") or {},
             workflow_diagnostics=workflow.get("workflow_diagnostics") or {},
         )
+        result_metadata = {
+            "requirements_generated_count": len(response.requirements),
+            "source_work_item_count": int(workflow.get("work_item_count") or 0),
+            "source_work_item_ids": workflow.get("source_work_item_ids") or [],
+            "source_project": workflow.get("source_project"),
+            "approved": response.approved,
+        }
+        billing_metadata = {
+            "approved": response.approved,
+            "source": "azure_devops",
+            "source_work_item_count": int(workflow.get("work_item_count") or 0),
+        }
+        if extraction is not None:
+            await run_in_threadpool(
+                extraction.publish,
+                response=response,
+                event_type=event_type,
+                billing_key="requirements.parse",
+                run_id=workflow_run_id,
+                billing_context=billing_context,
+                quantity=len(response.requirements),
+                result_metadata=result_metadata,
+                billing_metadata=billing_metadata,
+            )
+            published = True
+            return await run_in_threadpool(extraction.find_preview, required=True)
         event_id = _log_success(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="requirements.import.azure_devops",
-            event_type="requirements.imported.azure_devops",
+            operation=operation,
+            event_type=event_type,
             billing_key="requirements.parse",
             quantity=len(response.requirements),
             unit="requirement",
-            result_metadata={
-                "requirements_generated_count": len(response.requirements),
-                "source_work_item_count": int(workflow.get("work_item_count") or 0),
-                "source_work_item_ids": workflow.get("source_work_item_ids") or [],
-                "source_project": workflow.get("source_project"),
-                "approved": response.approved,
-            },
+            result_metadata=result_metadata,
         )
         _record_billing_consumption_safe(
             current_user=current_user,
@@ -361,23 +392,15 @@ async def azure_devops_import_requirements_endpoint(
             billing_key="requirements.parse",
             quantity=len(response.requirements),
             unit="requirement",
-            metadata={
-                "approved": response.approved,
-                "source": "azure_devops",
-                "source_work_item_count": int(workflow.get("work_item_count") or 0),
-            },
+            metadata=billing_metadata,
         )
-        if payload.project_id:
-            return await run_in_threadpool(
-                stage_import, payload.project_id, current_user, payload.base_project_revision, response, "requirements.import.azure_devops"
-            )
         response.requirements = persist_requirement_versions(
             current_requirements=response.requirements,
             actor=current_user,
             request_id=request_id,
             workflow_run_id=workflow_run_id,
             source_event_id=event_id,
-            operation="requirements.import.azure_devops",
+            operation=operation,
             source_name=response.source_name,
             source_names=response.source_names,
             raw_text=response.raw_text,
@@ -392,15 +415,28 @@ async def azure_devops_import_requirements_endpoint(
             source_event_id=event_id,
         )
         return finish_generation(response, current_user, payload.project_id, "requirements", None, request_id)
+    except ExtractionPublicationUnconfirmed:
+        raise
     except HTTPException:
+        if extraction is not None and not published:
+            _log_failure(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation=operation,
+                event_type=event_type,
+                billing_key="requirements.parse",
+                error_message="http_exception",
+                metadata={"source": "azure_devops"},
+            )
         raise
     except LookupError as exc:
         _log_failure(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="requirements.import.azure_devops",
-            event_type="requirements.imported.azure_devops",
+            operation=operation,
+            event_type=event_type,
             billing_key="requirements.parse",
             error_message=str(exc),
             metadata={"source": "azure_devops"},
@@ -411,8 +447,8 @@ async def azure_devops_import_requirements_endpoint(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="requirements.import.azure_devops",
-            event_type="requirements.imported.azure_devops",
+            operation=operation,
+            event_type=event_type,
             billing_key="requirements.parse",
             error_message=str(exc),
             metadata={"source": "azure_devops"},
@@ -423,8 +459,8 @@ async def azure_devops_import_requirements_endpoint(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="requirements.import.azure_devops",
-            event_type="requirements.imported.azure_devops",
+            operation=operation,
+            event_type=event_type,
             billing_key="requirements.parse",
             error_message=str(exc),
             metadata={"source": "azure_devops", "status_code": exc.status_code},
@@ -436,8 +472,8 @@ async def azure_devops_import_requirements_endpoint(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="requirements.import.azure_devops",
-            event_type="requirements.imported.azure_devops",
+            operation=operation,
+            event_type=event_type,
             billing_key="requirements.parse",
             error_message=str(exc),
             metadata={"source": "azure_devops"},

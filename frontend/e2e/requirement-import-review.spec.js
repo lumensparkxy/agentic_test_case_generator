@@ -38,7 +38,17 @@ const incoming = ["The agricultural portal displays PDF resources.", "The reader
 
 async function setup(
 	page,
-	{ candidates = incoming, revision = 7, failedApply = false, pendingOnLoad = false, emptyBaseline = false, sourceName = "TX-6" } = {}
+	{
+		candidates = incoming,
+		revision = 7,
+		failedApply = false,
+		extractionInterruption,
+		connector,
+		pendingOnLoad = false,
+		emptyBaseline = false,
+		sourceName = "TX-6",
+		sourceEvidenceFindings = [],
+	} = {}
 ) {
 	await seedAuthenticatedSession(page);
 	const baseline = emptyBaseline ? [] : originals;
@@ -62,7 +72,7 @@ async function setup(
 		project_id: ID,
 		base_project_revision: 7,
 		source_name: sourceName,
-		operation: "requirements.import.jira",
+		operation: connector === "azure-devops" ? "requirements.import.azure_devops" : "requirements.import.jira",
 		status: "pending",
 		created_at: when,
 		current_requirements: structuredClone(baseline),
@@ -70,6 +80,7 @@ async function setup(
 		suggested_update_scope: [],
 		counts: {},
 		warnings: [],
+		source_evidence_findings: sourceEvidenceFindings,
 		recovery_snapshot_ids: [],
 	};
 	let pending = pendingOnLoad ? [preview] : [];
@@ -107,12 +118,49 @@ async function setup(
 
 	await page.route(`**/projects/${ID}`, (route) => route.fulfill({ json: project }));
 	await page.route(`**/projects/${ID}/requirement-imports`, (route) => route.fulfill({ json: pending }));
-	await page.route("**/requirements/parse", (route) => {
-		expect(route.request().postData()).toContain('name="import_mode"');
-		expect(route.request().postData()).toContain("review");
+	const extractions = [];
+	const finishExtraction = (route, input) => {
+		const request = route.request();
+		extractions.push({ id: request.headers()["x-request-id"], body: input });
+		if (extractions.length === 1 && extractionInterruption === "failed")
+			return route.fulfill({ status: 503, json: { detail: "Project persistence is unavailable." } });
 		pending = [preview];
+		if (extractions.length === 1 && extractionInterruption === "transport") return route.abort("failed");
+		if (extractions.length <= 2 && extractionInterruption === "repeated-transport") return route.abort("failed");
+		if (extractions.length === 1 && extractionInterruption === "unconfirmed")
+			return route.fulfill({ status: 503, json: { detail: { code: "requirement_extraction_unconfirmed" } } });
+		if (extractions.length === 1 && extractionInterruption === "gateway")
+			return route.fulfill({ status: 504, contentType: "text/html", body: "<h1>Gateway timeout</h1>" });
 		return route.fulfill({ json: preview });
+	};
+	await page.route("**/requirements/parse", (route) => {
+		const request = route.request();
+		const body = request.postData();
+		expect(body).toContain('name="import_mode"');
+		expect(body).toContain("review");
+		const boundary = request.headers()["content-type"].split("boundary=")[1];
+		return finishExtraction(route, body.replaceAll(boundary, "boundary"));
 	});
+	if (connector) {
+		const isJira = connector === "jira";
+		const endpoints = isJira
+			? {
+					connection: { connected: true, connection: { site_url: "https://jira.example.test" } },
+					"projects?*": { projects: [{ project_id: "123", key: "QA", name: "QA Project" }] },
+					"projects/*/issue-types": { issue_types: [{ name: "Epic" }] },
+					"issues/search?*": { issues: [{ key: "QA-416", issue_type: "Epic", summary: "Synthetic Jira source" }] },
+				}
+			: {
+					connection: { connected: true, connection: { default_project: "QA Project" } },
+					"projects?*": { projects: [{ project_id: "123", name: "QA Project" }] },
+					"projects/*/work-item-types": { work_item_types: [{ name: "Feature" }] },
+					"work-items/search?*": { work_items: [{ work_item_id: 416, work_item_type: "Feature", title: "Synthetic Azure DevOps source" }] },
+				};
+		for (const [endpoint, payload] of Object.entries(endpoints)) {
+			await page.route(`**/integrations/${connector}/${endpoint}`, (route) => route.fulfill({ json: payload }));
+		}
+		await page.route(`**/integrations/${connector}/import`, (route) => finishExtraction(route, route.request().postDataJSON()));
+	}
 	await page.route(`**/projects/${ID}/requirement-imports/import-1`, (route) => {
 		pending = [];
 		return route.fulfill({ status: 204 });
@@ -182,16 +230,19 @@ async function setup(
 	});
 	await page.goto(`/projects/${ID}/requirements`);
 	await expect(page.getByRole("heading", { name: "Requirement Review Workbench" })).toBeVisible();
-	return { applies, preview, guidanceReads, summaryReads, getProject: () => project };
+	return { applies, extractions, preview, guidanceReads, summaryReads, getProject: () => project };
 }
 
-async function stage(page) {
+async function startExtraction(page) {
 	const open = page.getByRole("button", { name: "Import requirements", exact: true });
 	if (await open.isVisible()) await open.click();
 	await page
 		.locator('input[type="file"]')
 		.setInputFiles({ name: "new.md", mimeType: "text/markdown", buffer: Buffer.from("Incoming requirements") });
 	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
+}
+async function stage(page) {
+	await startExtraction(page);
 	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
 	await expect(page.getByRole("heading", { name: "Upload Requirements", exact: true })).toBeHidden();
 }
@@ -202,6 +253,74 @@ const openRequirement = (page, id) =>
 		.click();
 const openIncoming = (page, text = incoming[0].requirement.text) =>
 	page.getByRole("button", { name: `Review incoming requirement: ${text}`, exact: true }).click();
+
+for (const interruption of ["transport", "unconfirmed", "gateway"]) {
+	test(
+		`recovers a ${interruption} extraction response with the same upload and request ID`,
+		{ tag: interruption === "transport" ? "@p1" : [] },
+		async ({ page }) => {
+			const state = await setup(page, { extractionInterruption: interruption });
+			await stage(page);
+			expect(state.extractions).toHaveLength(2);
+			expect(state.extractions[0].id).toBeTruthy();
+			expect(state.extractions[1]).toEqual(state.extractions[0]);
+			expect(state.applies).toHaveLength(0);
+			expect(state.getProject().current_revision).toBe(7);
+			expect(state.getProject().current_snapshots.requirements.payload.requirements).toHaveLength(8);
+		}
+	);
+}
+
+test("a rejected extraction shows an error and keeps the file available to retry", { tag: "@p1" }, async ({ page }) => {
+	const state = await setup(page, { extractionInterruption: "failed" });
+	await startExtraction(page);
+	await expect(page.getByRole("alert").filter({ hasText: "Project persistence is unavailable" })).toBeVisible();
+	expect(state.extractions).toHaveLength(1);
+	expect(state.applies).toHaveLength(0);
+	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
+	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+	expect(state.extractions).toHaveLength(2);
+	expect(state.extractions[1].id).not.toBe(state.extractions[0].id);
+});
+
+test("an uncertain extraction keeps the request ID when the user retries the same file", { tag: "@p1" }, async ({ page }) => {
+	const state = await setup(page, { extractionInterruption: "repeated-transport" });
+	await startExtraction(page);
+	await expect(page.getByRole("alert").filter({ hasText: "The requirements preview could not be confirmed" })).toBeVisible();
+	expect(state.extractions).toHaveLength(2);
+	await page.getByRole("button", { name: "Parse Requirements", exact: true }).click();
+	await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+	expect(state.extractions).toEqual(Array(3).fill(state.extractions[0]));
+	expect(state.applies).toHaveLength(0);
+});
+
+for (const [connector, sourceLabel, buttonLabel, selector] of [
+	["jira", "JIRA Cloud", "Import QA-416", { epic_key: "QA-416" }],
+	["azure-devops", "Azure DevOps", "Import #416", { project: "QA Project", work_item_id: 416 }],
+]) {
+	test(`${sourceLabel} retries an uncertain reviewed import with the same selection and request ID`, { tag: "@p1" }, async ({ page }) => {
+		const state = await setup(page, { connector, extractionInterruption: "repeated-transport" });
+		await page.getByRole("button", { name: "Import requirements", exact: true }).click();
+		await page.getByRole("radio", { name: sourceLabel, exact: true }).check();
+		await page.locator("#requirement-import-setup").getByRole("button", { name: "Search", exact: true }).click();
+		const importButton = page.getByRole("button", { name: buttonLabel, exact: true });
+		await importButton.click();
+		await expect(page.getByRole("alert").filter({ hasText: "The requirements preview could not be confirmed" })).toBeVisible();
+		expect(state.extractions).toHaveLength(2);
+		await importButton.click();
+		await expect(page.getByRole("heading", { name: "Compare incoming requirements" })).toBeFocused();
+		expect(state.extractions[0].id).toBeTruthy();
+		expect(state.extractions[0].body).toMatchObject({
+			...selector,
+			include_children: true,
+			import_mode: "review",
+			base_project_revision: 7,
+		});
+		expect(state.extractions).toEqual(Array(3).fill(state.extractions[0]));
+		expect(state.applies).toHaveLength(0);
+		expect(state.getProject().current_snapshots.requirements.payload.requirements).toHaveLength(8);
+	});
+}
 
 test("comparison displays verified original IDs and quotes before applying", async ({ page }) => {
 	await setup(page, {
@@ -231,6 +350,77 @@ test("comparison displays verified original IDs and quotes before applying", asy
 	await expect(page.getByText("Original IDs: ROOM-101", { exact: true })).toBeVisible();
 	await expect(page.locator("blockquote").filter({ hasText: "Attendees must be a whole number from 1 to 8." })).toBeVisible();
 	await expect(workbench(page)).toBeHidden();
+});
+
+test("shows claimed and omitted ranges with their source group before a reviewer decides", { tag: "@p1" }, async ({ page }) => {
+	const source = { source_label: "rooms.md", original_requirement_ids: ["ROOM-101"], source_section: "Lines 6-6" };
+	const text = "The system shall confirm a booking with 1 to 6 attendees.";
+	const state = await setup(page, {
+		candidates: [{ ...incoming[0], requirement: { ...incoming[0].requirement, text }, classification: "needs_decision" }],
+		sourceName: "rooms.md",
+		sourceEvidenceFindings: [
+			{ ...source, kind: "unverified_range", requirement_id: "REQ-001", excerpt: "between 1 and 6 inclusive" },
+			{ ...source, kind: "uncovered_range", excerpt: "Attendees must be a whole number from 1 to 6 inclusive." },
+		],
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	await stage(page);
+	const findings = page.getByRole("region", { name: "Numeric source evidence needs review" });
+	await expect(findings.getByRole("listitem").filter({ hasText: "Range absent from the incoming quotation" })).toContainText(
+		"Incoming REQ-001 · rooms.md · ROOM-101"
+	);
+	await expect(findings.getByRole("listitem").filter({ hasText: "Source range missing from verified extraction" })).toContainText(
+		"Attendees must be a whole number from 1 to 6 inclusive."
+	);
+	await openIncoming(page, text);
+	await expect(page.getByLabel("Decision for incoming-1")).toHaveValue("");
+	await expect(page.getByRole("button", { name: "Apply reviewed changes" })).toBeDisabled();
+	expect(state.applies).toHaveLength(0);
+});
+
+test("a verified source suggestion previews the prior requirement and still needs an explicit choice", { tag: "@p1" }, async ({ page }) => {
+	const prior = originals[1];
+	const revisedText = "A task can be archived by its owner after completion.";
+	const state = await setup(page, {
+		candidates: [
+			{
+				...incoming[0],
+				requirement: { ...incoming[0].requirement, text: revisedText, source_system: "file" },
+				classification: "needs_decision",
+				reason: "Verified original IDs suggest a match. Compare the requirements and choose a decision.",
+				suggestions: [
+					{ requirement_uid: prior.requirement_uid, reason: "Verified source reference", verified_original_ids: ["TASK-20"] },
+					{ requirement_uid: originals[0].requirement_uid, reason: "Similar wording" },
+				],
+			},
+		],
+	});
+	await stage(page);
+	await openIncoming(page, revisedText);
+	const apply = page.getByRole("button", { name: "Apply reviewed changes", exact: true });
+	const decision = page.getByLabel("Decision for incoming-1", { exact: true });
+	const sourceOptions = decision.locator('optgroup[label="Verified source matches"] option');
+	await expect(page.getByRole("heading", { name: `Suggested current requirement · ${prior.id}`, exact: true })).toBeVisible();
+	await expect(page.getByText(prior.text, { exact: true })).toBeVisible();
+	await expect(page.getByText("Verified original IDs: TASK-20", { exact: true })).toBeVisible();
+	await expect(sourceOptions).toHaveCount(1);
+	await expect(sourceOptions).toHaveAttribute("value", prior.requirement_uid);
+	await expect(decision.locator(`:scope > option[value="${originals[0].requirement_uid}"]`)).toHaveCount(1);
+	await expect(decision).toHaveValue("");
+	await expect(apply).toBeDisabled();
+	await decision.selectOption(prior.requirement_uid);
+	await expect(page.getByRole("heading", { name: `Current requirement · ${prior.id}`, exact: true })).toBeVisible();
+	await apply.click();
+	await expect(workbench(page)).toBeVisible();
+	expect(state.applies[0].decisions).toEqual([
+		{ candidate_id: "incoming-1", action: "update", target_requirement_uid: prior.requirement_uid },
+	]);
+	expect(state.getProject().current_snapshots.requirements.payload.requirements.find((item) => item.id === prior.id)).toMatchObject({
+		requirement_uid: prior.requirement_uid,
+		text: revisedText,
+		content_version: 2,
+		review_status: "Needs Review",
+	});
 });
 
 test("stages eight plus two, applies ten, and retains IDs and approvals after reload", { tag: "@p1" }, async ({ page }) => {
@@ -345,12 +535,26 @@ test("renewed comparison refreshes the baseline revision after a conflict", asyn
 
 test("comparison works on narrow screens and passes focused accessibility checks", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
-	await setup(page);
+	await setup(page, {
+		candidates: [
+			incoming[0],
+			{
+				...incoming[1],
+				classification: "needs_decision",
+				suggestions: [{ requirement_uid: "original-2", reason: "Verified source reference", verified_original_ids: ["TASK-20"] }],
+			},
+		],
+	});
 	await stage(page);
 	const comparison = page.getByRole("region", { name: "Compare incoming requirements" });
+	const filter = page.getByLabel("Filter import changes");
+	await filter.selectOption("new");
+	await expect(comparison.getByRole("row")).toHaveCount(2);
+	await filter.selectOption("needs_decision");
+	await openIncoming(page, incoming[1].requirement.text);
+	await expect(page.getByText("Verified original IDs: TASK-20", { exact: true })).toBeVisible();
 	const box = await comparison.boundingBox();
 	expect(box.width).toBeLessThanOrEqual(390);
-	await page.getByLabel("Filter import changes").selectOption("new");
 	const results = await new AxeBuilder({ page }).include(".requirement-import-review").analyze();
 	expect(results.violations).toEqual([]);
 });

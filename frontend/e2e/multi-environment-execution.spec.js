@@ -79,6 +79,14 @@ function projectDetail(executionRuns = []) {
 				metadata: { test_case_count: 1 },
 				created_at: "2026-06-12T00:00:00Z",
 			},
+			execution: executionRuns.length
+				? {
+						snapshot_id: executionRuns[0].snapshot_id,
+						stage: "execution",
+						source_snapshot_id: "snap-test-v1",
+						payload: executionRuns[0],
+					}
+				: undefined,
 		},
 		timeline: executionRuns.map((run) => ({
 			event_id: `event-${run.target_environment}`,
@@ -118,7 +126,9 @@ function runRecord(environment, status, index) {
 		project_id: "project-1",
 		run_id: `run-${environment}`,
 		target_environment: environment,
-		target_base_url: `https://${environment}.example.test/app`,
+		target_base_url: `https://${environment}.example.test/app/`,
+		artifacts_root: `/execution/run-${environment}`,
+		playwright_report_paths: [`/execution/run-${environment}/index.html`],
 		project_revision: 4 + index,
 		test_case_count: 1,
 		status,
@@ -162,7 +172,7 @@ function statusPayload() {
 }
 
 test.describe("Multi-environment execution", () => {
-	test("named environment executions report separate results after history rail removal", { tag: [] }, async ({ page }) => {
+	test("named environment executions retain report targets before and after reload", { tag: ["@p1"] }, async ({ page }) => {
 		const executionRuns = [];
 		let currentProject = projectDetail(executionRuns);
 
@@ -248,8 +258,11 @@ test.describe("Multi-environment execution", () => {
 			return jsonResponse(route, {
 				status,
 				run_id: record.run_id,
+				artifacts_root: record.artifacts_root,
+				playwright_report_paths: record.playwright_report_paths,
 				results: [{ id: `result-${environment}`, source_test_case_id: "TC-001", title: "TC-001 checkout coverage", status }],
 				preview: {
+					readiness: { target_base_url: record.target_base_url },
 					executable: [],
 					manual: [],
 					unsupported: [],
@@ -293,5 +306,19 @@ test.describe("Multi-environment execution", () => {
 			{ target_environment: "production-like", status: "passed" },
 			{ target_environment: "staging", status: "failed" },
 		]);
+		await page
+			.getByRole("navigation", { name: "Project navigation" })
+			.getByRole("link", { name: /^Reports,/i })
+			.click();
+		const report = page.locator(".playwright-report-card");
+		const expectLatestReport = async () => {
+			await expect(report.getByText("Run run-production-like", { exact: true })).toBeVisible();
+			await expect(report.getByText("production-like • https://production-like.example.test/app/", { exact: true })).toBeVisible();
+			await expect(report.getByText("/execution/run-production-like", { exact: true })).toBeVisible();
+			await expect(report.getByText("/execution/run-production-like/index.html", { exact: true })).toBeVisible();
+		};
+		await expectLatestReport();
+		await page.reload();
+		await expectLatestReport();
 	});
 });

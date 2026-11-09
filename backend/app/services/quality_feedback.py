@@ -242,6 +242,8 @@ def update_finding(project_id, identity, actor, payload: QualityFindingAction, r
             or run.metadata.get("target_environment") != record["environment"]
         ):
             raise HTTPException(409, "Verification needs passing affected cases from the current suite in the finding's environment")
+        if run.payload.get("issues"):
+            raise HTTPException(409, "Verification requires a run without browser runner errors")
         if record["category"] == "application_defect":
             assertions = [
                 {k: row.get(k) for k in ("id", "steps", "expected_result")}
@@ -288,7 +290,15 @@ def update_finding(project_id, identity, actor, payload: QualityFindingAction, r
                     case.pop(key)
             case["status"] = "Draft"
     cases_payload["approved"] = False
-    cases_payload["review"] = {**cases_payload.get("review", {}), "approved": False, "summary": "Prerequisites changed; re-review required."}
+    review_reason = "Prerequisites changed; re-review required."
+    assessment = cases_payload.get("substantive_assessment") or {}
+    review = cases_payload.get("review") or {}
+    if assessment.get("design_status") == "assessed_complete" and assessment.get("execution_status") == "blocked":
+        review["blocking_issues"] = [issue for issue in review.get("blocking_issues", []) if issue != assessment.get("reason")]
+    cases_payload["review"] = {**review, "approved": False, "summary": review_reason}
+    cases_payload["substantive_assessment"] = {"status": "unknown", "reason": review_reason}
+    if cases_payload.get("coverage_metrics") is not None:
+        cases_payload["coverage_metrics"]["substantive_coverage_status"] = "unknown"
     revision = project.current_revision + 1
     states = {stage: value.model_dump(mode="json") for stage, value in project.stage_state.items()}
     for stage in projects.DOWNSTREAM_STAGES["context"]:
@@ -329,7 +339,9 @@ def execution_finding_writes(project_id, snapshot):
     payload = snapshot["payload"]
     observations = []
     for result in payload.get("results", []):
-        if result.get("status") in ("failed", "invalid", "skipped"):
+        if result.get("status") == "flaky":
+            observations.append((result.get("source_test_case_id"), "Execution passed on retry. Review the recorded first-attempt failure."))
+        elif result.get("status") in ("failed", "invalid", "skipped"):
             observations.append((result.get("source_test_case_id"), "Execution did not pass; classify using the recorded run evidence."))
     for category in ("manual", "unsupported", "invalid"):
         for candidate in payload.get("candidates", {}).get(category, []):

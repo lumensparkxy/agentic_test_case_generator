@@ -32,6 +32,15 @@ class GroundedUIElement(BaseModel):
     ] = "Other"
     description: str
     href: Optional[str] = None
+    select_options: list[str] | None = Field(
+        default=None, max_length=40, description="Exact selectable labels on a native dropdown. An empty list denotes a dropdown without supported choices."
+    )
+    checkbox_available: bool | None = Field(
+        default=None, description="Availability of a grounded native checkbox. Null indicates that no native checkbox is grounded."
+    )
+    radio_available: bool | None = Field(
+        default=None, description="Availability of a grounded native radio option. Null indicates that no native radio is grounded."
+    )
 
 
 class GroundedApiSurface(BaseModel):

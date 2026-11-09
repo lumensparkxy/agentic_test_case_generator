@@ -36,6 +36,27 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
     SelectedOperation("projectUpdate", "patch", "/projects/{project_id}", "ProjectUpdateRequest", "ProjectUpdateResponse"),
     SelectedOperation("projectTimeline", "get", "/projects/{project_id}/timeline", "ProjectTimelineRequest", "ProjectTimelineResponse"),
     SelectedOperation(
+        "projectTestCaseEvidence",
+        "get",
+        "/projects/{project_id}/test-case-evidence",
+        "ProjectTestCaseEvidenceRequest",
+        "ProjectTestCaseEvidenceResponse",
+    ),
+    SelectedOperation(
+        "projectExecutionRun",
+        "get",
+        "/projects/{project_id}/execution-runs/{run_record_id}",
+        "ProjectExecutionRunRequest",
+        "ProjectExecutionRunResponse",
+    ),
+    SelectedOperation(
+        "projectExecutionRequest",
+        "get",
+        "/projects/{project_id}/execution-requests/{request_id}",
+        "ProjectExecutionRequest",
+        "ProjectExecutionRequestResponse",
+    ),
+    SelectedOperation(
         "projectOrchestratorStatus",
         "get",
         "/projects/{project_id}/orchestrator/status",
@@ -54,6 +75,9 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
     ),
     SelectedOperation(
         "projectImpactUpdateApply", "post", "/projects/{project_id}/impact-update/apply", "ProjectImpactUpdateApplyRequest", "ProjectImpactUpdateApplyResponse"
+    ),
+    SelectedOperation(
+        "projectTestCasesReview", "post", "/projects/{project_id}/test-cases/review", "ProjectTestCasesReviewRequest", "ProjectTestCasesReviewResponse"
     ),
     SelectedOperation(
         "projectUseCasesGenerate", "post", "/projects/{project_id}/use-cases/generate", "ProjectUseCasesGenerateRequest", "ProjectUseCasesGenerateResponse"

@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import {
 	liveFixture,
 	roomSource,
@@ -12,15 +12,113 @@ import {
 	assertSourceMapping,
 	caseQuality,
 } from "./support/live-workflow.js";
+import { installWorkspaceApi } from "./support/workspace.js";
 
 test.use({ trace: "off", video: "off" });
 
 test("anonymous portal opens provider chooser from sign-in", async ({ page }) => {
 	await page.goto("/");
-	await page.getByRole("button", { name: /^sign in$/i }).click();
+	const signIn = page.getByRole("button", { name: /^sign in$/i });
+	await expect(signIn).toBeVisible();
+	await signIn.click();
 	await expect(page.getByRole("dialog", { name: /choose a sign-in method/i })).toBeVisible();
 	for (const provider of ["google", "microsoft", "apple"])
 		await expect(page.getByRole("button", { name: new RegExp(provider, "i") })).toBeVisible();
+});
+
+test("restored Firebase user stays signed out after reload", async ({ page }) => {
+	const apiKey = process.env.E2E_FIREBASE_FIXTURE_API_KEY;
+	test.skip(!apiKey, "Requires a synthetic Vite Firebase configuration with the matching fixture key.");
+
+	const user = { sub: "firebase-fixture-user", name: "Firebase Fixture", email: "firebase-fixture@example.test" };
+	const expires = Math.floor(Date.now() / 1000) + 3600;
+	const payload = Buffer.from(JSON.stringify({ sub: user.sub, user_id: user.sub, exp: expires })).toString("base64url");
+	const token = `eyJhbGciOiJSUzI1NiJ9.${payload}.synthetic`;
+	await page.addInitScript(
+		({ key, firebaseUser }) => {
+			if (sessionStorage.getItem("firebase-fixture-seeded")) return;
+			localStorage.setItem(key, JSON.stringify(firebaseUser));
+			sessionStorage.setItem("firebase-fixture-seeded", "1");
+		},
+		{
+			key: `firebase:authUser:${apiKey}:[DEFAULT]`,
+			firebaseUser: {
+				uid: user.sub,
+				displayName: user.name,
+				email: user.email,
+				emailVerified: true,
+				isAnonymous: false,
+				providerData: [{ providerId: "google.com", uid: user.sub, email: user.email, displayName: user.name }],
+				stsTokenManager: { refreshToken: "synthetic-refresh", accessToken: token, expirationTime: expires * 1000 },
+				apiKey,
+				appName: "[DEFAULT]",
+			},
+		}
+	);
+	await installWorkspaceApi(page);
+	await page.route("https://identitytoolkit.googleapis.com/v1/accounts:lookup*", (route) =>
+		route.fulfill({
+			headers: { "Access-Control-Allow-Origin": "*" },
+			json: { users: [{ localId: user.sub, email: user.email, emailVerified: true, displayName: user.name }] },
+		})
+	);
+	let verifications = 0;
+	await page.route("**/auth/me", (route) => {
+		verifications += 1;
+		expect(route.request().headers().authorization).toBe(`Bearer ${token}`);
+		return route.fulfill({ json: user });
+	});
+
+	const account = page.getByRole("button", { name: `Open account menu for ${user.name}` });
+	const signIn = page.getByRole("button", { name: "Sign In", exact: true });
+	await page.goto("/");
+	await expect(account).toBeVisible();
+	await page.reload();
+	await expect(account).toBeVisible();
+	expect(verifications).toBe(2);
+	await account.click();
+	await page.getByRole("menuitem", { name: "Sign Out" }).click();
+	await expect(signIn).toBeEnabled();
+	expect(await page.evaluate(() => localStorage.getItem("tcg.auth.token"))).toBeNull();
+	await page.reload();
+	await expect(page.getByText("Sign in to parse requirements, generate test cases, and export artifacts.")).toBeVisible();
+	await expect(signIn).toBeEnabled();
+	expect(verifications).toBe(2);
+});
+
+test.describe("Mobile Firebase startup", () => {
+	const { viewport, userAgent, isMobile, hasTouch, deviceScaleFactor } = devices["iPhone 13"];
+	test.use({ viewport, userAgent, isMobile, hasTouch, deviceScaleFactor });
+
+	test("loads the popup resolver on provider selection and recovers from failure", async ({ page }) => {
+		let resolverRequests = 0;
+		await page.route("https://apis.google.com/js/api.js*", async (route) => {
+			resolverRequests += 1;
+			await route.abort("failed");
+		});
+		await page.goto("/");
+		await expect(page.getByText("Sign in to parse requirements, generate test cases, and export artifacts.")).toBeVisible();
+		await page.getByRole("button", { name: "Open workspace controls" }).click();
+		const signIn = page.getByRole("button", { name: /^sign in$/i });
+		const chooser = page.getByRole("dialog", { name: "Choose a sign-in method" });
+		const google = chooser.getByRole("button", { name: "Sign in with Google" });
+		const status = page.getByRole("alert").filter({ hasText: "Sign-in with Google failed" });
+
+		await signIn.click();
+		await expect(chooser).toBeVisible();
+		expect(resolverRequests).toBe(0);
+		await google.click();
+		await expect.poll(() => resolverRequests).toBe(1);
+		await expect(status).toBeVisible();
+		await expect(signIn).toBeEnabled();
+
+		await signIn.click();
+		await expect(status).toHaveCount(0);
+		await google.click();
+		await expect.poll(() => resolverRequests).toBe(2);
+		await expect(status).toBeVisible();
+		await expect(signIn).toBeEnabled();
+	});
 });
 
 test.describe("Live project workbench acceptance", () => {

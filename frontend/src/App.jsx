@@ -1,26 +1,46 @@
 import ClarificationScopeNotice from "./components/context/ClarificationScopeNotice";
 import { hasApprovedGenerationScope } from "./utils/requirementScope";
 import useReviewDraft from "./hooks/useReviewDraft";
+import useExecutionRecovery from "./hooks/useExecutionRecovery";
 import DraftRecoveryNotice from "./components/reviews/DraftRecoveryNotice";
 import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
 import useRequirementImports from "./hooks/useRequirementImports";
-import RequirementImportReview from "./components/requirements/RequirementImportReview";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import GenerationGuidance from "./components/knowledge/GenerationGuidance";
 import KnowledgeSuggestion from "./components/knowledge/KnowledgeSuggestion";
-import { Badge, Disclosure, Surface } from "./components/ui/surfaces";
+import { Alert, Badge, Disclosure, Surface } from "./components/ui/surfaces";
 import { Button, Link, Radio, Checkbox, Field, Input, Select, Textarea } from "./components/ui/controls";
 import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
-import ImproveTestsPanel from "./components/generation/ImproveTestsPanel";
 import { improvementFindings } from "./components/generation/improvementFindings";
-import { useEffect, useRef, useState } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { browserPopupRedirectResolver, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
 import { GlobalDestinationPlaceholderPage, ProjectLoadingPage, ProjectOverviewPage, RouteRecoveryPage } from "./app/RoutePages";
+import {
+	AutomationPanel,
+	ContextInputsPanel,
+	ExportPanel,
+	GeneratedTestCasesView,
+	ImproveTestsPanel,
+	LinkedTestCaseView,
+	OrchestratorCockpitPanel,
+	projectRouteModules,
+	ProjectsPage,
+	ReportsPage,
+	RequirementImportReview,
+	RequirementReviewWorkbench,
+	ReviewsPage,
+	RunsPage,
+	TemplateSetupPanel,
+	TraceabilityMatrixPanel,
+	UseCaseReviewPage,
+} from "./app/workspaceModules";
+import { readSavedCaseLink } from "./app/savedCaseLinks";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -30,25 +50,17 @@ import {
 } from "./firebase";
 import AppNavigationControls, { SignInDialog } from "./components/layout/AppHeader";
 import TestCaseReadiness from "./components/projects/TestCaseReadiness";
-import { getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
-import AutomationPanel from "./components/automation/AutomationPanel";
+import { formatExecutionRunSummary, getAutomationEvidenceStatus } from "./components/automation/automationEvidence";
 import {
 	getDefaultSelectedCandidateIds,
 	getExecutionEligibility,
 	normalizeAutomationPreview,
 	resolveSelectedExecutableCandidates,
 } from "./components/automation/automationPreview";
-import ContextInputsPanel from "./components/context/ContextInputsPanel";
 import { ProjectSyncStatus } from "./components/context/ProjectSyncPanel";
-import ExportPanel from "./components/export/ExportPanel";
-import GeneratedTestCasesView from "./components/generation/GeneratedTestCasesView";
-import TraceabilityMatrixPanel from "./components/generation/TraceabilityMatrixPanel";
 import BillingBanner from "./components/layout/BillingBanner";
-import OrchestratorCockpitPanel from "./components/projects/OrchestratorCockpitPanel";
 import { selectContextualTask } from "./components/projects/contextualTask";
-import RequirementReviewWorkbench from "./components/requirements/RequirementReviewWorkbench";
 import SettingsDialog from "./components/settings/SettingsDialog";
-import TemplateSetupPanel from "./components/template/TemplateSetupPanel";
 import WorkflowNavigationDrawer from "./components/layout/WorkflowNavigationDrawer";
 import useAppSessionState from "./hooks/useAppSessionState";
 import useBillingStatus from "./hooks/useBillingStatus";
@@ -64,11 +76,6 @@ import useWorkflowNavigationState from "./hooks/useWorkflowNavigationState";
 import useWorkflowShellLayoutState from "./hooks/useWorkflowShellLayoutState";
 import useWorkspaceSummary from "./hooks/useWorkspaceSummary";
 import HomePage from "./pages/HomePage";
-import ProjectsPage from "./pages/ProjectsPage";
-import ReportsPage from "./pages/ReportsPage";
-import ReviewsPage from "./pages/ReviewsPage";
-import RunsPage from "./pages/RunsPage";
-import UseCaseReviewPage from "./pages/UseCaseReviewPage";
 import {
 	GLOBAL_DESTINATIONS,
 	PROJECT_DESTINATIONS,
@@ -95,13 +102,13 @@ import {
 	STORAGE_CURRENT_PROJECT_ID,
 } from "./constants/workflow";
 import { buildTestCaseExportFilename } from "./services/exportFilename";
-import { API_BASE, createRequestId, downloadResponseBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
+import { API_BASE, createRequestId, downloadBlob, ensureRequestIdHeader, parseApiError } from "./services/apiClient";
 import { API_CONTRACT_ENDPOINTS } from "./api/generated/api-contracts";
 import {
 	buildAzureDevOpsConnectionForm,
 	buildJiraConnectionForm,
+	buildRequirementTraceability,
 	getRequirementReviewStatus,
-	getTestCaseLinkedRequirementIds,
 	isAzureDevOpsLinkedRequirement,
 	isJiraLinkedRequirement,
 	mergeRequirementMetadata,
@@ -123,6 +130,8 @@ const PROJECT_API_PATHS = Object.freeze({
 	orchestratorStatus: (projectId) =>
 		API_CONTRACT_ENDPOINTS.projectOrchestratorStatus.path.replace("{project_id}", encodeURIComponent(projectId)),
 	impactAnalysis: (projectId) => `/projects/${projectId}/impact-analysis`,
+	savedSuiteReview: (projectId) =>
+		API_CONTRACT_ENDPOINTS.projectTestCasesReview.path.replace("{project_id}", encodeURIComponent(projectId)),
 	impactUpdateApply: (projectId) => `/projects/${projectId}/impact-update/apply`,
 });
 
@@ -215,6 +224,23 @@ const getRequirementSourceMetricMeta = (coverageMetrics) => {
 
 const normalizeImpactText = (value) => `${value || ""}`.trim().replace(/\s+/g, " ").toLowerCase();
 
+const contextSourceInputs = (context) => {
+	const normalizeLink = (link) => {
+		try {
+			return new URL(link).href;
+		} catch {
+			return link || null;
+		}
+	};
+	return JSON.stringify([
+		normalizeLink(context.app_link),
+		normalizeLink(context.prototype_link),
+		(context.diagram_links || []).map(normalizeLink),
+		(context.image_links || []).map(normalizeLink),
+		context.notes || null,
+	]);
+};
+
 const estimateChangedRequirementCount = (snapshots) => {
 	const requirements = snapshots?.requirements?.payload?.requirements || [];
 	const coveragePlan = snapshots?.test_cases?.payload?.coverage_plan || [];
@@ -252,7 +278,11 @@ export default function App() {
 	const requirementReviewLock = useRef(false);
 	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
-	const { route, navigate } = useBrowserNavigation();
+	const { route, location, navigate } = useBrowserNavigation();
+	const [restoredTraceabilityLocation, setRestoredTraceabilityLocation] = useState(null);
+	const savedCaseLink =
+		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.TEST_CASES ? readSavedCaseLink(location.search) : null;
+	const viewingSavedCase = Boolean(savedCaseLink);
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
@@ -262,6 +292,9 @@ export default function App() {
 	const projectOperationUserRef = useRef("");
 	const workflowMainRef = useRef(null);
 	const requirementImportControl = useRef(null);
+	const requirementExtractionAttempts = useRef(new Map());
+	const contextAnalysisAttempt = useRef(null);
+	const fileExportAttempts = useRef(new Map());
 	const requirementReviewHeading = useRef(null);
 	const [requirementSetup, setRequirementSetup] = useState(null);
 	const [requirementFocus, setRequirementFocus] = useState(null);
@@ -269,6 +302,7 @@ export default function App() {
 	const [projectRouteStatus, setProjectRouteStatus] = useState("idle");
 	const [projectRouteError, setProjectRouteError] = useState("");
 	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
+	const [authActionError, setAuthActionError] = useState("");
 	const { isWorkflowNavCollapsed, isCompactWorkflowNavigation, toggleWorkflowNavCollapsed, closeCompactWorkflowNavigation } =
 		useWorkflowShellLayoutState();
 	const {
@@ -346,7 +380,7 @@ export default function App() {
 		setFeedback,
 		testCaseWorkflowSettings,
 		setTestCaseWorkflowSettings,
-		activeGenerateResultTab,
+		activeGenerateResultTab: selectedGenerateResultTab,
 		setActiveGenerateResultTab,
 		isGenerating,
 		setIsGenerating,
@@ -354,6 +388,8 @@ export default function App() {
 	} = useTestCaseWorkflowState();
 	const [impactAnalysis, setImpactAnalysis] = useState(null);
 	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
+	const [savedSuiteReview, setSavedSuiteReview] = useState(null);
+	const savedSuiteReviewRequests = useRef(new Set());
 	const [changedTestCaseIds, setChangedTestCaseIds] = useState(null);
 	const [exportMessage, setExportMessage] = useState("");
 	const [exportDraftRequiredFor, setExportDraftRequiredFor] = useState(null);
@@ -378,7 +414,9 @@ export default function App() {
 		resetExecutionWorkflowState: resetExecutionState,
 	} = useExecutionWorkflowState();
 	const executionPreviewRequestIdRef = useRef(0);
+	const executionPreviewAttempt = useRef(null);
 	const executionRunRequestIdRef = useRef(0);
+	const executingScopeRef = useRef(null);
 	const invalidateExecutionPreviewRequest = () => {
 		executionPreviewRequestIdRef.current += 1;
 		setIsPreviewingExecution(false);
@@ -547,6 +585,8 @@ export default function App() {
 	const hasVisibleAuthProviders = visibleFirebaseAuthProviders.length > 0;
 	const authActionDisabled = !isAuthenticated || isAuthenticating || isVerifyingSession;
 	const currentProjectId = currentProject?.project_id || "";
+	const [executionRecovery, saveExecutionRecovery] = useExecutionRecovery(currentUser?.sub, currentProjectId);
+	const executionNeedsResolution = Boolean(executionRecovery && executionRecovery.status !== "completed");
 	const currentProjectRevision = Number.isInteger(currentProject?.current_revision) ? currentProject.current_revision : null;
 	projectOperationUserRef.current = currentUser?.sub || "";
 	if (projectRevisionsRef.current.identity !== projectOperationUserRef.current) {
@@ -666,11 +706,15 @@ export default function App() {
 		acc[status] = (acc[status] || 0) + 1;
 		return acc;
 	}, {});
-	const approvedRequirements = requirements.filter(
-		(requirement) =>
-			requirement.lifecycle_status !== "retired" &&
-			getRequirementReviewStatus(requirement) === "Approved" &&
-			!["open", "deferred", "excluded"].includes(requirement.clarification_status)
+	const approvedRequirements = useMemo(
+		() =>
+			requirements.filter(
+				(requirement) =>
+					requirement.lifecycle_status !== "retired" &&
+					getRequirementReviewStatus(requirement) === "Approved" &&
+					!["open", "deferred", "excluded"].includes(requirement.clarification_status)
+			),
+		[requirements]
 	);
 	const approvedRequirementCount = approvedRequirements.length;
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
@@ -696,6 +740,42 @@ export default function App() {
 	const hasExistingTestCaseBaseline = Boolean(testCases.length || persistedTestCaseCount || projectSnapshots.test_cases);
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
+	const savedSuite = projectSnapshots.test_cases;
+	const traceabilityCase =
+		restoredTraceabilityLocation !== location &&
+		!viewingSavedCase &&
+		route.kind === "project" &&
+		route.destination === PROJECT_DESTINATIONS.TEST_CASES
+			? location.state?.traceabilityCase
+			: null;
+	const isTraceabilityReturn = (projectId, snapshotId) =>
+		traceabilityCase && snapshotId && traceabilityCase.projectId === projectId && traceabilityCase.snapshotId === snapshotId;
+	const traceabilityReturn =
+		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
+	const activeGenerateResultTab = traceabilityReturn ? "traceability" : selectedGenerateResultTab;
+	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
+	const savedSuiteReviewPending =
+		persistedTestCaseCount > 0 &&
+		(savedSuite?.metadata?.review_retry_available === true ||
+			["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation)) &&
+		savedSuite?.payload?.substantive_assessment?.status === "unknown";
+	const savedSuiteInputsReady =
+		currentProject?.status === "active" &&
+		hasApprovedGenerationScope(currentProject) &&
+		useCasesHumanApproved &&
+		(!testCaseStageState.stale || savedSuite?.operation === "quality.feedback.apply");
+	const savedSuiteReviewState = savedSuiteReview?.key === savedSuiteReviewKey ? savedSuiteReview : null;
+	const savedSuiteReviewed = savedSuite?.operation === "test_cases.review" && !testCaseStageState.stale;
+	const savedSuiteReviewDisabled =
+		!savedSuiteInputsReady || authActionDisabled || isGenerating || isApplyingImpactUpdate || isAnalyzingImpact || isRunningExecution;
+	const testCaseFindings = improvementFindings(testCaseReview, substantiveAssessment);
+	const testCasesNeedSetup =
+		testCaseReview?.approved === false &&
+		!testCaseStageState.stale &&
+		!generationTasks.length &&
+		!testCaseFindings.length &&
+		substantiveAssessment?.design_status === "assessed_complete" &&
+		substantiveAssessment.execution_status === "blocked";
 	const upstreamChangedForImpact = Boolean(hasExistingTestCaseBaseline && (testCaseStageState.stale || impactStageState.stale));
 	const estimatedImpactChangedRequirementCount = estimateChangedRequirementCount(projectSnapshots);
 	const impactChangedItemCount =
@@ -732,6 +812,8 @@ export default function App() {
 	);
 	const requirementReviewMeta = getReviewScoreMeta(requirementReview);
 	const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
+	const [findingCaseSelection, setFindingCaseSelection] = useState(null);
+	const [reviewCaseScope, setReviewCaseScope] = useState(null);
 
 	const pasteDraft = useReviewDraft({
 		identity: currentUser?.sub,
@@ -742,11 +824,18 @@ export default function App() {
 	});
 	const [reportedCase, setReportedCase] = useState(null);
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
+	const activeReviewCaseScope = reviewCaseScope?.snapshot === sourceCaseSnapshot ? reviewCaseScope : null;
 	const focusResultContent = useRef(false);
+	const [improveMountedScope, setImproveMountedScope] = useState(null);
+	useEffect(() => {
+		if (activeTab === 3 && activeGenerateResultTab === "improve") setImproveMountedScope(sourceCaseSnapshot);
+	}, [activeTab, activeGenerateResultTab, sourceCaseSnapshot]);
 	useEffect(() => {
 		setSelectedTestCaseId(null);
+		setFindingCaseSelection(null);
 		setReportedCase(null);
 		setChangedTestCaseIds(null);
+		setReviewCaseScope(null);
 	}, [sourceCaseSnapshot]);
 	useEffect(() => {
 		if (focusResultContent.current) {
@@ -754,9 +843,12 @@ export default function App() {
 			focusResultContent.current = false;
 		}
 	}, [activeGenerateResultTab]);
-	const openCaseResults = (id = null) => {
+	const openCaseResults = (id = null, group = null, { fromFinding = false } = {}) => {
 		setSelectedTestCaseId(id);
-		focusResultContent.current = true;
+		setFindingCaseSelection(fromFinding ? { id, source: sourceCaseSnapshot } : null);
+		setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
+		if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
+		else focusResultContent.current = true;
 		setActiveGenerateResultTab("test-cases");
 	};
 	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
@@ -945,7 +1037,8 @@ export default function App() {
 						.filter(Boolean)
 				: null,
 			notes: contextNotes || null,
-			execution_prerequisites: enrichedContext?.execution_prerequisites || [],
+			execution_prerequisites:
+				enrichedContext?.execution_prerequisites || currentProject?.current_snapshots?.context?.payload?.execution_prerequisites || [],
 			project_id: currentProjectId || null,
 			base_project_revision: currentProjectRevision,
 		};
@@ -1239,6 +1332,7 @@ export default function App() {
 		if (isAuthenticating || !hasVisibleAuthProviders) {
 			return;
 		}
+		setAuthActionError("");
 		setIsSignInDialogOpen(true);
 	};
 
@@ -1309,6 +1403,7 @@ export default function App() {
 					return;
 				}
 
+				const isCurrentStoredSession = () => !firebaseAuth.currentUser && localStorage.getItem(STORAGE_AUTH_TOKEN) === storedToken;
 				try {
 					const res = await fetch(`${API_BASE}/auth/me`, {
 						method: "GET",
@@ -1320,12 +1415,13 @@ export default function App() {
 						throw new Error("Stored session is no longer valid");
 					}
 					const data = await res.json();
+					if (!isCurrentStoredSession()) return;
 					persistAuthState(storedToken, data || storedUser);
 					setStatus(`Welcome back, ${(data || storedUser).name}.`);
 				} catch {
-					clearAuthState("Stored compatibility session expired or is disabled. Please sign in again.");
+					if (isCurrentStoredSession()) clearAuthState("Stored compatibility session expired or is disabled. Please sign in again.");
 				} finally {
-					setIsVerifyingSession(false);
+					if (!firebaseAuth.currentUser) setIsVerifyingSession(false);
 				}
 				return;
 			}
@@ -1487,6 +1583,14 @@ export default function App() {
 	const routeFocusKey = `${route.kind}:${route.projectId || ""}:${route.destination || ""}`;
 	const previousRouteFocusKeyRef = useRef(routeFocusKey);
 	const pendingRouteFocusRef = useRef(false);
+	const focusPendingRoute = useCallback((replacingFocusedLoader = false) => {
+		if (!replacingFocusedLoader && !pendingRouteFocusRef.current) return;
+		const main = document.getElementById("main-content");
+		if (!main || main.dataset.workspaceModulePending) return;
+		if (document.activeElement === main) main.blur();
+		main.focus();
+		pendingRouteFocusRef.current = false;
+	}, []);
 
 	const storeExecutionPreview = (rawPreview, { source = "live", consistencyMessage = null, selectedCandidateIds = null } = {}) => {
 		const normalizedPreview = normalizeAutomationPreview(rawPreview, { source });
@@ -1525,6 +1629,10 @@ export default function App() {
 	}, [route.kind, route.destination, isAuthenticated, isVerifyingSession, refreshWorkspaceSummary]);
 
 	useEffect(() => {
+		if (isAuthenticated && !isVerifyingSession && route.kind === "project") projectRouteModules.get(route.destination)?.preload();
+	}, [isAuthenticated, isVerifyingSession, route.kind, route.destination]);
+
+	useEffect(() => {
 		if (previousRouteFocusKeyRef.current !== routeFocusKey) {
 			previousRouteFocusKeyRef.current = routeFocusKey;
 			pendingRouteFocusRef.current = true;
@@ -1535,19 +1643,9 @@ export default function App() {
 		if (route.kind === "project" && ["idle", "loading"].includes(projectRouteStatus)) {
 			return undefined;
 		}
-		const focusFrame = window.requestAnimationFrame(() => {
-			const main = document.getElementById("main-content");
-			if (!main) {
-				return;
-			}
-			if (document.activeElement === main) {
-				main.blur();
-			}
-			main.focus();
-			pendingRouteFocusRef.current = false;
-		});
+		const focusFrame = window.requestAnimationFrame(() => focusPendingRoute());
 		return () => window.cancelAnimationFrame(focusFrame);
-	}, [projectRouteStatus, route.kind, routeFocusKey]);
+	}, [focusPendingRoute, projectRouteStatus, route.kind, routeFocusKey]);
 
 	const hydrateProjectWorkflow = (project) => {
 		invalidateExecutionPreviewRequest();
@@ -1613,7 +1711,9 @@ export default function App() {
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
-		setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
+		if (!isTraceabilityReturn(project?.project_id, snapshots.test_cases?.snapshot_id)) {
+			setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
+		}
 		resetExportWorkflowState();
 		setExportMessage("");
 		setExportError("");
@@ -1624,8 +1724,14 @@ export default function App() {
 			setExecutionRunResult({
 				status: executionPayload.status,
 				run_id: executionPayload.run_id,
+				source_snapshot_id: executionSnapshot.source_snapshot_id,
+				target_environment: executionPayload.target_environment,
+				target_base_url: executionPayload.target_base_url,
+				artifacts_root: executionPayload.artifacts_root,
+				playwright_report_paths: executionPayload.playwright_report_paths,
 				results: executionPayload.results || [],
 				warnings: executionPayload.warnings || [],
+				issues: executionPayload.issues || [],
 				summary: executionPayload.summary || {},
 				preview: null,
 			});
@@ -2021,11 +2127,11 @@ export default function App() {
 
 	const createWorkspaceProject = (name) => createProject(name, { throwOnError: true });
 
-	const openWorkspaceProject = ({ projectId, destination } = {}) => {
+	const openWorkspaceProject = ({ projectId, destination, path } = {}) => {
 		if (!projectId) {
 			return null;
 		}
-		navigate(buildProjectPath(projectId, destination));
+		navigate(path || buildProjectPath(projectId, destination));
 		return projects.find((project) => project.project_id === projectId) || { project_id: projectId };
 	};
 
@@ -2091,7 +2197,7 @@ export default function App() {
 		setProjectRouteStatus("loading");
 		setProjectRouteError("");
 		void openProject(route.projectId, { hydrate: true, silent: true, routeRequestId });
-	}, [route.kind, route.projectId, route.destination, isAuthenticated, isVerifyingSession, currentUser?.sub]);
+	}, [route.kind, route.projectId, route.destination, viewingSavedCase, isAuthenticated, isVerifyingSession, currentUser?.sub]);
 
 	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
 		const user = userOverride || currentUser;
@@ -2657,6 +2763,66 @@ export default function App() {
 		}
 	);
 
+	const submitRequirementPreview = async ({ path, body, headers = {}, input, upload = null, operationScope, setBusy, pendingMessage }) => {
+		setBusy(true);
+		imports.setExtractionError("");
+		setStatus(pendingMessage);
+		try {
+			const fingerprint = JSON.stringify([operationScope, input]);
+			const attempts = requirementExtractionAttempts.current;
+			const prior = attempts.get(path);
+			const attempt =
+				prior?.fingerprint === fingerprint && prior.file === upload ? prior : { fingerprint, file: upload, requestId: createRequestId() };
+			attempts.set(path, attempt);
+			const clearAttempt = () => {
+				if (attempts.get(path) === attempt) attempts.delete(path);
+			};
+			const options = { method: "POST", headers: { ...headers, "X-Request-ID": attempt.requestId }, body };
+			const send = async () => {
+				const res = await apiRequest(path, options);
+				return { res, data: res.ok ? await res.json() : null };
+			};
+			let reply = await send().catch((error) => {
+				if (error instanceof TypeError || error instanceof SyntaxError) return null;
+				throw error;
+			});
+			const unconfirmed = async (response) => {
+				if (![502, 503, 504].includes(response.status)) return false;
+				const data = await response
+					.clone()
+					.json()
+					.catch(() => null);
+				return !data?.detail || data.detail.code === "requirement_extraction_unconfirmed";
+			};
+			if (!reply || (await unconfirmed(reply.res))) {
+				if (!isProjectOperationCurrent(operationScope)) return;
+				reply = await send();
+			}
+			const { res, data } = reply;
+			if (!res.ok) {
+				if (await unconfirmed(res)) throw new Error("The requirements preview could not be confirmed. Retry with the same inputs.");
+				clearAttempt();
+				throw new Error(await parseApiError(res, "Failed to prepare requirements"));
+			}
+			if (!isProjectOperationCurrent(operationScope)) return;
+			imports.accept(data);
+			clearAttempt();
+			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
+			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
+		} catch (error) {
+			if (isProjectOperationCurrent(operationScope)) {
+				const message =
+					error instanceof TypeError || error instanceof SyntaxError
+						? "The requirements preview could not be confirmed. Retry with the same inputs."
+						: error.message;
+				imports.setExtractionError(message);
+				setStatus(message);
+			}
+		} finally {
+			if (isProjectOperationCurrent(operationScope)) setBusy(false);
+		}
+	};
+
 	const importRequirementsFromJira = async () => {
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
@@ -2672,43 +2838,24 @@ export default function App() {
 			setStatus("Open a QA project before importing requirements.");
 			return;
 		}
-		setIsImportingFromJira(true);
-		setStatus("Importing requirements from JIRA...");
 		resetJiraSyncState();
-		try {
-			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			const res = await apiRequest("/integrations/jira/import", {
-				method: "POST",
-				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
-				body: JSON.stringify({
-					project_id: operationScope.projectId,
-					import_mode: "review",
-					base_project_revision: currentProjectRevision,
-					epic_key: selectedJiraIssueKey,
-					include_children: true,
-					workflow_settings: workflowSettingsPayload,
-				}),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to import requirements from JIRA");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			imports.accept(data);
-			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
-			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
-				setStatus(`JIRA import failed: ${error.message}`);
-			}
-		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
-				setIsImportingFromJira(false);
-			}
-		}
+		const input = {
+			project_id: operationScope.projectId,
+			import_mode: "review",
+			base_project_revision: currentProjectRevision,
+			epic_key: selectedJiraIssueKey,
+			include_children: true,
+			workflow_settings: buildWorkflowSettingsPayload(requirementWorkflowSettings),
+		};
+		await submitRequirementPreview({
+			path: "/integrations/jira/import",
+			body: JSON.stringify(input),
+			headers: { "Content-Type": "application/json" },
+			input,
+			operationScope,
+			setBusy: setIsImportingFromJira,
+			pendingMessage: "Importing requirements from JIRA...",
+		});
 	};
 
 	const importRequirementsFromAzureDevOps = async () => {
@@ -2730,44 +2877,25 @@ export default function App() {
 			setStatus("Open a QA project before importing requirements.");
 			return;
 		}
-		setIsImportingFromAzureDevOps(true);
-		setStatus("Importing requirements from Azure DevOps...");
 		resetAzureDevOpsSyncState();
-		try {
-			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			const res = await apiRequest("/integrations/azure-devops/import", {
-				method: "POST",
-				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
-				body: JSON.stringify({
-					project_id: operationScope.projectId,
-					import_mode: "review",
-					base_project_revision: currentProjectRevision,
-					project: selectedAzureDevOpsProject,
-					work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
-					include_children: true,
-					workflow_settings: workflowSettingsPayload,
-				}),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to import requirements from Azure DevOps");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			imports.accept(data);
-			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
-			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
-				setStatus(`Azure DevOps import failed: ${error.message}`);
-			}
-		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
-				setIsImportingFromAzureDevOps(false);
-			}
-		}
+		const input = {
+			project_id: operationScope.projectId,
+			import_mode: "review",
+			base_project_revision: currentProjectRevision,
+			project: selectedAzureDevOpsProject,
+			work_item_id: Number.parseInt(`${selectedAzureDevOpsWorkItemId}`, 10),
+			include_children: true,
+			workflow_settings: buildWorkflowSettingsPayload(requirementWorkflowSettings),
+		};
+		await submitRequirementPreview({
+			path: "/integrations/azure-devops/import",
+			body: JSON.stringify(input),
+			headers: { "Content-Type": "application/json" },
+			input,
+			operationScope,
+			setBusy: setIsImportingFromAzureDevOps,
+			pendingMessage: "Importing requirements from Azure DevOps...",
+		});
 	};
 
 	const previewJiraSync = async (requirementsOverride = requirements, options = {}) => {
@@ -2994,9 +3122,10 @@ export default function App() {
 		setIsSignInDialogOpen(false);
 		setStatus(`Signing in with ${providerConfig.label}...`);
 		try {
-			await signInWithPopup(firebaseAuth, provider);
+			await signInWithPopup(firebaseAuth, provider, browserPopupRedirectResolver);
 		} catch (error) {
-			clearAuthState(buildProviderSignInErrorMessage(providerConfig, error));
+			clearAuthState();
+			setAuthActionError(buildProviderSignInErrorMessage(providerConfig, error));
 		} finally {
 			setIsAuthenticating(false);
 			setActiveAuthProvider("");
@@ -3005,14 +3134,15 @@ export default function App() {
 
 	const handleLogout = async () => {
 		setIsAuthenticating(true);
+		// The Firebase observer can report a null user before signOut resolves.
+		clearAuthState("Signed out.");
 		try {
 			if (firebaseAuth) {
 				await signOut(firebaseAuth);
 			}
 		} catch (error) {
-			setStatus(`Sign out failed: ${error.message}`);
+			setAuthActionError(`Sign out failed: ${error.message}`);
 		} finally {
-			clearAuthState("Signed out.");
 			setIsAuthenticating(false);
 		}
 	};
@@ -3031,47 +3161,35 @@ export default function App() {
 			setStatus("Open a QA project before parsing requirements.");
 			return;
 		}
-		setIsParsing(true);
-		setStatus(withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...");
 		resetIntegrationSyncState();
-		try {
-			const formData = new FormData();
-			const requestId = createRequestId();
-			const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
-			if (sourceFile) formData.append("file", sourceFile);
-			if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
-			formData.append("project_id", operationScope.projectId);
-			formData.append("import_mode", "review");
-			if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
-			if (withFeedback && reqFeedback) {
-				formData.append("feedback", reqFeedback);
-				formData.append("existing_requirements", JSON.stringify(requirements));
-			}
-			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsParse.path, {
-				method: "POST",
-				headers: { "X-Request-ID": requestId },
-				body: formData,
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to parse requirements");
-				throw new Error(errorMessage);
-			}
-			const data = await res.json();
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
-			imports.accept(data);
-			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
-			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
-		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
-				setStatus(`Parse failed: ${error.message}`);
-			}
-		} finally {
-			if (isProjectOperationCurrent(operationScope)) {
-				setIsParsing(false);
-			}
+		const formData = new FormData();
+		const workflowSettingsPayload = buildWorkflowSettingsPayload(requirementWorkflowSettings);
+		const feedback = withFeedback ? reqFeedback : "";
+		const existing = feedback ? JSON.stringify(requirements) : "";
+		if (sourceFile) formData.append("file", sourceFile);
+		if (workflowSettingsPayload) formData.append("workflow_settings", JSON.stringify(workflowSettingsPayload));
+		formData.append("project_id", operationScope.projectId);
+		formData.append("import_mode", "review");
+		if (currentProjectRevision !== null) formData.append("base_project_revision", String(currentProjectRevision));
+		if (feedback) {
+			formData.append("feedback", feedback);
+			formData.append("existing_requirements", existing);
 		}
+		await submitRequirementPreview({
+			path: API_CONTRACT_ENDPOINTS.requirementsParse.path,
+			body: formData,
+			input: [
+				currentProjectRevision,
+				requirementSourceMode === "paste" ? pasteDraft.value : null,
+				workflowSettingsPayload,
+				feedback,
+				existing,
+			],
+			upload: requirementSourceMode === "file" ? sourceFile : null,
+			operationScope,
+			setBusy: setIsParsing,
+			pendingMessage: withFeedback ? "Refining requirements with feedback..." : "Parsing requirements...",
+		});
 	};
 
 	const buildExecutionPayload = (casesOverride = testCases, { includeProject = true, operationScope = null } = {}) => {
@@ -3098,12 +3216,22 @@ export default function App() {
 	};
 
 	const previewExecution = async (casesOverride = testCases, options = {}) => {
+		if (executionNeedsResolution) {
+			setExecutionError("Resolve the previous browser request before previewing another run.");
+			return null;
+		}
 		const { updateStatus = true, persistProject = true, operationScope: providedOperationScope = null } = options;
 		const operationScope = providedOperationScope || captureProjectOperationScope();
 		if (!operationScope || !isProjectOperationCurrent(operationScope)) {
 			return null;
 		}
-		resetExecutionWorkflowState();
+		invalidateExecutionPreviewRequest();
+		setExecutionError("");
+		setExecutionPreview((previous) =>
+			previous
+				? { ...previous, requiresRefresh: true, consistencyMessage: "Refresh the prior preview before running candidates." }
+				: previous
+		);
 		const casesToPreview = Array.isArray(casesOverride) ? casesOverride : [];
 		if (!casesToPreview.length) {
 			if (updateStatus) {
@@ -3115,6 +3243,7 @@ export default function App() {
 		}
 
 		const previewRequestId = executionPreviewRequestIdRef.current;
+		const isCurrent = () => isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current;
 		setIsPreviewingExecution(true);
 		if (updateStatus) {
 			const message = "Previewing execution readiness...";
@@ -3122,23 +3251,50 @@ export default function App() {
 			setApplicationLiveStatus(message);
 		}
 		try {
-			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, {
+			const payload = buildExecutionPayload(casesToPreview, { includeProject: persistProject, operationScope });
+			const fingerprint = JSON.stringify([operationScope, payload]);
+			const priorAttempt = executionPreviewAttempt.current;
+			const attempt = persistProject && priorAttempt?.fingerprint === fingerprint ? priorAttempt : { fingerprint, id: createRequestId() };
+			if (persistProject) executionPreviewAttempt.current = attempt;
+			const clearAttempt = () => {
+				if (executionPreviewAttempt.current === attempt) executionPreviewAttempt.current = null;
+			};
+			const request = {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildExecutionPayload(casesToPreview, { includeProject: persistProject, operationScope })),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to preview execution");
-				throw new Error(errorMessage);
+				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.id },
+				body: JSON.stringify(payload),
+			};
+			const send = async () => {
+				try {
+					const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionPreview.path, request);
+					if (res.ok) return { data: await res.json() };
+					if (persistProject && [502, 503, 504].includes(res.status)) {
+						const rejection = await res
+							.clone()
+							.json()
+							.catch(() => null);
+						if (!rejection?.detail || rejection.detail.code === "execution_preview_unconfirmed") return null;
+					}
+					clearAttempt();
+					throw new Error(await parseApiError(res, "Failed to preview execution"));
+				} catch (error) {
+					if (persistProject && (error instanceof TypeError || error instanceof SyntaxError)) return null;
+					throw error;
+				}
+			};
+			let reply = await send();
+			if (!reply && isCurrent()) {
+				reply = await send();
 			}
-			const data = await res.json();
+			if (!isCurrent()) return null;
+			if (!reply) throw new Error("The execution preview could not be confirmed. Retry with the same target and test cases.");
+			const { data } = reply;
+			clearAttempt();
 			if (!data || typeof data !== "object" || Array.isArray(data)) {
 				throw new Error("Preview response did not include candidate data.");
 			}
-			if (!isProjectOperationCurrent(operationScope) || previewRequestId !== executionPreviewRequestIdRef.current) {
-				return null;
-			}
 			const normalizedPreview = storeExecutionPreview(data, { source: "live" });
+			setExecutionRunResult(null);
 			if (updateStatus) {
 				if (!normalizedPreview.isConsistent) {
 					const message = "Execution preview data was inconsistent. Preview again before running candidates.";
@@ -3153,20 +3309,20 @@ export default function App() {
 			}
 			if (persistProject) {
 				await refreshCurrentProject({ hydrate: false, operationScope });
-				if (!isProjectOperationCurrent(operationScope) || previewRequestId !== executionPreviewRequestIdRef.current) {
+				if (!isCurrent()) {
 					return null;
 				}
 			}
 			return normalizedPreview;
 		} catch (error) {
-			if (isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
+			if (isCurrent()) {
 				const message = `Execution preview failed: ${error.message}`;
 				setApplicationLiveStatus("");
 				setExecutionError(message);
 			}
 			return null;
 		} finally {
-			if (isProjectOperationCurrent(operationScope) && previewRequestId === executionPreviewRequestIdRef.current) {
+			if (isCurrent()) {
 				setIsPreviewingExecution(false);
 			}
 		}
@@ -3179,6 +3335,8 @@ export default function App() {
 	});
 
 	const runApprovedExecution = async () => {
+		if (executionNeedsResolution || isPreviewingExecution || isRunningExecution || isProjectOperationCurrent(executingScopeRef.current))
+			return;
 		const operationScope = captureProjectOperationScope();
 		if (!operationScope || operationScope.projectId !== currentProjectId) {
 			return;
@@ -3212,16 +3370,33 @@ export default function App() {
 		const runningMessage = `Running ${executableCandidates.length} executable candidate${executableCandidates.length === 1 ? "" : "s"}...`;
 		setStatus(runningMessage);
 		setApplicationLiveStatus(runningMessage);
+		const requestId = createRequestId();
+		executingScopeRef.current = operationScope;
+		saveExecutionRecovery({ requestId, status: "pending" });
+		let outcomeUnconfirmed = true;
 		try {
+			const payload = {
+				...buildExecutionPayload(testCases, { operationScope }),
+				selected_test_case_ids: executableCandidates.map((candidate) => candidate.id),
+			};
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionRun.path, {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					...buildExecutionPayload(testCases, { operationScope }),
-					selected_test_case_ids: executableCandidates.map((candidate) => candidate.id),
-				}),
+				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
+				body: JSON.stringify(payload),
 			});
 			if (!res.ok) {
+				if (res.status < 500 && isProjectOperationCurrent(operationScope)) {
+					const problem = await res
+						.clone()
+						.json()
+						.catch(() => null);
+					const rejectedBeforeLaunch =
+						problem?.detail?.readiness?.run_allowed === false || problem?.detail?.code === "execution_selection_rejected";
+					if (rejectedBeforeLaunch && isProjectOperationCurrent(operationScope)) {
+						saveExecutionRecovery(null);
+						outcomeUnconfirmed = false;
+					}
+				}
 				const errorMessage = await parseApiError(res, "Failed to run execution candidates");
 				throw new Error(errorMessage);
 			}
@@ -3247,28 +3422,86 @@ export default function App() {
 			if (!isProjectOperationCurrent(operationScope) || executionRunRequestId !== executionRunRequestIdRef.current) {
 				return;
 			}
-			setExecutionRunResult(data);
+			if (data.historical) {
+				if (typeof data.run_record_id !== "string" || !data.run_record_id.trim()) {
+					throw new Error("The historical execution response did not include its saved run identity.");
+				}
+				saveExecutionRecovery({ requestId, status: "completed", runId: data.run_id, runRecordId: data.run_record_id, historical: true });
+				setApplicationLiveStatus("");
+				setStatus("Execution saved to history for its starting project revision.");
+				await refreshCurrentProject({ hydrate: true, operationScope });
+				return;
+			}
+			saveExecutionRecovery(null);
+			setExecutionRunResult({
+				...data,
+				source_snapshot_id: data.preview.readiness?.source_snapshot_id,
+				target_environment: payload.target_environment,
+				target_base_url: data.preview.readiness?.target_base_url ?? payload.target_base_url,
+			});
 			storeExecutionPreview(data.preview, {
 				source: "live",
 				selectedCandidateIds: executableCandidates.map((candidate) => candidate.id),
 			});
 			setApplicationLiveStatus("");
-			const summary = data?.summary || {};
-			setStatus(
-				`Execution ${data?.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`
-			);
+			setStatus(formatExecutionRunSummary(data));
 			await refreshCurrentProject({ hydrate: false, operationScope });
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
-				const message = `Execution run failed: ${error.message}`;
+				const message = `${outcomeUnconfirmed ? "Execution outcome unconfirmed" : "Execution run failed"}: ${error.message}`;
 				setApplicationLiveStatus("");
 				setExecutionError(message);
 			}
 		} finally {
+			if (executingScopeRef.current === operationScope) executingScopeRef.current = null;
 			if (isProjectOperationCurrent(operationScope) && executionRunRequestId === executionRunRequestIdRef.current) {
 				setIsRunningExecution(false);
 			}
 		}
+	};
+
+	const checkExecutionRecovery = async () => {
+		const scope = captureProjectOperationScope();
+		const requestId = executionRecovery?.requestId;
+		if (!scope || !requestId) return;
+		const path = API_CONTRACT_ENDPOINTS.projectExecutionRequest.path
+			.replace("{project_id}", encodeURIComponent(scope.projectId))
+			.replace("{request_id}", encodeURIComponent(requestId));
+		try {
+			const response = await apiRequest(path);
+			const receipt = response.status === 404 ? null : response.ok ? await response.json() : undefined;
+			if (!isProjectOperationCurrent(scope)) return;
+			if (receipt === null) {
+				saveExecutionRecovery({ requestId, status: "missing" });
+				setExecutionError("");
+				return;
+			}
+			if (
+				receipt?.project_id !== scope.projectId ||
+				receipt?.request_id !== requestId ||
+				!["pending", "completed", "unconfirmed"].includes(receipt.status) ||
+				(receipt.status === "completed" && (!receipt.run_record_id || !receipt.run_id))
+			) {
+				throw new Error("The saved execution receipt could not be verified. Check again.");
+			}
+			saveExecutionRecovery({
+				requestId,
+				status: receipt.status,
+				runId: receipt.run_id,
+				runRecordId: receipt.run_record_id,
+				historical: receipt.historical === true,
+			});
+			setExecutionError("");
+			if (receipt.status === "completed") await refreshCurrentProject({ hydrate: true, operationScope: scope });
+		} catch (error) {
+			if (isProjectOperationCurrent(scope)) setExecutionError(error.message);
+		}
+	};
+
+	const acknowledgeExecutionRecovery = () => {
+		saveExecutionRecovery(null);
+		resetExecutionWorkflowState();
+		setStatus("Execution uncertainty acknowledged. Preview the current suite before running again.");
 	};
 
 	const generateTestCases = async (
@@ -3359,16 +3592,36 @@ export default function App() {
 			const testCaseGenerationPath = useRefineEndpoint
 				? API_CONTRACT_ENDPOINTS.testCasesRefine.path
 				: API_CONTRACT_ENDPOINTS.testCasesGenerate.path;
-			const res = await apiRequest(testCaseGenerationPath, {
+			const options = {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
 				body: JSON.stringify(payload),
+			};
+			const send = async () => {
+				const res = await apiRequest(testCaseGenerationPath, options);
+				return { res, data: res.ok ? await res.json() : null };
+			};
+			let reply = await send().catch((error) => {
+				if (error instanceof TypeError || error instanceof SyntaxError) return null;
+				throw error;
 			});
+			const unconfirmed =
+				reply?.res.status === 503 &&
+				(
+					await reply.res
+						.clone()
+						.json()
+						.catch(() => null)
+				)?.detail?.code === "generation_publication_unconfirmed";
+			if (!reply || unconfirmed) {
+				if (!isProjectOperationCurrent(operationScope)) return false;
+				reply = await send();
+			}
+			const { res, data } = reply;
 			if (!res.ok) {
 				const errorMessage = await parseApiError(res, "Failed to generate test cases");
 				throw Object.assign(new Error(errorMessage), { status: res.status });
 			}
-			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) {
 				return false;
 			}
@@ -3491,6 +3744,49 @@ export default function App() {
 				? impactApplication.operation.accepted_recommendation_ids
 				: acceptedImpactRecommendationIds
 		);
+	};
+
+	const reviewSavedSuite = async () => {
+		if (!savedSuiteReviewPending || savedSuiteReviewDisabled || savedSuiteReviewRequests.current.has(savedSuiteReviewKey)) return;
+		const scope = captureProjectOperationScope();
+		if (scope?.projectId !== currentProjectId) return;
+		savedSuiteReviewRequests.current.add(savedSuiteReviewKey);
+		setSavedSuiteReview({ key: savedSuiteReviewKey, busy: true });
+		try {
+			const response = await apiRequest(PROJECT_API_PATHS.savedSuiteReview(scope.projectId), {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": createRequestId() },
+				body: JSON.stringify({ snapshot_id: savedSuite.snapshot_id, base_project_revision: currentProjectRevision }),
+			});
+			if (!response.ok) {
+				const details =
+					response.status === 503
+						? (
+								await response
+									.clone()
+									.json()
+									.catch(() => null)
+							)?.detail
+						: null;
+				const error = new Error(await parseApiError(response, "Saved suite review failed"));
+				if (details?.code === "review_groups_unverified" && Array.isArray(details.groups)) error.reviewGroups = details.groups;
+				throw error;
+			}
+			const project = await response.json();
+			if (!isProjectOperationCurrent(scope)) return;
+			if (project?.project_id !== scope.projectId || !isLatestProjectRevision(project.project_id, project.current_revision)) return;
+			recordProjectRevision(project.project_id, project.current_revision);
+			setCurrentProject(project);
+			hydrateProjectWorkflow(project);
+			void loadProjectOrchestrator(project.project_id, { silent: true, operationScope: scope });
+		} catch (error) {
+			if (isProjectOperationCurrent(scope)) {
+				setSavedSuiteReview({ key: savedSuiteReviewKey, busy: false, error: error.message, reviewGroups: error.reviewGroups });
+			}
+		} finally {
+			savedSuiteReviewRequests.current.delete(savedSuiteReviewKey);
+			setSavedSuiteReview((current) => (current?.key === savedSuiteReviewKey && current.busy ? null : current));
+		}
 	};
 
 	const handleOrchestratorAction = async (recommendation) => {
@@ -3617,34 +3913,53 @@ export default function App() {
 			if (!exportPath) {
 				throw new Error(`Unsupported export format: ${format}`);
 			}
-			const res = await apiRequest(exportPath, {
+			const attempts = fileExportAttempts.current;
+			const fingerprint = JSON.stringify([operationScope, payload]);
+			if (attempts.get(format)?.fingerprint !== fingerprint) {
+				attempts.set(format, { fingerprint, requestId: createRequestId() });
+			}
+			const attempt = attempts.get(format);
+			const clearAttempt = () => {
+				if (attempts.get(format) === attempt) attempts.delete(format);
+			};
+			const options = {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.requestId },
 				body: JSON.stringify(payload),
-			});
-
-			if (!res.ok) {
-				if (res.status === 422) {
-					const rejection = await res
-						.clone()
-						.json()
-						.catch(() => null);
-					if (rejection?.detail?.code === "draft_override_required" && isProjectOperationCurrent(operationScope)) {
-						setExportDraftRequiredFor(exportEvidenceKey);
+			};
+			const send = async () => {
+				try {
+					const res = await apiRequest(exportPath, options);
+					if (res.ok) return await res.blob();
+					if ([422, 502, 503, 504].includes(res.status)) {
+						const rejection = await res
+							.clone()
+							.json()
+							.catch(() => null);
+						if (res.status !== 422 && (!rejection?.detail || rejection.detail.code === "export_publication_unconfirmed")) return null;
+						if (rejection?.detail?.code === "draft_override_required" && isProjectOperationCurrent(operationScope)) {
+							setExportDraftRequiredFor(exportEvidenceKey);
+						}
 					}
+					clearAttempt();
+					throw new Error(await parseApiError(res, "Export failed"));
+				} catch (error) {
+					if (error instanceof TypeError) return null;
+					throw error;
 				}
-				const errorMessage = await parseApiError(res, "Export failed");
-				throw new Error(errorMessage);
+			};
+			let blob = await send();
+			if (!blob && isProjectOperationCurrent(operationScope)) {
+				blob = await send();
 			}
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
+			if (!blob) throw new Error("The export could not be confirmed. Retry the same format with the same inputs.");
 
 			const filename = buildTestCaseExportFilename(currentProject, format);
-			await downloadResponseBlob(res, filename);
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
+			downloadBlob(blob, filename);
+			clearAttempt();
 			await refreshCurrentProject({ hydrate: false, operationScope });
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
@@ -3664,30 +3979,17 @@ export default function App() {
 		}
 	};
 
-	const getRequirementScenarioSummary = (requirementId) => {
-		return coverageMetrics?.requirement_scenario_summary?.[requirementId] || null;
-	};
-
-	const requirementTraceabilityRows = approvedRequirements.map((requirement) => {
-		const linkedTestCases = testCases.filter((testCase) => getTestCaseLinkedRequirementIds(testCase).includes(requirement.id));
-		const scenarioSummary = getRequirementScenarioSummary(requirement.id);
-		const linkedScenarioTypes = [
-			...new Set(
-				linkedTestCases
-					.flatMap((testCase) => normalizeStringArray(testCase.tags))
-					.filter((tag) => tag.startsWith("scenario:"))
-					.map((tag) => tag.replace("scenario:", "").replace(/-/g, " "))
-			),
-		];
-		return {
-			requirement,
-			linkedTestCases,
-			scenarioSummary,
-			linkedScenarioTypes,
-		};
-	});
-	const tracedRequirementCount = requirementTraceabilityRows.filter((row) => row.linkedTestCases.length > 0).length;
+	const requirementScenarioSummaries = coverageMetrics?.requirement_scenario_summary;
+	const {
+		rows: requirementTraceabilityRows,
+		tracedRequirementCount,
+		linkedCaseCount,
+	} = useMemo(
+		() => buildRequirementTraceability(approvedRequirements, testCases, requirementScenarioSummaries),
+		[approvedRequirements, testCases, requirementScenarioSummaries]
+	);
 	const traceabilityGapCount = Math.max(0, approvedRequirements.length - tracedRequirementCount);
+	const browserHandoffWarnings = (testCaseWorkflowDiagnostics?.warnings || []).filter((warning) => warning.startsWith("Browser handoff "));
 	const hasGenerateResults = Boolean(
 		testCases.length ||
 		coveragePlan.length ||
@@ -3712,8 +4014,8 @@ export default function App() {
 		{
 			id: "improve",
 			label: "Improve tests",
-			badge: improvementFindings(testCaseReview).length,
-			variant: testCaseReview?.approved === false ? "warning" : "muted",
+			badge: testCaseFindings.length + (substantiveAssessment?.execution_blockers?.length || 0) + Number(browserHandoffWarnings.length > 0),
+			variant: testCaseReview?.approved === false || browserHandoffWarnings.length > 0 ? "warning" : "muted",
 		},
 	];
 
@@ -3724,6 +4026,8 @@ export default function App() {
 		const changedItems = impactAnalysis.changed_items || [];
 		const impactedCases = impactAnalysis.impacted_test_cases || [];
 		const recommendations = impactAnalysis.recommendations || [];
+		const titleCounts = new Map();
+		for (const { title } of recommendations) titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
 		const actionLabels = {
 			keep: "Keep",
 			update: "Update",
@@ -3754,11 +4058,15 @@ export default function App() {
 					recommendations={recommendations}
 					analysisDisabled={isAnalyzingImpact || testCaseActionDisabled}
 					approvalRequired={impactApplyBlockedByApproval}
+					reviewApproved={
+						savedSuiteReviewed && savedSuite.approved && savedSuite.source_snapshot_id === impactApplication.operation?.result_snapshot_id
+					}
 					disabled={!canApplyImpactUpdate || testCaseActionDisabled}
 					onApply={applyImpactUpdate}
 					onCheck={impactApplication.checkStatus}
 					onAnalyze={analyzeImpact}
 					onReview={() => {
+						setReviewCaseScope(null);
 						setChangedTestCaseIds(impactApplication.operation.changed_test_case_ids);
 						setActiveGenerateResultTab("test-cases");
 						window.requestAnimationFrame(() => {
@@ -3819,44 +4127,49 @@ export default function App() {
 				<div className="impact-table-block">
 					<h3>Recommendations</h3>
 					<List as="div" variant="grouped" className="impact-recommendation-list">
-						{recommendations.map((recommendation) => (
-							<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
-								<div>
-									<strong>{actionLabels[recommendation.action] || recommendation.action}</strong>
-									<span>{recommendation.title}</span>
-									<p>{recommendation.reason}</p>
+						{recommendations.map((recommendation) => {
+							const reference = recommendation.test_case_id || recommendation.scenario_refs?.join(", ") || recommendation.recommendation_id;
+							const title = titleCounts.get(recommendation.title) > 1 ? `${recommendation.title} (${reference})` : recommendation.title;
+							return (
+								<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
+									<div>
+										<strong>{actionLabels[recommendation.action] || recommendation.action}</strong>
+										<span>{title}</span>
+										<p>{recommendation.reason}</p>
+									</div>
+									<div className="impact-recommendation-meta">
+										<span>{Math.round((recommendation.confidence || 0) * 100)}%</span>
+										<label>
+											<Checkbox
+												aria-label={`Accept ${title}`}
+												data-testid={`impact-accept-${recommendation.recommendation_id}`}
+												checked={
+													impactApplication.operation
+														? impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
+														: Boolean(recommendation.accepted)
+												}
+												disabled={isApplyingImpactUpdate || Boolean(impactApplication.operation)}
+												onChange={(event) => {
+													const accepted = event.target.checked;
+													setImpactAnalysis((current) => ({
+														...current,
+														recommendations: current.recommendations.map((item) =>
+															item.recommendation_id === recommendation.recommendation_id ? { ...item, accepted } : item
+														),
+													}));
+												}}
+											/>
+											{impactApplication.operation?.status === "applied" &&
+											impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
+												? "Applied"
+												: acceptedImpactRecommendationIds.includes(recommendation.recommendation_id)
+													? "Accepted"
+													: "Review"}
+										</label>
+									</div>
 								</div>
-								<div className="impact-recommendation-meta">
-									<span>{Math.round((recommendation.confidence || 0) * 100)}%</span>
-									<label>
-										<Checkbox
-											aria-label={`Accept ${recommendation.title}`}
-											checked={
-												impactApplication.operation
-													? impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
-													: Boolean(recommendation.accepted)
-											}
-											disabled={isApplyingImpactUpdate || Boolean(impactApplication.operation)}
-											onChange={(event) => {
-												const accepted = event.target.checked;
-												setImpactAnalysis((current) => ({
-													...current,
-													recommendations: current.recommendations.map((item) =>
-														item.recommendation_id === recommendation.recommendation_id ? { ...item, accepted } : item
-													),
-												}));
-											}}
-										/>
-										{impactApplication.operation?.status === "applied" &&
-										impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
-											? "Applied"
-											: acceptedImpactRecommendationIds.includes(recommendation.recommendation_id)
-												? "Accepted"
-												: "Review"}
-									</label>
-								</div>
-							</div>
-						))}
+							);
+						})}
 					</List>
 				</div>
 
@@ -3880,19 +4193,50 @@ export default function App() {
 		setContextAnalysisError("");
 		setStatus("Analyzing context artifacts...");
 		try {
-			const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(buildContextPayload()),
-			});
-			if (!res.ok) {
-				const errorMessage = await parseApiError(res, "Failed to analyze context");
-				throw new Error(errorMessage);
+			const payload = buildContextPayload();
+			if (payload.grounded_context && contextSourceInputs(payload) !== contextSourceInputs(enrichedContext)) {
+				payload.grounded_context = null;
 			}
-			const data = await res.json();
+			const fingerprint = JSON.stringify([operationScope, payload]);
+			if (contextAnalysisAttempt.current?.fingerprint !== fingerprint) {
+				contextAnalysisAttempt.current = { fingerprint, requestId: createRequestId() };
+			}
+			const attempt = contextAnalysisAttempt.current;
+			const clearAttempt = () => {
+				if (contextAnalysisAttempt.current === attempt) contextAnalysisAttempt.current = null;
+			};
+			const options = {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "X-Request-ID": attempt.requestId },
+				body: JSON.stringify(payload),
+			};
+			const send = async () => {
+				try {
+					const res = await apiRequest(API_CONTRACT_ENDPOINTS.requirementsEnrich.path, options);
+					if (res.ok) return await res.json();
+					if ([502, 503, 504].includes(res.status)) {
+						const error = await res
+							.clone()
+							.json()
+							.catch(() => null);
+						if (!error?.detail || error.detail.code === "context_publication_unconfirmed") return null;
+					}
+					clearAttempt();
+					throw new Error(await parseApiError(res, "Failed to analyze context"));
+				} catch (error) {
+					if (error instanceof TypeError || error instanceof SyntaxError) return null;
+					throw error;
+				}
+			};
+			let data = await send();
+			if (!data && isProjectOperationCurrent(operationScope)) {
+				data = await send();
+			}
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
+			if (!data) throw new Error("Context analysis could not be confirmed. Retry with the same inputs.");
+			clearAttempt();
 			setEnrichedContext(data);
 			setSelectedArtifactSourceIds((data.grounded_context?.artifact_sources || []).map((source) => source.id));
 			await refreshCurrentProject({ hydrate: false, operationScope });
@@ -3903,7 +4247,6 @@ export default function App() {
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setStatus(`Context analysis failed: ${error.message}`);
-				resetContextAnalysis();
 				setContextAnalysisError(error.message);
 			}
 		} finally {
@@ -3919,7 +4262,13 @@ export default function App() {
 				{ id: 0, label: "Requirements", title: "Import and review", href: buildProjectPath(navigationProjectId, "requirements") },
 				{ id: 1, label: "Context", title: "Grounded inputs", href: buildProjectPath(navigationProjectId, "context") },
 				{ id: 6, label: "Use Cases", title: "Review scenarios", href: buildProjectPath(navigationProjectId, "use-cases") },
-				{ id: 3, label: "Test Cases", title: "Design and generate", href: buildProjectPath(navigationProjectId, "test-cases") },
+				{
+					id: 3,
+					label: "Test Cases",
+					title: "Design and generate",
+					href: buildProjectPath(navigationProjectId, "test-cases"),
+					attentionLabel: testCasesNeedSetup ? "Setup needed" : undefined,
+				},
 				{ id: 4, label: "Automation", title: "Preview and run", href: buildProjectPath(navigationProjectId, "automation") },
 				{ id: 5, label: "Reports", title: "Evidence and export", href: buildProjectPath(navigationProjectId, "reports") },
 			]
@@ -3948,13 +4297,13 @@ export default function App() {
 				? "pending"
 				: "blocked",
 		4: getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: projectStageState.execution?.stale }).status,
-		5: projectStageState.reports?.stale
-			? "attention"
-			: exportMessage
+		5: projectStageState.reports?.current_snapshot_id
+			? projectStageState.reports.approved && !projectStageState.reports.stale
 				? "complete"
-				: testCases.length && !exportGateLocked
-					? "pending"
-					: "blocked",
+				: "attention"
+			: testCases.length && !exportGateLocked
+				? "pending"
+				: "blocked",
 	};
 
 	const selectWorkflowTab = (nextTab) => {
@@ -3971,6 +4320,16 @@ export default function App() {
 	const goNext = () => moveProjectStep(1);
 	const requirementsRoute = route.destination === PROJECT_DESTINATIONS.REQUIREMENTS;
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
+	const openTraceabilityCase = (path, target) => {
+		navigate(`${location.pathname}${location.search}${location.hash}`, {
+			replace: true,
+			state: {
+				...location.state,
+				traceabilityCase: { ...target, projectId: currentProjectId, snapshotId: savedSuite.snapshot_id },
+			},
+		});
+		navigate(path);
+	};
 	const compactReview = requirementsRoute || testReviewRoute;
 	const requirementSetupOpen =
 		!imports.preview && (requirementSetup?.projectId === navigationProjectId ? requirementSetup.open : requirements.length === 0);
@@ -3978,8 +4337,7 @@ export default function App() {
 	const focusPendingRequirements = () => {
 		setRequirementSetup({ projectId: navigationProjectId, open: false });
 		setRequirementReviewRequest({ projectId: navigationProjectId });
-		requirementReviewHeading.current?.focus({ preventScroll: true });
-		requirementReviewHeading.current?.scrollIntoView({ block: "nearest" });
+		setRequirementFocus({ projectId: navigationProjectId, target: "review" });
 	};
 	const reviewRequirementImport = async (action, payload) => {
 		const completed = await imports.mutate(action, payload);
@@ -3987,13 +4345,15 @@ export default function App() {
 		setRequirementSetup({ projectId: navigationProjectId, open: action === "cancel" && !requirements.length });
 		setRequirementFocus({ projectId: navigationProjectId, target: action === "apply" ? "review" : "import" });
 	};
-	useEffect(() => {
+	const focusRequirementTarget = useCallback(() => {
 		if (!requirementsRoute || imports.preview || requirementFocus?.projectId !== navigationProjectId) return;
 		const target = requirementFocus.target === "review" ? requirementReviewHeading.current : requirementImportControl.current;
-		target?.focus({ preventScroll: true });
-		target?.scrollIntoView({ block: "nearest" });
+		if (!target) return;
+		target.focus({ preventScroll: true });
+		target.scrollIntoView({ block: "nearest" });
 		setRequirementFocus(null);
 	}, [imports.preview, requirementFocus, requirementsRoute, navigationProjectId]);
+	useEffect(focusRequirementTarget, [focusRequirementTarget]);
 
 	const goPrev = () => moveProjectStep(-1);
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
@@ -4093,7 +4453,9 @@ export default function App() {
 				{applicationLiveStatus}
 			</div>
 			{!isAuthenticated && !isVerifyingSession && (
-				<div className="auth-warning-banner">🔐 Sign in to parse requirements, generate test cases, and export artifacts.</div>
+				<div className="auth-warning-banner" role={authActionError ? "alert" : undefined}>
+					{authActionError || "🔐 Sign in to parse requirements, generate test cases, and export artifacts."}
+				</div>
 			)}
 
 			<BillingBanner isAuthenticated={isAuthenticated} pilotAlert={pilotAlert} billingContactEmail={billingContactEmail} />
@@ -4139,6 +4501,7 @@ export default function App() {
 						/>
 					) : route.destination === "projects" ? (
 						<ProjectsPage
+							onModuleReady={focusPendingRoute}
 							projects={workspaceSummary?.projects || []}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession) && !workspaceSummary}
 							error={isAuthenticated ? workspaceSummaryError : ""}
@@ -4149,6 +4512,7 @@ export default function App() {
 						/>
 					) : route.destination === "reviews" ? (
 						<ReviewsPage
+							onModuleReady={focusPendingRoute}
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}
@@ -4159,6 +4523,7 @@ export default function App() {
 						/>
 					) : route.destination === "runs" ? (
 						<RunsPage
+							onModuleReady={focusPendingRoute}
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}
@@ -4169,6 +4534,7 @@ export default function App() {
 						/>
 					) : route.destination === "reports" ? (
 						<ReportsPage
+							onModuleReady={focusPendingRoute}
 							summary={workspaceSummary}
 							isLoading={isAuthenticated && (isWorkspaceSummaryLoading || isVerifyingSession)}
 							isRefreshing={isWorkspaceSummaryRefreshing}
@@ -4233,6 +4599,7 @@ export default function App() {
 									testCases: testCases.length,
 								}}
 								testCaseReview={testCaseReview}
+								testCasesNeedSetup={testCasesNeedSetup}
 								exportLocked={exportGateLocked}
 								navigate={navigate}
 								contextualTask={
@@ -4252,6 +4619,7 @@ export default function App() {
 							/>
 						) : route.destination === "use-cases" ? (
 							<UseCaseReviewPage
+								onModuleReady={focusPendingRoute}
 								project={currentProject}
 								identity={currentUser?.sub || ""}
 								request={apiRequest}
@@ -4321,7 +4689,7 @@ export default function App() {
 														</Button>
 													))}
 											</div>
-										) : route.destination === "test-cases" ? (
+										) : route.destination === "test-cases" && !savedCaseLink ? (
 											<div className="workbench-actions">
 												{testReviewRoute && testCases.length > 0 && exportGateLocked && (
 													<Badge className="workbench-status" tone="warning">
@@ -4353,7 +4721,7 @@ export default function App() {
 									}
 								/>
 
-								{["requirements", "test-cases", "automation"].includes(route.destination) && (
+								{!savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}
 										compact={compactReview}
@@ -4362,7 +4730,7 @@ export default function App() {
 										onUpdated={() => openProject(navigationProjectId, { silent: true })}
 									/>
 								)}
-								{["requirements", "test-cases"].includes(route.destination) && (
+								{!savedCaseLink && ["requirements", "test-cases"].includes(route.destination) && (
 									<ClarificationScopeNotice
 										project={currentProject}
 										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
@@ -4370,6 +4738,7 @@ export default function App() {
 								)}
 								{["requirements", "test-cases", "automation"].includes(route.destination) &&
 									!(requirementsRoute && (requirements.length || imports.preview)) &&
+									!savedCaseLink &&
 									!(testReviewRoute && testCases.length) && (
 										<GenerationGuidance
 											key={`${knowledgeScope}:${route.destination}:${currentProjectRevision}`}
@@ -4386,6 +4755,7 @@ export default function App() {
 									currentDestination={route.destination}
 									hasTestCases={hasExistingTestCaseBaseline}
 									hidden={
+										viewingSavedCase ||
 										(route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2) ||
 										(requirementsRoute && Boolean(imports.preview))
 									}
@@ -4413,6 +4783,11 @@ export default function App() {
 												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
 												until you apply an update.
 											</p>
+											{imports.extractionError && (
+												<Alert tone="danger" role="alert">
+													{imports.extractionError}
+												</Alert>
+											)}
 											<div className="choice-group source-choice-group" role="radiogroup" aria-label="Requirement source selector">
 												{REQUIREMENT_SOURCE_OPTIONS.map((option) => (
 													<label key={option.value} className={`choice-card ${requirementSourceMode === option.value ? "selected" : ""}`}>
@@ -4421,7 +4796,10 @@ export default function App() {
 															name="requirement-source"
 															value={option.value}
 															checked={requirementSourceMode === option.value}
-															onChange={() => setRequirementSourceMode(option.value)}
+															onChange={() => {
+																setRequirementSourceMode(option.value);
+																imports.setExtractionError("");
+															}}
 														/>
 														<span className="choice-card-copy">
 															<span className="choice-card-title">{option.label}</span>
@@ -4810,6 +5188,7 @@ export default function App() {
 											{imports.message && <p role="status">{imports.message}</p>}
 											<RequirementReviewWorkbench
 												key={navigationProjectId}
+												onModuleReady={focusRequirementTarget}
 												headingRef={requirementReviewHeading}
 												reviewRequest={requirementReviewRequest?.projectId === navigationProjectId ? requirementReviewRequest : null}
 												requirements={requirements}
@@ -5108,6 +5487,7 @@ export default function App() {
 											project={currentProject}
 											request={apiRequest}
 											projectId={navigationProjectId}
+											prerequisiteSearch={new URLSearchParams(location.search).has("prerequisite") ? location.search : ""}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
 											appLink={appLink}
 											setAppLink={setAppLink}
@@ -5133,7 +5513,7 @@ export default function App() {
 										/>
 									)}
 
-									{activeTab === 2 && (
+									{activeTab === 2 && !savedCaseLink && (
 										<TemplateSetupPanel
 											templateName={templateName}
 											setTemplateName={setTemplateName}
@@ -5143,7 +5523,17 @@ export default function App() {
 										/>
 									)}
 
-									{activeTab === 3 && (
+									{savedCaseLink && isAuthenticated && currentUser?.sub && (
+										<LinkedTestCaseView
+											key={JSON.stringify([currentUser.sub, navigationProjectId, savedCaseLink.snapshotId, savedCaseLink.caseId])}
+											projectId={navigationProjectId}
+											{...savedCaseLink}
+											request={apiRequest}
+											navigate={navigate}
+										/>
+									)}
+
+									{activeTab === 3 && !savedCaseLink && (
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
 											<TestCaseReadiness
@@ -5153,6 +5543,36 @@ export default function App() {
 												caseCount={testCases.length}
 												taskCount={generationTasks.length}
 												onReview={selectWorkflowTab}
+											/>
+											{savedSuiteReviewPending && (
+												<div className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}>
+													<div role="status">
+														<strong>{savedSuiteReviewState?.busy ? "Reviewing saved test cases…" : "Saved suite needs review"}</strong>
+														<p>
+															{savedSuiteInputsReady
+																? "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
+																: "Review current Requirements and Use Cases or resolve upstream changes first."}
+														</p>
+													</div>
+													{savedSuiteReviewState?.error && <p role="alert">{savedSuiteReviewState.error}</p>}
+													<Button onClick={reviewSavedSuite} disabled={savedSuiteReviewDisabled || savedSuiteReviewState?.busy}>
+														Review saved suite
+													</Button>
+												</div>
+											)}
+											{savedSuiteReviewed && (
+												<div className={`generation-gate-card ${savedSuite.approved ? "ready" : "blocked"}`} role="status">
+													<div>
+														<strong>{savedSuite.approved ? "Saved suite review passed." : "Saved suite review needs attention."}</strong>
+														<p>{savedSuite.payload?.review?.summary}</p>
+													</div>
+												</div>
+											)}
+											<ReviewGroupSummary
+												groups={savedSuiteReviewState?.reviewGroups ?? substantiveAssessment?.diagnostics?.groups}
+												attempted={Boolean(savedSuiteReviewState?.reviewGroups)}
+												stale={Boolean(testCaseStageState.stale)}
+												onInspect={(group) => openCaseResults(group.caseIds[0], group)}
 											/>
 											{upstreamChangedForImpact && (
 												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
@@ -5263,66 +5683,83 @@ export default function App() {
 														role="tabpanel"
 														aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
 													>
-														<div hidden={activeGenerateResultTab !== "improve"}>
-															<ImproveTestsPanel
-																identity={currentUser?.sub}
-																projectId={currentProjectId}
-																snapshotId={sourceCaseSnapshot}
-																reportedCase={reportedCase}
-																summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
-																onClearReport={() => setReportedCase(null)}
-																key={sourceCaseSnapshot}
-																review={testCaseReview}
-																assessment={substantiveAssessment}
-																meta={testCaseReviewMeta}
-																testCases={testCases}
-																busy={isGenerating}
-																disabled={
-																	testCaseActionDisabled ||
-																	upstreamChangedForImpact ||
-																	!canGenerateFromApprovedRequirements ||
-																	!testCases.length
-																}
-																stale={upstreamChangedForImpact}
-																blockedReason={
-																	upstreamChangedForImpact
-																		? "Upstream inputs changed. Review their impact before applying fixes."
-																		: !testCases.length
-																			? "Generate test cases before applying improvements."
-																			: !canGenerateFromApprovedRequirements
-																				? "Approve requirements before applying fixes."
-																				: testCaseActionDisabled
-																					? "Refinement is unavailable while another operation is running or your account is restricted."
-																					: ""
-																}
-																onImpact={() => {
-																	setActiveGenerateResultTab("test-cases");
-																	document.querySelector(".generation-gate-card")?.scrollIntoView({ block: "center" });
-																}}
-																onApply={(feedbackText, selectedTestCaseIds) =>
-																	generateTestCases(true, { feedbackText, selectedTestCaseIds })
-																}
-																onReload={async () => {
-																	const project = await refreshCurrentProject({
-																		hydrate: true,
-																		operationScope: captureProjectOperationScope(),
-																	});
-																	if (project) {
-																		setActiveGenerateResultTab("improve");
+														{(activeGenerateResultTab === "improve" || improveMountedScope === sourceCaseSnapshot) && (
+															<div hidden={activeGenerateResultTab !== "improve"}>
+																<ImproveTestsPanel
+																	identity={currentUser?.sub}
+																	projectId={currentProjectId}
+																	snapshotId={sourceCaseSnapshot}
+																	reportedCase={reportedCase}
+																	summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
+																	onClearReport={() => setReportedCase(null)}
+																	key={sourceCaseSnapshot}
+																	review={testCaseReview}
+																	findings={testCaseFindings}
+																	needsOnlySetup={testCasesNeedSetup}
+																	assessment={substantiveAssessment}
+																	canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}
+																	prerequisiteSnapshotId={
+																		projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id
 																	}
-																	return Boolean(project);
-																}}
-																onViewCase={openCaseResults}
-																onReviewCases={() => openCaseResults()}
-															/>
-														</div>
+																	browserHandoffWarnings={browserHandoffWarnings}
+																	meta={testCaseReviewMeta}
+																	testCases={testCases}
+																	busy={isGenerating}
+																	disabled={
+																		testCaseActionDisabled ||
+																		upstreamChangedForImpact ||
+																		!canGenerateFromApprovedRequirements ||
+																		!testCases.length
+																	}
+																	stale={upstreamChangedForImpact}
+																	blockedReason={
+																		upstreamChangedForImpact
+																			? "Upstream inputs changed. Review their impact before applying fixes."
+																			: !testCases.length
+																				? "Generate test cases before applying improvements."
+																				: !canGenerateFromApprovedRequirements
+																					? "Approve requirements before applying fixes."
+																					: testCaseActionDisabled
+																						? "Refinement is unavailable while another operation is running or your account is restricted."
+																						: ""
+																	}
+																	onImpact={() => {
+																		setActiveGenerateResultTab("test-cases");
+																		document.querySelector(".generation-gate-card")?.scrollIntoView({ block: "center" });
+																	}}
+																	onApply={(feedbackText, selectedTestCaseIds) =>
+																		generateTestCases(true, { feedbackText, selectedTestCaseIds })
+																	}
+																	onReload={async () => {
+																		const project = await refreshCurrentProject({
+																			hydrate: true,
+																			operationScope: captureProjectOperationScope(),
+																		});
+																		if (project) {
+																			setActiveGenerateResultTab("improve");
+																		}
+																		return Boolean(project);
+																	}}
+																	onViewCase={(id) => openCaseResults(id, null, { fromFinding: true })}
+																	onReviewCases={() => openCaseResults()}
+																/>
+															</div>
+														)}
 														{activeGenerateResultTab === "traceability" && (
 															<TraceabilityMatrixPanel
-																approvedRequirements={approvedRequirements}
 																requirementTraceabilityRows={requirementTraceabilityRows}
 																tracedRequirementCount={tracedRequirementCount}
+																linkedCaseCount={linkedCaseCount}
 																coverageMetrics={coverageMetrics}
 																testCases={testCases}
+																projectId={currentProjectId}
+																savedSuite={savedSuite}
+																returnCase={traceabilityReturn}
+																onOpenCase={openTraceabilityCase}
+																onReturnHandled={() => {
+																	setActiveGenerateResultTab("traceability");
+																	setRestoredTraceabilityLocation(location);
+																}}
 															/>
 														)}
 
@@ -5331,21 +5768,26 @@ export default function App() {
 																<GeneratedTestCasesView
 																	identity={currentUser?.sub}
 																	projectId={currentProjectId}
+																	savedSuite={savedSuite}
 																	snapshotId={sourceCaseSnapshot}
 																	onReport={(testCase) => {
 																		setReportedCase(testCase);
 																		setActiveGenerateResultTab("improve");
 																		focusResultContent.current = true;
 																	}}
-																	key={`${sourceCaseSnapshot}:${changedTestCaseIds ? "changed" : "all"}`}
+																	key={`${sourceCaseSnapshot}:${activeReviewCaseScope?.key || (changedTestCaseIds ? "changed" : "all")}`}
 																	changedIds={changedTestCaseIds}
 																	onClearChanged={() => setChangedTestCaseIds(null)}
+																	reviewGroup={activeReviewCaseScope}
+																	onClearReviewGroup={() => openCaseResults(selectedTestCaseId)}
 																	testCases={testCases}
 																	qualityIssues={testCaseReview?.blocking_issues || []}
 																	requirements={requirements}
 																	substantiveAssessment={substantiveAssessment}
 																	selectedId={selectedTestCaseId}
 																	setSelectedId={setSelectedTestCaseId}
+																	findingCaseId={findingCaseSelection?.source === sourceCaseSnapshot ? findingCaseSelection.id : null}
+																	onDismissFindingCase={() => setFindingCaseSelection(null)}
 																/>
 																<div className="workbench-support">
 																	{guidanceSummary("test_cases")}
@@ -5399,6 +5841,15 @@ export default function App() {
 											selectedExecutionCandidateIds={selectedExecutionCandidateIds}
 											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
+											executionRecovery={executionRecovery}
+											executionNeedsResolution={executionNeedsResolution}
+											checkExecutionRecovery={checkExecutionRecovery}
+											acknowledgeExecutionRecovery={acknowledgeExecutionRecovery}
+											recoveredReportPath={
+												executionRecovery?.runRecordId
+													? `${buildProjectPath(currentProjectId, "reports")}?run=${encodeURIComponent(executionRecovery.runRecordId)}`
+													: null
+											}
 											executionError={executionError}
 											effectiveTarget={executionTargetBaseUrl.trim() || appLink}
 											executionStale={projectStageState.execution?.stale}
@@ -5419,6 +5870,9 @@ export default function App() {
 											testCaseReview={testCaseReview}
 											executionRunResult={executionRunResult}
 											currentProject={currentProject}
+											location={location}
+											navigate={navigate}
+											request={apiRequest}
 											exportReviewApproved={exportReviewApproved}
 											exportRequiresOverride={exportRequiresOverride}
 											exportGateLocked={exportGateLocked}

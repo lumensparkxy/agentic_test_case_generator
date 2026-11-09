@@ -208,7 +208,7 @@ class MainAuditLoggingTests(unittest.TestCase):
         self.assertEqual(payload["generation_evidence"]["workflow_run_id"], "run-1")
         self.assertEqual(payload["generation_evidence"]["final_test_case_count"], 1)
 
-    def test_project_generation_keeps_machine_and_human_use_case_approval_separate(self) -> None:
+    def test_project_generation_passes_machine_review_into_the_use_case_draft(self) -> None:
         response = GenerateTestCasesResponse(
             test_cases=[TestCase(id="TC-1", title="Login test", steps=[TestStep(step=1, action="Act", expected="Observe")])],
             approved=True,
@@ -226,11 +226,11 @@ class MainAuditLoggingTests(unittest.TestCase):
         with (
             patch(
                 "app.routers.testcases.get_project",
-                return_value=SimpleNamespace(current_snapshots={}),
+                return_value=SimpleNamespace(status="active", current_revision=4, current_snapshots={}, stage_state={}),
             ),
             patch(
                 "app.routers.testcases.append_stage_snapshot",
-                side_effect=[SimpleNamespace(snapshot_id="snap-use-cases"), SimpleNamespace(snapshot_id="snap-test-cases")],
+                return_value=SimpleNamespace(snapshot_id="snap-test-cases"),
             ) as append_snapshot,
         ):
             _append_project_generation_snapshots(
@@ -244,12 +244,11 @@ class MainAuditLoggingTests(unittest.TestCase):
                 base_project_revision=4,
             )
 
-        use_case_call, test_case_call = append_snapshot.call_args_list
-        self.assertEqual(use_case_call.kwargs["stage"], "use_cases")
-        self.assertFalse(use_case_call.kwargs["approved"])
-        self.assertTrue(use_case_call.kwargs["payload"]["review"]["approved"])
-        self.assertEqual(test_case_call.kwargs["stage"], "test_cases")
-        self.assertTrue(test_case_call.kwargs["approved"])
+        append_snapshot.assert_called_once()
+        args = append_snapshot.call_args.kwargs
+        self.assertTrue(args["use_case_draft_payload"]["review"]["approved"])
+        self.assertEqual(args["stage"], "test_cases")
+        self.assertTrue(args["approved"])
 
 
 if __name__ == "__main__":

@@ -144,6 +144,34 @@ export const getTestCaseLinkedRequirementIds = (testCase) => {
 	return [...new Set([...explicit, ...tagLinks])];
 };
 
+export const buildRequirementTraceability = (approvedRequirements, testCases, scenarioSummaries) => {
+	const byRequirement = new Map(approvedRequirements.map(({ id }) => [id, { cases: [], scenarios: new Set() }]));
+	let linkedCaseCount = 0;
+	for (const testCase of testCases) {
+		const links = getTestCaseLinkedRequirementIds(testCase).filter((id) => byRequirement.has(id));
+		if (!links.length) continue;
+		linkedCaseCount += 1;
+		const scenarios = normalizeStringArray(testCase.tags)
+			.filter((tag) => tag.startsWith("scenario:"))
+			.map((tag) => tag.replace("scenario:", "").replace(/-/g, " "));
+		for (const id of links) {
+			const row = byRequirement.get(id);
+			row.cases.push(testCase);
+			for (const scenario of scenarios) row.scenarios.add(scenario);
+		}
+	}
+	const rows = approvedRequirements.map((requirement) => {
+		const { cases, scenarios } = byRequirement.get(requirement.id);
+		return {
+			requirement,
+			linkedTestCases: cases,
+			linkedScenarioTypes: [...scenarios],
+			scenarioSummary: scenarioSummaries?.[requirement.id] || null,
+		};
+	});
+	return { rows, linkedCaseCount, tracedRequirementCount: rows.filter((row) => row.linkedTestCases.length > 0).length };
+};
+
 export const mergeRequirementMetadata = (nextRequirements = [], previousRequirements = []) => {
 	const previousList = Array.isArray(previousRequirements) ? previousRequirements : [];
 	const nextList = Array.isArray(nextRequirements) ? nextRequirements : [];

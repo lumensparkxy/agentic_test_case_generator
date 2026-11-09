@@ -513,7 +513,7 @@ test.describe("Impact update flow", () => {
 
 		await page.getByRole("button", { name: /Apply 3 recommendations/i }).click();
 		await expect(page.getByText(/1 preserved · 2 updated · 0 added · 0 deprecated/i)).toBeVisible();
-		await expect(page.locator(".test-suite-summary")).toContainText("3 test cases");
+		await expect(page.getByRole("tab", { name: "Generated Test Cases 3", exact: true })).toBeVisible();
 		await expect(task.getByRole("button", { name: /^Start analysis$/i })).toHaveCount(0);
 	});
 });

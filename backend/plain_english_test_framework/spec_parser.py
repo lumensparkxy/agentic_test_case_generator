@@ -26,6 +26,20 @@ PLACEHOLDER_PATTERN = re.compile(r"\{(?:env|data)\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A
 BRACED_PATTERN = re.compile(r"\{[^{}\s]*(?:\.[^{}\s]*)*\}")
 MARKDOWN_YAML_BLOCK_PATTERN = re.compile(r"(?ms)^```ya?ml\s*\n(.*?)\n```")
 STEP_KEYWORD_PATTERN = re.compile(r"^(Given|When|Then|And|But)\s+")
+_JSON_STRING = r'"(?:\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|[^"\\\x00-\x1f])*"'
+_QUOTED_LOCATOR = r'(?:\\["\\]|[^"\\\r\n])+'
+STRUCTURED_LITERAL_STEP_PATTERN = re.compile(
+    rf'(?:I fill exact field "(?P<field>{_QUOTED_LOCATOR})" with'
+    rf'|(?P<kind>field|css|test id) "(?P<locator>{_QUOTED_LOCATOR})" (?P<subject>value|text) should equal)'
+    rf" literal (?P<literal>{_JSON_STRING})"
+)
+STRUCTURED_LOCATOR_ASSERTION_PATTERN = re.compile(
+    rf'(?P<kind>css|test id) (?:literal (?P<locator_literal>{_JSON_STRING})|"(?P<locator>[^"]+)") '
+    r"(?:(?P<visible>should be visible)|should (?P<negation>not )?be (?P<checked>checked)|should be (?P<enabled>enabled|disabled)"
+    rf'|attribute (?:literal (?P<attribute_literal>{_JSON_STRING})|"(?P<attribute>[^"]+)") should equal '
+    rf'(?:literal (?P<expected_literal>{_JSON_STRING})|"(?P<expected>[^"]*)")'
+    r"|count should be (?P<count>\d+))"
+)
 
 
 class SpecValidationError(Exception):
@@ -69,10 +83,20 @@ def parse_spec_text(
     source = Path(source_path) if source_path is not None else None
     yaml_text = _extract_yaml_payload(text, source)
     document = _load_yaml_document(yaml_text, source)
+    return parse_spec_document(document, source_path=source, schema_path=schema_path)
+
+
+def parse_spec_document(
+    document: Any,
+    *,
+    source_path: str | Path | None = None,
+    schema_path: str | Path = DEFAULT_SCHEMA_PATH,
+) -> ParsedSpec:
+    """Validate and parse an already-loaded structured spec."""
     issues = validate_spec_document(document, schema_path=schema_path)
     if issues:
         raise SpecValidationError(issues)
-    return _to_parsed_spec(document, source)
+    return _to_parsed_spec(document, Path(source_path) if source_path is not None else None)
 
 
 def validate_spec_document(document: Any, *, schema_path: str | Path = DEFAULT_SCHEMA_PATH) -> tuple[ValidationIssue, ...]:
@@ -153,6 +177,16 @@ def _validate_placeholders(document: Mapping[str, Any]) -> list[ValidationIssue]
     for index, step in enumerate(steps):
         if not isinstance(step, str):
             continue
+        body = STEP_KEYWORD_PATTERN.sub("", step, count=1)
+        if literal := STRUCTURED_LITERAL_STEP_PATTERN.fullmatch(body):
+            # Only the explicit operand is exempt from template validation.
+            step = body[: literal.start("literal")]
+        elif assertion := STRUCTURED_LOCATOR_ASSERTION_PATTERN.fullmatch(body):
+            step = body
+            for group in ("expected_literal", "attribute_literal", "locator_literal"):
+                start, end = assertion.span(group)
+                if start >= 0:
+                    step = step[:start] + step[end:]
 
         if step.count("{") != step.count("}"):
             issues.append(ValidationIssue(f"$.steps[{index}]", "placeholder braces are not balanced", "placeholder.unbalanced"))

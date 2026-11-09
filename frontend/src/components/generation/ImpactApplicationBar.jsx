@@ -9,6 +9,7 @@ export default function ImpactApplicationBar({
 	disabled,
 	analysisDisabled,
 	approvalRequired,
+	reviewApproved,
 	onApply,
 	onCheck,
 	onReview,
@@ -77,7 +78,7 @@ export default function ImpactApplicationBar({
 						<time dateTime={operation.completed_at}>
 							{operation.completed_at ? new Date(operation.completed_at).toLocaleString() : "Saved"}
 						</time>{" "}
-						· Review the changed tests before export.
+						· {reviewApproved ? "Review evidence saved." : "Review the changed tests before export."}
 					</p>
 				)}
 				{approvalRequired && !applied && <p>Approve changed requirements/use cases before applying impact updates.</p>}

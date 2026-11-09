@@ -16,9 +16,11 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import ExecutionSettings
 from app.models import ExecutionCandidate, ExecutionPreviewResponse, TestCase, TestStep
 from app.services.execution_service import preview_execution, run_execution
-from plain_english_test_framework.compiler import CompilerError, compile_spec_file
+from plain_english_test_framework.compiler import CompilerError, ResolvedEnvironment, compile_parsed_spec, compile_spec_file
+from plain_english_test_framework.ir_validator import validate_ir_document
 from plain_english_test_framework.local_runner import LocalPlaywrightRunnerError, _node_resolution_env
 from plain_english_test_framework.playwright_generator import generate_playwright_spec
+from plain_english_test_framework.spec_parser import SpecValidationError, parse_spec_document
 from plain_english_test_framework.validation import ValidationIssue
 
 
@@ -60,17 +62,12 @@ def _documentation_case(case_id: str = "TC-DOC") -> TestCase:
             TestStep(
                 step=1,
                 action="Locate the 'Playwright Test' section or pathway on the landing page.",
-                expected="The Playwright Test section is visible and clearly demarcated.",
+                expected='"Playwright Test" is visible',
             ),
             TestStep(
                 step=2,
-                action="Verify the active URL in the browser address bar.",
-                expected="The URL is exactly 'https://playwright.dev/python/' and does not redirect.",
-            ),
-            TestStep(
-                step=3,
-                action="Scan the text content and feature list within the Playwright Test section.",
-                expected="The text explicitly describes auto-waiting and assertions.",
+                action="Verify the URL is exactly 'https://playwright.dev/python/'.",
+                expected="",
             ),
         ],
     )
@@ -186,6 +183,13 @@ def _fake_batch_run(statuses_by_case_id: dict[str, str], *, returncode: int = 0)
 
 
 class ExecutionServiceTests(unittest.TestCase):
+    def test_execution_preview_excludes_deprecated_cases_before_the_limit(self) -> None:
+        deprecated = _browser_case("TC-OLD").model_copy(update={"status": "Deprecated"})
+        active = _browser_case("TC-ACTIVE")
+        preview = preview_execution([deprecated, active], target_base_url="https://example.test", settings=ExecutionSettings(max_cases_per_request=1))
+        self.assertEqual([candidate.source_test_case_id for candidate in preview.executable], [active.id])
+        self.assertEqual(preview.warnings, [])
+
     def test_local_runner_exposes_runtime_node_modules_to_generated_specs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime = Path(temp_dir) / "runtime"
@@ -202,7 +206,7 @@ class ExecutionServiceTests(unittest.TestCase):
         settings = ExecutionSettings()
         cases = [_browser_case(f"TC-{index:03d}") for index in range(1, 26)]
 
-        response = preview_execution(cases, settings=settings)
+        response = preview_execution(cases, target_base_url="https://example.test", settings=settings)
 
         self.assertEqual(settings.max_cases_per_request, 9999)
         self.assertEqual(response.summary.executable, 25)
@@ -310,7 +314,8 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(candidate.traceability_ids, ["REQ-001", "SCN-001", "ctx-login"])
         self.assertEqual(candidate.spec["id"], "tc_001")
         self.assertIn('Given I open "https://example.test/login"', candidate.spec["steps"])
-        self.assertIn('When I enter "mira@example.com" into "Email"', candidate.spec["steps"])
+        self.assertIn('When I enter "mira@example.com" into field "Email"', candidate.spec["steps"])
+        self.assertIn('And field "Email" value should equal "mira@example.com"', candidate.spec["steps"])
         self.assertIn('And I click "Sign in"', candidate.spec["steps"])
 
     def test_preview_converts_documentation_checks_with_implicit_navigation(self) -> None:
@@ -320,7 +325,7 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.unsupported, 0)
         candidate = response.executable[0]
         self.assertEqual(candidate.status, "executable")
-        self.assertIn("Some source steps were not executable", candidate.review_reasons[0])
+        self.assertEqual(candidate.review_reasons, ["The configured target supplies the initial navigation step."])
         self.assertIn("implicit_navigation", {step.reason_code for step in candidate.unsupported_steps})
         self.assertIn('Given I open "https://playwright.dev/python/"', candidate.spec["steps"])
         self.assertIn('Then "Playwright Test" should be visible', candidate.spec["steps"])
@@ -401,7 +406,7 @@ class ExecutionServiceTests(unittest.TestCase):
                 TestStep(step=1, action="Open https://example.test/sign-in.", expected='exact heading "Sign in" is visible'),
                 TestStep(step=2, action="Inspect the status message", expected='The exact visible text "No results" is displayed'),
                 TestStep(step=3, action="Inspect the supporting heading", expected='heading "Help" is visible'),
-                TestStep(step=4, action="Inspect the form heading", expected='heading "Account" is visible with exact text "Account"'),
+                TestStep(step=4, action="Inspect the form heading", expected='exact heading "Account" is visible'),
                 TestStep(step=5, action="Inspect confirmation", expected='exact text "You\'re signed in." is visible'),
                 TestStep(step=6, action="Inspect notice", expected="""exact text 'Select "Search".' is visible"""),
             ],
@@ -423,6 +428,262 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('page.getByRole("heading", { name: "Account", exact: true })', generated)
         self.assertIn('page.getByText("You\'re signed in.", { exact: true })', generated)
         self.assertIn(r'page.getByText("Select \"Search\".", { exact: true })', generated)
+
+    def test_exact_click_preserves_button_and_link_names_alongside_legacy_clicks(self) -> None:
+        url = "https://example.test"
+        case = TestCase(
+            id="TC-CLICK",
+            title="Open the request and visit the receipt",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action='Click exact button "Open database"', expected=""),
+                TestStep(step=3, action=r'Click exact link "Go to \"Receipt\""', expected=""),
+                TestStep(step=4, action='Click the "Done" button', expected='exact text "Saved" is visible'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        self.assertFalse(preview.executable[0].unsupported_steps)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        clicks = [step["locator"] for step in ir.raw["cases"][0]["steps"] if step["action"] == "click"]
+        self.assertEqual(
+            clicks,
+            [
+                {"strategy": "role", "role": "button", "value": "Open database", "exact": True},
+                {"strategy": "role", "role": "link", "value": 'Go to "Receipt"', "exact": True},
+                {"strategy": "role", "role": "button", "value": "Done"},
+            ],
+        )
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("button", { name: "Open database", exact: true }).click()', generated)
+        self.assertIn(r'page.getByRole("link", { name: "Go to \"Receipt\"", exact: true }).click()', generated)
+        self.assertIn('page.getByRole("button", { name: "Done" }).click()', generated)
+
+    def test_navigation_and_url_checks_bind_to_the_selected_target_without_changing_the_suite(self) -> None:
+        selected = "https://selected.example.test/app"
+        original = "http://original.example.test:8443"
+        foreign = "https://selected.example.test:8443"
+        cases = [
+            TestCase(
+                id=identity,
+                title=identity,
+                automation_status="Automated",
+                steps=[TestStep(step=1, action=action, expected=expected)],
+            )
+            for identity, action, expected in (
+                ("rebased", f'Open "{original}/orders?q=next%2Fpage#detail"', f'URL is exactly "{original}/orders?q=next%2Fpage#detail"'),
+                ("relative", "Open /orders?next=https://example.test/a", 'exact text "Ready" is visible'),
+                ("same", 'Open "https://SELECTED.example.test:443/orders"', 'exact text "Ready" is visible'),
+                ("foreign", f'Open "{foreign}/orders"', 'exact text "Ready" is visible'),
+                ("scheme-relative", "Open the application at //unknown.example.test/orders", 'exact text "Ready" is visible'),
+                ("invalid-scheme", 'Open "javascript:void(0)"', 'exact text "Ready" is visible'),
+            )
+        ]
+        before = [case.model_dump() for case in cases]
+        preview = preview_execution(cases, target_base_url=selected, source_app_url=original)
+        self.assertEqual([case.id for case in preview.executable], ["rebased", "relative", "same"])
+        self.assertEqual([case.id for case in preview.unsupported], ["foreign", "scheme_relative", "invalid_scheme"])
+        self.assertTrue(all(case.unsupported_steps[0].reason_code == "execution.target_origin_mismatch" for case in preview.unsupported))
+        self.assertEqual(
+            preview.executable[0].spec["steps"],
+            [
+                'Given I open "https://selected.example.test/orders?q=next%2Fpage#detail"',
+                'Then URL should be "https://selected.example.test/orders?q=next%2Fpage#detail"',
+            ],
+        )
+        self.assertEqual(preview.executable[1].spec["steps"][0], 'Given I open "https://selected.example.test/orders?next=https://example.test/a"')
+        self.assertEqual(preview.executable[2].spec["steps"][0], 'Given I open "https://selected.example.test/orders"')
+        self.assertEqual([case.model_dump() for case in cases], before)
+
+    def test_a_url_field_value_does_not_become_a_navigation(self) -> None:
+        case = TestCase(
+            id="url-field",
+            title="Store an external URL as text",
+            automation_status="Automated",
+            steps=[
+                TestStep(
+                    step=1,
+                    action='Enter "https://external.example.test" into the "Reference URL" field',
+                    expected='field "Reference URL" value should equal "https://external.example.test"',
+                )
+            ],
+        )
+        preview = preview_execution([case], target_base_url="https://selected.example.test/form")
+        self.assertEqual(preview.summary.executable, 1)
+        self.assertEqual(preview.executable[0].spec["steps"][0], 'Given I open "https://selected.example.test/form"')
+        self.assertIn('When I enter "https://external.example.test" into field "Reference URL"', preview.executable[0].spec["steps"])
+
+    def test_exact_negative_visibility_preserves_role_and_text_without_reopening_page(self) -> None:
+        url = "https://example.test/receipt"
+        case = TestCase(
+            id="TC-HIDDEN",
+            title="Keep the receipt link out of view before saving",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action='Inspect the "Open receipt" link', expected='exact link "Open receipt" is not visible'),
+                TestStep(step=3, action=r'exact text "Receipt \"saved\"" should not be visible', expected=""),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        self.assertFalse(preview.executable[0].unsupported_steps)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "assert_hidden", "assert_hidden"])
+        self.assertEqual(steps[1]["locator"], {"strategy": "role", "role": "link", "value": "Open receipt", "exact": True})
+        self.assertEqual(steps[2]["locator"], {"strategy": "text", "value": 'Receipt "saved"', "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('page.getByRole("link", { name: "Open receipt", exact: true, includeHidden: true }).filter({ visible: true })).toHaveCount(0)', generated)
+        self.assertIn(r'page.getByText("Receipt \"saved\"", { exact: true }).filter({ visible: true })).toHaveCount(0)', generated)
+
+    def test_exact_checkbox_states_preserve_the_native_action_and_expectations(self) -> None:
+        url = "https://example.test/preferences"
+        case = TestCase(
+            id="TC-PREF",
+            title="Persist the receipt preference",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action=r'Check exact checkbox "Email \"receipt\""', expected=r'exact checkbox "Email \"receipt\"" is checked'),
+                TestStep(step=3, action=r'Uncheck exact checkbox "Email \"receipt\""', expected=r'exact checkbox "Email \"receipt\"" should not be checked'),
+                TestStep(step=4, action="Inspect the saved choice", expected='css "#email" should not be checked'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "set_checked", "assert_checked", "set_checked", "assert_checked", "assert_checked"])
+        self.assertEqual([steps[1]["value"], steps[2]["expected"], steps[3]["value"], steps[4]["expected"]], [True, True, False, False])
+        self.assertEqual(steps[1]["locator"], {"strategy": "label", "value": 'Email "receipt"', "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn("checkbox.setChecked(true)", generated)
+        self.assertIn("checkbox.setChecked(false)", generated)
+        self.assertIn('input[type="checkbox"]', generated)
+        self.assertIn('input[type="checkbox"]:not(:indeterminate)', generated)
+        self.assertIn("toBeChecked({ checked: false })", generated)
+        self.assertIn('page.locator("#email")).not.toBeChecked()', generated)
+
+        for malformed in (
+            'Check exact checkbox "Email receipt" and save preferences',
+            'Uncheck exact checkbox ""',
+            'Uncheck exact radio "Open preferences"',
+            'exact checkbox "Open preferences" is not checked after saving',
+        ):
+            with self.subTest(action=malformed):
+                case.steps[1].action = malformed
+                invalid = preview_execution([case], target_base_url=url)
+                self.assertEqual(invalid.summary.executable, 0)
+                self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
+
+    def test_exact_radio_selects_and_checks_native_choice_without_selector_fallback(self) -> None:
+        url = "https://example.test/preferences"
+        case = TestCase(
+            id="TC-RADIO",
+            title="Switch to Express delivery",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected='exact radio "Standard" is selected'),
+                TestStep(step=2, action=r'Select exact radio "Express \"delivery\""', expected=""),
+                TestStep(step=3, action="Inspect the prior option", expected='exact radio "Standard" is not selected'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "assert_radio_selected", "select_radio", "assert_radio_selected"])
+        self.assertEqual([steps[1]["expected"], steps[3]["expected"]], [True, False])
+        self.assertEqual(steps[2]["locator"], {"strategy": "role", "role": "radio", "value": 'Express "delivery"', "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn(r'getByRole("radio", { name: "Express \"delivery\"", exact: true })', generated)
+        self.assertIn('input[type="radio"]', generated)
+        self.assertIn("await expect(radio).toBeEnabled();", generated)
+        self.assertIn("await radio.check();", generated)
+        self.assertIn(".toBeChecked({ checked: false })", generated)
+        steps[2]["locator"]["exact"] = False
+        self.assertTrue(validate_ir_document(ir.raw))
+
+        for malformed in (
+            'Select exact radio "Express" and save',
+            'Select radio "Express"',
+            'Deselect exact radio "Standard"',
+            'exact radio "Standard" is not selected after saving',
+        ):
+            with self.subTest(action=malformed):
+                case.steps[1].action = malformed
+                invalid = preview_execution([case], target_base_url=url)
+                self.assertFalse(invalid.executable)
+                self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
+
+    def test_exact_dropdown_selection_compiles_as_a_native_option_action(self) -> None:
+        url = "https://example.test/orders"
+        case = TestCase(
+            id="TC-ORDER",
+            title="Filter orders",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected=""),
+                TestStep(step=2, action=r'Select exact option "Closed \"today\"" in field "Order status"', expected=""),
+                TestStep(step=3, action='Click exact button "Apply filters"', expected='exact text "Closed order 0142" is visible'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        step = ir.raw["cases"][0]["steps"][1]
+        self.assertEqual(step["action"], "select_option")
+        self.assertEqual(step["value"], 'Closed "today"')
+        self.assertEqual(step["locator"], {"strategy": "label", "value": "Order status", "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('getByLabel("Order status", { exact: true }).and(page.locator("select:not([multiple])"))', generated)
+        self.assertIn(r'select.selectOption({ label: "Closed \"today\"" })', generated)
+        self.assertIn("toEqual([true])", generated)
+        self.assertIn('getByText("Closed order 0142", { exact: true })).toBeVisible()', generated)
+
+        for malformed in (
+            'Select exact option "Closed" in field "Order status" and click Apply filters',
+            'Select exact option "Closed"',
+            'Select exact option "" in field "Order status"',
+        ):
+            with self.subTest(action=malformed):
+                case.steps[1].action = malformed
+                invalid = preview_execution([case], target_base_url=url)
+                self.assertEqual(invalid.summary.executable, 0)
+                self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
+
+    def test_negative_visibility_rejects_incomplete_and_different_expectations(self) -> None:
+        for expectation in (
+            'exact link "Open receipt" is not visible and the audit log is unchanged',
+            'exact link "Open receipt" is not visible before saving',
+            'exact link "Open receipt" is not present in the DOM',
+            'link "Open receipt" is not visible',
+            'exact text "href" is not visible',
+        ):
+            with self.subTest(expectation=expectation):
+                for action, expected in (("Inspect the receipt", expectation), (expectation, "")):
+                    case = _browser_case()
+                    case.steps[2] = TestStep(step=3, action=action, expected=expected)
+                    preview = preview_execution([case], target_base_url="https://example.test")
+                    self.assertEqual(preview.summary.executable, 0)
+                    self.assertEqual(preview.unsupported[0].unsupported_steps[0].expected, expected)
+
+    def test_malformed_exact_click_does_not_fall_back_to_partial_action(self) -> None:
+        for action in (
+            'Click exact button "Sign in" and confirm the user has access',
+            'Click exact button "Sign in" before submitting another request',
+            'Click exact button "Sign in" is visible',
+            'Click exact checkbox "Sign in"',
+            'Click exact button ""',
+        ):
+            with self.subTest(action=action):
+                case = _browser_case()
+                case.steps[2].action = action
+                preview = preview_execution([case], target_base_url="https://example.test")
+                self.assertEqual(preview.summary.executable, 0)
+                self.assertEqual(preview.unsupported[0].unsupported_steps[0].action, action)
 
     def test_preview_compiler_and_generator_support_explicit_browser_assertion_dsl(self) -> None:
         semantic_case = TestCase(
@@ -476,6 +737,388 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertIn('await expect(page.getByTestId("email-input")).toBeVisible();', generated)
         self.assertIn('await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();', generated)
 
+    def test_state_and_attribute_assertions_preserve_exact_locator_operands(self) -> None:
+        target = "https://example.test/orders"
+        expectation = r"""test id ' receipt\path ' attribute "data-{env.marker}" should equal '  A\B "{env.baseUrl}" café  '"""
+        case = TestCase(
+            id="TC-LOCATOR",
+            title="Observe exact saved-order controls",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{target}"', expected=""),
+                TestStep(step=2, action="""Verify css '[data-name="  café  "]' is visible""", expected=""),
+                TestStep(step=3, action="Inspect the control", expected=r'test id "console \state {data.user}" is disabled'),
+                TestStep(step=4, action="Inspect the checkbox", expected=r'css ".ordered\#row" should not be checked'),
+                TestStep(step=5, action="Inspect the saved receipt", expected=expectation),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=target)
+        self.assertEqual(preview.summary.executable, 1)
+        environment = ResolvedEnvironment("web", {"baseUrl": target, "marker": "expanded"}, target, None)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=environment)
+        checks = ir.raw["cases"][0]["steps"][1:]
+        expected_value = r'  A\B "{env.baseUrl}" café  '
+        self.assertEqual(
+            [(item["action"], item["locator"]["value"], item.get("expected")) for item in checks],
+            [
+                ("assert_visible", '[data-name="  café  "]', None),
+                ("assert_enabled", r"console \state {data.user}", False),
+                ("assert_checked", r".ordered\#row", False),
+                ("assert_attribute_equals", r" receipt\path ", expected_value),
+            ],
+        )
+        self.assertEqual(checks[-1]["attribute"], "data-{env.marker}")
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn(r'page.getByTestId("console \\state {data.user}")).toBeDisabled()', generated)
+        self.assertIn(r'page.locator(".ordered\\#row")).not.toBeChecked()', generated)
+        self.assertIn(f'toHaveAttribute("data-{{env.marker}}", {json.dumps(expected_value)})', generated)
+
+    def test_legacy_and_mixed_structured_locator_assertions_keep_their_templates(self) -> None:
+        target = "https://example.test/orders"
+        legacy_selector = r".legacy\\row"
+        legacy_value = r"orders\\receipt"
+        env = ResolvedEnvironment("web", {"baseUrl": target, "selector": legacy_selector, "value": legacy_value}, target, None)
+        literal_selector = r"#{env.selector}\row"
+        literal_expected = '{data.unused} "  value  "'
+        document = {
+            "schemaVersion": "1.0",
+            "id": "orders",
+            "title": "Check old and literal saved order selectors",
+            "steps": [
+                f'Given I open "{target}"',
+                'Then css "{env.selector}" should be visible',
+                f'And css "{legacy_selector}" should be enabled',
+                f'And css literal {json.dumps(literal_selector)} attribute "data-receipt" should equal "{{env.value}}"',
+                f'And css "{{env.selector}}" attribute "data-receipt" should equal literal {json.dumps(literal_expected)}',
+            ],
+        }
+        ir = compile_parsed_spec(parse_spec_document(document), environment=env)
+        checks = ir.raw["cases"][0]["steps"][1:]
+        self.assertEqual([item["locator"]["value"] for item in checks], [legacy_selector, legacy_selector, literal_selector, legacy_selector])
+        self.assertEqual([item["expected"] for item in checks[-2:]], [legacy_value, literal_expected])
+        document["steps"][-2] = document["steps"][-2].replace("{env.value}", "{unsupported}")
+        with self.assertRaises(SpecValidationError) as raised:
+            parse_spec_document(document)
+        self.assertIn("placeholder.unsupported", {issue.code for issue in raised.exception.issues})
+
+    def test_exact_count_selectors_survive_preview_compilation_and_playwright_rendering(self) -> None:
+        target = "https://example.test/orders"
+        selectors = (
+            (r'css ".order\#rejected"', "css", r".order\#rejected", 0),
+            ("""css '[data-order-id="  café  "]'""", "css", '[data-order-id="  café  "]', 1),
+            ('''css "[data-order-id='Q-17']"''', "css", "[data-order-id='Q-17']", 1),
+            (r'test id " SAP GUI console\\\"  {env.baseUrl} "', "test_id", ' SAP GUI console\\"  {env.baseUrl} ', 2),
+        )
+        for source, strategy, value, expected in selectors:
+            with self.subTest(source=source):
+                case = TestCase(
+                    id="TC-COUNT",
+                    title="Count exactly the observed orders",
+                    automation_status="Automated",
+                    steps=[
+                        TestStep(step=1, action=f'Open "{target}"', expected=""),
+                        TestStep(step=2, action="Inspect the saved orders", expected=f"{source} count should be {expected}"),
+                    ],
+                )
+                preview = preview_execution([case], target_base_url=target)
+                self.assertEqual(preview.summary.executable, 1)
+                ir = compile_parsed_spec(
+                    parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None)
+                )
+                check = ir.raw["cases"][0]["steps"][-1]
+                self.assertEqual((check["action"], check["locator"], check["expected"]), ("assert_count", {"strategy": strategy, "value": value}, expected))
+                method = "getByTestId" if strategy == "test_id" else "locator"
+                self.assertIn(f"await expect(page.{method}({json.dumps(value)})).toHaveCount({expected});", generate_playwright_spec(ir).contents)
+
+    def test_invalid_count_only_disables_its_own_candidate(self) -> None:
+        valid = _browser_case()
+        for index, count in enumerate(("-1", "1.5", "2 or 3", "9007199254740992", "9" * 4400)):
+            with self.subTest(index=index):
+                invalid = valid.model_copy(deep=True, update={"id": "TC-BAD-COUNT"})
+                invalid.steps.append(TestStep(step=99, action="Inspect the order list", expected=f'css "#orders tr" count should be {count}'))
+                preview = preview_execution([invalid, valid], target_base_url="https://example.test")
+                self.assertEqual([item.source_test_case_id for item in preview.executable], [valid.id])
+                self.assertEqual(preview.unsupported[0].source_test_case_id, invalid.id)
+                diagnostic = preview.unsupported[0].unsupported_steps[0]
+                self.assertEqual(diagnostic.step, 99)
+                if index >= 3:
+                    self.assertIn("represent exactly", diagnostic.suggested_next_action)
+
+    def test_structured_count_retains_legacy_templates_and_reports_unsafe_values(self) -> None:
+        target = "https://example.test/orders"
+        locator = r".order\\part"
+        env = ResolvedEnvironment("web", {"baseUrl": target, "selector": locator}, target, None)
+        document = {
+            "schemaVersion": "1.0",
+            "id": "orders",
+            "title": "Count saved orders",
+            "steps": [f'Given I open "{target}"', 'Then css "{env.selector}" count should be 2', rf'Then css "{locator}" count should be 0'],
+        }
+        ir = compile_parsed_spec(parse_spec_document(document), environment=env)
+        checks = ir.raw["cases"][0]["steps"][1:]
+        self.assertEqual([(step["locator"]["value"], step["expected"]) for step in checks], [(locator, 2), (locator, 0)])
+        checks[0]["expected"] = 9007199254740992
+        self.assertTrue(validate_ir_document(ir.raw))
+        document["steps"][-1] = 'Then test id "orders" count should be ' + "9" * 4400
+        with self.assertRaises(CompilerError) as raised:
+            compile_parsed_spec(parse_spec_document(document), environment=env)
+        self.assertEqual(raised.exception.issues[0].code, "step.count_range")
+
+    def test_field_value_assertions_survive_preview_compiler_and_codegen(self) -> None:
+        case = TestCase(
+            id="TC-FIELD-VALUE",
+            title="Check an editable value and ordinary text",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test/directory", expected='"Summary" should equal "Ready"'),
+                TestStep(
+                    step=2,
+                    action='Enter "Alex Rivera" into the "Employee name" field',
+                    expected='Verify that "Employee name" should equal "Alex Rivera".',
+                ),
+                TestStep(step=3, action='Verify the "Employee name" field should equal "Alex Rivera"', expected=""),
+                TestStep(step=4, action='Verify test id "empty-input" value should equal ""', expected=""),
+                TestStep(step=5, action=r'Verify css "#backup-notes" value should equal "  Keep  spacing and \"quotes\"  "', expected=""),
+                TestStep(step=6, action='Enter "Taylor" into the "Employee name" field', expected='"Summary" should equal "Ready"'),
+                TestStep(
+                    step=7,
+                    action='Enter "A.+ surname" into the "Employee name" field.',
+                    expected='The "Employee name" field contains "A.+".',
+                ),
+            ],
+        )
+
+        response = preview_execution([case], target_base_url="https://example.test")
+        self.assertEqual(response.summary.executable, 1)
+        spec = response.executable[0].spec
+        self.assertEqual(
+            spec["steps"],
+            [
+                'Given I open "https://example.test/directory"',
+                'Then "Summary" should equal "Ready"',
+                'When I enter "Alex Rivera" into field "Employee name"',
+                'And field "Employee name" value should equal "Alex Rivera"',
+                'And field "Employee name" value should equal "Alex Rivera"',
+                'And test id "empty-input" value should equal ""',
+                r'And css "#backup-notes" value should equal "  Keep  spacing and \"quotes\"  "',
+                'And I enter "Taylor" into "Employee name"',
+                'And "Summary" should equal "Ready"',
+                'And I enter "A.+ surname" into field "Employee name"',
+                'And field "Employee name" value should contain "A.+"',
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            spec_path = root / "field_value.yaml"
+            env_path = root / "environment.yaml"
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
+            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
+            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
+
+        steps = ir.raw["cases"][0]["steps"]
+        value_steps = [step for step in steps if step["action"] == "assert_value_equals"]
+        self.assertEqual(len(value_steps), 4)
+        self.assertEqual(value_steps[-1]["expected"], '  Keep  spacing and "quotes"  ')
+        generated = generate_playwright_spec(ir).contents
+        self.assertEqual(generated.count('await expect(page.getByLabel("Summary")).toHaveText("Ready");'), 2)
+        self.assertIn('await page.getByLabel("Employee name", { exact: true }).fill("Alex Rivera");', generated)
+        self.assertIn('await page.getByLabel("Employee name").fill("Taylor");', generated)
+        self.assertIn('await expect(page.getByLabel("Employee name", { exact: true })).toHaveValue("Alex Rivera");', generated)
+        self.assertIn('await expect(page.getByTestId("empty-input")).toHaveValue("");', generated)
+        self.assertIn(r'await expect(page.locator("#backup-notes")).toHaveValue("  Keep  spacing and \"quotes\"  ");', generated)
+        self.assertIn(r'await expect(page.getByLabel("Employee name", { exact: true })).toHaveValue(new RegExp("A\\.\\+"));', generated)
+
+        self.assertEqual(steps[-1]["action"], "assert_value_contains")
+        steps[-1]["expected"] = ""
+        self.assertTrue(validate_ir_document(ir.raw))
+        steps[-1]["expected"] = "A.+"
+        value_steps[-1].pop("expected")
+        self.assertTrue(validate_ir_document(ir.raw))
+
+    def test_scoped_text_checks_compile_to_exact_single_locator_assertions(self) -> None:
+        case = _browser_case()
+        case.steps = [
+            TestStep(step=1, action='Open "https://example.test/login"', expected='css "#login-message" text should equal "  Ready .+ [x]  "'),
+            TestStep(step=2, action=r'Verify test id "summary" text should equal "Keep \"quotes\""', expected=""),
+            TestStep(step=3, action="Inspect the diagnostic", expected='test id "diagnostic" text should equal ""'),
+        ]
+        response = preview_execution([case], target_base_url="https://example.test")
+        self.assertEqual(response.summary.executable, 1)
+        ir = compile_parsed_spec(
+            parse_spec_document(response.executable[0].spec),
+            environment=ResolvedEnvironment("web", {"baseUrl": "https://example.test"}, "https://example.test", None),
+        )
+        assertions = ir.raw["cases"][0]["steps"][1:]
+        self.assertEqual([step["action"] for step in assertions], ["assert_scoped_text_equals"] * 3)
+        self.assertEqual(assertions[0]["locator"], {"strategy": "css", "value": "#login-message"})
+        self.assertEqual(assertions[1]["locator"], {"strategy": "test_id", "value": "summary"})
+        self.assertEqual([step["expected"] for step in assertions], ["  Ready .+ [x]  ", 'Keep "quotes"', ""])
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn(r'await expect(page.locator("#login-message")).toHaveText(new RegExp("^\\ \\ Ready\\ \\.\\+\\ \\[x\\]\\ \\ $"));', generated)
+        self.assertIn(r'await expect(page.getByTestId("summary")).toHaveText(new RegExp("^Keep\\ \"quotes\"$"));', generated)
+        self.assertIn('await expect(page.getByTestId("diagnostic")).toHaveText(new RegExp("^$"));', generated)
+
+    def test_quoted_fills_preserve_exact_values_through_browser_codegen(self) -> None:
+        target = "https://example.test/"
+        case = _browser_case("TC-EXACT-FILL")
+        values = ["  A  into the room  ", '  A\t"quoted" \\path  ', "  ", ""]
+        label = 'Internal "Notes"'
+        field = json.dumps(label)
+        case.steps = [TestStep(step=1, action=f'Open "{target}"', expected="")]
+        for number, value in enumerate(values, start=2):
+            literal = json.dumps(value).replace(r"\t", "\t")
+            locator = f"field {field}" if number != 3 else f"the {field} field"
+            case.steps.append(TestStep(step=number, action=f"Enter {literal} into {locator}", expected=f"field {field} value should equal {literal}"))
+        case.steps.append(TestStep(step=6, action=f'Enter "" into field {field}', expected=""))
+
+        preview = preview_execution([case], target_base_url=target)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None))
+        steps = ir.raw["cases"][0]["steps"]
+        fills = [step for step in steps if step["action"] == "fill"]
+        checks = [step for step in steps if step["action"] == "assert_value_equals"]
+        self.assertEqual([step["value"] for step in fills], [*values, ""])
+        self.assertEqual([step["expected"] for step in checks], values)
+        self.assertTrue(all(step["locator"] == {"strategy": "label", "value": label, "exact": True} for step in [*fills, *checks]))
+        generated = generate_playwright_spec(ir).contents
+        for value in values:
+            self.assertIn(f".fill({json.dumps(value)});", generated)
+            self.assertIn(f".toHaveValue({json.dumps(value)});", generated)
+
+    def test_malformed_quoted_fills_remain_unsupported(self) -> None:
+        for action in (
+            'Enter "unfinished into field "Email"',
+            'Enter "one" into field "Email" and save the form',
+            'Enter "one" into "Email" and press Enter',
+            'Enter "one" into field ""',
+            'Enter "one\nanother" into field "Email"',
+        ):
+            with self.subTest(action=action):
+                case = _browser_case()
+                case.steps[1].action = action
+                preview = preview_execution([case], target_base_url="https://example.test/")
+                self.assertFalse(preview.executable)
+                self.assertEqual(preview.unsupported[0].unsupported_steps[0].action, action)
+
+    def test_legacy_structured_fill_retains_raw_backslashes_and_bindings(self) -> None:
+        target = "https://example.test/"
+        spec = parse_spec_document(
+            {
+                "schemaVersion": "1.0",
+                "id": "legacy_fill",
+                "title": "Fill inputs",
+                "steps": [
+                    f'Given I open "{target}"',
+                    r'When I enter "\\share\file" into "Path"',
+                    'And I enter "{env.input}" into field "Bound"',
+                    r'And I fill exact field "Path" with "prefix \"quote\" {env.input}"',
+                ],
+            }
+        )
+        environment = ResolvedEnvironment("web", {"baseUrl": target, "input": "  original  "}, target, None)
+        steps = compile_parsed_spec(spec, environment=environment).raw["cases"][0]["steps"]
+        self.assertEqual([step["value"] for step in steps[1:]], [r"\\share\file", "  original  ", 'prefix "quote"   original  '])
+        self.assertEqual(steps[1]["locator"], {"strategy": "label", "value": "Path"})
+        self.assertEqual(steps[2]["locator"], {"strategy": "label", "value": "Bound", "exact": True})
+
+    def test_step_data_compiles_as_literal_fill_value_and_saved_text(self) -> None:
+        target = "https://example.test/"
+        for value in ('{\n  "nested": "{data.missing}",\n  "tag": "café"\n}', '{"missing_closer":', "[[env:PETF_TEST_LITERAL]]", ""):
+            with self.subTest(value=value):
+                case = _browser_case("TC-STEP-DATA")
+                case.steps = [
+                    TestStep(step=1, action=f'Open "{target}"', expected=""),
+                    TestStep(
+                        step=2,
+                        action='Enter step data into field "Payload"',
+                        expected='field "Payload" value should equal step data',
+                        test_data=value,
+                    ),
+                    TestStep(step=3, action='Click exact button "Save"', expected="", test_data=None),
+                    TestStep(step=4, action="Inspect the saved payload", expected='test id "saved" text should equal step data', test_data=value),
+                ]
+                preview = preview_execution([case], target_base_url=target)
+                self.assertEqual(preview.summary.executable, 1)
+                ir = compile_parsed_spec(
+                    parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None)
+                )
+                fill, value_check, _, saved = ir.raw["cases"][0]["steps"][1:]
+                self.assertEqual(fill["locator"], {"strategy": "label", "value": "Payload", "exact": True})
+                self.assertEqual(fill["action"], "fill_literal")
+                self.assertEqual(fill["value"], value)
+                self.assertEqual(value_check["action"], "assert_value_equals")
+                self.assertEqual(saved["action"], "assert_scoped_text_equals")
+                self.assertEqual(value_check["expected"], value)
+                self.assertEqual(saved["expected"], value)
+                generated = generate_playwright_spec(ir).contents
+                self.assertIn(f".fill({json.dumps(value)});", generated)
+                self.assertNotIn("process.env", generated)
+
+    def test_incomplete_or_sensitive_step_data_cannot_become_executable(self) -> None:
+        for action, expected, data, reason in (
+            ('Enter step data into field "Email"', '"Email" is visible', None, "step_data_missing"),
+            ('Enter browser sample "unresolved" into field "Email"', '"Email" is visible', "untrusted", "unsupported_step_data_instruction"),
+            ("Inspect the field", 'field "Email" value should equal step data', None, "step_data_missing"),
+            ('Enter step data into field "Email" then submit', '"Email" is visible', "[]", "unsupported_step_data_instruction"),
+            ('On the current page, enter step data into field "Email"', '"Email" is visible', "[]", "unsupported_step_data_instruction"),
+            ("Inspect the result", 'css "#result" text should equal step data and the record is saved', "[]", "unsupported_step_data_instruction"),
+            ('Enter step data into field "Email"', '"Email" is visible', "token=synthetic-test-only", "secret.raw_value"),
+        ):
+            with self.subTest(action=action, expected=expected, reason=reason):
+                case = _browser_case()
+                case.test_data = "Case-level data cannot substitute for step data."
+                case.steps[1] = TestStep(step=2, action=action, expected=expected, test_data=data)
+                preview = preview_execution([case], target_base_url="https://example.test/")
+                self.assertFalse(preview.executable)
+                step = preview.unsupported[0].unsupported_steps[0]
+                self.assertEqual(step.reason_code, reason)
+                if reason == "secret.raw_value":
+                    self.assertIsNone(step.test_data)
+
+    def test_malformed_scoped_text_check_does_not_drop_the_expected_result(self) -> None:
+        for statement in (
+            'css "#result" text should contain "Click save"',
+            'css "#result" text should equal "Click save" and capture the time',
+            'css " " text should equal "Ready"',
+        ):
+            with self.subTest(statement=statement):
+                case = _browser_case()
+                case.steps[2] = TestStep(step=3, action=statement, expected="")
+                response = preview_execution([case], target_base_url="https://example.test")
+                self.assertEqual(response.summary.unsupported, 1)
+                self.assertEqual(response.unsupported[0].unsupported_steps[0].step, 3)
+
+    def test_unrepresentable_field_value_assertion_blocks_entire_candidate(self) -> None:
+        case = TestCase(
+            id="TC-FIELD-VALUE-UNSUPPORTED",
+            title="Cannot verify editable value with an unsupported operator",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test/directory", expected='heading "Directory" is visible'),
+                TestStep(
+                    step=2,
+                    action='Enter "Alex Rivera" into the "Employee name" field',
+                    expected='Verify field "Employee name" value starts with "Alex"',
+                ),
+            ],
+        )
+
+        for statement in (
+            'Verify field "Employee name" value starts with "Alex"',
+            'The Employee name field should contain "Alex"',
+            'Verify field "Employee name" value should contain ""',
+        ):
+            with self.subTest(statement=statement):
+                case.steps[1].expected = statement
+                response = preview_execution([case], target_base_url="https://example.test")
+
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.summary.unsupported, 1)
+                candidate = response.unsupported[0]
+                self.assertIsNone(candidate.spec)
+                self.assertEqual(candidate.unsupported_steps[0].reason_code, "unsupported_field_value_assertion")
+                self.assertIn('field "Employee name" value should equal "Alex"', candidate.unsupported_steps[0].suggested_next_action)
+
     def test_preview_marks_runtime_and_title_visible_assertions_unsupported(self) -> None:
         unsupported_case = TestCase(
             id="TC-UNSUPPORTED-BROWSER-ASSERTIONS",
@@ -490,28 +1133,14 @@ class ExecutionServiceTests(unittest.TestCase):
 
         response = preview_execution([unsupported_case], target_base_url="https://example.test")
 
-        self.assertEqual(response.summary.executable, 1)
-        candidate = response.executable[0]
+        self.assertEqual(response.summary.executable, 0)
+        candidate = response.unsupported[0]
         self.assertEqual(
             [step.reason_code for step in candidate.unsupported_steps],
             ["unsupported_browser_assertion", "unsupported_browser_assertion"],
         )
-        self.assertIn('Then "Welcome" should be visible', candidate.spec["steps"])
-        self.assertNotIn("ScopeMismatch: locator failed", "\n".join(candidate.spec["steps"]))
-        self.assertNotIn("Incorrect Page Title", "\n".join(candidate.spec["steps"]))
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            spec_path = root / "unsupported_dsl.yaml"
-            env_path = root / "environment.yaml"
-            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
-            env_path.write_text(yaml.safe_dump({"baseUrl": "https://example.test"}), encoding="utf-8")
-            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
-
-        generated = generate_playwright_spec(ir).contents
-        self.assertNotIn('getByText("ScopeMismatch: locator failed")', generated)
-        self.assertNotIn('getByText("Incorrect Page Title")', generated)
-        self.assertIn('getByText("Welcome")', generated)
+        self.assertEqual([step.step for step in candidate.unsupported_steps], [2, 3])
+        self.assertIsNone(candidate.spec)
 
     def test_preview_rejects_role_only_visible_assertions(self) -> None:
         role_only_case = TestCase(
@@ -534,13 +1163,12 @@ class ExecutionServiceTests(unittest.TestCase):
         candidate = response.unsupported[0]
         reason_codes = {step.reason_code for step in candidate.unsupported_steps}
         self.assertIn("ambiguous_semantic_assertion", reason_codes)
-        self.assertIn("missing_assertion", reason_codes)
         self.assertIn("exact accessible name", candidate.unsupported_steps[0].suggested_next_action)
 
-    def test_preview_omits_ambiguous_semantic_assertions_from_executable_spec(self) -> None:
+    def test_preview_blocks_cases_with_ambiguous_semantic_assertions(self) -> None:
         mixed_case = TestCase(
             id="TC-MIXED-SEMANTIC",
-            title="Keep exact copy and omit role-only assertion",
+            title="An exact check cannot cover a role-only assertion",
             automation_status="Automated",
             steps=[
                 TestStep(
@@ -554,22 +1182,11 @@ class ExecutionServiceTests(unittest.TestCase):
 
         response = preview_execution([mixed_case], target_base_url="https://playwright.dev/")
 
-        self.assertEqual(response.summary.executable, 1)
-        candidate = response.executable[0]
+        self.assertEqual(response.summary.executable, 0)
+        candidate = response.unsupported[0]
         self.assertIn("ambiguous_semantic_assertion", {step.reason_code for step in candidate.unsupported_steps})
-        self.assertNotIn('And "heading" should be visible', candidate.spec["steps"])
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            spec_path = root / "mixed_case.yaml"
-            env_path = root / "environment.yaml"
-            spec_path.write_text(yaml.safe_dump(candidate.spec, sort_keys=False), encoding="utf-8")
-            env_path.write_text(yaml.safe_dump({"baseUrl": "https://playwright.dev/"}), encoding="utf-8")
-            ir = compile_spec_file(spec_path, environment_path=env_path, environment_name="web")
-
-        generated = generate_playwright_spec(ir).contents
-        self.assertNotIn('getByText("heading")', generated)
-        self.assertIn('page.getByText("Playwright enables reliable web automation for testing, scripting, and AI agents")', generated)
+        self.assertEqual(candidate.unsupported_steps[0].action, mixed_case.steps[1].action)
+        self.assertIsNone(candidate.spec)
 
     def test_compiler_rejects_ambiguous_semantic_visible_text_specs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -619,12 +1236,11 @@ class ExecutionServiceTests(unittest.TestCase):
 
         response = preview_execution([command_case], target_base_url="https://playwright.dev/python/")
 
-        self.assertEqual(response.summary.executable, 1)
-        generated_steps = response.executable[0].spec["steps"]
-        self.assertEqual(
-            [step for step in generated_steps if 'I open "https://playwright.dev/python/"' in step],
-            ['Given I open "https://playwright.dev/python/"'],
-        )
+        self.assertEqual(response.summary.executable, 0)
+        blocked = response.unsupported[0]
+        self.assertIsNone(blocked.spec)
+        self.assertEqual(blocked.unsupported_steps[0].reason_code, "unsupported_browser_assertion")
+        self.assertEqual(blocked.unsupported_steps[0].expected, command_case.steps[1].expected)
 
     def test_preview_marks_manual_cases_as_manual_by_default(self) -> None:
         manual_case = _browser_case("TC-MANUAL")
@@ -635,6 +1251,70 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.summary.manual, 1)
         self.assertEqual(response.manual[0].status, "manual")
         self.assertIn("Automation Status is Manual", response.manual[0].review_reasons[0])
+
+    def test_required_expectation_cannot_be_omitted_after_convertible_action(self) -> None:
+        case = TestCase(
+            id="TC-AUDIT",
+            title="Verify the audit record",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test", expected='"Summary" should equal "Ready"'),
+                TestStep(step=2, action='Click the "Submit" button', expected=""),
+            ],
+        )
+        for expectation in (
+            "An immutable audit record is created in the database for this submission.",
+            'heading "Submitted" is visible and an immutable audit record is created.',
+            'heading "Submitted" is visible with exact text "Submitted".',
+            'The "Payment declined" message is not visible.',
+            'URL should be "https://example.test/confirmation" and must not redirect.',
+            '"Submitted" and "Receipt sent" are visible.',
+        ):
+            with self.subTest(expectation=expectation):
+                case.steps[-1].expected = expectation
+                response = preview_execution([case], target_base_url="https://example.test")
+
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.summary.unsupported, 1)
+                blocked = response.unsupported[0]
+                self.assertIsNone(blocked.spec)
+                self.assertEqual(len(blocked.unsupported_steps), 1)
+                gap = blocked.unsupported_steps[0]
+                self.assertEqual(gap.step, 2)
+                self.assertEqual(gap.expected, expectation)
+                self.assertEqual(gap.reason_code, "unsupported_expected_result")
+
+    def test_unmapped_assertion_in_action_cannot_turn_into_navigation_or_click(self) -> None:
+        case = _browser_case()
+        for action in (
+            'Verify URL should be "https://example.test/confirmation" and must not redirect.',
+            'Click the "Submit" button and verify the audit record.',
+        ):
+            with self.subTest(action=action):
+                case.steps[-1] = TestStep(step=3, action=action, expected="")
+                response = preview_execution([case], target_base_url="https://example.test")
+
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.unsupported[0].unsupported_steps[0].action, action)
+                self.assertIsNone(response.unsupported[0].spec)
+
+    def test_valid_action_only_steps_and_whole_assertions_remain_executable(self) -> None:
+        case = TestCase(
+            id="TC-SUBMIT",
+            title="Verify submission is shown in the browser",
+            automation_status="Automated",
+            steps=[
+                TestStep(step=1, action="Open https://example.test", expected=" "),
+                TestStep(step=2, action='Click the "Submit" button', expected=""),
+                TestStep(step=3, action="Inspect the status output", expected='"Summary" should equal "Submitted"'),
+            ],
+        )
+        response = preview_execution([case], target_base_url="https://example.test")
+
+        self.assertEqual(response.summary.executable, 1)
+        candidate = response.executable[0]
+        self.assertFalse(candidate.unsupported_steps)
+        self.assertEqual(candidate.spec["steps"], ['Given I open "https://example.test/"', 'When I click "Submit"', 'Then "Summary" should equal "Submitted"'])
 
     def test_preview_preserves_unsupported_sap_steps_with_reasons(self) -> None:
         sap_case = TestCase(
@@ -721,6 +1401,72 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(response.results[1].returncode, 1)
         self.assertEqual(response.results[1].stderr, "batch stderr")
         self.assertEqual(response.results[1].issues[0].message, "tc_002 assertion failed")
+        self.assertEqual(response.issues, [])
+
+    def test_runner_failure_preserves_passing_cases_without_passing_the_run(self) -> None:
+        huge_error = "Fixture cleanup failed 🧪 " * 5000
+        for returncode, errors, expected_code in (
+            (0, [{"message": huge_error}] * 20, "playwright.runner_error"),
+            (1, [], "playwright.runner_exit"),
+            (-15, [], "playwright.runner_exit"),
+        ):
+
+            def run_batch(*args, **kwargs):
+                result = _fake_batch_run({"tc_001": "passed"}, returncode=returncode)(*args, **kwargs)
+                path = result.paths.artifacts_dir / "results.json"
+                report = json.loads(path.read_text(encoding="utf-8"))
+                report["errors"] = errors
+                path.write_text(json.dumps(report), encoding="utf-8")
+                return result
+
+            with (
+                self.subTest(returncode=returncode),
+                tempfile.TemporaryDirectory() as temp_dir,
+                patch("app.services.execution_service.run_local_playwright_specs", side_effect=run_batch),
+            ):
+                response = run_execution([_browser_case()], settings=_settings(Path(temp_dir)))
+                self.assertEqual(response.status, "failed")
+                self.assertEqual((response.summary.passed, response.summary.failed), (1, 0))
+                self.assertEqual(response.results[0].status, "passed")
+                self.assertEqual(response.results[0].issues, [])
+                self.assertEqual(response.issues[0].code, expected_code)
+                if errors:
+                    self.assertEqual(response.issues[0].path, "$.errors[0]")
+                    self.assertTrue(response.issues[0].message.startswith("Fixture cleanup failed"))
+                    self.assertTrue(response.issues[0].message.endswith("[Runner diagnostic shortened.]"))
+                    self.assertEqual(response.issues[-1].code, "playwright.runner_errors_omitted")
+                    self.assertLess(sum(len(issue.message.encode("utf-8")) for issue in response.issues), 50_000)
+                else:
+                    self.assertIn(str(returncode), response.issues[0].message)
+
+    def test_retry_pass_preserves_failure_evidence_across_duplicate_playwright_records(self) -> None:
+        def run_batch(*args, **kwargs):
+            result = _fake_batch_run({"tc_001": "passed", "tc_002": "passed"})(*args, **kwargs)
+            path = result.paths.artifacts_dir / "results.json"
+            report = json.loads(path.read_text(encoding="utf-8"))
+            spec = report["suites"][0]["suites"][0]["specs"][0]
+            clean = spec["tests"][0]
+            flaky = {
+                **clean,
+                "status": "flaky",
+                "results": [
+                    {"status": "timedOut", "errors": [{"message": "First attempt timed out"}]},
+                    *clean["results"],
+                ],
+            }
+            spec["tests"] = [flaky, clean]
+            path.write_text(json.dumps(report), encoding="utf-8")
+            return result
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch("app.services.execution_service.run_local_playwright_specs", side_effect=run_batch):
+            response = run_execution([_browser_case(), _browser_case("TC-002")], settings=_settings(Path(temp_dir)))
+
+        self.assertEqual(response.status, "flaky")
+        self.assertEqual((response.summary.passed, response.summary.flaky, response.summary.failed), (1, 1, 0))
+        flaky, clean = response.results
+        self.assertEqual((flaky.status, clean.status), ("flaky", "passed"))
+        self.assertEqual(flaky.issues[0].message, "First attempt timed out")
+        self.assertEqual(flaky.issues[0].code, "playwright.error")
 
     def test_run_keeps_selected_non_executable_cases_skipped_outside_batch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -745,6 +1491,18 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual([item.status for item in response.results], ["passed", "skipped"])
         self.assertEqual(response.results[1].source_test_case_id, "TC-MANUAL")
         runner.assert_called_once()
+
+    def test_run_with_only_unmapped_expectations_cannot_report_passed(self) -> None:
+        case = _browser_case()
+        case.steps[-1].expected = "The login is recorded in the audit database."
+        with tempfile.TemporaryDirectory() as temp_dir, patch("app.services.execution_service.run_local_playwright_specs") as runner:
+            response = run_execution([case], selected_test_case_ids=[case.id], settings=_settings(Path(temp_dir)))
+
+        runner.assert_not_called()
+        self.assertEqual(response.status, "failed")
+        self.assertEqual(response.summary.passed, 0)
+        self.assertEqual(response.summary.skipped, 1)
+        self.assertEqual(response.results[0].issues[0].code, "execution.unsupported")
 
     def test_run_does_not_publish_report_paths_when_runner_fails_before_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

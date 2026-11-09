@@ -61,6 +61,13 @@ mocked API fixtures and synthetic sessions for local UI checks unless the task
 requires a live integration. For a reusable browser workflow, see
 [repository-qa](../../.agents/skills/repository-qa/SKILL.md).
 
+Measure startup with a production `npm run build` served by `npm run preview`.
+Open Home in a fresh browser context and record its JavaScript asset requests.
+Compare the sum of raw bytes and the sum recompressed at the same gzip level
+across builds. Check first navigation, slow or failed module requests, and
+Settings tabs separately. The development module graph does not represent the
+production startup download.
+
 ### Broader checks when the change requires them
 
 From the repository root, with `.venv` activated:
@@ -111,6 +118,36 @@ An empty selection fails through Playwright's default no-tests behavior.
 The script is intentionally synthetic: it uses mocked API fixtures, a seeded
 test session, and local Vite only. It does not call Firebase, a model, a live
 backend, production, or an external integration.
+
+To run every offline browser spec, start Vite from `frontend/` with dummy
+Firebase web settings. These settings expose the anonymous provider chooser for
+the UI checks. The tests use a disposable JWT for authenticated fixtures.
+
+```bash
+VITE_API_BASE=http://127.0.0.1:8000 \
+VITE_FIREBASE_API_KEY=offline-ui-smoke-key \
+VITE_FIREBASE_AUTH_DOMAIN=offline-ui-smoke.example.test \
+VITE_FIREBASE_PROJECT_ID=demo-offline-ui-smoke \
+VITE_FIREBASE_APP_ID=1:12345:web:0000000000000000000000 \
+VITE_FIREBASE_ENABLE_GOOGLE_AUTH=true \
+VITE_FIREBASE_ENABLE_MICROSOFT_AUTH=true \
+VITE_FIREBASE_ENABLE_APPLE_AUTH=true \
+npm run dev -- --host 127.0.0.1 --strictPort
+```
+
+In another `frontend/` shell, run the complete selection with the live suites
+disabled:
+
+```bash
+JWT_SECRET_KEY=local-chromium-regression-test-secret \
+E2E_FIREBASE_FIXTURE_API_KEY=offline-ui-smoke-key \
+E2E_BASE_URL=http://127.0.0.1:5173 E2E_LIVE=0 E2E_LOCAL_WORKBENCH=0 \
+npm run test:e2e -- --workers=4 --retries=0
+```
+
+`E2E_FIREBASE_FIXTURE_API_KEY` must match the dummy Vite key above. The restored
+session test uses the browser Firebase SDK with intercepted Firebase and backend
+responses. Use disposable web settings for this test.
 
 CI currently runs:
 
@@ -240,7 +277,7 @@ variant. Review discovery output whenever the selection changes.
 | Multi-environment execution orchestration | Yes | Approved-suite automation recommendations, source test-case snapshot linkage, named environment run records, idempotent reruns, failed-run review signal, and project history visibility | `backend/tests/test_orchestrator_service.py`, `backend/tests/test_workflow_project_service.py`, `backend/tests/test_automation_endpoint.py`, and `frontend/e2e/multi-environment-execution.spec.js` use synthetic project and execution fixtures |
 | Automation preview consistency | Yes | Empty, executable, mixed, unsupported, and invalid count/list invariants; malformed summaries and responses; duplicate/slug-colliding candidate IDs with repeated source IDs; persisted/live hydration; target-change and execution reset; latest-response ownership; selected-candidate Run counts and request IDs; zero-selection request suppression; contextual preview-before-run behavior; and distinct no-preview versus zero-executable states | `backend/tests/test_execution_service.py` and `backend/tests/test_automation_endpoint.py` cover the producer contract, collision-safe candidate execution, and persisted snapshot fields; `frontend/e2e/automation-preview-consistency.spec.js` covers mismatched live summaries, persisted compact previews, stale-snapshot refresh gating, selection preservation, preview/run response races, target reset, malformed payloads, contextual Execute, and empty-state consumers; `frontend/e2e/multi-environment-execution.spec.js` preserves named-environment run compatibility |
 | Evidence-backed reporting | Yes | Report source snapshot IDs, execution run IDs, stale report regeneration, review/report actions, and latest report evidence visibility | `backend/tests/test_export_endpoint.py`, `backend/tests/test_orchestrator_service.py`, and `frontend/e2e/report-evidence.spec.js` use synthetic project/report fixtures |
-| Workspace summary read model | Yes | Empty accounts, owner/archive isolation, authoritative stage/action normalization, Use Cases review counts, deterministic ranking/deduplication, bounded runs/reports, query validation, and safe persistence failure | `backend/tests/test_workspace_summary_service.py` and `backend/tests/test_workspace_summary_endpoint.py` use synthetic project fixtures and patched Firestore/service boundaries |
+| Workspace summary read model | Yes | Empty accounts, owner/archive isolation, batched stage-specific snapshot projections, exact pointer matching with missing and out-of-order results, legacy preview bucket reads, authoritative stage/action normalization, Use Cases review counts, deterministic ranking/deduplication, bounded runs/reports, query validation, and safe persistence failure | `backend/tests/test_workspace_summary_service.py` and `backend/tests/test_workspace_summary_endpoint.py` use synthetic project fixtures and patched Firestore/service boundaries |
 | Frontend Home and Projects | Yes | Zero/one/many-project Home states, subject-scoped and refreshed server ranking, stable My work groups, stale stored selection cleanup, bounded client search, create/open/clear behavior, delayed-create route/logout races, latest-wins project-list reads, loading/retry semantics, populated reflow at 320/390/640/760/900/1280/1440/1920, status containment, and canonical project links | `frontend/e2e/home-workspace.spec.js` uses deterministic workspace/project fixtures from `frontend/e2e/support/workspace.js`; `frontend/e2e/workflow-navigation.spec.js` preserves URL and browser-history authority |
 | Frontend Review Inbox | Yes | Server-ranked ordering, exact project/stage/snapshot deduplication, distinct-snapshot preservation, actionable versus informational/completed views, stage/status filters without refetch, canonical rendered Use Cases/Requirements/Test Cases destinations, cold and cached loading/error/retry states, invalid-filter normalization, empty and filtered-empty states, route and dynamic-action focus, full keyboard order, long-name containment and reflow at 390/639/640/899/900/1280/1920, and removal after a durable Use Cases decision refreshes the shared summary | `frontend/e2e/review-inbox.spec.js` uses bounded synthetic workspace and Use Cases review fixtures; `frontend/e2e/workflow-navigation.spec.js` preserves global navigation and route authority |
 | Frontend Runs and Reports indexes | Yes | Bounded workspace-summary projections, local search/status/environment/type/format filters without refetch or mutation, exact durable run status/count/timestamp rendering, non-color approved/draft/stale report status and evidence identity, canonical project Automation/Reports links, source-empty and filtered-empty states, cold loading/error/retry behavior, predictable route/filter/retry focus, and long-content containment from 320px through 1920px | `frontend/e2e/runs-reports-index.spec.js` uses deterministic workspace activity fixtures; `frontend/e2e/workflow-navigation.spec.js` preserves global destination, URL, and browser-history authority |
@@ -485,9 +522,40 @@ the repository. Each instance suppresses only its first matching 2xx response;
 restart it to arm a new isolated test. Only small GET/POST fixtures are supported
 (1 MiB bodies, five-second socket timeouts); it is not an HTTPS interception or
 general production proxy. The original response and retry are never synthesized.
-Real-target routing, ID extraction and browser/application behavior need separate
-verification when an execution target becomes available. Never treat this
-fixture capability check as booking execution or human acceptance.
+
+### Synthetic Room Booking execution target
+
+Run the authored Chromium controls against a healthy loopback app and eight
+independently faulted variants, including corrupted saved room and attendee
+displays. The command uses the installed frontend
+Playwright and Chromium from the usual local test setup.
+
+```bash
+.venv/bin/python scripts/evaluate_room_booking.py --output /tmp/tcg-room-booking-matrix
+```
+
+Use a new output directory for each run. The matrix lists the expected and
+observed checks for each control. Detection requires that the same control
+passes against the healthy fixture and produces the specified faulty result in
+the broken version. Response-loss evidence includes the original ID and request
+and response hashes. The browser compares the retry body hash and the displayed
+record after reload. No provider key or Firebase configuration is required.
+
+For manual exploration, start `.venv/bin/python scripts/room_booking_fixture.py`
+and open the printed loopback URL. **Sign in as Alice** and **Sign in as Bob**
+select synthetic actors within the same isolated browser session. A fresh
+Chromium context starts from Alice's Confirmed Atlas booking `B-EXISTING`. The
+form exposes exact labels **Room**, **Time slot**, **Attendees**, and **Book**.
+The second listed slot starts free. **My bookings** shows the current actor's
+bookings. `/bookings/B-EXISTING` opens the direct booking page. Cancel attempts
+are checked by the server even when the direct page offers the button.
+
+The retry control binds the existing proxy to `POST /api/bookings` and reads
+its top-level `id`. The app owns the submission identity and booking state.
+The proxy owns the one-shot transport fault. Booking state persists through
+browser reload for the life of the fixture process. These authored controls
+establish synthetic target behavior and defect detection. Live generated-case
+handoff and independent business acceptance require their own evidence.
 
 `frontend/e2e/live-project-sync.spec.js` exercises the real-provider shared
 correction journey on an isolated synthetic Draft order project. It imports and
@@ -565,6 +633,182 @@ and draft/approved export regressions remain in the scoped
 not prove the entire source-change path against live generation. Resume that
 live path after the upstream quality gate is resolved; do not bypass the gate
 or substitute mocked output to make this scenario green.
+
+After a targeted update, use **Review saved suite** in Test Cases to run the
+structural and independent review against the current snapshot. A prerequisite
+correction first requires approval of the current Use Cases. The review creates
+a successor snapshot with the same cases and artifact versions. The original
+suite and run evidence remain available. Deprecated cases stay in history and
+are excluded from execution preview. Stale or unavailable review requests leave
+the existing suite in place.
+
+### Browser fault-detection benchmark
+
+With the local execution runtime and Chromium installed, run the authored
+controls and an optional live comparison from the repository root.
+
+```bash
+.venv/bin/python scripts/evaluate_browser_handoff.py --output /tmp/tcg-browser-controls.json
+.venv/bin/python scripts/evaluate_browser_handoff.py --live --output /tmp/tcg-browser-live.json
+.venv/bin/python scripts/evaluate_browser_handoff.py --fixture payload-editor --live --output /tmp/tcg-payload-editor-live.json
+```
+
+The live command uses the configured Gemini credentials and generates one
+suite per synthetic workflow. The server binds to loopback. Use the same
+`--port` to preserve the fixture input hashes between runs. The default port
+is 58946. Both modes retain the report and Chromium artifacts outside the
+repository. The live command also saves the generation evidence beside its
+report.
+
+A defect counts as detected when a case linked to its requirement passes on
+the healthy fixture and fails at the intended check on the broken fixture.
+The payload editor also requires the latest literal fill before the single
+named submit action to match the supplied string exactly. That includes the
+malformed sample's final line feed. The evaluator records
+`exact_payload_unverified` when a linked case lacks this proof. Use
+`--fixture` to run a single workflow.
+The JSON editor supplies both payloads as named Context samples. Authored
+controls and live generation materialize the same exact values before run.
+The delivery fixture checks native radio exclusivity, persisted selection and
+the presence of the unselected option after reopening. Use
+`--fixture delivery-radio` to run that workflow on its own.
+The report lists missing cases, healthy-target failures, surviving defects,
+failures at another check, and unavailable runtime evidence separately.
+Manual audit coverage and generation approval have separate fields. A
+nonzero exit signals an unmet benchmark criterion.
+
+### Browser target binding
+
+Run the opt-in Chromium test with the local execution dependencies installed.
+It starts two loopback origins and compares their request logs. Relative,
+same-origin, rebased and same-origin redirect cases pass on the selected
+origin. Unverified authored URLs and direct off-origin links, including
+popups, produce no requests to the foreign target. The cross-origin redirect
+is classified as a target mismatch before a subsequent test action can post
+to either origin. A connection error on the selected origin remains a
+Playwright failure.
+
+```bash
+PETF_PLAYWRIGHT_BROWSER_CHANNEL=chromium PETF_EXECUTION_TARGET_CHROMIUM_TEST=1 \
+  .venv/bin/python -m unittest discover -s backend/tests -p test_execution_target_runtime.py -v
+```
+
+### Isolated live browser workbench
+
+Use the official Firestore emulator JAR, Java 21 or later, and the existing
+Python, frontend, and execution-runtime dependencies. Install Chromium for
+both Playwright packages as needed. Supply the Gemini API key through the
+environment or the local repository `.env`.
+
+Verify the emulator download against the
+[Firebase CLI emulator manifest](https://github.com/firebase/firebase-tools/blob/main/src/emulator/downloadableEmulatorInfo.json).
+For example, the manifest records this artifact and SHA-256 for version
+`1.22.0`.
+
+```bash
+mkdir -p /tmp/tcg-emulator
+jar=/tmp/tcg-emulator/cloud-firestore-emulator-v1.22.0.jar
+curl --fail --location \
+  https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.22.0.jar \
+  --output "$jar"
+printf '%s  %s\n' 9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c "$jar" | shasum -a 256 -c -
+.venv/bin/python scripts/e2e_workbench_local.py \
+  --emulator-jar "$jar" --output /tmp/tcg-live-browser-workbench
+```
+
+The runner starts the actual API and frontend against the loopback emulator
+with a demo project ID and a disposable local JWT identity. The test uses live
+Gemini for synthetic requirements, Use Cases and Test Cases. It records the
+explicit synthetic Use Cases review, verifies execution admission for the
+saved suite, runs healthy and faulty Directory responses, and inspects saved
+report and export evidence. The fixture uses supplied context notes to ground
+the loopback target. The export binds the approved Use Cases snapshot as
+source evidence and reports the separate Test Cases machine review.
+From the Runs index the smoke opens each saved run, reloads its exact Reports
+link, and checks the case identities and recorded assertion for the seeded
+failure.
+For the healthy execution, the browser harness sends the actual request,
+discards the committed response, reloads Automation, and checks its receipt.
+It verifies the exact saved report link and rejects a replay of the original
+request identity without adding another run.
+
+Use `--fixture directory-change` for the live source-change path. It reimports
+the same Directory source with a revised empty-result message, applies only the
+affected test recommendation, and checks exact artifact versions after review.
+The repaired suite runs against the revised app and the original app. The new
+assertion must pass on the revised app and fail on the original app, while the
+unrelated test passes on both. The run saves the import, impact, case versions,
+and reviewed export evidence before archiving the disposable project.
+
+```bash
+.venv/bin/python scripts/e2e_workbench_local.py --fixture directory-change \
+  --emulator-jar "$jar" --output /tmp/tcg-live-directory-change
+```
+
+To measure fresh generated cases on the stateful Room Booking fixture, use the
+same runner with a new output directory.
+
+```bash
+.venv/bin/python scripts/e2e_workbench_local.py --fixture room-booking \
+  --emulator-jar "$jar" --output /tmp/tcg-live-room-booking
+```
+
+The test imports the existing Room Booking requirements, supplies observed
+same-origin page and dropdown declarations in Context, and reviews the exact
+saved suite. It verifies the loopback response-loss proxy before saving its
+fixture reference against the sourced retry requirement. The retry remains
+Manual. The matrix records design and setup status, admission, and browser
+eligibility separately. Each seeded fault is tried only with healthy-passing
+cases linked to its source requirement. The slot-release probe also requires
+a rebooking action after cancellation. Detection requires a matching failed
+browser assertion. Use a grounded CSS selector or test ID to scope exact text
+checks where the same status can appear in multiple elements. A `Browser result`
+declaration ties an observed result cell to its page, input field and submit
+button. The saved-value probes require a healthy-passing case with an exact
+check of the corresponding cell after submission. The authored
+booking matrix separately exercises native double-click and response-loss
+controls.
+
+The `reject-but-save` fault returns the correct attendee error while persisting
+an extra booking. The authored control verifies that both the HTTP status and
+message agree with healthy behavior, then detects the extra row after reopening.
+The generated benchmark requires detection at the saved booking count assertion.
+The declared collection's loaded heading makes an empty count meaningful.
+
+Use `--fixture room-booking-change` to compare and apply the attendee limit
+change from 8 to 6 in the same disposable workbench. The revised source also
+states the new maximum in the successful-booking clause. If the baseline has
+case-linked substantive findings, the benchmark allows one targeted repair
+and reviews the result before importing the revision. If the baseline has no
+generation tasks and independent review reports a provider outage, the
+benchmark tries the normal saved-suite review action once. It uses
+verified source quotations to select the updates, checks stale export, and
+uses **Review refresh scope** to regenerate only affected Use Case groups. It
+checks that retained groups preserve their exact scenario identities, then
+reviews the targeted repair. It requires a saved booking at 6 on the revised
+app and a rejection at 7 that fails at the intended assertion on the old app.
+The authored Booking controls validate both versions separately from generated
+case quality. The original `room-booking` option runs the seeded fault matrix.
+
+```bash
+.venv/bin/python scripts/e2e_workbench_local.py --fixture room-booking-change \
+  --emulator-jar "$jar" --output /tmp/tcg-live-room-booking-change
+```
+
+Use `--fixture room-booking-scope` to check source revision and scoped Use
+Cases refresh independently of test-case generation. It verifies exact
+preservation of retained groups and reviews the combined plan through the same
+machine and synthetic reviewer gates as the full revision.
+
+`test_workflow_project_service.py` covers multi-part execution snapshots,
+ordered readback, atomic rollback, retry, incomplete and corrupted parts, and
+bounded Unicode diagnostics. `test_quality_feedback.py` verifies that a passing
+run can close a finding only when its saved case evidence is complete.
+
+Choose a new output directory for each run. The runner keeps service logs,
+browser evidence and execution artifacts there, archives the exact test-owned
+project, and stops its local services when the run ends. Model quality and
+admission gates stay active throughout the test.
 
 ### Generation source snapshot regression
 

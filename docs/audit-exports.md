@@ -14,13 +14,24 @@ or leading control whitespace, is prefixed with an apostrophe in CSV/XLSX.
 JSON preserves the original text. XLSX requires openpyxl; the server no longer
 mislabels CSV bytes as an Excel workbook when that dependency is missing.
 
-Project exports require the current project revision. Optional
+Cells that exceed Excel's character or line-feed limit link to a `Long Values`
+sheet. To recover the complete value, select the rows with the source sheet and
+cell, then concatenate the `Text` cells in ascending `Part` order with zero
+separators. `Text` encoding gives the original value directly. For a
+`JSON string` encoding, decode the joined text as one JSON string to recover
+characters that Excel XML cannot safely store literally. The links stay within
+the workbook and the fragments are literal text. Select a `Text` cell to read
+or copy its full part from the formula bar.
+See [Excel specifications](https://support.microsoft.com/en-us/excel/excel-specifications-and-limits).
+
+Project exports require an active project and the current project revision. Optional
 `source_snapshot_id` identifies the expected current test-case snapshot; older
 clients may omit it, but their full case array must still match the current saved
 suite. Ownership is checked before serialization. A stale suite, old revision,
 mismatched snapshot or altered case array returns 409 before a file is sent.
 Reload and re-review/regenerate the current suite rather than bypassing the
-conflict. The existing report-write revision check also protects concurrent edits.
+conflict. If the saved suite pointer exists but its snapshot cannot be read,
+the export fails with 409.
 
 Approval comes from the saved suite's stage/review and recorded completion.
 Client `approved`/`review` fields remain accepted for request compatibility but
@@ -52,8 +63,15 @@ historical runs yield `unknown`. A latest passed selected run does not certify
 the whole suite. Project history is bounded to its latest 100 run records.
 
 The report snapshot records the same resolved export evidence and draft reason.
-It does not re-read newer project approval to relabel the exported artifact.
-No provider diagnostics, credentials or internal artifact paths are included.
+It commits with the completed workflow, usage event and timeline entry under
+the originating revision. Failed or stale writes preserve the previous report
+and leave zero completed usage. The report links to the completed usage event.
+
+After an interrupted download, retry the same format with the same inputs.
+The workbench keeps the original `X-Request-ID`. An authenticated exact retry
+returns the original export timestamp and evidence while the report is current.
+It creates zero additional revisions or usage events. Changed input, a stale
+report or a superseded report requires a new export from current evidence.
 
 When server evidence requires a draft despite the initial browser state, the API
 returns `detail.code: draft_override_required` with status 422. The export panel

@@ -8,6 +8,24 @@ from ..contracts.projects import QaProjectDetail
 from ..contracts.test_cases import TestCase
 
 
+PREVIEW_SOURCE_BLOCKER_CODES = frozenset(
+    {
+        "case_snapshot_mismatch",
+        "missing_cases",
+        "missing_test_cases",
+        "project_archived",
+        "project_unavailable",
+        "revision_conflict",
+        "snapshot_unavailable",
+    }
+)
+
+
+def preview_has_verified_receipt(metadata: dict) -> bool:
+    fingerprint = metadata.get("preview_response_fingerprint")
+    return isinstance(fingerprint, str) and len(fingerprint) == 64
+
+
 def assess_execution(
     payload: ExecutionPreviewInput,
     *,

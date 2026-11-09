@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import asdict, dataclass
+from itertools import islice
+from time import monotonic
 from uuid import uuid4
 from hashlib import sha256
 import json
@@ -7,8 +11,11 @@ import logging
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 
+from ..agents.evaluation_limits import current_evaluation_limits
 from ..agents.impact_update_agent import analyze_impact
+from ..config import get_generation_settings, get_settings
 from ..models import (
     AuthUser,
     ImpactAnalysisResult,
@@ -29,7 +36,7 @@ from .scenario_review_state import current_scenario_reviews, scenario_key
 from ..agents.test_case_agent import generate_test_cases
 from .test_case_quality import placeholder_reason, separate_generation_work, delivered_coverage
 from .guidance_runtime import prepare_run
-from .guidance_service import guidance_scope, public_manifest
+from .guidance_service import guidance_scope, public_manifest, submit_with_guidance
 from .billing_service import enforce_billing_access, record_billing_consumption
 from .audit_service import start_workflow_run, complete_workflow_run, record_usage_event
 from .workflow_project_service import (
@@ -45,6 +52,18 @@ class ImpactWorkflowError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class _TargetedGeneration:
+    recommendation: ImpactRecommendation
+    previous_case: TestCase | None
+    payload: GenerateTestCasesInput
+    scenario_refs: frozenset[str]
+
+
+def _fingerprint(value):
+    return sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
 def _model_payload(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -53,6 +72,129 @@ def _model_payload(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _model_payload(item) for key, item in value.items()}
     return value
+
+
+def _generate_targeted(work, manifest, *, actor_user_id, request_id, run_id, parallel_batch):
+    payload = work.payload
+    with guidance_scope(manifest):
+        response = GenerateTestCasesResponse.model_validate(
+            generate_test_cases(
+                payload,
+                actor_user_id=actor_user_id,
+                request_id=request_id,
+                workflow_run_id=run_id,
+                operation="impact.update.apply",
+                **({"max_parallel_workers": 1} if parallel_batch else {}),
+            )
+        )
+    _validate_targeted(work, response)
+    return response
+
+
+def _validate_targeted(work, response):
+    generated = response.test_cases
+    payload = work.payload
+    allowed = {requirement.id for requirement in payload.requirements}
+    covered = {ref for case in generated for ref in case.scenario_refs}
+    if (
+        not response.approved
+        or not generated
+        or response.generation_tasks
+        or response.workflow_diagnostics.used_fallback
+        or response.workflow_diagnostics.timed_out
+        or response.workflow_diagnostics.failed_shard_count
+        or any(
+            placeholder_reason(case)
+            or not case.linked_requirement_ids
+            or not set(case.linked_requirement_ids) <= allowed
+            or not case.scenario_refs
+            or not set(case.scenario_refs) <= work.scenario_refs
+            for case in generated
+        )
+        or not work.scenario_refs <= covered
+    ):
+        raise ImpactWorkflowError("Targeted generation is incomplete or failed quality checks. The existing suite was preserved.")
+
+
+def _targeted_policy(settings):
+    try:
+        model = get_settings().model_name
+    except RuntimeError as exc:
+        if "GEMINI_API_KEY" not in str(exc):
+            raise
+        model = None
+    return _fingerprint([model, settings.model_dump(mode="json"), asdict(current_evaluation_limits.get())]) if model else None
+
+
+def _recover_targeted(inputs, keys, lease):
+    results = {}
+    usable = {}
+    for index, (work, key) in enumerate(zip(inputs, keys, strict=True)):
+        if key not in lease.checkpoints:
+            continue
+        saved = lease.checkpoints[key]
+        try:
+            response = GenerateTestCasesResponse.model_validate_json(saved)
+            _validate_targeted(work, response)
+        except ValidationError, ImpactWorkflowError:
+            continue
+        if (response.substantive_assessment or {}).get("status") == "assessed_complete":
+            results[index] = response
+            usable[key] = saved
+    lease.checkpoints = usable
+    return results
+
+
+def _run_targeted_batch(inputs, manifests, keys, lease, *, worker_limit, actor_user_id, request_id, run_id):
+    results = _recover_targeted(inputs, keys, lease)
+    reused = len(results)
+    workers = min(worker_limit, len(inputs) - reused)
+    pending = [index for index in range(len(inputs)) if index not in results]
+
+    def generate(index):
+        response = _generate_targeted(
+            inputs[index],
+            manifests[index],
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            run_id=run_id,
+            parallel_batch=min(worker_limit, len(inputs)) > 1,
+        )
+        key = keys[index]
+        if key and (response.substantive_assessment or {}).get("status") == "assessed_complete":
+            lease.checkpoint(
+                key,
+                response.model_dump_json(
+                    include={"test_cases", "approved", "generation_tasks", "workflow_diagnostics", "generation_evidence", "substantive_assessment"}
+                ),
+            )
+        return response
+
+    if workers <= 1:
+        for index in pending:
+            results[index] = generate(index)
+    else:
+        _generate_targeted_in_parallel(pending, generate, workers, results)
+    return [results[index] for index in range(len(inputs))], workers, reused
+
+
+def _generate_targeted_in_parallel(pending, generate, workers, results):
+    queue = iter(pending)
+    # Keep only running work in flight. A failure stops submission, and the
+    # executor lets active workers finish checkpointing before lease release.
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="impact-repair") as executor:
+        active = {}
+        free_slots = workers
+        while True:
+            for index in islice(queue, free_slots):
+                future = submit_with_guidance(executor, generate, index)
+                active[future] = index
+            if not active:
+                break
+            done, _ = wait(active, return_when=FIRST_COMPLETED)
+            for future in done:
+                results[active.pop(future)] = future.result()
+            free_slots = len(done)
 
 
 def _load_snapshot_by_id(project_id: str, snapshot_id: Optional[str], *, actor: AuthUser) -> Optional[QaProjectStageSnapshot]:
@@ -290,7 +432,7 @@ def apply_project_impact_update(
             feedback="Generate concrete user/API actions, necessary input values, and observable assertions. Do not return instructions to review or generate tests. Address this selected finding without inventing missing facts: "
             + rec.reason,
         )
-        inputs.append((rec, old, payload, available))
+        inputs.append(_TargetedGeneration(rec, old, payload, frozenset(available)))
     lease = ApplicationLease(project_id, impact_snapshot.snapshot_id, actor, base_project_revision, selected)
     if not lease.reserve():
         return get_project(project_id, actor=actor)
@@ -303,51 +445,52 @@ def apply_project_impact_update(
             generated_count = 0
             evidence = []
             try:
-                for rec, old, payload, refs in inputs:
-                    manifest = prepare_run(
+                input_hashes = [_fingerprint(work.payload.model_dump(mode="json")) for work in inputs]
+                manifests = [
+                    prepare_run(
                         "test_cases",
                         actor,
                         project_id,
-                        f"{request_id}:{rec.recommendation_id}",
-                        requirement_ids=[r.id for r in payload.requirements],
-                        input_fingerprint=sha256(json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode()).hexdigest(),
+                        f"{request_id}:{lease.token}:{work.recommendation.recommendation_id}",
+                        requirement_ids=[r.id for r in work.payload.requirements],
+                        input_fingerprint=input_hash,
                     )
-                    with guidance_scope(manifest):
-                        response = GenerateTestCasesResponse.model_validate(
-                            generate_test_cases(
-                                payload, actor_user_id=actor.sub, request_id=request_id, workflow_run_id=run_id, operation="impact.update.apply"
-                            )
-                        )
+                    for work, input_hash in zip(inputs, input_hashes, strict=True)
+                ]
+                if len(manifests) > 1:
+                    current_revision = get_project(project_id, actor=actor).current_revision
+                    if current_revision != base_project_revision:
+                        raise ProjectConflictError(current_revision)
+                settings = get_generation_settings()
+                worker_limit = min(3, settings.parallel_test_case_max_workers) if settings.parallel_test_case_generation_enabled else 1
+                policy = _targeted_policy(settings) if inputs else None
+                keys = [
+                    _fingerprint([work.recommendation.recommendation_id, input_hash, manifest.manifest_id, policy]) if policy else None
+                    for work, input_hash, manifest in zip(inputs, input_hashes, manifests, strict=True)
+                ]
+                started = monotonic()
+                responses, workers, reused = _run_targeted_batch(
+                    inputs, manifests, keys, lease, worker_limit=worker_limit, actor_user_id=actor.sub, request_id=request_id, run_id=run_id
+                )
+                batch_metrics = {
+                    "targeted_generation_worker_count": workers,
+                    "targeted_generation_reused_count": reused,
+                    "targeted_generation_duration_ms": round((monotonic() - started) * 1000, 2),
+                }
+                for work, manifest, response in zip(inputs, manifests, responses, strict=True):
+                    rec, old = work.recommendation, work.previous_case
                     evidence.append(
                         {
                             "recommendation_id": rec.recommendation_id,
+                            "source_test_case_id": old.id if old else None,
+                            "source_project_revision": work.payload.base_project_revision,
+                            "scenario_refs": sorted(work.scenario_refs),
                             "generation_evidence": _model_payload(response.generation_evidence),
                             "substantive_assessment": response.substantive_assessment,
                             "guidance": public_manifest(manifest),
                         }
                     )
-                    generated = response.test_cases
-                    covered = {ref for case in generated for ref in case.scenario_refs}
-                    allowed = {r.id for r in payload.requirements}
-                    if (
-                        not response.approved
-                        or not generated
-                        or response.generation_tasks
-                        or response.workflow_diagnostics.used_fallback
-                        or response.workflow_diagnostics.timed_out
-                        or response.workflow_diagnostics.failed_shard_count
-                        or any(
-                            placeholder_reason(c)
-                            or not c.linked_requirement_ids
-                            or not set(c.linked_requirement_ids) <= allowed
-                            or not c.scenario_refs
-                            or not set(c.scenario_refs) <= refs
-                            for c in generated
-                        )
-                        or not refs <= covered
-                    ):
-                        raise ImpactWorkflowError("Targeted generation is incomplete or failed quality checks. The existing suite was preserved.")
-                    for index, case in enumerate(generated):
+                    for index, case in enumerate(response.test_cases):
                         change = {
                             "id": old.id if old and index == 0 else f"TC-{uuid4().hex[:12].upper()}",
                             "status": "In Review",
@@ -364,8 +507,9 @@ def apply_project_impact_update(
                 deprecated = {r.test_case_id for r in accepted if r.action == "deprecate"}
                 next_cases = [replacements.get(c.id, c.model_copy(update={"status": "Deprecated"}) if c.id in deprecated else c) for c in existing]
                 next_cases += additions
-                if get_project(project_id, actor=actor).current_revision != base_project_revision:
-                    raise ProjectConflictError(get_project(project_id, actor=actor).current_revision)
+                current_revision = get_project(project_id, actor=actor).current_revision
+                if current_revision != base_project_revision:
+                    raise ProjectConflictError(current_revision)
                 pending_writes = []
                 versioned = persist_test_case_versions(
                     current_test_cases=next_cases,
@@ -458,12 +602,13 @@ def apply_project_impact_update(
                         "deprecated_count": result.deprecated_count,
                         "source_snapshot_ids": analysis.current_snapshot_ids,
                         "targeted_generation_runs": evidence,
+                        **batch_metrics,
                     },
                 )
             except Exception:
                 complete_workflow_run(run_id, status="failed", error_message="Targeted generation or commit failed")
                 raise
-            complete_workflow_run(run_id, status="completed", metadata={"generated_count": generated_count})
+            complete_workflow_run(run_id, status="completed", metadata={"generated_count": generated_count, **batch_metrics})
             if generated_count:
                 try:
                     record_billing_consumption(

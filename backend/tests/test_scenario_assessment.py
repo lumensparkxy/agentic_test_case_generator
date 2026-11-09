@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.agents import use_case_agent as agent
 from app.agents.scenario_assessment import assessment_input, assess_scenarios, combine_review, local_findings, parse_critic_output, CRITERIA
+from app.agents.scenario_boundary_coverage import inclusive_input_ranges
 from app.models import Requirement, WorkflowSettings
 from app.contracts.requirements import ReviewResult
 
@@ -51,6 +52,113 @@ def passes(coverage, context="", requirements=None):
 
 
 class ScenarioAssessmentTests(unittest.TestCase):
+    def test_incomplete_booking_plan_cannot_pass_when_each_delivered_scenario_passes(self):
+        range_requirement = REQ.model_copy(
+            update={"text": "The system shall require Attendees to be a whole number from 1 to 8 inclusive, displaying an inline error on invalid input."}
+        )
+        coverage = plan(
+            ("Reject empty input", "Submit with Attendees empty. An inline error appears and no booking is created."),
+            ("Reject zero", 'Submit with Attendees set to 0. The inline error says "Enter a whole number from 1 to 8".'),
+            ("Reject 9", "Submit with 9 attendees. An inline error appears and no booking is created."),
+            ("Reject 1.5", "Submit with 1.5 attendees. An inline error appears and no booking is created."),
+            ("Create confirmed booking", "Submit an available room with a valid attendee count. The booking appears as Confirmed."),
+        )
+        coverage[0]["requirement_text"] = range_requirement.text
+        rows = passes(coverage, requirements=[range_requirement])
+        (interval,) = inclusive_input_ranges([range_requirement])
+        rows[1]["boundary_evidence"] = [
+            {
+                "range_id": interval.range_id,
+                "endpoint": "1",
+                "input_quote": "whole number from 1",
+                "outcome_quote": "The inline error says",
+            }
+        ]
+        semantic = assess_scenarios(coverage, [range_requirement], "", rows)
+        self.assertTrue(all(item["status"] == "passed" for item in semantic["items"]))
+        self.assertEqual(semantic["status"], "needs_review")
+        self.assertEqual(semantic["flagged_count"], 0)
+        review = ReviewResult.model_validate(combine_review({"approved": True, "score": 100}, semantic))
+        self.assertFalse(review.approved)
+        (finding,) = review.semantic_assessment.requirement_findings
+        self.assertEqual((finding.requirement_id, finding.source_excerpt, finding.missing_endpoints), (REQ.id, "from 1 to 8 inclusive", ["1", "8"]))
+
+    def test_exact_positive_boundaries_use_related_success_group_and_current_source(self):
+        validation = REQ.model_copy(update={"text": "Attendees must be a whole number from 1 to 6 inclusive. A count of 7 is rejected."})
+        creation = Requirement(id="REQ-002", text="Submitting a valid attendee count for an available room creates a Confirmed booking.")
+        coverage = plan(("Reject seven attendees", "Submit 7 attendees and show the inline error."))
+        coverage[0]["requirement_text"] = validation.text
+        success = plan(
+            ("Book with 1 attendee", "Submit with Attendees set to 1. The booking appears as Confirmed."),
+            ("Book with 6 attendees", "Submit with Attendees set to 6. The booking appears as Confirmed."),
+        )[0]
+        success.update(requirement_id=creation.id, requirement_text=creation.text)
+        for index, scenario in enumerate(success["scenarios"], 1):
+            scenario.update(id=f"{creation.id}-SCN-{index:02}", requirement_id=creation.id)
+        coverage.append(success)
+        requirements = [validation, creation]
+        (interval,) = inclusive_input_ranges(requirements)
+        rows = passes(coverage, requirements=requirements)
+        for row, endpoint in zip(rows[1:], ("1", "6"), strict=True):
+            row["boundary_evidence"] = [
+                {
+                    "range_id": interval.range_id,
+                    "endpoint": endpoint,
+                    "input_quote": f"Attendees set to {endpoint}",
+                    "outcome_quote": "The booking appears as Confirmed",
+                }
+            ]
+        parsed = parse_critic_output(json.dumps({"assessments": rows}))
+        assessment = assess_scenarios(coverage, requirements, "", parsed)
+        self.assertEqual(assessment["status"], "passed")
+        self.assertEqual(assessment["items"][-1]["boundary_evidence"], rows[-1]["boundary_evidence"])
+
+        for changed_evidence in (
+            {"endpoint": "8"},
+            {"input_quote": "Attendees set to 66"},
+            {"outcome_quote": "The booking is saved and emailed"},
+            {"range_id": "wrong-range"},
+        ):
+            with self.subTest(changed_evidence=changed_evidence):
+                changed_rows = deepcopy(rows)
+                changed_rows[-1]["boundary_evidence"][0].update(changed_evidence)
+                missing = assess_scenarios(coverage, requirements, "", changed_rows)["requirement_findings"]
+                self.assertEqual(missing[0]["missing_endpoints"], ["6"])
+        unsupported = deepcopy(rows)
+        unsupported[-1]["source_grounding"] = {"passed": False, "reason": "The asserted outcome is unsupported."}
+        self.assertEqual(assess_scenarios(coverage, requirements, "", unsupported)["requirement_findings"][0]["missing_endpoints"], ["6"])
+
+        overlapping = deepcopy(rows)
+        overlapping[-1]["boundary_evidence"][0]["outcome_quote"] = "Submit with Attendees set to 6. The booking appears as Confirmed."
+        self.assertEqual(assess_scenarios(coverage, requirements, "", overlapping)["status"], "passed")
+
+        longer_value = deepcopy(coverage)
+        longer_value[1]["scenarios"][1]["objective"] = success["scenarios"][1]["objective"].replace("6", "6.5")
+        rebound = passes(longer_value, requirements=requirements)
+        for new, old in zip(rebound[1:], rows[1:], strict=True):
+            new["boundary_evidence"] = old["boundary_evidence"]
+        self.assertEqual(assess_scenarios(longer_value, requirements, "", rebound)["requirement_findings"][0]["missing_endpoints"], ["6"])
+
+        prior = validation.model_copy(update={"text": validation.text.replace("to 6", "to 8")})
+        result = assess_scenarios(coverage, [prior, creation], "", rows)
+        self.assertEqual(result["assessed_count"], 0)
+        self.assertEqual(result["requirement_findings"][0]["missing_endpoints"], ["1", "8"])
+
+    def test_inclusive_range_detection_ignores_quotes_denials_and_nonranges(self):
+        texts = [
+            "The system accepts a temperature from -2.5 to 3.5 (inclusive).",
+            "Batch size must be between 1 and 8 inclusive.",
+            'Send an error that says "Enter from 1 to 8 inclusive".',
+            "The system rejects choices from 1 to 8 inclusive.",
+            "The system does not allow quantities from 1 to 8 inclusive.",
+            "The service displays rows 1 to 8.",
+        ]
+        rows = [Requirement(id=f"REQ-{index}", text=value) for index, value in enumerate(texts)]
+        self.assertEqual(
+            [(item.requirement_id, item.endpoints) for item in inclusive_input_ranges(rows)],
+            [("REQ-0", ("-2.5", "3.5")), ("REQ-1", ("1", "8"))],
+        )
+
     def test_all_nine_category_scaffolds_warn_even_if_critic_passes(self):
         categories = [
             "Happy Path",
@@ -188,6 +296,21 @@ class ScenarioAssessmentTests(unittest.TestCase):
             with self.subTest(context=context, route=route):
                 coverage = plan(("Inspect booking", f"Open {route}; status remains Confirmed."))
                 self.assertEqual(assess_scenarios(coverage, [REQ], context, passes(coverage, context))["status"], "needs_review")
+
+    def test_context_browser_page_grounds_only_the_observed_same_origin_route(self):
+        target = "http://127.0.0.1:8810/"
+        route = "/bookings/B-EXISTING"
+        for notes, scenario_route, expected in (
+            (f'Browser page "{target}bookings/B-EXISTING"', route, "passed"),
+            (f'Browser page "{target}bookings/B-EXISTING"', route + "/cancel", "needs_review"),
+            (f'The page is "{target}bookings/B-EXISTING".', route, "needs_review"),
+            ('Browser page "http://127.0.0.1:8811/bookings/B-EXISTING"', route, "needs_review"),
+            ('Route /bookings/{bookingId}.\nBrowser page "https://foreign.test/bookings/B-EXISTING"', route, "needs_review"),
+        ):
+            with self.subTest(notes=notes, route=scenario_route):
+                context = json.dumps({"app_link": target, "notes": notes})
+                coverage = plan(("Inspect existing booking", f"Open {scenario_route}; status remains Confirmed."))
+                self.assertEqual(assess_scenarios(coverage, [REQ], context, passes(coverage, context))["status"], expected)
 
     def test_route_instances_with_multiple_parameters_require_every_source_value(self):
         coverage = plan(("Inspect booking", "Open /rooms/Atlas/bookings/B-EXISTING; Confirmed is displayed."))

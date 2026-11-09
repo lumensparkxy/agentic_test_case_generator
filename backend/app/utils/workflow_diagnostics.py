@@ -3,6 +3,8 @@ from typing import Any, Dict
 
 RETRYABLE_PARSER_FAILURE_KEY = "_retryable_parser_failure"
 RETRY_REASON_KEY = "_retry_reason"
+REVIEW_SCHEMA_INVALID = "review_schema_invalid"
+RETAINED_REQUIREMENT_DRAFT_WARNING = "Structural review could not complete. Review the retained requirement draft."
 
 
 def mark_retryable_parser_failure(diagnostics: Dict[str, Any], reason: str) -> None:

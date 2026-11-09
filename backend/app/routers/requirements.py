@@ -16,20 +16,57 @@ from ..agents.requirements_agent import extract_requirements, refine_requirement
 from ..auth.jwt_auth import get_current_user
 from ..config import get_settings
 from ..models import AuthUser, EnrichInput, EnrichResponse, RequirementsWorkflowResponse, WorkflowSettings
+from ..observability.metrics import record_workflow_completed
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
 from ..services.billing_service import enforce_billing_access, record_billing_consumption
 from ..services.context_grounding import build_grounded_context
+from ..services.firestore_repository import get_required_firestore_client
 from ..services.versioning_service import persist_requirement_versions
-from ..services.workflow_project_service import append_stage_snapshot, project_error_to_http
+from ..services.workflow_project_service import (
+    ProjectConflictError,
+    ProjectNotFoundError,
+    ProjectPermissionError,
+    append_stage_snapshot,
+    find_idempotent_stage_snapshot,
+    get_project_summary,
+    project_error_to_http,
+)
 from ..utils.excel_parser import parse_excel_to_text
 
 from ..contracts.requirement_imports import RequirementImportPreview
-from ..services.requirement_import_service import require_review_client, stage_import
+from ..services.requirement_import_service import require_review_client
+from ..services.requirement_import_publication import ExtractionPublicationUnconfirmed, ProjectRequirementExtraction
+from ..services.requirement_reconciliation import digest
 from ..services.requirement_source_evidence import bind_document_evidence
 
 router = APIRouter()
 
 MAX_UPLOAD_SIZE_BYTES = 16 * 1024 * 1024
+CONTEXT_OPERATION = "requirements.enrich"
+CONTEXT_EVENT = "requirements.enriched"
+
+
+class _ContextPublicationUnconfirmed(HTTPException):
+    def __init__(self):
+        super().__init__(503, {"code": "context_publication_unconfirmed", "message": "Context analysis could not be confirmed. Retry this request."})
+
+
+async def _read_upload(upload: UploadFile) -> bytes:
+    content = await upload.read(MAX_UPLOAD_SIZE_BYTES + 1)
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(413, f"File too large. Max supported size is {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB.")
+    return content
+
+
+async def _upload_fingerprints(uploads):
+    fingerprints = []
+    for upload in uploads:
+        try:
+            content = await _read_upload(upload)
+            fingerprints.append([upload.filename or "uploaded", upload.content_type, hashlib.sha256(content).hexdigest()])
+        finally:
+            await upload.seek(0)
+    return fingerprints
 
 
 def _build_grounded_context_from_enrich_input(payload: EnrichInput):
@@ -151,6 +188,7 @@ def _context_project_payload(response: EnrichResponse) -> dict[str, Any]:
         "diagram_links": [str(item) for item in response.diagram_links or []],
         "image_links": [str(item) for item in response.image_links or []],
         "notes": response.notes,
+        "execution_prerequisites": _model_payload(response.execution_prerequisites),
         "grounded_context": _model_payload(response.grounded_context),
     }
 
@@ -262,14 +300,37 @@ async def parse_requirements(
     await run_in_threadpool(require_review_client, project_id, parsed_project_revision, import_mode, current_user)
     request_id = _get_request_id(request)
     is_refinement_request = bool(feedback and existing_requirements)
+    operation = "requirements.refine" if is_refinement_request else "requirements.parse"
+    event_type = "requirements.refined" if is_refinement_request else "requirements.parsed"
+    uploads: List[UploadFile] = list(files or [])
+    if file is not None:
+        uploads.append(file)
+    if project_id and not uploads and not is_refinement_request:
+        raise HTTPException(400, "No file provided")
+    if project_id:
+        source = [feedback, existing_requirements] if is_refinement_request else await _upload_fingerprints(uploads)
+        fingerprint = digest(
+            [
+                operation,
+                parsed_project_revision,
+                source,
+                parsed_workflow_settings.model_dump(mode="json") if parsed_workflow_settings else None,
+                request.headers.get("X-Knowledge-Bypass", "").lower() == "true",
+            ]
+        )
+        extraction = ProjectRequirementExtraction(project_id, parsed_project_revision, current_user, request_id, operation, fingerprint)
+        saved = await run_in_threadpool(extraction.find_preview)
+        if saved is not None:
+            return saved
+
     billing_context = await run_in_threadpool(
         enforce_billing_access,
         current_user=current_user,
-        billing_key="requirements.refine" if is_refinement_request else "requirements.parse",
+        billing_key=operation,
     )
 
     workflow_run_id = start_workflow_run(
-        operation="requirements.parse" if not is_refinement_request else "requirements.refine",
+        operation=operation,
         actor=current_user,
         request_id=request_id,
         metadata={
@@ -278,8 +339,39 @@ async def parse_requirements(
         },
     )
 
-    # If feedback is provided, refine existing requirements
-    if feedback and existing_requirements:
+    published = False
+
+    async def publish(response, quantity, result_metadata, billing_metadata):
+        nonlocal published
+        await run_in_threadpool(
+            extraction.publish,
+            response=response,
+            event_type=event_type,
+            billing_key=operation,
+            run_id=workflow_run_id,
+            billing_context=billing_context,
+            quantity=quantity,
+            result_metadata=result_metadata,
+            billing_metadata=billing_metadata,
+        )
+        published = True
+        return await run_in_threadpool(extraction.find_preview, required=True)
+
+    def fail(error_message):
+        if not published:
+            _log_failure(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation=operation,
+                event_type=event_type,
+                billing_key=operation,
+                error_message=error_message,
+                metadata={"has_feedback": is_refinement_request},
+            )
+
+    # If feedback is provided, refine existing requirements.
+    if is_refinement_request:
         try:
             existing_reqs = json.loads(existing_requirements)
             workflow = await run_in_threadpool(
@@ -308,6 +400,14 @@ async def parse_requirements(
                 _requirement_snapshot(existing_reqs),
                 _requirement_snapshot(response.requirements),
             )
+            result_metadata = {
+                "requirements_modified_count": modified_count,
+                "requirements_total": len(response.requirements),
+                "approved": response.approved,
+            }
+            billing_metadata = {"approved": response.approved}
+            if project_id:
+                return await publish(response, max(1, modified_count), result_metadata, billing_metadata)
             event_id = _log_success(
                 current_user=current_user,
                 request=request,
@@ -317,11 +417,7 @@ async def parse_requirements(
                 billing_key="requirements.refine",
                 quantity=max(1, modified_count),
                 unit="requirement",
-                result_metadata={
-                    "requirements_modified_count": modified_count,
-                    "requirements_total": len(response.requirements),
-                    "approved": response.approved,
-                },
+                result_metadata=result_metadata,
             )
             _record_billing_consumption_safe(
                 current_user=current_user,
@@ -332,10 +428,8 @@ async def parse_requirements(
                 billing_key="requirements.refine",
                 quantity=max(1, modified_count),
                 unit="requirement",
-                metadata={"approved": response.approved},
+                metadata=billing_metadata,
             )
-            if project_id:
-                return await run_in_threadpool(stage_import, project_id, current_user, parsed_project_revision, response, "requirements.refine")
             response.requirements = persist_requirement_versions(
                 current_requirements=response.requirements,
                 previous_requirements=existing_reqs,
@@ -347,29 +441,20 @@ async def parse_requirements(
                 approved=response.approved,
             )
             return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
+        except ExtractionPublicationUnconfirmed:
+            raise
         except HTTPException:
+            if project_id:
+                fail("http_exception")
             raise
         except Exception as exc:
             logging.exception("Requirement refinement failed")
-            _log_failure(
-                current_user=current_user,
-                request=request,
-                workflow_run_id=workflow_run_id,
-                operation="requirements.refine",
-                event_type="requirements.refined",
-                billing_key="requirements.refine",
-                error_message=str(exc),
-                metadata={"has_feedback": True},
-            )
+            fail(str(exc))
             raise HTTPException(status_code=500, detail="Refinement failed") from exc
 
     # Otherwise, parse the uploaded file
-    uploads: List[UploadFile] = list(files or [])
-    if file is not None:
-        uploads.append(file)
-
     if not uploads:
-        raise HTTPException(status_code=400, detail="No file provided")
+        raise HTTPException(400, "No file provided")
 
     try:
         raw_sections: List[str] = []
@@ -378,12 +463,7 @@ async def parse_requirements(
 
         for upload in uploads:
             filename = upload.filename or "uploaded"
-            content = await upload.read()
-            if len(content) > MAX_UPLOAD_SIZE_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File too large. Max supported size is {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB.",
-                )
+            content = await _read_upload(upload)
 
             if filename.endswith(".md") or upload.content_type == "text/markdown":
                 parsed_text = content.decode("utf-8", errors="ignore")
@@ -423,7 +503,27 @@ async def parse_requirements(
             workflow_diagnostics=workflow.get("workflow_diagnostics", {}),
         )
         response.requirements = _apply_file_source_metadata(response.requirements, source_name, source_names)
-        response.requirements = bind_document_evidence(response.requirements, documents)
+        evidence = await run_in_threadpool(bind_document_evidence, response.requirements, documents)
+        response.requirements = evidence.requirements
+        response.source_evidence_findings = evidence.findings
+        if evidence.findings:
+            response.approved = False
+            response.review = response.review.model_copy(
+                update={
+                    "approved": False,
+                    "summary": "Review the unresolved inclusive range evidence.",
+                    "blocking_issues": [*response.review.blocking_issues, "Inclusive range evidence is incomplete."],
+                }
+            )
+        result_metadata = {
+            "requirements_generated_count": len(response.requirements),
+            "document_count": len(source_names),
+            "source_names": source_names,
+            "approved": response.approved,
+        }
+        billing_metadata = {"approved": response.approved, "document_count": len(source_names)}
+        if project_id:
+            return await publish(response, len(response.requirements), result_metadata, billing_metadata)
         event_id = _log_success(
             current_user=current_user,
             request=request,
@@ -433,12 +533,7 @@ async def parse_requirements(
             billing_key="requirements.parse",
             quantity=len(response.requirements),
             unit="requirement",
-            result_metadata={
-                "requirements_generated_count": len(response.requirements),
-                "document_count": len(source_names),
-                "source_names": source_names,
-                "approved": response.approved,
-            },
+            result_metadata=result_metadata,
         )
         _record_billing_consumption_safe(
             current_user=current_user,
@@ -449,10 +544,8 @@ async def parse_requirements(
             billing_key="requirements.parse",
             quantity=len(response.requirements),
             unit="requirement",
-            metadata={"approved": response.approved, "document_count": len(source_names)},
+            metadata=billing_metadata,
         )
-        if project_id:
-            return await run_in_threadpool(stage_import, project_id, current_user, parsed_project_revision, response, "requirements.parse")
         response.requirements = persist_requirement_versions(
             current_requirements=response.requirements,
             actor=current_user,
@@ -466,106 +559,157 @@ async def parse_requirements(
             approved=response.approved,
         )
         return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
+    except ExtractionPublicationUnconfirmed:
+        raise
     except HTTPException:
-        _log_failure(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="requirements.parse",
-            event_type="requirements.parsed",
-            billing_key="requirements.parse",
-            error_message="http_exception",
-            metadata={"has_feedback": False},
-        )
+        fail("http_exception")
         raise
     except Exception as exc:
         logging.exception("Requirement parsing failed")
-        _log_failure(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="requirements.parse",
-            event_type="requirements.parsed",
-            billing_key="requirements.parse",
-            error_message=str(exc),
-            metadata={"has_feedback": False},
-        )
+        fail(str(exc))
         raise HTTPException(status_code=500, detail="Requirement parsing failed") from exc
 
 
+def _find_context_receipt(payload, actor, key, fingerprint, *, require_current=True):
+    try:
+        receipt = find_idempotent_stage_snapshot(payload.project_id, "context", CONTEXT_OPERATION, key, actor=actor, require_current=require_current)
+    except (ProjectConflictError, ProjectNotFoundError, ProjectPermissionError) as exc:
+        raise project_error_to_http(exc) from exc
+    except Exception as exc:
+        raise _ContextPublicationUnconfirmed() from exc
+    if receipt and receipt.metadata.get("analysis_request_fingerprint") != fingerprint:
+        raise HTTPException(409, "This request already saved Context for different inputs.")
+    return receipt
+
+
+def _context_response(payload, grounded_context):
+    return EnrichResponse(**payload.model_dump(exclude={"grounded_context"}), grounded_context=grounded_context)
+
+
+def _publish_context(response, actor, request_id, run_id, base_revision, key, fingerprint, quantity, metadata):
+    try:
+        client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
+        writes = []
+        event_id = record_usage_event(
+            event_type=CONTEXT_EVENT,
+            billing_key=CONTEXT_OPERATION,
+            quantity=quantity,
+            unit="artifact_source",
+            actor=actor,
+            request_id=request_id,
+            workflow_run_id=run_id,
+            status="completed",
+            metadata={"operation": CONTEXT_OPERATION, **metadata},
+            pending_writes=writes,
+            firestore_client=client,
+        )
+        complete_workflow_run(run_id, status="completed", metadata=metadata, pending_writes=writes, firestore_client=client)
+        return append_stage_snapshot(
+            project_id=response.project_id,
+            stage="context",
+            payload=_context_project_payload(response),
+            operation=CONTEXT_OPERATION,
+            actor=actor,
+            request_id=request_id,
+            workflow_run_id=run_id,
+            source_event_id=event_id,
+            approved=True,
+            title="Context analyzed",
+            metadata={**metadata, "analysis_request_fingerprint": fingerprint},
+            base_project_revision=base_revision,
+            idempotency_key=key,
+            pending_writes=writes,
+        )
+    except Exception as exc:
+        # Reconcile a possible commit before checking whether its result is still current.
+        receipt = _find_context_receipt(response, actor, key, fingerprint, require_current=False)
+        if receipt:
+            return receipt
+        if isinstance(exc, HTTPException):
+            raise
+        raise project_error_to_http(exc) from exc
+
+
 @router.post("/requirements/enrich", response_model=EnrichResponse)
-async def enrich_requirements(
+def enrich_requirements(
     request: Request,
     payload: EnrichInput,
     current_user: AuthUser = Depends(get_current_user),
 ) -> EnrichResponse:
     request_id = _get_request_id(request)
+    base_revision = payload.base_project_revision
+    if payload.project_id:
+        key = digest(["context", current_user.sub, request_id])
+        fingerprint = digest(payload.model_dump(mode="json"))
+        receipt = _find_context_receipt(payload, current_user, key, fingerprint)
+        if receipt:
+            return _context_response(payload, receipt.payload["grounded_context"])
+        try:
+            project = get_project_summary(payload.project_id, actor=current_user)
+        except Exception as exc:
+            raise project_error_to_http(exc) from exc
+        if project.status != "active" or (base_revision is not None and base_revision != project.current_revision):
+            receipt = _find_context_receipt(payload, current_user, key, fingerprint)
+            if receipt:
+                return _context_response(payload, receipt.payload["grounded_context"])
+            conflict = ProjectConflictError(project.current_revision)
+            raise project_error_to_http(conflict)
+        base_revision = project.current_revision
+
     workflow_run_id = start_workflow_run(
-        operation="requirements.enrich",
+        operation=CONTEXT_OPERATION,
         actor=current_user,
         request_id=request_id,
         metadata={"requirement_count": len(payload.requirements)},
     )
     try:
-        grounded_context = payload.grounded_context or _build_grounded_context_from_enrich_input(payload)
-        response = EnrichResponse(
-            requirements=payload.requirements,
-            app_link=payload.app_link,
-            prototype_link=payload.prototype_link,
-            diagram_links=payload.diagram_links,
-            image_links=payload.image_links,
-            notes=payload.notes,
-            execution_prerequisites=payload.execution_prerequisites,
-            grounded_context=grounded_context,
-            project_id=payload.project_id,
-            base_project_revision=payload.base_project_revision,
-        )
-        event_id = _log_success(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="requirements.enrich",
-            event_type="requirements.enriched",
-            billing_key="requirements.enrich",
-            quantity=max(1, len(response.grounded_context.artifact_sources)),
-            unit="artifact_source",
-            result_metadata={
-                "requirement_count": len(response.requirements),
-                "artifact_source_count": len(response.grounded_context.artifact_sources),
-                "ui_element_count": len(response.grounded_context.ui_elements),
-            },
-        )
+        grounded_context = payload.grounded_context
+        if grounded_context is None:
+            grounded_context = _build_grounded_context_from_enrich_input(payload)
+        response = _context_response(payload, grounded_context)
+        metadata = {
+            "requirement_count": len(response.requirements),
+            "artifact_source_count": len(response.grounded_context.artifact_sources),
+            "ui_element_count": len(response.grounded_context.ui_elements),
+        }
+        quantity = max(1, metadata["artifact_source_count"])
         if payload.project_id:
-            try:
-                append_stage_snapshot(
-                    project_id=payload.project_id,
-                    stage="context",
-                    payload=_context_project_payload(response),
-                    operation="requirements.enrich",
-                    actor=current_user,
-                    request_id=request_id,
-                    workflow_run_id=workflow_run_id,
-                    source_event_id=event_id,
-                    approved=True,
-                    title="Context analyzed",
-                    metadata={
-                        "artifact_source_count": len(response.grounded_context.artifact_sources),
-                        "ui_element_count": len(response.grounded_context.ui_elements),
-                    },
-                    base_project_revision=payload.base_project_revision,
-                )
-            except Exception as project_exc:
-                raise project_error_to_http(project_exc) from project_exc
-        return response
+            snapshot = _publish_context(response, current_user, request_id, workflow_run_id, base_revision, key, fingerprint, quantity, metadata)
+            if snapshot.metadata.get("analysis_request_fingerprint") != fingerprint:
+                raise HTTPException(409, "This request already saved Context for different inputs.")
+        else:
+            _log_success(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation=CONTEXT_OPERATION,
+                event_type=CONTEXT_EVENT,
+                billing_key=CONTEXT_OPERATION,
+                quantity=quantity,
+                unit="artifact_source",
+                result_metadata=metadata,
+            )
+            return response
+    except _ContextPublicationUnconfirmed:
+        raise
     except Exception as exc:
         _log_failure(
             current_user=current_user,
             request=request,
             workflow_run_id=workflow_run_id,
-            operation="requirements.enrich",
-            event_type="requirements.enriched",
-            billing_key="requirements.enrich",
+            operation=CONTEXT_OPERATION,
+            event_type=CONTEXT_EVENT,
+            billing_key=CONTEXT_OPERATION,
             error_message=str(exc),
             metadata={"requirement_count": len(payload.requirements)},
         )
         raise
+
+    if snapshot.workflow_run_id == workflow_run_id:
+        record_workflow_completed(workflow_run_id, "completed")
+    else:
+        complete_workflow_run(workflow_run_id, status="completed", metadata={**metadata, "reused_snapshot_id": snapshot.snapshot_id})
+    receipt = _find_context_receipt(payload, current_user, key, fingerprint)
+    if receipt is None:
+        raise _ContextPublicationUnconfirmed()
+    return _context_response(payload, receipt.payload["grounded_context"])

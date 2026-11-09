@@ -5,7 +5,9 @@ that revision and fence the lease in the same Firestore transaction.
 """
 
 from datetime import datetime, timedelta, timezone
-from threading import Event, Thread
+from hashlib import sha256
+import json
+from threading import Event, Lock, Thread
 from uuid import uuid4
 
 from ..contracts.impact import ImpactApplication
@@ -13,6 +15,9 @@ from . import workflow_project_service as projects
 
 LEASE_SECONDS = 120
 HEARTBEAT_SECONDS = 30
+RECOVERY_SCHEMA_VERSION = 1
+RECOVERY_WINDOW = timedelta(hours=24)
+MAX_RECOVERY_BYTES = 512 * 1024
 
 
 def now():
@@ -93,8 +98,19 @@ class ApplicationLease:
         self.client = projects.get_required_firestore_client(unavailable_message="Project storage is unavailable")
         self.project_doc = self.client.collection(projects.QA_PROJECTS_COLLECTION).document(project_id)
         self.doc = operation_doc(self.project_doc, analysis_id)
+        self.recovery_doc = self.project_doc.collection("impact_recovery").document("current")
+        self.recovery_binding = sha256(json.dumps([RECOVERY_SCHEMA_VERSION, analysis_id, revision, self.selected]).encode()).hexdigest()
+        self.checkpoints: dict[str, str] = {}
+        self.recovery_lock = Lock()
         self.stop = Event()
         self.thread = None
+
+    def _check_project(self, project):
+        projects._require_owner(project, self.actor)
+        projects._check_revision(project, self.revision)
+        analysis = project["stage_state"].get("impact_analysis") or {}
+        if project.get("status") != "active" or analysis.get("current_snapshot_id") != self.analysis_id:
+            raise projects.ProjectConflictError(project["current_revision"])
 
     def reserve(self):
         @projects.transactional
@@ -103,12 +119,20 @@ class ApplicationLease:
             projects._require_owner(project, self.actor)
             record = projects._document_to_dict(self.doc.get(transaction=transaction))
             if record and (record["status"] == "applied" or (record["status"] == "applying" and not _expired(record))):
-                return False
-            projects._check_revision(project, self.revision)
-            if project.get("status") != "active" or project["stage_state"]["impact_analysis"]["current_snapshot_id"] != self.analysis_id:
-                raise projects.ProjectConflictError(project["current_revision"])
+                return None
+            self._check_project(project)
             if record and record["accepted_recommendation_ids"] != self.selected:
                 raise ValueError("Retry the original selection, or analyze impact again to change it.")
+            recovery = projects._document_to_dict(self.recovery_doc.get(transaction=transaction))
+            expires_at = recovery.get("expires_at") if recovery else None
+            checkpoints = {}
+            if recovery:
+                if recovery.get("binding") == self.recovery_binding and isinstance(expires_at, datetime) and expires_at > now():
+                    items = recovery.get("items")
+                    if isinstance(items, dict):
+                        checkpoints = {key: value for key, value in items.items() if isinstance(value, str)}
+                else:
+                    transaction.delete(self.recovery_doc)
             transaction.set(
                 self.doc,
                 {
@@ -120,9 +144,32 @@ class ApplicationLease:
                     "started_at": now(),
                 },
             )
-            return True
+            return checkpoints
 
-        return claim(self.client.transaction())
+        checkpoints = claim(self.client.transaction())
+        if checkpoints is None:
+            return False
+        self.checkpoints = checkpoints
+        return True
+
+    def checkpoint(self, key: str, value: str):
+        # A single bounded record avoids accumulating unpublished content per
+        # analysis. Serialize local writers and fence each write in Firestore.
+        with self.recovery_lock:
+            items = {**self.checkpoints, key: value}
+            if sum(len(item_key) + len(item.encode()) for item_key, item in items.items()) > MAX_RECOVERY_BYTES:
+                return
+
+            @projects.transactional
+            def save(transaction):
+                project = projects._document_to_dict(self.project_doc.get(transaction=transaction))
+                self._check_project(project)
+                record = projects._document_to_dict(self.doc.get(transaction=transaction))
+                self._check(record)
+                transaction.set(self.recovery_doc, {"binding": self.recovery_binding, "expires_at": now() + RECOVERY_WINDOW, "items": items})
+
+            save(self.client.transaction())
+            self.checkpoints = items
 
     def renew(self):
         @projects.transactional
@@ -158,6 +205,7 @@ class ApplicationLease:
         record = projects._document_to_dict(self.doc.get(transaction=transaction))
         self._check(record)
         result = snapshot["payload"]["impact_update_result"]
+        transaction.delete(self.recovery_doc)
         transaction.set(
             self.doc,
             {

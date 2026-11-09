@@ -3,8 +3,9 @@ import { expect, test } from "@playwright/test";
 import { buildProjectPath } from "../src/app/workflowRoutes.js";
 import { expectNoSeriousOrCriticalViolations } from "./support/accessibility.js";
 import { seedAuthenticatedSession } from "./support/auth.js";
+import { settleLayout } from "./support/layout.js";
 import { USE_CASE_PROJECT_ID, installUseCaseReviewApi, useCaseProjectFixture } from "./support/use-case-review.js";
-import { installWorkspaceApi, seedStoredProject, workspaceSummaryFixture } from "./support/workspace.js";
+import { createDeferred, installWorkspaceApi, seedStoredProject, workspaceSummaryFixture } from "./support/workspace.js";
 
 const surfaceRoutes = {
 	"empty Home": "/",
@@ -136,7 +137,74 @@ test("moves focus to each SPA destination through links, Back, and Forward", asy
 	await expect(page.locator("#main-content")).toHaveAttribute("aria-label", "Workflow workspace: Reports");
 });
 
-test("keeps compact workspace controls open when Escape closes the project chooser", async ({ page }) => {
+test("opens a deferred direct link with parallel project data and preserves skip-link focus", { tag: "@p1" }, async ({ page }) => {
+	await installUseCaseReviewApi(page, { initialProject: useCaseProjectFixture() });
+	await seedAuthenticatedSession(page);
+	const data = createDeferred();
+	const module = createDeferred();
+	let requestedData = false;
+	let requestedModule = false;
+	await page.route(
+		(url) => url.pathname === `/projects/${USE_CASE_PROJECT_ID}`,
+		async (route) => {
+			requestedData = true;
+			await data.promise;
+			await route.fallback();
+		}
+	);
+	await page.route("**/src/pages/UseCaseReviewPage.jsx*", async (route) => {
+		requestedModule = true;
+		await module.promise;
+		await route.continue();
+	});
+	try {
+		await page.goto(buildProjectPath(USE_CASE_PROJECT_ID, "use-cases"), { waitUntil: "domcontentloaded" });
+		await expect.poll(() => [requestedData, requestedModule]).toEqual([true, true]);
+		await expect(page.getByRole("navigation", { name: "Global navigation" })).toBeVisible();
+		data.resolve();
+		const main = page.locator("#main-content");
+		await expect(main.getByRole("status")).toHaveText("Loading Use Cases…");
+		await expect(page.getByRole("navigation", { name: "Project navigation" })).toBeVisible();
+		await page.getByRole("link", { name: "Skip to main content" }).focus();
+		await page.keyboard.press("Enter");
+		await expect(main).toBeFocused();
+		module.resolve();
+		await expect(main.getByRole("heading", { name: "Use Cases", exact: true, level: 1 })).toBeVisible();
+		await expect(main).toBeFocused();
+	} finally {
+		data.resolve();
+		module.resolve();
+	}
+});
+
+test("keeps navigation available after a workspace module fails and reloads only on request", { tag: "@p1" }, async ({ page }) => {
+	await installUseCaseReviewApi(page, { initialProject: useCaseProjectFixture() });
+	await seedAuthenticatedSession(page);
+	const reportsModule = "**/src/pages/ReportsPage.jsx*";
+	await page.route(reportsModule, (route) => route.abort("failed"));
+	let documentLoads = 0;
+	page.on("request", (request) => {
+		if (request.resourceType() === "document") documentLoads++;
+	});
+	await page.goto("/");
+	const nav = page.getByRole("navigation", { name: "Global navigation" });
+	const main = page.locator("#main-content");
+	const alert = main.getByRole("alert");
+	await nav.getByRole("link", { name: "Reports", exact: true }).click();
+	await expect(alert).toContainText("Couldn’t load Reports.");
+	await expect(main).toBeFocused();
+	await nav.getByRole("link", { name: "Home", exact: true }).click();
+	await expect(main.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
+	await nav.getByRole("link", { name: "Reports", exact: true }).click();
+	await expect(alert).toBeVisible();
+	expect(documentLoads).toBe(1);
+	await page.unroute(reportsModule);
+	await alert.getByRole("button", { name: "Reload page", exact: true }).click();
+	await expect(main.getByRole("heading", { name: "Reports", exact: true, level: 1 })).toBeVisible();
+	expect(documentLoads).toBe(2);
+});
+
+test("keeps compact workspace controls open when Escape closes a nested control", { tag: "@p1" }, async ({ page }) => {
 	await openSurface(page, "project Overview", 390);
 
 	const workspaceToggle = page.getByRole("button", { name: /^Open workspace controls$/i });
@@ -156,16 +224,21 @@ test("keeps compact workspace controls open when Escape closes the project choos
 	await expect(projectTrigger).toBeFocused();
 	await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toHaveAttribute("aria-expanded", "true");
 
-	const healthTrigger = page.getByRole("button", { name: /^Open system health details$/i });
+	const healthTrigger = page.getByRole("button", { name: /^(Open|Close) system health details$/i });
 	await healthTrigger.focus();
 	await page.keyboard.press("Enter");
-	await expect(page.getByRole("button", { name: /^Close system health details$/i })).toHaveAttribute("aria-expanded", "true");
-	await page.keyboard.press("Escape");
+	await expect(healthTrigger).toHaveAttribute("aria-expanded", "true");
 	await expect(healthTrigger).toBeFocused();
-	await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toHaveAttribute("aria-expanded", "true");
 
 	const accountTrigger = page.getByRole("button", { name: /^Open account menu/i });
-	await accountTrigger.focus();
+	await accountTrigger.evaluate((account) => {
+		document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+		account.focus();
+	});
+	await settleLayout(page);
+	await expect(healthTrigger).toHaveAttribute("aria-expanded", "false");
+	await expect(accountTrigger).toBeFocused({ timeout: 1500 });
+	await expect(page.getByRole("button", { name: /^Close workspace controls$/i })).toHaveAttribute("aria-expanded", "true");
 	await page.keyboard.press("Enter");
 	const accountMenu = page.getByRole("menu", { name: /^Account menu$/i });
 	await expect(accountMenu.getByRole("menuitem", { name: /^Settings$/i })).toBeFocused();

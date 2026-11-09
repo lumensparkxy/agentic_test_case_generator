@@ -186,6 +186,13 @@ All events are immutable (append-only). All versioned artifacts are linked to th
 - login (auth event)
 - logout (auth event)
 
+Project Context analysis verifies project ownership and the originating revision before retrieving artifacts.
+The Context snapshot, downstream staleness, completed workflow, and usage event commit in one Firestore
+transaction. The snapshot links to its usage event. If the response is lost, the same authenticated
+`X-Request-ID` and inputs return the saved analysis while that snapshot is still current. A stale or
+failed save preserves the previous snapshot. The Context workbench retrieves fresh grounding when links
+or notes change and carries forward the saved execution prerequisites.
+
 **Counts guidance:**
 - requirements_generated_count: number of requirements parsed/generated
 - requirements_modified_count: number of requirements changed/refined

@@ -60,6 +60,12 @@ class FakeDocument:
         del transaction, field_paths
         return FakeSnapshot(self.store.get(self.path))
 
+    def set(self, payload: dict[str, Any], merge: bool = False) -> None:
+        self.store[self.path] = {**self.store.get(self.path, {}), **deepcopy(payload)} if merge else deepcopy(payload)
+
+    def update(self, payload: dict[str, Any]) -> None:
+        self.store[self.path].update(deepcopy(payload))
+
     def collection(self, name: str) -> "FakeCollection":
         return FakeCollection(f"{self.path}/{name}", self.store)
 
@@ -114,6 +120,10 @@ class FakeTransaction:
         self.pending.append(("merge" if merge else "set", document, deepcopy(payload)))
         self.operations.append(("set", document.path))
 
+    def delete(self, document):
+        self.pending.append(("delete", document, {}))
+        self.operations.append(("delete", document.path))
+
     def commit(self) -> None:
         next_store = deepcopy(self.store)
         for operation, document, payload in self.pending:
@@ -121,6 +131,8 @@ class FakeTransaction:
                 next_store[document.path] = payload
             elif operation == "merge":
                 next_store.setdefault(document.path, {}).update(payload)
+            elif operation == "delete":
+                next_store.pop(document.path, None)
             else:
                 next_store[document.path].update(payload)
         self.store.clear()

@@ -70,6 +70,46 @@ class TestCaseQualityTests(unittest.TestCase):
             build_export_evidence(ExportTestCasesInput(test_cases=[bad], approved=True, draft_override_requested=True), None)
         self.assertEqual(caught.exception.status_code, 422)
 
+    def test_complete_browser_actions_can_precede_an_observable_outcome(self):
+        case = self.concrete()
+        row = case.model_dump()
+        row["steps"] = [
+            {"step": 1, "action": 'Open "https://example.test/orders"', "expected": ""},
+            {"step": 2, "action": 'Select exact option "Closed" in field "Order status"', "expected": ""},
+            {"step": 3, "action": 'Click exact button "Apply filters"', "expected": 'exact text "Closed order 0142" is visible'},
+        ]
+        delivered, tasks = separate_generation_work([TestCase.model_validate(row)])
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(tasks, [])
+        export = build_export_evidence(
+            ExportTestCasesInput(test_cases=delivered, draft_override_requested=True, draft_override_reason="Synthetic browser test review"), None
+        )
+        self.assertTrue(export.draft_override_used)
+
+        for action, final_expected in (
+            ("Open the app", 'exact text "Closed order 0142" is visible'),
+            ('Select exact option "Closed"', 'exact text "Closed order 0142" is visible'),
+            ('Inspect the "Order status" dropdown', 'exact text "Closed order 0142" is visible'),
+            (row["steps"][1]["action"], ""),
+            (row["steps"][1]["action"], "The changed behavior works without regressing preserved coverage."),
+        ):
+            with self.subTest(action=action, final_expected=final_expected):
+                draft = deepcopy(row)
+                draft["steps"][1]["action"] = action
+                draft["steps"][2]["expected"] = final_expected
+                self.assertIsNotNone(placeholder_reason(draft))
+
+    def test_step_data_fill_is_complete_only_with_its_saved_data(self):
+        row = self.concrete().model_dump()
+        row["steps"] = [
+            {"step": 1, "action": 'Open "https://example.test/orders"', "expected": ""},
+            {"step": 2, "action": 'Enter step data into field "Payload"', "expected": "", "test_data": '{\n  "id": 9\n}'},
+            {"step": 3, "action": 'Click exact button "Submit"', "expected": 'exact text "Saved" is visible'},
+        ]
+        self.assertIsNone(placeholder_reason(row))
+        row["steps"][1].pop("test_data")
+        self.assertIsNotNone(placeholder_reason(row))
+
     def test_targeted_generation_preserves_exact_reviewed_scenario_slice(self):
         requirement = Requirement(id="REQ-001", text="Declined cards keep cart contents", review_status="Approved")
         plan = [
@@ -124,7 +164,8 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(generator=generator), ExitStack() as stack:
                 for name in ("validate_generation_baseline", "enforce_billing_access", "start_workflow_run", "_log_failure"):
                     stack.enter_context(patch.object(routes, name))
-                stack.enter_context(patch.object(routes, "_refinement_source_inputs", return_value={}))
+                stack.enter_context(patch.object(routes, "_test_case_publication_receipt", return_value=None))
+                stack.enter_context(patch.object(routes, "_refinement_source_inputs", return_value={"source_coverage_plan": []}))
                 stack.enter_context(
                     patch.object(
                         routes,
@@ -135,11 +176,14 @@ class IncompleteGenerationEndpointTests(unittest.IsolatedAsyncioTestCase):
                         },
                     )
                 )
-                stack.enter_context(
-                    patch.object(
-                        routes, "get_project", return_value=SimpleNamespace(current_revision=1, stage_state={}, current_snapshots={"test_cases": object()})
-                    )
+                project = SimpleNamespace(
+                    status="active",
+                    current_revision=1,
+                    stage_state={"test_cases": SimpleNamespace(stale=False, current_snapshot_id="saved")},
+                    current_snapshots={"test_cases": SimpleNamespace(snapshot_id="saved", payload={"test_cases": []})},
                 )
+                stack.enter_context(patch.object(routes, "get_project", return_value=project))
+                stack.enter_context(patch("app.services.scoped_refinement.get_project", return_value=project))
                 versions = stack.enter_context(patch.object(routes, "persist_test_case_versions"))
                 snapshot = stack.enter_context(patch.object(routes, "_append_project_generation_snapshots"))
                 with self.assertRaises(HTTPException) as caught:

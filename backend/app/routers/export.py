@@ -1,10 +1,9 @@
-import io
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 
 from ..services.test_case_quality import placeholder_reason
 from ..services.export_evidence import build_export_evidence
@@ -12,24 +11,72 @@ from ..contracts.exports import ExportTestCasesDocument
 from ..agents.export_agent import export_to_csv, export_to_excel, export_to_jira, export_to_json
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, ExportTestCasesInput, JiraExportInput, JiraExportResponse
+from ..observability.metrics import record_workflow_completed
 from ..services.audit_service import complete_workflow_run, record_usage_event, start_workflow_run
-from ..services.workflow_project_service import append_stage_snapshot, get_project, project_error_to_http
+from ..services.firestore_repository import get_required_firestore_client
+from ..services.requirement_reconciliation import digest
+from ..services.workflow_project_service import (
+    ProjectConflictError,
+    ProjectNotFoundError,
+    ProjectPermissionError,
+    append_stage_snapshot,
+    find_idempotent_stage_snapshot,
+    get_project,
+    project_error_to_http,
+)
 
 router = APIRouter()
+
+_EXACT_STEPS_LAYOUT = "exact-steps-v1"
 
 
 def _get_request_id(request: Request) -> str:
     return str(getattr(request.state, "request_id", "") or uuid4())
 
 
-def _export_audit_metadata(payload: ExportTestCasesInput, *, actor: AuthUser) -> dict[str, Any]:
-    project = None
-    if payload.project_id:
-        try:
-            project = get_project(payload.project_id, actor=actor)
-        except Exception as exc:
-            raise project_error_to_http(exc) from exc
-    return build_export_evidence(payload, project).model_dump(mode="json")
+class _ExportPublicationUnconfirmed(HTTPException):
+    def __init__(self):
+        super().__init__(503, {"code": "export_publication_unconfirmed", "message": "The export could not be confirmed. Retry this request."})
+
+
+def _load_export_project(project_id, actor):
+    try:
+        project = get_project(project_id, actor=actor)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+    if project.status != "active":
+        raise HTTPException(409, "Restore the archived project before exporting.")
+    return project
+
+
+def _find_export_receipt(project_id, actor, operation, key):
+    try:
+        # Freshness is verified against the loaded suite and report during replay.
+        return find_idempotent_stage_snapshot(project_id, "reports", operation, key, actor=actor, require_current=False)
+    except (ProjectConflictError, ProjectNotFoundError, ProjectPermissionError) as exc:
+        raise project_error_to_http(exc) from exc
+    except Exception as exc:
+        raise _ExportPublicationUnconfirmed() from exc
+
+
+def _check_export_fingerprint(receipt, fingerprint):
+    if receipt.metadata.get("export_request_fingerprint") != fingerprint:
+        raise HTTPException(409, "This request already published a report for different inputs.")
+
+
+def _replay_export_metadata(receipt, payload, actor, fingerprint):
+    _check_export_fingerprint(receipt, fingerprint)
+    project = _load_export_project(payload.project_id, actor)
+    state = project.stage_state.get("reports")
+    if not state or state.stale or state.current_snapshot_id != receipt.snapshot_id:
+        raise HTTPException(409, "The saved export is no longer current. Reload before exporting.")
+    current = payload.model_copy(update={"base_project_revision": project.current_revision})
+    audit = build_export_evidence(current, project).model_dump(mode="json")
+    audit["project_revision"] = payload.base_project_revision
+    audit["exported_at"] = receipt.payload["audit_metadata"]["exported_at"]
+    if digest(audit) != receipt.metadata.get("export_audit_fingerprint"):
+        raise HTTPException(409, "The saved export evidence has changed. Reload before exporting.")
+    return audit
 
 
 def _project_report_evidence(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -45,22 +92,39 @@ def _project_report_evidence(metadata: dict[str, Any]) -> dict[str, Any]:
     return {"source_snapshot_ids": source_ids, "execution_run_ids": metadata["execution_run_ids"], "evidence_refs": refs}
 
 
-def _record_project_export_snapshot(
+def _publish_project_export(
     *,
     payload: ExportTestCasesInput,
     export_format: str,
     current_user: AuthUser,
     request_id: str,
     workflow_run_id: str,
-    source_event_id: str,
     result_metadata: dict[str, Any],
-) -> None:
-    if not payload.project_id:
-        return
+    key: str,
+    fingerprint: str,
+    export_layout: str | None,
+):
+    operation = f"export.{export_format}"
     try:
+        client = get_required_firestore_client(unavailable_message="Project storage is unavailable")
+        writes = []
+        event_id = record_usage_event(
+            event_type=operation,
+            billing_key=operation,
+            quantity=len(payload.test_cases),
+            unit="test_case",
+            actor=current_user,
+            request_id=request_id,
+            workflow_run_id=workflow_run_id,
+            status="completed",
+            metadata={"operation": operation, **result_metadata},
+            pending_writes=writes,
+            firestore_client=client,
+        )
+        complete_workflow_run(workflow_run_id, status="completed", metadata=result_metadata, pending_writes=writes, firestore_client=client)
         evidence = _project_report_evidence(result_metadata)
         audit_metadata = {key: value for key, value in result_metadata.items() if key not in {"content_length", "byte_count"}}
-        append_stage_snapshot(
+        return append_stage_snapshot(
             project_id=payload.project_id,
             stage="reports",
             payload={
@@ -73,17 +137,13 @@ def _record_project_export_snapshot(
                 "draft_override_requested": result_metadata["draft_override_used"],
                 "draft_override_reason": result_metadata["draft_override_reason"],
                 "result_metadata": {key: result_metadata[key] for key in ("content_length", "byte_count") if key in result_metadata},
-                "evidence": {
-                    "source_snapshot_ids": evidence["source_snapshot_ids"],
-                    "execution_run_ids": evidence["execution_run_ids"],
-                    "evidence_refs": evidence["evidence_refs"],
-                },
+                "evidence": evidence,
             },
-            operation=f"export.{export_format}",
+            operation=operation,
             actor=current_user,
             request_id=request_id,
             workflow_run_id=workflow_run_id,
-            source_event_id=source_event_id,
+            source_event_id=event_id,
             approved=not result_metadata["is_draft"],
             source_snapshot_id=result_metadata["snapshot_id"],
             title=f"{export_format.upper()} export",
@@ -93,10 +153,21 @@ def _record_project_export_snapshot(
                 "source_snapshot_ids": evidence["source_snapshot_ids"],
                 "execution_run_ids": evidence["execution_run_ids"],
                 "evidence_count": len(evidence["evidence_refs"]),
+                "export_request_fingerprint": fingerprint,
+                "export_audit_fingerprint": digest(audit_metadata),
+                **({"export_layout": export_layout} if export_layout else {}),
             },
             base_project_revision=payload.base_project_revision,
+            idempotency_key=key,
+            pending_writes=writes,
         )
     except Exception as project_exc:
+        # A reply may be lost after Firestore commits, even if the report later becomes stale.
+        receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
+        if receipt:
+            return receipt
+        if isinstance(project_exc, HTTPException):
+            raise
         raise project_error_to_http(project_exc) from project_exc
 
 
@@ -155,8 +226,7 @@ def _log_failure(
         request_id=request_id,
         workflow_run_id=workflow_run_id,
         status="failed",
-        metadata=failure_metadata,
-        error_message=error_message,
+        metadata={**failure_metadata, "error_message": error_message},
     )
 
 
@@ -203,172 +273,132 @@ async def export_jira(
         raise
 
 
+def _file_export(
+    request: Request,
+    payload: ExportTestCasesInput,
+    current_user: AuthUser,
+    *,
+    export_format: str,
+    render: Callable[..., str | bytes],
+    media_type: str,
+    extension: str,
+) -> Response:
+    operation = f"export.{export_format}"
+    request_id = _get_request_id(request)
+    export_layout = _EXACT_STEPS_LAYOUT if export_format in {"csv", "excel"} else None
+
+    def response(content):
+        return Response(content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename=test_cases.{extension}"})
+
+    def render_content(audit, layout):
+        options = {"include_exact_steps": layout == _EXACT_STEPS_LAYOUT} if export_layout else {}
+        return render(payload.test_cases, audit_metadata=audit, **options)
+
+    def render_saved_export(receipt):
+        audit = _replay_export_metadata(receipt, payload, current_user, fingerprint)
+        return render_content(audit, receipt.metadata.get("export_layout"))
+
+    project = None
+    if payload.project_id:
+        key = digest(["file-export", current_user.sub, request_id])
+        fingerprint = digest(payload.model_dump(mode="json"))
+        receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
+        if receipt:
+            return response(render_saved_export(receipt))
+        project = _load_export_project(payload.project_id, current_user)
+        if payload.base_project_revision != project.current_revision:
+            # A duplicate may have committed between the receipt read and the project read.
+            receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
+            if receipt:
+                return response(render_saved_export(receipt))
+
+    audit = build_export_evidence(payload, project).model_dump(mode="json")
+    workflow_run_id = start_workflow_run(operation=operation, actor=current_user, request_id=request_id, metadata=audit)
+    try:
+        content = render_content(audit, export_layout)
+        result_metadata = {**audit, ("byte_count" if isinstance(content, bytes) else "content_length"): len(content)}
+        if payload.project_id:
+            snapshot = _publish_project_export(
+                payload=payload,
+                export_format=export_format,
+                current_user=current_user,
+                request_id=request_id,
+                workflow_run_id=workflow_run_id,
+                result_metadata=result_metadata,
+                key=key,
+                fingerprint=fingerprint,
+                export_layout=export_layout,
+            )
+            _check_export_fingerprint(snapshot, fingerprint)
+        else:
+            _log_success(
+                current_user=current_user,
+                request=request,
+                workflow_run_id=workflow_run_id,
+                operation=operation,
+                event_type=operation,
+                billing_key=operation,
+                quantity=len(payload.test_cases),
+                unit="test_case",
+                result_metadata=result_metadata,
+            )
+            return response(content)
+    except _ExportPublicationUnconfirmed:
+        raise
+    except Exception as exc:
+        _log_failure(
+            current_user=current_user,
+            request=request,
+            workflow_run_id=workflow_run_id,
+            operation=operation,
+            event_type=operation,
+            billing_key=operation,
+            error_message=str(exc),
+            metadata={"test_case_count": len(payload.test_cases)},
+        )
+        raise
+
+    if snapshot.workflow_run_id == workflow_run_id:
+        record_workflow_completed(workflow_run_id, "completed")
+    else:
+        complete_workflow_run(workflow_run_id, status="completed", metadata={"reused_snapshot_id": snapshot.snapshot_id})
+        content = render_saved_export(snapshot)
+    return response(content)
+
+
 @router.post("/export/csv")
-async def export_csv(
+def export_csv(
     request: Request,
     payload: ExportTestCasesInput,
     current_user: AuthUser = Depends(get_current_user),
 ):
     """Export test cases to CSV format."""
-    request_id = _get_request_id(request)
-    export_metadata = _export_audit_metadata(payload, actor=current_user)
-    workflow_run_id = start_workflow_run(
-        operation="export.csv",
-        actor=current_user,
-        request_id=request_id,
-        metadata=export_metadata,
-    )
-    try:
-        csv_content = export_to_csv(payload.test_cases, audit_metadata=export_metadata)
-        result_metadata = {**export_metadata, "content_length": len(csv_content)}
-        event_id = _log_success(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="export.csv",
-            event_type="export.csv",
-            billing_key="export.csv",
-            quantity=len(payload.test_cases),
-            unit="test_case",
-            result_metadata=result_metadata,
-        )
-        _record_project_export_snapshot(
-            payload=payload,
-            export_format="csv",
-            current_user=current_user,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=event_id,
-            result_metadata=result_metadata,
-        )
-        return StreamingResponse(
-            io.StringIO(csv_content),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=test_cases.csv"},
-        )
-    except Exception as exc:
-        _log_failure(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="export.csv",
-            event_type="export.csv",
-            billing_key="export.csv",
-            error_message=str(exc),
-            metadata={"test_case_count": len(payload.test_cases)},
-        )
-        raise
+    return _file_export(request, payload, current_user, export_format="csv", render=export_to_csv, media_type="text/csv", extension="csv")
 
 
 @router.post("/export/excel")
-async def export_excel_endpoint(
+def export_excel_endpoint(
     request: Request,
     payload: ExportTestCasesInput,
     current_user: AuthUser = Depends(get_current_user),
 ):
     """Export test cases to Excel format."""
-    request_id = _get_request_id(request)
-    export_metadata = _export_audit_metadata(payload, actor=current_user)
-    workflow_run_id = start_workflow_run(
-        operation="export.excel",
-        actor=current_user,
-        request_id=request_id,
-        metadata=export_metadata,
+    return _file_export(
+        request,
+        payload,
+        current_user,
+        export_format="excel",
+        render=export_to_excel,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        extension="xlsx",
     )
-    try:
-        excel_bytes = export_to_excel(payload.test_cases, audit_metadata=export_metadata)
-        result_metadata = {**export_metadata, "byte_count": len(excel_bytes)}
-        event_id = _log_success(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="export.excel",
-            event_type="export.excel",
-            billing_key="export.excel",
-            quantity=len(payload.test_cases),
-            unit="test_case",
-            result_metadata=result_metadata,
-        )
-        _record_project_export_snapshot(
-            payload=payload,
-            export_format="excel",
-            current_user=current_user,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=event_id,
-            result_metadata=result_metadata,
-        )
-        return StreamingResponse(
-            io.BytesIO(excel_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=test_cases.xlsx"},
-        )
-    except Exception as exc:
-        _log_failure(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="export.excel",
-            event_type="export.excel",
-            billing_key="export.excel",
-            error_message=str(exc),
-            metadata={"test_case_count": len(payload.test_cases)},
-        )
-        raise
 
 
 @router.post("/export/json", response_model=ExportTestCasesDocument)
-async def export_json_endpoint(
+def export_json_endpoint(
     request: Request,
     payload: ExportTestCasesInput,
     current_user: AuthUser = Depends(get_current_user),
 ):
     """Export test cases to JSON format."""
-    request_id = _get_request_id(request)
-    export_metadata = _export_audit_metadata(payload, actor=current_user)
-    workflow_run_id = start_workflow_run(
-        operation="export.json",
-        actor=current_user,
-        request_id=request_id,
-        metadata=export_metadata,
-    )
-    try:
-        json_content = export_to_json(payload.test_cases, audit_metadata=export_metadata)
-        result_metadata = {**export_metadata, "content_length": len(json_content)}
-        event_id = _log_success(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="export.json",
-            event_type="export.json",
-            billing_key="export.json",
-            quantity=len(payload.test_cases),
-            unit="test_case",
-            result_metadata=result_metadata,
-        )
-        _record_project_export_snapshot(
-            payload=payload,
-            export_format="json",
-            current_user=current_user,
-            request_id=request_id,
-            workflow_run_id=workflow_run_id,
-            source_event_id=event_id,
-            result_metadata=result_metadata,
-        )
-        return StreamingResponse(
-            io.StringIO(json_content),
-            media_type="application/json",
-            headers={"Content-Disposition": "attachment; filename=test_cases.json"},
-        )
-    except Exception as exc:
-        _log_failure(
-            current_user=current_user,
-            request=request,
-            workflow_run_id=workflow_run_id,
-            operation="export.json",
-            event_type="export.json",
-            billing_key="export.json",
-            error_message=str(exc),
-            metadata={"test_case_count": len(payload.test_cases)},
-        )
-        raise
+    return _file_export(request, payload, current_user, export_format="json", render=export_to_json, media_type="application/json", extension="json")

@@ -13,7 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.main import app, get_current_user
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
-from app.models import AuthUser, OrchestratorStatusResponse
+from app.models import AuthUser, OrchestratorStatusResponse, QaProjectExecutionRun
 from app.services.orchestrator_service import build_orchestrator_status, get_project_orchestrator_status
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 from app.services.workspace_summary_service import build_workspace_summary
@@ -261,6 +261,24 @@ class OrchestratorServiceTests(unittest.TestCase):
     def _action(self, status: OrchestratorStatusResponse, action_id: str):
         return next(action for action in status.next_actions if action.action == action_id)
 
+    def _append_manual_only_preview(self, project_id: str, source_snapshot_id: str | None) -> None:
+        counts = {"executable": 0, "manual": 1, "unsupported": 0, "invalid": 0}
+        append_stage_snapshot(
+            project_id=project_id,
+            stage="execution",
+            payload={
+                "summary": counts,
+                "candidate_counts": counts,
+                "candidates": {"executable": [], "manual": [{"id": "manual-1"}], "unsupported": [], "invalid": []},
+            },
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="req-manual-preview",
+            approved=True,
+            source_snapshot_id=source_snapshot_id,
+            title="Manual-only preview",
+        )
+
     def test_no_project_status_reports_missing_project_blocker(self) -> None:
         status = build_orchestrator_status(None)
 
@@ -463,6 +481,210 @@ class OrchestratorServiceTests(unittest.TestCase):
         self.assertTrue(execute.primary)
         self.assertTrue(execute.enabled)
         self.assertEqual(status.stages["execution"].status, "ready")
+
+    def test_current_manual_preview_recommends_report_before_and_after_export(self) -> None:
+        project = self._seed_baseline_suite()
+        test_snapshot_id = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        self._append_manual_only_preview(project.project_id, test_snapshot_id)
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.current_stage, "reports")
+        self.assertEqual(status.next_actions[0].label, "Create Test Case Report")
+        self.assertTrue(self._action(status, "report").enabled)
+        self.assertNotIn("execute", [action.action for action in status.next_actions])
+
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="reports",
+            payload={"format": "json"},
+            operation="export.json",
+            actor=self.actor,
+            request_id="req-manual-export",
+            approved=True,
+            source_snapshot_id=test_snapshot_id,
+            title="JSON export",
+        )
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertEqual(status.next_actions[0].label, "Review Reports")
+        self.assertEqual(status.stages["reports"].status, "completed")
+
+    def test_only_consistent_current_zero_counts_change_preview_recommendation(self) -> None:
+        counts = {"executable": 0, "manual": 0, "unsupported": 0, "invalid": 0}
+        buckets = {"executable": [], "manual": [], "unsupported": [], "invalid": []}
+        project = self._seed_baseline_suite()
+        test_snapshot_id = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        for label, payload, source_id, stale, expected in (
+            ("unclassified legacy preview", {"summary": {}}, None, False, "automate"),
+            ("mismatch", {"summary": counts, "candidate_counts": counts, "candidates": {**buckets, "executable": [{}]}}, test_snapshot_id, False, "automate"),
+            ("outdated source", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, "older-tests", False, "automate"),
+            ("stale", {"summary": counts, "candidate_counts": counts, "candidates": buckets}, test_snapshot_id, True, "automate"),
+            (
+                "partial classification",
+                {"summary": counts, "candidate_counts": counts, "candidates": buckets, "reviewed_full_suite": False},
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
+            (
+                "legacy classification limit",
+                {
+                    "summary": counts,
+                    "candidate_counts": counts,
+                    "candidates": buckets,
+                    "warnings": ["Only the first 1 test cases were reviewed for execution."],
+                },
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
+            (
+                "unverified saved cases",
+                {
+                    "summary": counts,
+                    "candidate_counts": counts,
+                    "candidates": buckets,
+                    "readiness": {"run_allowed": False, "blockers": [{"code": "case_snapshot_mismatch", "message": "The cases could not be verified."}]},
+                },
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
+            (
+                "unfinished suite",
+                {
+                    "summary": counts,
+                    "candidate_counts": counts,
+                    "candidates": buckets,
+                    "readiness": {"run_allowed": False, "blockers": [{"code": "incomplete_suite", "message": "Resolve unfinished generation tasks."}]},
+                },
+                test_snapshot_id,
+                False,
+                "automate",
+            ),
+        ):
+            with self.subTest(label=label):
+                append_stage_snapshot(
+                    project_id=project.project_id,
+                    stage="execution",
+                    payload=payload,
+                    operation="automation.execution.preview",
+                    actor=self.actor,
+                    request_id=f"req-preview-{label}",
+                    approved=True,
+                    source_snapshot_id=source_id,
+                    title="Execution preview",
+                )
+                detail = get_project(project.project_id, actor=self.actor)
+                detail.stage_state["execution"].stale = stale
+                status = build_orchestrator_status(detail)
+                self.assertEqual(status.next_actions[0].action, expected)
+
+    def test_current_preview_outranks_failed_run_history_and_stale_report(self) -> None:
+        project = self._seed_baseline_suite()
+        suite = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        preview = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"summary": {"executable": 1}},
+            operation="automation.execution.preview",
+            actor=self.actor,
+            request_id="req-preview",
+            approved=True,
+            source_snapshot_id=suite,
+            title="Current execution preview",
+        )
+        append_stage_snapshot(
+            project_id=project.project_id,
+            stage="reports",
+            payload={"format": "json"},
+            operation="export.json",
+            actor=self.actor,
+            request_id="req-report",
+            approved=True,
+            title="Older report",
+        )
+        detail = get_project(project.project_id, actor=self.actor)
+        detail.stage_state["reports"].stale = True
+        detail.execution_runs = [
+            QaProjectExecutionRun(
+                run_record_id="prior-failure",
+                project_id=detail.project_id,
+                run_id="run-failure",
+                target_environment="staging",
+                project_revision=preview.project_revision - 1,
+                status="failed",
+                snapshot_id="older-execution",
+                source_snapshot_id=suite,
+                actor_user_id=self.actor.sub,
+                created_at=preview.created_at,
+            )
+        ]
+        status = build_orchestrator_status(detail)
+        self.assertEqual(status.next_actions[0].action, "execute")
+        self.assertEqual(status.stages["reports"].status, "stale")
+        self.assertNotIn("failed_execution", [blocker.code for blocker in status.stages["review"].blockers])
+
+        detail.current_snapshots["execution"].payload["readiness"] = {"run_allowed": False, "blockers": [{"code": "target_required"}]}
+        status = build_orchestrator_status(detail)
+        self.assertEqual(status.next_actions[0].action, "automate")
+
+        detail.stage_state["execution"].stale = True
+        status = build_orchestrator_status(detail)
+        self.assertEqual(status.next_actions[0].label, "Regenerate Evidence Report")
+
+    def test_only_matching_current_run_record_can_report_execution_failure(self) -> None:
+        project = self._seed_baseline_suite()
+        suite = get_project(project.project_id, actor=self.actor).stage_state["test_cases"].current_snapshot_id
+        snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="execution",
+            payload={"run_id": "run-1"},
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="req-run",
+            approved=False,
+            source_snapshot_id=suite,
+            title="Execution run",
+        )
+        detail = get_project(project.project_id, actor=self.actor)
+        run = QaProjectExecutionRun(
+            run_record_id="run-record-1",
+            project_id=detail.project_id,
+            run_id="run-1",
+            target_environment="staging",
+            project_revision=snapshot.project_revision,
+            status="failed",
+            snapshot_id=snapshot.snapshot_id,
+            source_snapshot_id=suite,
+            actor_user_id=self.actor.sub,
+            created_at=snapshot.created_at,
+        )
+        for outcome, stage_status in (("failed", "failed"), ("flaky", "attention_required")):
+            detail.stage_state["execution"].stale = False
+            for changes in ({"snapshot_id": "older-run"}, {"source_snapshot_id": "older-suite"}, {"historical": True}):
+                with self.subTest(outcome=outcome, changes=changes):
+                    detail.execution_runs = [run.model_copy(update={"status": outcome, **changes})]
+                    status = build_orchestrator_status(detail)
+                    self.assertNotEqual(status.stages["execution"].status, stage_status)
+                    self.assertNotIn(f"{outcome}_execution", [blocker.code for blocker in status.stages["review"].blockers])
+
+            detail.execution_runs = [run.model_copy(update={"status": outcome})]
+            status = build_orchestrator_status(detail)
+            self.assertEqual(status.stages["execution"].status, stage_status)
+            self.assertEqual(status.next_actions[0].label, f"Review {outcome.title()} Execution")
+            self.assertIn(f"{outcome}_execution", [blocker.code for blocker in status.stages["review"].blockers])
+            detail.stage_state["execution"].stale = True
+            self.assertEqual(build_orchestrator_status(detail).next_actions[0].action, "automate")
+
+    def test_existing_approved_suite_without_use_cases_can_report_manual_preview(self) -> None:
+        project = self._create_project()
+        self._append_requirements(project.project_id)
+        suite = self._append_test_cases(project.project_id)
+        self._append_manual_only_preview(project.project_id, suite.snapshot_id)
+
+        status = get_project_orchestrator_status(project.project_id, actor=self.actor)
+        self.assertTrue(status.has_baseline_test_suite)
+        self.assertEqual(status.next_actions[0].action, "report")
 
     def test_passed_execution_without_report_recommends_report(self) -> None:
         project = self._seed_baseline_suite()

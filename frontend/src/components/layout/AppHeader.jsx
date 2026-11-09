@@ -41,10 +41,6 @@ function HealthMenu({ isAuthenticated, billingStatusItems, statusUsageItems, isU
 	const healthTriggerRef = useRef(null);
 	const healthDetailsId = useId();
 	const healthLabel = isAuthenticated ? "System healthy" : "Sign in required";
-	const closeAndRestoreFocus = useCallback(() => {
-		setIsOpen(false);
-		window.requestAnimationFrame(() => healthTriggerRef.current?.focus());
-	}, []);
 
 	useEffect(() => {
 		if (!isOpen) return undefined;
@@ -63,7 +59,8 @@ function HealthMenu({ isAuthenticated, billingStatusItems, statusUsageItems, isU
 				if (event.key !== "Escape" || !isOpen) return;
 				event.preventDefault();
 				event.stopPropagation();
-				closeAndRestoreFocus();
+				setIsOpen(false);
+				healthTriggerRef.current?.focus();
 			}}
 		>
 			<Button

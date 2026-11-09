@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Button, Checkbox, Select } from "../ui/controls";
-import { Badge, Disclosure } from "../ui/surfaces";
+import { Alert, Badge, Disclosure } from "../ui/surfaces";
 import { CollectionState, Table, TableScroll } from "../ui/collections";
 import ReviewRowToggle from "../reviews/ReviewRowToggle";
 import RequirementSourceEvidence from "./RequirementSourceEvidence";
@@ -13,13 +13,25 @@ const labels = {
 	skipped: "Skipped",
 	retiring: "Retiring",
 };
+const evidenceLabels = {
+	unverified_range: "Range absent from the incoming quotation",
+	ambiguous_range: "Range match is ambiguous",
+	uncovered_range: "Source range missing from verified extraction",
+};
 const normalize = (value) => value.trim().replace(/\s+/g, " ");
+const requirementOption = (requirement) => (
+	<option key={requirement.requirement_uid} value={requirement.requirement_uid}>
+		{requirement.id} — {requirement.text}
+	</option>
+);
 
 export default function RequirementImportReview({ preview, revision, busy, error, stalePreview, onAction }) {
 	const heading = useRef(null);
 	const actionBar = useRef(null);
 	const filterControl = useRef(null);
 	const detailId = useId();
+	const evidenceId = useId();
+	const evidenceFindings = preview.source_evidence_findings || [];
 	const [openCandidate, setOpenCandidate] = useState(null);
 	const [filter, setFilter] = useState("all");
 	const [scope, setScope] = useState([]);
@@ -75,7 +87,14 @@ export default function RequirementImportReview({ preview, revision, busy, error
 		setConfirm(false);
 	};
 	const rows = preview.candidates.filter((candidate) => filter === "all" || kindOf(candidate) === filter);
-	const openCandidateVisible = rows.some((candidate) => candidate.candidate_id === openCandidate);
+	const opened = rows.find((candidate) => candidate.candidate_id === openCandidate);
+	const openCandidateVisible = Boolean(opened);
+	const sourceMatches = new Map(
+		(opened?.suggestions || [])
+			.filter((match) => match.verified_original_ids?.length && current.has(match.requirement_uid))
+			.map((match) => [match.requirement_uid, match.verified_original_ids])
+	);
+	const [firstSourceMatch] = sourceMatches.keys();
 	useEffect(() => {
 		if (openCandidate && !openCandidateVisible) {
 			filterControl.current?.focus();
@@ -106,6 +125,23 @@ export default function RequirementImportReview({ preview, revision, busy, error
 					{warning}
 				</p>
 			))}
+			{evidenceFindings.length > 0 && (
+				<Alert as="section" tone="warning" className="import-notice" aria-labelledby={evidenceId}>
+					<h3 id={evidenceId}>Numeric source evidence needs review</h3>
+					<p>Compare the incoming wording with the quoted source before deciding what to keep, update, or skip.</p>
+					<ul>
+						{evidenceFindings.map((finding, index) => (
+							<li key={index}>
+								<strong>{evidenceLabels[finding.kind]}</strong>
+								{finding.requirement_id && ` · Incoming ${finding.requirement_id}`}
+								{" · "}
+								{[finding.source_label, ...finding.original_requirement_ids, finding.source_section].filter(Boolean).join(" · ")}
+								<p>“{finding.excerpt}”</p>
+							</li>
+						))}
+					</ul>
+				</Alert>
+			)}
 			{preview.recovery_snapshot_ids.length > 0 && (
 				<Disclosure>
 					<summary>Restore saved baseline ({preview.current_requirements.length} requirements)</summary>
@@ -151,6 +187,8 @@ export default function RequirementImportReview({ preview, revision, busy, error
 								const previous = current.get(decision.target_requirement_uid);
 								const kind = kindOf(candidate);
 								const expanded = openCandidate === id;
+								const suggested = expanded && !decision.action && sourceMatches.size === 1 ? current.get(firstSourceMatch) : null;
+								const comparison = previous || suggested;
 								const duplicate = duplicateTargets.has(decision.target_requirement_uid);
 								const decisionLabel = previous
 									? `${decision.action === "keep" ? "Keep" : "Update"} ${previous.id}`
@@ -186,11 +224,18 @@ export default function RequirementImportReview({ preview, revision, busy, error
 										{expanded && (
 											<tr className="review-detail-row">
 												<td colSpan={3} id={detailId}>
-													<div className={`import-text-comparison${previous ? "" : " single"}`}>
-														{previous && (
+													<div className={`import-text-comparison${comparison ? "" : " single"}`}>
+														{comparison && (
 															<div>
-																<h3>Current requirement · {previous.id}</h3>
-																<p>{previous.text}</p>
+																<h3>
+																	{suggested ? "Suggested current requirement" : "Current requirement"} · {comparison.id}
+																</h3>
+																<p>{comparison.text}</p>
+																{sourceMatches.has(comparison.requirement_uid) && (
+																	<p className="helper-text">
+																		Verified original IDs: {sourceMatches.get(comparison.requirement_uid).join(", ")}
+																	</p>
+																)}
 															</div>
 														)}
 														<div>
@@ -210,11 +255,14 @@ export default function RequirementImportReview({ preview, revision, busy, error
 															<option value="">Choose a decision</option>
 															<option value="add">Add independently</option>
 															<option value="skip">Skip this incoming requirement</option>
-															{preview.current_requirements.map((requirement) => (
-																<option key={requirement.requirement_uid} value={requirement.requirement_uid}>
-																	{requirement.id} — {requirement.text}
-																</option>
-															))}
+															{sourceMatches.size > 0 && (
+																<optgroup label="Verified source matches">
+																	{Array.from(sourceMatches.keys(), (uid) => requirementOption(current.get(uid)))}
+																</optgroup>
+															)}
+															{preview.current_requirements
+																.filter((requirement) => !sourceMatches.has(requirement.requirement_uid))
+																.map(requirementOption)}
 														</Select>
 													</label>
 													{duplicate && (
@@ -228,6 +276,12 @@ export default function RequirementImportReview({ preview, revision, busy, error
 																<strong>{current.get(suggestion.requirement_uid)?.id}</strong> — {suggestion.reason}
 																<br />
 																{current.get(suggestion.requirement_uid)?.text}
+																{suggestion.verified_original_ids?.length > 0 && (
+																	<>
+																		<br />
+																		Verified original IDs: {suggestion.verified_original_ids.join(", ")}
+																	</>
+																)}
 															</p>
 														))}
 													</Disclosure>

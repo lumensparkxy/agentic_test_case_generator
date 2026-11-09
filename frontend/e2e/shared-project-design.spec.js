@@ -28,7 +28,8 @@ const caseFixture = (id, title) => ({
 async function openCases(
 	page,
 	testCases = [caseFixture("TC-001", "Valid checkout"), caseFixture("TC-002", "Declined card")],
-	payload = {}
+	payload = {},
+	resultTab = /^Generated Test Cases/
 ) {
 	const project = useCaseProjectFixture();
 	project.current_snapshots.test_cases = {
@@ -50,12 +51,12 @@ async function openCases(
 		},
 	};
 	project.stage_state.test_cases = { current_snapshot_id: "cases-v1", approved: false, stale: false, version: 1 };
-	await installUseCaseReviewApi(page, { initialProject: project });
+	const api = await installUseCaseReviewApi(page, { initialProject: project });
 	await seedAuthenticatedSession(page);
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
 	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toBeVisible();
-	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
-	return project;
+	await page.getByRole("tab", { name: resultTab }).click();
+	return { project, api };
 }
 
 test("selects cases and preserves all steps and metadata while searching", async ({ page }) => {
@@ -84,6 +85,222 @@ test("selects cases and preserves all steps and metadata while searching", async
 	await page.getByRole("button", { name: "Generate and review", exact: true }).click();
 	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
 	await expect(page.getByRole("heading", { name: "Generated Test Cases", exact: true })).toBeVisible();
+});
+
+test("moves through the filtered case sequence and restores selection after reload", { tag: "@p1" }, async ({ page }) => {
+	const writes = [];
+	page.on("request", (request) => {
+		if (request.method() !== "GET" && /\/(projects|testcases|automation|export)\b/.test(new URL(request.url()).pathname))
+			writes.push(request.url());
+	});
+	await openCases(page, [
+		caseFixture("TC-001", "Receipt review"),
+		{ ...caseFixture("TC-002", "Automated receipt"), automation_status: "Automated" },
+		caseFixture("TC-003", "Resend receipt"),
+		{ ...caseFixture("TC-004", "Draft receipt"), priority: "Medium" },
+		caseFixture("TC-005", "Cancel payment"),
+	]);
+	const pane = page.getByRole("region", { name: "Generated test cases", exact: true });
+	const detail = pane.getByRole("region", { name: "Selected test case" });
+	const search = pane.getByRole("searchbox", { name: "Search test cases" });
+	const skipList = pane.getByRole("button", { name: "Go to selected case" });
+	const firstTitle = detail.getByRole("heading", { name: "Receipt review" });
+	const lastTitle = detail.getByRole("heading", { name: "Resend receipt" });
+	const previous = detail.getByRole("button", { name: "Previous case" });
+	const next = detail.getByRole("button", { name: "Next case" });
+	await search.focus();
+	await page.keyboard.press("Tab");
+	await expect(pane.getByRole("button", { name: "Filters", exact: true })).toBeFocused();
+	await page.keyboard.press("Tab");
+	await expect(skipList).toBeFocused();
+	await page.keyboard.press("Enter");
+	await expect(firstTitle).toBeFocused();
+	await expect(firstTitle).toHaveAccessibleDescription("Case 1 of 5");
+
+	await search.fill("receipt");
+	await pane.getByRole("button", { name: "Filters", exact: true }).click();
+	await pane.getByRole("combobox", { name: "Priority", exact: true }).selectOption("High");
+	await pane.getByRole("combobox", { name: "Automation intent", exact: true }).selectOption("Manual");
+	await expect(firstTitle).toHaveAccessibleDescription("Case 1 of 2");
+	await expect(previous).toBeDisabled();
+	await next.press("Enter");
+	await expect(lastTitle).toBeFocused();
+	await expect(lastTitle).toHaveAccessibleDescription("Case 2 of 2");
+	await expect(next).toBeDisabled();
+	const lastRow = pane.getByRole("button", { name: "TC-003 Resend receipt" });
+	await expect(lastRow).toHaveAttribute("aria-pressed", "true");
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await expect(lastRow).toHaveAttribute("aria-pressed", "true");
+	await expect(search).toHaveValue("receipt");
+	await expect(lastTitle).toHaveAccessibleDescription("Case 2 of 2");
+	await previous.press("Enter");
+	await expect(firstTitle).toBeFocused();
+	await expect(previous).toBeDisabled();
+	await expect(next).toBeEnabled();
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+	await search.fill("no matching case");
+	await expect(skipList).toHaveCount(0);
+	await expect(next).toHaveCount(0);
+	expect(writes).toEqual([]);
+});
+
+test("copies an exact case link and keeps its original evidence after the suite changes", { tag: "@p1" }, async ({ page, context }) => {
+	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+	const original = caseFixture("TC-02 + / Ω", "Original checkout");
+	const { project, api } = await openCases(page, [caseFixture("TC-001", "Other checkout"), original]);
+	const caseQueries = [];
+	let historical = false;
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/test-case-evidence?*`, (route) => {
+		const query = Object.fromEntries(new URL(route.request().url()).searchParams);
+		caseQueries.push(query);
+		return route.fulfill({
+			json: {
+				project_id: USE_CASE_PROJECT_ID,
+				snapshot_id: "cases-v1",
+				suite_version: 1,
+				project_revision: 7,
+				historical,
+				test_case: original,
+				requirements: [{ id: "REQ-101", text: "Original recorded requirement" }],
+				obligations: [],
+			},
+		});
+	});
+	await page.getByRole("button", { name: `${original.id} ${original.title}`, exact: true }).click();
+	const beforeCopy = page.url();
+	await page.getByRole("button", { name: "Copy case link" }).click();
+	await expect(page.getByText("Case link copied.", { exact: true })).toBeVisible();
+	const copied = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+	expect(copied.pathname).toBe(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
+	expect(Object.fromEntries(copied.searchParams)).toEqual({ suite: "cases-v1", case: original.id });
+	await expect(page).toHaveURL(beforeCopy);
+	await page.getByRole("searchbox", { name: "Search test cases" }).fill("Other checkout");
+	await page.goto(copied.href);
+	const reader = page.getByRole("region", { name: "Saved test case", exact: true });
+	await expect(reader.getByRole("heading", { name: "Original checkout" })).toBeVisible();
+	await expect(reader.getByText("Current saved suite · Version 1 · Project revision 7")).toBeVisible();
+	await expect(page.getByRole("searchbox", { name: "Search test cases" })).toHaveCount(0);
+	await expect(reader.getByRole("button", { name: "Report a problem" })).toHaveCount(0);
+
+	historical = true;
+	project.current_revision += 1;
+	project.current_snapshots.test_cases.snapshot_id = "cases-v2";
+	project.stage_state.test_cases.current_snapshot_id = "cases-v2";
+	project.current_snapshots.test_cases.payload.test_cases = [{ ...original, title: "Replacement checkout" }];
+	api.setProject(project);
+	await page.reload();
+	await expect(reader.getByText("Historical saved suite · Version 1 · Project revision 7")).toBeVisible();
+	await expect(reader.getByRole("heading", { name: "Original checkout" })).toBeVisible();
+	await expect(reader.getByText("Replacement checkout")).toHaveCount(0);
+	await reader.getByText("Why this test? Source and assessment", { exact: true }).click();
+	await expect(reader.getByText("Original recorded requirement")).toBeVisible();
+	expect(caseQueries).toEqual([
+		{ snapshot_id: "cases-v1", case_id: original.id },
+		{ snapshot_id: "cases-v1", case_id: original.id },
+	]);
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await reader.getByRole("link", { name: "Open current suite" }).click();
+	await expect(page).toHaveURL(beforeCopy);
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await expect(page.getByRole("heading", { name: "Replacement checkout" })).toBeVisible();
+});
+
+test("shows a selectable URL on clipboard denial and keeps unavailable links explicit", { tag: "@p1" }, async ({ page }) => {
+	await page.addInitScript(() => {
+		Object.defineProperty(navigator, "clipboard", {
+			value: { writeText: () => Promise.reject(new DOMException("Clipboard blocked", "NotAllowedError")) },
+		});
+	});
+	await openCases(page);
+	const workbench = page.getByRole("region", { name: "Selected test case" });
+	await workbench.getByRole("button", { name: "Copy case link" }).press("Enter");
+	const fallback = workbench.getByRole("textbox", { name: "Select and copy the case link" });
+	await expect(fallback).toBeFocused();
+	await expect(fallback).toHaveJSProperty("readOnly", true);
+	const href = await fallback.inputValue();
+	expect(await fallback.evaluate((input) => input.selectionEnd - input.selectionStart)).toBe(href.length);
+	let lookups = 0;
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/test-case-evidence?*`, (route) => {
+		lookups += 1;
+		return route.fulfill({ status: 404, json: { detail: "Unavailable" } });
+	});
+	const unavailable = page.getByText("This saved test case is unavailable.", { exact: true });
+	await page.goto(`${href}&suite=duplicate`);
+	await expect(unavailable).toBeVisible();
+	expect(lookups).toBe(0);
+	await page.goto(href);
+	await expect(unavailable).toBeVisible();
+	expect(lookups).toBe(1);
+	await expect(page.getByRole("region", { name: "Selected test case" })).toHaveCount(0);
+	await expect(page.getByRole("link", { name: "Open current suite" })).toBeVisible();
+});
+
+test("triages a saved suite by priority and automation intent and restores only the same source", { tag: "@p1" }, async ({ page }) => {
+	const writes = [];
+	page.on("request", (request) => {
+		if (request.method() !== "GET" && /\/(projects|testcases|automation|export)\b/.test(new URL(request.url()).pathname)) {
+			writes.push(request.url());
+		}
+	});
+	const { project, api } = await openCases(page, [
+		caseFixture("TC-001", "Receipt review"),
+		{ ...caseFixture("TC-002", "Rejected receipt"), automation_status: "To Be Automated" },
+		{ ...caseFixture("TC-003", "Pending order"), priority: "Critical" },
+		{ ...caseFixture("TC-004", "Legacy confirmation"), priority: undefined, automation_status: undefined },
+	]);
+	const pane = page.getByRole("region", { name: "Generated test cases", exact: true });
+	const search = pane.getByRole("searchbox", { name: "Search test cases" });
+	const priority = pane.getByRole("combobox", { name: "Priority", exact: true });
+	const intent = pane.getByRole("combobox", { name: "Automation intent", exact: true });
+	const first = pane.getByRole("button", { name: "TC-001 Receipt review", exact: true });
+	const legacy = pane.getByRole("button", { name: "TC-004 Legacy confirmation", exact: true });
+	const clear = pane.getByRole("button", { name: "Clear filters", exact: true });
+	await expect(first).toHaveAccessibleDescription("High priority · Manual");
+	await expect(legacy).toHaveAccessibleDescription("Medium priority · Manual");
+	await search.fill("High");
+	await expect(pane.getByText("2 of 4 test cases")).toBeVisible();
+	await search.fill("Manual");
+	await expect(pane.getByText("3 of 4 test cases")).toBeVisible();
+	await pane.getByRole("button", { name: "Filters", exact: true }).click();
+	await priority.selectOption("High");
+	await intent.selectOption("To Be Automated");
+	await expect(pane.getByText("No test cases match your filters.")).toBeVisible();
+	await expect(pane.getByText("0 of 4 test cases")).toBeVisible();
+	await search.fill("receipt");
+	await expect(pane.getByText("1 of 4 test cases")).toBeVisible();
+	const selected = pane.getByRole("button", { name: "TC-002 Rejected receipt", exact: true });
+	await selected.click();
+	await expect(selected).toHaveAttribute("aria-pressed", "true");
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await pane.getByRole("button", { name: "Filters (2)", exact: true }).click();
+	await expect(priority).toHaveValue("High");
+	await expect(intent).toHaveValue("To Be Automated");
+	await expect(search).toHaveValue("receipt");
+	await expect(selected).toHaveAttribute("aria-pressed", "true");
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	await clear.click();
+	await expect(search).toBeFocused();
+	await expect(pane.getByText("4 of 4 test cases")).toBeVisible();
+	await intent.selectOption("Manual");
+	project.current_revision++;
+	project.current_snapshots.test_cases.snapshot_id = "cases-v2";
+	project.stage_state.test_cases.current_snapshot_id = "cases-v2";
+	api.setProject(project);
+	await page.reload();
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await pane.getByRole("button", { name: "Filters", exact: true }).click();
+	await expect(intent).toHaveValue("");
+	await expect(priority).toHaveValue("");
+	await expect(pane.getByText("4 of 4 test cases")).toBeVisible();
+	expect(writes).toEqual([]);
 });
 
 test("requires an explicit human decision and keeps navigation status separate", async ({ page }) => {
@@ -290,12 +507,12 @@ test("project typography uses the compact shared reading scale", async ({ page }
 	await expect(page.getByRole("button", { name: "Template setup", exact: true })).toHaveCSS("min-height", "36px");
 });
 
-test("case summaries flow inline and wrap only when the pane narrows", async ({ page }) => {
+test("case titles stay on one line at wide widths and wrap when the pane narrows", async ({ page }) => {
 	await page.setViewportSize({ width: 1920, height: 1080 });
 	const title = "Valid checkout with a saved payment method and delivery address";
 	await openCases(page, [caseFixture("TC-001", title)]);
 	const row = page.getByRole("button", { name: /TC-001 Valid checkout/ });
-	const text = row.locator(":scope > span");
+	const text = row.getByText(title, { exact: true });
 	const wideHeight = await text.evaluate((element) => element.getBoundingClientRect().height);
 	const lineHeight = await text.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight));
 	expect(wideHeight).toBeLessThanOrEqual(lineHeight + 1);
@@ -304,7 +521,9 @@ test("case summaries flow inline and wrap only when the pane narrows", async ({ 
 	await page.keyboard.press("Home");
 	await expect.poll(() => text.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(wideHeight);
 	await expect(row).toHaveAttribute("aria-pressed", "true");
-	await expect(row).toHaveText(`TC-001 ${title}`);
+	await expect(row).toHaveAccessibleName(`TC-001 ${title}`);
+	await expect(row).toHaveAccessibleDescription("High priority · Manual");
+	await expect(row.getByText("High priority · Manual", { exact: true })).toBeVisible();
 	await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("High priority · REQ-101");
 });
 
@@ -312,7 +531,10 @@ test("step table shows actions and expectations with step data on demand", async
 	await openCases(page);
 	const table = page.getByRole("region", { name: "Test steps and expected results" }).getByRole("table");
 	await expect(table.getByRole("columnheader")).toHaveText(["Step", "Action", "Expected result"]);
-	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText(["TC-001 action 1", "TC-001 expectation 1"]);
+	await expect(table.getByRole("row").nth(1).getByRole("cell")).toHaveText([
+		/^TC-001 action 1\s*Test data is an empty string\.$/,
+		"TC-001 expectation 1",
+	]);
 	await expect(table.getByRole("rowheader")).toHaveText(["1", "2", "3"]);
 	await expect(page.getByRole("button", { name: /Show (all .*|fewer) steps/ })).toHaveCount(0);
 	const thirdAction = table.getByRole("row").nth(3).getByRole("cell").first();
@@ -340,7 +562,7 @@ test("stale Use Cases cannot be approved from either review entry point", async 
 });
 
 test("Test Cases keeps three result tabs and compact traceability rows", async ({ page }) => {
-	const project = await openCases(page);
+	const { project } = await openCases(page);
 	const tabs = page.getByRole("tablist", { name: "Generation result sections" });
 	await expect(tabs.getByRole("tab")).toHaveCount(3);
 	await expect(tabs).not.toContainText("Scenario Coverage");
@@ -386,6 +608,111 @@ test("coverage gaps select the remaining traceability tab after load and reload"
 	await expect(page.getByRole("region", { name: "Requirement traceability table" })).toBeVisible();
 	await page.reload();
 	await expect(selected).toHaveAttribute("aria-selected", "true");
+});
+
+test("opens exact saved evidence from an expanded traceability row and restores the link on Back", { tag: "@p1" }, async ({ page }) => {
+	const cases = Array.from({ length: 8 }, (_, index) => ({
+		...caseFixture(`TC-00${index + 1}`, `Checkout ${index + 1}`),
+		linked_requirement_ids: index < 5 ? ["REQ-101", "REQ-202"] : [],
+		tags: ["REQ-101", index % 2 ? "scenario:boundary" : "scenario:happy-path"],
+	}));
+	const target = cases.at(-1);
+	const writes = [];
+	const lookups = [];
+	page.on("request", (request) => {
+		const path = new URL(request.url()).pathname;
+		if (request.method() !== "GET" && /\/(projects|testcases|automation|export)\b/.test(path)) writes.push(path);
+	});
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/test-case-evidence?*`, (route) => {
+		lookups.push(Object.fromEntries(new URL(route.request().url()).searchParams));
+		return route.fulfill({
+			json: {
+				project_id: USE_CASE_PROJECT_ID,
+				snapshot_id: "cases-v1",
+				suite_version: 1,
+				project_revision: 7,
+				historical: false,
+				test_case: target,
+				requirements: [{ id: "REQ-101", text: "Recorded checkout requirement" }],
+				obligations: [],
+			},
+		});
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	const { project, api } = await openCases(
+		page,
+		[...cases, caseFixture("TC-DUP", "First legacy case"), caseFixture("TC-DUP", "Second legacy case")],
+		{
+			coverage_metrics: {
+				planned_scenarios_total: 4,
+				covered_planned_scenarios: 3,
+				requirement_scenario_summary: { "REQ-202": { planned_scenarios: 2, covered_scenarios: 1 } },
+			},
+		},
+		/^Traceability Matrix/
+	);
+	const tab = page.getByRole("tab", { name: /^Traceability Matrix/ });
+	const matrix = page.getByRole("region", { name: "Requirement traceability table" });
+	const row = matrix.getByRole("row").filter({ has: page.getByRole("cell", { name: "REQ-101", exact: true }) });
+	const links = row.getByRole("link", { name: /^Open saved case/ });
+	const more = row.getByText("7 more linked tests", { exact: true });
+	const overflow = row.getByRole("region", { name: "More linked tests for REQ-101" });
+	const sourceLink = row.getByRole("link", { name: `Open saved case ${target.id} ${target.title}`, exact: true });
+	const other = matrix.getByRole("row").filter({ has: page.getByRole("cell", { name: "REQ-202", exact: true }) });
+	const otherMore = other.getByText("2 more linked tests", { exact: true });
+	const otherOverflow = other.locator(".traceability-more-cases");
+	const matrixUrl = page.url();
+	await expect(page.getByText("Approved requirements with linked tests 2/2", { exact: true })).toBeVisible();
+	await expect(page.getByText("Cases with traceability 10/10", { exact: true })).toBeVisible();
+	await expect(page.getByText("Linked scenarios 3/4", { exact: true })).toBeVisible();
+	await expect(other.getByRole("cell", { name: "1/2 happy path boundary", exact: true })).toBeVisible();
+	await expect(matrix.locator(".traceability-more-cases")).toHaveCount(0);
+	await expect(matrix.locator("a[data-traceability-case]")).toHaveCount(6);
+	await expect(links).toHaveCount(3);
+	await more.press("Enter");
+	await expect(links).toHaveCount(8);
+	await otherMore.press("Enter");
+	await expect(otherOverflow.getByRole("link")).toHaveCount(2);
+	await expect(overflow).toBeVisible();
+	await otherMore.press("Enter");
+	await expect(otherOverflow).toHaveCount(0);
+	await expect(overflow).toBeVisible();
+	await expect(overflow.getByText("TC-DUP", { exact: true })).toHaveCount(2);
+	await expect(overflow.getByRole("link", { name: /TC-DUP/ })).toHaveCount(0);
+	const href = new URL(await sourceLink.getAttribute("href"), matrixUrl);
+	expect(Object.fromEntries(href.searchParams)).toEqual({ suite: "cases-v1", case: target.id });
+
+	await sourceLink.press("Enter");
+	await expect(page).toHaveURL(href.href);
+	const reader = page.getByRole("region", { name: "Saved test case", exact: true });
+	await expect(reader.getByRole("heading", { name: "Saved test case", exact: true })).toBeFocused();
+	await expect(reader.getByRole("heading", { name: target.title })).toBeVisible();
+	await expect(reader).toContainText(`Result for ${target.id}`);
+	expect(lookups).toEqual([{ snapshot_id: "cases-v1", case_id: target.id }]);
+
+	project.current_revision += 1;
+	api.setProject(project);
+	await page.goBack();
+	await expect(page).toHaveURL(matrixUrl);
+	await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(`Revision ${project.current_revision}`);
+	await expect(tab).toHaveAttribute("aria-selected", "true");
+	await expect(overflow).toBeVisible();
+	await expect(sourceLink).toBeFocused();
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+	const improve = page.getByRole("tab", { name: /^Improve tests/ });
+	await improve.click();
+	await expect(improve).toHaveAttribute("aria-selected", "true");
+	await page.goForward();
+	await expect(reader.getByRole("heading", { name: target.title })).toBeVisible();
+	await page.goBack();
+	await expect(tab).toHaveAttribute("aria-selected", "true");
+	await expect(overflow).toBeVisible();
+	await expect(sourceLink).toBeFocused();
+	await more.press("Enter");
+	await expect(row.locator(".traceability-more-cases")).toHaveCount(0);
+	await expect(links).toHaveCount(3);
+	expect(writes).toEqual([]);
 });
 
 test("loaded project without test cases selects a visible results tab", async ({ page }) => {

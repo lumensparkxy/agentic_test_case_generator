@@ -10,6 +10,7 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 	const [pending, setPending] = useState([]);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
+	const [extractionError, setExtractionError] = useState("");
 	const [stalePreview, setStalePreview] = useState(false);
 	const [message, setMessage] = useState("");
 	useEffect(() => {
@@ -47,6 +48,7 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 		setPreview(null);
 		setPending([]);
 		setError("");
+		setExtractionError("");
 		setStalePreview(false);
 		setMessage("");
 		setBusy(false);
@@ -119,5 +121,5 @@ export default function useRequirementImports(request, projectId, enabled, onApp
 			}
 		}
 	};
-	return { preview, pending, busy, error, stalePreview, message, accept, mutate, load, read };
+	return { preview, pending, busy, error, extractionError, setExtractionError, stalePreview, message, accept, mutate, load, read };
 }

@@ -50,6 +50,16 @@ def original_ids(sources):
     return list(dict.fromkeys(identifier for source in sources if source.excerpt_verified for identifier in source.original_requirement_ids))
 
 
+def verified_document_keys(sources):
+    return {
+        (source.source_id, identifier)
+        for source in sources
+        if source.source_system == "file" and source.source_id and source.excerpt_verified and source.excerpt.strip()
+        for identifier in source.original_requirement_ids
+        if identifier
+    }
+
+
 def canonical_requirements(project_id, snapshot):
     """Lazy identity assignment is deterministic and never rewrites a legacy snapshot."""
     if not snapshot:
@@ -74,40 +84,59 @@ def canonical_requirements(project_id, snapshot):
 def compare_requirements(current, incoming, semantic_matches=None, semantic_failed=False, source_name="Imported requirements"):
     candidates = []
     semantic_matches = semantic_matches or {}
+    source_keys_by_uid = {old.requirement_uid: verified_document_keys(old.sources) for old in current}
     for index, req in enumerate(incoming):
         cid = f"incoming-{index + 1}"
         exact = [old for old in current if normalized(old.text) == normalized(req.text)]
         references = source_references(req, "comparison", source_name)
         incoming_keys = {reference_key(source) for source in references}
         confirmed = [old for old in current if any(reference_key(source) in incoming_keys for source in old.sources)]
+        document_keys = verified_document_keys(references)
+        source_matches = {}
+        for uid, old_keys in source_keys_by_uid.items():
+            ids = sorted({identifier for _, identifier in old_keys & document_keys})
+            if ids:
+                source_matches[uid] = ImportMatch(
+                    requirement_uid=uid,
+                    reason="Verified excerpts refer to the same original ID in files with the same name. Compare both versions before choosing.",
+                    verified_original_ids=ids,
+                )
 
         scores = sorted(((SequenceMatcher(None, normalized(req.text), normalized(old.text)).ratio(), old) for old in current), key=lambda x: -x[0])
-        suggestions = [
-            ImportMatch(requirement_uid=old.requirement_uid, reason="Similar wording; verify behavior and constraints.")
+        suggestions = source_matches | {
+            old.requirement_uid: ImportMatch(requirement_uid=old.requirement_uid, reason="Similar wording; verify behavior and constraints.")
             for score, old in scores[:3]
-            if score >= 0.45
-        ]
+            if score >= 0.45 and old.requirement_uid not in source_matches
+        }
         for old in confirmed:
-            if old.requirement_uid not in {s.requirement_uid for s in suggestions}:
-                suggestions.append(
-                    ImportMatch(
-                        requirement_uid=old.requirement_uid,
-                        reason="Previously reviewed mapping for this source content version. Check against the current content.",
-                    )
+            if old.requirement_uid not in suggestions:
+                suggestions[old.requirement_uid] = ImportMatch(
+                    requirement_uid=old.requirement_uid,
+                    reason="Previously reviewed mapping for this source content version. Check against the current content.",
                 )
-        valid_uids = {r.requirement_uid for r in current}
         for match in semantic_matches.get(cid, []):
-            if match.requirement_uid in valid_uids and match.requirement_uid not in {s.requirement_uid for s in suggestions}:
-                suggestions.append(match)
-        if len(exact) == 1:
+            if match.requirement_uid in source_keys_by_uid and match.requirement_uid not in suggestions:
+                suggestions[match.requirement_uid] = match
+        if len(exact) == 1 and source_matches.keys() <= {exact[0].requirement_uid}:
             kind, target, reason = "unchanged", exact[0].requirement_uid, "Identical requirement text; retain identity and approval, attach source evidence."
-        elif len(exact) > 1:
-            kind, target, reason = "needs_decision", None, "Multiple existing requirements have identical text. Choose the intended requirement."
-            suggestions = [ImportMatch(requirement_uid=r.requirement_uid, reason="Identical text") for r in exact]
+        elif exact:
+            kind, target = "needs_decision", None
+            reason = (
+                "Verified source IDs and identical wording suggest different requirements. Choose the intended requirement."
+                if source_matches.keys() - {old.requirement_uid for old in exact}
+                else "Multiple existing requirements have identical text. Choose the intended requirement."
+            )
+            suggestions = source_matches | {
+                old.requirement_uid: ImportMatch(requirement_uid=old.requirement_uid, reason="Identical text")
+                for old in exact
+                if old.requirement_uid not in source_matches
+            }
+        elif source_matches:
+            kind, target, reason = "needs_decision", None, "Verified original IDs suggest a match. Compare the requirements and choose a decision."
         elif suggestions:
             kind, target, reason = "needs_decision", None, "Possible revision or overlap. Review the existing requirement before choosing."
             if len(suggestions) == 1:
-                kind, target = "updated", suggestions[0].requirement_uid
+                kind, target = "updated", next(iter(suggestions))
                 reason = "Suggested revision; compare both versions and confirm or change the match."
         else:
             kind, target, reason = (
@@ -118,7 +147,9 @@ def compare_requirements(current, incoming, semantic_matches=None, semantic_fail
         # Never accept model-extracted identity, approval or version fields as canonical.
         req = req.model_copy(update={"requirement_uid": None, "content_version": 1, "lifecycle_status": "active"})
         candidates.append(
-            ImportCandidate(candidate_id=cid, requirement=req, classification=kind, target_requirement_uid=target, suggestions=suggestions, reason=reason)
+            ImportCandidate(
+                candidate_id=cid, requirement=req, classification=kind, target_requirement_uid=target, suggestions=list(suggestions.values()), reason=reason
+            )
         )
     texts = Counter(normalized(c.requirement.text) for c in candidates)
     counts = Counter(c.target_requirement_uid for c in candidates if c.target_requirement_uid)

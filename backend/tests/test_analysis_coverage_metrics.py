@@ -112,6 +112,42 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
         self.assertEqual(metrics["risk_signals_covered"], 1)
         self.assertEqual(metrics["high_risk_items_without_tests"], [])
 
+    def test_rendered_whitespace_risk_needs_exact_linked_output_evidence(self) -> None:
+        requirements = [Requirement(id="JSON-VALID", text="Show the accepted JSON with original spacing.")]
+        title = "Whitespace and indentation collapsing in rendered view"
+        analysis = [
+            {
+                "requirement_id": "JSON-VALID",
+                "risk_signals": [
+                    {
+                        "id": "JSON-VALID-RS-01",
+                        "requirement_id": "JSON-VALID",
+                        "title": title,
+                        "rationale": "Rendering engines may trim or collapse multiline indentations.",
+                        "category": "Data Integrity",
+                        "severity": "High",
+                    }
+                ],
+            }
+        ]
+        payload = '{\n  "enabled": false,\n  "label": "  Launch into β  "\n}'
+        fill = {"action": 'Enter step data into field "Payload"', "test_data": payload}
+        output = {"expected": 'test id "saved-payload" text should equal step data', "test_data": payload}
+        for label, steps, linked, covered in (
+            ("exact output", [fill, output], "JSON-VALID", True),
+            ("fill only", [fill], "JSON-VALID", False),
+            ("input value", [fill, {**output, "expected": 'field "Payload" value should equal step data'}], "JSON-VALID", False),
+            ("single spaces", [fill, {**output, "test_data": "Ordinary text"}], "JSON-VALID", False),
+            ("unlinked case", [fill, output], "JSON-OTHER", False),
+            ("partial assertion", [fill, {**output, "expected": output["expected"] + " and page title is correct"}], "JSON-VALID", False),
+        ):
+            for tag in ("scenario:happy-path", "scenario:data-variation"):
+                with self.subTest(label=label, tag=tag):
+                    cases = [{"id": "TC-JSON-VALID", "linked_requirement_ids": [linked], "tags": [tag], "steps": steps}]
+                    metrics = _compute_requirement_analysis_metrics(analysis, cases, requirements)
+                    self.assertEqual(metrics["risk_signals_covered"], int(covered))
+                    self.assertEqual(metrics["high_risk_items_without_tests"], [] if covered else [f"JSON-VALID - {title}"])
+
     def test_high_risk_gaps_block_review(self) -> None:
         weak_test_cases = [
             {
@@ -242,15 +278,94 @@ class BrowserAssertionReviewTests(unittest.TestCase):
         self.assertTrue(any("grounded accessible names" in criterion for criterion in review["unmet_criteria"]))
 
     def test_review_blocks_selector_as_visible_text_assertions(self) -> None:
-        review = _heuristic_test_case_review(
-            [self._browser_case(expected='"#email-input" should be visible')],
-            self.requirements,
-            90,
-            coverage_plan=self.coverage_plan,
-        )
+        for expected, selector in (
+            ('"#email-input" should be visible', "#email-input"),
+            ('exact text "#bookings tr" is visible', "#bookings tr"),
+            ('exact text "div.notice" is visible', "div.notice"),
+            ('exact text ".receipt-row" is visible', ".receipt-row"),
+            ('exact text ".receipt-row .status" is visible', ".receipt-row .status"),
+            (r'exact text ".\31 st-row" is visible', r".\31 st-row"),
+            ('The attachment named "#expense-table tr" is visible', "#expense-table tr"),
+            ('One row is present in "#bookings tr" and exact heading "#bookings tr" is visible', "#bookings tr"),
+            ('css "#bookings" is visible and exact text "#bookings" is visible', "#bookings"),
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review(
+                    [self._browser_case(expected=expected)],
+                    self.requirements,
+                    90,
+                    coverage_plan=self.coverage_plan,
+                )
+
+                self.assertFalse(review["approved"])
+                self.assertTrue(any(f"raw selector `{selector}`" in issue for issue in review["blocking_issues"]))
+
+    def test_review_accepts_quoted_filenames_as_visible_copy(self) -> None:
+        for expected in (
+            "The expense record shows status 'Submitted', amount 150.00 EUR, and displays the attached receipt file 'hotel_receipt.pdf'.",
+            'The file name "Hotel receipt.final.pdf" is visible.',
+            'The attachment named "receipt-001.pdf" is shown.',
+            'The fixture file ".receipt.example" is visible.',
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)
+
+                self.assertTrue(review["approved"], review["blocking_issues"])
+
+    def test_review_keeps_leading_dots_in_literal_copy(self) -> None:
+        for expected in (
+            'exact text "..." is visible',
+            'exact text ".75" is visible',
+            'exact text "./receipt.pdf" is visible',
+            'css ".receipt-row" is visible',
+        ):
+            with self.subTest(expected=expected):
+                review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)
+
+                self.assertTrue(review["approved"], review["blocking_issues"])
+
+    def test_filename_context_does_not_exempt_a_separate_selector_assertion(self) -> None:
+        expected = 'The receipt file "hotel_receipt.pdf" is shown, and exact text "div.notice" is visible.'
+        review = _heuristic_test_case_review([self._browser_case(expected=expected)], self.requirements, 90, coverage_plan=self.coverage_plan)
 
         self.assertFalse(review["approved"])
-        self.assertTrue(any("raw selector `#email-input`" in issue for issue in review["blocking_issues"]))
+        self.assertTrue(any("raw selector `div.notice`" in issue for issue in review["blocking_issues"]))
+        self.assertFalse(any("raw selector `hotel_receipt.pdf`" in issue for issue in review["blocking_issues"]))
+
+    def test_review_allows_selector_as_row_locator(self) -> None:
+        for action, expected in (
+            (
+                "Inspect My bookings",
+                'Exactly one data row matching selector "#bookings tr" is displayed with room Birch, time slot '
+                '2026-10-01 10:00–11:00 Europe/Zurich, 2 attendees, and status "Confirmed"',
+            ),
+            (
+                "Inspect My bookings",
+                'exact heading "My bookings" is visible, exactly one durable record row is present in "#bookings tr", '
+                "and its displayed ID matches the recorded original ID",
+            ),
+            ('Inspect data rows in My bookings matching css "#bookings tr"', 'exact text "Birch" is visible'),
+            ("Inspect the result", 'css "#booking-result" is visible'),
+            ("Inspect the visible result", 'css "#booking-result" text should equal "Booking cancelled"'),
+            (
+                "Inspect the My bookings table",
+                'css "#bookings tr" displays exactly one row with booking ID "B-001" and '
+                'css "#bookings tr:has(a[href=\'/bookings/B-001\']) td:nth-child(5)" text should equal "Confirmed"',
+            ),
+            (
+                'Inspect data rows matching css "#bookings tr" to verify exactly one durable record exists with the recorded original ID',
+                'exact text "Birch" is visible',
+            ),
+        ):
+            with self.subTest(action=action, expected=expected):
+                review = _heuristic_test_case_review(
+                    [self._browser_case(action=action, expected=expected)],
+                    self.requirements,
+                    90,
+                    coverage_plan=self.coverage_plan,
+                )
+
+                self.assertTrue(review["approved"], review["blocking_issues"])
 
     def test_review_blocks_implementation_only_visible_text_assertions(self) -> None:
         review = _heuristic_test_case_review(

@@ -1,10 +1,17 @@
 from pathlib import Path
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import timedelta
+import json
+from threading import Event
 import sys
 import unittest
 from typing import Any
 from copy import deepcopy
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
-from app.services.test_case_quality import placeholder_reason
+from app.services.test_case_quality import case_source_hash, placeholder_reason
 from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -13,14 +20,24 @@ if str(BACKEND_DIR) not in sys.path:
 
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
-from app.models import AuthUser, TestCase, TestStep
+from app.models import AuthUser, EnrichInput, GenerateTestCasesResponse, TestCase, TestStep
+from app.config import GenerationSettings, Settings
 from copy import deepcopy
 from fastapi import HTTPException
+import httpx
+from app.agents import substantive_review
 from app.services import impact_update_service as service
+from app.services import test_case_suite_review as suite_review
+from app.routers.testcases import _append_project_generation_snapshots
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
 from app.services.impact_update_service import analyze_project_impact, apply_project_impact_update
+from app.services.guidance_service import current_guidance, guidance_scope
+from app.services.impact_application_state import ApplicationLease, now
 from app.services.orchestrator_service import get_project_orchestrator_status
+from app.services.requirement_scope import approved_generation_requirements
+from app.services.test_case_review_progress import GenerationReviewProgress
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
+from test_substantive_review_groups import critic_output
 
 
 class FakeSnapshot:
@@ -129,6 +146,10 @@ def _test_case(req_id: str, *, title: str | None = None) -> TestCase:
 class ImpactUpdateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
+        self.model_settings = Settings(gemini_api_key="synthetic", model_name="test-model")
+        settings_patch = patch.object(service, "get_settings", return_value=self.model_settings)
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
         for target in ("enforce_billing_access", "start_workflow_run", "complete_workflow_run", "record_billing_consumption"):
             patcher = patch.object(service, target, return_value="run-test")
             patcher.start()
@@ -339,6 +360,7 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(first.impact_application.changed_test_case_ids, ["TC-003"])
         self.assertEqual(first.impact_application.result_snapshot_id, first.current_snapshots["test_cases"].snapshot_id)
         self.assertEqual(self.generator.call_count, calls)
+        self.assertNotIn("max_parallel_workers", self.generator.call_args.kwargs)
         self.assertEqual(self.store, before)
         self.assertEqual(len([k for k in self.store if k.startswith("usage_events/")]), 1)
 
@@ -356,10 +378,146 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(result.impact_application.status, "applied")
         self.assertEqual(self.generator.call_count, 1)
 
-    def test_expired_worker_cannot_commit_after_retry_takes_lease(self):
-        from datetime import timedelta
-        from app.services.impact_application_state import ApplicationLease, now
+    def test_parallel_replacements_are_bounded_and_commit_in_selection_order(self):
+        requirement_ids = [f"REQ-{index:03d}" for index in range(1, 5)]
+        baseline = self._seed_project(modified=set(requirement_ids))
+        project = analyze_project_impact(project_id=baseline.project_id, actor=self.actor, request_id="analysis")
+        existing = project.current_snapshots["test_cases"]
+        entered = {requirement_id: Event() for requirement_id in requirement_ids}
+        release = {requirement_id: Event() for requirement_id in requirement_ids}
+        observed = {}
+        trace = ContextVar("test_parallel_trace", default="")
 
+        def generate(payload, **kwargs):
+            requirement_id = payload.requirements[0].id
+            observed[requirement_id] = (current_guidance(), trace.get(), kwargs)
+            entered[requirement_id].set()
+            if not release[requirement_id].wait(5):
+                raise AssertionError(f"Test did not release {requirement_id}")
+            result = self._generate(payload)
+            case = result["test_cases"][0]
+            case["title"] = f"Replacement for {requirement_id}"
+            result["test_cases"].append({**case, "id": f"EXTRA-{requirement_id}", "title": f"Additional check for {requirement_id}"})
+            return result
+
+        def apply():
+            trace.set("caller-trace")
+            return self._apply(project)
+
+        self.generator.side_effect = generate
+        settings = GenerationSettings(parallel_test_case_max_workers=20)
+        with patch.object(service, "get_generation_settings", return_value=settings), ThreadPoolExecutor(max_workers=1) as runner:
+            result = runner.submit(apply)
+            try:
+                self.assertTrue(all(entered[requirement_id].wait(5) for requirement_id in requirement_ids[:3]))
+                self.assertFalse(entered["REQ-004"].is_set())
+                release["REQ-002"].set()
+                self.assertTrue(entered["REQ-004"].wait(5))
+                self.assertFalse(release["REQ-001"].is_set())
+                joined = self._apply(project, request_id="duplicate")
+                self.assertEqual(joined.impact_application.status, "applying")
+                self.assertEqual(joined.current_snapshots["test_cases"], existing)
+            finally:
+                for event in release.values():
+                    event.set()
+            updated = result.result(timeout=5)
+
+        self.assertEqual(self.generator.call_count, 4)
+        self.assertEqual(updated.current_revision, project.current_revision + 1)
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertFalse(snapshot.approved)
+        self.assertEqual(snapshot.metadata["targeted_generation_worker_count"], 3)
+        saved_rows = snapshot.payload["test_cases"]
+        for index, requirement_id in enumerate(requirement_ids):
+            manifest, trace_id, kwargs = observed[requirement_id]
+            self.assertEqual(trace_id, "caller-trace")
+            self.assertEqual(kwargs["max_parallel_workers"], 1)
+            self.assertEqual(manifest.project_inputs.requirements_snapshot_id, project.current_snapshots["requirements"].snapshot_id)
+            row, old = saved_rows[index], existing.payload["test_cases"][index]
+            self.assertEqual((row["id"], row["artifact_item_id"]), (old["id"], old["artifact_item_id"]))
+            self.assertEqual(row["artifact_version_number"], old["artifact_version_number"] + 1)
+            self.assertEqual(row["title"], f"Replacement for {requirement_id}")
+            evidence = snapshot.metadata["targeted_generation_runs"][index]
+            self.assertEqual(evidence["recommendation_id"], f"impact-update-{old['id']}")
+            self.assertEqual(evidence["source_test_case_id"], old["id"])
+            self.assertEqual(evidence["source_project_revision"], project.current_revision)
+            self.assertEqual(evidence["scenario_refs"], [f"{requirement_id}-SCN-01"])
+            self.assertEqual(evidence["guidance"]["manifest_id"], manifest.manifest_id)
+        self.assertEqual(saved_rows[4:10], existing.payload["test_cases"][4:])
+        self.assertEqual([row["title"] for row in saved_rows[10:]], [f"Additional check for {requirement_id}" for requirement_id in requirement_ids])
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
+
+    def test_parallel_failure_drains_active_workers_and_does_not_start_remaining_work(self):
+        requirement_ids = [f"REQ-{index:03d}" for index in range(1, 5)]
+        baseline = self._seed_project(modified=set(requirement_ids))
+        project = analyze_project_impact(project_id=baseline.project_id, actor=self.actor, request_id="analysis")
+        before = deepcopy(self.store)
+        entered = {requirement_id: Event() for requirement_id in requirement_ids}
+        release_bad = Event()
+        release_other = Event()
+        failed_worker = Event()
+
+        def generate(payload, **kwargs):
+            requirement_id = payload.requirements[0].id
+            entered[requirement_id].set()
+            result = self._generate(payload)
+            if requirement_id == "REQ-002":
+                if not release_bad.wait(5):
+                    raise AssertionError("Test did not release the failing worker")
+                result["test_cases"][0]["scenario_refs"] = ["REQ-001-SCN-01"]
+            elif not release_other.wait(5):
+                raise AssertionError("Test did not release the other workers")
+            return result
+
+        def observe_wait(*args, **kwargs):
+            done, pending = wait(*args, **kwargs)
+            if any(future.exception() is not None for future in done):
+                failed_worker.set()
+            return done, pending
+
+        self.generator.side_effect = generate
+        with (
+            patch.object(service, "get_generation_settings", return_value=GenerationSettings()),
+            patch.object(service, "wait", side_effect=observe_wait),
+            ThreadPoolExecutor(max_workers=1) as runner,
+        ):
+            result = runner.submit(self._apply, project)
+            try:
+                self.assertTrue(all(entered[requirement_id].wait(5) for requirement_id in requirement_ids[:3]))
+                release_bad.set()
+                self.assertTrue(failed_worker.wait(5))
+                self.assertFalse(result.done())
+                self.assertEqual(self._apply(project, request_id="duplicate").impact_application.status, "applying")
+            finally:
+                release_bad.set()
+                release_other.set()
+            with self.assertRaisesRegex(service.ImpactWorkflowError, "failed quality checks"):
+                result.result(timeout=5)
+
+        self.assertFalse(entered["REQ-004"].is_set())
+        self.assertEqual(self.generator.call_count, 3)
+        checkpoint_path = f"qa_projects/{project.project_id}/impact_recovery/current"
+        self.assertEqual(len(self.store[checkpoint_path]["items"]), 2)
+        self.assertEqual({key: value for key, value in self.store.items() if "/impact_applications/" not in key and key != checkpoint_path}, before)
+        failed = get_project(project.project_id, actor=self.actor)
+        self.assertEqual(failed.impact_application.status, "failed")
+        self.assertEqual(failed.current_snapshots["test_cases"], project.current_snapshots["test_cases"])
+        self.assertNotIn("checkpoints", failed.model_dump_json())
+        self.generator.side_effect = self._generate
+        with patch.object(service, "get_generation_settings", return_value=GenerationSettings()):
+            repaired = self._apply(project, request_id="retry")
+        self.assertEqual(self.generator.call_count, 5)
+        self.assertEqual(
+            {call.args[0].requirements[0].id for call in self.generator.call_args_list[3:]},
+            {"REQ-002", "REQ-004"},
+        )
+        self.assertNotIn(checkpoint_path, self.store)
+        self.assertEqual(repaired.impact_application.status, "applied")
+        self.assertEqual(repaired.current_revision, project.current_revision + 1)
+        self.assertEqual(repaired.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 2)
+        self.assertEqual(len([key for key in self.store if key.startswith("usage_events/")]), 1)
+
+    def test_expired_worker_cannot_commit_after_retry_takes_lease(self):
         project = self._analyzed()
         aid = project.current_snapshots["impact_analysis"].snapshot_id
         selected = [r["recommendation_id"] for r in project.current_snapshots["impact_analysis"].payload["recommendations"] if r["accepted"]]
@@ -368,6 +526,11 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         path = f"qa_projects/{project.project_id}/impact_applications/{aid}"
         self.store[path]["lease_expires_at"] = now() - timedelta(seconds=1)
         self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        retry = ApplicationLease(project.project_id, aid, self.actor, project.current_revision, selected)
+        self.assertTrue(retry.reserve())
+        with self.assertRaisesRegex(RuntimeError, "superseded"):
+            old.checkpoint("late", "should never be saved")
+        retry.fail()
         applied = self._apply(project)
         before = deepcopy(self.store)
         with self.assertRaisesRegex(RuntimeError, "superseded"):
@@ -439,9 +602,6 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         self.assertEqual(self.generator.call_count, 1)
 
     def test_lease_renewal_cannot_resurrect_expired_worker(self):
-        from datetime import timedelta
-        from app.services.impact_application_state import ApplicationLease, now
-
         project = self._analyzed()
         aid = project.current_snapshots["impact_analysis"].snapshot_id
         lease = ApplicationLease(project.project_id, aid, self.actor, project.current_revision, ["selection"])
@@ -554,8 +714,9 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         latest = get_project(project.project_id, actor=self.actor)
         self.assertEqual(latest.current_snapshots["test_cases"], analyzed.current_snapshots["test_cases"])
         self.assertEqual(latest.name, "Other edit")
+        self.assertNotIn(f"qa_projects/{project.project_id}/impact_recovery/current", self.store)
 
-    def test_commit_failure_does_not_publish_artifact_versions(self):
+    def test_commit_failure_keeps_only_private_results_and_expired_retry_reuses_them(self):
         project = self._seed_project(modified={"REQ-003"})
         analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="analysis")
         before = deepcopy(self.store)
@@ -566,8 +727,69 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 apply_project_impact_update(
                     project_id=project.project_id, actor=self.actor, request_id="apply", base_project_revision=analyzed.current_revision
                 )
-        self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k}, before)
+        checkpoint_path = f"qa_projects/{project.project_id}/impact_recovery/current"
+        self.assertEqual({k: v for k, v in self.store.items() if "/impact_applications/" not in k and k != checkpoint_path}, before)
+        self.assertEqual(len(self.store[checkpoint_path]["items"]), 1)
         self.assertEqual(get_project(project.project_id, actor=self.actor).impact_application.status, "failed")
+        aid = analyzed.current_snapshots["impact_analysis"].snapshot_id
+        receipt = self.store[f"qa_projects/{project.project_id}/impact_applications/{aid}"]
+        receipt.update(status="applying", lease_expires_at=now() - timedelta(seconds=1))
+
+        applied = self._apply(analyzed, request_id="expired-retry")
+        self.assertEqual(applied.impact_application.status, "applied")
+        self.assertEqual(self.generator.call_count, 1)
+        self.assertEqual(applied.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 1)
+        self.assertEqual(applied.current_snapshots["test_cases"].metadata["targeted_generation_worker_count"], 0)
+        self.assertNotIn(checkpoint_path, self.store)
+
+    def test_retry_regenerates_expired_invalid_and_policy_mismatched_results(self):
+        prepare = service.prepare_run
+        for cause in ("expired", "malformed", "scope", "model", "guidance", "source_revision"):
+            with self.subTest(cause=cause):
+                self.generator.reset_mock()
+                self.model_settings.model_name = "test-model"
+                project = self._analyzed()
+                path = f"qa_projects/{project.project_id}/impact_recovery/current"
+                with patch.object(service, "append_stage_snapshot", side_effect=RuntimeError("Synthetic commit interruption")):
+                    with self.assertRaisesRegex(RuntimeError, "commit interruption"):
+                        self._apply(project)
+                saved = self.store[path]
+                key, payload = next(iter(saved["items"].items()))
+                if cause == "expired":
+                    saved["expires_at"] = now() - timedelta(seconds=1)
+                elif cause == "malformed":
+                    saved["items"][key] = "{"
+                elif cause == "scope":
+                    changed = json.loads(payload)
+                    changed["test_cases"][0]["scenario_refs"] = ["unapproved-scenario"]
+                    saved["items"][key] = json.dumps(changed)
+                elif cause == "model":
+                    self.model_settings.model_name = "changed-model"
+                elif cause == "source_revision":
+                    project = update_project(
+                        project_id=project.project_id,
+                        actor=self.actor,
+                        request_id="revision-changed",
+                        name="Revision changed",
+                        base_project_revision=project.current_revision,
+                    )
+
+                def prepare_retry(*args, **kwargs):
+                    manifest = prepare(*args, **kwargs)
+                    return manifest.model_copy(update={"manifest_id": "changed-guidance"}) if cause == "guidance" else manifest
+
+                with patch.object(service, "prepare_run", side_effect=prepare_retry):
+                    applied = self._apply(project, request_id="retry")
+                self.assertEqual(self.generator.call_count, 2)
+                self.assertEqual(applied.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 0)
+                self.assertNotIn(path, self.store)
+
+    def test_checkpoint_size_cap_does_not_prevent_an_approved_replacement(self):
+        project = self._analyzed()
+        with patch("app.services.impact_application_state.MAX_RECOVERY_BYTES", 100):
+            updated = self._apply(project)
+        self.assertEqual(updated.impact_application.status, "applied")
+        self.assertNotIn(f"qa_projects/{project.project_id}/impact_recovery/current", self.store)
 
     def test_substantive_repair_groups_findings_and_preserves_unselected_gaps(self):
         project = self._seed_project()
@@ -631,6 +853,638 @@ class ImpactUpdateServiceTests(unittest.TestCase):
         rec = next(r for r in analyzed.current_snapshots["impact_analysis"].payload["recommendations"] if r["recommendation_id"].startswith("repair-"))
         self.assertEqual(rec["action"], "add")
         self.assertIsNone(rec.get("test_case_id"))
+
+    def _suite_pending_review(self, *, pending=()):
+        project = self._seed_project(omit={"REQ-005"})
+        analyzed = analyze_project_impact(project_id=project.project_id, actor=self.actor, request_id="impact")
+        updated = self._apply(analyzed)
+        state = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]
+        state["metadata"]["latest_human_review"] = {"snapshot_id": state["current_snapshot_id"], "decision": "approve"}
+        current = updated.current_snapshots["test_cases"]
+        path = f"qa_projects/{updated.project_id}/snapshots/{current.snapshot_id}"
+        self.store[path]["payload"]["generation_tasks"] = list(pending)
+        for case in self.store[path]["payload"]["test_cases"]:
+            case["preconditions"] = "Open the provisioned fixture."
+            case["expected_result"] = "The recorded result is displayed."
+        return get_project(updated.project_id, actor=self.actor), path
+
+    def _review_saved_suite(self, project, snapshot_id=None):
+        return suite_review.review_saved_test_cases(
+            project_id=project.project_id,
+            snapshot_id=snapshot_id or project.current_snapshots["test_cases"].snapshot_id,
+            base_project_revision=project.current_revision,
+            actor=self.actor,
+            request_id="review-test",
+        )
+
+    def _generated_suite_pending_review(self):
+        project = self._seed_project()
+        project_path = f"qa_projects/{project.project_id}"
+        use_cases = project.current_snapshots["use_cases"]
+        self.store[project_path]["stage_state"]["use_cases"]["metadata"]["latest_human_review"] = {
+            "snapshot_id": use_cases.snapshot_id,
+            "decision": "approve",
+        }
+        reason = "Independent assessment provider unavailable; review is required."
+        rows = deepcopy(project.current_snapshots["test_cases"].payload["test_cases"])
+        for row in rows:
+            row.update(preconditions="Open the provisioned fixture.", expected_result="The recorded result is displayed.")
+        snapshot = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload={
+                "test_cases": rows,
+                "approved": False,
+                "coverage_plan": use_cases.payload["coverage_plan"],
+                "review": {"score": 100, "threshold": 90, "blocking_issues": [reason]},
+                "substantive_assessment": {"status": "unknown", "reason": reason, "diagnostics": {"failure_reason": "provider_unavailable"}},
+                "workflow_diagnostics": {"status": "partial"},
+                "generation_evidence": {"evidence_id": "original-generation", "final_status": "partial"},
+            },
+            operation="testcases.generate",
+            actor=self.actor,
+            request_id="original-generation",
+            source_snapshot_id=use_cases.snapshot_id,
+            metadata={
+                "source_snapshot_ids": {stage: project.current_snapshots[stage].snapshot_id for stage in ("requirements", "use_cases")},
+                "source_requirement_hashes": {row.id: case_source_hash(row.model_dump(mode="json")) for row in approved_generation_requirements(project)},
+                "source_context_hash": None,
+            },
+            base_project_revision=project.current_revision,
+        )
+        return get_project(project.project_id, actor=self.actor), f"{project_path}/snapshots/{snapshot.snapshot_id}"
+
+    def test_generated_suite_outage_can_recover_without_regeneration(self):
+        project, path = self._generated_suite_pending_review()
+        original = deepcopy(self.store[path])
+        self.assertTrue(project.current_snapshots["test_cases"].metadata["review_retry_available"])
+        applied_inputs = []
+
+        def critic(cases, requirements, context, **kwargs):
+            applied_inputs.append(current_guidance().project_inputs)
+            self.assertEqual(cases, [TestCase.model_validate(row).model_dump(mode="json") for row in original["payload"]["test_cases"]])
+            self.assertIsNone(context)
+            return {"status": "assessed_complete"}
+
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value={"status": "unknown"}) as review,
+        ):
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            review.side_effect = critic
+            approved = self._review_saved_suite(project)
+            self.assertEqual(self._review_saved_suite(project).current_revision, approved.current_revision)
+            self.assertEqual(review.call_count, 2)
+
+        snapshot = approved.current_snapshots["test_cases"]
+        self.assertTrue(snapshot.approved)
+        self.assertEqual(snapshot.source_snapshot_id, original["snapshot_id"])
+        self.assertEqual(snapshot.payload["test_cases"], original["payload"]["test_cases"])
+        self.assertEqual(snapshot.payload["generation_evidence"], original["payload"]["generation_evidence"])
+        self.assertEqual(applied_inputs[0].requirements_snapshot_id, original["metadata"]["source_snapshot_ids"]["requirements"])
+        self.assertNotIn("review_retry_available", snapshot.metadata)
+        self.assertEqual(self.store[path], original)
+        self.assertFalse(any(key.startswith(("test_case_sets/", "usage_events/")) for key in self.store))
+        self.generator.assert_not_called()
+
+    def test_generated_suite_retry_rejects_generation_failures_and_changed_source_bindings(self):
+        project, path = self._generated_suite_pending_review()
+        original = deepcopy(self.store[path])
+        for cause in ("generation_failed", "fallback", "tasks", "review_gap", "invalid_review", "lineage", "requirements", "context", "project_inputs"):
+            self.store[path] = deepcopy(original)
+            saved = self.store[path]
+            payload = saved["payload"]
+            if cause == "generation_failed":
+                payload["workflow_diagnostics"]["failed_shard_count"] = 1
+            elif cause == "fallback":
+                payload["workflow_diagnostics"]["used_fallback"] = True
+            elif cause == "tasks":
+                payload["generation_tasks"] = [{"requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-01"], "reason": "Unfinished task"}]
+            elif cause == "review_gap":
+                payload["review"]["blocking_issues"].append("Structural review found another blocker.")
+            elif cause == "invalid_review":
+                payload["substantive_assessment"]["diagnostics"]["failure_reason"] = "invalid_evidence"
+            elif cause == "lineage":
+                saved["metadata"]["source_snapshot_ids"]["use_cases"] = "different-plan"
+            elif cause == "requirements":
+                saved["metadata"]["source_requirement_hashes"]["REQ-001"] = "different-content"
+            elif cause == "context":
+                saved["metadata"]["source_context_hash"] = "different-context"
+            else:
+                saved["metadata"]["guidance"] = {"project_inputs": {"revision": -1}}
+            with self.subTest(cause=cause), patch.object(suite_review, "assess_delivered_suite") as critic:
+                with self.assertRaises(HTTPException) as rejected:
+                    self._review_saved_suite(project)
+                self.assertEqual(rejected.exception.status_code, 409)
+                critic.assert_not_called()
+                current = get_project(project.project_id, actor=self.actor)
+                self.assertEqual(current.current_revision, project.current_revision)
+                if cause in {"generation_failed", "fallback", "tasks", "review_gap", "invalid_review"}:
+                    self.assertNotIn("review_retry_available", current.current_snapshots["test_cases"].metadata)
+
+    def test_generated_suite_retry_saves_real_review_findings_without_approval(self):
+        project, _ = self._generated_suite_pending_review()
+        original = project.current_snapshots["test_cases"]
+        finding = {
+            "status": "incomplete",
+            "reason": "The saved payment outcome was not verified.",
+            "obligations": [{"requirement_id": "REQ-001", "status": "unmet", "obligation": "Verify saved payment", "reason": "No saved result"}],
+        }
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value=finding),
+        ):
+            reviewed = self._review_saved_suite(project)
+        snapshot = reviewed.current_snapshots["test_cases"]
+        self.assertFalse(snapshot.approved)
+        self.assertEqual(snapshot.payload["test_cases"], original.payload["test_cases"])
+        self.assertEqual(snapshot.payload["substantive_assessment"], finding)
+        self.assertIn("Verify saved payment", snapshot.payload["generation_tasks"][0]["reason"])
+        self.assertNotIn("review_retry_available", snapshot.metadata)
+
+    @contextmanager
+    def _mock_grouped_suite_review(self, critic):
+        with (
+            patch.object(substantive_review, "GROUP_REVIEW_MIN_CASES", 1),
+            patch.object(substantive_review, "GROUP_REVIEW_TARGET_CASES", 3),
+            patch.object(substantive_review, "_call_critic", side_effect=critic),
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=self.model_settings) as settings,
+        ):
+            yield settings
+
+    def test_saved_suite_grouped_review_publishes_verified_gaps_but_not_an_unavailable_review(self):
+        project, path = self._generated_suite_pending_review()
+        original = deepcopy(self.store[path])
+        known_gap = False
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            ids = data["review_group"]["requirement_ids"]
+            if "REQ-007" in ids or ("REQ-004" in ids and not known_gap):
+                raise httpx.ReadTimeout("synthetic unavailable group")
+            if known_gap and "REQ-004" in ids:
+                output["obligations"][0].update(status="unmet", reason="Saved result needs a better assertion.")
+            return json.dumps(output)
+
+        with self._mock_grouped_suite_review(critic):
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(unavailable.exception.detail["code"], "review_groups_unverified")
+            self.assertIn("2 of 4 groups unverified", unavailable.exception.detail["message"])
+            groups = unavailable.exception.detail["groups"]
+            self.assertEqual(len(groups), 4)
+            self.assertEqual(groups[1]["requirement_ids"], ["REQ-004", "REQ-005", "REQ-006"])
+            self.assertEqual(groups[1]["status"], "unknown")
+            self.assertEqual(groups[1]["case_ids"], ["TC-004", "TC-005", "TC-006"])
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            known_gap = True
+            updated = self._review_saved_suite(project)
+
+        self.assertFalse(updated.stage_state["test_cases"].approved)
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertEqual(snapshot.payload["test_cases"], original["payload"]["test_cases"])
+        self.assertEqual(snapshot.payload["substantive_assessment"]["diagnostics"]["unverified_group_count"], 1)
+        self.assertIn("1 of 4 groups unverified", " ".join(snapshot.payload["review"]["blocking_issues"]))
+        self.assertEqual([task["source_test_case_id"] for task in snapshot.payload["generation_tasks"]], ["TC-004"])
+        self.assertNotIn(f"qa_projects/{project.project_id}/test_case_review_progress/current", self.store)
+        self.assertEqual(self.store[path], original)
+
+    def test_saved_suite_retry_reuses_only_valid_completed_review_groups(self):
+        project, path = self._generated_suite_pending_review()
+        original = deepcopy(self.store[path])
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = Counter()
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            key = data["review_group"]["requirement_ids"][0]
+            calls[key] += 1
+            if outage and key == "REQ-004":
+                raise httpx.ReadTimeout("synthetic unavailable group")
+            return json.dumps(output)
+
+        with self._mock_grouped_suite_review(critic):
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            groups = unavailable.exception.detail["groups"]
+            self.assertEqual(set(self.store[progress_path]["items"]), {group["input_hash"] for group in groups if group["status"] != "unknown"})
+            self.assertEqual(self.store[path], original)
+            interrupted = deepcopy(self.store)
+            outage = False
+            for defect in (None, "hash", "quote", "step", "grounding", "deep_json"):
+                with self.subTest(defect=defect):
+                    self.store.clear()
+                    self.store.update(deepcopy(interrupted))
+                    calls.clear()
+                    if defect:
+                        key = groups[0]["input_hash"]
+                        items = self.store[progress_path]["items"]
+                        invalid = json.loads(items[key])
+                        if defect == "hash":
+                            invalid["input_hash"] = groups[2]["input_hash"]
+                        elif defect == "quote":
+                            invalid["obligations"][0].pop("source_field")
+                            invalid["obligations"][0]["source_quote"] = "Not in the source"
+                        elif defect == "step":
+                            invalid["obligations"][0]["evidence"][0]["step"] = 99
+                        elif defect == "grounding":
+                            invalid["case_grounding"][0]["test_case_id"] = "TC-004"
+                        items[key] = "[" * 2000 + "]" * 2000 if defect == "deep_json" else json.dumps(invalid)
+
+                    result = self._review_saved_suite(project)
+                    replay = self._review_saved_suite(project)
+                    expected = {"REQ-004": 1, **({"REQ-001": 1} if defect else {})}
+                    self.assertEqual(calls, expected)
+                    self.assertEqual(result.current_revision, project.current_revision + 1)
+                    self.assertEqual(replay.current_revision, result.current_revision)
+                    snapshot = result.current_snapshots["test_cases"]
+                    self.assertTrue(snapshot.approved)
+                    self.assertEqual(snapshot.payload["test_cases"], original["payload"]["test_cases"])
+                    assessment = snapshot.payload["substantive_assessment"]
+                    self.assertEqual(assessment["diagnostics"]["reused_group_count"], 4 - len(expected))
+                    self.assertEqual([row["test_case_id"] for row in assessment["case_grounding"]], [case["id"] for case in snapshot.payload["test_cases"]])
+                    self.assertNotIn(progress_path, self.store)
+                    self.assertFalse(any(key.startswith(("test_case_sets/", "usage_events/")) for key in self.store))
+
+    def test_saved_suite_review_progress_cannot_cross_review_policy_or_project_revision(self):
+        project, _ = self._generated_suite_pending_review()
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = Counter()
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            key = data["review_group"]["requirement_ids"][0]
+            calls[key] += 1
+            if outage and key == "REQ-004":
+                raise httpx.ReadTimeout("synthetic unavailable group")
+            return json.dumps(output)
+
+        prepare_run = suite_review.prepare_run
+        quality_goal = substantive_review.QUALITY_GOAL
+        with self._mock_grouped_suite_review(critic) as settings:
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(len(self.store[progress_path]["items"]), 3)
+            interrupted = deepcopy(self.store)
+            outage = False
+            for cause in ("model", "prompt", "guidance", "expiry", "revision"):
+                with self.subTest(cause=cause):
+                    self.store.clear()
+                    self.store.update(deepcopy(interrupted))
+                    calls.clear()
+                    settings.return_value = self.model_settings.model_copy(update={"model_name": "another-model"}) if cause == "model" else self.model_settings
+                    retry = project
+                    if cause == "expiry":
+                        self.store[progress_path]["expires_at"] = now() - timedelta(seconds=1)
+                    if cause == "revision":
+                        retry = update_project(
+                            project_id=project.project_id,
+                            actor=self.actor,
+                            request_id="change",
+                            name="New name",
+                            base_project_revision=project.current_revision,
+                        )
+                        with self.assertRaises(ProjectConflictError):
+                            self._review_saved_suite(project)
+                        self.assertEqual(calls, {})
+
+                    def guidance(*args, **kwargs):
+                        manifest = prepare_run(*args, **kwargs)
+                        return manifest.model_copy(update={"manifest_id": "changed-guidance"}) if cause == "guidance" else manifest
+
+                    with (
+                        patch.object(suite_review, "prepare_run", side_effect=guidance),
+                        patch.object(
+                            substantive_review, "QUALITY_GOAL", quality_goal + "Changed reviewer instructions." if cause == "prompt" else quality_goal
+                        ),
+                    ):
+                        result = self._review_saved_suite(retry)
+                    assessment = result.current_snapshots["test_cases"].payload["substantive_assessment"]
+                    self.assertEqual(assessment["diagnostics"]["reused_group_count"], 0)
+                    self.assertEqual(calls, {"REQ-001": 1, "REQ-004": 1, "REQ-007": 1, "REQ-010": 1})
+                    self.assertNotIn(progress_path, self.store)
+
+    def test_saved_suite_review_progress_survives_an_interrupted_publication(self):
+        project, _ = self._generated_suite_pending_review()
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = []
+
+        def critic(settings, prompt, **kwargs):
+            calls.append(prompt)
+            return json.dumps(critic_output(prompt)[1])
+
+        with self._mock_grouped_suite_review(critic):
+            self.transaction_client.fail_on_create_segment = "/snapshots/"
+            with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                self._review_saved_suite(project)
+            self.assertEqual(len(self.store[progress_path]["items"]), 4)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            self.transaction_client.fail_on_create_segment = None
+            result = self._review_saved_suite(project)
+
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(result.current_snapshots["test_cases"].approved)
+        self.assertEqual(result.current_revision, project.current_revision + 1)
+        self.assertNotIn(progress_path, self.store)
+
+    def _publish_generated_progress(self, project, response, progress, requirements, manifest):
+        with guidance_scope(manifest):
+            _append_project_generation_snapshots(
+                project_id=project.project_id,
+                response=response,
+                operation="testcases.generate",
+                actor=self.actor,
+                request_id="generation-request",
+                workflow_run_id="generation-run",
+                source_event_id="generation-event",
+                base_project_revision=project.current_revision,
+                source_requirements=requirements,
+                approved_use_case_snapshot_id=project.current_snapshots["use_cases"].snapshot_id,
+                review_progress=progress,
+            )
+        return get_project(project.project_id, actor=self.actor)
+
+    def test_first_saved_retry_reuses_published_generation_review_progress(self):
+        project, _ = self._generated_suite_pending_review()
+        requirements = approved_generation_requirements(project)
+        original = project.current_snapshots["test_cases"]
+        cases = [TestCase.model_validate(case) for case in original.payload["test_cases"]]
+        progress = GenerationReviewProgress()
+        prepare_run = suite_review.prepare_run
+        manifest = prepare_run("test_cases", self.actor, project.project_id, "generation", input_fingerprint="generation inputs")
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        calls = Counter()
+        outage = True
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            key = data["review_group"]["requirement_ids"][0]
+            calls[key] += 1
+            if outage and key == "REQ-004":
+                raise httpx.ReadTimeout("synthetic unavailable group during generation")
+            return json.dumps(output)
+
+        with self._mock_grouped_suite_review(critic) as settings:
+            with guidance_scope(manifest):
+                assessment = substantive_review.assess_delivered_suite(cases, requirements, None, settings=self.model_settings, progress=progress)
+            self.assertEqual(assessment["status"], "unknown")
+            self.assertEqual(len(progress.items), 3)
+            self.assertNotIn(progress_path, self.store)
+            response = GenerateTestCasesResponse.model_validate(
+                {
+                    **original.payload,
+                    "review": {**original.payload["review"], "blocking_issues": [assessment["reason"]]},
+                    "substantive_assessment": assessment,
+                }
+            )
+            pending = self._publish_generated_progress(project, response, progress, requirements, manifest)
+            draft = pending.current_snapshots["test_cases"]
+            self.assertTrue(draft.metadata["review_retry_available"])
+            self.assertEqual(set(self.store[progress_path]["items"]), set(progress.items))
+            self.assertNotIn("test_case_review_progress", pending.model_dump_json())
+            saved = deepcopy(self.store)
+            outage = False
+
+            for cause in (None, "model", "guidance", "legacy"):
+                with self.subTest(cause=cause):
+                    self.store.clear()
+                    self.store.update(deepcopy(saved))
+                    calls.clear()
+                    settings.return_value = self.model_settings.model_copy(update={"model_name": "new-model"}) if cause == "model" else self.model_settings
+                    if cause == "legacy":
+                        del self.store[progress_path]
+
+                    def review_guidance(*args, **kwargs):
+                        current = prepare_run(*args, **kwargs)
+                        self.assertNotEqual(current.manifest_id, manifest.manifest_id)
+                        return current.model_copy(update={"knowledge_revision": "changed"}) if cause == "guidance" else current
+
+                    with patch.object(suite_review, "prepare_run", side_effect=review_guidance):
+                        reviewed = self._review_saved_suite(pending)
+                    snapshot = reviewed.current_snapshots["test_cases"]
+                    expected = {"REQ-004": 1} if cause is None else {"REQ-001": 1, "REQ-004": 1, "REQ-007": 1, "REQ-010": 1}
+                    self.assertEqual(calls, expected)
+                    self.assertTrue(snapshot.approved)
+                    self.assertEqual(snapshot.source_snapshot_id, draft.snapshot_id)
+                    self.assertEqual(snapshot.payload["test_cases"], draft.payload["test_cases"])
+                    self.assertEqual(snapshot.payload["generation_evidence"], draft.payload["generation_evidence"])
+                    self.assertNotIn(progress_path, self.store)
+                    self.assertFalse(any(key.startswith(("test_case_sets/", "usage_events/")) for key in self.store))
+
+    def test_generation_review_progress_commits_only_with_an_eligible_current_draft(self):
+        project, _ = self._generated_suite_pending_review()
+        requirements = approved_generation_requirements(project)
+        draft = project.current_snapshots["test_cases"]
+        response = GenerateTestCasesResponse.model_validate(draft.payload)
+        progress = GenerationReviewProgress()
+        progress.load("reviewer-input-binding", ["verified-group"])
+        progress.save("verified-group", '{"input_hash":"validated-fixture"}')
+        progress_path = f"qa_projects/{project.project_id}/test_case_review_progress/current"
+        saved = deepcopy(self.store)
+        self.transaction_client.fail_on_create_segment = "/snapshots/"
+        with self.assertRaises(HTTPException) as failed:
+            self._publish_generated_progress(project, response, progress, requirements, None)
+        self.assertEqual(failed.exception.status_code, 503)
+        self.assertEqual(self.store, saved)
+        self.transaction_client.fail_on_create_segment = None
+
+        approved = self._publish_generated_progress(project, response.model_copy(update={"approved": True}), progress, requirements, None)
+        self.assertTrue(approved.current_snapshots["test_cases"].approved)
+        self.assertNotIn(progress_path, self.store)
+        before_stale = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as stale:
+            self._publish_generated_progress(project, response, progress, requirements, None)
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertEqual(self.store, before_stale)
+
+    def test_generated_suite_retry_reconstructs_selected_workbench_context(self):
+        project, _ = self._generated_suite_pending_review()
+        suite = project.current_snapshots["test_cases"]
+        context = EnrichInput.model_validate(
+            {
+                "requirements": approved_generation_requirements(project),
+                "diagram_links": [],
+                "image_links": [],
+                "grounded_context": {
+                    "artifact_sources": [{"id": "kept", "label": "Selected"}, {"id": "removed", "label": "Omitted"}],
+                    "ui_elements": [
+                        {"id": "1", "source_id": "kept", "name": "Book", "description": "Submit"},
+                        {"id": "2", "source_id": "removed", "name": "Admin", "description": "Open settings"},
+                    ],
+                },
+            }
+        )
+        expected = context.model_copy(
+            update={
+                "project_id": suite.project_id,
+                "base_project_revision": suite.project_revision - 1,
+                "diagram_links": None,
+                "image_links": None,
+                "grounded_context": context.grounded_context.model_copy(
+                    update={"artifact_sources": context.grounded_context.artifact_sources[:1], "ui_elements": context.grounded_context.ui_elements[:1]}
+                ),
+            }
+        )
+        suite.metadata.update(source_context_hash=case_source_hash(expected.model_dump(mode="json")), source_context_artifact_ids=["kept"])
+        self.assertEqual(suite_review._generated_review_context(suite, context), expected)
+        # Draft generation may publish Use Cases in the preceding revision.
+        paired = expected.model_copy(update={"base_project_revision": suite.project_revision - 2})
+        suite.metadata.update(
+            generation_base_project_revision=paired.base_project_revision, source_context_hash=case_source_hash(paired.model_dump(mode="json"))
+        )
+        self.assertEqual(suite_review._generated_review_context(suite, context), paired)
+        suite.metadata.pop("source_context_artifact_ids")
+        with self.assertRaises(HTTPException) as mismatch:
+            suite_review._generated_review_context(suite, context)
+        self.assertEqual(mismatch.exception.status_code, 409)
+
+    def test_saved_suite_review_preserves_exact_cases_and_can_reopen_approval(self):
+        project, path = self._suite_pending_review()
+        saved = deepcopy(self.store[path])
+        self.assertTrue(any(case["status"] == "Deprecated" for case in saved["payload"]["test_cases"]))
+        artifacts = {key: deepcopy(value) for key, value in self.store.items() if key.startswith("test_case_sets/")}
+        assessment = {"status": "assessed_complete", "design_status": "assessed_complete", "input_hash": "exact-test-review"}
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value=assessment) as critic,
+        ):
+            updated = self._review_saved_suite(project)
+            replay = self._review_saved_suite(project)
+        self.assertEqual(replay.current_revision, updated.current_revision)
+        self.assertEqual(critic.call_count, 1)
+        tested_cases, reviewed_requirements, _ = critic.call_args.args
+        self.assertEqual({case["id"] for case in tested_cases}, {case["id"] for case in saved["payload"]["test_cases"] if case["status"] != "Deprecated"})
+        self.assertNotIn("REQ-005", {requirement.id for requirement in reviewed_requirements})
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertTrue(snapshot.approved)
+        self.assertTrue(snapshot.payload["review"]["approved"])
+        self.assertEqual(snapshot.source_snapshot_id, saved["snapshot_id"])
+        self.assertEqual(snapshot.payload["test_cases"], saved["payload"]["test_cases"])
+        self.assertEqual(snapshot.metadata["source_use_case_snapshot_id"], updated.current_snapshots["use_cases"].snapshot_id)
+        self.assertEqual(self.store[path], saved)
+        self.assertEqual({key: value for key, value in self.store.items() if key.startswith("test_case_sets/")}, artifacts)
+
+    def test_saved_suite_review_keeps_required_work_and_independent_findings(self):
+        task = {"requirement_ids": ["REQ-001"], "scenario_refs": ["REQ-001-SCN-01"], "reason": "Unfinished generation work"}
+        project, _ = self._suite_pending_review(pending=[task])
+        assessment = {
+            "status": "incomplete",
+            "design_status": "incomplete",
+            "reason": "Independent review found missing saved-state coverage.",
+            "obligations": [{"requirement_id": "REQ-002", "status": "unmet", "obligation": "Verify saved value", "reason": "No result was checked"}],
+        }
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value=assessment),
+        ):
+            updated = self._review_saved_suite(project)
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertFalse(snapshot.approved)
+        self.assertEqual(snapshot.payload["generation_tasks"][0], task)
+        self.assertIn("Verify saved value", snapshot.payload["generation_tasks"][1]["reason"])
+        self.assertFalse(updated.stage_state["test_cases"].approved)
+
+    def test_saved_suite_review_rejects_stale_and_unavailable_results_without_publishing(self):
+        project, path = self._suite_pending_review()
+        saved = deepcopy(self.store[path])
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value={"status": "unknown"}) as critic,
+        ):
+            with self.assertRaises(HTTPException) as wrong:
+                self._review_saved_suite(project, "older-suite")
+            self.assertEqual(wrong.exception.status_code, 409)
+            critic.assert_not_called()
+            with self.assertRaises(HTTPException) as unavailable:
+                self._review_saved_suite(project)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+            critic.return_value = {"status": "unknown", "diagnostics": {"failure_reason": "review_input_too_large"}}
+            with self.assertRaises(HTTPException) as oversized:
+                self._review_saved_suite(project)
+            self.assertEqual(oversized.exception.status_code, 422)
+            self.assertEqual(get_project(project.project_id, actor=self.actor).current_revision, project.current_revision)
+
+            def concurrent_review(*args, **kwargs):
+                update_project(
+                    project_id=project.project_id, actor=self.actor, request_id="other", name="Another revision", base_project_revision=project.current_revision
+                )
+                return {"status": "assessed_complete"}
+
+            critic.side_effect = concurrent_review
+            with self.assertRaises(ProjectConflictError):
+                self._review_saved_suite(project)
+        self.assertEqual(self.store[path], saved)
+        self.assertEqual(get_project(project.project_id, actor=self.actor).current_snapshots["test_cases"].snapshot_id, saved["snapshot_id"])
+
+    def test_corrected_suite_can_be_reviewed_after_current_use_cases_are_approved(self):
+        project, _ = self._suite_pending_review()
+        context = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="context",
+            payload={"notes": "The test fixture has been provisioned."},
+            operation="quality.feedback.apply",
+            actor=self.actor,
+            request_id="correction",
+        )
+        corrected = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="test_cases",
+            payload=project.current_snapshots["test_cases"].payload,
+            operation="quality.feedback.apply",
+            actor=self.actor,
+            request_id="correction",
+            metadata={"source_context_snapshot_id": context.snapshot_id},
+        )
+        with patch.object(suite_review, "assess_delivered_suite") as critic:
+            with self.assertRaises(HTTPException) as upstream:
+                self._review_saved_suite(get_project(project.project_id, actor=self.actor))
+            self.assertEqual(upstream.exception.status_code, 409)
+            critic.assert_not_called()
+        plan = append_stage_snapshot(
+            project_id=project.project_id,
+            stage="use_cases",
+            payload=project.current_snapshots["use_cases"].payload,
+            operation="use_cases.generate",
+            actor=self.actor,
+            request_id="new-plan",
+            approved=True,
+        )
+        state = self.store[f"qa_projects/{project.project_id}"]["stage_state"]["use_cases"]
+        state["metadata"]["latest_human_review"] = {"snapshot_id": plan.snapshot_id, "decision": "approve"}
+        pending = get_project(project.project_id, actor=self.actor)
+        self.assertTrue(pending.stage_state["test_cases"].stale)
+        with (
+            patch.object(suite_review, "start_workflow_run", return_value="review-run"),
+            patch.object(suite_review, "complete_workflow_run"),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", return_value={"status": "assessed_complete"}) as critic,
+        ):
+            updated = self._review_saved_suite(pending)
+        self.assertEqual(critic.call_args.args[2].notes, "The test fixture has been provisioned.")
+        self.assertTrue(updated.stage_state["test_cases"].approved)
+        self.assertFalse(updated.stage_state["test_cases"].stale)
+        self.assertEqual(updated.current_snapshots["test_cases"].payload["test_cases"], corrected.payload["test_cases"])
 
     def test_owner_archived_unapproved_and_stale_inputs_stop_before_generation(self):
         project = self._seed_project(modified={"REQ-003"})

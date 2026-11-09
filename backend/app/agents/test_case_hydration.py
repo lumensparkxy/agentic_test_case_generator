@@ -36,6 +36,7 @@ from ..models import (
     TestCase,
     TestStep,
 )
+from ..services.browser_samples import materialize_browser_sample
 
 STEP_TEXT_PREFIX_PATTERN = re.compile(r"^\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
 STEP_TEXT_MARKER_PATTERN = re.compile(r"(?:^|\n)\s*(?:step\s*)?\d+[\).:-]\s*", re.IGNORECASE)
@@ -181,8 +182,25 @@ def _hydrate_text_step(raw_step: str, step_number: int) -> TestStep:
     )
 
 
-def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]], *, rejections: List[Dict[str, Any]] | None = None) -> List[TestCase]:
+def _hydrate_test_step(raw_step: dict[str, Any], index: int, samples: dict[str, str]) -> TestStep:
+    action = str(raw_step.get("action", "") or "")
+    expected = str(raw_step.get("expected", "") or "")
+    try:
+        bound = materialize_browser_sample(action, expected, samples)
+    except ValueError as exc:
+        raise ValueError(f"step {index}: {exc}") from exc
+    if bound is None:
+        test_data = _normalize_test_data(raw_step.get("test_data"), f"steps[{index - 1}].test_data")
+    else:
+        action, expected, test_data = bound
+    return TestStep(step=raw_step.get("step", index), action=action, expected=expected, test_data=test_data)
+
+
+def _hydrate_test_cases(
+    raw_test_cases: List[Dict[str, Any]], *, rejections: List[Dict[str, Any]] | None = None, browser_samples: dict[str, str] | None = None
+) -> List[TestCase]:
     test_cases: List[TestCase] = []
+    samples = browser_samples or {}
     for index, raw_test_case in enumerate(raw_test_cases, start=1):
         try:
             if not isinstance(raw_test_case, dict):
@@ -194,20 +212,9 @@ def _hydrate_test_cases(raw_test_cases: List[Dict[str, Any]], *, rejections: Lis
             steps = []
             for raw_step in _normalize_raw_steps(raw_test_case.get("steps", [])):
                 if isinstance(raw_step, str):
-                    steps.append(_hydrate_text_step(raw_step, len(steps) + 1))
-                    continue
-
-                if not isinstance(raw_step, dict):
-                    continue
-
-                steps.append(
-                    TestStep(
-                        step=raw_step.get("step", len(steps) + 1),
-                        action=str(raw_step.get("action", "") or ""),
-                        expected=str(raw_step.get("expected", "") or ""),
-                        test_data=_normalize_test_data(raw_step.get("test_data"), f"steps[{len(steps)}].test_data"),
-                    )
-                )
+                    raw_step = _hydrate_text_step(raw_step, len(steps) + 1).model_dump()
+                if isinstance(raw_step, dict):
+                    steps.append(_hydrate_test_step(raw_step, len(steps) + 1, samples))
 
             test_cases.append(
                 TestCase(

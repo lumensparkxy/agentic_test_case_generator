@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence
 from uuid import uuid4
@@ -187,6 +188,7 @@ def persist_test_case_versions(
     operation: str,
     approved: Optional[bool] = None,
     reuse_unchanged_versions: bool = False,
+    changed_case_ids: Optional[set[str]] = None,
     pending_writes: Optional[list] = None,
 ) -> list[TestCase]:
     def write(document, payload, *, operation, merge=False):
@@ -196,6 +198,8 @@ def persist_test_case_versions(
         return _safe_set(document, payload, operation=operation, merge=merge)
 
     test_cases = [test_case if isinstance(test_case, TestCase) else TestCase.model_validate(test_case) for test_case in current_test_cases]
+    if changed_case_ids is not None and not changed_case_ids:
+        return test_cases
     previous = [_coerce_test_case(test_case) for test_case in (previous_test_cases or [])]
     collection = _get_collection(TEST_CASE_SETS_COLLECTION)
     if collection is None:
@@ -211,36 +215,49 @@ def persist_test_case_versions(
         None,
     )
     set_id = existing_set_id or str(uuid4())
-    set_doc = collection.document(set_id)
     actor_snapshot = build_actor_snapshot(actor)
     now = _utcnow()
-    overall_success = write(
-        set_doc,
-        {
-            "set_id": set_id,
-            "artifact_type": "test_cases",
-            "current_operation": operation,
-            "request_id": request_id,
-            "workflow_run_id": workflow_run_id,
-            "latest_event_id": source_event_id,
-            "actor": actor_snapshot,
-            "actor_user_id": actor.sub if actor else None,
-            "approved": approved,
-            "item_count": len(test_cases),
-            "updated_at": now,
-            **({"created_at": now} if not existing_set_id else {}),
-        },
-        operation="test_case_set_upsert",
-        merge=True,
-    )
+    scoped = changed_case_ids is not None
+    scoped_counts = Counter(case.artifact_set_id or set_id for case in test_cases if scoped and (case.artifact_set_id or case.id in changed_case_ids))
+
+    def save_set(target_set_id, item_count):
+        return write(
+            collection.document(target_set_id),
+            {
+                "set_id": target_set_id,
+                "artifact_type": "test_cases",
+                "current_operation": operation,
+                "request_id": request_id,
+                "workflow_run_id": workflow_run_id,
+                "latest_event_id": source_event_id,
+                "actor": actor_snapshot,
+                "actor_user_id": actor.sub if actor else None,
+                "approved": approved,
+                "item_count": item_count,
+                "updated_at": now,
+                **({"created_at": now} if not existing_set_id else {}),
+            },
+            operation="test_case_set_upsert",
+            merge=True,
+        )
+
+    overall_success = True if scoped else save_set(set_id, len(test_cases))
+    written_sets = set()
 
     previous_by_item_id = {test_case.artifact_item_id: test_case for test_case in previous if test_case.artifact_item_id}
     previous_by_case_id = {test_case.id: test_case for test_case in previous}
     updated_test_cases: list[TestCase] = []
 
     for test_case in test_cases:
+        if scoped and test_case.id not in changed_case_ids:
+            updated_test_cases.append(test_case)
+            continue
+        target_set_id = (test_case.artifact_set_id or set_id) if scoped else set_id
+        if scoped and target_set_id not in written_sets:
+            overall_success = save_set(target_set_id, scoped_counts[target_set_id]) and overall_success
+            written_sets.add(target_set_id)
         previous_test_case = None
-        if test_case.artifact_item_id and test_case.artifact_item_id in previous_by_item_id:
+        if not scoped and test_case.artifact_item_id and test_case.artifact_item_id in previous_by_item_id:
             previous_test_case = previous_by_item_id[test_case.artifact_item_id]
         elif test_case.id in previous_by_case_id:
             previous_test_case = previous_by_case_id[test_case.id]
@@ -272,12 +289,12 @@ def persist_test_case_versions(
         previous_version_id = previous_test_case.artifact_version_id if previous_test_case else None
         version_number = int(previous_test_case.artifact_version_number or 0) + 1 if previous_test_case else 1
         version_id = str(uuid4())
-        item_doc = set_doc.collection("items").document(item_id)
+        item_doc = collection.document(target_set_id).collection("items").document(item_id)
         item_success = write(
             item_doc,
             {
                 "item_id": item_id,
-                "set_id": set_id,
+                "set_id": target_set_id,
                 "test_case_id": test_case.id,
                 "current_version_id": version_id,
                 "latest_event_id": source_event_id,
@@ -293,7 +310,7 @@ def persist_test_case_versions(
             item_doc.collection("versions").document(version_id),
             {
                 "version_id": version_id,
-                "set_id": set_id,
+                "set_id": target_set_id,
                 "item_id": item_id,
                 "version_number": version_number,
                 "previous_version_id": previous_version_id,
@@ -313,7 +330,7 @@ def persist_test_case_versions(
         updated_test_cases.append(
             test_case.model_copy(
                 update={
-                    "artifact_set_id": set_id,
+                    "artifact_set_id": target_set_id,
                     "artifact_item_id": item_id,
                     "artifact_version_id": version_id,
                     "artifact_version_number": version_number,

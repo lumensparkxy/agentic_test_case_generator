@@ -318,8 +318,9 @@ def complete_workflow_run(
     status: str,
     metadata: Optional[Dict[str, Any]] = None,
     error_message: Optional[str] = None,
+    pending_writes: Optional[list] = None,
+    firestore_client=None,
 ) -> None:
-    record_workflow_completed(run_id, status)
     payload = _attach_trace_id(
         {
             "status": status,
@@ -329,7 +330,11 @@ def complete_workflow_run(
             "result": _serialize_value(metadata or {}),
         }
     )
-    _record_repository_failure(get_audit_repository().record_workflow_run_complete(run_id, payload))
+    if pending_writes is not None:
+        pending_writes.append((firestore_client.collection(WORKFLOW_RUNS_COLLECTION).document(run_id), payload, True))
+    else:
+        record_workflow_completed(run_id, status)
+        _record_repository_failure(get_audit_repository().record_workflow_run_complete(run_id, payload))
 
 
 def record_usage_event(

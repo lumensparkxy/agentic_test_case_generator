@@ -437,6 +437,10 @@ test.describe("Authenticated Home workspace", () => {
 		const recentActivity = homeRegion(page, "Recent activity");
 		await expect(recentActivity).toContainText(BLOCKED_PROJECT.name);
 		await expect(recentActivity).toContainText(READY_PROJECT.name);
+		await expect(recentActivity.getByRole("link", { name: "Open evidence for run internal-run-id-must-not-render" })).toHaveAttribute(
+			"href",
+			`${buildProjectPath(BLOCKED_PROJECT.project_id, "reports")}?run=run-record-orbit-failed`
+		);
 		await expect(page.getByText("internal-run-id-must-not-render", { exact: true })).toHaveCount(0);
 		await expect(page.getByText("internal-report-id-must-not-render", { exact: true })).toHaveCount(0);
 		await expect(page.getByText(REVIEW_PROJECT.current_snapshot_id, { exact: true })).toHaveCount(0);

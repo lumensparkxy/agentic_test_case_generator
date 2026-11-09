@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 class RequirementSourceReference(BaseModel):
@@ -16,6 +16,15 @@ class RequirementSourceReference(BaseModel):
     excerpt_verified: bool = False
     source_section: Optional[str] = None
     original_requirement_ids: List[str] = Field(default_factory=list)
+
+
+class RequirementSourceFinding(BaseModel):
+    kind: Literal["unverified_range", "ambiguous_range", "uncovered_range"]
+    source_label: str
+    source_section: Optional[str] = None
+    original_requirement_ids: List[str] = Field(default_factory=list)
+    requirement_id: Optional[str] = None
+    excerpt: str
 
 
 class Requirement(BaseModel):
@@ -177,6 +186,20 @@ class ScenarioCriterion(BaseModel):
     reason: str
 
 
+class ScenarioBoundaryEvidence(BaseModel):
+    range_id: str = Field(min_length=1, max_length=300)
+    endpoint: str = Field(min_length=1, max_length=40)
+    input_quote: str = Field(min_length=1, max_length=500)
+    outcome_quote: str = Field(min_length=1, max_length=500)
+
+    @field_validator("input_quote", "outcome_quote")
+    @classmethod
+    def nonblank_quote(cls, value):
+        if not value.strip():
+            raise ValueError("Boundary evidence needs an exact excerpt")
+        return value.strip()
+
+
 class ScenarioAssessment(BaseModel):
     requirement_id: str
     scenario_id: str
@@ -185,6 +208,14 @@ class ScenarioAssessment(BaseModel):
     review_available: bool = False
     checks: Dict[str, ScenarioCriterion] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+    boundary_evidence: List[ScenarioBoundaryEvidence] = Field(default_factory=list)
+
+
+class RequirementCoverageFinding(BaseModel):
+    range_id: str
+    requirement_id: str
+    source_excerpt: str
+    missing_endpoints: List[str] = Field(default_factory=list)
 
 
 class SemanticAssessment(BaseModel):
@@ -195,6 +226,7 @@ class SemanticAssessment(BaseModel):
     flagged_count: int = 0
     summary: str = ""
     items: List[ScenarioAssessment] = Field(default_factory=list)
+    requirement_findings: List[RequirementCoverageFinding] = Field(default_factory=list)
 
 
 class ReviewResult(BaseModel):
@@ -300,6 +332,7 @@ class RequirementsWorkflowResponse(ParseResponse):
     guidance: Optional[Dict[str, Any]] = None
     knowledge_suggestion: Optional[Dict[str, Any]] = None
     source_names: List[str] = Field(default_factory=list)
+    source_evidence_findings: List[RequirementSourceFinding] = Field(default_factory=list)
     approved: bool = False
     review: ReviewResult = Field(default_factory=ReviewResult)
     iteration_history: List[WorkflowIteration] = Field(default_factory=list)

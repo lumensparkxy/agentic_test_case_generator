@@ -10,8 +10,10 @@ Azure DevOps are input adapters, not mutually exclusive project modes.
    and collapses the source form.
 2. Expand an incoming row to compare full text, inspect source evidence, or change
    the proposed decision. Exact matches preserve identity and review;
-   semantic and wording matches are suggestions. Correct a match, add independently,
-   or skip. Resolve ambiguous matches before applying.
+   source, semantic and wording matches are suggestions. A unique verified source
+   match shows the current text and matching original IDs before selection. The
+   decision control groups verified matches and keeps the other choices available.
+   Correct a match, add independently, or skip. Resolve ambiguous matches before applying.
 3. Select a replacement scope only when the incoming content replaces an existing
    subset. Unmatched requirements inside that scope appear in **Retiring** and
    require confirmation. Requirements outside it remain active.
@@ -38,6 +40,23 @@ candidate IDs, the captured project revision, existing requirements, suggestions
 counts, warnings and an import ID. Standalone extraction without a project keeps
 its previous response. Older project clients receive HTTP 409 `import_review_required`
 before extraction; release API and UI together.
+
+File extraction, feedback refinement, Jira and Azure DevOps intake save the
+pending preview, completed workflow, usage and applicable consumption in one
+transaction. A stale revision or failed publication preserves the baseline
+and produces no extraction charge. The workbench retries an interrupted
+extraction once with the same inputs and request ID. If the result is still
+uncertain, a retry with the same inputs in the open workbench keeps that ID.
+API callers can resend the
+original request with the same `X-Request-ID` while the preview is pending at
+the captured revision.
+Reusing the ID with different inputs, or after applying, cancelling or
+superseding the preview, returns HTTP 409.
+
+If structural review returns invalid output after extraction, the comparison
+can retain the valid draft and its source evidence after the configured retry.
+The preview identifies the incomplete review and requires the normal explicit
+apply and requirement review decisions.
 
 Project routes:
 
@@ -71,6 +90,9 @@ Firestore's document limit; oversize batches fail without changing the baseline.
 Matching compares every incoming/current chunk using the existing configured model;
 responses are validated against supplied IDs. Model errors are surfaced and uncertain
 candidates require manual decisions. Exact text matches remain usable without a model.
+Verified document excerpts can suggest a match across versions when the source
+identity and original ID agree. Changed text and conflicting matches still require
+an explicit decision.
 No matcher can approve, retire, publish or push requirements to an external system.
 
 A failed apply retains the preview. Retry the same decisions with the same key.
@@ -120,6 +142,17 @@ Oversized, absent, ambiguous or unverifiable claims become unavailable with a
 quality flag. No normalized requirement text substitutes for a source quotation.
 File imports do not accept model-supplied external issue keys, sync destinations
 or persistence identifiers as source identity.
+
+For direct affirmative numeric intervals such as “must be from 1 to 6
+inclusive,” extraction keeps the accepted range and explicitly rejected examples
+with exact supporting sentences. During upload, the range check compares both
+bounds in the incoming wording against the literal spans inside verified
+quotations. A nearby quote with only an upper bound can still be a valid
+quotation, while leaving the two-sided claim unverified. A claim with multiple
+possible source spans also needs review. The comparison lists those claims and
+any uncited source interval with its file, original ID when available, and
+line location. These findings survive re-comparison. Existing manual matching
+and approval remain separate.
 
 Existing references default to `excerpt_verified=false`. Their metadata remains
 stored, but the UI and mapping download do not present an unverified historical

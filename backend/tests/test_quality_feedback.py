@@ -19,13 +19,14 @@ class QualityFeedbackTests(unittest.TestCase):
     setUp = project_tests.WorkflowProjectServiceTests.setUp
     tearDown = project_tests.WorkflowProjectServiceTests.tearDown
 
-    def fixture(self):
+    def fixture(self, case_payload=None):
         project = projects.create_project(name="Quality", description=None, actor=self.actor, request_id="create")
         self.project_id = project.project_id
         self.case = {
             "id": "TC-1",
             "title": "Supervisor approval",
             "steps": [{"step": 1, "action": "Approve expense", "expected": "Expense is approved"}],
+            "expected_result": "Expense is approved",
             "linked_requirement_ids": ["REQ-1"],
         }
         projects.append_stage_snapshot(
@@ -37,7 +38,10 @@ class QualityFeedbackTests(unittest.TestCase):
             request_id="requirements",
             approved=True,
         )
-        for stage, payload in (("use_cases", {"coverage_plan": []}), ("test_cases", {"test_cases": [self.case], "review": {"approved": True}})):
+        for stage, payload in (
+            ("use_cases", {"coverage_plan": []}),
+            ("test_cases", {"test_cases": [self.case], "review": {"approved": True}, **(case_payload or {})}),
+        ):
             projects.append_stage_snapshot(
                 project_id=self.project_id, stage=stage, payload=payload, operation="generate", actor=self.actor, request_id=stage, approved=True
             )
@@ -56,7 +60,21 @@ class QualityFeedbackTests(unittest.TestCase):
         )
 
     def test_capture_duplicate_and_apply_preserve_assertions_and_invalidate_downstream(self):
-        project = self.fixture()
+        setup_reason = "Resolve the Supervisor account before approval."
+        project = self.fixture(
+            {
+                "review": {"approved": False, "blocking_issues": [setup_reason, "A structural finding"]},
+                "coverage_metrics": {"substantive_coverage_status": "incomplete"},
+                "substantive_assessment": {
+                    "status": "incomplete",
+                    "design_status": "assessed_complete",
+                    "execution_status": "blocked",
+                    "reason": setup_reason,
+                    "input_hash": "previous-input-hash",
+                    "execution_blockers": [{"test_case_id": "TC-1", "prerequisite_name": "supervisor"}],
+                },
+            }
+        )
         payload = self.finding(project)
         created = capture_finding(self.project_id, self.actor, payload, "record")
         duplicate = capture_finding(self.project_id, self.actor, payload, "record-again")
@@ -75,9 +93,16 @@ class QualityFeedbackTests(unittest.TestCase):
         applied = update_finding(self.project_id, created["finding"]["id"], self.actor, action, "apply")
         current = projects.get_project(self.project_id, actor=self.actor)
         self.assertEqual(applied["finding"]["status"], "applied_pending_verification")
-        corrected = current.current_snapshots["test_cases"].payload["test_cases"][0]
+        corrected_suite = current.current_snapshots["test_cases"].payload
+        corrected = corrected_suite["test_cases"][0]
         self.assertEqual(corrected["steps"], self.case["steps"])
+        self.assertEqual(corrected["expected_result"], self.case["expected_result"])
         self.assertEqual(corrected["execution_prerequisites"][0]["reference"], "env:PETF_TEST_SUPERVISOR")
+        self.assertEqual(corrected_suite["review"]["blocking_issues"], ["A structural finding"])
+        self.assertEqual(corrected_suite["substantive_assessment"]["status"], "unknown")
+        self.assertNotIn("input_hash", corrected_suite["substantive_assessment"])
+        self.assertNotIn("execution_blockers", corrected_suite["substantive_assessment"])
+        self.assertEqual(corrected_suite["coverage_metrics"]["substantive_coverage_status"], "unknown")
         self.assertFalse(current.stage_state["test_cases"].approved)
         self.assertTrue(current.stage_state["test_cases"].stale)
         self.assertTrue(current.stage_state["use_cases"].stale)
@@ -163,23 +188,71 @@ class QualityFeedbackTests(unittest.TestCase):
             "classify",
         )
         self.assertEqual(classified["finding"]["category"], "environment")
-        passed = projects.append_stage_snapshot(
+        flaky = projects.append_stage_snapshot(
             project_id=self.project_id,
             stage="execution",
-            payload={"results": [{"source_test_case_id": "TC-1", "status": "passed"}]},
+            payload={"results": [{"source_test_case_id": "TC-1", "status": "flaky"}]},
             operation="automation.execution.run",
             actor=self.actor,
-            request_id="rerun",
+            request_id="flaky-rerun",
             source_snapshot_id=source,
             metadata={"target_environment": "staging"},
         )
-        result = update_finding(
-            self.project_id,
-            finding["id"],
-            self.actor,
-            QualityFindingAction(action="verify", base_project_revision=passed.project_revision, verification_snapshot_id=passed.snapshot_id),
-            "verify",
+        with self.assertRaises(HTTPException) as retry_only:
+            update_finding(
+                self.project_id,
+                finding["id"],
+                self.actor,
+                QualityFindingAction(action="verify", base_project_revision=flaky.project_revision, verification_snapshot_id=flaky.snapshot_id),
+                "verify-flaky",
+            )
+        self.assertEqual(retry_only.exception.status_code, 409)
+
+        runner_failure = projects.append_stage_snapshot(
+            project_id=self.project_id,
+            stage="execution",
+            payload={
+                "results": [{"source_test_case_id": "TC-1", "status": "passed"}],
+                "issues": [{"code": "playwright.runner_error", "message": "Fixture cleanup failed"}],
+            },
+            operation="automation.execution.run",
+            actor=self.actor,
+            request_id="runner-failed",
+            source_snapshot_id=source,
+            metadata={"target_environment": "staging"},
         )
+        with self.assertRaises(HTTPException) as runner_error:
+            update_finding(
+                self.project_id,
+                finding["id"],
+                self.actor,
+                QualityFindingAction(
+                    action="verify", base_project_revision=runner_failure.project_revision, verification_snapshot_id=runner_failure.snapshot_id
+                ),
+                "verify-runner-failed",
+            )
+        self.assertEqual(runner_error.exception.status_code, 409)
+        self.assertIn("browser runner errors", runner_error.exception.detail)
+
+        with patch("app.services.execution_result_storage.INLINE_RESULT_BYTES", 1):
+            passed = projects.append_stage_snapshot(
+                project_id=self.project_id,
+                stage="execution",
+                payload={"results": [{"source_test_case_id": "TC-1", "status": "passed"}]},
+                operation="automation.execution.run",
+                actor=self.actor,
+                request_id="rerun",
+                source_snapshot_id=source,
+                metadata={"target_environment": "staging"},
+            )
+        verification = QualityFindingAction(action="verify", base_project_revision=passed.project_revision, verification_snapshot_id=passed.snapshot_id)
+        part_path = f"qa_projects/{self.project_id}/snapshots/{passed.snapshot_id}/execution_result_parts/0000"
+        part = self.store.pop(part_path)
+        with self.assertLogs(level="WARNING"), self.assertRaises(HTTPException) as incomplete:
+            update_finding(self.project_id, finding["id"], self.actor, verification, "verify")
+        self.assertEqual(incomplete.exception.status_code, 409)
+        self.store[part_path] = part
+        result = update_finding(self.project_id, finding["id"], self.actor, verification, "verify")
         self.assertEqual(result["finding"]["status"], "verified")
 
     def test_ownership_and_stale_revisions_prevent_writes(self):

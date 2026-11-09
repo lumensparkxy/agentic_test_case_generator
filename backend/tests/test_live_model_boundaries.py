@@ -15,6 +15,18 @@ from app.contracts.requirements import ReviewResult
 
 
 class ModelSchemaTests(unittest.TestCase):
+    def test_file_range_quotes_are_requested_only_for_document_extraction(self):
+        extraction = adk_client._build_requirement_extraction_pipeline("fixture", 1, 90)
+        connector = adk_client._build_requirement_extraction_pipeline("fixture", 1, 90, verify_range_quotes=False)
+        refinement = adk_client._build_requirement_refinement_pipeline("fixture", 1, 90, "Confirm the boundary")
+        extractor, loop = extraction.sub_agents
+        self.assertIn("Keep an inclusive input range", extractor.instruction)
+        self.assertIn("Check every explicit numeric range", loop.sub_agents[0].instruction)
+        self.assertIn("Restore omitted numeric input constraints", loop.sub_agents[1].instruction)
+        self.assertNotIn("Keep an inclusive input range", connector.sub_agents[0].instruction)
+        for pipeline in (connector, refinement):
+            self.assertNotIn("Check every explicit numeric range", pipeline.sub_agents[1].sub_agents[0].instruction)
+
     def test_model_review_schemas_convert_through_developer_api_sdk(self):
         client = SimpleNamespace(vertexai=False)
         # This API envelope contains server-produced metadata. It cannot be a

@@ -1,11 +1,12 @@
-import KnowledgePanel from "../knowledge/KnowledgePanel";
 import { X } from "lucide-react";
+import { deferWorkspace } from "../../app/deferWorkspace";
 import { Dialog } from "../ui/dialog";
 import { IconButton } from "../ui/controls";
 import { TabList, Tab, TabPanel } from "../ui/tabs";
-import AzureDevOpsConnectionSettings from "../integrations/AzureDevOpsConnectionSettings";
-import JiraConnectionSettings from "../integrations/JiraConnectionSettings";
-import WorkflowSettingsPanel from "../workflow/WorkflowSettingsPanel";
+
+const WorkflowTuningSettings = deferWorkspace(() => import("./WorkflowTuningSettings"), "workflow tuning");
+const IntegrationSettings = deferWorkspace(() => import("./IntegrationSettings"), "integration settings");
+const KnowledgePanel = deferWorkspace(() => import("../knowledge/KnowledgePanel"), "personal knowledge");
 
 export default function SettingsDialog({
 	request,
@@ -78,24 +79,12 @@ export default function SettingsDialog({
 				</TabList>
 				<TabPanel id="settings-section-panel" aria-labelledby={`settings-${settingsSection}-tab`} className="settings-dialog-body">
 					{settingsSection === "workflow" ? (
-						<>
-							<div className="settings-section-intro">
-								<h3>Advanced workflow tuning</h3>
-								<p>Leave fields blank for backend defaults. Adjust these only when you need stricter review gates or shorter AI loops.</p>
-							</div>
-							<WorkflowSettingsPanel
-								title="Requirements workflow settings"
-								description="Tune the requirement review loop when you want stricter gates or shorter runs."
-								settings={requirementWorkflowSettings}
-								setSettings={setRequirementWorkflowSettings}
-							/>
-							<WorkflowSettingsPanel
-								title="Test-case workflow settings"
-								description="Control validation strictness, loop length, and timeout behavior for generation and refinement."
-								settings={testCaseWorkflowSettings}
-								setSettings={setTestCaseWorkflowSettings}
-							/>
-						</>
+						<WorkflowTuningSettings
+							requirementWorkflowSettings={requirementWorkflowSettings}
+							setRequirementWorkflowSettings={setRequirementWorkflowSettings}
+							testCaseWorkflowSettings={testCaseWorkflowSettings}
+							setTestCaseWorkflowSettings={setTestCaseWorkflowSettings}
+						/>
 					) : settingsSection === "knowledge" ? (
 						isAuthenticated ? (
 							<KnowledgePanel request={request} personal />
@@ -103,19 +92,7 @@ export default function SettingsDialog({
 							<p>Sign in to manage personal knowledge.</p>
 						)
 					) : (
-						<>
-							<div className="settings-section-intro">
-								<h3>Integration connections</h3>
-								<p>Set these up once per user. Import/search/sync actions stay in the Upload workflow where they are used.</p>
-							</div>
-							{!isAuthenticated && (
-								<div className="settings-auth-note">🔐 Sign in to create or manage JIRA and Azure DevOps connections.</div>
-							)}
-							<div className="settings-integration-grid">
-								<JiraConnectionSettings {...jiraSettings} />
-								<AzureDevOpsConnectionSettings {...azureDevOpsSettings} />
-							</div>
-						</>
+						<IntegrationSettings isAuthenticated={isAuthenticated} jiraSettings={jiraSettings} azureDevOpsSettings={azureDevOpsSettings} />
 					)}
 				</TabPanel>
 			</Dialog>

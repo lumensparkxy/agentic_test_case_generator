@@ -9,16 +9,17 @@ from google.cloud.firestore_v1 import transactional
 from ..agents.requirement_matching_agent import suggest_matches
 from ..contracts.requirement_imports import RequirementImportPreview, ImportApplyInput, ImportHistoryEntry
 from ..contracts.requirements import Requirement
+from ..utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
 from .guidance_service import public_manifest
 from .firestore_repository import get_required_firestore_client
 from .requirement_reconciliation import build_preview, canonical_requirements, digest, reconcile
 from .workflow_project_service import get_project, DOWNSTREAM_STAGES
 
 
-def _owned(data, actor):
+def _owned(data, actor, *, require_active=True):
     if not data or data.get("owner_user_id") != actor.sub:
         raise HTTPException(404, "Project not found")
-    if data.get("status") == "archived":
+    if require_active and data.get("status") == "archived":
         raise HTTPException(409, "Restore this project before changing requirements.")
     return data
 
@@ -39,6 +40,13 @@ def _bounded(payload):
     if len(json.dumps(payload, default=str).encode()) > 850_000:
         raise HTTPException(413, "Requirement comparison exceeds the storage limit. Import a smaller batch.")
     return payload
+
+
+def check_extraction_receipt(data, fingerprint, *, require_pending=True):
+    if data.get("extraction", {}).get("fingerprint") != fingerprint:
+        raise HTTPException(409, "This request already saved a requirements preview for different inputs.")
+    if require_pending and data["status"] != "pending":
+        raise HTTPException(409, "This requirements preview is no longer pending.")
 
 
 def _snapshot_write(transaction, doc, project, payload, actor, request_id, snapshot_id, operation, counts):
@@ -122,19 +130,45 @@ class RequirementImportRepository:
         return data
 
     def save(self, preview, actor, retired, workflow_payload):
+        self._save_preview(preview, actor, retired, workflow_payload)
+        return preview
+
+    def find_extraction(self, project_id, import_id, actor, revision, fingerprint, *, require_pending=True):
+        doc = self.project_doc(project_id)
+        _owned(doc.get().to_dict(), actor, require_active=require_pending)
+        data = doc.collection("requirement_imports").document(import_id).get().to_dict()
+        if data is not None:
+            check_extraction_receipt(data, fingerprint, require_pending=require_pending)
+            if require_pending:
+                _revision(_owned(doc.get().to_dict(), actor), revision)
+        return data
+
+    def _save_preview(self, preview, actor, retired, workflow_payload, *, extraction=None, commit_audit=None):
         doc = self.project_doc(preview.project_id)
+        ref = doc.collection("requirement_imports").document(preview.import_id)
         data = _bounded(
-            {**preview.model_dump(mode="json"), "retired_requirements": [r.model_dump(mode="json") for r in retired], "workflow_payload": workflow_payload}
+            {
+                **preview.model_dump(mode="json"),
+                "retired_requirements": [r.model_dump(mode="json") for r in retired],
+                "workflow_payload": workflow_payload,
+                **({"extraction": extraction} if extraction is not None else {}),
+            }
         )
 
         @transactional
         def save(transaction):
             project = _owned(doc.get(transaction=transaction).to_dict(), actor)
             _revision(project, preview.base_project_revision)
-            transaction.create(doc.collection("requirement_imports").document(preview.import_id), data)
+            if extraction is not None:
+                previous = ref.get(transaction=transaction).to_dict()
+                if previous is not None:
+                    check_extraction_receipt(previous, extraction["fingerprint"])
+                    return previous
+                commit_audit(transaction)
+            transaction.create(ref, data)
+            return data
 
-        save(self.client.transaction())
-        return preview
+        return save(self.client.transaction())
 
     def list_pending(self, project_id, actor):
         self.baseline(project_id, actor)
@@ -291,8 +325,7 @@ def require_review_client(project_id, base_project_revision, import_mode, actor)
     repository().baseline(project_id, actor, base_project_revision)
 
 
-def stage_import(project_id, actor, revision, response, operation):
-    repo = repository()
+def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit):
     project, snapshot = repo.baseline(project_id, actor, revision)
     current, retired = canonical_requirements(project_id, snapshot)
     incoming = response.requirements
@@ -300,11 +333,14 @@ def stage_import(project_id, actor, revision, response, operation):
         raise HTTPException(422, "No requirements extracted. The current project has not changed.")
     _bounded({"current": [r.model_dump(mode="json") for r in current], "incoming": [r.model_dump(mode="json") for r in incoming]})
     matches, failed = suggest_matches(current, incoming)
-    preview = build_preview(project_id, project["current_revision"], current, incoming, response.source_name, operation, str(uuid4()), matches, failed)
+    preview = build_preview(project_id, project["current_revision"], current, incoming, response.source_name, operation, import_id, matches, failed)
     preview.guidance = response.guidance or public_manifest()
-    workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text"})
+    preview.source_evidence_findings = response.source_evidence_findings
+    if response.workflow_diagnostics.failure_reason == REVIEW_SCHEMA_INVALID:
+        preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
+    workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text", "source_evidence_findings"})
     workflow["guidance"] = preview.guidance
-    return repo.save(preview, actor, retired, workflow)
+    return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit)
 
 
 def recompare_import(project_id, import_id, actor):
@@ -322,6 +358,9 @@ def recompare_import(project_id, import_id, actor):
     matches, failed = suggest_matches(current, incoming)
     preview = build_preview(project_id, project["current_revision"], current, incoming, old.source_name, old.operation, str(uuid4()), matches, failed)
     preview.guidance = old.guidance
+    preview.source_evidence_findings = old.source_evidence_findings
+    if RETAINED_REQUIREMENT_DRAFT_WARNING in old.warnings:
+        preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
     result = repo.save(preview, actor, retired, data.get("workflow_payload", {}))
     repo.cancel(project_id, import_id, actor)
     return result

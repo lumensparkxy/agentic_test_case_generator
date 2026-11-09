@@ -6,6 +6,27 @@ import re
 from typing import Any
 
 
+QUOTED_BROWSER_LOCATOR = r"""(?:"(?:\\[^\r\n]|[^"\\\r\n])*"|'(?:\\[^\r\n]|[^'\\\r\n])*')"""
+MAX_BROWSER_COUNT = (1 << 53) - 1
+
+
+def unquote_browser_locator(quoted: str) -> str:
+    r"""Decode the outer quotes while preserving CSS escapes such as \#."""
+    delimiter = re.escape(quoted[0])
+    return re.sub(rf"\\([{delimiter}\\])", r"\1", quoted[1:-1])
+
+
+def parse_browser_count(text: str) -> int | None:
+    """Read an exact JavaScript integer without converting unbounded input."""
+    if not text.isdecimal():
+        return None
+    digits = text.lstrip("0") or "0"
+    if len(digits) > len(str(MAX_BROWSER_COUNT)):
+        return None
+    count = int(digits)
+    return count if count <= MAX_BROWSER_COUNT else None
+
+
 AMBIGUOUS_SEMANTIC_VISIBLE_TEXTS = frozenset(
     {
         "button",

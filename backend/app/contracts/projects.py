@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Literal
 from .impact import ImpactApplication
 from pydantic import BaseModel, Field
 
+from .execution import ExecutionCaseStatus, ExecutionIssue
 from .requirements import (
     RequirementAnalysis,
     RequirementCoveragePlan,
@@ -11,6 +12,7 @@ from .requirements import (
     WorkflowDiagnostics,
     WorkflowSettings,
 )
+from .test_cases import TestCase
 
 
 ProjectStageName = Literal["requirements", "context", "use_cases", "impact_analysis", "test_cases", "execution", "reports"]
@@ -82,6 +84,7 @@ class QaProjectExecutionRun(BaseModel):
     artifacts_root: Optional[str] = None
     playwright_report_paths: List[str] = Field(default_factory=list)
     project_revision: int
+    historical: bool = False
     test_case_count: int = 0
     status: str
     summary: Dict[str, Any] = Field(default_factory=dict)
@@ -93,6 +96,36 @@ class QaProjectExecutionRun(BaseModel):
     request_id: Optional[str] = None
     actor_user_id: Optional[str] = None
     created_at: datetime
+
+
+class QaProjectExecutionCaseResult(BaseModel):
+    id: str
+    source_test_case_id: str
+    title: str
+    status: ExecutionCaseStatus
+    issues: List[ExecutionIssue] = Field(default_factory=list)
+
+
+class QaProjectExecutionRunDetail(QaProjectExecutionRun):
+    results: Optional[List[QaProjectExecutionCaseResult]] = None
+    issues: List[ExecutionIssue] = Field(default_factory=list)
+
+
+class QaProjectCaseSourceRequirement(BaseModel):
+    id: str
+    text: str
+
+
+class QaProjectTestCaseEvidence(BaseModel):
+    project_id: str
+    snapshot_id: str
+    suite_version: int
+    project_revision: int
+    historical: bool
+    stale: bool = False
+    test_case: TestCase
+    requirements: List[QaProjectCaseSourceRequirement] = Field(default_factory=list)
+    obligations: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class QaProjectDetail(QaProjectSummary):
@@ -123,6 +156,13 @@ class QaProjectUpdateInput(BaseModel):
 
 class QaProjectUseCaseGenerationInput(BaseModel):
     model_config = {"extra": "forbid"}
+    base_project_revision: int = Field(ge=0)
+    refresh_requirement_ids: Optional[List[str]] = Field(default=None, max_length=400)
+
+
+class QaProjectTestCaseReviewInput(BaseModel):
+    model_config = {"extra": "forbid"}
+    snapshot_id: str = Field(min_length=1, max_length=160)
     base_project_revision: int = Field(ge=0)
 
 

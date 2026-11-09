@@ -2,17 +2,21 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from google.genai import errors as genai_errors
+from google.genai import errors as genai_errors, types
 import httpx
 
 from app.agents.substantive_review import (
+    MAX_INPUT_BYTES,
     review_input,
+    review_prompt,
     validate_assessment,
     assess_delivered_suite,
     apply_assessment,
     assessment_tasks,
 )
+from app.contracts.guidance import GuidanceManifest, MemoryGuidance, SkillGuidance
 from app.models import Requirement, TestCase
+from app.services.guidance_service import guidance_scope
 
 
 def fixture(*, retry=True):
@@ -56,7 +60,105 @@ def fixture(*, retry=True):
     return req, case, data, digest, output
 
 
+def rejected_booking_fixture():
+    target = "https://booking.example/"
+    error = "Enter a whole number from 1 to 8"
+    context = {
+        "app_link": target,
+        "notes": f'Browser rejection "{error}" on "{target}" after button "Book" preserves css "#bookings tr" when exact heading "My bookings" is visible',
+    }
+    requirement = Requirement(id="BOOK-1", text="Show an inline error and create no booking when the attendee count is above the maximum.")
+    case = TestCase(
+        id="TC-REJECT",
+        title="Reject an oversized booking",
+        automation_status="To Be Automated",
+        linked_requirement_ids=[requirement.id],
+        expected_result="The inline error is displayed and no booking is created.",
+        steps=[
+            {"step": 1, "action": f'Open "{target}"', "expected": ""},
+            {"step": 2, "action": 'Click exact button "Sign in as Alice"', "expected": 'exact heading "My bookings" is visible'},
+            {"step": 3, "action": "Inspect the bookings", "expected": 'css "#bookings tr" count should be 1'},
+            {"step": 4, "action": 'Enter "9" into the "Attendees" field', "expected": 'field "Attendees" value should equal "9"'},
+            {"step": 5, "action": 'Click exact button "Book"', "expected": f'exact text "{error}" is visible'},
+            {"step": 6, "action": f'Open "{target}"', "expected": 'exact heading "My bookings" is visible'},
+            {"step": 7, "action": "Inspect the bookings", "expected": 'css "#bookings tr" count should be 1'},
+        ],
+    )
+    return requirement, case, context
+
+
 class SubstantiveReviewTests(unittest.TestCase):
+    def test_rejected_write_requires_fresh_saved_state_even_when_the_critic_approves(self):
+        requirement, case, context = rejected_booking_fixture()
+        case.steps = case.steps[:5]
+        data, digest, _ = review_input([case], [requirement], context)
+        output = {
+            "input_hash": digest,
+            "obligations": [
+                {
+                    "requirement_id": requirement.id,
+                    "source_field": "text",
+                    "obligation": "Reject an oversized booking",
+                    "status": "covered",
+                    "reason": "The error is displayed.",
+                    "evidence": [{"test_case_id": case.id, "step": 5}],
+                }
+            ],
+            "case_grounding": [{"test_case_id": case.id, "reason": "The supplied app has the booking form.", "prerequisites": []}],
+        }
+        result = validate_assessment(json.dumps(output), data, digest)
+        self.assertEqual(result["model_status"], "assessed_complete")
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["obligations"][-1]["assessment_method"], "deterministic_regression_guard")
+        self.assertIn('css "#bookings tr"', result["obligations"][-1]["reason"])
+        self.assertEqual(assessment_tasks(result, [case])[0]["source_test_case_id"], case.id)
+
+    def test_rejected_write_readback_checks_the_same_loaded_collection_before_and_after(self):
+        from app.agents.substantive_review import known_regression_findings
+
+        requirement, case, context = rejected_booking_fixture()
+
+        def findings(current, current_context=context):
+            data, _, _ = review_input([current], [requirement], current_context)
+            return known_regression_findings(data)[0]
+
+        self.assertEqual(findings(case), [])
+        for step_index, changes in (
+            (2, {"expected": 'css "#other tr" count should be 1'}),
+            (5, {"action": "Inspect the collection"}),
+            (5, {"action": 'Open "https://booking.example/other"'}),
+            (5, {"expected": ""}),
+            (6, {"expected": 'css "#bookings tr" count should be 2'}),
+            (6, {"expected": 'css "#other tr" count should be 1'}),
+        ):
+            with self.subTest(step=step_index, changes=changes):
+                defective = case.model_copy(deep=True)
+                defective.steps[step_index] = defective.steps[step_index].model_copy(update=changes)
+                self.assertEqual(len(findings(defective)), 1)
+        stale = case.model_copy(update={"steps": [*case.steps[:5], case.steps[-1]]})
+        separate = case.model_copy(update={"id": "TC-LIST", "steps": case.steps[-2:]})
+        data, _, _ = review_input([stale, separate], [requirement], context)
+        self.assertEqual(len(known_regression_findings(data)[0]), 1)
+        scoped_error = case.model_copy(deep=True)
+        scoped_error.steps[4].expected = 'css "#error" text should equal "Enter a whole number from 1 to 8"'
+        self.assertEqual(findings(scoped_error), [])
+        scoped_error.steps.pop(5)
+        self.assertEqual(len(findings(scoped_error)), 1)
+        quoted_selector = """css '#bookings tr[data-owner="QA  User"]'"""
+        quoted_context = {**context, "notes": context["notes"].replace('css "#bookings tr"', quoted_selector)}
+        scoped_count = case.model_copy(deep=True)
+        for step_index in (2, 6):
+            scoped_count.steps[step_index].expected = f"{quoted_selector} count should be 1"
+        self.assertEqual(findings(scoped_count, quoted_context), [])
+        scoped_count.steps[6].expected = scoped_count.steps[6].expected.replace("QA  User", "QA User")
+        quoted_findings = findings(scoped_count, quoted_context)
+        self.assertEqual(len(quoted_findings), 1)
+        self.assertIn(r'css "#bookings tr[data-owner=\"QA  User\"]"', quoted_findings[0]["reason"])
+        self.assertEqual(findings(stale.model_copy(update={"automation_status": "Manual"})), [])
+        self.assertEqual(findings(stale, {**context, "notes": "No declared rejection."}), [])
+        requirement.text = "Show an inline error when the attendee count is above the maximum."
+        self.assertEqual(findings(stale), [])
+
     def test_compact_source_references_resolve_hash_bound_text_and_excerpt(self):
         req, case, _, _, output = fixture(retry=False)
         req.source_excerpt = "Original source excerpt: retain the same identity."
@@ -123,6 +225,61 @@ class SubstantiveReviewTests(unittest.TestCase):
             with self.subTest(reference=reference), self.assertRaises(ValueError):
                 validate_assessment(json.dumps(output), data, digest)
 
+    def test_covered_chain_binds_standalone_action_and_later_observable_result(self):
+        requirement = Requirement(id="DIR-1", text="Pressing Search for Alex Rivera shows the exact result Alex Rivera.")
+        case = TestCase(
+            id="TC-SEARCH",
+            title="Search the directory",
+            linked_requirement_ids=[requirement.id],
+            steps=[
+                {"step": 1, "action": "Open the directory", "expected": "Directory heading is visible"},
+                {"step": 2, "action": 'Click exact button "Search"', "expected": ""},
+                {"step": 3, "action": "Inspect the matching result", "expected": 'exact text "Alex Rivera" is visible'},
+            ],
+        )
+        data, digest, _ = review_input([case], [requirement], None)
+        trigger = {"test_case_id": case.id, "step": 2}
+        result_ref = {"test_case_id": case.id, "step": 3}
+        output = {
+            "input_hash": digest,
+            "obligations": [
+                {
+                    "requirement_id": requirement.id,
+                    "source_field": "text",
+                    "obligation": "Search returns the exact result",
+                    "status": "covered",
+                    "reason": "Search triggers the observed exact result",
+                    "evidence": [trigger, result_ref],
+                }
+            ],
+            "case_grounding": [{"test_case_id": case.id, "reason": "Grounded directory action and result", "prerequisites": []}],
+        }
+        assessment = validate_assessment(json.dumps(output), data, digest)
+        self.assertEqual(assessment["design_status"], "assessed_complete")
+        self.assertEqual(assessment["status"], "assessed_complete")
+        self.assertEqual(
+            assessment["obligations"][0]["evidence"],
+            [{"test_case_id": case.id, **step.model_dump(include={"step", "action", "expected"})} for step in case.steps[1:]],
+        )
+
+        invalid = json.loads(json.dumps(output))
+        for evidence in ([trigger], [{"test_case_id": case.id, "step": 1}, trigger]):
+            invalid["obligations"][0]["evidence"] = evidence
+            with self.subTest(evidence=evidence), self.assertRaisesRegex(ValueError, "observable result after its cited actions"):
+                validate_assessment(json.dumps(invalid), data, digest)
+        with patch("app.agents.substantive_review._call_critic", side_effect=[json.dumps(invalid), json.dumps(output)]) as call:
+            repaired = assess_delivered_suite([case], [requirement], None, settings=object())
+        self.assertEqual(repaired["status"], "assessed_complete")
+        self.assertEqual(repaired["diagnostics"]["first_validation_error"], "missing_observable_result")
+        self.assertEqual(call.call_count, 2)
+
+        invalid["obligations"][0]["evidence"] = [
+            {**trigger, "action": case.steps[1].action, "expected": "Fabricated result"},
+            result_ref,
+        ]
+        with self.assertRaisesRegex(ValueError, "exact delivered steps"):
+            validate_assessment(json.dumps(invalid), data, digest)
+
     def test_transient_provider_failure_recovers_once_without_weakening_evidence(self):
         req, case, _, _, output = fixture(retry=False)
         for error in (genai_errors.ServerError(503, {"error": {"message": "private provider detail"}}), httpx.ReadTimeout("private detail")):
@@ -140,7 +297,7 @@ class SubstantiveReviewTests(unittest.TestCase):
         scenarios = [
             ([private_error, private_error], 2, "provider_unavailable"),
             ([genai_errors.ClientError(401, {"error": {"message": "private key"}})], 1, "provider_unavailable"),
-            (["not JSON"], 1, "invalid_evidence"),
+            (["not JSON", "not JSON again"], 2, "invalid_evidence"),
             ([json.dumps({**output, "input_hash": "stale"})], 1, "invalid_evidence"),
         ]
         for side_effect, attempts, reason in scenarios:
@@ -160,6 +317,64 @@ class SubstantiveReviewTests(unittest.TestCase):
             result = assess_delivered_suite([case], [req], None, settings=object())
         self.assertEqual(call.call_count, 1)
         self.assertEqual(result["status"], "unknown")
+
+    def test_bad_review_format_and_cross_case_citation_can_be_retried_once(self):
+        req, case, _, _, output = fixture(retry=False)
+        other = case.model_copy(update={"id": "TC-OTHER"})
+        _, digest, _ = review_input([case, other], [req], None)
+        output["input_hash"] = digest
+        output["case_grounding"].append({"test_case_id": other.id, "reason": "Grounded", "prerequisites": []})
+        mixed = json.loads(json.dumps(output))
+        mixed["obligations"][0]["evidence"].append({**mixed["obligations"][0]["evidence"][0], "test_case_id": other.id})
+        for invalid, code in (("not JSON", "malformed_json"), (json.dumps(mixed), "incoherent_case_evidence")):
+            with self.subTest(code=code), patch("app.agents.substantive_review._call_critic", side_effect=[invalid, json.dumps(output)]) as call:
+                result = assess_delivered_suite([case, other], [req], None, settings=object())
+            self.assertEqual(result["status"], "assessed_complete")
+            self.assertEqual(result["diagnostics"]["first_validation_error"], code)
+            self.assertEqual(result["diagnostics"]["attempt_count"], 2)
+            self.assertIn(code, call.call_args.args[1])
+            self.assertIn(digest, call.call_args.args[1])
+
+    def test_declared_missing_setup_blocks_combined_gate_even_when_critic_omits_it(self):
+        req, case, _, _, output = fixture(retry=False)
+        from app.contracts.quality_feedback import ExecutionPrerequisite
+
+        case.execution_prerequisites = [ExecutionPrerequisite(name="bookingAccount", kind="credential", description="Provision the booking account")]
+        data, digest, _ = review_input([case], [req], None)
+        output["input_hash"] = digest
+        blocker = {"test_case_id": case.id, "prerequisite_name": "bookingAccount"}
+        gap = {
+            "description": "Provision the booking account",
+            "status": "missing_prerequisite",
+            "required": True,
+            "reason": "No provisioned account was supplied",
+            "execution_prerequisite_name": "bookingAccount",
+        }
+        for findings in ([], [gap]):
+            output["case_grounding"][0]["prerequisites"] = findings
+            assessment = validate_assessment(json.dumps(output), data, digest)
+            self.assertEqual(assessment["status"], "incomplete")
+            self.assertEqual(assessment["design_status"], "assessed_complete")
+            self.assertEqual(assessment["execution_status"], "blocked")
+            self.assertEqual(assessment["execution_blockers"], [blocker])
+            result = apply_assessment(
+                {
+                    "test_cases": [case],
+                    "approved": True,
+                    "review": {"approved": True},
+                    "workflow_diagnostics": {"status": "completed"},
+                    "generation_evidence": {},
+                    "coverage_metrics": {},
+                },
+                assessment,
+            )
+            self.assertFalse(result["approved"])
+            self.assertEqual(result["generation_tasks"], [])
+        output["case_grounding"][0]["prerequisites"] = [{**gap, "execution_prerequisite_name": "invented"}]
+        with self.assertRaisesRegex(ValueError, "declared missing prerequisite"):
+            validate_assessment(json.dumps(output), data, digest)
+        output["case_grounding"][0]["prerequisites"] = [{**gap, "execution_prerequisite_name": None, "status": "unsupported_fact"}]
+        self.assertEqual(validate_assessment(json.dumps(output), data, digest)["design_status"], "incomplete")
 
     def test_applied_assessment_keeps_score_and_specific_findings_after_project_reload(self):
         from app.services.test_case_quality import project_test_case_view
@@ -334,14 +549,28 @@ class SubstantiveReviewTests(unittest.TestCase):
 
     def test_transport_bounded_and_complete_source_not_truncated(self):
         req, case, _, digest, output = fixture()
-        from app.agents.substantive_review import _call_critic, review_prompt
+        from app.agents.substantive_review import IncompleteCriticResponse, _call_critic, review_prompt
 
         with patch("app.agents.substantive_review.genai.Client") as client:
-            client.return_value.__enter__.return_value.models.generate_content.return_value = SimpleNamespace(text=json.dumps(output))
-            _call_critic(SimpleNamespace(gemini_api_key="synthetic", model_name="fixture"), "prompt")
-            config = client.return_value.__enter__.return_value.models.generate_content.call_args.kwargs["config"]
+            generate = client.return_value.__enter__.return_value.models.generate_content
+            generate.return_value = types.GenerateContentResponse(
+                candidates=[
+                    types.Candidate(
+                        content=types.Content(parts=[types.Part(text="thinking", thought=True), types.Part(text=json.dumps(output))]),
+                        finish_reason=types.FinishReason.STOP,
+                    )
+                ]
+            )
+            settings = SimpleNamespace(gemini_api_key="synthetic", model_name="fixture")
+            self.assertEqual(json.loads(_call_critic(settings, "prompt")), output)
+            config = generate.call_args.kwargs["config"]
+            self.assertIn("source_field", config.response_schema["$defs"]["ObligationReference"]["required"])
+            self.assertNotIn("additionalProperties", json.dumps(config.response_schema))
             self.assertEqual(config.http_options.timeout, 120_000)
             self.assertEqual(config.http_options.retry_options.attempts, 1)
+            generate.return_value.candidates[0].finish_reason = types.FinishReason.MAX_TOKENS
+            with self.assertRaises(IncompleteCriticResponse):
+                _call_critic(settings, "prompt")
         data, _, _ = review_input([case], [req], None, scope_plan=[{"requirement_id": req.id, "scenarios": []}])
         self.assertEqual(data["scope"], "selected_scenarios")
         self.assertIn(req.text, review_prompt(data, digest))
@@ -352,6 +581,145 @@ class SubstantiveReviewTests(unittest.TestCase):
         self.assertEqual(review_input([versioned], [req], None)[1], digest)
         self.assertNotEqual(review_input([case], [req], {"notes": "contradictory policy"})[1], digest)
         self.assertNotEqual(review_input([case.model_copy(update={"title": "changed"})], [req], None)[1], digest)
+
+    def test_compact_prompt_keeps_behavior_and_exact_input_binding(self):
+        req, case, _, _, _ = fixture(retry=False)
+        case = case.model_copy(
+            update={
+                "generation_source": "model",
+                "generation_pass_id": "opaque-pass",
+                "source_shard_id": "opaque-shard",
+                "source_refs": ["ART-001"],
+                "scenario_refs": ["SCN-001"],
+                "test_data": '{"optionalAttendee":null,"attendees":0}',
+            }
+        )
+        scope = [{"requirement_id": req.id, "scenarios": [{"id": "SCN-001", "must_have": False, "objective": "Verify the saved identifier."}]}]
+        context = {
+            "requirements": [req.model_dump(mode="json")],
+            "notes": "Retain the ID after refresh.",
+            "grounded_context": {"ui_elements": [{"source_id": "ART-001", "name": "Room", "select_options": [], "checkbox_available": False}]},
+        }
+        guidance = GuidanceManifest(
+            manifest_id="guidance-1",
+            stage="test_cases",
+            model="fixture",
+            skills=(
+                SkillGuidance(id="skill", version="1", stage="test_cases", description="Method", content_hash="hash", instructions="Check the final state."),
+            ),
+            memories=(MemoryGuidance(id="memory", revision=0, scope="project", text="Existing fixture has one booking.", source="fixture", reason="Scoped"),),
+        )
+        with guidance_scope(guidance):
+            data, digest, encoded = review_input([case], [req], context, scope_plan=scope)
+            prompt = review_prompt(data, digest)
+            projected = json.loads(prompt.rsplit("\nDATA:\n", 1)[1])
+            self.assertIn(digest, prompt)
+            self.assertEqual(projected["requirements"][0]["text"], req.text)
+            self.assertEqual(projected["context"]["grounded_context"], context["grounded_context"])
+            self.assertNotIn("requirements", projected["context"])
+            self.assertEqual(projected["selected_scenarios"], scope)
+            self.assertEqual(projected["test_cases"][0]["steps"][0], case.steps[0].model_dump(exclude_none=True))
+            self.assertEqual(projected["test_cases"][0]["test_data"], case.test_data)
+            self.assertEqual(projected["test_cases"][0]["source_refs"], ["ART-001"])
+            self.assertEqual(projected["test_cases"][0]["scenario_refs"], ["SCN-001"])
+            self.assertNotIn("generation_source", projected["test_cases"][0])
+            self.assertNotIn("opaque-pass", prompt)
+            self.assertNotIn("opaque-shard", prompt)
+            self.assertNotIn("guidance_manifest", projected)
+            self.assertEqual(projected["applied_guidance"]["manifest_id"], "guidance-1")
+            self.assertEqual(projected["applied_guidance"]["skills"][0]["instructions"], "Check the final state.")
+            self.assertEqual(projected["applied_guidance"]["memories"][0]["text"], "Existing fixture has one booking.")
+            self.assertEqual(projected["applied_guidance"]["memories"][0]["revision"], 0)
+            self.assertEqual(json.loads(encoded), data)
+            self.assertEqual(data["test_cases"][0]["generation_pass_id"], "opaque-pass")
+
+            context["requirements"] = [{**context["requirements"][0], "text": "Different Context requirement."}]
+            changed, changed_digest, _ = review_input([case], [req], context, scope_plan=scope)
+            retained = json.loads(review_prompt(changed, changed_digest).rsplit("\nDATA:\n", 1)[1])
+            self.assertEqual(retained["context"]["requirements"][0]["text"], "Different Context requirement.")
+            self.assertNotEqual(changed_digest, digest)
+
+    def test_200_case_prompt_fits_and_requires_all_case_citations(self):
+        req, base, _, _, output = fixture(retry=False)
+        cases = [
+            base.model_copy(
+                update={
+                    "id": f"TC-{index:03d}",
+                    "description": "Capture saved receipt and exact IDs. " * 52,
+                    "generation_source": "model",
+                    "generation_pass_id": "39cb139b-7760-4a22-8286-667ad29fc4d9",
+                    "source_shard_id": "test-case-shard-01",
+                }
+            )
+            for index in range(1, 201)
+        ]
+        context = {"requirements": [req.model_dump(mode="json")]}
+        data, digest, encoded = review_input(cases, [req], context)
+        self.assertGreater(len(encoded.encode("utf-8")), MAX_INPUT_BYTES)
+        self.assertLessEqual(len(review_prompt(data, digest).encode("utf-8")), MAX_INPUT_BYTES)
+        omitted = False
+
+        def critic(settings, prompt, **kwargs):
+            instructions, _, encoded = prompt.rpartition("\nDATA:\n")
+            sent = json.loads(encoded)
+            group_cases = sent["test_cases"]
+            finding = output["obligations"][0]
+            if group_cases:
+                finding = {**finding, "evidence": [{"test_case_id": group_cases[0]["id"], "step": 1}]}
+            else:
+                finding = {**finding, "status": "unknown", "evidence": []}
+            return json.dumps(
+                {
+                    "input_hash": instructions.split("Copy input_hash exactly as ", 1)[1].split(".", 1)[0],
+                    "obligations": [finding],
+                    "case_grounding": [
+                        {"test_case_id": row["id"], "reason": "Grounded fixture", "prerequisites": []}
+                        for row in group_cases
+                        if not omitted or row["id"] != cases[-1].id
+                    ],
+                }
+            )
+
+        with patch("app.agents.substantive_review._call_critic", side_effect=critic) as provider:
+            reviewed = assess_delivered_suite(cases, [req], context, settings=object())
+            self.assertEqual(reviewed["status"], "assessed_complete")
+            self.assertEqual(len(reviewed["case_grounding"]), len(cases))
+            sent = [json.loads(call.args[1].rsplit("\nDATA:\n", 1)[1]) for call in provider.call_args_list]
+            self.assertEqual(sorted(row["id"] for packet in sent for row in packet["test_cases"]), [case.id for case in cases])
+            omitted = True
+            incomplete = assess_delivered_suite(cases, [req], context, settings=object())
+            self.assertEqual(incomplete["status"], "unknown")
+            missing = [group for group in incomplete["diagnostics"]["groups"] if group["status"] == "unknown"]
+            self.assertEqual(len(missing), 1)
+            self.assertIn(cases[-1].id, missing[0]["case_ids"])
+            self.assertEqual(missing[0]["validation_error"], "incomplete_case_review")
+
+    def test_prompt_budget_counts_utf8_and_repair_instructions(self):
+        req, case, _, _, _ = fixture(retry=False)
+        context = {"notes": "Check pièce 雪 after reload." * 40}
+        data, digest, _ = review_input([case], [req], context)
+        prompt = review_prompt(data, digest)
+        byte_count = len(prompt.encode("utf-8"))
+        self.assertGreater(byte_count, len(prompt))
+        with (
+            patch("app.agents.substantive_review._call_critic", return_value="not JSON") as critic,
+            patch("app.agents.substantive_review.MAX_INPUT_BYTES", len(prompt)),
+        ):
+            oversized = assess_delivered_suite([case], [req], context, settings=object())
+            critic.assert_not_called()
+        self.assertEqual(oversized["status"], "unknown")
+        self.assertEqual(oversized["diagnostics"]["prompt_bytes"], byte_count)
+        self.assertEqual(oversized["diagnostics"]["attempt_count"], 0)
+        with (
+            patch("app.agents.substantive_review._call_critic", return_value="not JSON") as critic,
+            patch("app.agents.substantive_review.MAX_INPUT_BYTES", byte_count),
+        ):
+            retry_oversized = assess_delivered_suite([case], [req], context, settings=object())
+            critic.assert_called_once()
+        self.assertEqual(retry_oversized["status"], "unknown")
+        self.assertEqual(retry_oversized["diagnostics"]["failure_reason"], "review_input_too_large")
+        self.assertEqual(retry_oversized["diagnostics"]["first_validation_error"], "malformed_json")
+        self.assertGreater(retry_oversized["diagnostics"]["prompt_bytes"], byte_count)
 
 
 class LiteralSourceTests(unittest.IsolatedAsyncioTestCase):

@@ -37,7 +37,7 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
                 _conflict("The saved test-case snapshot cannot be verified.")
             if saved_cases != [case.model_dump(mode="json") for case in payload.test_cases]:
                 _conflict("Export only the exact current saved suite. Reload to recover its cases and review.")
-        elif payload.source_snapshot_id:
+        elif payload.source_snapshot_id or (state and state.current_snapshot_id):
             _conflict("The requested test-case snapshot is unavailable. Reload before exporting.")
     elif payload.source_snapshot_id:
         _conflict("A project is required to verify the requested test-case snapshot.")
@@ -52,7 +52,7 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
             pass
     human = state.metadata.get("latest_human_review") if state else None
     human_status = "unavailable"
-    if isinstance(human, dict) and human.get("snapshot_id") == snapshot.snapshot_id:
+    if snapshot and isinstance(human, dict) and human.get("snapshot_id") == snapshot.snapshot_id:
         human_status = {"approve": "approved", "request_changes": "changes_requested"}.get(human.get("decision"), "unavailable")
     tasks = saved.get("generation_tasks")
     unresolved = len(tasks) if isinstance(tasks, list) else None

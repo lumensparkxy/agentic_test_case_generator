@@ -1,12 +1,14 @@
 import useReviewDraft from "../../hooks/useReviewDraft";
 import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
-import BusinessCoverageSummary from "./BusinessCoverageSummary";
+import BusinessCoverageSummary, { ExecutionSetupSummary } from "./BusinessCoverageSummary";
 import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
-import { improvementFindings, findingCaseIds, improvementFeedback } from "./improvementFindings";
+import { findingCaseIds, improvementFeedback, requiresIndependentReview } from "./improvementFindings";
 
 export default function ImproveTestsPanel({
 	review,
+	findings,
+	needsOnlySetup,
 	identity,
 	projectId,
 	snapshotId,
@@ -14,6 +16,9 @@ export default function ImproveTestsPanel({
 	onClearReport,
 	summary,
 	assessment,
+	canReviewSavedSuite,
+	prerequisiteSnapshotId,
+	browserHandoffWarnings,
 	meta,
 	testCases,
 	busy,
@@ -26,7 +31,6 @@ export default function ImproveTestsPanel({
 	onViewCase,
 	onReviewCases,
 }) {
-	const findings = improvementFindings(review);
 	const recovery = useReviewDraft({
 		identity,
 		projectId,
@@ -42,6 +46,7 @@ export default function ImproveTestsPanel({
 			recovery.setValue({ selected: [], instructions: "", caseId: reportedCase.id });
 	}, [reportedCase?.id]);
 	const target = reportedCase || testCases.find((item) => item.id === recovery.value.caseId);
+	const reviewOnly = !target && findings.length === 0 && requiresIndependentReview(assessment);
 	const evidence = target
 		? [
 				`Test ${target.id}: ${target.title}`,
@@ -58,6 +63,7 @@ export default function ImproveTestsPanel({
 	const chosen = findings.filter((finding) => selected.includes(finding));
 	const canApply =
 		!locked &&
+		!reviewOnly &&
 		testCases.length > 0 &&
 		(target ? Boolean(instructions.trim()) : findings.length ? chosen.length > 0 : Boolean(instructions.trim()));
 	const apply = async () => {
@@ -108,9 +114,31 @@ export default function ImproveTestsPanel({
 					</Button>
 				</div>
 			)}
-			<h2>{review?.approved ? "Machine quality check passed" : review ? "What needs fixing" : "Review your test cases"}</h2>
+			<h2>
+				{needsOnlySetup
+					? "Execution setup needed"
+					: review?.approved
+						? "Machine quality check passed"
+						: reviewOnly
+							? "Independent review needed"
+							: review
+								? "What needs fixing"
+								: "Review your test cases"}
+			</h2>
 			<p>{review?.summary || "Describe the improvements you want to make to this test suite."}</p>
 			<BusinessCoverageSummary assessment={assessment} />
+			{reviewOnly && <p>{canReviewSavedSuite ? "Use Review saved suite to check these cases." : assessment.reason}</p>}
+			<ExecutionSetupSummary assessment={assessment} projectId={projectId} prerequisiteSnapshotId={prerequisiteSnapshotId} />
+			{browserHandoffWarnings.length > 0 && (
+				<div>
+					<h3>Browser handoff</h3>
+					<ul>
+						{browserHandoffWarnings.map((warning) => (
+							<li key={warning}>{warning}</li>
+						))}
+					</ul>
+				</div>
+			)}
 			{review && (
 				<p className="helper-text">
 					{meta.scoreLabel}
@@ -125,7 +153,7 @@ export default function ImproveTestsPanel({
 					</Button>
 				</>
 			)}
-			{blockedReason && <p role="status">{blockedReason}</p>}
+			{blockedReason && (!needsOnlySetup || target) && <p role="status">{blockedReason}</p>}
 			{stale && (
 				<Button variant="secondary" onClick={onImpact}>
 					Review impact
@@ -187,21 +215,25 @@ export default function ImproveTestsPanel({
 					))}
 				</fieldset>
 			)}
-			<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
-			<Textarea
-				id={instructionsId}
-				value={instructions}
-				onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
-				disabled={locked}
-				rows={4}
-				placeholder="Describe any details the fixes should take into account…"
-			/>
-			<div className="button-row improve-tests-actions">
-				<Button disabled={!canApply} onClick={() => void apply()}>
-					{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
-				</Button>
-				<span>{chosen.length} selected</span>
-			</div>
+			{!reviewOnly && (!needsOnlySetup || target) && (
+				<>
+					<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
+					<Textarea
+						id={instructionsId}
+						value={instructions}
+						onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
+						disabled={locked}
+						rows={4}
+						placeholder="Describe any details the fixes should take into account…"
+					/>
+					<div className="button-row improve-tests-actions">
+						<Button disabled={!canApply} onClick={() => void apply()}>
+							{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
+						</Button>
+						<span>{chosen.length} selected</span>
+					</div>
+				</>
+			)}
 		</section>
 	);
 }

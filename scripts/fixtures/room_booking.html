@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meeting Room Booking</title>
+</head>
+<body>
+<main>
+  <h1>Meeting Room Booking</h1>
+  <p>Local synthetic fixture</p>
+  <div>
+    <button type="button" data-actor="Alice">Sign in as Alice</button>
+    <button type="button" data-actor="Bob">Sign in as Bob</button>
+    <p id="actor" role="status"></p>
+  </div>
+  <div id="home" hidden>
+    <h2>Book room</h2>
+    <form>
+      <label for="room">Room</label>
+      <select id="room"><option>Atlas</option><option>Birch</option></select>
+      <label for="slot">Time slot</label>
+      <select id="slot">
+        <option>2026-10-01 10:00–11:00 Europe/Zurich</option>
+        <option>2026-10-01 11:00–12:00 Europe/Zurich</option>
+      </select>
+      <label for="attendees">Attendees</label>
+      <input id="attendees" inputmode="decimal" aria-describedby="attendee-error">
+      <span id="attendee-error" role="alert" hidden></span>
+      <button>Book</button>
+      <button type="button" id="retry" hidden>Retry pending booking</button>
+    </form>
+    <p id="booking-result" role="status" aria-label="Booking submission"></p>
+    <section id="confirmation" aria-label="Booking confirmation" hidden>
+      <h3>Booking confirmed</h3>
+      <p id="confirmation-id"></p>
+    </section>
+    <h2>My bookings</h2>
+    <table aria-label="My bookings">
+      <thead><tr><th scope="col">Booking ID</th><th scope="col">Room</th><th scope="col">Time slot</th><th scope="col">Attendees</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+      <tbody id="bookings"></tbody>
+    </table>
+  </div>
+  <section id="detail" aria-label="Booking details" hidden>
+    <h2>Booking details</h2>
+    <dl id="booking-fields"></dl>
+    <div id="detail-actions"></div>
+    <p id="cancel-result" role="status" aria-label="Cancellation result"></p>
+    <a href="/">Back to Book room</a>
+  </section>
+</main>
+<script>
+const byId = (id) => document.getElementById(id);
+const pathId = location.pathname.startsWith("/bookings/") ? location.pathname.split("/").at(-1) : "";
+let pendingBody;
+
+async function post(path, body) {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+  return response.json();
+}
+
+async function cancel(id) {
+  const result = await post(`/api/bookings/${encodeURIComponent(id)}/cancel`, "{}");
+  if (!result.error) pendingBody = undefined;
+  await refresh();
+  byId("cancel-result").textContent = result.error || "Booking cancelled";
+  if (!pathId) byId("booking-result").textContent = result.error || "Booking cancelled";
+}
+
+function cancelButton(id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Cancel booking";
+  button.addEventListener("click", () => cancel(id));
+  return button;
+}
+
+async function refresh() {
+  const url = pathId ? `/api/view?booking=${encodeURIComponent(pathId)}` : "/api/view";
+  const view = await (await fetch(url)).json();
+  byId("actor").textContent = view.actor ? `Signed in as ${view.actor}` : "Choose an employee";
+  byId("home").hidden = Boolean(pathId) || !view.actor;
+  byId("detail").hidden = !pathId || !view.actor;
+  byId("bookings").replaceChildren();
+  for (const booking of view.bookings) {
+    const row = byId("bookings").insertRow();
+    const link = document.createElement("a");
+    link.href = `/bookings/${encodeURIComponent(booking.id)}`;
+    link.textContent = booking.id;
+    row.insertCell().append(link);
+    for (const field of ["room", "slot", "attendees", "status"]) row.insertCell().textContent = booking[field];
+    const actions = row.insertCell();
+    if (booking.status === "Confirmed") actions.append(cancelButton(booking.id));
+  }
+  byId("booking-fields").replaceChildren();
+  byId("detail-actions").replaceChildren();
+  if (view.detail) {
+    for (const [label, field] of [["Booking ID", "id"], ["Room", "room"], ["Time slot", "slot"], ["Attendees", "attendees"], ["Status", "status"]]) {
+      const term = document.createElement("dt");
+      const value = document.createElement("dd");
+      term.textContent = label;
+      value.textContent = view.detail[field];
+      byId("booking-fields").append(term, value);
+    }
+    if (view.detail.status === "Confirmed") byId("detail-actions").append(cancelButton(view.detail.id));
+  }
+}
+
+async function book() {
+  pendingBody ||= JSON.stringify({
+    room: byId("room").value, slot: byId("slot").value, attendees: byId("attendees").value, submission: crypto.randomUUID(),
+  });
+  byId("attendee-error").hidden = true;
+  byId("confirmation").hidden = true;
+  byId("retry").hidden = true;
+  byId("booking-result").textContent = "";
+  let result;
+  try {
+    result = await post("/api/bookings", pendingBody);
+  } catch {
+    byId("booking-result").textContent = "Booking response was lost";
+    byId("retry").hidden = false;
+    return;
+  }
+  if (result.field === "attendees") {
+    byId("attendee-error").textContent = result.error;
+    byId("attendee-error").hidden = false;
+  } else if (result.error) {
+    byId("booking-result").textContent = result.error;
+  } else {
+    byId("confirmation-id").textContent = result.id;
+    byId("confirmation").hidden = false;
+  }
+  await refresh();
+}
+
+const form = document.querySelector("form");
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void book();
+});
+form.addEventListener("input", () => {
+  pendingBody = undefined;
+  byId("retry").hidden = true;
+});
+byId("retry").addEventListener("click", book);
+for (const button of document.querySelectorAll("[data-actor]")) {
+  button.addEventListener("click", async () => {
+    await post("/api/actor", JSON.stringify({ actor: button.dataset.actor }));
+    pendingBody = undefined;
+    byId("confirmation").hidden = true;
+    byId("retry").hidden = true;
+    byId("booking-result").textContent = "";
+    byId("cancel-result").textContent = "";
+    await refresh();
+  });
+}
+void refresh();
+</script>
+</body>
+</html>

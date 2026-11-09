@@ -272,6 +272,9 @@ async function installApi(page, scenario) {
 		if (pathname === `/projects/${PROJECT_ID}/orchestrator/runs`) {
 			return jsonResponse(route, { runs: [], events: [], checkpoints: [] });
 		}
+		if (pathname.startsWith(`/projects/${PROJECT_ID}/execution-runs/`) && scenario.runDetails) {
+			return jsonResponse(route, scenario.runDetails);
+		}
 		if (pathname === "/automation/execution/preview" && method === "POST") {
 			const previewIndex = requests.previews;
 			requests.previews += 1;
@@ -305,6 +308,148 @@ async function openAutomation(page) {
 }
 
 test.describe("Automation preview consistency", () => {
+	test("keeps runner errors separate from passing cases through reload @p1", async ({ page }) => {
+		const preview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const scenario = {
+			project: projectFixture(),
+			previews: [preview],
+			handleRun: (route, body) => {
+				const run = runResponse(preview, body.selected_test_case_ids);
+				run.status = "failed";
+				run.issues = [{ code: "playwright.runner_error", path: "$.errors[0]", message: "Fixture cleanup failed" }];
+				scenario.project = projectFixture({ executionPayload: run });
+				scenario.project.current_snapshots.execution.operation = "automation.execution.run";
+				scenario.project.current_snapshots.execution.approved = false;
+				scenario.project.stage_state.execution.approved = false;
+				return jsonResponse(route, run);
+			},
+		};
+		const requests = await installApi(page, scenario);
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		const expectRunnerEvidence = async () => {
+			await expect(page.getByLabel("Automation evidence")).toContainText("Browser runner failed");
+			await expect(page.getByRole("list", { name: "Browser runner errors" })).toContainText("Fixture cleanup failed");
+			await expect(page.getByRole("region", { name: "Execution results table" }).getByRole("cell", { name: "passed" })).toBeVisible();
+			await expect(page.getByText("Passed 1", { exact: true })).toBeVisible();
+		};
+		await expectRunnerEvidence();
+		await page.reload();
+		await expectRunnerEvidence();
+		expect(requests.runs).toBe(1);
+	});
+
+	test("shows a retry-only pass as flaky immediately after execution @p1", async ({ page }) => {
+		const preview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const requests = await installApi(page, {
+			project: projectFixture(),
+			previews: [preview],
+			handleRun: (route, body) => {
+				const run = runResponse(preview, body.selected_test_case_ids);
+				run.status = "flaky";
+				run.summary = { ...run.summary, passed: 0, flaky: 1 };
+				run.results[0].status = "flaky";
+				run.results[0].issues = [{ code: "playwright.error", message: "First attempt timed out" }];
+				return jsonResponse(route, run);
+			},
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		await expect(page.getByLabel("Automation evidence")).toContainText("Flaky run");
+		await expect(page.getByRole("link", { name: "Automation, Flaky run", exact: true })).toBeVisible();
+		await expect(page.getByText("Flaky (passed on retry)", { exact: true })).toBeVisible();
+		await expect(page.getByText("Flaky 1", { exact: true })).toBeVisible();
+		expect(requests.runs).toBe(1);
+	});
+
+	test("opens the exact historical run after a project edit without replacing current evidence @p1", async ({ page }) => {
+		const project = projectFixture();
+		const priorPreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		const historical = {
+			project_id: PROJECT_ID,
+			run_record_id: "history-run-record",
+			run_id: "exec-history",
+			target_environment: "staging",
+			target_base_url: "https://staging.example.test/app",
+			project_revision: project.current_revision,
+			source_snapshot_id: TEST_CASE_SNAPSHOT_ID,
+			status: "passed",
+			historical: true,
+			summary: { passed: 1 },
+			results: [{ id: "candidate-checkout", source_test_case_id: "TC-001", title: "Checkout passed", status: "passed" }],
+		};
+		const requests = await installApi(page, {
+			project,
+			previews: [priorPreview],
+			runDetails: historical,
+			handleRun: (route) => {
+				project.current_revision += 1;
+				project.stage_state.test_cases.stale = true;
+				project.execution_runs = [historical];
+				return jsonResponse(route, { ...historical, preview: priorPreview });
+			},
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		const recovery = page.getByRole("region", { name: "Execution request recovery" });
+		await expect(recovery).toContainText("Execution saved to history");
+		await expect(page.getByRole("heading", { name: "Execution Results", exact: true })).toHaveCount(0);
+		await recovery.getByRole("link", { name: "Open saved run exec-history" }).click();
+		await expect(page.getByText("Historical run from project revision 4.", { exact: true })).toBeVisible();
+		await expect(page.getByText("Run exec-history", { exact: true })).toBeVisible();
+		await expect(page.getByText(TEST_CASE_SNAPSHOT_ID, { exact: true })).toBeVisible();
+		expect(requests.runs).toBe(1);
+	});
+
+	test("recovers a lost preview with the original request and keeps the prior candidates visible @p1", async ({ page }) => {
+		const one = executableCandidate("candidate-checkout", "TC-001");
+		const two = executableCandidate("candidate-refund", "TC-002");
+		const project = projectFixture({ testCaseIds: ["TC-001", "TC-002"] });
+		const attempts = [];
+		let receipt;
+		const requests = await installApi(page, {
+			project,
+			handlePreview: (route, index) => {
+				const attempt = { id: route.request().headers()["x-request-id"], body: route.request().postDataJSON() };
+				attempts.push(attempt);
+				if (index === 0) {
+					project.current_revision += 1;
+					return jsonResponse(
+						route,
+						previewFixture([one], { readiness: readinessFixture({ project_revision: project.current_revision }) })
+					);
+				}
+				if (index === 1) {
+					project.current_revision += 1;
+					receipt = previewFixture([one, two], { readiness: readinessFixture({ project_revision: project.current_revision }) });
+				}
+				if (attempt.id !== attempts[1].id || JSON.stringify(attempt.body) !== JSON.stringify(attempts[1].body)) {
+					return jsonResponse(route, { detail: "Stale preview request" }, 409);
+				}
+				if (index <= 2) return route.abort("failed");
+				return jsonResponse(route, receipt);
+			},
+		});
+		await openAutomation(page);
+		const preview = page.getByRole("button", { name: "Preview Execution", exact: true });
+		await preview.click();
+		await expect(page.getByRole("button", { name: "Run 1 Candidate", exact: true })).toBeEnabled();
+		await preview.click();
+		await expect(page.getByRole("alert").filter({ hasText: "The execution preview could not be confirmed" })).toBeVisible();
+		await expect(page.getByText("Executable 1", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Run 1 Candidate", exact: true })).toBeDisabled();
+		expect(requests.runs).toBe(0);
+		await preview.click();
+		await expect(page.getByRole("button", { name: "Run 2 Candidates", exact: true })).toBeEnabled();
+		expect(attempts[0].id).not.toBe(attempts[1].id);
+		expect(attempts[1].id).toBeTruthy();
+		expect(attempts.slice(1)).toEqual(Array(3).fill(attempts[1]));
+		expect(project.current_revision).toBe(6);
+	});
+
 	test("renders a valid mixed preview with counts that match every candidate collection", async ({ page }) => {
 		const mixedPreview = previewFixture([executableCandidate("candidate-executable", "TC-001")], {
 			manual: [nonExecutableCandidate("candidate-manual", "TC-002", "manual")],
@@ -389,6 +534,40 @@ test.describe("Automation preview consistency", () => {
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 	});
 
+	test("shows the unmapped expectation and runs only the verified browser case", { tag: "@p1" }, async ({ page }) => {
+		const expectation = "An immutable audit record is created in the database for this submission.";
+		const candidate = executableCandidate("candidate-checkout", "TC-001");
+		const blockedCandidate = {
+			...nonExecutableCandidate("candidate-audit", "TC-002", "unsupported"),
+			unsupported_steps: [
+				{
+					step: 2,
+					expected: expectation,
+					reason_code: "unsupported_expected_result",
+					suggested_next_action: "Map the entire expected result to an observable browser assertion or verify it manually.",
+				},
+			],
+		};
+		const preview = previewFixture([candidate], {
+			unsupported: [blockedCandidate],
+			summary: { executable: 1, manual: 0, unsupported: 1, invalid: 0 },
+		});
+		const requests = await installApi(page, {
+			project: projectFixture({ testCaseIds: ["TC-001", "TC-002"] }),
+			previews: [preview],
+			runPreview: preview,
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
+
+		const unsupported = page.getByRole("heading", { name: "Unsupported", exact: true }).locator("..");
+		await expect(unsupported.getByText(expectation, { exact: true })).toBeVisible();
+		await expect(unsupported.getByText(/Step 2: Expected result needs a browser check/i)).toBeVisible();
+		await expect(page.getByRole("checkbox", { name: /Select TC-002 for execution/i })).toHaveCount(0);
+		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
+		await expect.poll(() => requests.runBodies.map((body) => body.selected_test_case_ids)).toEqual([["candidate-checkout"]]);
+	});
+
 	test("keeps repeated source IDs actionable when execution candidate IDs are unique", async ({ page }) => {
 		const candidates = [executableCandidate("candidate-checkout-1", "TC-001"), executableCandidate("candidate-checkout-2", "TC-001")];
 		const livePreview = previewFixture(candidates);
@@ -431,6 +610,39 @@ test.describe("Automation preview consistency", () => {
 		await page.getByRole("button", { name: /^Run approved cases$/ }).click();
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		expect(requests.previews).toBe(1);
+		expect(requests.runs).toBe(0);
+	});
+
+	test("follows the saved manual-only preview recommendation to Reports without previewing again", async ({ page }) => {
+		const executionPayload = persistedPreviewPayload();
+		executionPayload.summary.manual = 1;
+		executionPayload.candidate_counts.manual = 1;
+		executionPayload.candidates.manual = [nonExecutableCandidate("manual-checkout", "TC-001", "manual")];
+		const scenario = {
+			project: projectFixture({ executionPayload }),
+			nextActions: [
+				{
+					action: "report",
+					label: "Create Test Case Report",
+					stage: "reports",
+					enabled: true,
+					primary: true,
+					secondary: false,
+					reason: "The current preview found zero executable candidates. Open Reports for test-case export options.",
+					blockers: [],
+				},
+			],
+		};
+		const requests = await installApi(page, scenario);
+		await openAutomation(page);
+		await expect(page.getByText("Manual 1", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
+		await page.getByRole("link", { name: "Overview", exact: true }).click();
+		await page.reload();
+		await expect(page.getByRole("heading", { name: "Create Test Case Report" })).toBeVisible();
+		await page.getByRole("button", { name: "Open Reports", exact: true }).click();
+		await expect(page).toHaveURL(buildProjectPath(PROJECT_ID, "reports"));
+		expect(requests.previews).toBe(0);
 		expect(requests.runs).toBe(0);
 	});
 
@@ -479,10 +691,61 @@ test.describe("Automation preview consistency", () => {
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();
 		await expect.poll(() => requests.runs).toBe(1);
 		await expect(page.getByRole("heading", { name: "Execution Results" })).toHaveCount(0);
-		await expect(page.getByRole("alert")).toContainText(/Execution run failed: Execution response did not include valid run data/i);
+		await expect(page.getByRole("alert")).toContainText(
+			/Execution outcome unconfirmed: Execution response did not include valid run data/i
+		);
 		await expect(page.getByTestId("application-live-status")).toBeEmpty();
 		await expect(page.getByText("Executable 1", { exact: true })).toBeVisible();
-		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
+		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeDisabled();
+		await expect(page.getByRole("button", { name: "Check saved run" })).toBeVisible();
+	});
+
+	test("checks an ambiguous browser request after reload without posting another run", { tag: ["@p1"] }, async ({ page }) => {
+		const livePreview = previewFixture([executableCandidate("candidate-checkout", "TC-001")]);
+		let requestId;
+		const requests = await installApi(page, {
+			project: projectFixture(),
+			previews: [livePreview],
+			handleRun: async (route) => {
+				requestId = route.request().headers()["x-request-id"];
+				await route.abort("failed");
+			},
+		});
+		let receiptStatus = "pending";
+		await page.route(`**/projects/${PROJECT_ID}/execution-requests/*`, async (route) => {
+			expect(new URL(route.request().url()).pathname).toBe(`/projects/${PROJECT_ID}/execution-requests/${requestId}`);
+			expect(route.request().method()).toBe("GET");
+			return jsonResponse(route, { project_id: PROJECT_ID, request_id: requestId, status: receiptStatus });
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		await expect(page.getByRole("button", { name: "Check saved run" })).toBeVisible();
+		await page.reload();
+		await page.getByRole("button", { name: "Check saved run" }).click();
+		await expect(page.getByRole("button", { name: "Preview Execution", exact: true })).toBeDisabled();
+		await expect(page.getByRole("button", { name: "Acknowledge uncertain outcome" })).toHaveCount(0);
+		receiptStatus = "unconfirmed";
+		await page.getByRole("button", { name: "Check saved run" }).click();
+		await page.getByRole("button", { name: "Acknowledge uncertain outcome" }).click();
+		await expect(page.getByRole("button", { name: "Preview Execution", exact: true })).toBeEnabled();
+		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
+		expect(requests.runs).toBe(1);
+	});
+
+	test("allows a fresh preview after an explicit preflight rejection", async ({ page }) => {
+		await installApi(page, {
+			project: projectFixture(),
+			previews: [previewFixture([executableCandidate("candidate-checkout", "TC-001")])],
+			handleRun: async (route) =>
+				jsonResponse(route, { detail: { message: "Execution prerequisites changed.", readiness: { run_allowed: false } } }, 409),
+		});
+		await openAutomation(page);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).click();
+		await page.getByRole("button", { name: "Run 1 Candidate", exact: true }).click();
+		await expect(page.getByRole("alert")).toContainText("Execution run failed: Execution prerequisites changed.");
+		await expect(page.getByRole("button", { name: "Preview Execution", exact: true })).toBeEnabled();
+		await expect(page.getByRole("button", { name: "Check saved run" })).toHaveCount(0);
 	});
 
 	test("ignores an older same-project preview that resolves after the latest request", async ({ page }) => {
@@ -637,13 +900,13 @@ test("preview evidence remains distinct from execution through navigation and re
 	await expect(page.getByRole("button", { name: /^Run 0 Candidates$/ })).toBeDisabled();
 });
 
-for (const state of ["passed", "failed", "disabled", "unknown", "stale"]) {
+for (const state of ["passed", "failed", "flaky", "disabled", "unknown", "stale"]) {
 	test(`saved run evidence: ${state}`, async ({ page }) => {
 		const payload = {
 			run_id: "exec-evidence",
 			status: state,
 			results: [{ id: "result-1", source_test_case_id: "TC-001", status: state }],
-			summary: { passed: state === "passed" ? 1 : 0, failed: state === "failed" ? 1 : 0 },
+			summary: { passed: state === "passed" ? 1 : 0, failed: state === "failed" ? 1 : 0, flaky: state === "flaky" ? 1 : 0 },
 		};
 		if (state === "stale") {
 			payload.status = "passed";
@@ -658,6 +921,7 @@ for (const state of ["passed", "failed", "disabled", "unknown", "stale"]) {
 		const labels = {
 			passed: "Execution passed",
 			failed: "Execution failed",
+			flaky: "Flaky run",
 			disabled: "Execution disabled",
 			unknown: "Execution evidence unavailable",
 			stale: "Past run; inputs changed",

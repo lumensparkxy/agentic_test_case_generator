@@ -62,6 +62,8 @@ from .test_case_coverage import (
     _scenario_tag,
 )
 from .test_case_fallback import _fallback_raw_test_cases
+from ..services.browser_handoff import BROWSER_AUTHORING_GUIDE, validate_browser_handoff
+from ..services.browser_samples import declared_browser_samples
 from ..services.test_case_quality import placeholder_reason, separate_generation_work
 from ..contracts.requirements import RequirementCoveragePlan, StructuralChecks
 from .test_case_hydration import (
@@ -88,14 +90,17 @@ STATE_VALIDATION_FEEDBACK = "validation_feedback"
 STATE_COVERAGE_PLAN = "coverage_plan"
 STATE_REQUIREMENT_ANALYSIS = "requirement_analysis"
 EVIDENCE_PAYLOAD_STRATEGY = "Raw prompts and raw model outputs are not stored; evidence keeps counts, pass status, shard status, and bounded diagnostics."
-TEST_CASE_CONTRACT_INSTRUCTIONS = """Canonical output contract (template field selection does not override it):
+TEST_CASE_CONTRACT_INSTRUCTIONS = (
+    """Canonical output contract (template field selection does not override it):
 Include id, title, a description of the verified behavior, steps, and traceability fields.
 Preconditions and case/step test_data MUST each be a string or null, never an object or array.
 For structured test data, encode JSON as a string.
 Use supplied non-secret literal inputs directly in steps or test_data (for example a supplied
 search name). A literal value is not an execution_prerequisite or a reference. A fixture
 that must already exist needs evidence of provision or a supported setup recipe.
-Preserve applicable execution_prerequisites from context and identify any missing dependency.
+Preserve applicable execution_prerequisites from context using their exact names, references,
+and status. Do not redeclare supplied setup under a new name. Identify genuinely missing
+dependencies separately. A configured manual fixture does not make its actions automatable.
 Each prerequisite has a name (identifier starting with a letter, no spaces), kind
 (test_data|credential|role|environment|setup|cleanup), description, reference, and status.
 Missing credentials, existing records or settings use status "missing" and reference null
@@ -111,7 +116,12 @@ assertions when the source specifies a concrete outcome. When exactness is requi
 'exact heading "Dashboard" is visible' for an accessible name or
 'exact text "No results" is visible' for displayed text. Preserve exactness in review and refinement.
 Each step is an object with an integer step, string action, string expected, and optional string/null test_data.
+For Manual checks, put the full pass condition in expected. When the same required
+outcome includes a record count and a comparison with a recorded identity, state both
+in expected for the observation step. Preserve the triggering action and any required refresh.
 """
+    + BROWSER_AUTHORING_GUIDE
+)
 GENERATION_SOURCE_MODEL = "model"
 GENERATION_SOURCE_MODEL_RECOVERED = "model_recovered"
 GENERATION_SOURCE_PARALLEL_RETRY = "parallel_retry"
@@ -821,6 +831,7 @@ def _build_coverage_planner_agent(
 3. Choose the category that describes the actual behavior. A rejection-only or permission-denial requirement need not contain a Happy Path, and a single positive rule need not contain an invented negative path.
 4. Use requirement analysis as a checklist of hypotheses, not a source of new facts. Verify its rules, constraints, permissions, risks, and transitions against the requirements and supplied factual context before using them.
 5. Cover authorization, boundaries, validation, transitions and external failures only where their behavior is supported by the sources. Do not prescribe unstated implementation mechanisms (such as debouncing, button disabling or submission identifiers), routes, states, timing, permissions, or error messages. Test the specified observable result instead. A missing record is not an invented named status.
+   For an explicitly inclusive valid numeric input range, plan separate must-have scenarios at the exact lower and upper endpoints, plus the explicit invalid partitions. Name the input, exact value and source-backed acceptance outcome. A generic valid input, a middle value, or an error that quotes the range cannot cover either valid endpoint. If a related requirement defines the successful outcome for that same input, assign the positive boundary scenarios to that requirement without duplicating them across groups. Do not invent a success side effect.
 6. Use ONLY these scenario types: Happy Path, Negative, Boundary, Validation, Authorization, State Transition, Integration, Error Handling, Data Variation.
 7. Mark every scenario needed to cover explicit source behavior with must_have=true; each requirement needs at least one essential scenario. Optional exploratory assumptions must be explicit and must_have=false; they cannot substitute for required coverage.
 8. Make every title and objective together name a concrete trigger/input and observable source-backed outcome. Before returning the plan, check every requirement for omitted behaviors and every pair of its scenarios for duplicate triggers/outcomes. Remove duplicates, not source behaviors. Never return category scaffolding such as 'validate this requirement under negative conditions'.
@@ -896,7 +907,7 @@ def _build_review_loop(
 **Quality Checklist:**
 1. Each test case has a clear title and meaningful description.
 2. Steps are executable and expected results are specific. Reject generation instructions such as "review the implemented behavior", "execute the scenario", or "generate tests" as test steps; each action must exercise the product and each assertion must name an observable result.
-3. Steps are sequential, actor-aware, and contain an action plus an observable expected result.
+3. Steps are sequential and actor-aware. Action-only steps may leave expected blank. Each required observable outcome has its own explicit check.
 4. Structured linked_requirement_ids cover every requirement; tags may mirror them for backward compatibility.
 5. Every must-have scenario from the coverage plan is represented by exact `scenario_refs` on at least one test case.
 6. Requirement analysis details (rules, constraints, permissions, transitions, and risks) are reflected when present.
@@ -1969,12 +1980,13 @@ def _fallback_parallel_test_case_shard(
     )
 
 
-def _usable_shard_cases(test_cases: List[Dict[str, Any]], coverage_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _usable_shard_cases(test_cases: List[Dict[str, Any]], coverage_plan: List[Dict[str, Any]], *, context: Optional[Any] = None) -> List[Dict[str, Any]]:
     """Count concrete, contract-valid cases with exact in-scope scenario identity."""
     scenario_by_id = _scenario_lookup(coverage_plan)
+    samples = declared_browser_samples(getattr(context, "notes", None))
     usable = []
     for row in test_cases:
-        hydrated = _hydrate_test_cases([row])
+        hydrated = _hydrate_test_cases([row], browser_samples=samples)
         if not hydrated or hydrated[0].status == "Deprecated" or placeholder_reason(hydrated[0]):
             continue
         refs = set(hydrated[0].scenario_refs)
@@ -2003,7 +2015,7 @@ def _recover_incomplete_test_case_shard(
     diagnostics = {**_new_workflow_diagnostics(), **dict(workflow.get("workflow_diagnostics") or {})}
     if diagnostics.get("used_fallback"):
         return workflow
-    retained = _usable_shard_cases(list(workflow.get("test_cases") or []), shard.coverage_plan)
+    retained = _usable_shard_cases(list(workflow.get("test_cases") or []), shard.coverage_plan, context=context)
     covered = {ref for row in retained for ref in _extract_scenario_refs_from_test_case(row)}
     missing = set(_scenario_lookup(shard.coverage_plan)) - covered
     if not missing:
@@ -2042,7 +2054,7 @@ def _recover_incomplete_test_case_shard(
         for key in ("parser_failures", "parser_recoveries", "warnings"):
             diagnostics[key] = _dedupe_preserve(diagnostics[key] + list(recovery_diagnostics.get(key) or []))
         diagnostics["timed_out"] = bool(diagnostics.get("timed_out") or recovery_diagnostics.get("timed_out"))
-        candidates = [] if recovery_diagnostics.get("used_fallback") else _usable_shard_cases(recovery.get("test_cases") or [], plan)
+        candidates = [] if recovery_diagnostics.get("used_fallback") else _usable_shard_cases(recovery.get("test_cases") or [], plan, context=context)
     except Exception as exc:
         # Keep recovered sibling cases; do not replace the whole shard with fallback.
         candidates = []
@@ -2489,6 +2501,9 @@ def _build_response(
         for case in test_cases:
             applicable = [p for p in context.execution_prerequisites if not p.requirement_ids or set(p.requirement_ids) & set(case.linked_requirement_ids)]
             case.execution_prerequisites = list({p.name: p for p in [*case.execution_prerequisites, *applicable]}.values())
+    handoff_warnings = []
+    if not workflow.get("workflow_diagnostics", {}).get("used_fallback"):
+        handoff_warnings = validate_browser_handoff(test_cases, context, requirements)
     serialized = _serialize_test_cases(test_cases)
     resolved_settings = dict(workflow.get("workflow_settings") or {})
     threshold = int(resolved_settings.get("approval_threshold") or DEFAULT_TEST_CASE_THRESHOLD)
@@ -2536,6 +2551,8 @@ def _build_response(
     requirement_analysis = _hydrate_requirement_analysis(raw_requirement_analysis, requirements)
     workflow_diagnostics = _update_generation_source_counts(dict(workflow.get("workflow_diagnostics") or {}), serialized)
     workflow_diagnostics = _update_scenario_ref_diagnostics(workflow_diagnostics, coverage_metrics)
+    if handoff_warnings:
+        workflow_diagnostics["warnings"] = [*(workflow_diagnostics.get("warnings") or []), *handoff_warnings]
     if generation_tasks and workflow_diagnostics.get("status") == "completed":
         workflow_diagnostics["status"] = "partial"
     for key in ("missing_requirements_count", "missing_must_have_scenario_count", "missing_optional_scenario_count"):
@@ -2681,6 +2698,9 @@ def generate_test_cases(
     operation: Optional[str] = None,
     source_coverage_plan: Optional[List[Dict[str, Any]]] = None,
     source_requirement_analysis: Optional[List[Dict[str, Any]]] = None,
+    *,
+    max_parallel_workers: Optional[int] = None,
+    review_progress=None,
 ) -> Dict[str, Any]:
     settings = _get_model_settings_or_none()
     requirements_text, context_text, template_text = _prepare_workflow_inputs(payload.requirements, payload.context, payload.template)
@@ -2697,6 +2717,10 @@ def generate_test_cases(
             _normalize_coverage_plan(_serialize_contract_items(payload.coverage_plan), payload.requirements) if payload.coverage_plan else []
         )
     generation_settings = get_generation_settings()
+    if max_parallel_workers is not None:
+        generation_settings = generation_settings.model_copy(
+            update={"parallel_test_case_max_workers": min(generation_settings.parallel_test_case_max_workers, max_parallel_workers)}
+        )
 
     if operation == "impact.update.apply":
         precomputed_coverage_plan = _serialize_contract_items(payload.coverage_plan)
@@ -2937,7 +2961,8 @@ def generate_test_cases(
         generation_settings=generation_settings,
     )
     contract_rejections = []
-    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
+    samples = declared_browser_samples(payload.context.notes if payload.context else None)
+    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections, browser_samples=samples)
     response = _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
     assessment = assess_delivered_suite(
         response["test_cases"],
@@ -2945,6 +2970,7 @@ def generate_test_cases(
         payload.context,
         settings=settings if not workflow.get("workflow_diagnostics", {}).get("used_fallback") else None,
         scope_plan=workflow.get("coverage_plan", []) if operation == "impact.update.apply" else None,
+        progress=review_progress,
     )
     return apply_assessment(response, assessment)
 
@@ -3059,7 +3085,8 @@ def refine_test_cases(
         workflow["strict_coverage_plan"] = True
 
     contract_rejections = []
-    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections)
+    samples = declared_browser_samples(payload.context.notes if payload.context else None)
+    test_cases = _hydrate_test_cases(raw_test_cases, rejections=contract_rejections, browser_samples=samples)
     response = _build_response(test_cases, workflow, payload.requirements, payload.context, contract_rejections=contract_rejections)
     assessment = assess_delivered_suite(
         response["test_cases"],

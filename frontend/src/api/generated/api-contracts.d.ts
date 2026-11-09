@@ -17,10 +17,14 @@ export interface ApiContractOperations {
 	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
+	projectTestCaseEvidence: ApiOperation<ProjectTestCaseEvidenceRequest, ProjectTestCaseEvidenceResponse, "GET", "/projects/{project_id}/test-case-evidence">;
+	projectExecutionRun: ApiOperation<ProjectExecutionRunRequest, ProjectExecutionRunResponse, "GET", "/projects/{project_id}/execution-runs/{run_record_id}">;
+	projectExecutionRequest: ApiOperation<ProjectExecutionRequest, ProjectExecutionRequestResponse, "GET", "/projects/{project_id}/execution-requests/{request_id}">;
 	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
+	projectTestCasesReview: ApiOperation<ProjectTestCasesReviewRequest, ProjectTestCasesReviewResponse, "POST", "/projects/{project_id}/test-cases/review">;
 	projectUseCasesGenerate: ApiOperation<ProjectUseCasesGenerateRequest, ProjectUseCasesGenerateResponse, "POST", "/projects/{project_id}/use-cases/generate">;
 	projectUseCasesSave: ApiOperation<ProjectUseCasesSaveRequest, ProjectUseCasesSaveResponse, "POST", "/projects/{project_id}/use-cases">;
 	projectUseCasesReview: ApiOperation<ProjectUseCasesReviewRequest, ProjectUseCasesReviewResponse, "POST", "/projects/{project_id}/use-cases/reviews">;
@@ -70,6 +74,15 @@ export type ProjectUpdateRequest = QaProjectUpdateInput;
 export type ProjectUpdateResponse = QaProjectDetail;
 export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
+export type ProjectTestCaseEvidenceRequest = {
+	case_id: string;
+	snapshot_id: string;
+};
+export type ProjectTestCaseEvidenceResponse = QaProjectTestCaseEvidence;
+export type ProjectExecutionRunRequest = undefined;
+export type ProjectExecutionRunResponse = QaProjectExecutionRunDetail;
+export type ProjectExecutionRequest = undefined;
+export type ProjectExecutionRequestResponse = ExecutionRequestReceipt;
 export type ProjectOrchestratorStatusRequest = undefined;
 export type ProjectOrchestratorStatusResponse = OrchestratorStatusResponse;
 export type ProjectOrchestratorRunsRequest = undefined;
@@ -78,6 +91,8 @@ export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
 export type ProjectImpactAnalysisResponse = QaProjectDetail;
 export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
 export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
+export type ProjectTestCasesReviewRequest = QaProjectTestCaseReviewInput;
+export type ProjectTestCasesReviewResponse = QaProjectDetail;
 export type ProjectUseCasesGenerateRequest = QaProjectUseCaseGenerationInput;
 export type ProjectUseCasesGenerateResponse = QaProjectDetail;
 export type ProjectUseCasesSaveRequest = QaProjectUseCaseSnapshotInput;
@@ -334,6 +349,18 @@ export interface ExecutionReadinessBlocker {
 	message: string;
 }
 
+export interface ExecutionRequestReceipt {
+	historical?: boolean;
+	project_id: string;
+	request_id: string;
+	run_id?: string | null;
+	run_record_id?: string | null;
+	source_snapshot_id: string;
+	started_at: string;
+	status: "pending" | "completed" | "unconfirmed";
+	target_environment: string;
+}
+
 export interface ExecutionRunInput {
 	base_project_revision?: number | null;
 	project_id?: string | null;
@@ -354,7 +381,7 @@ export interface ExecutionRunItem {
 	returncode?: number | null;
 	source_test_case_id: string;
 	spec_id?: string | null;
-	status: "passed" | "failed" | "invalid" | "skipped";
+	status: "passed" | "failed" | "flaky" | "invalid" | "skipped";
 	stderr?: string;
 	stdout?: string;
 	title: string;
@@ -362,17 +389,21 @@ export interface ExecutionRunItem {
 
 export interface ExecutionRunResponse {
 	artifacts_root?: string | null;
+	historical?: boolean;
+	issues?: Array<ExecutionIssue>;
 	playwright_report_paths?: Array<string>;
 	preview: ExecutionPreviewResponse;
 	results?: Array<ExecutionRunItem>;
 	run_id: string;
-	status: "passed" | "failed" | "disabled";
+	run_record_id?: string | null;
+	status: "passed" | "failed" | "flaky" | "disabled";
 	summary?: ExecutionRunSummary;
 	warnings?: Array<string>;
 }
 
 export interface ExecutionRunSummary {
 	failed?: number;
+	flaky?: number;
 	invalid?: number;
 	manual?: number;
 	passed?: number;
@@ -460,11 +491,14 @@ export interface GroundedContext {
 }
 
 export interface GroundedUIElement {
+	checkbox_available?: boolean | null;
 	description: string;
 	element_type?: "Page" | "Heading" | "Form" | "Field" | "Button" | "Message" | "Filter" | "Navigation" | "Other";
 	href?: string | null;
 	id: string;
 	name: string;
+	radio_available?: boolean | null;
+	select_options?: Array<string> | null;
 	source_id?: string | null;
 }
 
@@ -537,6 +571,7 @@ export interface ImportHistoryEntry {
 export interface ImportMatch {
 	reason: string;
 	requirement_uid: string;
+	verified_original_ids?: Array<string>;
 }
 
 export interface ImportRecoveryInput {
@@ -583,7 +618,7 @@ export interface OrchestratorActionRecommendation {
 
 export interface OrchestratorBlocker {
 	action?: "refine" | "approve" | "generate" | "analyze_impact" | "apply_update" | "full_regenerate" | "automate" | "execute" | "review" | "report" | null;
-	code: "missing_project" | "missing_requirements" | "missing_use_cases" | "missing_test_cases" | "missing_approval" | "stale_downstream_stage" | "missing_baseline" | "failed_execution" | "unresolved_review" | "missing_execution";
+	code: "missing_project" | "missing_requirements" | "missing_use_cases" | "missing_test_cases" | "missing_approval" | "stale_downstream_stage" | "missing_baseline" | "failed_execution" | "flaky_execution" | "unresolved_review" | "missing_execution";
 	message: string;
 	severity?: "info" | "warning" | "blocking";
 	source_stage?: "requirements" | "context" | "use_cases" | "impact_analysis" | "test_cases" | "automation" | "execution" | "review" | "reports" | null;
@@ -680,6 +715,11 @@ export interface OrchestratorStatusResponse {
 	upstream_changed?: boolean;
 }
 
+export interface QaProjectCaseSourceRequirement {
+	id: string;
+	text: string;
+}
+
 export interface QaProjectCreateInput {
 	description?: string | null;
 	name: string;
@@ -704,14 +744,48 @@ export interface QaProjectDetail {
 	updated_at: string;
 }
 
+export interface QaProjectExecutionCaseResult {
+	id: string;
+	issues?: Array<ExecutionIssue>;
+	source_test_case_id: string;
+	status: "passed" | "failed" | "flaky" | "invalid" | "skipped";
+	title: string;
+}
+
 export interface QaProjectExecutionRun {
 	actor_user_id?: string | null;
 	artifacts_root?: string | null;
 	created_at: string;
+	historical?: boolean;
 	playwright_report_paths?: Array<string>;
 	project_id: string;
 	project_revision: number;
 	request_id?: string | null;
+	run_id: string;
+	run_record_id: string;
+	selected_test_case_ids?: Array<string>;
+	snapshot_id?: string | null;
+	source_event_id?: string | null;
+	source_snapshot_id?: string | null;
+	status: string;
+	summary?: Record<string, unknown>;
+	target_base_url?: string | null;
+	target_environment: string;
+	test_case_count?: number;
+	workflow_run_id?: string | null;
+}
+
+export interface QaProjectExecutionRunDetail {
+	actor_user_id?: string | null;
+	artifacts_root?: string | null;
+	created_at: string;
+	historical?: boolean;
+	issues?: Array<ExecutionIssue>;
+	playwright_report_paths?: Array<string>;
+	project_id: string;
+	project_revision: number;
+	request_id?: string | null;
+	results?: Array<QaProjectExecutionCaseResult> | null;
 	run_id: string;
 	run_record_id: string;
 	selected_test_case_ids?: Array<string>;
@@ -773,6 +847,23 @@ export interface QaProjectSummary {
 	updated_at: string;
 }
 
+export interface QaProjectTestCaseEvidence {
+	historical: boolean;
+	obligations?: Array<Record<string, unknown>>;
+	project_id: string;
+	project_revision: number;
+	requirements?: Array<QaProjectCaseSourceRequirement>;
+	snapshot_id: string;
+	stale?: boolean;
+	suite_version: number;
+	test_case: TestCase;
+}
+
+export interface QaProjectTestCaseReviewInput {
+	base_project_revision: number;
+	snapshot_id: string;
+}
+
 export interface QaProjectTimelineEvent {
 	actor_user_id?: string | null;
 	event_id: string;
@@ -796,6 +887,7 @@ export interface QaProjectUpdateInput {
 
 export interface QaProjectUseCaseGenerationInput {
 	base_project_revision: number;
+	refresh_requirement_ids?: Array<string> | null;
 }
 
 export interface QaProjectUseCaseSnapshotInput {
@@ -871,6 +963,13 @@ export interface RequirementCorrection {
 	text: string;
 }
 
+export interface RequirementCoverageFinding {
+	missing_endpoints?: Array<string>;
+	range_id: string;
+	requirement_id: string;
+	source_excerpt: string;
+}
+
 export interface RequirementCoveragePlan {
 	requirement_id: string;
 	requirement_text: string;
@@ -888,6 +987,7 @@ export interface RequirementImportPreview {
 	operation: string;
 	project_id: string;
 	recovery_snapshot_ids?: Array<string>;
+	source_evidence_findings?: Array<RequirementSourceFinding>;
 	source_name: string;
 	status?: "pending" | "applied" | "cancelled";
 	suggested_update_scope?: Array<string>;
@@ -904,6 +1004,15 @@ export interface RequirementReviewsInput {
 	base_project_revision: number;
 	idempotency_key: string;
 	reviews: Array<RequirementReviewChange>;
+}
+
+export interface RequirementSourceFinding {
+	excerpt: string;
+	kind: "unverified_range" | "ambiguous_range" | "uncovered_range";
+	original_requirement_ids?: Array<string>;
+	requirement_id?: string | null;
+	source_label: string;
+	source_section?: string | null;
 }
 
 export interface RequirementSourceReference {
@@ -929,6 +1038,7 @@ export interface RequirementsWorkflowResponse {
 	raw_text: string;
 	requirements: Array<Requirement>;
 	review?: ReviewResult;
+	source_evidence_findings?: Array<RequirementSourceFinding>;
 	source_name: string;
 	source_names?: Array<string>;
 	workflow_diagnostics?: WorkflowDiagnostics;
@@ -970,6 +1080,7 @@ export interface RolePermission {
 }
 
 export interface ScenarioAssessment {
+	boundary_evidence?: Array<ScenarioBoundaryEvidence>;
 	checks?: Record<string, ScenarioCriterion>;
 	content_hash: string;
 	requirement_id: string;
@@ -977,6 +1088,13 @@ export interface ScenarioAssessment {
 	scenario_id: string;
 	status: "passed" | "needs_review" | "unavailable";
 	warnings?: Array<string>;
+}
+
+export interface ScenarioBoundaryEvidence {
+	endpoint: string;
+	input_quote: string;
+	outcome_quote: string;
+	range_id: string;
 }
 
 export interface ScenarioCriterion {
@@ -1005,6 +1123,7 @@ export interface SemanticAssessment {
 	assessed_count?: number;
 	flagged_count?: number;
 	items?: Array<ScenarioAssessment>;
+	requirement_findings?: Array<RequirementCoverageFinding>;
 	rubric_version: string;
 	scenario_count?: number;
 	status: "passed" | "needs_review" | "unavailable";
@@ -1276,6 +1395,7 @@ export interface WorkspaceReportSummary {
 export interface WorkspaceRunSummary {
 	executed_count: number;
 	failed_count: number;
+	flaky_count?: number;
 	invalid_count: number;
 	passed_count: number;
 	project_id: string;

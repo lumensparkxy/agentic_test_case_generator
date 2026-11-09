@@ -80,7 +80,15 @@ export function ProjectProgress({ completed = 0, total = 0 }) {
 	);
 }
 
-export function ProjectOpenLink({ projectId, destination, onOpenProject, children, className = "workspace-open-link", ariaLabel }) {
+export function ProjectOpenLink({
+	projectId,
+	destination,
+	runRecordId,
+	onOpenProject,
+	children,
+	className = "workspace-open-link",
+	ariaLabel,
+}) {
 	if (!projectId) {
 		return (
 			<span className={`${className} workspace-open-link-disabled`} aria-disabled="true">
@@ -88,7 +96,8 @@ export function ProjectOpenLink({ projectId, destination, onOpenProject, childre
 			</span>
 		);
 	}
-	const path = getProjectPath(projectId, destination);
+	const projectPath = getProjectPath(projectId, destination);
+	const path = runRecordId ? `${projectPath}?run=${encodeURIComponent(runRecordId)}` : projectPath;
 	return (
 		<Link
 			href={path}

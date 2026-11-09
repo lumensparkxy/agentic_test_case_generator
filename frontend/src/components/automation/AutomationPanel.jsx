@@ -1,6 +1,8 @@
-import { getAutomationEvidenceStatus } from "./automationEvidence";
+import { useState } from "react";
+import { formatExecutionCaseStatus, formatExecutionRunSummary, getAutomationEvidenceStatus } from "./automationEvidence";
+import { RunnerIssues } from "./ExecutionIssues";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
-import { Checkbox, Field, Input, Button } from "../ui/controls";
+import { Checkbox, Field, Input, Button, Link } from "../ui/controls";
 import { Surface, Alert, Disclosure } from "../ui/surfaces";
 const renderBucketCount = (label, value, tone = "") => (
 	<span className={`workflow-diagnostics-pill ${tone}`.trim()}>
@@ -126,7 +128,17 @@ const renderUnsupportedList = (candidates, emptyMessage = "No unsupported cases 
 					<List className="jira-sync-warning-list">
 						{candidate.unsupported_steps?.map((step) => (
 							<ListItem key={`${candidate.id}-${step.step}-${step.reason_code}`}>
-								Step {step.step}: {step.reason_code}. {step.suggested_next_action}
+								<strong>
+									Step {step.step}:{" "}
+									{step.reason_code === "unsupported_expected_result" ? "Expected result needs a browser check" : step.reason_code}.
+								</strong>{" "}
+								{step.suggested_next_action}
+								{typeof step.expected === "string" && step.expected.trim() && (
+									<div className="execution-source-expectation">
+										<strong>Expected result </strong>
+										<q>{step.expected}</q>
+									</div>
+								)}
 							</ListItem>
 						))}
 					</List>
@@ -141,7 +153,7 @@ const renderRunResults = (runResult) => {
 		return null;
 	}
 	const summary = runResult.summary || {};
-	const resultMessage = `Execution ${runResult.status || "finished"}: ${summary.passed || 0} passed, ${summary.failed || 0} failed, ${summary.invalid || 0} invalid.`;
+	const resultMessage = formatExecutionRunSummary(runResult);
 	const directReportPaths = Array.isArray(runResult.playwright_report_paths) ? runResult.playwright_report_paths : [];
 	const resultReportPaths = Array.isArray(runResult.results)
 		? runResult.results.map((result) => result?.playwright_report_path).filter(Boolean)
@@ -165,9 +177,11 @@ const renderRunResults = (runResult) => {
 			<div className="workflow-diagnostics-pills">
 				{renderBucketCount("Passed", summary.passed, "success")}
 				{renderBucketCount("Failed", summary.failed, "warning")}
+				{summary.flaky > 0 && renderBucketCount("Flaky", summary.flaky, "warning")}
 				{renderBucketCount("Invalid", summary.invalid, "warning")}
 				{renderBucketCount("Skipped", summary.skipped)}
 			</div>
+			<RunnerIssues issues={runResult.issues} />
 			{runResult.artifacts_root && (
 				<p className="helper-text">
 					Artifacts root: <code>{runResult.artifacts_root}</code>
@@ -196,7 +210,7 @@ const renderRunResults = (runResult) => {
 									<td>
 										<strong>{result.source_test_case_id}</strong>
 									</td>
-									<td>{result.status}</td>
+									<td>{formatExecutionCaseStatus(result.status)}</td>
 									<td>{result.generated_spec_path ? <code>{result.generated_spec_path}</code> : "None"}</td>
 									<td>{result.artifacts_dir ? <code>{result.artifacts_dir}</code> : "None"}</td>
 								</tr>
@@ -221,6 +235,11 @@ export default function AutomationPanel({
 	selectedExecutionCandidateIds,
 	setSelectedExecutionCandidateIds,
 	executionRunResult,
+	executionRecovery,
+	executionNeedsResolution,
+	checkExecutionRecovery,
+	acknowledgeExecutionRecovery,
+	recoveredReportPath,
 	executionError,
 	effectiveTarget,
 	executionStale,
@@ -233,15 +252,25 @@ export default function AutomationPanel({
 	goPrev,
 	goNext,
 }) {
+	const [isCheckingRecovery, setIsCheckingRecovery] = useState(false);
+	const checkRecovery = async () => {
+		setIsCheckingRecovery(true);
+		try {
+			await checkExecutionRecovery();
+		} finally {
+			setIsCheckingRecovery(false);
+		}
+	};
 	const evidence = getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: executionStale });
 	const previewSummary = executionPreview?.summary || {};
 	const executableCandidates = executionPreview?.executable || [];
 	const actualCandidateIds = new Set(executableCandidates.map((candidate) => candidate.id));
 	const selectedExecutableCount = selectedExecutionCandidateIds.filter((candidateId) => actualCandidateIds.has(candidateId)).length;
 	const previewIsActionable = executionPreview?.isConsistent === true && !executionPreview?.requiresRefresh;
-	const previewDisabled = !testCases.length || isPreviewingExecution || isRunningExecution || authActionDisabled;
+	const previewDisabled =
+		!testCases.length || isPreviewingExecution || isRunningExecution || executionNeedsResolution || authActionDisabled;
 	const runDisabled = previewDisabled || !previewIsActionable || !executionEligibility?.ready || selectedExecutableCount === 0;
-	const inputsDisabled = isPreviewingExecution || isRunningExecution || authActionDisabled;
+	const inputsDisabled = isPreviewingExecution || isRunningExecution || executionNeedsResolution || authActionDisabled;
 
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
@@ -303,6 +332,42 @@ export default function AutomationPanel({
 					<p>{executionError}</p>
 				</Alert>
 			) : null}
+			{executionRecovery && !isRunningExecution && (
+				<div className="workflow-result-notice" role="region" aria-label="Execution request recovery">
+					<strong>
+						{recoveredReportPath
+							? executionRecovery.historical
+								? "Execution saved to history"
+								: "Saved execution recovered"
+							: "Check the previous browser request"}
+					</strong>
+					{recoveredReportPath ? (
+						<p>
+							<Link href={recoveredReportPath}>Open saved run {executionRecovery.runId}</Link>
+						</p>
+					) : (
+						<>
+							<p role="status">
+								{executionRecovery.status === "missing"
+									? "No receipt is available yet. Check the application before starting another run."
+									: executionRecovery.status === "unconfirmed"
+										? "The run outcome is unconfirmed. Check the application for changes before starting another run."
+										: "The result is pending confirmation. Checking status does not launch browser actions."}
+							</p>
+							<div className="feedback-actions">
+								<Button type="button" className="secondary" disabled={isCheckingRecovery || authActionDisabled} onClick={checkRecovery}>
+									{isCheckingRecovery ? "Checking…" : "Check saved run"}
+								</Button>
+								{["missing", "unconfirmed"].includes(executionRecovery.status) && (
+									<Button type="button" className="secondary" disabled={isCheckingRecovery} onClick={acknowledgeExecutionRecovery}>
+										Acknowledge uncertain outcome
+									</Button>
+								)}
+							</div>
+						</>
+					)}
+				</div>
+			)}
 
 			{executionPreview ? (
 				<div className="generate-results-workspace">

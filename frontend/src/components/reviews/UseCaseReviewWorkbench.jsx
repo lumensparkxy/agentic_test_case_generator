@@ -479,6 +479,8 @@ export default function UseCaseReviewWorkbench({ identity, project, snapshot, st
 		0
 	);
 	const machineReview = payload.review || null;
+	const requirementFindings = normalizeList(machineReview?.semantic_assessment?.requirement_findings);
+	const findingsTitleId = useId();
 	const effectiveStageState = review.response?.use_cases_state || stageState;
 	const storedHumanReview = getHumanReview(effectiveStageState, snapshot.snapshot_id);
 	const responseReview = review.response?.review?.snapshot_id === snapshot.snapshot_id ? review.response.review : null;
@@ -513,6 +515,20 @@ export default function UseCaseReviewWorkbench({ identity, project, snapshot, st
 		<div className="use-case-review-workbench">
 			<DraftRecoveryNotice draft={recovery} />
 			<DraftRecoveryNotice draft={review.recovery} />
+			{requirementFindings.length > 0 && (
+				<Alert as="section" tone="warning" aria-labelledby={findingsTitleId}>
+					<h2 id={findingsTitleId}>Accepted boundary coverage needs review</h2>
+					<p>Review the exact inputs below and add scenarios that verify the source-defined acceptance outcome.</p>
+					<List>
+						{requirementFindings.map((finding) => (
+							<ListItem key={finding.range_id}>
+								<strong>{finding.requirement_id}</strong> · “{finding.source_excerpt}” · Inputs without verified coverage{" "}
+								<strong>{finding.missing_endpoints.join(", ")}</strong>
+							</ListItem>
+						))}
+					</List>
+				</Alert>
+			)}
 			<section className="use-case-collection" aria-labelledby="use-case-collection-title">
 				<h2 className="sr-only" id="use-case-collection-title">
 					Use case scenarios

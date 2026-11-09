@@ -3,12 +3,13 @@
 from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
-from .requirements import Requirement
+from .requirements import Requirement, RequirementSourceFinding
 
 
 class ImportMatch(BaseModel):
     requirement_uid: str
     reason: str
+    verified_original_ids: list[str] = Field(default_factory=list)
 
 
 class ImportCandidate(BaseModel):
@@ -33,6 +34,7 @@ class RequirementImportPreview(BaseModel):
     suggested_update_scope: list[str] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    source_evidence_findings: list[RequirementSourceFinding] = Field(default_factory=list)
     recovery_snapshot_ids: list[str] = Field(default_factory=list)
     guidance: dict[str, Any] | None = None
 

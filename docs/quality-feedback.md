@@ -9,6 +9,12 @@ skills reinforce the same method; project facts remain scoped approved knowledge
 
 ## Product workflow
 
+In **Test Cases → Improve tests**, business coverage and execution setup appear
+separately. For a named missing prerequisite, open its link to review a finding
+prefilled from the current saved case. Check the environment and record the
+finding before applying a correction in **Context → Quality feedback**. Links
+to stale or mismatched cases require returning to the current Test Cases view.
+
 In **Context → Quality feedback**, select the evidence snapshot and record the
 observed problem, expected behavior, affected case IDs, environment and missing
 prerequisites. Execution previews and failed/invalid/skipped results also create
@@ -21,7 +27,9 @@ and choose **Apply prerequisite correction**. This atomically creates new Contex
 and Test Cases snapshots. The old evidence remains immutable; corrected cases are
 drafts, upstream scenarios and downstream execution/reports require review.
 Business assertions are preserved. Regenerate/review affected artifacts using the
-normal workflow before execution. Changed source suites reject stale corrections.
+normal workflow before execution. The new suite requires a fresh substantive
+assessment, and the previous assessment stays with its original snapshot.
+Changed source suites reject stale corrections.
 Three correction attempts are the maximum per finding.
 
 A configured reference is not a verified resource. **Verify against latest
@@ -96,6 +104,23 @@ expectations. A bare URL at the end of a sentence can have its prose punctuation
 removed. Use `exact heading "Sign in" is visible` for an exact accessible name,
 or `exact text "No results" is visible` for exact displayed text. Unqualified
 visibility assertions retain their existing partial-match behavior.
+
+For a private app, enter its **Application link** and add declarations on their
+own lines in **Context notes** for any observed page or native dropdown that
+the artifact collector cannot inspect.
+
+```text
+Browser page "https://booking.example.test/bookings/B-EXISTING"
+Browser dropdown "Room" on "https://booking.example.test/" options ["Atlas", "Birch"]
+```
+
+Use an absolute URL on the same origin as the application link. The application
+link itself is already a known page. Declare an additional page before relying
+on its dropdowns. Use the exact accessible field name and a JSON list of exact,
+selectable option labels. For a field-value assertion, supply the DOM value
+separately using `field "Room" DOM value is "atlas"`. Conflicting declarations
+retain the case for manual review. These declarations record supplied evidence
+and do not cause the server to fetch the pages.
 
 Place supplied non-secret inputs directly in steps or test data. When a case
 depends on an existing user, record or setting, cite its fixture or provide a
@@ -194,3 +219,13 @@ The archived threshold appears after 128,000 characters in its fixture.
 .venv/bin/python scripts/evaluate_argon.py --conflict-pilot --live --output /tmp/argon-conflicts
 .venv/bin/python scripts/review_argon.py /tmp/argon-conflicts --live
 ```
+
+Substantive review reports business design coverage separately from declared
+execution blockers. A design can cover every source obligation while its cases
+still need provisioned accounts, data, or an environment. Missing prerequisites
+remain blockers for the combined assessment and do not become requests to
+regenerate an otherwise covered design. The reviewer receives a structured
+response schema and can retry a malformed or incoherent response once within
+its existing deadline. A covered obligation may cite a standalone action with
+an empty expected result when a later cited step in the same case supplies the
+observable result. Source binding and exact step validation still apply.

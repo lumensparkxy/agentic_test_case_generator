@@ -45,6 +45,93 @@ schema still accepts legacy optional descriptions; this change does not migrate
 saved artifacts or enable held guidance stages. Matched live quality evidence
 and the separate rollout decision remain necessary under #280/#274.
 
+## Browser handoff
+
+Supply the application URL and the exact interface evidence available for the
+scenario. Context analysis reads explicit form labels in linked HTML, including
+`<label for="…">`, simple labels that wrap an input, and `aria-label`. Field IDs,
+names and placeholders stay as hints when a label is unavailable. Supply observed
+names or result text from rendered states in context notes, such as
+`field "Reference"`, `button "Save request"`, and `"Request saved"`.
+
+Generation and refinement use one browser action and at most one observable
+check per step. Complete browser actions may leave their expected result
+empty when the case has a separate observable outcome. Use
+`Click exact button "Save request"` and
+`Click exact link "View receipt"` for whole accessible names. Enter data with
+`Enter "literal input" into field "Reference"`. Quoted values preserve spaces.
+Escape an embedded double quote or backslash with a backslash. To clear a
+populated field, use `Enter "" into field "Reference"` and check the empty value.
+For an initially blank field, check the empty value without filling it.
+
+For JSON, multiline values, or deliberately malformed input, put the exact
+string in the step's `test_data`. Use `Enter step data into field "Payload"`
+and `field "Payload" value should equal step data`. For a saved text check,
+put the expected literal in that observation step's own data and use
+`css "#saved" text should equal step data`. Ground the field and result locator
+in Context and use synthetic data for the payload.
+When the linked requirement has a rendered-whitespace risk, an exact text
+comparison with whitespace-sensitive step data provides coverage evidence.
+A scenario label alone leaves this risk uncovered.
+
+To reuse exact test data across generated cases, declare a named sample in
+Context notes on one line. The value is a JSON string, so `\n` preserves a
+line break and `\"` represents a double quote.
+
+```text
+Browser sample "malformed-json" is "{\n  \"enabled\": false\n"
+```
+
+Generation and refinement can refer to `browser sample "malformed-json"` in
+a fill or exact value or text check. Delivery resolves the name to ordinary
+step data before review. Use a unique name and up to 16,000 UTF-8 bytes per
+sample. Missing, ambiguous, malformed, or credential-looking samples leave
+unfinished work with a case and step reference.
+
+For a grounded native single-choice dropdown, use
+`Select exact option "Closed" in field "Order status"`. Linked HTML supplies
+the selectable labels. A separate field-value check needs an explicit
+declaration such as `field "Order status" DOM value is "closed_internal"`
+in the supplied context. The browser verifies one available exact option
+before selecting it. Cases with unsupported or unavailable choices stay
+manual.
+
+For a grounded native checkbox, use `Check exact checkbox "Email receipt"`
+or `Uncheck exact checkbox "Email receipt"`. Use `exact checkbox "Email
+receipt" is checked` or `exact checkbox "Email receipt" is not checked` for
+the state expectation. These expectations describe definite states. Keep any
+save or persistence outcome as its own check. State-setting requires an
+available checkbox with the supplied label.
+
+For an observed native radio option, use
+`Select exact radio "Express delivery"`. Check
+`exact radio "Express delivery" is selected` and check any option that must
+clear in a separate step. After Save, reopen the supplied page and verify
+the saved selection. Analyze linked HTML again when older Context lacks radio
+evidence.
+
+For an out-of-view state, use an expectation such as
+`exact link "Open receipt" is not visible`. The browser waits for zero visible
+exact matches at that step. Hidden and absent matches both satisfy the check.
+Record DOM absence, authorization, and timing as distinct requirements.
+For a CSS class selector, use a typed check such as
+`css ".receipt-row" is visible`. Use exact text for the displayed label.
+
+New browser-intended cases go through the deterministic preview and compiler
+without launching the app. Verified cases are marked **To Be Automated**.
+Cases with missing evidence, prerequisites, or unsupported steps keep their
+actions, expectations, and traceability and appear as **Manual**. **Improve
+tests** shows the reasons recorded for the latest generation or refinement.
+External outcomes, such as checks in a separate audit store, remain manual.
+
+Business approval and execution are separate. Review the delivered cases, then
+preview eligible cases against the chosen environment before running them.
+
+For an attachment observation, label the quoted filename explicitly, as in
+`The attached receipt file "hotel_receipt.pdf" is visible`. Structural review
+treats the filename as literal evidence. The execution path still needs support
+for the attachment action and any required setup.
+
 ## Repair a suite
 
 1. Review and approve current requirements and the affected Use Cases.
@@ -55,18 +142,48 @@ and the separate rollout decision remain necessary under #280/#274.
 Analysis does not call the model. Apply generates only the selected requirement
 and scenario slices, using saved context and the existing bounded generation
 pipeline. At most 40 generation recommendations can be selected per request;
-duplicate updates/additions are consolidated. Each distinct recommendation is
-generated in sequence, with bounded parallel shards inside that generation run.
+duplicate updates/additions are consolidated. Multiple independent replacements
+run with up to three workers, capped by `PARALLEL_TEST_CASE_MAX_WORKERS`.
+`PARALLEL_TEST_CASE_GENERATION_ENABLED=false` keeps replacements sequential.
+In a parallel repair batch each replacement runs its inner shards one at a time,
+so nested fan-out stays within the batch limit. A single replacement keeps
+the ordinary shard configuration. Results are assembled in the saved
+recommendation order.
 
 The apply API requires `base_project_revision`. Ownership, active status, input
 snapshot freshness, requirement approval, and snapshot-bound scenario reviews
 are checked before model generation. Rejected, incomplete, fallback, or foreign
 coverage cannot be committed. The original suite and history remain intact on
-failure. Changed artifact versions and the new project snapshot commit in one
-revision-guarded transaction. Unchanged test identities and versions are retained.
-Generation evidence, guidance references, usage, and billing consumption follow
-the targeted run. Repaired tests are saved for review, without a fabricated pass
+failure. A failed worker stops further submissions and allows already-running
+work to finish before releasing the application lease. Changed artifact versions
+and the new project snapshot commit in one revision-guarded transaction.
+Unchanged test identities and versions are retained. Generation evidence binds
+each result to its recommendation, source case, scenario scope and project
+revision. The snapshot records the worker count and batch duration.
+Usage and billing consumption follow the committed targeted run. Repaired tests
+are saved for review, without a fabricated pass
 score. Old invalid snapshot content is retained as historical evidence.
+
+**Retry** on a failed or interrupted apply reuses replacements that already
+passed individual review. The saved result must match the same analysis,
+selection, source revision, generation input, model settings and current
+guidance. Missing or invalid results go through generation and review again.
+The completed draft records how many replacements were reused and retains their
+original generation evidence. It still needs combined-suite review.
+
+If a provider outage was the sole blocker after complete generation, use
+**Review saved suite** in Test Cases. Review retries the saved cases with the
+same approved Requirements, Use Cases and generation Context. It writes a
+review successor with the original case versions and generation evidence.
+Changed inputs require impact analysis. A repeated outage leaves the saved
+suite in place, while verified gaps are saved for repair.
+
+Recovery keeps one private Firestore record per project, capped at 512 KiB of
+checkpoint data. A record is eligible for reuse for 24 hours after its latest
+checkpoint. A successful apply deletes it in the draft transaction. A subsequent
+apply discards a record from an expired or different operation. Results outside
+the storage bound can still be applied and may need to be generated again after
+an interruption.
 
 ## Validation boundary
 
@@ -98,10 +215,98 @@ Current requirements outrank conflicting context/memory; curated methods are not
 product facts. Valid boundaries and each stated invalid example must be assessed
 separately. A trigger and its durable result must belong to the same coherent case.
 
-The final review has one request, no HTTP retries, a 60-second HTTP timeout,
-160,000-byte input limit and 24,000-token output limit. Missing credentials,
-empty output, oversized inputs, malformed evidence or provider failure preserve
-cases but leave coverage `unknown`, unapproved and explicitly needing review.
+When the source says a rejection must create no record, assert the error and the
+fresh saved state in the triggering case. A browser Context declaration can bind
+the exact error, submit control, collection and loaded indicator on a supplied
+page. Review checks the compiled steps for the same count after the collection
+loads before submission and after reopening. A missing check stays in review
+with a repair finding for the affected case.
+
+```text
+Browser rejection "Invalid input" on "https://app.example/" after button "Save" preserves css "#records tr" when exact heading "My records" is visible
+```
+
+The independent review allows up to two requests within a 180-second budget,
+with at most 120 seconds per request and no SDK retries. Each prompt, including
+review instructions and any correction, must fit within 512,000 UTF-8 bytes.
+The output limit is 24,000 tokens. The prompt keeps every case and its behavioral
+evidence, omitting duplicate Context requirements, redundant guidance metadata,
+null fields and generation bookkeeping. Citations and regression checks use the
+full input and its hash.
+
+Whole-suite reviews of 41 or more cases can use up to eight groups with three
+concurrent workers and a shared 240-second budget. Each group can make two
+requests of up to 90 seconds and 192,000 UTF-8 bytes. Cases that link multiple
+requirements keep them in the same group. Reviewers see the full source and
+shared Context, assess their assigned requirements and cases, and return
+evidence bound to that group's input. The combined assessment keeps the full
+suite hash and requires every group to verify its coverage before approval.
+Grouped prompts can share identical step bodies while preserving each case's
+step numbers and full evidence for citation checks.
+Requirements derived from the same verified source version and original ID
+can cite related cases across groups. Exact duplicate reference cases share
+one representative, while each original case is grounded in its own group.
+A large linked scope that exceeds the ordinary group limits can use a source
+obligation inventory followed by bounded case batches. The inventory gets up to
+60 seconds inside the same 240-second budget. Each batch assesses the exact
+indexed obligations for its linked scope and grounds its assigned cases. Cases
+linked to the same verified source can supply proof in separate batches. The
+combined assessment uses a coherent case for each covered obligation. The
+reviewer reports an indexed coverage gap after all its assigned batches finish
+without verified proof. If batching cannot start, the bounded whole-suite
+reviewer still applies. If the indexed content exceeds the batch limits,
+review reports an input limit. Selected-repair review keeps its existing
+scope and limits.
+
+Completed groups retain verified findings. If any group remains unverified,
+approval stays blocked. A saved-suite review with verified gaps can record the
+findings on a new unapproved snapshot. If the service is unavailable and no
+group confirmed a gap, the original snapshot stays current for retry.
+The Test Cases workbench shows group status separately from test repair
+findings and opens the exact cases assigned to a group. A failed review
+attempt can show its groups while the current suite is open. Saved group
+evidence remains available after reload.
+
+Retrying an interrupted **Review saved suite** reuses completed groups from
+the same project, saved suite, revision, reviewer model and effective prompts.
+The service revalidates each group's source and step citations before combining
+the results. Missing or invalid groups go to the reviewer again. Progress stays
+in one private Firestore record per project, capped at 768 KiB and eligible for
+24 hours. The next grouped review replaces expired or incompatible progress.
+Publishing the reviewed snapshot removes its progress in the same transaction.
+Groups beyond the storage cap can still complete in the current attempt.
+For a batched review, retry also revalidates and reuses the source inventory.
+Generation against an approved Use Cases snapshot can save that same private
+progress with an eligible outage-only draft. The draft and progress commit
+together. The first saved review can reuse it when the current inputs, reviewer
+and effective guidance match the original review.
+
+Project generation commits the Test Cases snapshot, case versions, completed
+usage, applicable billing and eligible review progress together. When planning
+produces a new Use Cases draft, the same transaction saves both stages with
+successive revisions and a timeline entry for each. Test Cases link to that
+exact draft, which still requires human approval. An unchanged current plan
+keeps its snapshot and review history.
+
+The commit checks project ownership, active status and the originating
+revision. A rejected publication leaves the prior stages and case versions
+intact and records zero-quantity failure usage. If delivery is interrupted,
+the workbench retries the exact payload and request ID once. A matching receipt
+for the current suite returns its saved cases and versions. An ID used for
+different inputs or an earlier suite returns a conflict. Standalone generation
+keeps its existing response and artifact workflow.
+
+Project refinements use the same publication and request recovery flow. They
+start from the saved suite, keep unchanged cases and their version IDs, and
+save new versions for changed or added cases. Removing a case from the suite
+preserves its version history. Fallback results and requests that make no case
+changes leave the original suite available. Selected repair limits updates to
+the selected tests and needs combined suite review before approved export.
+
+Missing credentials, empty output, oversized inputs, malformed evidence or
+provider failure preserve cases but leave coverage `unknown`, unapproved and
+explicitly needing review. Saved-suite review reports an input limit separately
+from a provider outage.
 This adds a bounded model call to generation/refinement; it does not enable held
 guidance. The review never upgrades another failed quality or completeness gate.
 

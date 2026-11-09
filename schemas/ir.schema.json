@@ -123,7 +123,7 @@
         "exact": {
           "properties": {
             "strategy": {
-              "enum": ["role", "text"]
+              "enum": ["role", "text", "label"]
             }
           }
         }
@@ -163,7 +163,7 @@
                 "$ref": "#/$defs/navigateStep"
               },
               {
-                "$ref": "#/$defs/fillStep"
+                "$ref": "#/$defs/fieldInputStep"
               },
               {
                 "$ref": "#/$defs/clickStep"
@@ -172,7 +172,7 @@
                 "$ref": "#/$defs/assertVisibleStep"
               },
               {
-                "$ref": "#/$defs/assertTextEqualsStep"
+                "$ref": "#/$defs/assertLocatorContentStep"
               },
               {
                 "$ref": "#/$defs/assertUrlStep"
@@ -195,6 +195,14 @@
             ]
           }
         }
+      }
+    },
+    "exactRadioLocator": {
+      "required": ["role", "exact"],
+      "properties": {
+        "strategy": { "const": "role" },
+        "role": { "const": "radio" },
+        "exact": { "const": true }
       }
     },
     "stepBase": {
@@ -277,7 +285,7 @@
         }
       ]
     },
-    "fillStep": {
+    "fieldInputStep": {
       "allOf": [
         {
           "$ref": "#/$defs/stepBase"
@@ -290,9 +298,39 @@
           ],
           "properties": {
             "action": {
-              "const": "fill"
+              "enum": ["fill", "fill_literal", "select_option", "set_checked"]
             }
           },
+          "if": {
+            "properties": {
+              "action": { "enum": ["fill_literal", "select_option", "set_checked"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "locator": {
+                "required": ["exact"],
+                "properties": {
+                  "strategy": { "const": "label" },
+                  "exact": { "const": true }
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "action": { "const": "fill_literal" } } },
+              "then": { "properties": { "value": { "type": "string" } } }
+            },
+            {
+              "if": { "properties": { "action": { "const": "select_option" } } },
+              "then": { "properties": { "value": { "type": "string", "minLength": 1 } } }
+            },
+            {
+              "if": { "properties": { "action": { "const": "set_checked" } } },
+              "then": { "properties": { "value": { "type": "boolean" } } }
+            }
+          ],
           "not": {
             "anyOf": [
               {
@@ -322,9 +360,11 @@
           ],
           "properties": {
             "action": {
-              "const": "click"
+              "enum": ["click", "select_radio"]
             }
           },
+          "if": { "properties": { "action": { "const": "select_radio" } } },
+          "then": { "properties": { "locator": { "$ref": "#/$defs/exactRadioLocator" } } },
           "not": {
             "anyOf": [
               {
@@ -359,7 +399,7 @@
           ],
           "properties": {
             "action": {
-              "const": "assert_visible"
+              "enum": ["assert_visible", "assert_hidden"]
             }
           },
           "not": {
@@ -384,7 +424,7 @@
         }
       ]
     },
-    "assertTextEqualsStep": {
+    "assertLocatorContentStep": {
       "allOf": [
         {
           "$ref": "#/$defs/stepBase"
@@ -397,7 +437,27 @@
           ],
           "properties": {
             "action": {
-              "const": "assert_text_equals"
+              "enum": [
+                "assert_text_equals",
+                "assert_scoped_text_equals",
+                "assert_value_equals",
+                "assert_value_contains"
+              ]
+            }
+          },
+          "if": {
+            "properties": {
+              "action": {
+                "const": "assert_value_contains"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "expected": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "not": {
@@ -512,12 +572,14 @@
           ],
           "properties": {
             "action": {
-              "const": "assert_checked"
+              "enum": ["assert_checked", "assert_radio_selected"]
             },
             "expected": {
               "type": "boolean"
             }
           },
+          "if": { "properties": { "action": { "const": "assert_radio_selected" } } },
+          "then": { "properties": { "locator": { "$ref": "#/$defs/exactRadioLocator" } } },
           "not": {
             "anyOf": [
               {
@@ -639,7 +701,8 @@
             },
             "expected": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "not": {

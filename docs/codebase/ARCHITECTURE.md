@@ -510,6 +510,51 @@ The conversion and run path is implemented by
 `backend/plain_english_test_framework/`, with Node runtime configuration in
 `backend/execution_runtime/playwright.config.ts`.
 
+Home and Runs link to project Reports with the exact run record selected in
+`?run=<run_record_id>`. The owner-only
+`GET /projects/{project_id}/execution-runs/{run_record_id}` lookup returns the
+recorded target, result and source suite, with case outcomes from the bound
+execution snapshot. Reports can show a saved assertion after a newer preview
+or after local runtime files have been removed. Older runs with missing or
+unmatched snapshot details keep their saved summary. The selected-run view
+keeps current-suite export on the ordinary Reports route. The endpoint reads
+project data and does not serve runtime files.
+
+Large execution result lists are stored as compressed parts under their
+execution snapshot. Parts, the snapshot, its findings and the project revision
+share a Firestore transaction. Reads verify the complete part set and checksum
+before restoring ordered case results. Small runs retain their inline format.
+Above 384 KiB of encoded case results, the writer stores compressed parts of
+at most 256 KiB each. A projection over 4 MiB encoded or 2 MiB compressed uses
+a shared 2 MiB text budget for saved diagnostics and marks abbreviated
+messages. Case identities, outcomes and artifact references remain intact.
+The run response and local Playwright artifacts retain their original output.
+
+Project Run requests with an explicit URL-safe `X-Request-ID` claim that
+identity once before launching Playwright. The claim binds the submitted
+revision, suite, target and selection. Its completed receipt is committed with
+the execution snapshot and run record. Replays return HTTP 409 with either
+the existing receipt or an input conflict. The owner can read the receipt at
+`GET /projects/{project_id}/execution-requests/{request_id}`.
+Automation keeps an unresolved identity in tab session storage. A status check
+can recover the exact Reports link after a dropped response or reload.
+An unconfirmed outcome requires acknowledgment and a fresh preview before
+another run. The original request identity remains single-use.
+
+The selected browser origin governs both preview and launch. Relative
+navigation resolves against the selected target. An absolute URL authored
+against the approved saved application context is rebased by origin, with
+its path, query and fragment preserved. Exact URL assertions use the same
+binding. An unverified origin or a URL with inline credentials makes the
+candidate unavailable for execution. The saved suite remains unchanged.
+
+Generated portal specs check the selected origin before browser steps and
+classify an escaped top-level navigation as
+`execution.target_origin_mismatch`. They block direct off-origin navigation
+requests and detect redirect escapes before later case actions. The guard
+is scoped to browser navigation, so subresources and network activity that
+occurs while the browser follows a redirect have separate boundaries.
+
 Execution preview has one count/list invariant for the `executable`, `manual`,
 `unsupported`, and `invalid` buckets: every `summary` count equals the length of
 its matching candidate collection. `ExecutionPreviewResponse` derives the

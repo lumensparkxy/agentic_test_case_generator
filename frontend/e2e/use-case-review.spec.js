@@ -164,6 +164,36 @@ test.describe("Use Cases review workbench", () => {
 		await expect(metrics).toContainText("Requirements planned");
 	});
 
+	test("shows missing boundary inputs beside the scenario plan without changing human review @p1", async ({ page }) => {
+		const snapshot = useCaseSnapshotFixture();
+		snapshot.payload.review.semantic_assessment = {
+			status: "needs_review",
+			assessed_count: 4,
+			scenario_count: 4,
+			flagged_count: 0,
+			requirement_findings: [
+				{
+					range_id: "REQ-101:1:1",
+					requirement_id: "REQ-101",
+					source_excerpt: "from 1 to 8 inclusive",
+					missing_endpoints: ["1", "8"],
+				},
+			],
+		};
+		await page.setViewportSize({ width: 390, height: 844 });
+		const api = await openUseCaseReview(page, { initialProject: useCaseProjectFixture({ snapshot }) });
+		const main = reviewMain(page);
+		const finding = main.getByRole("region", { name: "Accepted boundary coverage needs review" });
+		await expect(finding).toBeVisible();
+		await expect(finding.getByRole("listitem")).toContainText("REQ-101");
+		await expect(finding.getByRole("listitem")).toContainText("from 1 to 8 inclusive");
+		await expect(finding.getByRole("listitem")).toContainText("Inputs without verified coverage 1, 8");
+		await expect(main.getByRole("table")).toBeVisible();
+		await expect(main.getByRole("button", { name: "Approve all", exact: true })).toBeEnabled();
+		await expect(humanReviewRegion(page)).toContainText("Pending human decision");
+		expect(api.requests.review).toHaveLength(0);
+	});
+
 	test("routes an Approve Use Cases recommendation to this workbench and never Upload", async ({ page }) => {
 		await installUseCaseReviewApi(page);
 		await seedAuthenticatedSession(page);

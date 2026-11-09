@@ -750,9 +750,11 @@ test.describe("Orchestrator lifecycle validation", () => {
 		await page.locator('input[type="file"]').setInputFiles(sampleRequirementsFile);
 		await page.getByRole("button", { name: /^Parse Requirements$/ }).click();
 		await page.getByRole("button", { name: "Apply reviewed changes", exact: true }).click();
-		await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Needs Review");
+		const requirementRow = (id) => page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: id, exact: true }) });
+		await expect(requirementRow("REQ-001").getByText("Needs Review", { exact: true })).toBeVisible();
+		await page.getByText("Review actions", { exact: true }).click();
 		await page.getByRole("button", { name: /approve non-rejected/i }).click();
-		await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Approved");
+		await expect(requirementRow("REQ-001").getByText("Approved", { exact: true })).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
@@ -762,23 +764,26 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByLabel("Test suite actions")
 			.getByRole("button", { name: /^Start generation$/i })
 			.click();
-		await expect(page.locator(".test-suite-summary", { hasText: "10 test cases" })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole("tab", { name: "Generated Test Cases 10", exact: true })).toBeVisible();
 
 		await page.reload();
 		await expect(page.getByLabel("Project information rail")).toHaveCount(0);
+		await expect(page.getByRole("tab", { name: "Generated Test Cases 10", exact: true })).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
 			.getByRole("link", { name: /^Requirements,/i })
 			.click();
+		await page.getByText("Human Feedback", { exact: true }).click();
 		await page
 			.getByPlaceholder(/Enter your feedback here/i)
 			.fill("Change REQ-003 and REQ-010 to include payment retry and approval behavior.");
 		await page.getByRole("button", { name: /Implement Changes/i }).click();
 		await page.getByRole("button", { name: "Apply reviewed changes", exact: true }).click();
-		await expect(page.getByLabel("Contextual task").getByRole("heading", { name: "Review Requirements" })).toBeVisible();
+		await expect(requirementRow("REQ-003").getByText("Needs Review", { exact: true })).toBeVisible();
+		await page.getByText("Review actions", { exact: true }).click();
 		await page.getByRole("button", { name: /approve non-rejected/i }).click();
-		await expect(page.getByLabel("Review status for REQ-003", { exact: true })).toHaveValue("Approved");
+		await expect(requirementRow("REQ-003").getByText("Approved", { exact: true })).toBeVisible();
 
 		await page
 			.getByRole("navigation", { name: "Project navigation" })
@@ -799,7 +804,7 @@ test.describe("Orchestrator lifecycle validation", () => {
 			.getByRole("link", { name: /^Automation,/i })
 			.click();
 		await page.getByPlaceholder("staging, dev, customer-a").fill("staging");
-		await page.getByPlaceholder("Use backend default").fill("https://staging.example.test/app");
+		await page.getByRole("textbox", { name: "Target base URL", exact: true }).fill("https://staging.example.test/app");
 		await page.getByRole("button", { name: /^Preview Execution$/ }).click();
 		await expect(page.getByRole("button", { name: /^Run 1 Candidate$/ })).toBeEnabled();
 		await page.getByRole("button", { name: /^Run 1 Candidate$/ }).click();

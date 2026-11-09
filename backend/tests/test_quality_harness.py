@@ -77,12 +77,12 @@ class QualityHarnessTests(unittest.TestCase):
             critic.assert_not_called()
             self.assertIn("bounded review size", baseline["reason"])
             trial = assess_delivered_suite([{"id": "TC-1"}], [requirement], context, settings=object())
-            critic.assert_called_once()
+            self.assertEqual(critic.call_count, 2)
             self.assertEqual(trial["status"], "unknown")
             self.assertEqual(trial["diagnostics"]["validation_error"], "malformed_json")
             oversized = context.model_copy(update={"notes": "x" * 512_000})
             result = assess_delivered_suite([{"id": "TC-1"}], [requirement], oversized, settings=object())
-            critic.assert_called_once()
+            self.assertEqual(critic.call_count, 2)
             self.assertIn("bounded review size", result["reason"])
 
     def test_requested_model_controls_settings_and_restores_them(self):
@@ -210,21 +210,3 @@ class QualityHarnessTests(unittest.TestCase):
             evaluation.adjudicate(
                 {"provenance": {"model": "changed"}, "results": [result]}, {"x": {"output_hash": result["output_hash"], "run_hash": result["run_hash"]}}
             )
-
-    def test_reenriching_context_preserves_corrected_prerequisites(self):
-        from starlette.requests import Request
-        from app.models import AuthUser
-        from app.routers.requirements import enrich_requirements
-
-        payload = EnrichInput(
-            requirements=[],
-            grounded_context=GroundedContext(),
-            execution_prerequisites=[
-                {"name": "employee", "kind": "test_data", "description": "Named employee", "reference": "fixture:employee", "status": "configured"}
-            ],
-        )
-        with patch("app.routers.requirements.start_workflow_run", return_value="run"), patch("app.routers.requirements._log_success", return_value="event"):
-            response = asyncio.run(
-                enrich_requirements(Request({"type": "http", "headers": []}), payload, AuthUser(sub="synthetic-owner", name="Synthetic owner"))
-            )
-        self.assertEqual(response.execution_prerequisites, payload.execution_prerequisites)

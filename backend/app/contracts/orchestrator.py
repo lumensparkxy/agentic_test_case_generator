@@ -51,6 +51,7 @@ OrchestratorBlockerCode = Literal[
     "stale_downstream_stage",
     "missing_baseline",
     "failed_execution",
+    "flaky_execution",
     "unresolved_review",
     "missing_execution",
 ]

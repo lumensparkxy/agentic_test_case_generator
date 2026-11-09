@@ -204,6 +204,7 @@ def summarize(folder, reviews):
             ):
                 raise ValueError("Output no longer matches the reviewed run")
         usage = result.get("usage") or {}
+        app_review = (result.get("output") or {}).get("substantive_assessment") or {}
         writers = [request for request in usage.get("requests", []) if request["config"].get("max_output_tokens") in (20_000, 256_000)]
         writer_evidence = {evidence for request in writers for evidence in request.get("evidence_ids", [])}
         fixture, profile = trial["fixture"], trial["profile"]
@@ -223,6 +224,13 @@ def summarize(folder, reviews):
             "repeat": trial["repeat"],
             "status": "incomplete_model_output" if incomplete else result.get("status", run["mode"]),
             "review_status": review["status"],
+            "app_review": {
+                "status": app_review.get("status"),
+                "design_status": app_review.get("design_status"),
+                "execution_status": app_review.get("execution_status"),
+                "execution_blocker_count": len(app_review.get("execution_blockers") or []),
+                "diagnostics": app_review.get("diagnostics"),
+            },
             "scores": review.get("scores"),
             "cases": len(packets[blind_id]["cases"]),
             "elapsed_seconds": result.get("latency_seconds"),
