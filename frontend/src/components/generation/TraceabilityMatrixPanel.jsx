@@ -1,4 +1,4 @@
-import { useEffectEvent, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createSavedCasePathResolver } from "../../app/savedCaseLinks";
 import { CollectionState, TableScroll, Table } from "../ui/collections";
 import { Link } from "../ui/controls";
@@ -6,7 +6,7 @@ import { Surface, Badge, Disclosure } from "../ui/surfaces";
 
 const VISIBLE_CASE_COUNT = 3;
 
-function LinkedCaseTags({ requirementId, cases, paths, onOpenCase }) {
+function LinkedCaseTags({ requirementId, cases, paths, onOpenCase, expanded, onToggle }) {
 	const renderCases = (items) =>
 		items.map((testCase, index) => {
 			const key = `${testCase.id}-${index}`;
@@ -41,18 +41,24 @@ function LinkedCaseTags({ requirementId, cases, paths, onOpenCase }) {
 		<>
 			<div className="traceability-case-items">{renderCases(cases.slice(0, VISIBLE_CASE_COUNT))}</div>
 			{remaining > 0 && (
-				<Disclosure className="traceability-case-overflow">
+				<Disclosure
+					className="traceability-case-overflow"
+					open={expanded}
+					onToggle={(event) => onToggle(requirementId, event.currentTarget.open)}
+				>
 					<summary>
 						{remaining} more linked {remaining === 1 ? "test" : "tests"}
 					</summary>
-					<div
-						className="traceability-case-items traceability-more-cases"
-						role="region"
-						aria-label={`More linked tests for ${requirementId}`}
-						tabIndex={0}
-					>
-						{renderCases(cases.slice(VISIBLE_CASE_COUNT))}
-					</div>
+					{expanded && (
+						<div
+							className="traceability-case-items traceability-more-cases"
+							role="region"
+							aria-label={`More linked tests for ${requirementId}`}
+							tabIndex={0}
+						>
+							{renderCases(cases.slice(VISIBLE_CASE_COUNT))}
+						</div>
+					)}
 				</Disclosure>
 			)}
 		</>
@@ -60,9 +66,9 @@ function LinkedCaseTags({ requirementId, cases, paths, onOpenCase }) {
 }
 
 export default function TraceabilityMatrixPanel({
-	approvedRequirements,
 	requirementTraceabilityRows,
 	tracedRequirementCount,
+	linkedCaseCount,
 	coverageMetrics,
 	testCases,
 	projectId,
@@ -72,28 +78,41 @@ export default function TraceabilityMatrixPanel({
 	onReturnHandled,
 }) {
 	const tableRef = useRef(null);
+	const [expandedRequirements, setExpandedRequirements] = useState(() => new Set());
 	const paths = useMemo(() => {
 		const resolve = createSavedCasePathResolver(projectId, savedSuite);
 		return new Map(testCases.map((testCase) => [testCase, resolve(testCase)]));
 	}, [projectId, savedSuite, testCases]);
-	const linkedCases = new Set(requirementTraceabilityRows.flatMap((row) => row.linkedTestCases));
-	const linkedCount = testCases.filter((testCase) => linkedCases.has(testCase)).length;
-	const handleReturn = useEffectEvent(onReturnHandled);
+	const returnedRow = returnCase && requirementTraceabilityRows.find(({ requirement }) => requirement.id === returnCase.requirementId);
+	const restoreOverflow = returnedRow?.linkedTestCases.some(
+		(testCase, index) => index >= VISIBLE_CASE_COUNT && testCase.id === returnCase.caseId && paths.get(testCase)
+	);
+	const toggleOverflow = (requirementId, open) => {
+		setExpandedRequirements((current) => {
+			if (current.has(requirementId) === open) return current;
+			const next = new Set(current);
+			if (open) next.add(requirementId);
+			else next.delete(requirementId);
+			return next;
+		});
+	};
+	const handleReturn = useEffectEvent((overflowId) => {
+		if (overflowId) toggleOverflow(overflowId, true);
+		onReturnHandled();
+	});
 	useLayoutEffect(() => {
-		if (!returnCase || !tableRef.current) return;
-		const link = Array.from(tableRef.current.querySelectorAll("a[data-traceability-case]")).find(
+		if (!returnCase) return;
+		const link = Array.from(tableRef.current?.querySelectorAll("a[data-traceability-case]") || []).find(
 			(item) => item.dataset.traceabilityCase === returnCase.caseId && item.dataset.requirementId === returnCase.requirementId
 		);
 		if (link) {
-			const overflow = link.closest("details");
-			if (overflow) overflow.open = true;
 			link.focus({ preventScroll: true });
 			link.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
 		}
-		handleReturn();
-	}, [returnCase]);
+		handleReturn(link && restoreOverflow ? returnCase.requirementId : null);
+	}, [returnCase, restoreOverflow]);
 
-	if (approvedRequirements.length === 0) {
+	if (requirementTraceabilityRows.length === 0) {
 		return (
 			<CollectionState as="div" kind="empty" className="generate-result-empty">
 				<h3>Traceability Matrix</h3>
@@ -108,10 +127,10 @@ export default function TraceabilityMatrixPanel({
 			<p>Links identify related tests. Business coverage assessment, human approval and execution results are separate evidence.</p>
 			<div className="workflow-diagnostics-pills">
 				<span className="workflow-diagnostics-pill">
-					Approved requirements with linked tests {tracedRequirementCount}/{approvedRequirements.length}
+					Approved requirements with linked tests {tracedRequirementCount}/{requirementTraceabilityRows.length}
 				</span>
 				<span className="workflow-diagnostics-pill">
-					Cases with traceability {linkedCount}/{testCases.length}
+					Cases with traceability {linkedCaseCount}/{testCases.length}
 				</span>
 				<span className="workflow-diagnostics-pill">
 					Linked scenarios{" "}
@@ -149,7 +168,16 @@ export default function TraceabilityMatrixPanel({
 									</td>
 									<td>
 										{linkedTestCases.length ? (
-											<LinkedCaseTags requirementId={requirement.id} cases={linkedTestCases} paths={paths} onOpenCase={onOpenCase} />
+											<LinkedCaseTags
+												requirementId={requirement.id}
+												cases={linkedTestCases}
+												paths={paths}
+												onOpenCase={onOpenCase}
+												expanded={
+													expandedRequirements.has(requirement.id) || (restoreOverflow && requirement.id === returnCase.requirementId)
+												}
+												onToggle={toggleOverflow}
+											/>
 										) : (
 											<span className="traceability-missing-text">No linked tests</span>
 										)}

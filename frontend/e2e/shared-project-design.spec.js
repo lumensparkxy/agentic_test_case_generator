@@ -611,7 +611,11 @@ test("coverage gaps select the remaining traceability tab after load and reload"
 });
 
 test("opens exact saved evidence from an expanded traceability row and restores the link on Back", { tag: "@p1" }, async ({ page }) => {
-	const cases = Array.from({ length: 8 }, (_, index) => caseFixture(`TC-00${index + 1}`, `Checkout ${index + 1}`));
+	const cases = Array.from({ length: 8 }, (_, index) => ({
+		...caseFixture(`TC-00${index + 1}`, `Checkout ${index + 1}`),
+		linked_requirement_ids: index < 5 ? ["REQ-101", "REQ-202"] : [],
+		tags: ["REQ-101", index % 2 ? "scenario:boundary" : "scenario:happy-path"],
+	}));
 	const target = cases.at(-1);
 	const writes = [];
 	const lookups = [];
@@ -638,7 +642,13 @@ test("opens exact saved evidence from an expanded traceability row and restores 
 	const { project, api } = await openCases(
 		page,
 		[...cases, caseFixture("TC-DUP", "First legacy case"), caseFixture("TC-DUP", "Second legacy case")],
-		{},
+		{
+			coverage_metrics: {
+				planned_scenarios_total: 4,
+				covered_planned_scenarios: 3,
+				requirement_scenario_summary: { "REQ-202": { planned_scenarios: 2, covered_scenarios: 1 } },
+			},
+		},
 		/^Traceability Matrix/
 	);
 	const tab = page.getByRole("tab", { name: /^Traceability Matrix/ });
@@ -648,11 +658,25 @@ test("opens exact saved evidence from an expanded traceability row and restores 
 	const more = row.getByText("7 more linked tests", { exact: true });
 	const overflow = row.getByRole("region", { name: "More linked tests for REQ-101" });
 	const sourceLink = row.getByRole("link", { name: `Open saved case ${target.id} ${target.title}`, exact: true });
+	const other = matrix.getByRole("row").filter({ has: page.getByRole("cell", { name: "REQ-202", exact: true }) });
+	const otherMore = other.getByText("2 more linked tests", { exact: true });
+	const otherOverflow = other.locator(".traceability-more-cases");
 	const matrixUrl = page.url();
+	await expect(page.getByText("Approved requirements with linked tests 2/2", { exact: true })).toBeVisible();
+	await expect(page.getByText("Cases with traceability 10/10", { exact: true })).toBeVisible();
+	await expect(page.getByText("Linked scenarios 3/4", { exact: true })).toBeVisible();
+	await expect(other.getByRole("cell", { name: "1/2 happy path boundary", exact: true })).toBeVisible();
+	await expect(matrix.locator(".traceability-more-cases")).toHaveCount(0);
+	await expect(matrix.locator("a[data-traceability-case]")).toHaveCount(6);
 	await expect(links).toHaveCount(3);
-	await expect(overflow).toBeHidden();
 	await more.press("Enter");
 	await expect(links).toHaveCount(8);
+	await otherMore.press("Enter");
+	await expect(otherOverflow.getByRole("link")).toHaveCount(2);
+	await expect(overflow).toBeVisible();
+	await otherMore.press("Enter");
+	await expect(otherOverflow).toHaveCount(0);
+	await expect(overflow).toBeVisible();
 	await expect(overflow.getByText("TC-DUP", { exact: true })).toHaveCount(2);
 	await expect(overflow.getByRole("link", { name: /TC-DUP/ })).toHaveCount(0);
 	const href = new URL(await sourceLink.getAttribute("href"), matrixUrl);
@@ -685,6 +709,9 @@ test("opens exact saved evidence from an expanded traceability row and restores 
 	await expect(tab).toHaveAttribute("aria-selected", "true");
 	await expect(overflow).toBeVisible();
 	await expect(sourceLink).toBeFocused();
+	await more.press("Enter");
+	await expect(row.locator(".traceability-more-cases")).toHaveCount(0);
+	await expect(links).toHaveCount(3);
 	expect(writes).toEqual([]);
 });
 

@@ -17,7 +17,7 @@ import { TableScroll, Table, List, ListItem, CollectionState } from "./component
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import { improvementFindings } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
 import { GlobalDestinationPlaceholderPage, ProjectLoadingPage, ProjectOverviewPage, RouteRecoveryPage } from "./app/RoutePages";
@@ -107,8 +107,8 @@ import { API_CONTRACT_ENDPOINTS } from "./api/generated/api-contracts";
 import {
 	buildAzureDevOpsConnectionForm,
 	buildJiraConnectionForm,
+	buildRequirementTraceability,
 	getRequirementReviewStatus,
-	getTestCaseLinkedRequirementIds,
 	isAzureDevOpsLinkedRequirement,
 	isJiraLinkedRequirement,
 	mergeRequirementMetadata,
@@ -705,11 +705,15 @@ export default function App() {
 		acc[status] = (acc[status] || 0) + 1;
 		return acc;
 	}, {});
-	const approvedRequirements = requirements.filter(
-		(requirement) =>
-			requirement.lifecycle_status !== "retired" &&
-			getRequirementReviewStatus(requirement) === "Approved" &&
-			!["open", "deferred", "excluded"].includes(requirement.clarification_status)
+	const approvedRequirements = useMemo(
+		() =>
+			requirements.filter(
+				(requirement) =>
+					requirement.lifecycle_status !== "retired" &&
+					getRequirementReviewStatus(requirement) === "Approved" &&
+					!["open", "deferred", "excluded"].includes(requirement.clarification_status)
+			),
+		[requirements]
 	);
 	const approvedRequirementCount = approvedRequirements.length;
 	const rejectedRequirementCount = requirementStatusCounts.Rejected || 0;
@@ -3969,29 +3973,15 @@ export default function App() {
 		}
 	};
 
-	const getRequirementScenarioSummary = (requirementId) => {
-		return coverageMetrics?.requirement_scenario_summary?.[requirementId] || null;
-	};
-
-	const requirementTraceabilityRows = approvedRequirements.map((requirement) => {
-		const linkedTestCases = testCases.filter((testCase) => getTestCaseLinkedRequirementIds(testCase).includes(requirement.id));
-		const scenarioSummary = getRequirementScenarioSummary(requirement.id);
-		const linkedScenarioTypes = [
-			...new Set(
-				linkedTestCases
-					.flatMap((testCase) => normalizeStringArray(testCase.tags))
-					.filter((tag) => tag.startsWith("scenario:"))
-					.map((tag) => tag.replace("scenario:", "").replace(/-/g, " "))
-			),
-		];
-		return {
-			requirement,
-			linkedTestCases,
-			scenarioSummary,
-			linkedScenarioTypes,
-		};
-	});
-	const tracedRequirementCount = requirementTraceabilityRows.filter((row) => row.linkedTestCases.length > 0).length;
+	const requirementScenarioSummaries = coverageMetrics?.requirement_scenario_summary;
+	const {
+		rows: requirementTraceabilityRows,
+		tracedRequirementCount,
+		linkedCaseCount,
+	} = useMemo(
+		() => buildRequirementTraceability(approvedRequirements, testCases, requirementScenarioSummaries),
+		[approvedRequirements, testCases, requirementScenarioSummaries]
+	);
 	const traceabilityGapCount = Math.max(0, approvedRequirements.length - tracedRequirementCount);
 	const browserHandoffWarnings = (testCaseWorkflowDiagnostics?.warnings || []).filter((warning) => warning.startsWith("Browser handoff "));
 	const hasGenerateResults = Boolean(
@@ -5749,9 +5739,9 @@ export default function App() {
 														)}
 														{activeGenerateResultTab === "traceability" && (
 															<TraceabilityMatrixPanel
-																approvedRequirements={approvedRequirements}
 																requirementTraceabilityRows={requirementTraceabilityRows}
 																tracedRequirementCount={tracedRequirementCount}
+																linkedCaseCount={linkedCaseCount}
 																coverageMetrics={coverageMetrics}
 																testCases={testCases}
 																projectId={currentProjectId}
