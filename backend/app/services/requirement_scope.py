@@ -13,10 +13,15 @@ def approved_generation_requirements(project):
         rows = [Requirement.model_validate(row) for row in baseline.payload.get("requirements", [])]
     except ValidationError:
         return []
+    return eligible_generation_scope(rows, approved=state.approved)
+
+
+def eligible_generation_scope(rows: list[Requirement], *, approved: bool) -> list[Requirement]:
+    """Use the same scope rules before and after an approval snapshot is committed."""
     active = [row for row in rows if row.lifecycle_status == "active" and row.review_status != "Rejected"]
     scoped = [row for row in active if row.clarification_status not in ("deferred", "excluded")]
     explicitly_scoped = any(row.clarification_status in ("deferred", "excluded") for row in rows)
-    if not state.approved and not explicitly_scoped:
+    if not approved and not explicitly_scoped:
         return []
     if (
         not scoped

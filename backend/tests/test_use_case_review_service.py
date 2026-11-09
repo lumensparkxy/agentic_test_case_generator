@@ -23,6 +23,7 @@ from app.models import (
     UseCaseReviewRequest,
     UseCaseReviewResponse,
 )
+from app.services.approval_continuation import OUTBOX_COLLECTION, ContinuationOptions
 from app.services.use_case_review_service import (
     UseCaseReviewConflictError,
     review_use_case_snapshot,
@@ -346,6 +347,7 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         actor: AuthUser | None = None,
         request_id: str = "req-review-1",
         scenario_reviews: list[dict] | None = None,
+        continuation: ContinuationOptions | None = None,
     ) -> UseCaseReviewResponse:
         return review_use_case_snapshot(
             project_id=PROJECT_ID,
@@ -356,6 +358,7 @@ class UseCaseReviewServiceTests(unittest.TestCase):
             scenario_reviews=scenario_reviews,
             actor=actor or self.actor,
             request_id=request_id,
+            continuation=continuation,
         )
 
     def _paths_containing(self, segment: str) -> list[str]:
@@ -456,6 +459,122 @@ class UseCaseReviewServiceTests(unittest.TestCase):
         self.assertIn("/use_case_reviews/", transaction.operations[0][1])
         self.assertEqual(transaction.operations[1][1], f"qa_projects/{PROJECT_ID}")
         self.assertIn("/timeline/", transaction.operations[2][1])
+
+    def _continuation_plan(self):
+        root = f"qa_projects/{PROJECT_ID}"
+        requirements_id = "snapshot-requirements-v1"
+        self.store[f"{root}/snapshots/{requirements_id}"]["payload"]["requirements"][0]["review_status"] = "Approved"
+        self.store[f"{root}/snapshots/context-v1"] = _snapshot_payload(
+            snapshot_id="context-v1", stage="context", approved=True, payload={"notes": "Observed checkout labels"}
+        )
+        self.project["stage_state"]["context"] = {"current_snapshot_id": "context-v1", "version": 1, "approved": True, "stale": False}
+        plan = self.store[f"{root}/snapshots/{SNAPSHOT_ID}"]
+        plan.update(
+            operation="use_cases.generate",
+            source_snapshot_id=requirements_id,
+            metadata={"source_requirements_snapshot_id": requirements_id, "source_context_snapshot_id": "context-v1"},
+        )
+        plan["payload"]["coverage_plan"][0]["requirement_text"] = "Checkout"
+        return plan
+
+    def test_scenario_approval_enqueues_the_exact_plan_with_current_sources_and_replays(self):
+        plan = deepcopy(self._continuation_plan())
+        options = ContinuationOptions(settings_fingerprint="a" * 64, max_provider_requests=7)
+
+        response = self._review(continuation=options)
+
+        self.assertTrue(response.use_cases_state.approved)
+        receipt = self.store[self._paths_containing("/use_case_reviews/")[0]]
+        run_id = receipt["continuation_run_id"]
+        run = self.store[f"qa_projects/{PROJECT_ID}/orchestrator_runs/{run_id}"]
+        intent = run["continuation"]
+        self.assertEqual(intent["approval_id"], response.review.review_id)
+        self.assertEqual(intent["stage"], "generate_tests")
+        self.assertEqual(
+            intent["source_snapshot_ids"],
+            {"requirements": "snapshot-requirements-v1", "context": "context-v1", "use_cases": SNAPSHOT_ID},
+        )
+        self.assertEqual(intent["requirement_ids"], ["REQ-1"])
+        self.assertEqual(intent["options"], options.model_dump(mode="json"))
+        self.assertEqual(run["project_revision"], response.review.resulting_project_revision)
+        self.assertEqual(run["actor_user_id"], self.actor.sub)
+        self.assertEqual(run["request_id"], response.review.request_id)
+        self.assertEqual(self.store[f"{OUTBOX_COLLECTION}/{run_id}"]["run_id"], run_id)
+        self.assertEqual(self.store[f"qa_projects/{PROJECT_ID}/snapshots/{SNAPSHOT_ID}"], plan)
+        self.assertNotIn("continuation_run_id", response.review.model_dump())
+        self.assertNotIn("continuation_options_fingerprint", response.review.model_dump())
+
+        committed = deepcopy(self.store)
+        replay = self._review(continuation=options)
+        self.assertEqual(replay.review, response.review)
+        self.assertEqual(self.store, committed)
+        self.assertEqual(self.client.transactions[-1].operations, [])
+        for changed in (None, ContinuationOptions(settings_fingerprint="b" * 64)):
+            with self.subTest(changed=changed):
+                with self.assertRaises(UseCaseReviewConflictError):
+                    self._review(continuation=changed)
+                self.assertEqual(self.store, committed)
+
+    def test_legacy_scenario_approval_never_enqueues_for_an_eligible_plan(self):
+        self._continuation_plan()
+        response = self._review()
+        self.assertTrue(response.use_cases_state.approved)
+        receipt = self.store[self._paths_containing("/use_case_reviews/")[0]]
+        self.assertNotIn("continuation_options_fingerprint", receipt)
+        self.assertFalse(any(path.startswith(f"{OUTBOX_COLLECTION}/") or "/orchestrator_runs/" in path for path in self.store))
+
+    def test_scenario_approval_persists_when_continuation_is_ineligible(self):
+        self._continuation_plan()
+        initial_store = deepcopy(self.store)
+        root = f"qa_projects/{PROJECT_ID}"
+        options = ContinuationOptions(settings_fingerprint="a" * 64)
+        for reason in (
+            "requirements_not_current",
+            "requirements_not_eligible",
+            "context_not_current",
+            "use_cases_source_mismatch",
+            "use_cases_scope_mismatch",
+            "use_cases_not_approved",
+        ):
+            with self.subTest(reason=reason):
+                self.store.clear()
+                self.store.update(deepcopy(initial_store))
+                plan = self.store[f"{root}/snapshots/{SNAPSHOT_ID}"]
+                if reason == "requirements_not_current":
+                    self.project["stage_state"]["requirements"]["stale"] = True
+                elif reason == "requirements_not_eligible":
+                    self.store[f"{root}/snapshots/snapshot-requirements-v1"]["payload"]["requirements"][0]["clarification_status"] = "open"
+                elif reason == "context_not_current":
+                    del self.store[f"{root}/snapshots/context-v1"]
+                elif reason == "use_cases_source_mismatch":
+                    del plan["metadata"]["source_context_snapshot_id"]
+                elif reason == "use_cases_scope_mismatch":
+                    plan["payload"]["coverage_plan"][0]["requirement_text"] = "Superseded checkout text"
+                approved = reason != "use_cases_not_approved"
+                response = self._review(
+                    decision="approve" if approved else "review_scenarios",
+                    continuation=options,
+                )
+                self.assertEqual(response.use_cases_state.approved, approved)
+                self.assertEqual(response.project_revision, PROJECT_REVISION + 1)
+                receipt = self.store[self._paths_containing("/use_case_reviews/")[0]]
+                self.assertEqual(receipt["continuation_blocked_reason"], reason)
+                self.assertNotIn("continuation_run_id", receipt)
+                self.assertFalse(any(path.startswith(f"{OUTBOX_COLLECTION}/") or "/orchestrator_runs/" in path for path in self.store))
+
+    def test_scenario_approval_and_continuation_roll_back_together(self):
+        self._continuation_plan()
+        before = deepcopy(self.store)
+        options = ContinuationOptions(settings_fingerprint="a" * 64)
+
+        for segment in (OUTBOX_COLLECTION, "/timeline/"):
+            with self.subTest(segment=segment):
+                self.client.fail_on_create_segment = segment
+                with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                    self._review(continuation=options)
+                self.assertEqual(self.store, before)
+        self.client.fail_on_create_segment = None
+        self.assertTrue(self._review(continuation=options).use_cases_state.approved)
 
     def test_request_changes_keeps_stage_unapproved_and_surfaces_reason(self) -> None:
         comment = "Add declined-card and timeout scenarios."

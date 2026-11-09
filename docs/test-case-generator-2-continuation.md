@@ -115,6 +115,23 @@ Inventory nested specialist retries before combining stages. Charge and publish
 under the same source/claim guard where supported. Treat unknown usage as
 unknown and distinguish one committed artifact from one external provider call.
 
+### Persisted approval foundation
+
+The internal approval path in #455 uses the existing requirement and
+scenario review transactions. A named, eligible decision can create an
+outbox entry and private, versioned run in the same commit as its receipt.
+An ineligible next stage leaves a saved decision and an explicit blocker
+reason. Exact replay uses that receipt. The public approval-only routes
+retain their current behavior.
+
+The claim uses one per-project Firestore lease and a monotonic fence. Known
+transaction contention leaves work due for a later poll. The dispatch
+reservation records a possibly paid attempt before an invocation, so an
+expired uncertain attempt cannot be reclaimed automatically. The result
+guard verifies the exact actor, operation, request, revision and source
+lineage before the artifact transaction advances the run. The next packet
+connects those guards to a separately invoked worker and Review status.
+
 ## Quality and delivery policy
 
 Use the existing [saved suite review](../backend/app/services/test_case_suite_review.py),
@@ -207,9 +224,12 @@ P0 pins the baseline and records the prospective gates (commit `2327ab9`,
 [PR #450](https://github.com/lumensparkxy/agentic_test_case_generator/pull/450)).
 P1 adds opt-in navigation and compatible aliases (commit `1d5977b`,
 [PR #452](https://github.com/lumensparkxy/agentic_test_case_generator/pull/452)).
-P2 adds unified intake and scoped decisions under
-[#453](https://github.com/lumensparkxy/agentic_test_case_generator/issues/453).
-Next is the P3 approval transaction, intent outbox and fenced stage claim.
+P2 adds unified intake and scoped decisions (commit `750fa78`,
+[PR #454](https://github.com/lumensparkxy/agentic_test_case_generator/pull/454)).
+P3a adds the internal transactional approval, intent outbox and fenced
+stage claim under
+[#455](https://github.com/lumensparkxy/agentic_test_case_generator/issues/455).
+Next is a separately invoked scenario worker and Review recovery status.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

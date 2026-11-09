@@ -10,9 +10,11 @@ from ..agents.requirement_matching_agent import suggest_matches
 from ..contracts.requirement_imports import RequirementImportPreview, ImportApplyInput, ImportHistoryEntry
 from ..contracts.requirements import Requirement
 from ..utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
+from .approval_continuation import ContinuationOptions, enqueue_approval
 from .guidance_service import public_manifest
 from .firestore_repository import get_required_firestore_client
 from .requirement_reconciliation import build_preview, canonical_requirements, digest, reconcile
+from .requirement_scope import eligible_generation_scope
 from .workflow_project_service import get_project, DOWNSTREAM_STAGES
 
 
@@ -120,6 +122,8 @@ def _snapshot_write(transaction, doc, project, payload, actor, request_id, snaps
             "metadata": {"operation": operation, "changes": counts},
         },
     )
+
+    return revision
 
 
 class RequirementImportRepository:
@@ -260,10 +264,11 @@ class RequirementImportRepository:
         apply(self.client.transaction())
         return get_project(project_id, actor=actor)
 
-    def review(self, project_id, actor, payload, request_id):
+    def review(self, project_id, actor, payload, request_id, *, continuation: ContinuationOptions | None = None):
         doc = self.project_doc(project_id)
         receipt = doc.collection("requirement_import_receipts").document(digest(payload.idempotency_key))
         fingerprint = digest(["review", payload.model_dump(mode="json")])
+        continuation_fingerprint = digest(continuation.model_dump(mode="json")) if continuation is not None else None
 
         @transactional
         def review(transaction):
@@ -272,10 +277,14 @@ class RequirementImportRepository:
             if saved:
                 if saved.get("fingerprint") != fingerprint:
                     raise HTTPException(409, "Retry key was used for different review decisions.")
+                if saved.get("continuation_options_fingerprint") != continuation_fingerprint:
+                    raise HTTPException(409, "Retry key was used for different continuation options.")
                 return
             _revision(project, payload.base_project_revision)
-            sid = (project.get("stage_state", {}).get("requirements") or {}).get("current_snapshot_id")
-            snapshot = doc.collection("snapshots").document(sid).get(transaction=transaction).to_dict() if sid else None
+            stage_state = project.get("stage_state") or {}
+            requirements_state = stage_state.get("requirements") or {}
+            source_id = requirements_state.get("current_snapshot_id")
+            snapshot = doc.collection("snapshots").document(source_id).get(transaction=transaction).to_dict() if source_id else None
             if not snapshot:
                 raise HTTPException(409, "Import requirements before reviewing them.")
             active, retired = canonical_requirements(project_id, snapshot)
@@ -299,10 +308,43 @@ class RequirementImportRepository:
             updated["review"] = {**updated.get("review", {}), "approved": updated["approved"]}
             sid = digest(["review", payload.idempotency_key])
             preserve_context = _context_matches_requirements(transaction, doc, project, active)
-            _snapshot_write(
+            resulting_revision = _snapshot_write(
                 transaction, doc, project, updated, actor, request_id, sid, "requirements.review", {"reviewed": len(seen)}, preserve_context=preserve_context
             )
-            transaction.create(receipt, {"fingerprint": fingerprint, "snapshot_id": sid})
+            receipt_data = {"fingerprint": fingerprint, "snapshot_id": sid}
+            if continuation is not None:
+                receipt_data["continuation_options_fingerprint"] = continuation_fingerprint
+                context_state = stage_state.get("context") or {}
+                context_id = context_state.get("current_snapshot_id")
+                scope = eligible_generation_scope(active, approved=updated["approved"])
+                if project.get("status") != "active":
+                    receipt_data["continuation_blocked_reason"] = "project_inactive"
+                elif (
+                    requirements_state.get("stale")
+                    or snapshot.get("project_id") != project_id
+                    or snapshot.get("stage") != "requirements"
+                    or snapshot.get("snapshot_id") != source_id
+                ):
+                    receipt_data["continuation_blocked_reason"] = "requirements_not_current"
+                elif not scope:
+                    receipt_data["continuation_blocked_reason"] = "requirements_not_eligible"
+                elif context_state.get("stale") or (context_id and not preserve_context):
+                    receipt_data["continuation_blocked_reason"] = "context_not_current"
+                else:
+                    receipt_data["continuation_run_id"] = enqueue_approval(
+                        transaction,
+                        doc,
+                        client=self.client,
+                        stage="prepare_scenarios",
+                        actor_id=actor.sub,
+                        approval_id=sid,
+                        request_id=request_id,
+                        resulting_revision=resulting_revision,
+                        source_snapshot_ids={"requirements": sid, "context": context_id},
+                        requirement_ids=[row.id for row in scope],
+                        options=continuation,
+                    )
+            transaction.create(receipt, receipt_data)
 
         review(self.client.transaction())
         return get_project(project_id, actor=actor)

@@ -7,12 +7,16 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, status
 from google.cloud.firestore_v1 import transactional
+from pydantic import ValidationError
 
 from ..models import (
     AuthUser,
     UseCaseReviewRecord,
     UseCaseReviewResponse,
 )
+from .approval_continuation import ContinuationOptions, enqueue_approval
+from .requirement_reconciliation import canonical_requirements, digest
+from .requirement_scope import eligible_generation_scope
 from .scenario_review_state import current_scenario_reviews, scenario_key
 from .audit_service import build_actor_snapshot
 from .firestore_repository import get_required_firestore_client
@@ -85,17 +89,85 @@ def _require_owner(payload: dict[str, Any], actor: AuthUser) -> None:
         raise ProjectPermissionError(str(payload.get("project_id") or "project"))
 
 
-def _same_idempotent_request(
-    existing: dict[str, Any],
+def _current_source(transaction, project_doc, stage, state, *, field_paths=None):
+    snapshot_id = state.get("current_snapshot_id")
+    if state.get("stale") or not snapshot_id:
+        return None
+    snapshot = _document_to_dict(project_doc.collection("snapshots").document(snapshot_id).get(transaction=transaction, field_paths=field_paths))
+    if not snapshot or snapshot.get("snapshot_id") != snapshot_id or snapshot.get("project_id") != project_doc.id or snapshot.get("stage") != stage:
+        return None
+    return snapshot
+
+
+def _test_generation_intent(
+    transaction,
+    project_doc,
     *,
-    request_fingerprint: str,
-) -> bool:
-    return existing.get("request_fingerprint") == request_fingerprint
+    client,
+    project_payload,
+    plan_snapshot,
+    actor,
+    request_id,
+    review_id,
+    resulting_revision,
+    options,
+):
+    if project_payload.get("status") != "active":
+        return {"continuation_blocked_reason": "project_inactive"}
+    stage_state = project_payload.get("stage_state") or {}
+    requirements_state = stage_state.get("requirements") or {}
+    baseline = _current_source(transaction, project_doc, "requirements", requirements_state)
+    if not baseline:
+        return {"continuation_blocked_reason": "requirements_not_current"}
+    try:
+        rows, _ = canonical_requirements(project_doc.id, baseline)
+    except AttributeError, TypeError, ValidationError:
+        return {"continuation_blocked_reason": "requirements_not_eligible"}
+    scope = eligible_generation_scope(rows, approved=bool(requirements_state.get("approved")))
+    if not scope:
+        return {"continuation_blocked_reason": "requirements_not_eligible"}
+
+    context_state = stage_state.get("context") or {}
+    context_id = context_state.get("current_snapshot_id")
+    if context_state.get("stale") or (
+        context_id and not _current_source(transaction, project_doc, "context", context_state, field_paths=("snapshot_id", "project_id", "stage"))
+    ):
+        return {"continuation_blocked_reason": "context_not_current"}
+    requirements_id = baseline["snapshot_id"]
+    metadata = plan_snapshot.get("metadata") or {}
+    if (
+        plan_snapshot.get("source_snapshot_id") != requirements_id
+        or metadata.get("source_requirements_snapshot_id") != requirements_id
+        or "source_context_snapshot_id" not in metadata
+        or metadata["source_context_snapshot_id"] != context_id
+    ):
+        return {"continuation_blocked_reason": "use_cases_source_mismatch"}
+    groups = plan_snapshot["payload"].get("coverage_plan") or []
+    expected = {row.id: row.text for row in scope}
+    if len(groups) != len(expected) or {group.get("requirement_id"): group.get("requirement_text") for group in groups if group.get("scenarios")} != expected:
+        return {"continuation_blocked_reason": "use_cases_scope_mismatch"}
+
+    return {
+        "continuation_run_id": enqueue_approval(
+            transaction,
+            project_doc,
+            client=client,
+            stage="generate_tests",
+            actor_id=actor.sub,
+            approval_id=review_id,
+            request_id=request_id,
+            resulting_revision=resulting_revision,
+            source_snapshot_ids={"requirements": requirements_id, "context": context_id, "use_cases": plan_snapshot["snapshot_id"]},
+            requirement_ids=[row.id for row in scope],
+            options=options,
+        )
+    }
 
 
 def _apply_review_transaction(
     transaction: Any,
     *,
+    client: Any,
     project_doc: Any,
     review_doc: Any,
     timeline_doc: Any,
@@ -110,6 +182,7 @@ def _apply_review_transaction(
     idempotency_key: str,
     request_fingerprint: str,
     decided_at: datetime,
+    continuation: ContinuationOptions | None = None,
     scenario_reviews: Optional[list[dict]] = None,
 ) -> UseCaseReviewRecord:
     project_payload = _document_to_dict(project_doc.get(transaction=transaction))
@@ -122,10 +195,11 @@ def _apply_review_transaction(
     stage_state = dict(project_payload.get("stage_state") or {})
     use_cases_state = dict(stage_state.get("use_cases") or {})
     current_snapshot_id = use_cases_state.get("current_snapshot_id")
+    continuation_fingerprint = digest(continuation.model_dump(mode="json")) if continuation is not None else None
     if existing_review is not None:
-        if _same_idempotent_request(
-            existing_review,
-            request_fingerprint=request_fingerprint,
+        if (
+            existing_review.get("request_fingerprint") == request_fingerprint
+            and existing_review.get("continuation_options_fingerprint") == continuation_fingerprint
         ):
             return UseCaseReviewRecord.model_validate(existing_review)
         raise UseCaseReviewConflictError(
@@ -148,10 +222,13 @@ def _apply_review_transaction(
         )
 
     snapshot_doc = project_doc.collection("snapshots").document(snapshot_id)
+    snapshot_fields = ("snapshot_id", "project_id", "stage", "payload")
+    if continuation is not None:
+        snapshot_fields += ("source_snapshot_id", "metadata")
     snapshot_payload = _document_to_dict(
         snapshot_doc.get(
             transaction=transaction,
-            field_paths=("snapshot_id", "project_id", "stage", "payload"),
+            field_paths=snapshot_fields,
         )
     )
     if (
@@ -258,6 +335,26 @@ def _apply_review_transaction(
         "occurred_at": decided_at,
     }
 
+    if continuation is not None:
+        review_payload["continuation_options_fingerprint"] = continuation_fingerprint
+        if approved:
+            review_payload.update(
+                _test_generation_intent(
+                    transaction,
+                    project_doc,
+                    client=client,
+                    project_payload=project_payload,
+                    plan_snapshot=snapshot_payload,
+                    actor=actor,
+                    request_id=request_id,
+                    review_id=review_id,
+                    resulting_revision=resulting_revision,
+                    options=continuation,
+                )
+            )
+        else:
+            review_payload["continuation_blocked_reason"] = "use_cases_not_approved"
+
     transaction.create(review_doc, review_payload)
     transaction.update(
         project_doc,
@@ -283,6 +380,7 @@ def review_use_case_snapshot(
     actor: AuthUser,
     request_id: str,
     scenario_reviews: Optional[list[dict]] = None,
+    continuation: ContinuationOptions | None = None,
 ) -> UseCaseReviewResponse:
     client = get_required_firestore_client(
         unavailable_message="Firestore client unavailable for Use Cases review persistence",
@@ -306,6 +404,7 @@ def review_use_case_snapshot(
     def apply(transaction: Any) -> UseCaseReviewRecord:
         return _apply_review_transaction(
             transaction,
+            client=client,
             project_doc=project_doc,
             review_doc=review_doc,
             timeline_doc=timeline_doc,
@@ -320,6 +419,7 @@ def review_use_case_snapshot(
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
             decided_at=decided_at,
+            continuation=continuation,
             scenario_reviews=scenario_reviews,
         )
 

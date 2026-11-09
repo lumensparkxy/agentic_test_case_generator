@@ -13,6 +13,7 @@ from app.models import AuthUser, Requirement, RequirementsWorkflowResponse
 from app.contracts.billing import BillingAccount, BillingUserProfile
 from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementImportPreview, RequirementReviewsInput
 from app.routers import integrations_azure_devops, integrations_jira, requirements as requirement_routes
+from app.services.approval_continuation import OUTBOX_COLLECTION, ContinuationOptions
 from app.services.billing_service import BillingAccessContext
 from app.services.requirement_reconciliation import canonical_requirements, build_preview, reconcile
 from app.services.requirement_source_evidence import bind_document_evidence
@@ -534,6 +535,113 @@ class ImportPersistenceTests(unittest.TestCase):
         result = self.repo.review(PID, ACTOR, payload, "review")
         self.assertTrue(result.stage_state["context"].stale)
         self.assertEqual(result.current_snapshots["context"].snapshot_id, "context")
+
+    def review_payload(self):
+        return RequirementReviewsInput(
+            base_project_revision=7,
+            idempotency_key="scope-approval",
+            reviews=[{"requirement_uid": self.p.current_requirements[0].requirement_uid, "review_status": "Approved"}],
+        )
+
+    def review_receipt(self, payload):
+        return self.store[f"qa_projects/{PID}/requirement_import_receipts/{service.digest(payload.idempotency_key)}"]
+
+    def test_scope_approval_enqueues_the_canonical_prospective_scope_and_replays_exactly(self):
+        root = f"qa_projects/{PID}"
+        rows = self.store[f"{root}/snapshots/original"]["payload"]["requirements"]
+        rows[0]["review_status"] = "Needs Review"
+        rows[1].update(clarification_status="deferred", review_status="Needs Review")
+        rows[2].update(clarification_status="excluded", review_status="Rejected")
+        self.store[root]["stage_state"]["requirements"]["approved"] = False
+        self.save_context()
+        payload = self.review_payload()
+        options = ContinuationOptions(settings_fingerprint="a" * 64, max_provider_requests=4)
+
+        project = self.repo.review(PID, ACTOR, payload, "approve-and-prepare", continuation=options)
+        self.assertFalse(project.stage_state["requirements"].approved)
+        snapshot_id = project.current_snapshots["requirements"].snapshot_id
+        self.assertEqual(project.stage_state["context"].current_snapshot_id, "context")
+        receipt = self.review_receipt(payload)
+        self.assertEqual(receipt["fingerprint"], service.digest(["review", payload.model_dump(mode="json")]))
+        self.assertEqual(receipt["snapshot_id"], snapshot_id)
+        run_id = receipt["continuation_run_id"]
+        run = self.store[f"{root}/orchestrator_runs/{run_id}"]
+        outbox = self.store[f"{OUTBOX_COLLECTION}/{run_id}"]
+        self.assertEqual(outbox["run_id"], run_id)
+        self.assertEqual(outbox["project_id"], PID)
+        self.assertEqual(run["project_revision"], project.current_revision)
+        self.assertEqual(run["actor_user_id"], ACTOR.sub)
+        self.assertEqual(run["request_id"], "approve-and-prepare")
+        intent = run["continuation"]
+        self.assertEqual(intent["stage"], "prepare_scenarios")
+        self.assertEqual(intent["approval_id"], snapshot_id)
+        self.assertEqual(intent["source_snapshot_ids"], {"requirements": snapshot_id, "context": "context"})
+        self.assertEqual(intent["requirement_ids"], ["REQ-001", "REQ-004", "REQ-005", "REQ-006", "REQ-007", "REQ-008"])
+        self.assertEqual(intent["options"], options.model_dump(mode="json"))
+        self.assertNotIn("continuation_run_id", project.model_dump())
+
+        committed = deepcopy(self.store)
+        self.repo.review(PID, ACTOR, payload, "replay", continuation=options)
+        self.assertEqual(self.store, committed)
+        self.assertEqual(self.client.transactions[-1].operations, [])
+        for changed in (None, ContinuationOptions(settings_fingerprint="b" * 64)):
+            with self.subTest(changed=changed):
+                with self.assertRaises(HTTPException) as error:
+                    self.repo.review(PID, ACTOR, payload, "changed-replay", continuation=changed)
+                self.assertEqual(error.exception.status_code, 409)
+                self.assertEqual(self.store, committed)
+
+    def test_legacy_scope_approval_does_not_enqueue_or_upgrade_on_replay(self):
+        payload = self.review_payload()
+        project = self.repo.review(PID, ACTOR, payload, "approve-only")
+        self.assertEqual(project.current_revision, 8)
+        self.assertNotIn("continuation_options_fingerprint", self.review_receipt(payload))
+        committed = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as error:
+            self.repo.review(PID, ACTOR, payload, "attempt-upgrade", continuation=ContinuationOptions(settings_fingerprint="a" * 64))
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertFalse(any(path.startswith(f"{OUTBOX_COLLECTION}/") or "/orchestrator_runs/" in path for path in self.store))
+        self.assertEqual(self.store, committed)
+
+    def test_scope_approval_records_why_continuation_is_blocked(self):
+        root = f"qa_projects/{PID}"
+        self.save_context()
+        initial_store = deepcopy(self.store)
+        payload = self.review_payload()
+        options = ContinuationOptions(settings_fingerprint="a" * 64)
+        for reason in ("requirements_not_eligible", "requirements_not_current", "context_not_current"):
+            with self.subTest(reason=reason):
+                self.store.clear()
+                self.store.update(deepcopy(initial_store))
+                if reason == "requirements_not_eligible":
+                    self.store[f"{root}/snapshots/original"]["payload"]["requirements"][1].update(clarification_status="open", review_status="Needs Review")
+                elif reason == "requirements_not_current":
+                    self.store[root]["stage_state"]["requirements"]["stale"] = True
+                else:
+                    self.store[f"{root}/snapshots/context"]["payload"]["requirements"][1]["text"] = "Incompatible saved wording"
+
+                project = self.repo.review(PID, ACTOR, payload, "approve", continuation=options)
+                self.assertEqual(project.current_revision, 8)
+                receipt = self.review_receipt(payload)
+                self.assertEqual(receipt["continuation_blocked_reason"], reason)
+                self.assertNotIn("continuation_run_id", receipt)
+                self.assertFalse(any(path.startswith(f"{OUTBOX_COLLECTION}/") or "/orchestrator_runs/" in path for path in self.store))
+
+    def test_scope_approval_rolls_back_when_continuation_or_receipt_cannot_commit(self):
+        payload = self.review_payload()
+        options = ContinuationOptions(settings_fingerprint="a" * 64)
+        before = deepcopy(self.store)
+        for segment in (OUTBOX_COLLECTION, "/requirement_import_receipts/"):
+            with self.subTest(segment=segment):
+                self.client.fail_on_create_segment = segment
+                with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                    self.repo.review(PID, ACTOR, payload, "approve", continuation=options)
+                self.assertEqual(self.store, before)
+        self.client.fail_on_create_segment = None
+        project = self.repo.review(PID, ACTOR, payload, "retry", continuation=options)
+        run = self.store[f"qa_projects/{PID}/orchestrator_runs/{self.review_receipt(payload)['continuation_run_id']}"]
+        self.assertIsNone(run["continuation"]["source_snapshot_ids"]["context"])
+        self.assertEqual(run["project_revision"], project.current_revision)
 
     def test_legacy_project_import_routes_fail_closed_before_extraction(self):
         app.dependency_overrides[get_current_user] = lambda: ACTOR
