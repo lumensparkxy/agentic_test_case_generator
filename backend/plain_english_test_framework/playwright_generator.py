@@ -71,6 +71,7 @@ SUPPORTED_ACTIONS = {
     "fill",
     "fill_literal",
     "select_option",
+    "select_radio",
     "set_checked",
     "click",
     "assert_visible",
@@ -82,6 +83,7 @@ SUPPORTED_ACTIONS = {
     "assert_url",
     "assert_title",
     "assert_checked",
+    "assert_radio_selected",
     "assert_enabled",
     "assert_attribute_equals",
     "assert_count",
@@ -206,6 +208,20 @@ def _render_action(step: Mapping[str, Any], *, enforce_target_origin: bool = Fal
         )
     if action == "click":
         return f"await {_render_locator(step['locator'])}.click();"
+    if action in {"select_radio", "assert_radio_selected"}:
+        locator = f"{_render_locator(step['locator'])}.and(page.locator('input[type=\"radio\"]'))"
+        if action == "assert_radio_selected":
+            checked = json.dumps(_to_bool(step["expected"]))
+            return f"await expect({locator}).toBeChecked({{ checked: {checked} }});"
+        return "\n".join(
+            (
+                f"const radio = {locator};",
+                "await expect(radio).toBeVisible();",
+                "await expect(radio).toBeEnabled();",
+                *(["checkTarget();"] if enforce_target_origin else []),
+                "await radio.check();",
+            )
+        )
     if action == "set_checked":
         locator = _render_locator(step["locator"])
         checked = json.dumps(step["value"])

@@ -578,6 +578,46 @@ class ExecutionServiceTests(unittest.TestCase):
                 self.assertEqual(invalid.summary.executable, 0)
                 self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
 
+    def test_exact_radio_selects_and_checks_native_choice_without_selector_fallback(self) -> None:
+        url = "https://example.test/preferences"
+        case = TestCase(
+            id="TC-RADIO",
+            title="Switch to Express delivery",
+            automation_status="To Be Automated",
+            steps=[
+                TestStep(step=1, action=f'Open "{url}"', expected='exact radio "Standard" is selected'),
+                TestStep(step=2, action=r'Select exact radio "Express \"delivery\""', expected=""),
+                TestStep(step=3, action="Inspect the prior option", expected='exact radio "Standard" is not selected'),
+            ],
+        )
+        preview = preview_execution([case], target_base_url=url)
+        self.assertEqual(preview.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(preview.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": url}, url, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "assert_radio_selected", "select_radio", "assert_radio_selected"])
+        self.assertEqual([steps[1]["expected"], steps[3]["expected"]], [True, False])
+        self.assertEqual(steps[2]["locator"], {"strategy": "role", "role": "radio", "value": 'Express "delivery"', "exact": True})
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn(r'getByRole("radio", { name: "Express \"delivery\"", exact: true })', generated)
+        self.assertIn('input[type="radio"]', generated)
+        self.assertIn("await expect(radio).toBeEnabled();", generated)
+        self.assertIn("await radio.check();", generated)
+        self.assertIn(".toBeChecked({ checked: false })", generated)
+        steps[2]["locator"]["exact"] = False
+        self.assertTrue(validate_ir_document(ir.raw))
+
+        for malformed in (
+            'Select exact radio "Express" and save',
+            'Select radio "Express"',
+            'Deselect exact radio "Standard"',
+            'exact radio "Standard" is not selected after saving',
+        ):
+            with self.subTest(action=malformed):
+                case.steps[1].action = malformed
+                invalid = preview_execution([case], target_base_url=url)
+                self.assertFalse(invalid.executable)
+                self.assertEqual(invalid.unsupported[0].unsupported_steps[0].action, malformed)
+
     def test_exact_dropdown_selection_compiles_as_a_native_option_action(self) -> None:
         url = "https://example.test/orders"
         case = TestCase(

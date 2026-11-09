@@ -38,6 +38,9 @@ class GroundedUIElement(BaseModel):
     checkbox_available: bool | None = Field(
         default=None, description="Availability of a grounded native checkbox. Null indicates that no native checkbox is grounded."
     )
+    radio_available: bool | None = Field(
+        default=None, description="Availability of a grounded native radio option. Null indicates that no native radio is grounded."
+    )
 
 
 class GroundedApiSurface(BaseModel):

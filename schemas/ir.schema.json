@@ -197,6 +197,14 @@
         }
       }
     },
+    "exactRadioLocator": {
+      "required": ["role", "exact"],
+      "properties": {
+        "strategy": { "const": "role" },
+        "role": { "const": "radio" },
+        "exact": { "const": true }
+      }
+    },
     "stepBase": {
       "type": "object",
       "additionalProperties": false,
@@ -352,9 +360,11 @@
           ],
           "properties": {
             "action": {
-              "const": "click"
+              "enum": ["click", "select_radio"]
             }
           },
+          "if": { "properties": { "action": { "const": "select_radio" } } },
+          "then": { "properties": { "locator": { "$ref": "#/$defs/exactRadioLocator" } } },
           "not": {
             "anyOf": [
               {
@@ -562,12 +572,14 @@
           ],
           "properties": {
             "action": {
-              "const": "assert_checked"
+              "enum": ["assert_checked", "assert_radio_selected"]
             },
             "expected": {
               "type": "boolean"
             }
           },
+          "if": { "properties": { "action": { "const": "assert_radio_selected" } } },
+          "then": { "properties": { "locator": { "$ref": "#/$defs/exactRadioLocator" } } },
           "not": {
             "anyOf": [
               {

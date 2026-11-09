@@ -86,6 +86,14 @@ EXACT_SELECT_ACTION = re.compile(
     re.IGNORECASE,
 )
 EXACT_SELECT_INTENT = re.compile(r"^Select\s+exact\b", re.IGNORECASE)
+EXACT_RADIO_ACTION = re.compile(rf"Select\s+exact\s+radio\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?", re.IGNORECASE)
+RADIO_ACTION_INTENT = re.compile(r"\b(?:Select|Deselect)\s+(?:exact\s+)?radio\b", re.IGNORECASE)
+EXACT_RADIO_ASSERTION = re.compile(
+    rf"exact\s+radio\s+(?P<name>{QUOTED_ASSERTION_TARGET})"
+    r"\s+(?P<state>is(?:\s+not)?|should(?:\s+not)?\s+be)\s+selected",
+    re.IGNORECASE,
+)
+EXACT_RADIO_ASSERTION_INTENT = re.compile(r"^exact\s+radio\b", re.IGNORECASE)
 EXACT_CHECKBOX_ACTION = re.compile(rf"^(?P<verb>Check|Uncheck) exact checkbox\s+(?P<name>{QUOTED_ASSERTION_TARGET})\.?$", re.IGNORECASE)
 EXACT_CHECKBOX_ACTION_INTENT = re.compile(r"^(?:Check\s+exact\s+checkbox|Uncheck)\b", re.IGNORECASE)
 EXACT_CHECKBOX_ASSERTION = re.compile(
@@ -181,6 +189,7 @@ ASSERTION_KINDS = {
     "assert_url",
     "assert_title",
     "assert_checked",
+    "assert_radio_selected",
     "assert_enabled",
     "assert_attribute_equals",
     "assert_count",
@@ -594,12 +603,19 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     expected_assertion = data_expectation or _convert_assertion(step.expected)
     exact_click = EXACT_CLICK_ACTION.fullmatch(raw_action)
     exact_select = EXACT_SELECT_ACTION.fullmatch(raw_action)
+    exact_radio = EXACT_RADIO_ACTION.fullmatch(raw_action)
     exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(raw_action)
     quoted_fill = QUOTED_FILL_ACTION.fullmatch(raw_action)
     # A supported assertion's quoted locator and value are data, not operations.
-    literal_assertions = {"assert_hidden", "assert_checked", "assert_scoped_text_equals"}
+    literal_assertions = {"assert_hidden", "assert_checked", "assert_radio_selected", "assert_scoped_text_equals"}
     action_is_literal = (
-        data_action or action_value or exact_click or exact_select or exact_checkbox or (action_assertion and action_assertion.kind in literal_assertions)
+        data_action
+        or action_value
+        or exact_click
+        or exact_select
+        or exact_radio
+        or exact_checkbox
+        or (action_assertion and action_assertion.kind in literal_assertions)
     )
     expected_is_literal = data_expectation or expected_value or (expected_assertion and expected_assertion.kind in literal_assertions)
     domain_action = "" if action_is_literal else step.action
@@ -627,6 +643,10 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
             return [], _unmapped_step(step, action, is_expected=False)
         role = exact_click["role"].lower()
         converted.append(_ConvertedStep("click", f'I click exact {role} "{_escape_step_text(name)}"'))
+    elif RADIO_ACTION_INTENT.search(unquoted_action):
+        if not exact_radio or not (name := _assertion_literal(exact_radio["name"])).strip():
+            return [], _unmapped_step(step, action, is_expected=False)
+        converted.append(_ConvertedStep("select_radio", f'I select exact radio "{_escape_step_text(name)}"'))
     elif EXACT_SELECT_INTENT.match(action):
         if not exact_select:
             return [], _unmapped_step(step, action, is_expected=False)
@@ -645,6 +665,7 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
         ASSERTION_ACTION_PATTERN.match(action)
         or (QUOTED_FILL_INTENT.match(action) and not quoted_fill)
         or EXACT_CHECKBOX_ASSERTION_INTENT.match(_assertion_statement(step.action))
+        or EXACT_RADIO_ASSERTION_INTENT.match(_assertion_statement(step.action))
         or SCOPED_TEXT_ASSERTION_INTENT.match(_assertion_statement(step.action))
         or NEGATIVE_VISIBILITY_INTENT.search(unquoted_action)
         or ACTION_SEQUENCE_PATTERN.search(unquoted_action)
@@ -722,7 +743,7 @@ def is_complete_browser_action(action: str, *, test_data: str | None = None) -> 
         return bool(opening and (URL_PATTERN.fullmatch(opening[1]) or (opening[1].startswith("/") and not opening[1].startswith("//"))))
     if kind == "click":
         return bool(EXACT_CLICK_ACTION.fullmatch(action))
-    return kind in {"fill", "fill_literal", "select_option", "set_checked"}
+    return kind in {"fill", "fill_literal", "select_option", "select_radio", "set_checked"}
 
 
 def _step_data_assertion(text: str, test_data: str | None) -> tuple[_ConvertedStep | None, bool]:
@@ -769,6 +790,13 @@ def _convert_assertion(text: str) -> _ConvertedStep | None:
         if match["locator"].strip():
             return _ConvertedStep("assert_scoped_text_equals", text)
         return None
+
+    if match := EXACT_RADIO_ASSERTION.fullmatch(text):
+        target = _assertion_literal(match["name"])
+        if not target.strip():
+            return None
+        negation = "not " if "not" in match["state"].lower().split() else ""
+        return _ConvertedStep("assert_radio_selected", f'exact radio "{_escape_step_text(target)}" should {negation}be selected')
 
     if match := EXACT_CHECKBOX_ASSERTION.fullmatch(text):
         target = _assertion_literal(match["name"])

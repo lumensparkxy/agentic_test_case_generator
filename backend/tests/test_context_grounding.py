@@ -113,6 +113,25 @@ class ContextGroundingTests(unittest.TestCase):
         self.assertEqual(options, {"Order status": ["In progress", "Done & archived", "Closed"], "Locked": [], "Many": [], "Empty": [], "Note": None})
         self.assertNotIn("private-id", str(fields))
 
+    def test_radio_evidence_requires_native_type_and_unique_available_label(self) -> None:
+        fields = extract_ui_elements_from_html(
+            "APP",
+            """
+            <label><input type="radio" name="speed" value="private-value">Standard</label>
+            <label for="express">Express</label><input id="express" type="radio" name="speed">
+            <fieldset disabled><input type="radio" aria-label="Unavailable"></fieldset>
+            <input id="first" type="radio" aria-label="Ambiguous">
+            <input id="second" type="radio" aria-label="Ambiguous">
+            <input type="radio" role="checkbox" aria-label="Wrong role">
+            <div role="radio" aria-label="Custom"></div>
+            """,
+        )
+        self.assertEqual(
+            {element.name: element.radio_available for element in fields},
+            {"Standard": True, "Express": True, "Unavailable": False, "first": None, "second": None, "Wrong role": None},
+        )
+        self.assertNotIn("private-value", str(fields))
+
     def test_linked_html_label_reaches_browser_preview_without_context_notes(self) -> None:
         target = "https://example.test/receipt"
         requirement = Requirement(id="R1", text='Saving a valid reference displays "Request saved".')

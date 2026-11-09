@@ -100,6 +100,13 @@ the state expectation. These expectations describe definite states. Keep any
 save or persistence outcome as its own check. State-setting requires an
 available checkbox with the supplied label.
 
+For an observed native radio option, use
+`Select exact radio "Express delivery"`. Check
+`exact radio "Express delivery" is selected` and check any option that must
+clear in a separate step. After Save, reopen the supplied page and verify
+the saved selection. Analyze linked HTML again when older Context lacks radio
+evidence.
+
 For an out-of-view state, use an expectation such as
 `exact link "Open receipt" is not visible`. The browser waits for zero visible
 exact matches at that step. Hidden and absent matches both satisfy the check.

@@ -28,6 +28,7 @@ BROWSER_AUTHORING_GUIDE = """Browser authoring contract for cases with a supplie
 - For a native dropdown with grounded select_options, use action 'Select exact option "observed option label" in field "observed accessible label"'. Leave expected empty for a selection with no separate source outcome and verify the business result in its own check. A field-value assertion needs the supplied DOM value, which may differ from the label. Keep unavailable or unsupported options manual.
 - Context lines beginning with 'Browser page' or 'Browser dropdown' may supply observed same-origin URLs and exact native option labels on a named page. Use only the declared page and choices.
 - For an available native checkbox with grounded checkbox_available, use action 'Check exact checkbox "observed accessible label"' or 'Uncheck exact checkbox "observed accessible label"'. Assert 'exact checkbox "observed accessible label" is checked' or 'exact checkbox "observed accessible label" is not checked' for a required state. Verify saved behavior separately.
+- For an available native radio with grounded radio_available, use 'Select exact radio "observed option label"'. Assert 'exact radio "observed option label" is selected' or 'exact radio "observed option label" is not selected'. Check the prior option separately if it must clear. Verify a saved choice after reopening the supplied page.
 - To clear a populated field, use action 'Enter "" into field "observed accessible label"' and check the empty value. For an initially blank field, inspect it and check the empty value without a fill step.
 - Use action 'Click exact button "observed accessible name"' or 'Click exact link "observed accessible name"'.
 - Write checks as complete statements. Use expected 'exact text "source copy" is visible', 'exact heading "observed heading" is visible', 'exact button "observed button" is visible', or 'URL should be "exact supplied URL"'. An observation action such as 'Inspect the status output' may carry a separate expected check.
@@ -52,7 +53,7 @@ _NOTED_REJECTION = re.compile(
     re.IGNORECASE,
 )
 _DROPDOWN_DOM_VALUE = re.compile(r'\bfield\s+"([^"\n]+)"\s+DOM value\s+(?:is\s+)?"([^"\n]*)"', re.IGNORECASE)
-_ROLE_TYPES = {"heading": "Heading", "button": "Button", "link": "Navigation"}
+_ROLE_TYPES = {"heading": "Heading", "button": "Button", "link": "Navigation", "radio": "Field"}
 _CONTROL_TYPES = {"field": "Field", **_ROLE_TYPES}
 _DIAGNOSTIC_LIMIT = 10
 
@@ -67,6 +68,7 @@ class _BrowserEvidence:
     select_options: dict[tuple[str, str], set[str]]
     select_dom_values: dict[str, set[str]]
     checkboxes: dict[tuple[str, str], bool]
+    radios: dict[tuple[str, str], bool | None]
     result_fields: dict[tuple[str, str, str], tuple[str, str]]
 
 
@@ -215,6 +217,7 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
     select_options: dict[tuple[str, str], set[str]] = {}
     other_native_fields: set[tuple[str, str]] = set()
     checkboxes: dict[tuple[str, str], bool] = {}
+    radios: dict[tuple[str, str], bool | None] = {}
     for element in grounded.ui_elements if grounded else []:
         if element.source_id is not None and element.source_id not in source_urls:
             continue
@@ -229,6 +232,9 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
         if element.element_type == "Field" and element.checkbox_available is not None:
             key = (source_urls.get(element.source_id, target), element.name)
             checkboxes[key] = element.checkbox_available and key not in checkboxes
+        if element.element_type == "Field" and element.radio_available is not None:
+            key = (source_urls.get(element.source_id, target), element.name)
+            radios[key] = element.radio_available if key not in radios else None
         if element.href:
             try:
                 href = _http_url(urljoin(source_urls.get(element.source_id, target), element.href))
@@ -275,7 +281,7 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
                 strategy = "css" if kind.lower() == "css" else "test_id"
                 result_bindings.setdefault((page, strategy, selector), set()).add((button, field))
     result_fields = {key: next(iter(bindings)) for key, bindings in result_bindings.items() if len(bindings) == 1}
-    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators, select_options, select_dom_values, checkboxes, result_fields)
+    return _BrowserEvidence(target, urls, names_by_type, literals, declared_locators, select_options, select_dom_values, checkboxes, radios, result_fields)
 
 
 def _locator_supported(locator: dict[str, Any], evidence: _BrowserEvidence) -> bool:
@@ -351,6 +357,12 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 return "A checkbox step lacks an exact native checkbox on this page."
             if action == "set_checked" and not availability:
                 return "The grounded native checkbox is unavailable for interaction."
+        if action in {"select_radio", "assert_radio_selected"}:
+            availability = evidence.radios.get((current_page, locator["value"])) if current_page is not None else None
+            if availability is None:
+                return "A radio step lacks an unambiguous native radio option on this page."
+            if action == "select_radio" and not availability:
+                return "The grounded native radio option is unavailable for selection."
         value_action = action in {"assert_value_equals", "assert_value_contains"}
         fill_action = action in {"fill", "fill_literal"}
         if fill_action or value_action:
@@ -360,6 +372,11 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             )
             if known_checkbox:
                 return "A known checkbox needs a checked or unchecked operation or assertion."
+            known_radio = locator["strategy"] == "label" and (
+                (current_page, field) in evidence.radios if current_page is not None else any(label == field for _, label in evidence.radios)
+            )
+            if known_radio:
+                return "A known radio option needs a selection or selected-state assertion."
             known_dropdown = (
                 (current_page, field) in evidence.select_options if current_page is not None else any(label == field for _, label in evidence.select_options)
             )

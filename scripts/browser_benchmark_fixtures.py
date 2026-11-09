@@ -114,6 +114,24 @@ document.querySelector("button").addEventListener("click", () => {
 VALID_PAYLOAD = '{\n  "enabled": false,\n  "label": "  Launch into β  ",\n  "template": "{env.example}"\n}'
 INVALID_PAYLOAD = '{\n  "enabled": false,\n  "label": "broken"\n'
 
+DELIVERY = """<!doctype html><html lang="en"><title>Delivery preference</title><h1>Delivery preference</h1>
+<form><fieldset><legend>Delivery speed</legend>
+<label><input id="standard" type="radio" name="delivery">Standard delivery</label>
+<label for="express">Express delivery</label><input id="express" type="radio" name="delivery">
+</fieldset><button>Save delivery</button></form><p role="status"></p>
+<script>
+const standard = document.querySelector("#standard");
+const express = document.querySelector("#express");
+const stored = localStorage.getItem("delivery") ?? "standard";
+standard.checked = stored === "standard";
+express.checked = stored === "express";
+document.querySelector("form").addEventListener("submit", event => {
+  event.preventDefault();
+  localStorage.setItem("delivery", express.checked ? "express" : "standard");
+  document.querySelector("[role=status]").textContent = "Delivery preference saved";
+});
+</script></html>"""
+
 FIXTURES = {
     "directory": Fixture(
         route="/directory",
@@ -282,6 +300,54 @@ FIXTURES = {
             Defect("wrong-confirmation", "REC-SAVE", '= "Request saved";', '= "Save queued";', 'exact text "Request saved" should be visible'),
         ),
         manual_requirement="REC-AUDIT",
+    ),
+    "delivery-radio": Fixture(
+        route="/delivery",
+        pages={"/delivery": DELIVERY},
+        requirements={
+            "DELIVERY-EXPRESS": (
+                'A fresh delivery form has "Standard delivery" selected. Selecting "Express delivery" selects it and clears '
+                '"Standard delivery". "Save delivery" displays "Delivery preference saved". On reopening the same page, '
+                '"Express delivery" is still selected and "Standard delivery" remains present and unselected.'
+            ),
+        },
+        notes="The public form has a native delivery radio group. Reopen the supplied URL to verify persisted state after saving.",
+        controls=(
+            (
+                "DELIVERY-EXPRESS",
+                (
+                    ("Inspect the default delivery", 'exact radio "Standard delivery" is selected'),
+                    ('Select exact radio "Express delivery"', 'exact radio "Express delivery" is selected'),
+                    ("Inspect the previous option", 'exact radio "Standard delivery" is not selected'),
+                    ('Click exact button "Save delivery"', 'exact text "Delivery preference saved" is visible'),
+                    ('Open "{target}"', 'exact radio "Express delivery" is selected'),
+                    ("Inspect the previous option after reopening", 'exact radio "Standard delivery" is not selected'),
+                ),
+            ),
+        ),
+        defects=(
+            Defect(
+                "split-delivery-group",
+                "DELIVERY-EXPRESS",
+                'id="express" type="radio" name="delivery"',
+                'id="express" type="radio" name="other"',
+                'exact radio "Standard delivery" should not be selected',
+            ),
+            Defect(
+                "lose-persisted-delivery",
+                "DELIVERY-EXPRESS",
+                'localStorage.setItem("delivery", express.checked ? "express" : "standard");',
+                'localStorage.setItem("delivery", "unknown");',
+                'exact radio "Express delivery" should be selected',
+            ),
+            Defect(
+                "missing-radio-after-reopen",
+                "DELIVERY-EXPRESS",
+                'standard.checked = stored === "standard";',
+                'standard.checked = stored === "standard";\nif (stored === "express") standard.remove();',
+                'exact radio "Standard delivery" should not be selected',
+            ),
+        ),
     ),
     "payload-editor": Fixture(
         route="/payload-editor",

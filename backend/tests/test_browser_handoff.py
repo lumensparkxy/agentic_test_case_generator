@@ -219,6 +219,29 @@ class BrowserHandoffTests(unittest.TestCase):
                 self.assertIn("known checkbox needs a checked or unchecked", warnings[1])
                 self.assertEqual(case.automation_status, "Manual")
 
+    def test_radio_handoff_requires_unambiguous_available_native_option(self):
+        grounded = context()
+        field = grounded.grounded_context.ui_elements[0]
+        field.radio_available = True
+        case = candidate()
+        case.steps[1] = TestStep(step=2, action='Select exact radio "Reference"', expected='exact radio "Reference" is selected')
+        self.assertEqual(validate_browser_handoff([case], grounded, [REQUIREMENT]), [])
+
+        for availability, reason in ((False, "unavailable for selection"), (None, "unambiguous native radio")):
+            with self.subTest(availability=availability):
+                field.radio_available = availability
+                draft = case.model_copy(deep=True)
+                self.assertIn(reason, validate_browser_handoff([draft], grounded, [REQUIREMENT])[1])
+                self.assertEqual(draft.automation_status, "Manual")
+
+        field.radio_available = False
+        observed = case.model_copy(deep=True)
+        observed.steps[1].action = 'Inspect the "Reference" option'
+        observed.steps[1].expected = 'exact radio "Reference" is not selected'
+        self.assertEqual(validate_browser_handoff([observed], grounded, [REQUIREMENT]), [])
+        grounded.grounded_context.ui_elements.append(field.model_copy(update={"id": "DUPLICATE"}))
+        self.assertIn("unambiguous native radio", validate_browser_handoff([observed], grounded, [REQUIREMENT])[1])
+
     def test_dropdown_handoff_requires_the_exact_option_on_its_grounded_page(self):
         grounded = context()
         field = grounded.grounded_context.ui_elements[0]

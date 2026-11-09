@@ -24,6 +24,7 @@ class FormField:
     hint: str
     select_options: tuple[str, ...] | None
     checkbox_available: bool | None
+    radio_available: bool | None
 
 
 @dataclass
@@ -74,6 +75,7 @@ class _FormMarkup(HTMLParser):
         self.labels: list[_NativeLabel] = []
         self.selects: dict[int, tuple[str, ...]] = {}
         self.checkboxes: dict[int, bool] = {}
+        self.radios: dict[int, bool] = {}
         self._open_label: _NativeLabel | None = None
         self._select: _NativeSelect | None = None
         self._fieldsets: list[bool] = []
@@ -123,6 +125,8 @@ class _FormMarkup(HTMLParser):
             self.fields.append(attrs)
             if tag == "input" and input_type == "checkbox":
                 self.checkboxes[field_index] = not any(self._fieldsets) and not _unavailable(attrs)
+            if tag == "input" and input_type == "radio" and attrs.get("role", "radio").strip().lower() == "radio":
+                self.radios[field_index] = not any(self._fieldsets) and not _unavailable(attrs) and attrs.get("aria-hidden", "").lower() != "true"
             if tag == "select":
                 available = not any(self._fieldsets) and not _unavailable(attrs) and "multiple" not in attrs
                 self.selects[field_index] = ()
@@ -208,6 +212,7 @@ def extract_form_fields(html: str) -> list[FormField]:
                     hint,
                     markup.selects.get(index) if verified else None,
                     markup.checkboxes.get(index) if verified else None,
+                    markup.radios.get(index) if verified else None,
                 )
             )
     return fields

@@ -24,6 +24,8 @@ ENTER_PATTERN = re.compile(r'^I enter "(?P<value>[^"]*)" into (?P<exact>field )?
 QUOTED_FILL_PATTERN = re.compile(r'I fill (?P<exact>exact )?field "(?P<label>(?:\\["\\]|[^"\\\r\n])+)" with "(?P<value>(?:\\["\\]|[^"\\\r\n])*)"')
 EXACT_CLICK_PATTERN = re.compile(r'^I click exact (?P<role>button|link) "(?P<name>(?:\\["\\]|[^"\\])+)"$')
 EXACT_SELECT_PATTERN = re.compile(r'^I select exact option "(?P<option>(?:\\["\\]|[^"\\])+)" in field "(?P<field>(?:\\["\\]|[^"\\])+)"$')
+RADIO_ACTION_PATTERN = re.compile(r'I select exact radio "(?P<name>(?:\\["\\]|[^"\\])+)"')
+RADIO_ASSERTION_PATTERN = re.compile(r'exact radio "(?P<name>(?:\\["\\]|[^"\\])+)" should (?P<negation>not )?be selected')
 CHECKBOX_ACTION_PATTERN = re.compile(r'^I (?P<verb>check|uncheck) exact checkbox "(?P<label>(?:\\["\\]|[^"\\])+)"$')
 CHECKBOX_ASSERTION_PATTERN = re.compile(r'^exact checkbox "(?P<label>(?:\\["\\]|[^"\\])+)" should (?P<negation>not )?be checked$')
 EXACT_HIDDEN_PATTERN = re.compile(r'^exact (?P<kind>heading|link|button|text) "(?P<target>(?:\\["\\]|[^"\\])+)" should not be visible$')
@@ -284,6 +286,19 @@ def _compile_step(original: str, source_step_index: int, environment: Mapping[st
             "action": "select_option",
             "locator": {"strategy": "label", "value": label, "exact": True},
             "value": option,
+        }
+
+    radio_selection = RADIO_ACTION_PATTERN.fullmatch(body)
+    if match := radio_selection or RADIO_ASSERTION_PATTERN.fullmatch(body):
+        path = f"$.steps[{source_step_index}]"
+        name = _resolve_text(re.sub(r'\\(["\\])', r"\1", match["name"]), environment, data, path=path)
+        return {
+            "id": _slug_identifier(f"radio {name}"),
+            "sourceStepIndex": source_step_index,
+            "original": original,
+            "action": "select_radio" if radio_selection else "assert_radio_selected",
+            "locator": {"strategy": "role", "role": "radio", "value": name, "exact": True},
+            **({} if radio_selection else {"expected": not bool(match["negation"])}),
         }
 
     checkbox_action = CHECKBOX_ACTION_PATTERN.fullmatch(body)

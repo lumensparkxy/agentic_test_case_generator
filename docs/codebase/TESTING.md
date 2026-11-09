@@ -664,6 +664,9 @@ malformed sample's final line feed. The evaluator records
 `--fixture` to run a single workflow.
 The JSON editor supplies both payloads as named Context samples. Authored
 controls and live generation materialize the same exact values before run.
+The delivery fixture checks native radio exclusivity, persisted selection and
+the presence of the unselected option after reopening. Use
+`--fixture delivery-radio` to run that workflow on its own.
 The report lists missing cases, healthy-target failures, surviving defects,
 failures at another check, and unavailable runtime evidence separately.
 Manual audit coverage and generation approval have separate fields. A
