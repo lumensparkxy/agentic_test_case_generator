@@ -503,20 +503,33 @@ scenario refresh (commit `d3b555a`,
 [PR #478](https://github.com/lumensparkxy/agentic_test_case_generator/pull/478)).
 The 8→6 synthetic replay refreshes two groups, retains seven exactly,
 and preserves the 14 prior cases. It keeps the new plan's human approval
-explicit. P5c2 adds bounded impact application under
-[#479](https://github.com/lumensparkxy/agentic_test_case_generator/issues/479).
+explicit. P5c2 adds bounded impact application (commit `b9eef81`,
+[PR #480](https://github.com/lumensparkxy/agentic_test_case_generator/pull/480)).
 The loopback Booking fixture replaces six direct cases, preserves eight
 exact rows and versions, and reuses a completed checkpoint after release.
 It verifies billing rollback, the physical request cap and exact receipt
 recovery. The separate assessment confirms exact current source lineage
 and leaves reviewed-design export unavailable because the fixture Context
 does not supply the response-loss test mechanism needed by TC-013.
-Next is verifying provisional Project Sync assessment lineage.
+P5d binds saved-suite assessment to an exact Context-only Project Sync
+draft under [#481](https://github.com/lumensparkxy/agentic_test_case_generator/issues/481).
+After separate approval of the matching plan, Review can assess the exact
+saved cases with the accepted project decision. Reassessment retains
+unchanged rows and versions, including explicit null values. Material
+requirement corrections and unverified drafts cannot use this admission.
+A saved assessment remains readable after the demo flag is off.
+
 Unenrolled paid draft producers remain a release gate.
 P6 error analysis found prior Booking gaps covered by existing regression
-checks and no verified new prompt change. A credential-free preflight
-verified paired intake and HTTP metering seams. Full synthetic
-generation through export remains a separate validation packet.
+checks and no verified new prompt change. The credential-free W05/W01
+rehearsal completed four arms at baseline `2f6458d` and candidate `b9eef81`.
+Both pairs matched exact saved case content and JSON projection. W05
+retained the deferred requirement and unavailable Supervisor setup.
+Candidate worker reservations stayed at 7 and 24 requests per arm. A
+total of 12 SDK mock requests used authored specialist responses. This
+measures the route, persistence and export seams. Live model outcomes
+and independent adjudication remain open. Next is the exact saved file
+report reader and the controlled Deliver journey.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

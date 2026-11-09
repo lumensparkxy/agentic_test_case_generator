@@ -130,7 +130,7 @@ def _source_is_stale(project, suite):
     return False
 
 
-def _approved_plan(project, plan_snapshot_id, requirements, context_id):
+def _approved_plan(project, plan_snapshot_id, requirements, context_id, *, sync_binding=None):
     plan = _current_snapshot(project, "use_cases")
     baseline = _current_snapshot(project, "requirements")
     if (
@@ -138,8 +138,11 @@ def _approved_plan(project, plan_snapshot_id, requirements, context_id):
         or not baseline
         or plan.snapshot_id != plan_snapshot_id
         or project.stage_state["use_cases"].stale
-        or plan.operation != "use_cases.generate"
         or plan.source_snapshot_id != baseline.snapshot_id
+    ):
+        return None
+    if sync_binding is None and (
+        plan.operation != "use_cases.generate"
         or plan.metadata.get("source_requirements_snapshot_id") != baseline.snapshot_id
         or plan.metadata.get("source_context_snapshot_id") != context_id
         or (plan.metadata.get("source_context_omitted") is True) != (context_id is None)
@@ -239,7 +242,7 @@ def _versioned_cases(rows):
     return all(len({row[key] for row in rows}) == len(rows) for key in ("id", "artifact_item_id", "artifact_version_id"))
 
 
-def _structural_gaps(payload, cases, scenarios):
+def _case_scope_gaps(cases, scenarios):
     covered = set()
     for row in cases:
         requirements = row["linked_requirement_ids"]
@@ -255,9 +258,13 @@ def _structural_gaps(payload, cases, scenarios):
         ):
             return True
         covered.update(refs)
+    return covered != scenarios.keys()
+
+
+def _structural_gaps(payload, cases, scenarios):
     diagnostics = _mapping(payload.get("workflow_diagnostics"))
     return (
-        covered != scenarios.keys()
+        _case_scope_gaps(cases, scenarios)
         or bool(payload["generation_tasks"])
         or diagnostics.get("status") not in {"completed", "partial"}
         or any(diagnostics.get(key) for key in _FAILED_GENERATION)
@@ -339,7 +346,14 @@ def _build_proof(project, payload, metadata, plan_snapshot_id, rubric):
         or any(nested_sources.get(stage) != source or metadata.get(_SOURCE_FIELDS[stage]) != source for stage, source in expected_sources.items())
     ):
         return None
-    plan = _approved_plan(project, plan_snapshot_id, requirements, expected_sources["context"])
+    sync_binding = None
+    if "sync_review_binding" in metadata:
+        from .project_sync_review import sync_review_binding_for_proof
+
+        sync_binding = sync_review_binding_for_proof(project, payload, metadata)
+        if sync_binding is None:
+            return None
+    plan = _approved_plan(project, plan_snapshot_id, requirements, expected_sources["context"], sync_binding=sync_binding)
     if not plan:
         return None
     groups, scenarios, review_id = plan
@@ -391,6 +405,7 @@ def _build_proof(project, payload, metadata, plan_snapshot_id, rubric):
         "scenario_plan_hash": case_source_hash([group.model_dump(mode="json") for group in groups]),
         **({"reviewed_suite_snapshot_id": parent_snapshot_id} if parent_snapshot_id is not None else {}),
         **context_proof,
+        **({"sync_review_binding": sync_binding} if sync_binding is not None else {}),
         "project_decisions_hash": case_source_hash(_without_null_fields(project.project_decisions)),
         "active_case_count": len(active),
         "deprecated_case_count": len(cases) - len(active),
@@ -447,7 +462,13 @@ def resolve_suite_quality(project, *, raw_suite=None):
     if _source_is_stale(project, suite):
         source_freshness = "stale"
         reasons.append("sources_stale")
-    elif state and state.current_snapshot_id == suite.snapshot_id and suite.operation in _PROOF_OPERATIONS and "suite_design_proof" in metadata:
+    elif (
+        state
+        and state.current_snapshot_id == suite.snapshot_id
+        and suite.operation in _PROOF_OPERATIONS
+        and "suite_design_proof" in metadata
+        and ("sync_review_binding" not in metadata or suite.operation == "test_cases.review")
+    ):
         recomputed = build_suite_design_proof(project, suite.payload, metadata, plan_snapshot_id=plan_id)
         parent_id = plan_id if suite.operation == "testcases.generate" else proof.get("reviewed_suite_snapshot_id")
         if (

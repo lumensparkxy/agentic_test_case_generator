@@ -848,20 +848,65 @@ export default function App() {
 		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
 	const activeGenerateResultTab = openingPriorityCase ? "test-cases" : traceabilityReturn ? "traceability" : selectedGenerateResultTab;
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
+	const syncDraftSuite = savedSuite?.operation === "project.sync.draft";
+	const showSyncDraftReview = Boolean(
+		APPROVAL_CONTINUATION_ENABLED &&
+		syncDraftSuite &&
+		currentUser?.sub &&
+		currentProject?.owner_user_id === currentUser.sub &&
+		savedSuite.project_id === currentProjectId &&
+		savedSuite.snapshot_id &&
+		savedSuite.snapshot_id === testCaseStageState.current_snapshot_id
+	);
+	const syncDraftPlanId = savedSuite?.source_snapshot_id;
+	const currentScenarioSnapshotId = projectSnapshots.use_cases?.snapshot_id;
+	const syncDraftMatchesPlan = Boolean(
+		syncDraftPlanId &&
+		syncDraftPlanId === currentScenarioSnapshotId &&
+		syncDraftPlanId === useCasesStageState.current_snapshot_id &&
+		!useCasesStageState.stale
+	);
+	const syncChange = currentProject?.project_sync;
+	const syncDraftChangeId = savedSuite?.metadata?.change_id;
+	const syncDraftSuperseded =
+		showSyncDraftReview &&
+		(testCaseStageState.stale ||
+			syncChange?.status === "superseded" ||
+			(syncDraftChangeId && syncChange?.id && syncDraftChangeId !== syncChange.id) ||
+			(syncDraftPlanId && currentScenarioSnapshotId && !syncDraftMatchesPlan));
+	const approvedGenerationScopeReady = hasApprovedGenerationScope(currentProject);
+	const syncDraftNeedsScenarioApproval =
+		showSyncDraftReview && !syncDraftSuperseded && syncDraftMatchesPlan && approvedGenerationScopeReady && !useCasesHumanApproved;
+	const syncDraftReviewReady =
+		showSyncDraftReview &&
+		!syncDraftSuperseded &&
+		syncDraftMatchesPlan &&
+		approvedGenerationScopeReady &&
+		useCasesHumanApproved &&
+		savedSuite.metadata?.review_retry_available === true;
 	const savedSuiteReviewPending =
 		persistedTestCaseCount > 0 &&
-		(savedSuite?.operation === "testcases.repair"
-			? APPROVAL_CONTINUATION_ENABLED && !testCaseStageState.stale
-			: savedSuite?.metadata?.review_retry_available === true ||
-				["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation)) &&
-		savedSuite?.payload?.substantive_assessment?.status === "unknown";
+		savedSuite?.payload?.substantive_assessment?.status === "unknown" &&
+		(syncDraftSuite
+			? syncDraftReviewReady
+			: savedSuite?.operation === "testcases.repair"
+				? APPROVAL_CONTINUATION_ENABLED && !testCaseStageState.stale
+				: savedSuite?.metadata?.review_retry_available === true ||
+					["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation));
+
 	const savedSuiteInputsReady =
 		currentProject?.status === "active" &&
-		hasApprovedGenerationScope(currentProject) &&
+		approvedGenerationScopeReady &&
 		useCasesHumanApproved &&
 		(!testCaseStageState.stale || savedSuite?.operation === "quality.feedback.apply");
 	const savedSuiteReviewState = savedSuiteReview?.key === savedSuiteReviewKey ? savedSuiteReview : null;
 	const savedSuiteReviewed = savedSuite?.operation === "test_cases.review" && !testCaseStageState.stale;
+	const syncSuiteReviewSaved =
+		APPROVAL_CONTINUATION_ENABLED &&
+		savedSuiteReviewed &&
+		savedSuite.snapshot_id === testCaseStageState.current_snapshot_id &&
+		savedSuite.metadata?.sync_review_binding?.test_cases_snapshot_id === savedSuite.source_snapshot_id &&
+		Boolean(savedSuite.source_snapshot_id);
 	const savedSuiteReviewUnavailable =
 		!savedSuiteInputsReady || authActionDisabled || isGenerating || isApplyingImpactUpdate || isAnalyzingImpact || isRunningExecution;
 	const testCaseFindings = improvementFindings(testCaseReview, substantiveAssessment);
@@ -2231,6 +2276,7 @@ export default function App() {
 		(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted");
 	const savedSuiteReviewDisabled =
 		savedSuiteReviewUnavailable ||
+		(syncDraftSuite && !savedReview.enabled) ||
 		(selectedRepair.enabled &&
 			(selectedRepair.attempt ||
 				selectedRepair.pending ||
@@ -6258,13 +6304,55 @@ export default function App() {
 													</div>
 												</section>
 											)}
-											{savedSuiteReviewPending && (
-												<div className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}>
+											{showSyncDraftReview && !savedSuiteReviewPending && (
+												<section className="generation-gate-card blocked" aria-label="Project Sync suite review">
 													<div role="status">
-														<strong>{savedSuiteReviewState?.busy ? "Reviewing saved test cases…" : "Saved suite needs review"}</strong>
+														<strong>
+															{syncDraftSuperseded
+																? "Earlier Sync draft"
+																: syncDraftNeedsScenarioApproval
+																	? "Sync suite awaits scenario approval"
+																	: "Sync draft saved"}
+														</strong>
+														<p>
+															{syncDraftSuperseded
+																? "These cases are saved evidence from an earlier project update."
+																: syncDraftNeedsScenarioApproval
+																	? "Approve the matching scenario plan before reviewing the saved suite."
+																	: "Independent review requires verified evidence for this draft and its current sources."}
+														</p>
+													</div>
+													{syncDraftNeedsScenarioApproval ? (
+														<RouteLink to={scenariosPath} navigate={navigate}>
+															Review matching scenarios
+														</RouteLink>
+													) : (
+														testCases.length > 0 && (
+															<Button variant="secondary" size="compact" onClick={() => openCaseResults()}>
+																View saved cases
+															</Button>
+														)
+													)}
+												</section>
+											)}
+											{savedSuiteReviewPending && (
+												<section
+													className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}
+													aria-label={syncDraftSuite ? "Project Sync suite review" : undefined}
+												>
+													<div role="status">
+														<strong>
+															{savedSuiteReviewState?.busy
+																? "Reviewing saved test cases…"
+																: syncDraftSuite
+																	? "Sync suite ready for independent review"
+																	: "Saved suite needs review"}
+														</strong>
 														<p>
 															{savedSuiteInputsReady
-																? "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
+																? syncDraftSuite
+																	? "Assess the saved cases against the approved scenarios and accepted correction. The saved steps and case versions stay the same."
+																	: "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
 																: "Review current Requirements and Use Cases or resolve upstream changes first."}
 														</p>
 													</div>
@@ -6272,12 +6360,18 @@ export default function App() {
 													<Button onClick={reviewSavedSuite} disabled={savedSuiteReviewDisabled || savedSuiteReviewState?.busy}>
 														Review saved suite
 													</Button>
-												</div>
+												</section>
 											)}
 											{savedSuiteReviewed && (
 												<div className={`generation-gate-card ${savedSuite.approved ? "ready" : "blocked"}`} role="status">
 													<div>
-														<strong>{savedSuite.approved ? "Saved suite review passed." : "Saved suite review needs attention."}</strong>
+														<strong>
+															{syncSuiteReviewSaved
+																? "Saved Sync suite review recorded."
+																: savedSuite.approved
+																	? "Saved suite review passed."
+																	: "Saved suite review needs attention."}
+														</strong>
 														<p>{savedSuite.payload?.review?.summary}</p>
 													</div>
 												</div>

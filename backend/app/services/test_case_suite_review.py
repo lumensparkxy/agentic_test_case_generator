@@ -15,11 +15,13 @@ from ..contracts.projects import QaProjectDetail
 from ..contracts.requirements import RequirementCoveragePlan, WorkflowSettings
 from ..contracts.test_cases import TestCase
 from ..models import AuthUser
+from .approved_test_case_source import _generation_context
 from .audit_service import complete_workflow_run, start_workflow_run
 from .guidance_runtime import prepare_run
 from .guidance_service import enabled, guidance_scope, public_manifest
 from .orchestrator_service import _use_cases_human_approved
 from .project_draft_admission import REPAIR_OPERATION, SCOPED_IMPACT_OPERATION, claim_draft_attempt, draft_admission_client, read_draft_attempt_result
+from .project_sync_review import SYNC_DRAFT_OPERATION, verify_sync_review
 from .requirement_scope import approved_generation_requirements
 from .suite_quality import build_suite_design_proof
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
@@ -129,6 +131,9 @@ def _review_publication(project, reviewed, sources, recorded, exact_sources, par
         proof = build_suite_design_proof(project, reviewed, matched_metadata, plan_snapshot_id=sources["use_cases"])
         if proof is not None:
             return matched_metadata, proof
+    if "sync_review_binding" in recorded:
+        # An independently reviewed suite retains its lineage even if the review finds a design gap.
+        return {**recorded, **metadata}, None
     if recorded:
         metadata["reviewed_suite_source_provenance"] = recorded
     return metadata, None
@@ -272,6 +277,37 @@ def _prepare_generated_review(suite, sources, requirements, context, actor, requ
     return guidance_scope(manifest), context
 
 
+def _prepare_sync_review(client, project, suite, actor, request_id, requirements, plans, sources):
+    from .approval_scenario_worker import approval_test_cases_enabled
+
+    if client is None or not approval_test_cases_enabled():
+        raise HTTPException(409, "Project Sync suite review is unavailable in this environment.")
+    binding, inputs = verify_sync_review(client, project, suite, actor)
+    context = _generation_context(project.current_snapshots["context"], requirements, project)
+    manifest = prepare_run(
+        "test_cases",
+        actor,
+        project.project_id,
+        f"saved-sync-review:{request_id}",
+        requirement_ids=[row.id for row in requirements],
+        memory_bypass=True,
+        input_fingerprint=case_source_hash(binding),
+    )
+    if manifest.project_inputs != inputs:
+        raise HTTPException(409, "Accepted project inputs changed before review. Reload the current correction.")
+    recorded = {
+        "sync_review_binding": binding,
+        "guidance": _serialize_value(public_manifest(manifest)),
+        "source_snapshot_ids": sources,
+        "source_requirement_hashes": {row.id: case_source_hash(row.model_dump(mode="json")) for row in requirements},
+        "source_use_case_hashes": {scenario["id"]: case_source_hash(scenario) for plan in plans for scenario in plan["scenarios"]},
+        "source_context_hash": case_source_hash(context.model_dump(mode="json")),
+        "generation_base_project_revision": project.current_revision,
+        **({"source_context_artifact_ids": [source.id for source in context.grounded_context.artifact_sources]} if context.grounded_context else {}),
+    }
+    return recorded, context, guidance_scope(manifest)
+
+
 def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_revision: int, actor: AuthUser, request_id: str) -> QaProjectDetail:
     project = get_project(project_id, actor=actor)
     client = draft_admission_client()
@@ -302,7 +338,8 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         raise HTTPException(409, "The saved test suite changed. Reload the current suite before reviewing.")
     generated_retry = generated_suite_review_retryable(current)
     pending_review = (current.payload.get("substantive_assessment") or {}).get("status") == "unknown"
-    if not generated_retry and (current.operation not in REVIEWABLE_OPERATIONS or not pending_review):
+    sync_review = current.operation == SYNC_DRAFT_OPERATION
+    if not generated_retry and ((current.operation not in REVIEWABLE_OPERATIONS and not sync_review) or not pending_review):
         raise HTTPException(409, "The current suite has no pending saved-suite assessment.")
     if project.stage_state["test_cases"].stale and current.operation != "quality.feedback.apply":
         raise HTTPException(409, "Upstream inputs changed. Analyze their impact before reviewing the saved suite.")
@@ -310,9 +347,14 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
     requirements, plans, analysis, context, sources = _current_review_inputs(project, current)
     original = get_project_stage_snapshot(project_id, snapshot_id, actor=actor)
     _require_recorded_scope(original, requirements)
+    review_scope = nullcontext()
     recorded = {key: original.metadata[key] for key in _RECORDED_SOURCE_FIELDS if key in original.metadata}
+    if sync_review:
+        recorded, context, review_scope = _prepare_sync_review(client, project, original, actor, request_id, requirements, plans, sources)
     exact_sources = _recorded_sources_match(recorded, sources)
-    requires_exact_sources = current.operation == REPAIR_OPERATION or (current.operation == SCOPED_IMPACT_OPERATION and "scoped_impact" in original.metadata)
+    requires_exact_sources = (
+        sync_review or current.operation == REPAIR_OPERATION or (current.operation == SCOPED_IMPACT_OPERATION and "scoped_impact" in original.metadata)
+    )
     if requires_exact_sources and not exact_sources:
         raise HTTPException(409, "The updated suite no longer matches its recorded sources. Analyze their impact before reviewing.")
     admission = None
@@ -337,15 +379,20 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
     run_id = None
 
     def publish_review(transaction, snapshot):
+        if sync_review:
+            binding, _ = verify_sync_review(client, project, original, actor, transaction=transaction)
+            if binding != snapshot["metadata"].get("sync_review_binding") or binding["draft_saved_rows_hash"] != case_source_hash(
+                snapshot["payload"]["test_cases"]
+            ):
+                raise HTTPException(409, "The saved Project Sync draft changed before review could publish.")
         if admission is not None:
             admission.finish_on_commit(transaction, snapshot)
         progress.clear_on_commit(transaction, snapshot)
 
     try:
-        review_scope = nullcontext()
         if generated_retry:
             review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id, memory_bypass=admission is not None)
-        elif exact_sources:
+        elif exact_sources and not sync_review:
             try:
                 context = _generated_review_context(original, context)
             except HTTPException:
@@ -357,6 +404,9 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         model_scope = bounded_model_requests(admission.reserve) if admission is not None else nullcontext()
         with review_scope, model_scope:
             reviewed = _review_payload(original.payload, requirements, plans, analysis, context, progress=progress)
+            if sync_review:
+                reviewed["approved"] = False
+                reviewed["review"] = {**reviewed["review"], "approved": False}
             metadata, proof = _review_publication(project, reviewed, sources, recorded, exact_sources, original.snapshot_id)
             append_stage_snapshot(
                 project_id=project_id,
@@ -374,14 +424,19 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
                 idempotency_key=admission.operation_id if admission is not None else None,
                 transaction_guard=publish_review,
                 suite_design_proof=proof,
+                **({"preserve_test_case_rows": True} if sync_review else {}),
             )
     except Exception:
+        stopped = admission is None
         if admission is not None:
             try:
-                admission.stop()
+                if sync_review and admission.read_result():
+                    complete_workflow_run(run_id, status="completed", metadata={"approved": False})
+                    return get_project(project_id, actor=actor)
+                stopped = admission.stop() or not sync_review
             except Exception as exc:
                 logging.warning("Could not reconcile saved-suite review admission (%s)", type(exc).__name__)
-        if run_id is not None:
+        if run_id is not None and stopped:
             complete_workflow_run(run_id, status="failed", error_message="Saved suite review was not published")
         raise
     complete_workflow_run(run_id, status="completed", metadata={"approved": reviewed["approved"]})

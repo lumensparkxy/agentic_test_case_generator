@@ -532,24 +532,37 @@ def _resolve_sync_attempt(transaction, project_doc, stage_doc, binding):
     return {**binding, "operation_id": attempt["operation_id"], "request_id": attempt["request_id"]}, attempt, alias_doc
 
 
-def _verify_sync_predecessor(transaction, project_doc, project, binding):
-    stage_doc = _sync_stage_doc(project_doc, binding["change_id"], "use_cases")
-    pointer = _read(transaction, stage_doc) or {}
-    checkpoint = (project["project_sync"].get("stage_receipts") or {}).get("use_cases") or {}
-    attempt = _sync_attempt_at(transaction, project_doc, pointer.get("operation_id"), {**binding, "operation": "project.sync.use_cases"})
+def verify_completed_sync_stage(transaction, project_doc, record, stage, *, actor_id, snapshot_id, result_revision):
+    """Verify an immutable result against its canonical private and public stage receipts."""
+    pointer = _read(transaction, _sync_stage_doc(project_doc, record["id"], stage)) or {}
+    checkpoint = (record.get("stage_receipts") or {}).get(stage) or {}
+    identity = {"project_id": project_doc.id, "actor_id": actor_id, "change_id": record["id"], "operation": f"project.sync.{stage}"}
+    attempt = _sync_attempt_at(transaction, project_doc, pointer.get("operation_id"), identity)
     if (
         attempt.get("state") != "completed"
-        or attempt["base_revision"] + 1 != binding["base_revision"]
+        or attempt["base_revision"] + 1 != result_revision
         or checkpoint.get("base_revision") != attempt["base_revision"]
-        or checkpoint.get("result_revision") != binding["base_revision"]
+        or checkpoint.get("result_revision") != result_revision
         or checkpoint.get("request_id") != attempt["request_id"]
         or checkpoint.get("settings_fingerprint") != attempt["settings_fingerprint"]
         or not _recorded_sync_sources_match(checkpoint.get("source_snapshot_ids"), attempt["source_snapshot_ids"])
         or checkpoint.get("snapshot_id") != attempt.get("result_snapshot_id")
-        or checkpoint.get("snapshot_id") != binding["source_snapshot_ids"]["use_cases"]
+        or checkpoint.get("snapshot_id") != snapshot_id
     ):
-        raise HTTPException(503, "The saved Project Sync scenario checkpoint could not be confirmed.")
+        raise HTTPException(503, "The saved Project Sync checkpoint could not be confirmed.")
     _read_result(transaction, project_doc, attempt)
+
+
+def _verify_sync_predecessor(transaction, project_doc, project, binding):
+    verify_completed_sync_stage(
+        transaction,
+        project_doc,
+        project["project_sync"],
+        "use_cases",
+        actor_id=binding["actor_id"],
+        snapshot_id=binding["source_snapshot_ids"]["use_cases"],
+        result_revision=binding["base_revision"],
+    )
 
 
 def _valid_scenario_refresh(binding, previous_snapshot_id):

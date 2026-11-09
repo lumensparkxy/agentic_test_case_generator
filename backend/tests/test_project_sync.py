@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from datetime import timedelta
 import sys
 import unittest
@@ -13,17 +14,19 @@ from app.contracts.quality_feedback import QualityFindingInput
 from app.contracts.knowledge import KnowledgeMutation
 from app.contracts.billing import BillingAccount, BillingAllocation, BillingUserProfile
 from app.agents.adk_runtime import _model_reservation
-from app.services import workflow_project_service as projects, project_sync as sync
+from app.agents.substantive_review import bind_reviewed_inputs, review_input, validate_assessment
+from app.services import workflow_project_service as projects, project_sync as sync, test_case_suite_review as suite_review
 from app.services import project_draft_admission as admission, approval_continuation
 from app.services.audit_service import record_usage_event
 from app.services.billing_repository import build_allocation_id
 from app.services.billing_service import BillingAccessContext, record_billing_consumption
 from app.services.quality_feedback import capture_finding
 from app.services.guidance_runtime import prepare_run
-from app.services.guidance_service import guidance_scope, guidance_text, submit_with_guidance
+from app.services.guidance_service import current_guidance, guidance_scope, guidance_text, submit_with_guidance
 from app.services.behaviour_maintenance import maintenance_scope
 from app.services.knowledge_service import mutate_knowledge
 from app.services.versioning_service import persist_test_case_versions
+from app.services.use_case_review_service import review_use_case_snapshot
 
 
 class ProjectSyncEndpointTests(unittest.TestCase):
@@ -66,7 +69,7 @@ class ProjectSyncTests(unittest.TestCase):
 
     tearDown = fixtures.WorkflowProjectServiceTests.tearDown
 
-    def fixture(self):
+    def fixture(self, *, context_only=False):
         project = projects.create_project(name="Sync", description=None, actor=self.actor, request_id="create")
         self.pid = project.project_id
         requirements = [{"id": "R1", "text": "Limit is 8", "review_status": "Approved"}, {"id": "R2", "text": "Show receipt", "review_status": "Approved"}]
@@ -76,6 +79,14 @@ class ProjectSyncTests(unittest.TestCase):
             "linked_requirement_ids": ["R2"],
             "steps": [{"step": 1, "action": "Submit", "expected": "Receipt appears"}],
         }
+        if context_only:
+            self.preserved.update(
+                scenario_refs=["S2"],
+                artifact_set_id="old-set",
+                artifact_item_id="receipt-item",
+                artifact_version_id="receipt-v1",
+                artifact_version_number=1,
+            )
         for stage, payload in (
             ("requirements", {"requirements": requirements}),
             ("context", {"requirements": requirements, "notes": "Existing context"}),
@@ -121,9 +132,9 @@ class ProjectSyncTests(unittest.TestCase):
             QualityFindingInput(
                 base_project_revision=project.current_revision,
                 source_snapshot_id=project.current_snapshots["requirements"].snapshot_id,
-                category="ambiguous_requirement",
-                summary="Limit changed",
-                expected_behavior="Limit is 6",
+                category="missing_data" if context_only else "ambiguous_requirement",
+                summary="Booking fixture missing" if context_only else "Limit changed",
+                expected_behavior="Use the confirmed booking fixture." if context_only else "Limit is 6",
                 requirement_ids=["R1"],
             ),
             "finding",
@@ -131,8 +142,8 @@ class ProjectSyncTests(unittest.TestCase):
         self.payload = AcceptProjectFinding(
             base_project_revision=finding["project_revision"],
             finding_id=finding["finding"]["id"],
-            decision="Maximum is six",
-            corrections=[RequirementCorrection(requirement_id="R1", previous_text="Limit is 8", text="Limit is 6")],
+            decision="Use the confirmed booking fixture." if context_only else "Maximum is six",
+            corrections=[] if context_only else [RequirementCorrection(requirement_id="R1", previous_text="Limit is 8", text="Limit is 6")],
         )
         return projects.get_project(self.pid, actor=self.actor)
 
@@ -381,6 +392,210 @@ class ProjectSyncTests(unittest.TestCase):
         self.assertEqual(self.store[self.allocation_path]["consumed_units"], 16)
         for collection in ("usage_events", "billing_consumption", "billing_wallet_ledger"):
             self.assertEqual(sum(path.startswith(f"{collection}/") for path in self.store), 1)
+
+    def prepare_context_only_review(self):
+        from test_use_case_review_service import _run_transaction
+
+        before = self.fixture(context_only=True)
+        self.enable_demo()
+        self.enterContext(patch("app.services.use_case_review_service.get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch("app.services.use_case_review_service.transactional", side_effect=_run_transaction))
+
+        def plan(payload, **_kwargs):
+            self.assertEqual(payload.requirements[0].text, "Limit is 8")
+            self.assertIn(self.payload.decision, guidance_text())
+            return {
+                "requirement_analysis": [{"requirement_id": "R1", "requirement_text": "Limit is 8"}],
+                "coverage_plan": [
+                    {
+                        "requirement_id": "R1",
+                        "requirement_text": "Limit is 8",
+                        "scenarios": [{"id": "S1", "requirement_id": "R1", "title": "Limit", "objective": "Check the maximum of eight"}],
+                    }
+                ],
+            }
+
+        def generate(payload, **_kwargs):
+            self.assertEqual(payload.coverage_plan[0].requirement_id, "R1")
+            self.assertIn(self.payload.decision, guidance_text())
+            return {
+                "test_cases": [
+                    {
+                        "id": "new",
+                        "title": "Accept the maximum of eight",
+                        "linked_requirement_ids": ["R1"],
+                        "scenario_refs": ["S1"],
+                        "steps": [{"step": 1, "action": "Submit the booking with eight attendees", "expected": "A booking for eight attendees appears."}],
+                    }
+                ],
+                "workflow_diagnostics": {"status": "completed"},
+            }
+
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(plan)),
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(generate)),
+        ):
+            drafted = sync.accept_finding(self.pid, self.actor, self.payload, "context-only")
+        self.assertEqual(drafted.project_sync["status"], "ready_for_review")
+        self.assertEqual(drafted.current_snapshots["requirements"].snapshot_id, before.current_snapshots["requirements"].snapshot_id)
+        self.assertFalse(drafted.stage_state["context"].approved)
+        draft = drafted.current_snapshots["test_cases"]
+        self.assertFalse(draft.metadata.get("review_retry_available"))
+        self.assertIsNone(draft.payload["test_cases"][-1]["steps"][0]["test_data"])
+        review_use_case_snapshot(
+            project_id=self.pid,
+            snapshot_id=drafted.current_snapshots["use_cases"].snapshot_id,
+            base_project_revision=drafted.current_revision,
+            decision="approve",
+            comment=None,
+            actor=self.actor,
+            request_id="explicit-context-plan-approval",
+        )
+        approved = projects.get_project(self.pid, actor=self.actor)
+        self.assertEqual(approved.project_sync, drafted.project_sync)
+        self.assertTrue(approved.current_snapshots["test_cases"].metadata.get("review_retry_available"))
+        return approved, draft
+
+    def test_context_only_sync_review_binds_decision_and_preserves_raw_nulls_after_lost_ack(self):
+        approved, draft = self.prepare_context_only_review()
+        original = projects.get_project_stage_snapshot(self.pid, draft.snapshot_id, actor=self.actor)
+        publish = suite_review.append_stage_snapshot
+
+        def assess(cases, requirements, context, **_kwargs):
+            self.assertEqual([row.id for row in requirements], ["R1", "R2"])
+            self.assertIn(self.payload.decision, guidance_text())
+            self.assertTrue(current_guidance().memory_bypassed)
+            self.assertFalse(current_guidance().skills_enabled)
+            self.assertGreater(_model_reservation.get()(), 0)
+            data, input_hash, _ = review_input(cases, requirements, context)
+            raw = {
+                "input_hash": input_hash,
+                "obligations": [
+                    {
+                        "requirement_id": row.id,
+                        "source_field": "text",
+                        "obligation": row.text,
+                        "status": "covered",
+                        "reason": "Verified exact saved step.",
+                        "evidence": [{"test_case_id": next(case["id"] for case in cases if row.id in case["linked_requirement_ids"]), "step": 1}],
+                    }
+                    for row in requirements
+                ],
+                "case_grounding": [{"test_case_id": case["id"], "reason": "Grounded saved case", "prerequisites": []} for case in cases],
+            }
+            return bind_reviewed_inputs(validate_assessment(json.dumps(raw), data, input_hash), data)
+
+        def lose_ack(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic saved-review acknowledgement lost")
+
+        args = {
+            "project_id": self.pid,
+            "snapshot_id": draft.snapshot_id,
+            "base_project_revision": approved.current_revision,
+            "actor": self.actor,
+            "request_id": "review-exact-sync-draft",
+        }
+        with (
+            patch.object(suite_review, "_heuristic_test_case_review", return_value={"approved": True, "score": 100, "threshold": 90}),
+            patch.object(suite_review, "get_settings", return_value=object()),
+            patch.object(suite_review, "assess_delivered_suite", side_effect=assess) as model,
+            patch.object(suite_review, "start_workflow_run", return_value="review-sync"),
+            patch.object(suite_review, "complete_workflow_run") as audit,
+            patch.object(suite_review, "append_stage_snapshot", side_effect=lose_ack),
+        ):
+            reviewed = suite_review.review_saved_test_cases(**args)
+            self.assertEqual(suite_review.review_saved_test_cases(**args), reviewed)
+        model.assert_called_once()
+        self.assertEqual(audit.call_args.kwargs["status"], "completed")
+        successor = reviewed.current_snapshots["test_cases"]
+        self.assertEqual(successor.source_snapshot_id, draft.snapshot_id)
+        self.assertEqual(successor.payload["test_cases"], original.payload["test_cases"])
+        self.assertEqual(projects.get_project_stage_snapshot(self.pid, draft.snapshot_id, actor=self.actor), original)
+        self.assertFalse(successor.approved)
+        self.assertFalse(successor.payload["review"]["approved"])
+        self.assertEqual(reviewed.project_sync, approved.project_sync)
+        self.assertEqual(reviewed.suite_quality.design_status, "complete")
+        self.assertEqual(reviewed.suite_quality.human_acceptance, "unavailable")
+        with patch.dict("os.environ", {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
+            historical = projects.get_project(self.pid, actor=self.actor)
+        self.assertEqual(historical.suite_quality, reviewed.suite_quality)
+        self.consume.assert_called_once()
+
+    def test_sync_review_rejects_missing_private_receipt_wrong_version_and_forged_hint_without_provider(self):
+        approved, draft = self.prepare_context_only_review()
+        project_path = f"qa_projects/{self.pid}"
+        draft_path = f"{project_path}/snapshots/{draft.snapshot_id}"
+        change_path = f"{project_path}/project_changes/{approved.project_sync['id']}"
+        pointer_path = f"{change_path}/draft_stages/test_cases"
+        review_id = approved.stage_state["use_cases"].metadata["latest_human_review"]["review_id"]
+        approval_path = f"{project_path}/use_case_reviews/{review_id}"
+        case = draft.payload["test_cases"][-1]
+        version_path = f"test_case_sets/{case['artifact_set_id']}/items/{case['artifact_item_id']}/versions/{case['artifact_version_id']}"
+        intact = deepcopy(self.store)
+        failures = [
+            (pointer_path, None),
+            (approval_path, None),
+            (version_path, {"version_number": 999}),
+            (draft_path, {"actor_user_id": "unrelated"}),
+            (project_path, {"project_decisions": []}),
+        ]
+        with patch.object(suite_review, "assess_delivered_suite") as provider:
+            for path, edit in failures:
+                with self.subTest(path=path):
+                    self.store.clear()
+                    self.store.update(deepcopy(intact))
+                    if edit is None:
+                        self.store.pop(path)
+                    else:
+                        self.store[path].update(edit)
+                    self.store[draft_path]["metadata"]["review_retry_available"] = True
+                    project = projects.get_project(self.pid, actor=self.actor)
+                    self.assertNotIn("review_retry_available", project.current_snapshots["test_cases"].metadata)
+                    with self.assertRaises(HTTPException):
+                        suite_review.review_saved_test_cases(
+                            project_id=self.pid,
+                            snapshot_id=draft.snapshot_id,
+                            base_project_revision=approved.current_revision,
+                            actor=self.actor,
+                            request_id="blocked-sync-review",
+                        )
+        provider.assert_not_called()
+
+    def test_material_sync_draft_remains_outside_saved_review_after_scenario_approval(self):
+        from test_use_case_review_service import _run_transaction
+
+        self.fixture()
+        self.enable_demo()
+        self.enterContext(patch("app.services.use_case_review_service.get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch("app.services.use_case_review_service.transactional", side_effect=_run_transaction))
+        with (
+            patch.object(sync, "generate_use_cases", side_effect=self.demo_provider(self.planner)),
+            patch.object(sync, "generate_test_cases", side_effect=self.demo_provider(self.generator)),
+        ):
+            project = sync.accept_finding(self.pid, self.actor, self.payload, "material")
+        self.assertEqual(project.project_sync["stages"]["requirements"], "draft")
+        draft = project.current_snapshots["test_cases"]
+        review_use_case_snapshot(
+            project_id=self.pid,
+            snapshot_id=project.current_snapshots["use_cases"].snapshot_id,
+            base_project_revision=project.current_revision,
+            decision="approve",
+            comment=None,
+            actor=self.actor,
+            request_id="material-plan-approval",
+        )
+        latest = projects.get_project(self.pid, actor=self.actor)
+        self.assertNotIn("review_retry_available", latest.current_snapshots["test_cases"].metadata)
+        with patch.object(suite_review, "assess_delivered_suite") as provider, self.assertRaises(HTTPException):
+            suite_review.review_saved_test_cases(
+                project_id=self.pid,
+                snapshot_id=draft.snapshot_id,
+                base_project_revision=latest.current_revision,
+                actor=self.actor,
+                request_id="material-review",
+            )
+        provider.assert_not_called()
 
     def test_demo_billing_rollback_preserves_plan_and_retry_uses_new_identity(self):
         before = self.fixture()

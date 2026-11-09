@@ -404,6 +404,13 @@ def get_project(project_id: str, *, actor: AuthUser, _application_retry: bool = 
     if raw_test_suite is not None:
         from .suite_quality import resolve_suite_quality
 
+        if raw_test_suite.operation == "project.sync.draft":
+            from .project_sync_review import sync_review_available
+
+            view = detail.current_snapshots["test_cases"]
+            view.metadata = {key: value for key, value in view.metadata.items() if key != "review_retry_available"}
+            if sync_review_available(detail, raw_test_suite, actor):
+                view.metadata["review_retry_available"] = True
         detail.suite_quality = resolve_suite_quality(detail, raw_suite=raw_test_suite)
         detail.reviewed_design_available = reviewed_design_available(detail, raw_suite=raw_test_suite)
     return detail
@@ -966,6 +973,7 @@ def append_stage_snapshot(
     transaction_guard=None,
     use_case_draft_payload: Optional[dict[str, Any]] = None,
     suite_design_proof: Optional[dict[str, Any]] = None,
+    preserve_test_case_rows: bool = False,
 ) -> QaProjectStageSnapshot:
     project_payload = _get_project_payload(project_id)
     _require_owner(project_payload, actor)
@@ -1037,6 +1045,10 @@ def append_stage_snapshot(
         now=now,
         idempotency_key=idempotency_key,
     )
+    if preserve_test_case_rows:
+        if stage != "test_cases" or operation != "test_cases.review" or transaction_guard is None:
+            raise ValueError("Raw case preservation requires a fenced saved-suite review.")
+        snapshot_payload["payload"]["test_cases"] = payload["test_cases"]
     if stage == "execution":
         from .quality_feedback import execution_finding_writes
 

@@ -126,8 +126,26 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 			}
 		}
 	};
-	const title =
-		sync.status === "ready_for_review"
+	const reviewedSuite = project.current_snapshots?.test_cases;
+	const suiteState = project.stage_state?.test_cases;
+	const reviewBinding = reviewedSuite?.metadata?.sync_review_binding;
+	const currentAssessment = Boolean(
+		SYNC_RECOVERY &&
+		sync.status === "ready_for_review" &&
+		reviewedSuite?.operation === "test_cases.review" &&
+		reviewedSuite.project_id === projectId &&
+		reviewedSuite.snapshot_id &&
+		reviewedSuite.snapshot_id === suiteState?.current_snapshot_id &&
+		!suiteState.stale &&
+		reviewBinding?.change_id &&
+		reviewBinding.change_id === sync.id &&
+		reviewBinding.test_cases_snapshot_id === reviewedSuite.source_snapshot_id &&
+		reviewBinding.use_cases_snapshot_id === project.current_snapshots?.use_cases?.snapshot_id
+	);
+
+	const title = currentAssessment
+		? "Project update assessed"
+		: sync.status === "ready_for_review"
 			? "Updated drafts are ready for review"
 			: sync.status === "superseded"
 				? "Project sources have changed"
@@ -136,7 +154,11 @@ export function ProjectSyncStatus({ project, request, onUpdated, compact = false
 					: "Project update needs attention";
 	const details = (
 		<>
-			<p>Accepted facts are shared across agents. Refreshed drafts still need review before approval, export or execution.</p>
+			<p>
+				{currentAssessment
+					? "The original drafts and accepted correction remain available as saved evidence."
+					: "Accepted facts are shared across agents. Refreshed drafts still need review before approval, export or execution."}
+			</p>
 			<div className="workflow-diagnostics-pills">
 				{Object.entries(sync.stages || {}).map(([stage, state]) => (
 					<span className="workflow-diagnostics-pill" key={stage}>
