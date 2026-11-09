@@ -1801,7 +1801,8 @@ export default function App() {
 		const active = document.activeElement;
 		const caseFocus = keepPriorityCaseFocus.current && active?.closest("#selected-test-case");
 		const evidenceFocus =
-			active?.matches("[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading") && main.contains(active);
+			active?.matches("[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-run-case-result]") &&
+			main.contains(active);
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
 			if (document.activeElement === main) main.blur();
