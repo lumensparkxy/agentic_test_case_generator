@@ -12,6 +12,7 @@ from .requirements import (
     WorkflowDiagnostics,
     WorkflowSettings,
 )
+from .test_cases import TestCase
 
 
 ProjectStageName = Literal["requirements", "context", "use_cases", "impact_analysis", "test_cases", "execution", "reports"]
@@ -108,6 +109,23 @@ class QaProjectExecutionCaseResult(BaseModel):
 class QaProjectExecutionRunDetail(QaProjectExecutionRun):
     results: Optional[List[QaProjectExecutionCaseResult]] = None
     issues: List[ExecutionIssue] = Field(default_factory=list)
+
+
+class QaProjectCaseSourceRequirement(BaseModel):
+    id: str
+    text: str
+
+
+class QaProjectTestCaseEvidence(BaseModel):
+    project_id: str
+    snapshot_id: str
+    suite_version: int
+    project_revision: int
+    historical: bool
+    stale: bool = False
+    test_case: TestCase
+    requirements: List[QaProjectCaseSourceRequirement] = Field(default_factory=list)
+    obligations: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class QaProjectDetail(QaProjectSummary):

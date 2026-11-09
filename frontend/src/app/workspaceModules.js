@@ -18,6 +18,7 @@ export const GeneratedTestCasesView = deferWorkspace(
 	() => import("../components/generation/GeneratedTestCasesView"),
 	"generated test cases"
 );
+export const LinkedTestCaseView = deferWorkspace(() => import("../components/generation/LinkedTestCaseView"), "saved test case");
 export const ImproveTestsPanel = deferWorkspace(() => import("../components/generation/ImproveTestsPanel"), "Improve tests");
 export const TraceabilityMatrixPanel = deferWorkspace(
 	() => import("../components/generation/TraceabilityMatrixPanel"),

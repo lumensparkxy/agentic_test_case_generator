@@ -1,4 +1,5 @@
 from base64 import b64encode
+from copy import deepcopy
 from pathlib import Path
 from random import Random
 import sys
@@ -300,6 +301,79 @@ class WorkflowProjectServiceTests(unittest.TestCase):
 
             app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="outsider", email="other@example.test", name="Outsider")
             self.assertEqual(client.get(path).status_code, 403)
+
+    def test_saved_case_endpoint_returns_exact_historical_case_and_bound_source(self) -> None:
+        project = create_project(name="Case handoff", description=None, actor=self.actor, request_id="create")
+        other = create_project(name="Other QA", description=None, actor=self.actor, request_id="other")
+        project_id = project.project_id
+        case_id = "TC-01 + / Ω"
+        case = {
+            "id": case_id,
+            "title": "Original checkout",
+            "tags": ["REQ-001"],
+            "steps": [{"step": 4, "action": "Clear the editor", "expected": "The editor is empty", "test_data": ""}],
+        }
+
+        def save(stage, payload, **metadata):
+            return append_stage_snapshot(
+                project_id=project_id,
+                stage=stage,
+                payload=payload,
+                operation="generate",
+                actor=self.actor,
+                request_id=f"save-{stage}",
+                metadata=metadata,
+            )
+
+        original_requirement = {"id": "REQ-001", "text": "Original requirement text"}
+        source = save("requirements", {"requirements": [original_requirement, {"id": "REQ-OTHER", "text": "Other source"}]})
+        evidence = {"test_case_id": case_id, "step": 4, "action": case["steps"][0]["action"], "expected": case["steps"][0]["expected"]}
+        obligation = {"obligation": "Clear the editor", "status": "covered", "source_quote": "Original requirement text"}
+        original = save(
+            "test_cases",
+            {
+                "test_cases": [case, {**case, "id": "TC-OTHER", "title": "Unrelated case"}],
+                "substantive_assessment": {
+                    "obligations": [
+                        {**obligation, "evidence": [evidence, {**evidence, "test_case_id": "TC-OTHER"}]},
+                        {"obligation": "Unrelated obligation", "evidence": [{**evidence, "test_case_id": "TC-OTHER"}]},
+                    ],
+                },
+            },
+            source_snapshot_ids={"requirements": source.snapshot_id},
+        )
+        save("requirements", {"requirements": [{**original_requirement, "text": "New requirement text"}]})
+        newer = save("test_cases", {"test_cases": [{**case, "title": "Replacement checkout"}]})
+        ambiguous = save("test_cases", {"test_cases": [case, case]})
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: self.actor
+        path = f"/projects/{project_id}/test-case-evidence"
+        params = {"snapshot_id": original.snapshot_id, "case_id": case_id}
+        before = deepcopy(self.store)
+        with TestClient(app) as client:
+            response = client.get(path, params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertTrue(body["historical"])
+            self.assertEqual(body["snapshot_id"], original.snapshot_id)
+            self.assertEqual(body["suite_version"], original.version)
+            self.assertEqual(body["project_revision"], original.project_revision)
+            self.assertEqual(body["test_case"]["title"], case["title"])
+            self.assertEqual(body["test_case"]["steps"], case["steps"])
+            self.assertEqual(body["requirements"], [original_requirement])
+            self.assertEqual(body["obligations"], [{**obligation, "evidence": [evidence]}])
+            replacement = client.get(path, params={**params, "snapshot_id": newer.snapshot_id}).json()
+            self.assertEqual(replacement["test_case"]["title"], "Replacement checkout")
+            self.assertEqual(replacement["requirements"], [])
+            for wrong in (source.snapshot_id, ambiguous.snapshot_id, "unknown"):
+                self.assertEqual(client.get(path, params={**params, "snapshot_id": wrong}).status_code, 404)
+            self.assertEqual(client.get(path, params={**params, "case_id": "unknown"}).status_code, 404)
+            self.assertEqual(client.get(path, params={**params, "snapshot_id": "path/nested"}).status_code, 422)
+            self.assertEqual(client.get(f"/projects/{other.project_id}/test-case-evidence", params=params).status_code, 404)
+            app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="outsider", name="Outsider")
+            self.assertEqual(client.get(path, params=params).status_code, 403)
+        self.assertEqual(self.store, before)
 
     def test_large_execution_parts_commit_atomically_and_restore_the_bound_run(self) -> None:
         project = create_project(name="Large execution", description=None, actor=self.actor, request_id="create")

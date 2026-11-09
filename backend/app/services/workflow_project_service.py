@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
@@ -7,8 +8,10 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from google.api_core.exceptions import GoogleAPICallError
 from google.cloud.firestore_v1 import Client, CollectionReference, DocumentReference, FieldFilter, Query, transactional
+from pydantic import ValidationError
 
-from ..contracts.projects import QaProjectExecutionRunDetail
+from ..contracts.projects import QaProjectCaseSourceRequirement, QaProjectExecutionRunDetail, QaProjectTestCaseEvidence
+from ..contracts.test_cases import TestCase
 from ..models import (
     AuthUser,
     ProjectStageName,
@@ -427,6 +430,76 @@ def get_project_execution_run(project_id: str, run_record_id: str, *, actor: Aut
         if isinstance(snapshot.payload.get("issues"), list):
             issues = snapshot.payload["issues"]
     return QaProjectExecutionRunDetail(**run.model_dump(), results=results, issues=issues)
+
+
+def get_project_test_case_evidence(project_id: str, snapshot_id: str, case_id: str, *, actor: AuthUser) -> QaProjectTestCaseEvidence:
+    project = _get_project_payload(project_id)
+    _require_owner(project, actor)
+    snapshot = _snapshot_for(project_id, snapshot_id)
+    if not snapshot or snapshot.project_id != project_id or snapshot.snapshot_id != snapshot_id or snapshot.stage != "test_cases":
+        raise ProjectNotFoundError(snapshot_id)
+    cases = snapshot.payload.get("test_cases")
+    matches = [case for case in cases if isinstance(case, dict) and case.get("id") == case_id] if isinstance(cases, list) else []
+    if len(matches) != 1:
+        raise ProjectNotFoundError(case_id)
+    try:
+        test_case = TestCase.model_validate(matches[0])
+    except ValidationError as exc:
+        raise ProjectNotFoundError(case_id) from exc
+
+    state = _stage_state_from_payload(project).get("test_cases", {})
+    historical = state.get("current_snapshot_id") != snapshot_id
+    return QaProjectTestCaseEvidence(
+        project_id=project_id,
+        snapshot_id=snapshot_id,
+        suite_version=snapshot.version,
+        project_revision=snapshot.project_revision,
+        historical=historical,
+        stale=not historical and bool(state.get("stale")),
+        test_case=test_case,
+        requirements=_case_source_requirements(snapshot, test_case),
+        obligations=_case_obligations(snapshot, case_id),
+    )
+
+
+def _case_source_requirements(snapshot: QaProjectStageSnapshot, test_case: TestCase) -> list[QaProjectCaseSourceRequirement]:
+    linked = {item.strip() for item in test_case.linked_requirement_ids}
+    linked.update(tag.strip() for tag in test_case.tags or [] if re.fullmatch(r"REQ-[A-Za-z0-9_-]+", tag.strip(), re.IGNORECASE))
+    if not linked:
+        return []
+    source_ids = snapshot.metadata.get("source_snapshot_ids")
+    source_id = snapshot.metadata.get("source_requirements_snapshot_id") or (source_ids.get("requirements") if isinstance(source_ids, dict) else None)
+    source = _snapshot_for(snapshot.project_id, source_id) if isinstance(source_id, str) and source_id else None
+    if not source or source.project_id != snapshot.project_id or source.snapshot_id != source_id or source.stage != "requirements":
+        return []
+    requirements = source.payload.get("requirements")
+    if not isinstance(requirements, list):
+        return []
+    return [
+        QaProjectCaseSourceRequirement(id=row["id"], text=row["text"])
+        for row in requirements
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"] in linked and isinstance(row.get("text"), str)
+    ]
+
+
+def _case_obligations(snapshot: QaProjectStageSnapshot, case_id: str) -> list[dict[str, Any]]:
+    assessment = snapshot.payload.get("substantive_assessment")
+    recorded = assessment.get("obligations") if isinstance(assessment, dict) else None
+    if not isinstance(recorded, list):
+        return []
+    obligations = []
+    for item in recorded:
+        rows = item.get("evidence") if isinstance(item, dict) else None
+        if not isinstance(rows, list):
+            continue
+        evidence = [
+            {key: row[key] for key in ("test_case_id", "step", "action", "expected") if key in row}
+            for row in rows
+            if isinstance(row, dict) and row.get("test_case_id") == case_id
+        ]
+        if evidence:
+            obligations.append({**{key: item[key] for key in ("obligation", "status", "source_quote", "reason") if key in item}, "evidence": evidence})
+    return obligations
 
 
 def list_projects(*, actor: AuthUser, include_archived: bool = False) -> list[QaProjectSummary]:

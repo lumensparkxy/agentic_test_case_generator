@@ -17,6 +17,7 @@ export interface ApiContractOperations {
 	projectGet: ApiOperation<ProjectGetRequest, ProjectGetResponse, "GET", "/projects/{project_id}">;
 	projectUpdate: ApiOperation<ProjectUpdateRequest, ProjectUpdateResponse, "PATCH", "/projects/{project_id}">;
 	projectTimeline: ApiOperation<ProjectTimelineRequest, ProjectTimelineResponse, "GET", "/projects/{project_id}/timeline">;
+	projectTestCaseEvidence: ApiOperation<ProjectTestCaseEvidenceRequest, ProjectTestCaseEvidenceResponse, "GET", "/projects/{project_id}/test-case-evidence">;
 	projectExecutionRun: ApiOperation<ProjectExecutionRunRequest, ProjectExecutionRunResponse, "GET", "/projects/{project_id}/execution-runs/{run_record_id}">;
 	projectExecutionRequest: ApiOperation<ProjectExecutionRequest, ProjectExecutionRequestResponse, "GET", "/projects/{project_id}/execution-requests/{request_id}">;
 	projectOrchestratorStatus: ApiOperation<ProjectOrchestratorStatusRequest, ProjectOrchestratorStatusResponse, "GET", "/projects/{project_id}/orchestrator/status">;
@@ -73,6 +74,11 @@ export type ProjectUpdateRequest = QaProjectUpdateInput;
 export type ProjectUpdateResponse = QaProjectDetail;
 export type ProjectTimelineRequest = undefined;
 export type ProjectTimelineResponse = Array<QaProjectTimelineEvent>;
+export type ProjectTestCaseEvidenceRequest = {
+	case_id: string;
+	snapshot_id: string;
+};
+export type ProjectTestCaseEvidenceResponse = QaProjectTestCaseEvidence;
 export type ProjectExecutionRunRequest = undefined;
 export type ProjectExecutionRunResponse = QaProjectExecutionRunDetail;
 export type ProjectExecutionRequest = undefined;
@@ -709,6 +715,11 @@ export interface OrchestratorStatusResponse {
 	upstream_changed?: boolean;
 }
 
+export interface QaProjectCaseSourceRequirement {
+	id: string;
+	text: string;
+}
+
 export interface QaProjectCreateInput {
 	description?: string | null;
 	name: string;
@@ -834,6 +845,18 @@ export interface QaProjectSummary {
 	stage_state?: Record<string, QaProjectStageState>;
 	status?: "active" | "archived";
 	updated_at: string;
+}
+
+export interface QaProjectTestCaseEvidence {
+	historical: boolean;
+	obligations?: Array<Record<string, unknown>>;
+	project_id: string;
+	project_revision: number;
+	requirements?: Array<QaProjectCaseSourceRequirement>;
+	snapshot_id: string;
+	stale?: boolean;
+	suite_version: number;
+	test_case: TestCase;
 }
 
 export interface QaProjectTestCaseReviewInput {

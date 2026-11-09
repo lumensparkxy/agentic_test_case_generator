@@ -73,6 +73,12 @@ straight to the case heading. At the end of a case, **Previous case** and
 review scopes. The selected case and its filters recover within the same
 saved suite.
 
+Use **Copy case link** to hand off an exact case in a saved suite. The
+linked reader is read-only and identifies its suite version and project
+revision. If a later suite replaces it, the link still shows the original
+case and its recorded source evidence. **Open current suite** returns to
+the workbench.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

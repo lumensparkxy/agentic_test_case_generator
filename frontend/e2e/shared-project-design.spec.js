@@ -147,6 +147,99 @@ test("moves through the filtered case sequence and restores selection after relo
 	expect(writes).toEqual([]);
 });
 
+test("copies an exact case link and keeps its original evidence after the suite changes", { tag: "@p1" }, async ({ page, context }) => {
+	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+	const original = caseFixture("TC-02 + / Ω", "Original checkout");
+	const { project, api } = await openCases(page, [caseFixture("TC-001", "Other checkout"), original]);
+	const caseQueries = [];
+	let historical = false;
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/test-case-evidence?*`, (route) => {
+		const query = Object.fromEntries(new URL(route.request().url()).searchParams);
+		caseQueries.push(query);
+		return route.fulfill({
+			json: {
+				project_id: USE_CASE_PROJECT_ID,
+				snapshot_id: "cases-v1",
+				suite_version: 1,
+				project_revision: 7,
+				historical,
+				test_case: original,
+				requirements: [{ id: "REQ-101", text: "Original recorded requirement" }],
+				obligations: [],
+			},
+		});
+	});
+	await page.getByRole("button", { name: `${original.id} ${original.title}`, exact: true }).click();
+	const beforeCopy = page.url();
+	await page.getByRole("button", { name: "Copy case link" }).click();
+	await expect(page.getByText("Case link copied.", { exact: true })).toBeVisible();
+	const copied = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+	expect(copied.pathname).toBe(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
+	expect(Object.fromEntries(copied.searchParams)).toEqual({ suite: "cases-v1", case: original.id });
+	await expect(page).toHaveURL(beforeCopy);
+	await page.getByRole("searchbox", { name: "Search test cases" }).fill("Other checkout");
+	await page.goto(copied.href);
+	const reader = page.getByRole("region", { name: "Saved test case", exact: true });
+	await expect(reader.getByRole("heading", { name: "Original checkout" })).toBeVisible();
+	await expect(reader.getByText("Current saved suite · Version 1 · Project revision 7")).toBeVisible();
+	await expect(page.getByRole("searchbox", { name: "Search test cases" })).toHaveCount(0);
+	await expect(reader.getByRole("button", { name: "Report a problem" })).toHaveCount(0);
+
+	historical = true;
+	project.current_revision += 1;
+	project.current_snapshots.test_cases.snapshot_id = "cases-v2";
+	project.stage_state.test_cases.current_snapshot_id = "cases-v2";
+	project.current_snapshots.test_cases.payload.test_cases = [{ ...original, title: "Replacement checkout" }];
+	api.setProject(project);
+	await page.reload();
+	await expect(reader.getByText("Historical saved suite · Version 1 · Project revision 7")).toBeVisible();
+	await expect(reader.getByRole("heading", { name: "Original checkout" })).toBeVisible();
+	await expect(reader.getByText("Replacement checkout")).toHaveCount(0);
+	await reader.getByText("Why this test? Source and assessment", { exact: true }).click();
+	await expect(reader.getByText("Original recorded requirement")).toBeVisible();
+	expect(caseQueries).toEqual([
+		{ snapshot_id: "cases-v1", case_id: original.id },
+		{ snapshot_id: "cases-v1", case_id: original.id },
+	]);
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await reader.getByRole("link", { name: "Open current suite" }).click();
+	await expect(page).toHaveURL(beforeCopy);
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await expect(page.getByRole("heading", { name: "Replacement checkout" })).toBeVisible();
+});
+
+test("shows a selectable URL on clipboard denial and keeps unavailable links explicit", { tag: "@p1" }, async ({ page }) => {
+	await page.addInitScript(() => {
+		Object.defineProperty(navigator, "clipboard", {
+			value: { writeText: () => Promise.reject(new DOMException("Clipboard blocked", "NotAllowedError")) },
+		});
+	});
+	await openCases(page);
+	const workbench = page.getByRole("region", { name: "Selected test case" });
+	await workbench.getByRole("button", { name: "Copy case link" }).press("Enter");
+	const fallback = workbench.getByRole("textbox", { name: "Select and copy the case link" });
+	await expect(fallback).toBeFocused();
+	await expect(fallback).toHaveJSProperty("readOnly", true);
+	const href = await fallback.inputValue();
+	expect(await fallback.evaluate((input) => input.selectionEnd - input.selectionStart)).toBe(href.length);
+	let lookups = 0;
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/test-case-evidence?*`, (route) => {
+		lookups += 1;
+		return route.fulfill({ status: 404, json: { detail: "Unavailable" } });
+	});
+	const unavailable = page.getByText("This saved test case is unavailable.", { exact: true });
+	await page.goto(`${href}&suite=duplicate`);
+	await expect(unavailable).toBeVisible();
+	expect(lookups).toBe(0);
+	await page.goto(href);
+	await expect(unavailable).toBeVisible();
+	expect(lookups).toBe(1);
+	await expect(page.getByRole("region", { name: "Selected test case" })).toHaveCount(0);
+	await expect(page.getByRole("link", { name: "Open current suite" })).toBeVisible();
+});
+
 test("triages a saved suite by priority and automation intent and restores only the same source", { tag: "@p1" }, async ({ page }) => {
 	const writes = [];
 	page.on("request", (request) => {

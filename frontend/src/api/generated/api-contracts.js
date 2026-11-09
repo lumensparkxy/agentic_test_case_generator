@@ -10,6 +10,7 @@ export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	projectGet: Object.freeze({ method: "GET", path: "/projects/{project_id}" }),
 	projectUpdate: Object.freeze({ method: "PATCH", path: "/projects/{project_id}" }),
 	projectTimeline: Object.freeze({ method: "GET", path: "/projects/{project_id}/timeline" }),
+	projectTestCaseEvidence: Object.freeze({ method: "GET", path: "/projects/{project_id}/test-case-evidence" }),
 	projectExecutionRun: Object.freeze({ method: "GET", path: "/projects/{project_id}/execution-runs/{run_record_id}" }),
 	projectExecutionRequest: Object.freeze({ method: "GET", path: "/projects/{project_id}/execution-requests/{request_id}" }),
 	projectOrchestratorStatus: Object.freeze({ method: "GET", path: "/projects/{project_id}/orchestrator/status" }),

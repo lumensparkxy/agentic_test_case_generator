@@ -27,6 +27,7 @@ import {
 	ExportPanel,
 	GeneratedTestCasesView,
 	ImproveTestsPanel,
+	LinkedTestCaseView,
 	OrchestratorCockpitPanel,
 	projectRouteModules,
 	ProjectsPage,
@@ -39,6 +40,7 @@ import {
 	TraceabilityMatrixPanel,
 	UseCaseReviewPage,
 } from "./app/workspaceModules";
+import { readSavedCaseLink } from "./app/savedCaseLinks";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -277,6 +279,9 @@ export default function App() {
 	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const { route, location, navigate } = useBrowserNavigation();
+	const savedCaseLink =
+		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.TEST_CASES ? readSavedCaseLink(location.search) : null;
+	const viewingSavedCase = Boolean(savedCaseLink);
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
@@ -2169,7 +2174,7 @@ export default function App() {
 		setProjectRouteStatus("loading");
 		setProjectRouteError("");
 		void openProject(route.projectId, { hydrate: true, silent: true, routeRequestId });
-	}, [route.kind, route.projectId, route.destination, isAuthenticated, isVerifyingSession, currentUser?.sub]);
+	}, [route.kind, route.projectId, route.destination, viewingSavedCase, isAuthenticated, isVerifyingSession, currentUser?.sub]);
 
 	const refreshJiraConnectionStatus = async (userOverride = currentUser, { silent = false } = {}) => {
 		const user = userOverride || currentUser;
@@ -4661,7 +4666,7 @@ export default function App() {
 														</Button>
 													))}
 											</div>
-										) : route.destination === "test-cases" ? (
+										) : route.destination === "test-cases" && !savedCaseLink ? (
 											<div className="workbench-actions">
 												{testReviewRoute && testCases.length > 0 && exportGateLocked && (
 													<Badge className="workbench-status" tone="warning">
@@ -4693,7 +4698,7 @@ export default function App() {
 									}
 								/>
 
-								{["requirements", "test-cases", "automation"].includes(route.destination) && (
+								{!savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}`}
 										compact={compactReview}
@@ -4702,7 +4707,7 @@ export default function App() {
 										onUpdated={() => openProject(navigationProjectId, { silent: true })}
 									/>
 								)}
-								{["requirements", "test-cases"].includes(route.destination) && (
+								{!savedCaseLink && ["requirements", "test-cases"].includes(route.destination) && (
 									<ClarificationScopeNotice
 										project={currentProject}
 										onOpen={() => navigate(buildProjectPath(navigationProjectId, "context"))}
@@ -4710,6 +4715,7 @@ export default function App() {
 								)}
 								{["requirements", "test-cases", "automation"].includes(route.destination) &&
 									!(requirementsRoute && (requirements.length || imports.preview)) &&
+									!savedCaseLink &&
 									!(testReviewRoute && testCases.length) && (
 										<GenerationGuidance
 											key={`${knowledgeScope}:${route.destination}:${currentProjectRevision}`}
@@ -4726,6 +4732,7 @@ export default function App() {
 									currentDestination={route.destination}
 									hasTestCases={hasExistingTestCaseBaseline}
 									hidden={
+										viewingSavedCase ||
 										(route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 2) ||
 										(requirementsRoute && Boolean(imports.preview))
 									}
@@ -5483,7 +5490,7 @@ export default function App() {
 										/>
 									)}
 
-									{activeTab === 2 && (
+									{activeTab === 2 && !savedCaseLink && (
 										<TemplateSetupPanel
 											templateName={templateName}
 											setTemplateName={setTemplateName}
@@ -5493,7 +5500,17 @@ export default function App() {
 										/>
 									)}
 
-									{activeTab === 3 && (
+									{savedCaseLink && isAuthenticated && currentUser?.sub && (
+										<LinkedTestCaseView
+											key={JSON.stringify([currentUser.sub, navigationProjectId, savedCaseLink.snapshotId, savedCaseLink.caseId])}
+											projectId={navigationProjectId}
+											{...savedCaseLink}
+											request={apiRequest}
+											navigate={navigate}
+										/>
+									)}
+
+									{activeTab === 3 && !savedCaseLink && (
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
 											<TestCaseReadiness
@@ -5720,6 +5737,7 @@ export default function App() {
 																<GeneratedTestCasesView
 																	identity={currentUser?.sub}
 																	projectId={currentProjectId}
+																	savedSuite={savedSuite}
 																	snapshotId={sourceCaseSnapshot}
 																	onReport={(testCase) => {
 																		setReportedCase(testCase);

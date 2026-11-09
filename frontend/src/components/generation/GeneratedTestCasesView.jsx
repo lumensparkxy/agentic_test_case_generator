@@ -5,6 +5,7 @@ import { Input, Button, Select } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { savedCasePathForSelection } from "../../app/savedCaseLinks";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
 const CASE_PRIORITIES = ["Critical", "High", "Medium", "Low"];
@@ -44,11 +45,49 @@ function TestStepData({ value }) {
 	);
 }
 
+function CaseReaderLayout({ singleCase, children, ...props }) {
+	return singleCase ? children[1] : <ListDetail {...props}>{children}</ListDetail>;
+}
+
+function CaseLinkControl({ path }) {
+	const [copyStatus, setCopyStatus] = useState("");
+	const inputRef = useRef(null);
+	const url = new URL(path, window.location.href).href;
+	useEffect(() => {
+		if (copyStatus === "manual") inputRef.current?.focus();
+	}, [copyStatus]);
+	const copyLink = async () => {
+		try {
+			await navigator.clipboard.writeText(url);
+			setCopyStatus("copied");
+		} catch {
+			setCopyStatus("manual");
+		}
+	};
+	return (
+		<div className="test-case-link-control">
+			<Button variant="secondary" size="compact" onClick={copyLink}>
+				Copy case link
+			</Button>
+			{copyStatus === "copied" && <span role="status">Case link copied.</span>}
+			{copyStatus === "manual" && (
+				<label>
+					Select and copy the case link
+					<Input ref={inputRef} value={url} readOnly onFocus={(event) => event.currentTarget.select()} />
+				</label>
+			)}
+		</div>
+	);
+}
+
 export default function GeneratedTestCasesView({
 	testCases,
 	identity,
 	projectId,
 	snapshotId,
+	savedSuite,
+	exactCasePath = "",
+	singleCase = false,
 	onReport,
 	selectedId,
 	setSelectedId,
@@ -133,8 +172,14 @@ export default function GeneratedTestCasesView({
 		});
 	}, [testCases, groupIds, visibleChanges, priority, automationIntent, normalizedQuery]);
 	const findingCase = findingCaseId ? testCases.find((tc) => tc.id === findingCaseId) : null;
-	const selected = findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
-	const selectedIndex = cases.indexOf(selected);
+	const selected = singleCase
+		? testCases[0]
+		: findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
+	const selectedIndex = singleCase ? -1 : cases.indexOf(selected);
+	const sharePath = useMemo(
+		() => exactCasePath || savedCasePathForSelection(projectId, savedSuite, selected),
+		[exactCasePath, projectId, savedSuite, selected]
+	);
 	const selectCase = (id) => {
 		if (findingCaseId) onDismissFindingCase();
 		setSelectedId(id);
@@ -168,7 +213,8 @@ export default function GeneratedTestCasesView({
 	else if (visibleChanges) emptyMessage = "No changed test cases are available in this suite.";
 	return (
 		<>
-			<ListDetail
+			<CaseReaderLayout
+				singleCase={singleCase}
 				storageKey="test-cases"
 				label="Resize test case list and details"
 				className="test-review-workspace"
@@ -320,10 +366,15 @@ export default function GeneratedTestCasesView({
 								<h2 ref={titleRef} tabIndex={-1} aria-describedby={selectedIndex >= 0 ? positionId : undefined}>
 									{selected.title}
 								</h2>
-								{onReport && (
-									<Button variant="secondary" size="compact" onClick={() => onReport(selected)}>
-										Report a problem
-									</Button>
+								{(sharePath || onReport) && (
+									<div className="test-detail-actions">
+										{sharePath && <CaseLinkControl key={sharePath} path={sharePath} />}
+										{onReport && (
+											<Button variant="secondary" size="compact" onClick={() => onReport(selected)}>
+												Report a problem
+											</Button>
+										)}
+									</div>
 								)}
 							</div>
 							<div className="test-steps-heading">
@@ -385,11 +436,18 @@ export default function GeneratedTestCasesView({
 										return (
 											<div key={id}>
 												<strong>{id}</strong>
-												<p>{requirement?.text || "Requirement text unavailable in the current project."}</p>
+												<p>
+													{requirement?.text ||
+														(singleCase
+															? "Requirement text unavailable in the saved source."
+															: "Requirement text unavailable in the current project.")}
+												</p>
 											</div>
 										);
 									})}
-									<p>Current requirement text is shown for comparison. It may have changed since this test was generated.</p>
+									{!singleCase && (
+										<p>Current requirement text is shown for comparison. It may have changed since this test was generated.</p>
+									)}
 									{(substantiveAssessment?.obligations || [])
 										.filter((item) => (item.evidence || []).some((evidence) => evidence.test_case_id === selected.id))
 										.map((item, index) => (
@@ -456,7 +514,7 @@ export default function GeneratedTestCasesView({
 						<p>Select a test case to review its details.</p>
 					)}
 				</section>
-			</ListDetail>
+			</CaseReaderLayout>
 		</>
 	);
 }

@@ -550,6 +550,35 @@ select {
 	outline: var(--focus-outline);
 	outline-offset: 3px;
 }
+.test-detail-actions,
+.linked-test-case-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 8px;
+}
+.test-detail-actions,
+.test-case-link-control {
+	min-width: 0;
+	max-width: 100%;
+}
+.test-case-link-control > :is(span, label) {
+	display: block;
+	margin-block-start: 4px;
+	font-size: var(--font-secondary);
+}
+.linked-test-case {
+	max-width: 900px;
+}
+.linked-test-case-header {
+	justify-content: space-between;
+}
+.linked-test-case-header .panel-title {
+	margin: 0;
+}
+.linked-test-case-meta {
+	color: var(--text-muted);
+}
 .test-review-detail h2 {
 	margin: 8px 0;
 	font-size: var(--font-section-title);

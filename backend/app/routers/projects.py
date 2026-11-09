@@ -1,10 +1,10 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
 from ..contracts.execution import ExecutionRequestReceipt
-from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
+from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
 from ..services.use_case_generation_service import generate_project_use_cases
 from ..auth.jwt_auth import get_current_user
 from ..models import (
@@ -33,6 +33,7 @@ from ..services.workflow_project_service import (
     create_project,
     get_project,
     get_project_execution_run,
+    get_project_test_case_evidence,
     list_projects,
     project_error_to_http,
     update_project,
@@ -128,6 +129,19 @@ async def get_qa_project_execution_run(
 ) -> QaProjectExecutionRunDetail:
     try:
         return await run_in_threadpool(get_project_execution_run, project_id, run_record_id, actor=current_user)
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.get("/projects/{project_id}/test-case-evidence", response_model=QaProjectTestCaseEvidence)
+async def get_qa_project_test_case_evidence(
+    project_id: str,
+    snapshot_id: str = Query(min_length=1, max_length=160, pattern=r"^[^/]+$"),
+    case_id: str = Query(min_length=1),
+    current_user: AuthUser = Depends(get_current_user),
+) -> QaProjectTestCaseEvidence:
+    try:
+        return await run_in_threadpool(get_project_test_case_evidence, project_id, snapshot_id, case_id, actor=current_user)
     except Exception as exc:
         raise project_error_to_http(exc) from exc
 
