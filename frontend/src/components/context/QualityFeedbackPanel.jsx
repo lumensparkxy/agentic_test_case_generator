@@ -49,7 +49,7 @@ function resolvePrerequisite(project, search) {
 	return prerequisite ? { snapshotId: snapshot.snapshot_id, testCase, prerequisite } : null;
 }
 
-export default function QualityFeedbackPanel({ request, projectId, prerequisiteSearch, onUpdated }) {
+export default function QualityFeedbackPanel({ request, projectId, prerequisiteSearch, focusRequested = false, onUpdated }) {
 	const [data, setData] = useState(null);
 	const [project, setProject] = useState(null);
 	const [error, setError] = useState("");
@@ -80,8 +80,8 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 	const linked = prerequisiteSearch ? resolvePrerequisite(project, prerequisiteSearch) : null;
 	const projectLoaded = Boolean(project);
 	useEffect(() => {
-		if (prerequisiteSearch && projectLoaded) heading.current?.focus();
-	}, [prerequisiteSearch, projectLoaded]);
+		if (focusRequested || (prerequisiteSearch && projectLoaded)) heading.current?.focus();
+	}, [focusRequested, prerequisiteSearch, projectLoaded]);
 	useEffect(() => {
 		alive.current = true;
 		return () => {

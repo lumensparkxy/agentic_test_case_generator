@@ -8,6 +8,7 @@ export default function ContextInputsPanel({
 	request,
 	projectId,
 	prerequisiteSearch,
+	focusQualityFeedback,
 	project,
 	onProjectUpdated,
 	appLink,
@@ -213,6 +214,7 @@ export default function ContextInputsPanel({
 					request={request}
 					projectId={projectId}
 					prerequisiteSearch={prerequisiteSearch}
+					focusRequested={focusQualityFeedback}
 					onUpdated={onProjectUpdated}
 				/>
 			)}

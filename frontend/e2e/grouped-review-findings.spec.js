@@ -209,6 +209,9 @@ test.describe("Grouped saved review findings", () => {
 		await page.goBack();
 		await expect(page).toHaveURL(`${root}/review/tests`);
 		await expect(findings(page).getByRole("region", { name: boundaryBehavior, exact: true })).toBeVisible();
+		await findings(page).getByRole("link", { name: "Open project quality findings", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/inputs/context#quality-feedback-heading`);
+		await expect(page.getByRole("heading", { name: "Quality feedback", exact: true })).toBeFocused();
 		expect(api.writes).toEqual([]);
 		expect(api.errors).toEqual([]);
 	});
