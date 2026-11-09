@@ -79,6 +79,11 @@ revision. If a later suite replaces it, the link still shows the original
 case and its recorded source evidence. **Open current suite** returns to
 the workbench.
 
+In the **Traceability Matrix**, a linked case ID opens that exact saved case.
+Use **more linked tests** to see the rest of a dense requirement row.
+Browser Back returns focus to the originating link while the same suite is
+current. Cases without a unique saved match appear as plain IDs.
+
 Before invoking the runtime, the run endpoint verifies project ownership, active
 status, the current revision, approved and non-stale requirements and test cases,
 and current human approval of Use Cases when that stage exists. The submitted

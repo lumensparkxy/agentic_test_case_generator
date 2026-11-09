@@ -5,7 +5,7 @@ import { Input, Button, Select } from "../ui/controls";
 import { Disclosure, Badge } from "../ui/surfaces";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { savedCasePathForSelection } from "../../app/savedCaseLinks";
+import { createSavedCasePathResolver } from "../../app/savedCaseLinks";
 import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
 
 const CASE_PRIORITIES = ["Critical", "High", "Medium", "Low"];
@@ -176,10 +176,8 @@ export default function GeneratedTestCasesView({
 		? testCases[0]
 		: findingCase || cases.find((tc) => tc.id === (selectedId || recovery.value.selectedId)) || cases[0];
 	const selectedIndex = singleCase ? -1 : cases.indexOf(selected);
-	const sharePath = useMemo(
-		() => exactCasePath || savedCasePathForSelection(projectId, savedSuite, selected),
-		[exactCasePath, projectId, savedSuite, selected]
-	);
+	const resolveCasePath = useMemo(() => createSavedCasePathResolver(projectId, savedSuite), [projectId, savedSuite]);
+	const sharePath = useMemo(() => exactCasePath || resolveCasePath(selected), [exactCasePath, resolveCasePath, selected]);
 	const selectCase = (id) => {
 		if (findingCaseId) onDismissFindingCase();
 		setSelectedId(id);

@@ -653,9 +653,47 @@ button.small {
 }
 
 .traceability-case-tag {
+	background: #f1f5f9;
+	color: #334155;
+	border: 1px solid #cbd5e1;
+}
+
+.traceability-case-link .traceability-case-tag {
 	background: #eff6ff;
 	color: #1d4ed8;
 	border: 1px solid #bfdbfe;
+}
+
+.traceability-case-link {
+	display: inline-flex;
+	max-width: 100%;
+	border-radius: 9999px;
+}
+
+.traceability-case-items {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 6px;
+}
+
+.traceability-case-overflow {
+	margin-block-start: 6px;
+}
+
+.traceability-case-overflow > summary {
+	width: fit-content;
+}
+
+.traceability-more-cases {
+	max-block-size: 10rem;
+	overflow: auto;
+	margin-block-start: 4px;
+	padding: 5px;
+}
+
+.traceability-more-cases:focus-visible {
+	outline: var(--focus-outline);
+	outline-offset: 1px;
 }
 
 .traceability-missing-text {

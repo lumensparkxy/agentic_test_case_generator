@@ -28,9 +28,15 @@ function caseContent(testCase) {
 	);
 }
 
-export function savedCasePathForSelection(projectId, suite, testCase) {
-	if (!projectId || !suite?.snapshot_id || !testCase?.id || !Array.isArray(suite.payload?.test_cases)) return "";
-	const matches = suite.payload.test_cases.filter((item) => item.id === testCase.id);
-	if (matches.length !== 1 || (matches[0] !== testCase && caseContent(matches[0]) !== caseContent(testCase))) return "";
-	return buildSavedCasePath(projectId, suite.snapshot_id, testCase.id);
+export function createSavedCasePathResolver(projectId, suite) {
+	if (!projectId || !suite?.snapshot_id || !Array.isArray(suite.payload?.test_cases)) return () => "";
+	const savedById = new Map();
+	for (const item of suite.payload.test_cases) {
+		if (item?.id) savedById.set(item.id, savedById.has(item.id) ? null : item);
+	}
+	return (testCase) => {
+		const saved = savedById.get(testCase?.id);
+		if (!saved || (saved !== testCase && caseContent(saved) !== caseContent(testCase))) return "";
+		return buildSavedCasePath(projectId, suite.snapshot_id, testCase.id);
+	};
 }

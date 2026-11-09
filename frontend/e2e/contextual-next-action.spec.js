@@ -582,6 +582,11 @@ test.describe("Contextual next task", () => {
 			await expect(newCaseRow).toBeVisible();
 			await expect(oldCaseRow).toHaveCount(0);
 			expect(requests.generation).toBe(1);
+
+			await page.getByRole("tab", { name: /^Traceability Matrix/ }).click();
+			const matrix = page.getByRole("region", { name: "Requirement traceability table" });
+			await expect(matrix.getByText(newTestCase.id, { exact: true })).toBeVisible();
+			await expect(matrix.getByRole("link", { name: new RegExp(newTestCase.id) })).toHaveCount(0);
 		}
 	);
 

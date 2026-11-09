@@ -28,7 +28,8 @@ const caseFixture = (id, title) => ({
 async function openCases(
 	page,
 	testCases = [caseFixture("TC-001", "Valid checkout"), caseFixture("TC-002", "Declined card")],
-	payload = {}
+	payload = {},
+	resultTab = /^Generated Test Cases/
 ) {
 	const project = useCaseProjectFixture();
 	project.current_snapshots.test_cases = {
@@ -54,7 +55,7 @@ async function openCases(
 	await seedAuthenticatedSession(page);
 	await page.goto(`/projects/${USE_CASE_PROJECT_ID}/test-cases`);
 	await expect(page.getByRole("heading", { name: "Test Cases", exact: true, level: 1 })).toBeVisible();
-	await page.getByRole("tab", { name: /^Generated Test Cases/ }).click();
+	await page.getByRole("tab", { name: resultTab }).click();
 	return { project, api };
 }
 
@@ -607,6 +608,84 @@ test("coverage gaps select the remaining traceability tab after load and reload"
 	await expect(page.getByRole("region", { name: "Requirement traceability table" })).toBeVisible();
 	await page.reload();
 	await expect(selected).toHaveAttribute("aria-selected", "true");
+});
+
+test("opens exact saved evidence from an expanded traceability row and restores the link on Back", { tag: "@p1" }, async ({ page }) => {
+	const cases = Array.from({ length: 8 }, (_, index) => caseFixture(`TC-00${index + 1}`, `Checkout ${index + 1}`));
+	const target = cases.at(-1);
+	const writes = [];
+	const lookups = [];
+	page.on("request", (request) => {
+		const path = new URL(request.url()).pathname;
+		if (request.method() !== "GET" && /\/(projects|testcases|automation|export)\b/.test(path)) writes.push(path);
+	});
+	await page.route(`**/projects/${USE_CASE_PROJECT_ID}/test-case-evidence?*`, (route) => {
+		lookups.push(Object.fromEntries(new URL(route.request().url()).searchParams));
+		return route.fulfill({
+			json: {
+				project_id: USE_CASE_PROJECT_ID,
+				snapshot_id: "cases-v1",
+				suite_version: 1,
+				project_revision: 7,
+				historical: false,
+				test_case: target,
+				requirements: [{ id: "REQ-101", text: "Recorded checkout requirement" }],
+				obligations: [],
+			},
+		});
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	const { project, api } = await openCases(
+		page,
+		[...cases, caseFixture("TC-DUP", "First legacy case"), caseFixture("TC-DUP", "Second legacy case")],
+		{},
+		/^Traceability Matrix/
+	);
+	const tab = page.getByRole("tab", { name: /^Traceability Matrix/ });
+	const matrix = page.getByRole("region", { name: "Requirement traceability table" });
+	const row = matrix.getByRole("row").filter({ has: page.getByRole("cell", { name: "REQ-101", exact: true }) });
+	const links = row.getByRole("link", { name: /^Open saved case/ });
+	const more = row.getByText("7 more linked tests", { exact: true });
+	const overflow = row.getByRole("region", { name: "More linked tests for REQ-101" });
+	const sourceLink = row.getByRole("link", { name: `Open saved case ${target.id} ${target.title}`, exact: true });
+	const matrixUrl = page.url();
+	await expect(links).toHaveCount(3);
+	await expect(overflow).toBeHidden();
+	await more.press("Enter");
+	await expect(links).toHaveCount(8);
+	await expect(overflow.getByText("TC-DUP", { exact: true })).toHaveCount(2);
+	await expect(overflow.getByRole("link", { name: /TC-DUP/ })).toHaveCount(0);
+	const href = new URL(await sourceLink.getAttribute("href"), matrixUrl);
+	expect(Object.fromEntries(href.searchParams)).toEqual({ suite: "cases-v1", case: target.id });
+
+	await sourceLink.press("Enter");
+	await expect(page).toHaveURL(href.href);
+	const reader = page.getByRole("region", { name: "Saved test case", exact: true });
+	await expect(reader.getByRole("heading", { name: "Saved test case", exact: true })).toBeFocused();
+	await expect(reader.getByRole("heading", { name: target.title })).toBeVisible();
+	await expect(reader).toContainText(`Result for ${target.id}`);
+	expect(lookups).toEqual([{ snapshot_id: "cases-v1", case_id: target.id }]);
+
+	project.current_revision += 1;
+	api.setProject(project);
+	await page.goBack();
+	await expect(page).toHaveURL(matrixUrl);
+	await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(`Revision ${project.current_revision}`);
+	await expect(tab).toHaveAttribute("aria-selected", "true");
+	await expect(overflow).toBeVisible();
+	await expect(sourceLink).toBeFocused();
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+	const improve = page.getByRole("tab", { name: /^Improve tests/ });
+	await improve.click();
+	await expect(improve).toHaveAttribute("aria-selected", "true");
+	await page.goForward();
+	await expect(reader.getByRole("heading", { name: target.title })).toBeVisible();
+	await page.goBack();
+	await expect(tab).toHaveAttribute("aria-selected", "true");
+	await expect(overflow).toBeVisible();
+	await expect(sourceLink).toBeFocused();
+	expect(writes).toEqual([]);
 });
 
 test("loaded project without test cases selects a visible results tab", async ({ page }) => {

@@ -546,7 +546,8 @@ select {
 	margin-block-start: 0.75rem;
 	padding-block-start: 0.75rem;
 }
-.test-review-detail h2:focus-visible {
+.test-review-detail h2:focus-visible,
+.linked-test-case-header .panel-title:focus-visible {
 	outline: var(--focus-outline);
 	outline-offset: 3px;
 }

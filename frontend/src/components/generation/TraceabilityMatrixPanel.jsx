@@ -1,6 +1,63 @@
+import { useEffectEvent, useLayoutEffect, useMemo, useRef } from "react";
+import { createSavedCasePathResolver } from "../../app/savedCaseLinks";
 import { CollectionState, TableScroll, Table } from "../ui/collections";
-import { getTestCaseLinkedRequirementIds } from "../../utils/requirements";
-import { Surface, Badge } from "../ui/surfaces";
+import { Link } from "../ui/controls";
+import { Surface, Badge, Disclosure } from "../ui/surfaces";
+
+const VISIBLE_CASE_COUNT = 3;
+
+function LinkedCaseTags({ requirementId, cases, paths, onOpenCase }) {
+	const renderCases = (items) =>
+		items.map((testCase, index) => {
+			const key = `${testCase.id}-${index}`;
+			const path = paths.get(testCase);
+			const badge = (
+				<Badge key={key} icon={null} tone="neutral" className="tag traceability-case-tag">
+					{testCase.id}
+				</Badge>
+			);
+			return path ? (
+				<Link
+					key={key}
+					href={path}
+					className="traceability-case-link"
+					aria-label={`Open saved case ${testCase.id} ${testCase.title}`}
+					data-traceability-case={testCase.id}
+					data-requirement-id={requirementId}
+					onClick={(event) => {
+						if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+						event.preventDefault();
+						onOpenCase(path, { requirementId, caseId: testCase.id });
+					}}
+				>
+					{badge}
+				</Link>
+			) : (
+				badge
+			);
+		});
+	const remaining = cases.length - VISIBLE_CASE_COUNT;
+	return (
+		<>
+			<div className="traceability-case-items">{renderCases(cases.slice(0, VISIBLE_CASE_COUNT))}</div>
+			{remaining > 0 && (
+				<Disclosure className="traceability-case-overflow">
+					<summary>
+						{remaining} more linked {remaining === 1 ? "test" : "tests"}
+					</summary>
+					<div
+						className="traceability-case-items traceability-more-cases"
+						role="region"
+						aria-label={`More linked tests for ${requirementId}`}
+						tabIndex={0}
+					>
+						{renderCases(cases.slice(VISIBLE_CASE_COUNT))}
+					</div>
+				</Disclosure>
+			)}
+		</>
+	);
+}
 
 export default function TraceabilityMatrixPanel({
 	approvedRequirements,
@@ -8,7 +65,34 @@ export default function TraceabilityMatrixPanel({
 	tracedRequirementCount,
 	coverageMetrics,
 	testCases,
+	projectId,
+	savedSuite,
+	returnCase,
+	onOpenCase,
+	onReturnHandled,
 }) {
+	const tableRef = useRef(null);
+	const paths = useMemo(() => {
+		const resolve = createSavedCasePathResolver(projectId, savedSuite);
+		return new Map(testCases.map((testCase) => [testCase, resolve(testCase)]));
+	}, [projectId, savedSuite, testCases]);
+	const linkedCases = new Set(requirementTraceabilityRows.flatMap((row) => row.linkedTestCases));
+	const linkedCount = testCases.filter((testCase) => linkedCases.has(testCase)).length;
+	const handleReturn = useEffectEvent(onReturnHandled);
+	useLayoutEffect(() => {
+		if (!returnCase || !tableRef.current) return;
+		const link = Array.from(tableRef.current.querySelectorAll("a[data-traceability-case]")).find(
+			(item) => item.dataset.traceabilityCase === returnCase.caseId && item.dataset.requirementId === returnCase.requirementId
+		);
+		if (link) {
+			const overflow = link.closest("details");
+			if (overflow) overflow.open = true;
+			link.focus({ preventScroll: true });
+			link.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+		}
+		handleReturn();
+	}, [returnCase]);
+
 	if (approvedRequirements.length === 0) {
 		return (
 			<CollectionState as="div" kind="empty" className="generate-result-empty">
@@ -27,13 +111,7 @@ export default function TraceabilityMatrixPanel({
 					Approved requirements with linked tests {tracedRequirementCount}/{approvedRequirements.length}
 				</span>
 				<span className="workflow-diagnostics-pill">
-					Cases with traceability{" "}
-					{
-						testCases.filter((item) =>
-							getTestCaseLinkedRequirementIds(item).some((id) => approvedRequirements.some((requirement) => requirement.id === id))
-						).length
-					}
-					/{testCases.length}
+					Cases with traceability {linkedCount}/{testCases.length}
 				</span>
 				<span className="workflow-diagnostics-pill">
 					Linked scenarios{" "}
@@ -45,7 +123,13 @@ export default function TraceabilityMatrixPanel({
 						: "Unavailable"}
 				</span>
 			</div>
-			<TableScroll className="traceability-table-wrapper" role="region" aria-label="Requirement traceability table" tabIndex={0}>
+			<TableScroll
+				ref={tableRef}
+				className="traceability-table-wrapper"
+				role="region"
+				aria-label="Requirement traceability table"
+				tabIndex={0}
+			>
 				<Table className="traceability-table">
 					<thead>
 						<tr>
@@ -65,11 +149,7 @@ export default function TraceabilityMatrixPanel({
 									</td>
 									<td>
 										{linkedTestCases.length ? (
-											linkedTestCases.map((testCase) => (
-												<Badge key={testCase.id} icon={null} tone="neutral" className="tag traceability-case-tag">
-													{testCase.id}
-												</Badge>
-											))
+											<LinkedCaseTags requirementId={requirement.id} cases={linkedTestCases} paths={paths} onOpenCase={onOpenCase} />
 										) : (
 											<span className="traceability-missing-text">No linked tests</span>
 										)}

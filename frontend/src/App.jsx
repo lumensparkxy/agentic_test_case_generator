@@ -279,6 +279,7 @@ export default function App() {
 	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
 	const { route, location, navigate } = useBrowserNavigation();
+	const [restoredTraceabilityLocation, setRestoredTraceabilityLocation] = useState(null);
 	const savedCaseLink =
 		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.TEST_CASES ? readSavedCaseLink(location.search) : null;
 	const viewingSavedCase = Boolean(savedCaseLink);
@@ -378,7 +379,7 @@ export default function App() {
 		setFeedback,
 		testCaseWorkflowSettings,
 		setTestCaseWorkflowSettings,
-		activeGenerateResultTab,
+		activeGenerateResultTab: selectedGenerateResultTab,
 		setActiveGenerateResultTab,
 		isGenerating,
 		setIsGenerating,
@@ -735,6 +736,18 @@ export default function App() {
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
 	const savedSuite = projectSnapshots.test_cases;
+	const traceabilityCase =
+		restoredTraceabilityLocation !== location &&
+		!viewingSavedCase &&
+		route.kind === "project" &&
+		route.destination === PROJECT_DESTINATIONS.TEST_CASES
+			? location.state?.traceabilityCase
+			: null;
+	const isTraceabilityReturn = (projectId, snapshotId) =>
+		traceabilityCase && snapshotId && traceabilityCase.projectId === projectId && traceabilityCase.snapshotId === snapshotId;
+	const traceabilityReturn =
+		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
+	const activeGenerateResultTab = traceabilityReturn ? "traceability" : selectedGenerateResultTab;
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const savedSuiteReviewPending =
 		persistedTestCaseCount > 0 &&
@@ -1690,7 +1703,9 @@ export default function App() {
 		setAppliedTestCaseWorkflowSettings(generationPayload.workflow_settings || useCases.workflow_settings || null);
 		setTestCaseIterationHistory(generationPayload.iteration_history || []);
 		setImpactAnalysis(impactPayload || generationPayload.impact_analysis || null);
-		setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
+		if (!isTraceabilityReturn(project?.project_id, snapshots.test_cases?.snapshot_id)) {
+			setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
+		}
 		resetExportWorkflowState();
 		setExportMessage("");
 		setExportError("");
@@ -4309,6 +4324,16 @@ export default function App() {
 	const goNext = () => moveProjectStep(1);
 	const requirementsRoute = route.destination === PROJECT_DESTINATIONS.REQUIREMENTS;
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
+	const openTraceabilityCase = (path, target) => {
+		navigate(`${location.pathname}${location.search}${location.hash}`, {
+			replace: true,
+			state: {
+				...location.state,
+				traceabilityCase: { ...target, projectId: currentProjectId, snapshotId: savedSuite.snapshot_id },
+			},
+		});
+		navigate(path);
+	};
 	const compactReview = requirementsRoute || testReviewRoute;
 	const requirementSetupOpen =
 		!imports.preview && (requirementSetup?.projectId === navigationProjectId ? requirementSetup.open : requirements.length === 0);
@@ -5729,6 +5754,14 @@ export default function App() {
 																tracedRequirementCount={tracedRequirementCount}
 																coverageMetrics={coverageMetrics}
 																testCases={testCases}
+																projectId={currentProjectId}
+																savedSuite={savedSuite}
+																returnCase={traceabilityReturn}
+																onOpenCase={openTraceabilityCase}
+																onReturnHandled={() => {
+																	setActiveGenerateResultTab("traceability");
+																	setRestoredTraceabilityLocation(location);
+																}}
 															/>
 														)}
 

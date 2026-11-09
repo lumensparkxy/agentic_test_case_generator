@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { buildSavedCasePath } from "../../app/savedCaseLinks";
 import { buildProjectPath, PROJECT_DESTINATIONS } from "../../app/workflowRoutes";
@@ -9,6 +9,10 @@ import GeneratedTestCasesView from "./GeneratedTestCasesView";
 export default function LinkedTestCaseView({ projectId, snapshotId, caseId, request, navigate }) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
+	const headingRef = useRef(null);
+	useLayoutEffect(() => {
+		headingRef.current?.focus();
+	}, []);
 	const fetchCase = useEffectEvent((signal) => {
 		const path = API_CONTRACT_ENDPOINTS.projectTestCaseEvidence.path.replace("{project_id}", encodeURIComponent(projectId));
 		const query = new URLSearchParams({ snapshot_id: snapshotId, case_id: caseId });
@@ -46,7 +50,9 @@ export default function LinkedTestCaseView({ projectId, snapshotId, caseId, requ
 	return (
 		<section className="panel linked-test-case" aria-label="Saved test case">
 			<header className="linked-test-case-header">
-				<h2 className="panel-title">Saved test case</h2>
+				<h2 className="panel-title" ref={headingRef} tabIndex={-1}>
+					Saved test case
+				</h2>
 				<Link
 					href={suitePath}
 					onClick={(event) => {
