@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createRequestId, parseApiError } from "../services/apiClient";
+import useScopedImpactApplication from "./useScopedImpactApplication";
 
 // A receipt always wins over transport state: losing a response is not failure.
-export default function useImpactApplication({ project, identity, enabled, apiRequest, captureScope, isCurrent, receiveProject }) {
+function useLegacyImpactApplication({ project, identity, enabled, apiRequest, captureScope, isCurrent, receiveProject }) {
 	const analysisId = project?.current_snapshots?.impact_analysis?.snapshot_id;
 	const key = `${identity}:${project?.project_id || ""}:${analysisId || ""}`;
 	const marker = `impact-application:${key}`;
@@ -117,4 +118,18 @@ export default function useImpactApplication({ project, identity, enabled, apiRe
 		}
 	};
 	return { state, operation, error: transient.error, apply, checkStatus };
+}
+
+export default function useImpactApplication(options) {
+	const scoped = useScopedImpactApplication(options);
+	const legacy = useLegacyImpactApplication({ ...options, enabled: options.enabled && !scoped.enrolled });
+	return scoped.enrolled
+		? {
+				state: scoped.operation ? "applied" : scoped.submitting ? "submitting" : scoped.attempt?.state === "running" ? "applying" : "ready",
+				operation: scoped.operation,
+				apply: scoped.apply,
+				checkStatus: scoped.check,
+				scoped,
+			}
+		: { ...legacy, scoped: null, providerRestricted: scoped.providerRestricted };
 }

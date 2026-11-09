@@ -30,7 +30,7 @@ from ..models import (
     TestCaseTemplate,
     EnrichInput,
 )
-from .impact_application_state import ApplicationLease
+from .impact_application_state import ApplicationLease, has_shared_application
 from .versioning_service import persist_test_case_versions
 from .scenario_review_state import current_scenario_reviews, scenario_key
 from ..agents.test_case_agent import generate_test_cases
@@ -38,6 +38,7 @@ from .test_case_quality import placeholder_reason, separate_generation_work, del
 from .guidance_runtime import prepare_run
 from .guidance_service import guidance_scope, public_manifest, submit_with_guidance
 from .project_draft_admission import draft_admission_client, draft_refresh_deferred
+from .scoped_impact import apply_scoped_impact, replay_scoped_impact, scoped_impact_fingerprint
 from .billing_service import enforce_billing_access, record_billing_consumption
 from .audit_service import start_workflow_run, complete_workflow_run, record_usage_event
 from .workflow_project_service import (
@@ -127,7 +128,7 @@ def _targeted_policy(settings):
     return _fingerprint([model, settings.model_dump(mode="json"), asdict(current_evaluation_limits.get())]) if model else None
 
 
-def _recover_targeted(inputs, keys, lease):
+def _recover_targeted(inputs, keys, lease, manifests=None, verifier=None):
     results = {}
     usable = {}
     for index, (work, key) in enumerate(zip(inputs, keys, strict=True)):
@@ -137,6 +138,9 @@ def _recover_targeted(inputs, keys, lease):
         try:
             response = GenerateTestCasesResponse.model_validate_json(saved)
             _validate_targeted(work, response)
+            if verifier is not None:
+                with guidance_scope(manifests[index]):
+                    verifier(work, response)
         except ValidationError, ImpactWorkflowError:
             continue
         if (response.substantive_assessment or {}).get("status") == "assessed_complete":
@@ -146,8 +150,8 @@ def _recover_targeted(inputs, keys, lease):
     return results
 
 
-def _run_targeted_batch(inputs, manifests, keys, lease, *, worker_limit, actor_user_id, request_id, run_id):
-    results = _recover_targeted(inputs, keys, lease)
+def _run_targeted_batch(inputs, manifests, keys, lease, *, worker_limit, actor_user_id, request_id, run_id, verifier=None):
+    results = _recover_targeted(inputs, keys, lease, manifests, verifier)
     reused = len(results)
     workers = min(worker_limit, len(inputs) - reused)
     pending = [index for index in range(len(inputs)) if index not in results]
@@ -161,6 +165,9 @@ def _run_targeted_batch(inputs, manifests, keys, lease, *, worker_limit, actor_u
             run_id=run_id,
             parallel_batch=min(worker_limit, len(inputs)) > 1,
         )
+        if verifier is not None:
+            with guidance_scope(manifests[index]):
+                verifier(inputs[index], response)
         key = keys[index]
         if key and (response.substantive_assessment or {}).get("status") == "assessed_complete":
             lease.checkpoint(
@@ -337,14 +344,22 @@ def apply_project_impact_update(
     analysis_snapshot_id: Optional[str] = None,
     accepted_recommendation_ids: Optional[list[str]] = None,
     base_project_revision: Optional[int] = None,
+    request_id_explicit: bool = True,
 ) -> QaProjectDetail:
     draft_client = draft_admission_client()
     project = get_project(project_id, actor=actor)
     current_analysis = project.current_snapshots.get("impact_analysis")
+    if draft_client is not None and accepted_recommendation_ids is not None:
+        fingerprint = scoped_impact_fingerprint(analysis_snapshot_id, base_project_revision, accepted_recommendation_ids)
+        replay = replay_scoped_impact(draft_client, project, actor, request_id, fingerprint)
+        if replay is not None:
+            return replay
     if analysis_snapshot_id and (not current_analysis or analysis_snapshot_id != current_analysis.snapshot_id):
         # An old tab must never apply its selection to a newly generated analysis.
         raise ImpactWorkflowError("Impact analysis changed. Reload the project before applying.")
     if project.impact_application and project.impact_application.status in {"applying", "applied"}:
+        if draft_client is not None and current_analysis and has_shared_application(draft_client, project_id, current_analysis.snapshot_id):
+            raise HTTPException(409, {"code": "scoped_impact_already_applied", "message": "Recover this application using its original request ID."})
         return project
     if base_project_revision is None or base_project_revision != project.current_revision:
         raise ProjectConflictError(project.current_revision)
@@ -379,7 +394,18 @@ def apply_project_impact_update(
     plan_by_req = {p["requirement_id"]: p for p in (plans.payload.get("coverage_plan", []) if plans else [])}
     pending = [r for r in accepted if r.action in {"add", "update"}]
     if pending and draft_client is not None:
-        raise draft_refresh_deferred()
+        if not plans or not plans.metadata.get("scenario_refresh_predecessor"):
+            raise draft_refresh_deferred()
+        return apply_scoped_impact(
+            draft_client,
+            project,
+            actor,
+            request_id,
+            analysis_id=analysis_snapshot_id,
+            revision=base_project_revision,
+            selected=accepted_recommendation_ids,
+            request_id_explicit=request_id_explicit,
+        )
     if len(pending) > 40:
         raise ImpactWorkflowError("Select at most 40 generation recommendations per update.")
     inputs = []

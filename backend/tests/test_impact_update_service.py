@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import timedelta
 import json
-from threading import Event
+from threading import Barrier, Event
 import sys
 import unittest
 from typing import Any
@@ -27,7 +27,10 @@ from copy import deepcopy
 from fastapi import HTTPException
 import httpx
 from app.agents import substantive_review
+from app.agents.adk_runtime import _model_reservation
 from app.services import impact_update_service as service
+from app.services import project_draft_admission as admission
+from app.services import scoped_impact
 from app.services import test_case_suite_review as suite_review
 from app.routers.testcases import _append_project_generation_snapshots
 from app.services.workflow_project_service import ProjectConflictError, ProjectPermissionError, update_project
@@ -37,6 +40,7 @@ from app.services.impact_application_state import ApplicationLease, now
 from app.services.orchestrator_service import get_project_orchestrator_status
 from app.services.requirement_scope import approved_generation_requirements
 from app.services.test_case_review_progress import GenerationReviewProgress
+from app.services.use_case_review_service import review_use_case_snapshot
 from app.services.workflow_project_service import append_stage_snapshot, create_project, get_project
 from test_substantive_review_groups import critic_output
 
@@ -349,6 +353,190 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 **overrides,
             }
         )
+
+    def _demo_direct_impact(self):
+        project = self._seed_project(modified={"REQ-003", "REQ-010"}, include_semantic_neighbor=True)
+        old = project.current_snapshots["test_cases"]
+        old_sources = old.metadata["source_snapshot_ids"]
+        rows = project.current_snapshots["requirements"].payload["requirements"]
+        self.transaction_client.project = admission.DEMO_PROJECT_ID
+        self.transaction_client._emulator_host = "127.0.0.1:44124"
+        self.enterContext(
+            patch.dict(
+                "os.environ",
+                {
+                    "TCG_APPROVAL_SCENARIOS_ENABLED": "true",
+                    "FIREBASE_PROJECT_ID": admission.DEMO_PROJECT_ID,
+                    "FIRESTORE_EMULATOR_HOST": self.transaction_client._emulator_host,
+                    "GOOGLE_GENAI_USE_VERTEXAI": "false",
+                    "MODEL_NAME": "gemini-local-fixture",
+                    "ADK_SKILLS_ENABLED": "false",
+                    "ADK_MEMORY_ENABLED": "false",
+                    "PARALLEL_TEST_CASE_MAX_WORKERS": "1",
+                },
+            )
+        )
+        for module in (admission, scoped_impact):
+            self.enterContext(patch.object(module, "get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch.object(admission, "transactional", side_effect=_run_transaction))
+        self.enterContext(patch("app.services.use_case_review_service.get_required_firestore_client", return_value=self.transaction_client))
+        self.enterContext(patch("app.services.use_case_review_service.transactional", side_effect=_run_transaction))
+
+        def save(stage, payload, operation, **kwargs):
+            return append_stage_snapshot(
+                project_id=project.project_id, stage=stage, payload=payload, actor=self.actor, request_id=f"demo-{stage}", operation=operation, **kwargs
+            )
+
+        current = save("requirements", {"requirements": rows}, "requirements.review", approved=True)
+        context = save("context", {"notes": "Use the saved payment form."}, "requirements.enrich", approved=True)
+        plan = save(
+            "use_cases",
+            {
+                "coverage_plan": _coverage_plan(rows),
+                "requirement_analysis": [{"requirement_id": row["id"], "requirement_text": row["text"]} for row in rows],
+            },
+            "use_cases.generate",
+            source_snapshot_id=current.snapshot_id,
+            metadata={
+                "source_requirements_snapshot_id": current.snapshot_id,
+                "source_context_snapshot_id": context.snapshot_id,
+                "use_case_refresh": {"previous_snapshot_id": old_sources["use_cases"]},
+                "scenario_refresh_predecessor": {
+                    "previous_requirements_snapshot_id": old_sources["requirements"],
+                    "source_test_cases_snapshot_id": old.snapshot_id,
+                    "previous_review_id": "prior-approved-scenario",
+                },
+            },
+        )
+        review = review_use_case_snapshot(
+            project_id=project.project_id,
+            snapshot_id=plan.snapshot_id,
+            base_project_revision=plan.project_revision,
+            decision="approve",
+            comment=None,
+            actor=self.actor,
+            request_id="explicit-approved-refresh",
+        )
+        self.assertTrue(review.use_cases_state.approved)
+        project = analyze_project_impact(
+            project_id=project.project_id, actor=self.actor, request_id="exact-impact", base_project_revision=review.project_revision
+        )
+        source = scoped_impact._load_source(self.transaction_client, project, self.actor)
+        self.assertEqual({job.previous_case.id for job in source.work.values()}, {"TC-003", "TC-010"})
+        self.assertEqual(len(source.work), 2)
+
+        def generate(payload, **kwargs):
+            self.assertEqual(_model_reservation.get()(), 25)
+            result = self._generate(payload, **kwargs)
+            data, input_hash, _ = substantive_review.review_input(
+                [TestCase.model_validate(row) for row in result["test_cases"]], payload.requirements, payload.context, scope_plan=payload.coverage_plan
+            )
+            _, raw = critic_output(substantive_review.review_prompt(data, input_hash))
+            result["substantive_assessment"] = substantive_review.bind_reviewed_inputs(
+                substantive_review.validate_assessment(json.dumps(raw), data, input_hash), data
+            )
+            return result
+
+        self.generator.side_effect = generate
+        return project, list(source.work)
+
+    def test_demo_direct_impact_commits_exact_receipt_and_preserves_raw_siblings(self):
+        project, selected = self._demo_direct_impact()
+        old = project.current_snapshots["test_cases"]
+        original = {row["id"]: row for row in old.payload["test_cases"]}
+        with self.assertRaises(HTTPException) as subset:
+            self._apply(project, accepted_recommendation_ids=selected[:1])
+        self.assertEqual(subset.exception.detail["code"], "scoped_impact_invalid_selection")
+        self.generator.assert_not_called()
+        service.enforce_billing_access.assert_not_called()
+
+        publish = service.append_stage_snapshot
+
+        def lose_reply(**kwargs):
+            publish(**kwargs)
+            raise RuntimeError("Synthetic commit reply lost")
+
+        def billing(**kwargs):
+            self.assertEqual(kwargs["quantity"], 2)
+            self.assertEqual(kwargs["firestore_client"], self.transaction_client)
+            receipt = self.transaction_client.collection("test_wallet_receipts").document(kwargs["source_event_id"])
+            kwargs["transaction"].create(receipt, {"quantity": 2})
+
+        service.record_billing_consumption.side_effect = billing
+        with patch.object(service, "append_stage_snapshot", side_effect=lose_reply):
+            updated = self._apply(project, accepted_recommendation_ids=selected)
+        self.assertEqual(self.generator.call_count, 2)
+        self.assertEqual(service.record_billing_consumption.call_count, 1)
+        self.assertEqual(self._apply(project, accepted_recommendation_ids=list(reversed(selected))), updated)
+        with self.assertRaises(HTTPException) as changed:
+            self._apply(project, accepted_recommendation_ids=selected[:1])
+        self.assertEqual(changed.exception.detail["code"], "project_draft_request_mismatch")
+        snapshot = updated.current_snapshots["test_cases"]
+        self.assertEqual([row["id"] for row in snapshot.payload["test_cases"]], list(original))
+        for row in snapshot.payload["test_cases"]:
+            before = original[row["id"]]
+            if row["id"] in {"TC-003", "TC-010"}:
+                self.assertEqual(row["artifact_version_number"], before["artifact_version_number"] + 1)
+                self.assertNotEqual(row["artifact_version_id"], before["artifact_version_id"])
+                self.assertEqual(row["artifact_item_id"], before["artifact_item_id"])
+            else:
+                self.assertEqual(row, before)
+        self.assertFalse(snapshot.approved)
+        self.assertEqual(snapshot.payload["substantive_assessment"]["status"], "unknown")
+        self.assertTrue(snapshot.metadata["review_retry_available"])
+        status = scoped_impact.scoped_impact_status(project.project_id, self.actor, request_id="apply")
+        self.assertEqual(status.result.result_snapshot_id, snapshot.snapshot_id)
+        self.assertEqual(status.result.source_snapshot_id, old.snapshot_id)
+        self.assertFalse(status.blocked)
+        self.assertEqual(len([key for key in self.store if key.startswith("test_wallet_receipts/")]), 1)
+
+    def test_demo_impact_reuses_exact_completed_checkpoints_after_wallet_rollback_and_owner_release(self):
+        project, selected = self._demo_direct_impact()
+        source = project.current_snapshots["test_cases"]
+        service.record_billing_consumption.side_effect = HTTPException(409, "Synthetic wallet rollback")
+        with self.assertRaises(HTTPException) as failure:
+            self._apply(project, accepted_recommendation_ids=selected)
+        self.assertEqual(failure.exception.detail, "Synthetic wallet rollback")
+        self.assertEqual(get_project(project.project_id, actor=self.actor).current_snapshots["test_cases"], source)
+        self.assertEqual(self.generator.call_count, 2)
+        self.assertFalse(any(key.startswith("usage_events/") for key in self.store))
+        recovery = scoped_impact.scoped_impact_status(project.project_id, self.actor, request_id="apply")
+        self.assertIsNone(recovery.result)
+        self.assertEqual(recovery.attempt.state, "interrupted")
+        with self.assertRaises(HTTPException) as contention:
+            self._apply(project, request_id="before-release", accepted_recommendation_ids=selected)
+        self.assertEqual(contention.exception.detail["code"], "project_draft_busy")
+        self.assertTrue(scoped_impact.release_scoped_impact(project.project_id, self.actor, recovery.attempt.operation_id, recovery.attempt.fence))
+        service.record_billing_consumption.side_effect = None
+        updated = self._apply(project, request_id="explicit-recovery", accepted_recommendation_ids=selected)
+        self.assertEqual(self.generator.call_count, 2)
+        self.assertEqual(updated.current_snapshots["test_cases"].metadata["targeted_generation_reused_count"], 2)
+        self.assertFalse(any(key.endswith("/impact_recovery/demo-current") for key in self.store))
+
+    def test_demo_impact_parallel_workers_share_one_physical_request_cap(self):
+        project, selected = self._demo_direct_impact()
+        barrier = Barrier(2, timeout=5)
+        physical_calls = []
+
+        def attempt(*_args, **_kwargs):
+            for _ in range(13):
+                barrier.wait()
+                _model_reservation.get()()
+                physical_calls.append(True)
+                barrier.wait()
+            self.fail("The twenty-fifth request crossed the shared cap.")
+
+        self.generator.side_effect = attempt
+        with (
+            patch.dict("os.environ", {"PARALLEL_TEST_CASE_MAX_WORKERS": "2"}),
+            self.assertRaises(HTTPException) as rejected,
+        ):
+            self._apply(project, accepted_recommendation_ids=selected)
+        self.assertEqual(rejected.exception.detail["code"], "project_draft_budget_unavailable")
+        self.assertEqual(len(physical_calls), 24)
+        self.assertEqual(self.generator.call_count, 2)
+        service.record_billing_consumption.assert_not_called()
+        self.assertEqual(get_project(project.project_id, actor=self.actor).current_snapshots["test_cases"], project.current_snapshots["test_cases"])
 
     def test_replay_returns_durable_receipt_without_versions_generation_or_usage(self):
         project = self._analyzed()

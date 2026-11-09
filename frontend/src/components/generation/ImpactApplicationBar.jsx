@@ -10,6 +10,7 @@ export default function ImpactApplicationBar({
 	analysisDisabled,
 	approvalRequired,
 	reviewApproved,
+	showRemainingWork = true,
 	onApply,
 	onCheck,
 	onReview,
@@ -101,7 +102,7 @@ export default function ImpactApplicationBar({
 										? "Retry"
 										: `Apply ${selected.length} recommendation${selected.length === 1 ? "" : "s"}`}
 				</Button>
-				{applied && operation.accepted_recommendation_ids.length < recommendations.length && (
+				{showRemainingWork && applied && operation.accepted_recommendation_ids.length < recommendations.length && (
 					<Button variant="secondary" onClick={onAnalyze} disabled={analysisDisabled}>
 						Analyze remaining work
 					</Button>

@@ -362,6 +362,27 @@ The new scenario plan remains pending for a fresh explicit human review.
 The current test suite and its prior execution and delivery evidence stay
 historical and stale. Scoped Test Cases application is a separate action.
 
+### Scoped application of directly affected tests
+
+Review uses deterministic impact analysis after the exact refreshed plan
+receives its ordinary approval. The loopback demo asks the reviewer to
+select every verified direct update, up to six existing cases. Optional
+semantic neighbors remain visible for review. A partial direct selection
+cannot publish a current suite with older affected assertions.
+
+The application uses one shared lease and up to 24 physical provider
+requests across its targeted writers and independent checks, with a
+300-second deadline. The receipt binds the revision, sources and selection.
+The owner can release a running or interrupted attempt. A new explicit
+attempt with the same compatible scope can reuse validated completed
+checkpoints. Publication writes one selected successor per changed case,
+the unchanged raw rows, usage and billing atomically.
+
+The saved result links the previous and revised cases by exact version.
+The separate **Review saved suite** action can assess the combined suite
+against its recorded approved sources. File delivery and browser execution
+retain their own gates and deliberate actions.
+
 ## Baseline evidence
 
 [Desktop workspace sketches](test-case-generator-2-workspaces.md) show the
@@ -478,11 +499,19 @@ P5b adds the bounded one-case repair and exact saved comparison (commit
 The loopback fixture proves one selected successor and charge, exact
 historical readback, lost acknowledgement recovery, source and cancellation
 fences, and explicit whole-suite reassessment. P5c1 adds bounded scoped
-scenario refresh under
-[#477](https://github.com/lumensparkxy/agentic_test_case_generator/issues/477).
+scenario refresh (commit `d3b555a`,
+[PR #478](https://github.com/lumensparkxy/agentic_test_case_generator/pull/478)).
 The 8→6 synthetic replay refreshes two groups, retains seven exactly,
 and preserves the 14 prior cases. It keeps the new plan's human approval
-explicit. Next is bounded impact application for the changed tests.
+explicit. P5c2 adds bounded impact application under
+[#479](https://github.com/lumensparkxy/agentic_test_case_generator/issues/479).
+The loopback Booking fixture replaces six direct cases, preserves eight
+exact rows and versions, and reuses a completed checkpoint after release.
+It verifies billing rollback, the physical request cap and exact receipt
+recovery. The separate assessment confirms exact current source lineage
+and leaves reviewed-design export unavailable because the fixture Context
+does not supply the response-loss test mechanism needed by TC-013.
+Next is verifying provisional Project Sync assessment lineage.
 Unenrolled paid draft producers remain a release gate.
 P6 error analysis found prior Booking gaps covered by existing regression
 checks and no verified new prompt change. A credential-free preflight

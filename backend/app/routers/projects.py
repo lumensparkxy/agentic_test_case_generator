@@ -6,6 +6,7 @@ from fastapi.concurrency import run_in_threadpool
 from ..contracts.execution import ExecutionRequestReceipt
 from ..contracts.projects import QaProjectExecutionRunDetail, QaProjectTestCaseEvidence, QaProjectTestCaseReviewInput, QaProjectUseCaseGenerationInput
 from ..contracts.scenario_refresh import ScenarioRefreshRelease, ScenarioRefreshReleased, ScenarioRefreshStatus
+from ..contracts.scoped_impact import ScopedImpactRelease, ScopedImpactReleased, ScopedImpactStatus
 from ..contracts.selected_case_repair import (
     SelectedCaseRepairInput,
     SelectedCaseRepairRelease,
@@ -34,6 +35,7 @@ from ..services.impact_update_service import analyze_project_impact, apply_proje
 from ..services.execution_request_service import public_execution_request, read_execution_request
 from ..services.orchestrator_run_service import list_orchestrator_runs
 from ..services.orchestrator_service import get_project_orchestrator_status
+from ..services.scoped_impact import release_scoped_impact, scoped_impact_status
 from ..services.selected_case_repair import release_selected_case_repair, repair_selected_case, selected_case_repair_status
 from ..services.test_case_suite_review import review_saved_test_cases
 from ..services.use_case_review_service import review_use_case_snapshot, use_case_review_error_to_http
@@ -214,6 +216,31 @@ async def analyze_qa_project_impact(
         raise impact_error_to_http(exc) from exc
 
 
+@router.get("/projects/{project_id}/impact-update/status", response_model=ScopedImpactStatus)
+def get_scoped_impact_status(
+    project_id: str,
+    request_id: str | None = Query(default=None, min_length=1, max_length=160),
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        return scoped_impact_status(project_id, actor, request_id=request_id)
+    except Exception as exc:
+        raise impact_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/impact-update/{operation_id}/release", response_model=ScopedImpactReleased)
+def release_project_scoped_impact(
+    project_id: str,
+    operation_id: str,
+    payload: ScopedImpactRelease,
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        return ScopedImpactReleased(released=release_scoped_impact(project_id, actor, operation_id, payload.fence))
+    except Exception as exc:
+        raise impact_error_to_http(exc) from exc
+
+
 @router.post("/projects/{project_id}/impact-update/apply", response_model=QaProjectDetail)
 async def apply_qa_project_impact_update(
     project_id: str,
@@ -230,6 +257,7 @@ async def apply_qa_project_impact_update(
             analysis_snapshot_id=payload.analysis_snapshot_id,
             accepted_recommendation_ids=payload.accepted_recommendation_ids,
             base_project_revision=payload.base_project_revision,
+            request_id_explicit=bool(request.headers.get("X-Request-ID")),
         )
     except Exception as exc:
         raise impact_error_to_http(exc) from exc

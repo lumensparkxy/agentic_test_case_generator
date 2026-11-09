@@ -26,6 +26,8 @@ export interface ApiContractOperations {
 	projectOrchestratorRuns: ApiOperation<ProjectOrchestratorRunsRequest, ProjectOrchestratorRunsResponse, "GET", "/projects/{project_id}/orchestrator/runs">;
 	projectImpactAnalysis: ApiOperation<ProjectImpactAnalysisRequest, ProjectImpactAnalysisResponse, "POST", "/projects/{project_id}/impact-analysis">;
 	projectImpactUpdateApply: ApiOperation<ProjectImpactUpdateApplyRequest, ProjectImpactUpdateApplyResponse, "POST", "/projects/{project_id}/impact-update/apply">;
+	projectImpactUpdateStatus: ApiOperation<ProjectImpactUpdateStatusRequest, ProjectImpactUpdateStatusResponse, "GET", "/projects/{project_id}/impact-update/status">;
+	projectImpactUpdateRelease: ApiOperation<ProjectImpactUpdateReleaseRequest, ProjectImpactUpdateReleaseResponse, "POST", "/projects/{project_id}/impact-update/{operation_id}/release">;
 	projectTestCasesReview: ApiOperation<ProjectTestCasesReviewRequest, ProjectTestCasesReviewResponse, "POST", "/projects/{project_id}/test-cases/review">;
 	selectedCaseRepairStatus: ApiOperation<SelectedCaseRepairStatusRequest, SelectedCaseRepairStatusResponse, "GET", "/projects/{project_id}/test-cases/repair">;
 	selectedCaseRepair: ApiOperation<SelectedCaseRepairRequest, SelectedCaseRepairResponse, "POST", "/projects/{project_id}/test-cases/repair">;
@@ -107,6 +109,12 @@ export type ProjectImpactAnalysisRequest = ImpactAnalysisInput;
 export type ProjectImpactAnalysisResponse = QaProjectDetail;
 export type ProjectImpactUpdateApplyRequest = ImpactUpdateApplyInput;
 export type ProjectImpactUpdateApplyResponse = QaProjectDetail;
+export type ProjectImpactUpdateStatusRequest = {
+	request_id?: string | null;
+};
+export type ProjectImpactUpdateStatusResponse = ScopedImpactStatus;
+export type ProjectImpactUpdateReleaseRequest = ScopedImpactRelease;
+export type ProjectImpactUpdateReleaseResponse = ScopedImpactReleased;
 export type ProjectTestCasesReviewRequest = QaProjectTestCaseReviewInput;
 export type ProjectTestCasesReviewResponse = QaProjectDetail;
 export type SelectedCaseRepairStatusRequest = {
@@ -1311,6 +1319,46 @@ export interface ScenarioReviewUpdate {
 	requirement_id: string;
 	scenario_id: string;
 	status: "needs_review" | "approved" | "request_changes";
+}
+
+export interface ScopedImpactAttempt {
+	accepted_recommendation_ids: Array<string>;
+	analysis_snapshot_id: string;
+	fence: number;
+	operation_id: string;
+	reason?: string | null;
+	request_id: string;
+	source_snapshot_id: string;
+	state: "running" | "interrupted";
+}
+
+export interface ScopedImpactRelease {
+	fence: number;
+}
+
+export interface ScopedImpactReleased {
+	released?: true;
+}
+
+export interface ScopedImpactResult {
+	accepted_recommendation_ids: Array<string>;
+	analysis_snapshot_id: string;
+	changed_test_case_ids: Array<string>;
+	preserved_count: number;
+	project_revision: number;
+	request_id: string;
+	result_snapshot_id: string;
+	source_snapshot_id: string;
+	updated_count: number;
+}
+
+export interface ScopedImpactStatus {
+	attempt?: ScopedImpactAttempt | null;
+	blocked?: boolean;
+	eligible?: boolean;
+	enabled?: boolean;
+	result?: ScopedImpactResult | null;
+	selectable_recommendation_ids?: Array<string>;
 }
 
 export interface SelectedCaseRepairAttempt {

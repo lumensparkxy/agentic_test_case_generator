@@ -10,6 +10,8 @@ import json
 from threading import Event, Lock, Thread
 from uuid import uuid4
 
+from fastapi import HTTPException
+
 from ..contracts.impact import ImpactApplication
 from . import workflow_project_service as projects
 
@@ -28,6 +30,12 @@ def operation_doc(project_doc, analysis_id):
     return project_doc.collection("impact_applications").document(analysis_id)
 
 
+def has_shared_application(client, project_id, analysis_id):
+    project_doc = client.collection(projects.QA_PROJECTS_COLLECTION).document(project_id)
+    record = operation_doc(project_doc, analysis_id).get().to_dict()
+    return bool(record and record.get("admission") == "shared")
+
+
 def _expired(record):
     expiry = record.get("lease_expires_at")
     if isinstance(expiry, str):
@@ -39,6 +47,8 @@ def public_record(record):
     if not record:
         return None
     record = dict(record)
+    if record.get("admission") == "shared" and record.get("status") == "applying":
+        return None  # The owner-only shared status endpoint resolves the actual lease.
     if record.get("status") == "applying" and _expired(record):
         record.update(status="failed", error="Application was interrupted. The existing suite was preserved; retry is safe.")
     return ImpactApplication.model_validate(record)
@@ -118,7 +128,7 @@ class ApplicationLease:
             project = projects._document_to_dict(self.project_doc.get(transaction=transaction))
             projects._require_owner(project, self.actor)
             record = projects._document_to_dict(self.doc.get(transaction=transaction))
-            if record and (record["status"] == "applied" or (record["status"] == "applying" and not _expired(record))):
+            if record and (record["status"] == "applied" or (record["status"] == "applying" and (record.get("admission") == "shared" or not _expired(record)))):
                 return None
             self._check_project(project)
             if record and record["accepted_recommendation_ids"] != self.selected:
@@ -227,3 +237,111 @@ class ApplicationLease:
                 transaction.update(self.doc, {"status": "failed", "error": "Application failed before saving changes. The existing suite was preserved."})
 
         finish(self.client.transaction())
+
+
+class SharedImpactApplication:
+    """Save exact checkpoints and a public receipt under the shared provider fence."""
+
+    def __init__(self, client, project_id, analysis_id, claim, selected, recovery_binding):
+        self.client = client
+        self.claim = claim
+        self.selected = selected
+        self.recovery_binding = recovery_binding
+        project_doc = client.collection(projects.QA_PROJECTS_COLLECTION).document(project_id)
+        self.doc = operation_doc(project_doc, analysis_id)
+        self.recovery_doc = project_doc.collection("impact_recovery").document("demo-current")
+        self.checkpoints: dict[str, str] = {}
+        self.recovery_lock = Lock()
+
+    def _record(self, transaction):
+        return projects._document_to_dict(self.doc.get(transaction=transaction))
+
+    def _check(self, record):
+        if (
+            not record
+            or record.get("status") != "applying"
+            or record.get("admission") != "shared"
+            or record.get("operation_id") != self.claim.operation_id
+            or record.get("fence") != self.claim.fence
+            or record.get("request_id") != self.claim.request_id
+            or record.get("recovery_binding") != self.recovery_binding
+        ):
+            raise RuntimeError("The scoped impact checkpoint owner changed.")
+
+    def _saved_items(self, transaction):
+        recovery = projects._document_to_dict(self.recovery_doc.get(transaction=transaction))
+        if not recovery or recovery.get("binding") != self.recovery_binding:
+            return {}
+        expires = recovery.get("expires_at")
+        items = recovery.get("items")
+        if not isinstance(expires, datetime) or expires.tzinfo is None or expires <= now() or not isinstance(items, dict):
+            return {}
+        return {key: value for key, value in items.items() if isinstance(value, str)}
+
+    def open(self):
+        @projects.transactional
+        def open_application(transaction):
+            self.claim.validate(transaction)
+            record = self._record(transaction)
+            checkpoints = self._saved_items(transaction)
+            if record and (
+                record.get("admission") != "shared" or record.get("status") != "applying" or record.get("accepted_recommendation_ids") != self.selected
+            ):
+                raise HTTPException(409, {"code": "scoped_impact_selection_changed", "message": "Use the original selection or create a new impact analysis."})
+            transaction.set(
+                self.doc,
+                {
+                    "analysis_snapshot_id": self.doc.id,
+                    "status": "applying",
+                    "admission": "shared",
+                    "accepted_recommendation_ids": self.selected,
+                    "request_id": self.claim.request_id,
+                    "operation_id": self.claim.operation_id,
+                    "fence": self.claim.fence,
+                    "recovery_binding": self.recovery_binding,
+                    "started_at": now(),
+                },
+            )
+            return checkpoints
+
+        self.checkpoints = open_application(self.client.transaction())
+
+    def checkpoint(self, key, value):
+        with self.recovery_lock:
+            items = {**self.checkpoints, key: value}
+            if sum(len(item_key) + len(item.encode()) for item_key, item in items.items()) > MAX_RECOVERY_BYTES:
+                raise RuntimeError("Scoped impact checkpoints exceed the recovery size limit.")
+
+            @projects.transactional
+            def save(transaction):
+                self.claim.validate(transaction)
+                self._check(self._record(transaction))
+                transaction.set(self.recovery_doc, {"binding": self.recovery_binding, "expires_at": now() + RECOVERY_WINDOW, "items": items})
+
+            save(self.client.transaction())
+            self.checkpoints = items
+
+    def prepare_commit(self, transaction, snapshot, keys):
+        advance = self.claim.prepare_publication(transaction, snapshot)
+        record = self._record(transaction)
+        self._check(record)
+        saved = self._saved_items(transaction)
+        if not all(key in saved and saved[key] == self.checkpoints.get(key) for key in keys):
+            raise RuntimeError("Exact completed impact checkpoints are unavailable.")
+
+        def commit():
+            advance()
+            transaction.delete(self.recovery_doc)
+            transaction.set(
+                self.doc,
+                {
+                    **record,
+                    **snapshot["payload"]["impact_update_result"],
+                    "status": "applied",
+                    "completed_at": snapshot["created_at"],
+                    "result_snapshot_id": snapshot["snapshot_id"],
+                    "result_project_revision": snapshot["project_revision"],
+                },
+            )
+
+        return commit

@@ -19,7 +19,7 @@ from .audit_service import complete_workflow_run, start_workflow_run
 from .guidance_runtime import prepare_run
 from .guidance_service import enabled, guidance_scope, public_manifest
 from .orchestrator_service import _use_cases_human_approved
-from .project_draft_admission import REPAIR_OPERATION, claim_draft_attempt, draft_admission_client, read_draft_attempt_result
+from .project_draft_admission import REPAIR_OPERATION, SCOPED_IMPACT_OPERATION, claim_draft_attempt, draft_admission_client, read_draft_attempt_result
 from .requirement_scope import approved_generation_requirements
 from .suite_quality import build_suite_design_proof
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
@@ -312,8 +312,9 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
     _require_recorded_scope(original, requirements)
     recorded = {key: original.metadata[key] for key in _RECORDED_SOURCE_FIELDS if key in original.metadata}
     exact_sources = _recorded_sources_match(recorded, sources)
-    if current.operation == REPAIR_OPERATION and not exact_sources:
-        raise HTTPException(409, "The repaired suite no longer matches its recorded sources. Analyze their impact before reviewing.")
+    requires_exact_sources = current.operation == REPAIR_OPERATION or (current.operation == SCOPED_IMPACT_OPERATION and "scoped_impact" in original.metadata)
+    if requires_exact_sources and not exact_sources:
+        raise HTTPException(409, "The updated suite no longer matches its recorded sources. Analyze their impact before reviewing.")
     admission = None
     if client is not None:
         if enabled("skills", "test_cases") or enabled("memory", "test_cases"):
@@ -348,7 +349,7 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
             try:
                 context = _generated_review_context(original, context)
             except HTTPException:
-                if current.operation == REPAIR_OPERATION:
+                if requires_exact_sources:
                     raise
                 # Older supported operations can still use the existing assessment path.
                 exact_sources = False

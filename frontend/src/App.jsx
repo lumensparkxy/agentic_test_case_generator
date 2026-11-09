@@ -10,6 +10,7 @@ import useApprovalContinuation from "./hooks/useApprovalContinuation";
 import useScopedScenarioRefresh from "./hooks/useScopedScenarioRefresh";
 import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
+import ScopedImpactStatus from "./components/generation/ScopedImpactStatus";
 import useRequirementImports from "./hooks/useRequirementImports";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
@@ -669,6 +670,18 @@ export default function App() {
 		enabled: route.kind === "project" && route.projectId === currentProjectId,
 		identity: currentUser?.sub || "",
 		apiRequest: (...args) => apiRequest(...args),
+		scopedEnabled: Boolean(
+			APPROVAL_CONTINUATION_ENABLED &&
+			route.workspace === "review" &&
+			route.section === "tests" &&
+			!viewingSavedCase &&
+			route.projectId === currentProjectId &&
+			currentUser?.sub &&
+			currentProject?.owner_user_id === currentUser.sub &&
+			isAuthenticated &&
+			!isVerifyingSession
+		),
+		scopedRequest: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
 		captureScope: captureProjectOperationScope,
 		isCurrent: isProjectOperationCurrent,
 		receiveProject: (data, scope) => {
@@ -681,7 +694,10 @@ export default function App() {
 			}
 		},
 	});
-	const isApplyingImpactUpdate = ["submitting", "applying", "checking", "unreachable"].includes(impactApplication.state);
+	const scopedImpact = impactApplication.scoped;
+	const isApplyingImpactUpdate = Boolean(
+		scopedImpact?.active || ["submitting", "applying", "checking", "unreachable"].includes(impactApplication.state)
+	);
 	const isProjectRequestCurrent = (projectId, { routeRequestId = null, operationScope = null } = {}) => {
 		if (routeRequestId !== null) {
 			const browserRoute = typeof window === "undefined" ? route : parseWorkflowRoute(window.location.pathname);
@@ -865,9 +881,27 @@ export default function App() {
 		estimatedImpactChangedRequirementCount;
 	const impactRecommendationCounts = impactAnalysis?.summary?.recommendation_counts || {};
 	const impactRecommendations = impactAnalysis?.recommendations || [];
-	const acceptedImpactRecommendationIds =
-		impactApplication.operation?.accepted_recommendation_ids ||
-		impactRecommendations.filter((recommendation) => recommendation.accepted).map((recommendation) => recommendation.recommendation_id);
+	const impactAnalysisId = projectSnapshots.impact_analysis?.snapshot_id;
+	const scopedImpactSelection = useReviewDraft({
+		identity: scopedImpact ? currentUser?.sub : "",
+		projectId: currentProjectId,
+		snapshotId: impactAnalysisId || "no-analysis",
+		name: "scoped-impact-selection",
+		initialValue: [],
+	});
+	const isImpactRecommendationSelectable = (item) =>
+		scopedImpact
+			? scopedImpact.selectable.has(item.recommendation_id)
+			: !impactApplication.providerRestricted || !["add", "update"].includes(item.action);
+	const acceptedImpactRecommendationIds = scopedImpact
+		? scopedImpact.boundSelection || (Array.isArray(scopedImpactSelection.value) ? scopedImpactSelection.value : [])
+		: impactApplication.operation?.accepted_recommendation_ids ||
+			impactRecommendations.filter((item) => item.accepted && isImpactRecommendationSelectable(item)).map((item) => item.recommendation_id);
+	const impactRecommendationsForApplication =
+		scopedImpact || impactApplication.providerRestricted
+			? impactRecommendations.map((item) => ({ ...item, accepted: acceptedImpactRecommendationIds.includes(item.recommendation_id) }))
+			: impactRecommendations;
+
 	const impactChangedItems = impactAnalysis?.changed_items || [];
 	const impactApplyBlockedByStageApproval = impactChangedItems.some((item) => {
 		if (!["added", "modified"].includes(item.change_type)) return false;
@@ -881,12 +915,19 @@ export default function App() {
 		impactApplyBlockedByStageApproval ||
 		impactChangedItems.some((item) => ["added", "modified"].includes(item.change_type) && !item.approved)
 	);
-	const canAnalyzeImpact = Boolean(currentProjectId && hasExistingTestCaseBaseline && (upstreamChangedForImpact || generationTasks.length));
+	const canAnalyzeImpact = Boolean(
+		currentProjectId && hasExistingTestCaseBaseline && (upstreamChangedForImpact || generationTasks.length) && !scopedImpact?.active
+	);
 	const canApplyImpactUpdate = Boolean(
 		currentProjectId &&
 		impactAnalysis &&
 		!impactApplyBlockedByApproval &&
 		acceptedImpactRecommendationIds.length > 0 &&
+		(!scopedImpact || (scopedImpact.canApply && scopedImpact.validSelection(acceptedImpactRecommendationIds))) &&
+		(!impactApplication.providerRestricted ||
+			impactRecommendations.every(
+				(item) => !acceptedImpactRecommendationIds.includes(item.recommendation_id) || isImpactRecommendationSelectable(item)
+			)) &&
 		!isApplyingImpactUpdate &&
 		["ready", "failed"].includes(impactApplication.state)
 	);
@@ -4354,7 +4395,9 @@ export default function App() {
 		}
 		const changedItems = impactAnalysis.changed_items || [];
 		const impactedCases = impactAnalysis.impacted_test_cases || [];
-		const recommendations = impactAnalysis.recommendations || [];
+		const recommendations = impactRecommendationsForApplication;
+		const availableScopedIds = scopedImpact ? [...scopedImpact.selectable.keys()] : [];
+		const selectionLocked = Boolean(scopedImpact && (scopedImpact.active || scopedImpact.checking || !scopedImpact.statusFresh));
 		const titleCounts = new Map();
 		for (const { title } of recommendations) titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
 		const actionLabels = {
@@ -4385,6 +4428,7 @@ export default function App() {
 				<ImpactApplicationBar
 					{...impactApplication}
 					recommendations={recommendations}
+					showRemainingWork={!scopedImpact}
 					analysisDisabled={isAnalyzingImpact || testCaseActionDisabled}
 					approvalRequired={impactApplyBlockedByApproval}
 					reviewApproved={
@@ -4395,6 +4439,7 @@ export default function App() {
 					onCheck={impactApplication.checkStatus}
 					onAnalyze={analyzeImpact}
 					onReview={() => {
+						if (!impactApplication.operation || (scopedImpact && !scopedImpact.resultCurrent)) return;
 						setReviewCaseScope(null);
 						setChangedTestCaseIds(impactApplication.operation.changed_test_case_ids);
 						setActiveGenerateResultTab("test-cases");
@@ -4455,10 +4500,37 @@ export default function App() {
 
 				<div className="impact-table-block">
 					<h3>Recommendations</h3>
+					{scopedImpact && (
+						<div className="workbench-actions">
+							<p>
+								{scopedImpact.requiredCount
+									? `${acceptedImpactRecommendationIds.length} of ${scopedImpact.requiredCount} required direct updates selected.`
+									: `This application supports a complete set of up to ${scopedImpact.limit} direct updates.`}{" "}
+								Optional neighbors remain available for review.
+							</p>
+							{scopedImpact.validSelection(availableScopedIds) && (
+								<Button
+									variant="secondary"
+									size="compact"
+									disabled={selectionLocked || Boolean(impactApplication.operation)}
+									onClick={() => scopedImpactSelection.setValue(availableScopedIds)}
+								>
+									Select direct updates
+								</Button>
+							)}
+						</div>
+					)}
 					<List as="div" variant="grouped" className="impact-recommendation-list">
 						{recommendations.map((recommendation) => {
 							const reference = recommendation.test_case_id || recommendation.scenario_refs?.join(", ") || recommendation.recommendation_id;
 							const title = titleCounts.get(recommendation.title) > 1 ? `${recommendation.title} (${reference})` : recommendation.title;
+							const checked = acceptedImpactRecommendationIds.includes(recommendation.recommendation_id);
+							const selectable = isImpactRecommendationSelectable(recommendation);
+							const scopedSelectionLimit =
+								scopedImpact &&
+								!checked &&
+								(acceptedImpactRecommendationIds.length >= scopedImpact.limit ||
+									acceptedImpactRecommendationIds.some((id) => scopedImpact.selectable.get(id) === recommendation.test_case_id));
 							return (
 								<div key={recommendation.recommendation_id} className={`impact-recommendation ${recommendation.action}`}>
 									<div>
@@ -4472,14 +4544,23 @@ export default function App() {
 											<Checkbox
 												aria-label={`Accept ${title}`}
 												data-testid={`impact-accept-${recommendation.recommendation_id}`}
-												checked={
-													impactApplication.operation
-														? impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
-														: Boolean(recommendation.accepted)
+												checked={checked}
+												disabled={
+													isApplyingImpactUpdate ||
+													Boolean(impactApplication.operation) ||
+													selectionLocked ||
+													(!selectable && !checked) ||
+													Boolean(scopedSelectionLimit)
 												}
-												disabled={isApplyingImpactUpdate || Boolean(impactApplication.operation)}
 												onChange={(event) => {
 													const accepted = event.target.checked;
+													if (scopedImpact) {
+														const next = accepted
+															? [...acceptedImpactRecommendationIds, recommendation.recommendation_id]
+															: acceptedImpactRecommendationIds.filter((id) => id !== recommendation.recommendation_id);
+														if (!accepted || scopedImpact.validPartialSelection(next)) scopedImpactSelection.setValue(next);
+														return;
+													}
 													setImpactAnalysis((current) => ({
 														...current,
 														recommendations: current.recommendations.map((item) =>
@@ -4491,9 +4572,11 @@ export default function App() {
 											{impactApplication.operation?.status === "applied" &&
 											impactApplication.operation.accepted_recommendation_ids.includes(recommendation.recommendation_id)
 												? "Applied"
-												: acceptedImpactRecommendationIds.includes(recommendation.recommendation_id)
+												: checked
 													? "Accepted"
-													: "Review"}
+													: !selectable
+														? "Outside scoped update"
+														: "Review"}
 										</label>
 									</div>
 								</div>
@@ -6101,6 +6184,14 @@ export default function App() {
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
 											{suiteQualitySummary}
+											<ScopedImpactStatus
+												application={scopedImpact}
+												projectId={currentProjectId}
+												analysisId={impactAnalysisId}
+												revision={currentProjectRevision}
+												navigate={navigate}
+												disabled={testCaseActionDisabled || impactApplyBlockedByApproval}
+											/>
 											{repairReviewRoute && <SelectedCaseRepairStatus repair={selectedRepair} currentSnapshotId={repairSnapshotId} />}
 											{repairReviewRoute && selectedRepair.result && (
 												<SavedRepairEvidence
@@ -6201,11 +6292,13 @@ export default function App() {
 												<div className={`generation-gate-card ${canGenerateFromApprovedRequirements ? "ready" : "blocked"}`}>
 													<div>
 														<strong>
-															{isApplyingImpactUpdate
-																? "Applying accepted recommendations"
-																: impactAnalysis && !impactStageState.stale
-																	? "Review impact recommendations"
-																	: "Existing suite needs impact analysis"}
+															{scopedImpact?.pending && !scopedImpact.submitting && scopedImpact.attempt?.state !== "running"
+																? "Check pending impact application"
+																: isApplyingImpactUpdate
+																	? "Applying accepted recommendations"
+																	: impactAnalysis && !impactStageState.stale
+																		? "Review impact recommendations"
+																		: "Existing suite needs impact analysis"}
 														</strong>
 														<p>
 															{approvedRequirementCount} approved • {reviewPendingRequirementCount} pending review •{" "}
