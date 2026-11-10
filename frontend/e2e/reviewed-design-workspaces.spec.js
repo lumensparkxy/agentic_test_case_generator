@@ -26,7 +26,15 @@ const literal = "  QA–01  ";
 
 async function setup(
 	page,
-	{ stale = false, available = true, oldServer = false, runEvidence, browserExecution = false, supersedeExport = false } = {}
+	{
+		stale = false,
+		available = true,
+		oldServer = false,
+		runEvidence,
+		browserExecution = false,
+		supersedeExport = false,
+		reassessment = false,
+	} = {}
 ) {
 	const project = useCaseProjectFixture({ name: "Verified checkout design" });
 	const plan = project.current_snapshots.use_cases;
@@ -66,25 +74,26 @@ async function setup(
 	};
 	const sourceIds = { requirements: project.current_snapshots.requirements.snapshot_id, use_cases: plan.snapshot_id };
 	const metadata = { source_snapshot_ids: sourceIds, source_use_case_snapshot_id: plan.snapshot_id };
+	const legacyApproved = browserExecution || reassessment;
 	project.current_snapshots.test_cases = {
 		snapshot_id: suiteId,
 		project_id: project.project_id,
 		stage: "test_cases",
 		version: 2,
 		project_revision: project.current_revision,
-		approved: browserExecution,
+		approved: legacyApproved,
 		operation: "testcases.generate",
 		source_snapshot_id: plan.snapshot_id,
 		metadata,
 		payload: {
 			test_cases: [testCase],
 			coverage_plan: coverage,
-			approved: browserExecution,
+			approved: legacyApproved,
 			review: {
-				approved: browserExecution,
+				approved: legacyApproved,
 				score: 100,
 				threshold: 90,
-				summary: browserExecution ? "Approved for browser execution." : "The checkout execution fixture is missing.",
+				summary: legacyApproved ? "The saved suite previously passed review." : "The checkout execution fixture is missing.",
 			},
 			substantive_assessment: {
 				status: "incomplete",
@@ -96,7 +105,7 @@ async function setup(
 			generation_tasks: [],
 		},
 	};
-	project.stage_state.test_cases = { current_snapshot_id: suiteId, version: 2, stale, approved: browserExecution, metadata };
+	project.stage_state.test_cases = { current_snapshot_id: suiteId, version: 2, stale, approved: legacyApproved, metadata };
 	const historicalRun = workspaceRunFixture({
 		project_id: project.project_id,
 		run_id: "checkout-run-before-repair",
@@ -177,12 +186,13 @@ async function setup(
 		project.execution_runs.unshift(indexedRun);
 	}
 	if (!oldServer) {
+		const complete = available && !stale && !reassessment;
 		project.design_delivery_enabled = true;
-		project.reviewed_design_available = available && !stale;
+		project.reviewed_design_available = complete;
 		project.suite_quality = {
 			suite_snapshot_id: suiteId,
-			source_freshness: stale ? "stale" : available ? "current" : "unknown",
-			design_status: available && !stale ? "complete" : "unknown",
+			source_freshness: stale ? "stale" : available || reassessment ? "current" : "unknown",
+			design_status: complete ? "complete" : "unknown",
 			scenario_decision: "approved",
 			scenario_snapshot_id: plan.snapshot_id,
 			scenario_review_id: "review-current-checkout-plan",
@@ -193,7 +203,9 @@ async function setup(
 			excluded_requirement_ids: [],
 			active_case_count: project.current_snapshots.test_cases.payload.test_cases.length,
 			deprecated_case_count: 0,
-			reason_codes: [stale ? "sources_stale" : available ? "design_verified" : "design_proof_missing"],
+			reason_codes: [
+				stale ? "sources_stale" : reassessment ? "design_reassessment_required" : complete ? "design_verified" : "design_proof_missing",
+			],
 		};
 	}
 
@@ -272,7 +284,7 @@ async function setup(
 				project_revision: publishedReport.project_revision,
 				format: publishedReport.payload.format,
 				created_at: "2026-07-17T12:35:00Z",
-				delivery_kind: "reviewed_design",
+				delivery_kind: publishedReport.payload.delivery_kind || "draft",
 				legacy_approved: false,
 				historical: true,
 				stale: false,
@@ -280,6 +292,7 @@ async function setup(
 					suite_snapshot_id: suiteId,
 					source_snapshot_ids: { ...sourceIds, test_cases: suiteId },
 					exported_at: "2026-07-17T12:35:00Z",
+					draft_override_reason: publishedReport.payload.draft_override_reason,
 					case_versions: [{ case_id: caseId, case_version_id: testCase.artifact_version_id, case_version_number: 2 }],
 				},
 			},
@@ -287,7 +300,10 @@ async function setup(
 	});
 	await page.route("**/export/json", (route) => {
 		const request = route.request();
-		exportRequests.push({ body: request.postDataJSON(), requestId: request.headers()["x-request-id"] });
+		const body = request.postDataJSON();
+		exportRequests.push({ body, requestId: request.headers()["x-request-id"] });
+		const draft = body.draft_override_requested === true;
+		const classification = draft ? {} : { delivery_kind: "reviewed_design" };
 		project.current_revision += 1;
 		const report = {
 			snapshot_id: reportId,
@@ -298,8 +314,8 @@ async function setup(
 			operation: "export.json",
 			approved: false,
 			source_snapshot_id: suiteId,
-			metadata: { delivery_kind: "reviewed_design" },
-			payload: { format: "json", source: "export", delivery_kind: "reviewed_design", approved: false },
+			metadata: classification,
+			payload: { format: "json", source: "export", ...classification, approved: false, draft_override_reason: body.draft_override_reason },
 		};
 		publishedReport = report;
 		project.current_snapshots.reports = report;
@@ -314,7 +330,7 @@ async function setup(
 				approved: false,
 				count: 1,
 				source_snapshot_id: suiteId,
-				delivery_kind: "reviewed_design",
+				...classification,
 			}),
 		];
 		if (supersedeExport) {
@@ -332,13 +348,15 @@ async function setup(
 		}
 		orchestrator.project_revision = project.current_revision;
 		return route.fulfill({
-			headers: supersedeExport ? { "X-Export-Report-ID": reportId, "Access-Control-Expose-Headers": "X-Export-Report-ID" } : {},
+			headers: supersedeExport || draft ? { "X-Export-Report-ID": reportId, "Access-Control-Expose-Headers": "X-Export-Report-ID" } : {},
 			json: {
 				test_cases: [testCase],
 				audit_metadata: {
 					snapshot_id: suiteId,
-					is_draft: false,
-					design_delivery: { delivery_kind: "reviewed_design", declared_setup: "blocked" },
+					is_draft: draft,
+					...(draft
+						? { draft_override_reason: body.draft_override_reason, machine_review_status: "unavailable" }
+						: { design_delivery: { delivery_kind: "reviewed_design", declared_setup: "blocked" } }),
 				},
 			},
 		});
@@ -352,6 +370,59 @@ const exportDesign = (page) => page.getByRole("button", { name: "Export reviewed
 
 test.describe("Exact suite evidence across Review and Deliver", () => {
 	test.skip(!v2, "Requires the opt-in project workspaces");
+
+	test("delivers a reasoned draft when the exact saved design needs reassessment", async ({ page }, testInfo) => {
+		const { errors, exportRequests, writes, testCase, reportReads } = await setup(page, { reassessment: true });
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/deliver`);
+		const json = page.getByRole("button", { name: "JSON API/Import ready", exact: true });
+		await expect(page.getByText("The saved design needs reassessment.", { exact: false })).toBeVisible();
+		await expect(page.getByText("Approved for export", { exact: true })).toHaveCount(0);
+		await expect(exportDesign(page)).toHaveCount(0);
+		await expect(json).toBeDisabled();
+		await page.screenshot({ path: testInfo.outputPath("deliver-needs-reassessment.png") });
+
+		await page.getByRole("link", { name: "Open test review", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/review/tests`);
+		await expect(quality(page)).toContainText(/Independent design\s*Unknown/);
+		await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
+		await page.goBack();
+		await expect(json).toBeDisabled();
+		await page.getByRole("checkbox", { name: "Export draft anyway", exact: true }).check();
+		const reasonField = page.getByRole("textbox", { name: "Reason for exporting this draft", exact: true });
+		await reasonField.fill("   ");
+		await expect(json).toBeDisabled();
+		expect(writes).toEqual([]);
+		const reason = "Share the exact saved cases for review.";
+		await reasonField.fill(reason);
+		await expect(json).toBeEnabled();
+		const downloadPromise = page.waitForEvent("download");
+		await json.press("Enter");
+		const download = await downloadPromise;
+		const file = JSON.parse(await readFile(await download.path(), "utf8"));
+		expect(file.audit_metadata).toMatchObject({
+			snapshot_id: suiteId,
+			is_draft: true,
+			draft_override_reason: reason,
+			machine_review_status: "unavailable",
+		});
+		expect(file.test_cases[0].steps).toEqual(testCase.steps);
+		expect(exportRequests).toHaveLength(1);
+		expect(exportRequests[0].body).toMatchObject({
+			approved: false,
+			source_snapshot_id: suiteId,
+			draft_override_requested: true,
+			draft_override_reason: reason,
+		});
+		expect(exportRequests[0].body).not.toHaveProperty("delivery_intent");
+		await page.getByRole("link", { name: "Open saved report for this download", exact: true }).press("Enter");
+		await expect(page.getByRole("heading", { name: "Saved file report", exact: true })).toBeVisible();
+		await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+		await expect(page.getByText(reason, { exact: true })).toBeVisible();
+		expect(reportReads).toContain(reportId);
+		expect(writes).toEqual(["POST /export/json"]);
+		expect(errors).toEqual([]);
+	});
 
 	test("delivers the exact reviewed design while browser setup stays blocked", async ({ page }, testInfo) => {
 		const { errors, exportRequests, writes, testCase, historicalRun } = await setup(page);

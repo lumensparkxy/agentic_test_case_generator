@@ -10,6 +10,7 @@ from ..contracts.exports import DesignDeliveryEvidence, ExportAuditMetadata, Exp
 from ..contracts.projects import QaProjectDetail, QaProjectStageSnapshot
 from ..contracts.requirements import Requirement, ReviewResult
 from ..contracts.test_cases import TestCase
+from .suite_quality import DESIGN_REASSESSMENT_REQUIRED
 from .test_case_quality import placeholder_reason
 
 
@@ -137,8 +138,11 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
 
     saved = snapshot.payload if snapshot else {}
     metadata = snapshot.metadata if snapshot else {}
+    quality = project.suite_quality if snapshot else None
+    reassessment_required = quality and quality.suite_snapshot_id == snapshot.snapshot_id and DESIGN_REASSESSMENT_REQUIRED in quality.reason_codes
     review = None
-    if isinstance(saved.get("review"), dict) and isinstance(saved["review"].get("approved"), bool):
+    # Leave the superseded approval on the saved suite and its historical reports.
+    if not reassessment_required and isinstance(saved.get("review"), dict) and isinstance(saved["review"].get("approved"), bool):
         try:
             review = ReviewResult.model_validate(saved["review"])
         except ValidationError:
@@ -249,7 +253,11 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
             422,
             {
                 "code": "draft_override_required",
-                "message": "Export is unapproved, incomplete or unverifiable. Request a draft export and provide a nonempty reason.",
+                "message": (
+                    "The saved design needs reassessment. Request a draft export and provide a nonempty reason."
+                    if reassessment_required
+                    else "Export is unapproved, incomplete or unverifiable. Request a draft export and provide a nonempty reason."
+                ),
             },
         )
 

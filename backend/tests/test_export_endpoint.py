@@ -426,9 +426,11 @@ class ExportPublicationTests(unittest.TestCase):
         self.assertEqual(event["workflow_run_id"], workflow["run_id"])
         return event
 
-    def seed_reviewed_design(self):
-        source, suite_payload, metadata = suite_quality_fixture(missing_setup=True)
+    def seed_reviewed_design(self, *, legacy_approved=False):
+        source, suite_payload, metadata = suite_quality_fixture(missing_setup=not legacy_approved)
         requirements_payload = deepcopy(source.current_snapshots["requirements"].payload)
+        if legacy_approved:
+            del requirements_payload["requirements"][1:]
         row = requirements_payload["requirements"][0]
         row.update(
             original_requirement_ids=["CHECKOUT-01"],
@@ -444,7 +446,7 @@ class ExportPublicationTests(unittest.TestCase):
                 }
             ],
         )
-        requirements = self.save("requirements", requirements_payload, operation="requirements.review", approved=False)
+        requirements = self.save("requirements", requirements_payload, operation="requirements.review", approved=legacy_approved)
         plan = self.save(
             "use_cases",
             source.current_snapshots["use_cases"].payload,
@@ -475,8 +477,13 @@ class ExportPublicationTests(unittest.TestCase):
                 "artifact_version_id": "version-2",
             }
         )
-        suite_payload["review"] = {"approved": False, "score": 100, "threshold": 90, "blocking_issues": ["Checkout operator role is missing."]}
-        suite_payload["approved"] = False
+        suite_payload["review"] = {
+            "approved": legacy_approved,
+            "score": 100,
+            "threshold": 90,
+            "blocking_issues": [] if legacy_approved else ["Checkout operator role is missing."],
+        }
+        suite_payload["approved"] = legacy_approved
         assessment = suite_payload["substantive_assessment"]
         assessment["case_grounding"].append({"test_case_id": "TC-0", "reason": "The saved checkout displays its confirmation.", "prerequisites": []})
         reviewed_hash = reviewed_case_content_hash(suite_payload["test_cases"])
@@ -499,14 +506,14 @@ class ExportPublicationTests(unittest.TestCase):
             "test_cases",
             suite_payload,
             operation="testcases.generate",
-            approved=False,
+            approved=legacy_approved,
             source_snapshot_id=plan.snapshot_id,
             metadata=metadata,
             suite_design_proof=proof,
         )
         self.before = self.project()
         self.assertEqual(self.before.suite_quality.design_status, "complete")
-        self.assertEqual(self.before.suite_quality.declared_setup, "blocked")
+        self.assertEqual(self.before.suite_quality.declared_setup, "not_assessed" if legacy_approved else "blocked")
         self.input.update(
             base_project_revision=self.before.current_revision,
             source_snapshot_id=self.suite.snapshot_id,
@@ -540,6 +547,60 @@ class ExportPublicationTests(unittest.TestCase):
         self.assertEqual(metadata["source_mappings"][0]["original_requirement_ids"], ["CHECKOUT-01"])
         self.assertEqual(metadata["source_mappings"][0]["sources"][0]["source_id"], "checkout-source")
         self.assertEqual(metadata["design_delivery"], report.payload["audit_metadata"]["design_delivery"])
+
+    def test_reassessment_blocks_fresh_approved_files_but_preserves_history_and_reasoned_draft_replay(self):
+        self.seed_reviewed_design(legacy_approved=True)
+        first = self.post(request_id="original-approval")
+        self.assertEqual(first.status_code, 200, first.text)
+        original_id = first.headers["X-Export-Report-ID"]
+        original = self.read_report(original_id).json()
+        self.assertEqual(original["delivery_kind"], "approved")
+        self.assertEqual(original["evidence"]["machine_review_status"], "approved")
+        published = deepcopy(self.store)
+
+        with patch("app.services.suite_quality._complete_assessment", return_value=False):
+            current = self.project()
+            self.assertIn("design_reassessment_required", current.suite_quality.reason_codes)
+            revision = current.current_revision
+            for fmt in ("csv", "excel", "json"):
+                with self.subTest(fmt=fmt):
+                    response = self.post(fmt, request_id="try-approved", base_project_revision=revision, approved=True)
+                    self.assertEqual(response.status_code, 422, response.text)
+                    self.assertEqual(response.json()["detail"]["code"], "draft_override_required")
+            replay = self.post(request_id="original-approval")
+            self.assertEqual(replay.status_code, 422, replay.text)
+            self.assertEqual(self.read_report(original_id).json(), original)
+            self.assertEqual(self.store, published)
+
+            draft_request = {
+                "base_project_revision": revision,
+                "approved": True,
+                "draft_override_requested": True,
+                "draft_override_reason": "Inspect the saved assertions while reassessment is pending.",
+            }
+            draft = self.post(request_id="reasoned-draft", **draft_request)
+            self.assertEqual(draft.status_code, 200, draft.text)
+            audit = draft.json()["audit_metadata"]
+            self.assertTrue(audit["is_draft"])
+            self.assertEqual(audit["draft_override_reason"], draft_request["draft_override_reason"])
+            self.assertEqual(audit["machine_review_status"], "unavailable")
+            self.assertIsNone(audit["machine_review"])
+            self.assertEqual(audit["snapshot_id"], self.suite.snapshot_id)
+            self.assertEqual([case["artifact_version_id"] for case in audit["case_versions"]], ["version-1", "version-2"])
+            self.assertEqual(draft.json()["test_cases"][0]["steps"][0], first.json()["test_cases"][0]["steps"][0])
+            draft_id = draft.headers["X-Export-Report-ID"]
+            saved_draft = self.read_report(draft_id).json()
+            self.assertEqual(saved_draft["delivery_kind"], "draft")
+            self.assertFalse(saved_draft["legacy_approved"])
+            self.assertEqual(saved_draft["evidence"]["machine_review_status"], "unavailable")
+            self.assertTrue(self.project().stage_state["test_cases"].approved)
+            self.assertEqual(self.read_report(original_id).json()["evidence"], original["evidence"])
+            writes = deepcopy(self.store)
+            replay = self.post(request_id="reasoned-draft", **draft_request)
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertEqual(replay.headers["X-Export-Report-ID"], draft_id)
+            self.assertEqual(replay.content, draft.content)
+            self.assertEqual(self.store, writes)
 
     def test_legacy_fingerprints_and_bytes_match_the_pre_upgrade_contract(self):
         with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):

@@ -1043,15 +1043,16 @@ export default function App() {
 		approvedGenerationScopeReady &&
 		useCasesHumanApproved &&
 		savedSuite.metadata?.review_retry_available === true;
-	const currentSuiteSnapshotId =
-		PROJECT_WORKSPACES_V2 && route.projectId === currentProjectId && savedSuite?.snapshot_id === testCaseStageState.current_snapshot_id
+	const exactSavedSuiteId =
+		route.projectId === currentProjectId && savedSuite?.snapshot_id === testCaseStageState.current_snapshot_id
 			? savedSuite?.snapshot_id
 			: null;
-	const suiteQuality =
-		currentSuiteSnapshotId && currentProject?.suite_quality?.suite_snapshot_id === currentSuiteSnapshotId
-			? currentProject.suite_quality
-			: null;
-	const reassessSavedProof = APPROVAL_CONTINUATION_ENABLED && suiteQuality?.reason_codes?.includes("design_reassessment_required");
+	const exactSuiteQuality =
+		exactSavedSuiteId && currentProject?.suite_quality?.suite_snapshot_id === exactSavedSuiteId ? currentProject.suite_quality : null;
+	const currentSuiteSnapshotId = PROJECT_WORKSPACES_V2 ? exactSavedSuiteId : null;
+	const suiteQuality = PROJECT_WORKSPACES_V2 ? exactSuiteQuality : null;
+	const savedProofNeedsReassessment = exactSuiteQuality?.reason_codes?.includes("design_reassessment_required");
+	const reassessSavedProof = APPROVAL_CONTINUATION_ENABLED && PROJECT_WORKSPACES_V2 && savedProofNeedsReassessment;
 	const pendingStoredReview =
 		savedSuite?.payload?.substantive_assessment?.status === "unknown" &&
 		(syncDraftSuite
@@ -4549,6 +4550,7 @@ export default function App() {
 			: null;
 	const reviewedDesignAvailable = Boolean(
 		suiteQuality &&
+		!savedProofNeedsReassessment &&
 		currentProject?.design_delivery_enabled === true &&
 		currentProject.reviewed_design_available === true &&
 		!testCaseStageState.stale &&
@@ -4592,6 +4594,7 @@ export default function App() {
 	) : null;
 	const exportReviewApproved = Boolean(
 		exportDraftRequiredFor !== exportEvidenceKey &&
+		!savedProofNeedsReassessment &&
 		testCaseReview?.approved &&
 		projectStageState.test_cases?.approved &&
 		!projectStageState.test_cases?.stale &&
@@ -7270,6 +7273,7 @@ export default function App() {
 											navigate={navigate}
 											request={apiRequest}
 											exportReviewApproved={exportReviewApproved}
+											savedProofNeedsReassessment={savedProofNeedsReassessment}
 											exportRequiresOverride={exportRequiresOverride}
 											exportGateLocked={exportGateLocked}
 											draftExportOverrideRequested={draftExportOverrideRequested}

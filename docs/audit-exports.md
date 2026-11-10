@@ -77,3 +77,10 @@ When server evidence requires a draft despite the initial browser state, the API
 returns `detail.code: draft_override_required` with status 422. The export panel
 shows the message and requires a reason before retrying that snapshot/revision.
 Changing the project evidence clears that server-derived draft requirement.
+
+When an exact saved design needs reassessment, the current export gate
+requires a reasoned draft even if the saved suite previously passed review.
+The draft marks machine review as unavailable and retains the saved case
+versions. An earlier report keeps the classification and evidence recorded
+at export time. Retrying its download still requires the original evidence
+to satisfy current file admission.
