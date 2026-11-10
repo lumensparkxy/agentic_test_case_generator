@@ -4963,10 +4963,8 @@ export default function App() {
 				testsPath={testsPath}
 				navigate={navigate}
 				onCheck={() => {
-					void approvalContinuation.refresh({ reset: true });
 					const operationScope = captureProjectOperationScope();
-					if (operationScope && (approvalContinuation.run?.result_snapshot_id || approvalContinuation.pendingRequest))
-						void refreshCurrentProject({ hydrate: true, operationScope });
+					void approvalContinuation.check(() => refreshCurrentProject({ hydrate: true, operationScope }));
 				}}
 				saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
 				resultCurrent={continuationResultCurrent}

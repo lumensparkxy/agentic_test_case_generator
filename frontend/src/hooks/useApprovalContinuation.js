@@ -37,6 +37,8 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const runs = current?.data?.runs || [];
 	const requestId = pending.value?.requestId || "";
 	const pendingStage = pending.value?.stage || "prepare_scenarios";
+	const activeRequestId = useRef(requestId);
+	activeRequestId.current = requestId;
 	const match = requestId && runs.find((item) => item.request_id === requestId && item.stage === pendingStage);
 	const receipt = requestId && current?.data?.receipt?.request_id === requestId ? current.data.receipt : null;
 	const run = match || (!requestId ? runs[0] : null);
@@ -104,6 +106,30 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	}, [current, refresh, run?.state, scope, unresolved]);
 
 	const clearPending = (requestId) => pending.clear({ matches: (value) => value?.requestId === requestId });
+	const check = async (readProject) => {
+		if (!requestId) {
+			void refresh({ reset: true });
+			if (run?.result_snapshot_id) await readProject();
+			return;
+		}
+		const isCurrent = () => activeScope.current === scope && activeRequestId.current === requestId;
+		const project = await readProject();
+		if (!isCurrent()) return;
+		// A read made after the newer revision sees any receipt committed by the old request.
+		const status = await refresh({ reset: true, replace: true });
+		if (
+			isCurrent() &&
+			project?.project_id === projectId &&
+			Number.isInteger(project.current_revision) &&
+			Number.isInteger(pending.value?.baseRevision) &&
+			project.current_revision > pending.value.baseRevision &&
+			status?.receipt === null &&
+			Array.isArray(status.runs) &&
+			!status.runs.some((item) => item.request_id === requestId && item.stage === pendingStage)
+		) {
+			clearPending(requestId);
+		}
+	};
 	const accept = (response, requestId, stage = "prepare_scenarios") => {
 		const result = response.continuation;
 		if (result) {
@@ -221,7 +247,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		clearPending,
 		accept,
 		cancel,
-		refresh,
+		check,
 		savedReview: {
 			enabled: current?.data?.saved_review_enabled === true,
 			statusRead: Boolean(current?.data),

@@ -109,6 +109,7 @@ async function fixture(
 		completedCases,
 		competingApproval,
 		scopeConflictGate,
+		dropCompetingReply = false,
 	} = {}
 ) {
 	const project = prepared ? useCaseProjectFixture() : pendingProject();
@@ -286,6 +287,7 @@ async function fixture(
 		};
 		if (competingApproval === "scope") {
 			if (scopeConflictGate) await scopeConflictGate.promise;
+			if (dropCompetingReply) return route.abort("failed");
 			return route.fulfill({
 				status: 409,
 				json: { detail: { code: "stale_import", latest_revision: project.current_revision, message: "Project changed." } },
@@ -329,7 +331,8 @@ async function fixture(
 			source_snapshot_id: input.snapshot_id,
 			result_snapshot_id: null,
 		};
-		if (competingApproval === "scenarios")
+		if (competingApproval === "scenarios") {
+			if (dropCompetingReply) return route.abort("failed");
 			return route.fulfill({
 				status: 409,
 				json: {
@@ -341,6 +344,7 @@ async function fixture(
 					},
 				},
 			});
+		}
 		if (loseTestReply) return route.abort("failed");
 		const ack = { ...useCaseReviewResponseFixture(project, { ...input, requestId }), continuation: testRun, blocked_reason: null };
 		if (scenarioAckGate) await scenarioAckGate.promise;
@@ -680,6 +684,55 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(openTests(page)).toBeVisible();
 		expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
 		expect(api.executionRequests).toEqual([]);
+	});
+
+	test("checks the current scope before releasing a dropped stale approval", async ({ page }) => {
+		const api = await fixture(page, { competingApproval: "scope", dropCompetingReply: true });
+		await page.goto(`${root}/review`);
+		await approve(page).click();
+		await expect(progress(page)).toContainText("Could not confirm the approval response.");
+		api.savePreparedPlan({ failReadback: false });
+		await page.reload();
+		await expect(progress(page)).toContainText("Could not confirm the approval response.");
+		await check(page).click();
+		const openPlan = progress(page).getByRole("link", { name: "Open prepared scenarios", exact: true });
+		await openPlan.click();
+		await expect(page.getByText(readyScenario, { exact: true })).toBeVisible();
+		expect(api.writes).toEqual([`POST ${approvalPath}`]);
+	});
+
+	test("checks the current plan before releasing a dropped stale scenario approval", async ({ page }) => {
+		const api = await fixture(page, { prepared: true, competingApproval: "scenarios", dropCompetingReply: true });
+		await openPreparedDecision(page);
+		await approveTests(page).click();
+		await expect(decision(page).getByRole("alert")).toContainText("Approval outcome unconfirmed");
+		api.reportSuiteSaved();
+		api.publishSuite();
+		await page.reload();
+		await expect(testProgress(page)).toContainText("Could not confirm the scenario approval response.");
+		await checkTests(page).click();
+		await expect(openTests(page)).toBeVisible();
+		expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
+		expect(api.executionRequests).toEqual([]);
+	});
+
+	test("keeps a missing approval receipt unresolved while the submitted revision remains current", async ({ page }) => {
+		const api = await fixture(page);
+		let requestId;
+		await page.route(routePath(approvalPath), (route) => {
+			requestId = route.request().headers()["x-request-id"];
+			return route.abort("failed");
+		});
+		await page.goto(`${root}/review`);
+		await approve(page).click();
+		await expect(progress(page)).toContainText("Could not confirm the approval response.");
+		const priorReads = api.reads.length;
+		await check(page).click();
+		await expect.poll(() => api.reads.slice(priorReads).some((read) => read.requestId === requestId)).toBe(true);
+		await page.reload();
+		await expect(progress(page)).toContainText("Could not confirm the approval response.");
+		await expect(progress(page).getByRole("link", { name: "Open prepared scenarios" })).toHaveCount(0);
+		expect(api.writes).toEqual([`POST ${approvalPath}`]);
 	});
 
 	test("cancellation retains the saved scope and is still visible after reload", async ({ page }) => {

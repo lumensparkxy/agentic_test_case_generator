@@ -509,9 +509,14 @@ reloaded and recovered its own exact receipt. Local Firestore recorded
 one plan, one 11-case suite, one usage event per continuation and one
 unapplied suite-generation billing receipt. The rehearsal used authored
 SDK responses and loopback-only networking.
-The next local recovery check is a dropped losing response. A status
-read must confirm both an advanced project revision and the absence of
-the exact receipt before releasing that unconfirmed attempt.
+
+A follow-up W01 rehearsal discarded both losing responses after the
+server rejected the stale writes. Review recovered both exact results
+after reload and an explicit status check. The check reads the project
+before the exact request status. A strictly newer revision and the
+absence of both the exact receipt and run release the attempt. An
+unchanged revision leaves the attempt unconfirmed. Local Firestore again
+recorded a single publication and usage event for each stage.
 
 P4a binds independent design evidence to the exact saved suite (commit
 `1be782c`, [PR #468](https://github.com/lumensparkxy/agentic_test_case_generator/pull/468)).
