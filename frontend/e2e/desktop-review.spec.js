@@ -6,6 +6,8 @@ test("shows saved step numbers and exact test data across case selection and rel
 	await page.setViewportSize({ width: 1366, height: 900 });
 	const project = useCaseProjectFixture();
 	const literal = '  =SUM(1,2)\r\n"Quoted"\u00a0🧪\t\n';
+	const preconditions = "Start with an empty editor.\nUse the QA guest account and leave the draft unsaved.";
+	const purpose = "Verify that the editor preserves the exact saved payload.";
 	project.current_snapshots.test_cases = {
 		snapshot_id: "exact-step-review",
 		stage: "test_cases",
@@ -15,6 +17,8 @@ test("shows saved step numbers and exact test data across case selection and rel
 				{
 					id: "TC-EXACT",
 					title: "Inspect saved editor data",
+					description: purpose,
+					preconditions,
 					linked_requirement_ids: ["REQ-101"],
 					steps: [
 						{ step: 4, action: "Clear the editor", expected: "The field is empty", test_data: "" },
@@ -40,7 +44,18 @@ test("shows saved step numbers and exact test data across case selection and rel
 
 	const detail = page.getByRole("region", { name: "Selected test case" });
 	const exactCase = page.getByRole("button", { name: "TC-EXACT Inspect saved editor data" });
+	const setupText = detail.getByText(/^Start with an empty editor\./);
+	const setup = detail.getByRole("region", { name: "Preconditions", exact: true });
+	const stepTable = detail.getByRole("region", { name: "Test steps and expected results", exact: true });
 	const checkExactData = async () => {
+		await expect(setupText).toBeVisible({ timeout: 5000 });
+		await expect(setup).toContainText("Use the QA guest account and leave the draft unsaved.");
+		expect(await setupText.textContent()).toBe(preconditions);
+		await expect(setupText).toHaveCSS("white-space", "pre-wrap");
+		await expect(detail.getByText(purpose, { exact: true })).toBeVisible();
+		await expect(setup).not.toContainText(purpose);
+		const [setupBounds, tableBounds] = await Promise.all([setup.boundingBox(), stepTable.boundingBox()]);
+		expect(setupBounds.y + setupBounds.height).toBeLessThan(tableBounds.y);
 		await expect(detail.getByRole("rowheader")).toHaveText(["4", "7", "9"]);
 		await expect(detail.getByRole("row", { name: /Clear the editor/ })).toContainText("Test data is an empty string.");
 		await expect(detail.getByRole("row", { name: /Read the label/ }).getByText(/Test data/)).toHaveCount(0);
@@ -58,9 +73,16 @@ test("shows saved step numbers and exact test data across case selection and rel
 		expect(JSON.parse(encoded)).toBe(literal);
 	};
 	await exactCase.click();
+	await expect(setupText).toBeVisible({ timeout: 5000 });
+	await expect(setupText).toBeInViewport();
+	await expect(stepTable.getByRole("row").nth(1)).toBeInViewport();
+	await page.screenshot({ path: test.info().outputPath("manual-case-setup.png") });
 	await checkExactData();
 
 	await page.getByRole("button", { name: "TC-OLDER Inspect an older case" }).click();
+	await expect(setup).toHaveText(/No preconditions recorded\./);
+	await expect(setupText).toHaveCount(0);
+	await expect(detail.getByText(purpose, { exact: true })).toHaveCount(0);
 	await expect(detail.getByRole("rowheader")).toHaveText(["1"]);
 	await expect(detail.getByRole("row", { name: /Open the earlier form/ }).getByText(/Test data/)).toHaveCount(0);
 	await expect(detail.getByText("Escaped JSON")).toHaveCount(0);

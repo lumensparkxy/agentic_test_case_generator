@@ -12,6 +12,7 @@ const historicalSuite = "suite + original";
 const historicalCase = {
 	id: "TC + / Ω",
 	title: "Original checkout",
+	preconditions: "Use the original order form with a guest session.",
 	steps: [{ step: 1, action: "Place the original order", expected: "Original confirmation appears" }],
 };
 const sourceExcerpt = "Customers can complete express checkout.";
@@ -123,6 +124,8 @@ async function expectHistoricalCase(page, lookups) {
 	await expect(reader.getByRole("heading", { name: historicalCase.title, exact: true })).toBeVisible();
 	await expect(reader).toContainText("Historical saved suite · Version 1 · Project revision 4");
 	await expect(reader).toContainText("Original confirmation appears");
+	await expect(reader.getByRole("region", { name: "Preconditions", exact: true })).toContainText(historicalCase.preconditions);
+	await expect(reader.getByText(historicalCase.preconditions, { exact: true })).toBeVisible();
 	await expect(reader.getByRole("button", { name: "Report a problem", exact: true })).toHaveCount(0);
 	expect(lookups.length).toBeGreaterThan(0);
 	expect(lookups).toEqual(Array(lookups.length).fill({ snapshot_id: historicalSuite, case_id: historicalCase.id }));

@@ -597,6 +597,24 @@ select {
 	font-size: var(--font-secondary);
 	margin: 4px 0;
 }
+.test-review-detail .test-case-purpose {
+	margin-block: 0.25rem 0.5rem;
+	white-space: pre-wrap;
+}
+.test-case-preconditions {
+	background: var(--surface-container);
+	border: 1px solid var(--border-color);
+	margin-block: 0.5rem;
+	padding: 0.5rem 0.75rem;
+}
+.test-review-detail .test-case-preconditions > h3 {
+	margin: 0;
+}
+.test-review-detail .test-case-preconditions > p {
+	margin: 0.25rem 0 0;
+	color: var(--text-main);
+	white-space: pre-wrap;
+}
 .test-inline-findings {
 	margin: 18px 0;
 	background: #fffbf4;

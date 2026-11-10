@@ -2,7 +2,7 @@ import useReviewDraft from "../../hooks/useReviewDraft";
 import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
 import { Table, TableScroll, ListDetail, ResultCount, List, SelectableItem, ListItem, CollectionState } from "../ui/collections";
 import { Input, Button, Select } from "../ui/controls";
-import { Disclosure, Badge } from "../ui/surfaces";
+import { Disclosure, Badge, Surface } from "../ui/surfaces";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { createSavedCasePathResolver } from "../../app/savedCaseLinks";
@@ -135,6 +135,7 @@ export default function GeneratedTestCasesView({
 	}, [snapshotId]);
 	const searchId = useId();
 	const positionId = `${searchId}-position`;
+	const preconditionsId = `${searchId}-preconditions`;
 	const [filtersOpen, setFiltersOpen] = useState(false);
 	const visibleChanges = reviewGroup ? null : (changedIds ?? recovery.value.changedIds ?? null);
 	useEffect(() => {
@@ -408,6 +409,11 @@ export default function GeneratedTestCasesView({
 									</div>
 								)}
 							</div>
+							{selected.description && <p className="test-case-purpose">{selected.description}</p>}
+							<Surface className="test-case-preconditions" aria-labelledby={preconditionsId}>
+								<h3 id={preconditionsId}>Preconditions</h3>
+								<p>{selected.preconditions?.trim() ? selected.preconditions : "No preconditions recorded."}</p>
+							</Surface>
 							{renderSelectedCaseRepair?.(selected, sharePath)}
 							{singleCase && savedStep && !citedStep && <p role="status">The cited step is unavailable in this saved case.</p>}
 							<div className="test-steps-heading">
@@ -452,11 +458,6 @@ export default function GeneratedTestCasesView({
 							<h3>Expected result</h3>
 							<p>{selected.expected_result || "Not specified."}</p>
 							<div className="test-case-support">
-								<Disclosure>
-									<summary>Preconditions</summary>
-									<p>{selected.preconditions || "None specified."}</p>
-									{selected.description && <p>{selected.description}</p>}
-								</Disclosure>
 								{findings.length > 0 && (
 									<Disclosure className="test-inline-findings">
 										<summary>Quality findings for {selected.id}</summary>
