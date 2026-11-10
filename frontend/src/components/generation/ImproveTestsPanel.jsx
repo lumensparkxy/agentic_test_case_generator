@@ -21,6 +21,9 @@ export default function ImproveTestsPanel({
 	savedSuite,
 	savedSuiteStale,
 	navigate,
+	onOpenCitation,
+	returnCitation,
+	onCitationReturnHandled,
 	canReviewSavedSuite,
 	prerequisiteSnapshotId,
 	browserHandoffWarnings,
@@ -178,6 +181,9 @@ export default function ImproveTestsPanel({
 				open={recovery.value.sourceEvidenceOpen === true}
 				onOpen={(sourceEvidenceOpen) => recovery.setValue((old) => ({ ...old, sourceEvidenceOpen }))}
 				navigate={navigate}
+				onOpenCitation={onOpenCitation}
+				returnCitation={returnCitation}
+				onCitationReturnHandled={onCitationReturnHandled}
 				onViewCase={trustedRepairOnly && !savedSuiteStale ? onViewCase : undefined}
 			/>
 			{reviewOnly && <p>{canReviewSavedSuite ? "Use Review saved suite to check these cases." : assessment.reason}</p>}

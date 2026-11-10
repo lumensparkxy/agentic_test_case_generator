@@ -357,8 +357,9 @@ export default function App() {
 	const requirementReviewLock = useRef(false);
 	const requirementReviewAttempt = useRef(null);
 	const { activeTab, setActiveTab } = useWorkflowNavigationState();
-	const { route, location, navigate } = useBrowserNavigation();
+	const { route, location, navigate, back } = useBrowserNavigation();
 	const [restoredTraceabilityLocation, setRestoredTraceabilityLocation] = useState(null);
+	const [pendingFindingCitation, setPendingFindingCitation] = useState(null);
 	const savedCaseLink =
 		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.TEST_CASES ? readSavedCaseLink(location.search) : null;
 	const viewingSavedCase = Boolean(savedCaseLink);
@@ -941,11 +942,36 @@ export default function App() {
 		traceabilityCase && snapshotId && traceabilityCase.projectId === projectId && traceabilityCase.snapshotId === snapshotId;
 	const traceabilityReturn =
 		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
-	const activeGenerateResultTab = openingPriorityCase
-		? "test-cases"
-		: traceabilityReturn
-			? "traceability"
-			: (resumedResultTab ?? selectedGenerateResultTab);
+	const locationPath = `${location.pathname}${location.search}${location.hash}`;
+	const findingCitation = location.state?.findingCitation;
+	const sameFindingSuite =
+		PROJECT_WORKSPACES_V2 &&
+		route.destination === PROJECT_DESTINATIONS.TEST_CASES &&
+		currentProjectId === route.projectId &&
+		currentUser?.sub &&
+		findingCitation?.identity === currentUser.sub &&
+		savedSuite?.snapshot_id &&
+		findingCitation.snapshotId === savedSuite.snapshot_id;
+	const openedFindingCitation = sameFindingSuite && viewingSavedCase && findingCitation.path === locationPath ? findingCitation : null;
+	const findingCitationReturn =
+		sameFindingSuite &&
+		!viewingSavedCase &&
+		findingCitation.origin === locationPath &&
+		pendingFindingCitation?.identity === findingCitation.identity &&
+		pendingFindingCitation.path === findingCitation.path &&
+		pendingFindingCitation.key === findingCitation.key
+			? findingCitation
+			: null;
+	useEffect(() => {
+		if (!findingCitationReturn) setPendingFindingCitation(openedFindingCitation);
+	}, [openedFindingCitation, findingCitationReturn]);
+	const activeGenerateResultTab = findingCitationReturn
+		? "improve"
+		: openingPriorityCase
+			? "test-cases"
+			: traceabilityReturn
+				? "traceability"
+				: (resumedResultTab ?? selectedGenerateResultTab);
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const syncDraftSuite = ["project.sync.draft", "project.sync.rebind"].includes(savedSuite?.operation);
 	const showSyncDraftReview = Boolean(
@@ -1919,8 +1945,9 @@ export default function App() {
 		const active = document.activeElement;
 		const caseFocus = keepPriorityCaseFocus.current && active?.closest("#selected-test-case");
 		const evidenceFocus =
-			active?.matches("[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-run-case-result]") &&
-			main.contains(active);
+			active?.matches(
+				"[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-run-case-result], [data-finding-citation]"
+			) && main.contains(active);
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
 			if (document.activeElement === main) main.blur();
@@ -5237,6 +5264,14 @@ export default function App() {
 		});
 		navigate(path);
 	};
+	const openFindingCitation = (path, key) => {
+		const citation = { path, key, origin: locationPath, identity: currentUser.sub, snapshotId: savedSuite.snapshot_id };
+		navigate(locationPath, {
+			replace: true,
+			state: { ...location.state, priorityTestCase: null, traceabilityCase: null, findingCitation: citation },
+		});
+		navigate(path, { state: { findingCitation: citation } });
+	};
 	const compactReview = requirementsRoute || testReviewRoute;
 	const requirementSetupOpen =
 		!imports.preview && (requirementSetup?.projectId === navigationProjectId ? requirementSetup.open : requirements.length === 0);
@@ -6575,6 +6610,7 @@ export default function App() {
 											projectId={navigationProjectId}
 											{...savedCaseLink}
 											savedStep={readSavedCaseStep(location.hash)}
+											onBackToFinding={openedFindingCitation ? back : undefined}
 											request={apiRequest}
 											navigate={navigate}
 										/>
@@ -6874,6 +6910,12 @@ export default function App() {
 																	}
 																	savedSuiteStale={Boolean(testCaseStageState.stale)}
 																	navigate={navigate}
+																	onOpenCitation={openFindingCitation}
+																	returnCitation={findingCitationReturn}
+																	onCitationReturnHandled={() => {
+																		setActiveGenerateResultTab("improve");
+																		setPendingFindingCitation(null);
+																	}}
 																	canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}
 																	prerequisiteSnapshotId={
 																		projectStageState.test_cases?.stale ? null : currentProject?.current_snapshots?.test_cases?.snapshot_id

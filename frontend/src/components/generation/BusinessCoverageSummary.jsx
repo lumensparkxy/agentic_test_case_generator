@@ -1,3 +1,4 @@
+import { useEffectEvent, useLayoutEffect, useRef } from "react";
 import { List, ListItem } from "../ui/collections";
 import { Badge, Disclosure } from "../ui/surfaces";
 import { Button } from "../ui/controls";
@@ -15,18 +16,18 @@ const RECORDED_STATUS = {
 
 function groupBehaviors(obligations) {
 	const requirements = new Map();
-	for (const row of obligations) {
+	for (const [index, row] of obligations.entries()) {
 		const id = row.requirement_id || "";
 		if (!requirements.has(id)) requirements.set(id, new Map());
 		const behaviors = requirements.get(id);
 		const behavior = row.obligation || "";
 		if (!behaviors.has(behavior)) behaviors.set(behavior, []);
-		behaviors.get(behavior).push(row);
+		behaviors.get(behavior).push({ row, index });
 	}
 	return requirements;
 }
 
-function GroupedAssessment({ assessment, projectId, savedSuite, navigate, onViewCase }) {
+function GroupedAssessment({ assessment, projectId, savedSuite, onOpenCitation, onViewCase }) {
 	const requirements = groupBehaviors(assessment.obligations || []);
 	const casePath = createSavedCasePathResolver(projectId, savedSuite);
 	const savedCases = new Map((savedSuite?.payload?.test_cases || []).map((item) => [item.id, item]));
@@ -42,6 +43,11 @@ function GroupedAssessment({ assessment, projectId, savedSuite, navigate, onView
 			? buildSavedCasePath(projectId, savedSuite.snapshot_id, testCase.id, evidence.step)
 			: "";
 	};
+	const citationLink = (path, key, reference) => (
+		<RouteLink to={path} navigate={() => onOpenCitation(path, key)} data-finding-citation={key} aria-label={`Open saved case ${reference}`}>
+			{reference}
+		</RouteLink>
+	);
 	const grounding = assessment.case_grounding || [];
 	return (
 		<>
@@ -54,7 +60,7 @@ function GroupedAssessment({ assessment, projectId, savedSuite, navigate, onView
 								<section key={behavior} className="business-behavior" aria-label={behavior || "Behavior name unavailable"}>
 									<h4>{behavior || "Behavior name unavailable"}</h4>
 									<List variant="grouped">
-										{rows.map((row, index) => {
+										{rows.map(({ row, index }) => {
 											const status = RECORDED_STATUS[row.status] || RECORDED_STATUS.unknown;
 											const reviewCaseIds =
 												row.status === "unmet" && onViewCase
@@ -73,9 +79,7 @@ function GroupedAssessment({ assessment, projectId, savedSuite, navigate, onView
 																return (
 																	<ListItem key={stepIndex}>
 																		{path ? (
-																			<RouteLink to={path} navigate={navigate} aria-label={`Open saved case ${reference}`}>
-																				{reference}
-																			</RouteLink>
+																			citationLink(path, `obligation-${index}-${stepIndex}`, reference)
 																		) : (
 																			<strong>{reference}</strong>
 																		)}
@@ -113,13 +117,7 @@ function GroupedAssessment({ assessment, projectId, savedSuite, navigate, onView
 							const gaps = (item.prerequisites || []).filter((gap) => !gap.execution_prerequisite_name);
 							return (
 								<ListItem key={index} className="business-behavior-record">
-									{path ? (
-										<RouteLink to={path} navigate={navigate} aria-label={`Open saved case ${item.test_case_id}`}>
-											{item.test_case_id}
-										</RouteLink>
-									) : (
-										<strong>{item.test_case_id}</strong>
-									)}
+									{path ? citationLink(path, `grounding-${index}`, item.test_case_id) : <strong>{item.test_case_id}</strong>}
 									<p>{item.reason}</p>
 									{gaps.length > 0 && (
 										<List>
@@ -152,8 +150,34 @@ export default function BusinessCoverageSummary({
 	open,
 	onOpen,
 	navigate,
+	onOpenCitation,
+	returnCitation,
+	onCitationReturnHandled,
 	onViewCase,
 }) {
+	const coverageRef = useRef(null);
+	const evidenceOpen = open || Boolean(returnCitation);
+	const finishCitationReturn = useEffectEvent((found) => {
+		if (found && !open) onOpen(true);
+		onCitationReturnHandled();
+	});
+	useLayoutEffect(() => {
+		if (!returnCitation) return;
+		const link = Array.from(coverageRef.current.querySelectorAll("a[data-finding-citation]")).find(
+			(item) => item.dataset.findingCitation === returnCitation.key && item.getAttribute("href") === returnCitation.path
+		);
+		if (!link) {
+			finishCitationReturn(false);
+			return;
+		}
+		link.focus({ preventScroll: true });
+		// Let native history scroll restoration finish before revealing the focused citation.
+		const frame = window.requestAnimationFrame(() => {
+			if (document.activeElement === link) link.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+			finishCitationReturn(true);
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [returnCitation]);
 	const designStatus = assessment?.design_status ?? assessment?.status;
 	const scope =
 		assessment?.scope === "whole_requirements"
@@ -162,7 +186,7 @@ export default function BusinessCoverageSummary({
 				? "Selected scenarios"
 				: null;
 	return (
-		<section aria-label="Business coverage assessment">
+		<section aria-label="Business coverage assessment" ref={coverageRef}>
 			<p>
 				Business coverage:{" "}
 				{designStatus === "assessed_complete" ? "assessed complete" : designStatus === "incomplete" ? "incomplete" : "unverified"}. Human
@@ -177,20 +201,20 @@ export default function BusinessCoverageSummary({
 			{grouped && requiresIndependentReview(assessment) && <p>Some assessment evidence remains unverified.</p>}
 			{grouped && assessment && (
 				<Disclosure
-					open={open}
+					open={evidenceOpen}
 					onToggle={(event) => {
-						if (event.currentTarget.open !== open) onOpen(event.currentTarget.open);
+						if (event.currentTarget.open !== evidenceOpen) onOpen(event.currentTarget.open);
 					}}
 				>
 					<summary>Source obligations and prerequisites</summary>
-					{open && (
+					{evidenceOpen && (
 						<>
 							{assessment.reason && <p>{assessment.reason}</p>}
 							<GroupedAssessment
 								assessment={assessment}
 								projectId={projectId}
 								savedSuite={savedSuite}
-								navigate={navigate}
+								onOpenCitation={onOpenCitation}
 								onViewCase={onViewCase}
 							/>
 						</>

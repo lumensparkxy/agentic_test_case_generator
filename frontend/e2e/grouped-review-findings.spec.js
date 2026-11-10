@@ -67,7 +67,7 @@ async function setup(page, { stale = false } = {}) {
 						source_quote: boundaryQuote,
 						status: "covered",
 						reason: "The saved confirmation is asserted.",
-						evidence: [{ test_case_id: caseId, ...fixtureCase.steps[0] }],
+						evidence: fixtureCase.steps.map((step) => ({ test_case_id: caseId, ...step })),
 					},
 					{
 						requirement_id: requirementId,
@@ -188,7 +188,9 @@ test.describe("Grouped saved review findings", () => {
 		await expect(findings(page).getByText("Unverified", { exact: true })).toBeVisible();
 		await expect(findings(page)).toContainText("An earlier evidence row remains visible.");
 		await expect(findings(page).getByText("Exact saved step unavailable.", { exact: true })).toBeVisible();
-		const original = findings(page).getByRole("link", { name: `Open saved case ${caseId}, step 2`, exact: true });
+		const citation = { name: `Open saved case ${caseId}, step 2`, exact: true };
+		await expect(boundary.getByRole("link", citation)).toHaveCount(2);
+		const original = boundary.getByRole("listitem").filter({ hasText: savedCountQuote }).getByRole("link", citation);
 		await expect(original).toHaveAttribute("href", new RegExp(`[?&]suite=${suiteId}&case=${caseId}#saved-case-step-2$`));
 		await expect(findings(page).getByRole("link", { name: `Open saved case ${caseId}, step 4`, exact: true })).toHaveCount(0);
 		const improvePanel = page.getByRole("region", { name: "Improve test quality", exact: true });
@@ -205,13 +207,47 @@ test.describe("Grouped saved review findings", () => {
 		await expect(page).toHaveURL(new RegExp(`[?&]suite=${suiteId}&case=${caseId}#saved-case-step-2$`));
 		await expect(page.getByRole("heading", { name: caseTitle, exact: true })).toBeVisible();
 		await expect(page.getByRole("row").filter({ hasText: "The confirmation displays six attendees." })).toBeFocused();
+		const backToFinding = page.getByRole("button", { name: "Back to finding", exact: true });
+		await expect(backToFinding).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath("saved-step-back-to-finding.png") });
 		expect(api.evidenceReads).toEqual([[suiteId, caseId]]);
 		await page.goBack();
 		await expect(page).toHaveURL(`${root}/review/tests`);
-		await expect(findings(page).getByRole("region", { name: boundaryBehavior, exact: true })).toBeVisible();
+		await expect(original).toBeFocused({ timeout: 5000 });
+		await expect(original).toBeInViewport();
+		await page.screenshot({ path: testInfo.outputPath("returned-to-exact-citation.png") });
+		await page.goForward();
+		await expect(page.getByRole("row").filter({ hasText: "The confirmation displays six attendees." })).toBeFocused();
+		await backToFinding.press("Enter");
+		await expect(page).toHaveURL(`${root}/review/tests`);
+		await expect(original).toBeFocused();
+		expect(api.evidenceReads).toEqual([
+			[suiteId, caseId],
+			[suiteId, caseId],
+		]);
+		const savedCasePath = await original.getAttribute("href");
+		const traceability = page.getByRole("tab", { name: /^Traceability Matrix/ });
+		await traceability.press("Enter");
+		await page
+			.getByRole("navigation", { name: "Project workspaces" })
+			.getByRole("link", { name: /^Deliver/ })
+			.press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver`);
+		await page.goBack();
+		await expect(traceability).toHaveAttribute("aria-selected", "true");
+		await improve.press("Enter");
 		await findings(page).getByRole("link", { name: "Open project quality findings", exact: true }).press("Enter");
 		await expect(page).toHaveURL(`${root}/inputs/context#quality-feedback-heading`);
 		await expect(page.getByRole("heading", { name: "Quality feedback", exact: true })).toBeFocused();
+		await page.goto(savedCasePath);
+		await expect(page.getByRole("heading", { name: caseTitle, exact: true })).toBeVisible();
+		await expect(backToFinding).toHaveCount(0);
+		await expect(page.getByRole("link", { name: "Open current suite", exact: true })).toBeVisible();
+		expect(api.evidenceReads).toEqual([
+			[suiteId, caseId],
+			[suiteId, caseId],
+			[suiteId, caseId],
+		]);
 		expect(api.writes).toEqual([]);
 		expect(api.errors).toEqual([]);
 	});

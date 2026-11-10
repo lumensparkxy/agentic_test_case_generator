@@ -5,7 +5,7 @@ import { buildProjectPath, PROJECT_DESTINATIONS } from "../../app/workflowRoutes
 import { Button, Link } from "../ui/controls";
 import GeneratedTestCasesView from "./GeneratedTestCasesView";
 
-export default function LinkedTestCaseView({ projectId, snapshotId, caseId, savedStep, request, navigate }) {
+export default function LinkedTestCaseView({ projectId, snapshotId, caseId, savedStep, request, navigate, onBackToFinding }) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
 	const headingRef = useRef(null);
@@ -38,16 +38,23 @@ export default function LinkedTestCaseView({ projectId, snapshotId, caseId, save
 				<h2 className="panel-title" ref={headingRef} tabIndex={-1}>
 					Saved test case
 				</h2>
-				<Link
-					href={suitePath}
-					onClick={(event) => {
-						if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-						event.preventDefault();
-						navigate(suitePath);
-					}}
-				>
-					Open current suite
-				</Link>
+				<div className="test-detail-actions">
+					{onBackToFinding && (
+						<Button variant="secondary" size="compact" onClick={onBackToFinding}>
+							Back to finding
+						</Button>
+					)}
+					<Link
+						href={suitePath}
+						onClick={(event) => {
+							if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+							event.preventDefault();
+							navigate(suitePath);
+						}}
+					>
+						Open current suite
+					</Link>
+				</div>
 			</header>
 			{unavailable ? (
 				<p role="status">This saved test case is unavailable.</p>
