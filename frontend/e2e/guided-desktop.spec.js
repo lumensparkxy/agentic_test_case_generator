@@ -115,8 +115,21 @@ test("local storage failure is visible and never claims a saved review", async (
 test(
 	"selected-test report prefills evidence, preserves instructions through failure and submits scoped repair",
 	{ tag: "@p1" },
-	async ({ page }) => {
+	async ({ page }, testInfo) => {
 		const { project, api } = await fixture(page);
+		project.current_snapshots.test_cases.payload.test_cases[1].steps = [
+			{ step: 4, action: "Submit order", expected: "Receipt 2 appears" },
+			{ step: 7, action: "Open the saved receipt", expected: "" },
+			{ step: 9, action: "Read the receipt identifier", expected: "The original identifier is displayed" },
+		];
+		api.setProject(project);
+		const savedEvidence = [
+			"Test TC-2: Checkout 2",
+			"Step 4: Submit order | Expected: Receipt 2 appears",
+			"Step 7: Open the saved receipt | Expected: Not specified",
+			"Step 9: Read the receipt identifier | Expected: The original identifier is displayed",
+			"Overall expected: Not specified",
+		].join("\n");
 		let attempt = 0;
 		const bodies = [];
 		await page.route("**/testcases/refine", async (route) => {
@@ -132,20 +145,35 @@ test(
 		await page.goto(path("test-cases"));
 		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 		await page.getByRole("button", { name: "TC-2 Checkout 2", exact: true }).click();
-		await page.getByRole("button", { name: "Report a problem", exact: true }).click();
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		await expect(reader.getByRole("rowheader")).toHaveText(["4", "7", "9"]);
+		await reader.getByRole("button", { name: "Report a problem", exact: true }).press("Enter");
 		const panel = page.getByRole("region", { name: "Improve test quality" });
-		await expect(panel).toContainText("Receipt 2 appears");
-		await panel.getByLabel("What is wrong with this test?").fill("Check the receipt identifier explicitly.");
-		await panel.getByRole("button", { name: "Repair selected test", exact: true }).click();
-		await expect(panel.getByRole("alert")).toContainText("Temporarily unavailable");
+		const report = panel.getByRole("region", { name: "Report a problem · TC-2", exact: true });
+		const evidence = report.locator("pre");
+		const instructions = report.getByRole("textbox", { name: "What is wrong with this test?", exact: true });
+		const repair = report.getByRole("button", { name: "Repair selected test", exact: true });
+		await expect(evidence).toBeVisible();
+		expect(await evidence.textContent()).toBe(savedEvidence);
+		await expect(page.getByRole("tabpanel", { name: "Improve tests", exact: true })).toBeFocused();
+		await page.keyboard.press("Tab");
+		await expect(instructions).toBeFocused();
+		await expect(report.getByText("0 selected", { exact: true })).toHaveCount(0);
+		await instructions.fill("Check the receipt identifier explicitly.");
+		await report.screenshot({ path: testInfo.outputPath("report-saved-steps.png") });
+		await repair.click();
+		await expect(report.getByRole("alert")).toContainText("Temporarily unavailable");
 		await page.reload();
 		await page.getByRole("tab", { name: /Improve tests/ }).click();
-		await expect(panel.getByLabel("What is wrong with this test?")).toHaveValue("Check the receipt identifier explicitly.");
-		await panel.getByRole("button", { name: "Repair selected test", exact: true }).click();
+		await expect(instructions).toHaveValue("Check the receipt identifier explicitly.");
+		expect(await evidence.textContent()).toBe(savedEvidence);
+		await repair.click();
 		await expect(panel).toContainText("1 changed · 0 added · 49 preserved");
-		expect(bodies[1].selected_test_case_ids).toEqual(["TC-2"]);
-		expect(bodies[1].feedback).toContain("Test TC-2: Checkout 2");
-		expect(bodies[1].feedback).toContain("Receipt 2 appears");
+		expect(bodies).toHaveLength(2);
+		for (const body of bodies) {
+			expect(body.selected_test_case_ids).toEqual(["TC-2"]);
+			expect(body.feedback).toContain(`${savedEvidence}\nReported problem: Check the receipt identifier explicitly.`);
+		}
 	}
 );
 

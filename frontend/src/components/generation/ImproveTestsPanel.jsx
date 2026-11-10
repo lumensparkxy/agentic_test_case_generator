@@ -59,7 +59,9 @@ export default function ImproveTestsPanel({
 	const evidence = target
 		? [
 				`Test ${target.id}: ${target.title}`,
-				...(target.steps || []).map((step, index) => `Step ${index + 1}: ${step.action} | Expected: ${step.expected}`),
+				...(target.steps || []).map(
+					(step, index) => `Step ${step.step ?? index + 1}: ${step.action} | Expected: ${step.expected || "Not specified"}`
+				),
 				`Overall expected: ${target.expected_result || "Not specified"}`,
 			].join("\n")
 		: "";
@@ -133,20 +135,57 @@ export default function ImproveTestsPanel({
 					{rows.map((finding) => renderFinding(finding, editable))}
 				</section>
 			));
-
-	return (
-		<section className="improve-tests" aria-label="Improve test quality">
-			<DraftRecoveryNotice draft={recovery} />
-			{summary && (
-				<p role="status">
-					{summary.changed} changed · {summary.added} added · {summary.preserved} preserved. Review changed tests before accepting.
-				</p>
+	const showSelectedReport = Boolean(target && !trustedRepairOnly);
+	const repairStatus = (
+		<>
+			{blockedReason && (!needsOnlySetup || target) && <p role="status">{blockedReason}</p>}
+			{stale && (
+				<Button variant="secondary" onClick={onImpact}>
+					Review impact
+				</Button>
 			)}
-			{target && !trustedRepairOnly && (
-				<div className="selected-test-report">
-					<h3>Report a problem · {target.id}</h3>
-					<p>Only this test will be repaired. Its current evidence is included below.</p>
-					<pre>{evidence}</pre>
+			{error && (
+				<div role="alert">
+					<p>{error}</p>
+					{conflict && (
+						<Button
+							disabled={reloading || busy}
+							onClick={async () => {
+								setReloading(true);
+								try {
+									if (await onReload()) {
+										setConflict(false);
+										setError("");
+										recovery.clear();
+									} else setError("The project could not be reloaded. Try reloading again before applying fixes.");
+								} finally {
+									setReloading(false);
+								}
+							}}
+						>
+							Reload current findings
+						</Button>
+					)}
+				</div>
+			)}
+		</>
+	);
+	const refinementFields = !trustedRepairOnly && !reviewOnly && (!needsOnlySetup || target) && (
+		<>
+			<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
+			<Textarea
+				id={instructionsId}
+				value={instructions}
+				onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
+				disabled={locked}
+				rows={4}
+				placeholder="Describe any details the fixes should take into account…"
+			/>
+			<div className="button-row improve-tests-actions">
+				<Button disabled={!canApply} onClick={() => void apply()}>
+					{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
+				</Button>
+				{showSelectedReport ? (
 					<Button
 						variant="secondary"
 						onClick={() => {
@@ -156,7 +195,29 @@ export default function ImproveTestsPanel({
 					>
 						Return to suite improvements
 					</Button>
-				</div>
+				) : (
+					<span>{chosen.length} selected</span>
+				)}
+			</div>
+		</>
+	);
+
+	return (
+		<section className="improve-tests" aria-label="Improve test quality">
+			<DraftRecoveryNotice draft={recovery} />
+			{summary && (
+				<p role="status">
+					{summary.changed} changed · {summary.added} added · {summary.preserved} preserved. Review changed tests before accepting.
+				</p>
+			)}
+			{showSelectedReport && (
+				<section className="selected-test-report" aria-labelledby={`${instructionsId}-report`}>
+					<h3 id={`${instructionsId}-report`}>Report a problem · {target.id}</h3>
+					<p>Only this test will be repaired. Its current evidence is included below.</p>
+					<pre>{evidence}</pre>
+					{repairStatus}
+					{refinementFields}
+				</section>
 			)}
 			<h2>
 				{needsOnlySetup
@@ -212,36 +273,7 @@ export default function ImproveTestsPanel({
 					</Button>
 				</>
 			)}
-			{blockedReason && (!needsOnlySetup || target) && <p role="status">{blockedReason}</p>}
-			{stale && (
-				<Button variant="secondary" onClick={onImpact}>
-					Review impact
-				</Button>
-			)}
-			{error && (
-				<div role="alert">
-					<p>{error}</p>
-					{conflict && (
-						<Button
-							disabled={reloading || busy}
-							onClick={async () => {
-								setReloading(true);
-								try {
-									if (await onReload()) {
-										setConflict(false);
-										setError("");
-										recovery.clear();
-									} else setError("The project could not be reloaded. Try reloading again before applying fixes.");
-								} finally {
-									setReloading(false);
-								}
-							}}
-						>
-							Reload current findings
-						</Button>
-					)}
-				</div>
-			)}
+			{!showSelectedReport && repairStatus}
 			{saved && <p role="status">Test cases updated. Review the latest quality result and remaining findings.</p>}
 			{trustedRepairOnly && findings.length > 0 && (
 				<div className="improve-tests-findings">
@@ -264,25 +296,7 @@ export default function ImproveTestsPanel({
 					{grouped ? renderFindingGroups(true) : findings.map((finding) => renderFinding(finding, true))}
 				</fieldset>
 			)}
-			{!trustedRepairOnly && !reviewOnly && (!needsOnlySetup || target) && (
-				<>
-					<label htmlFor={instructionsId}>{target ? "What is wrong with this test?" : "Additional instructions (optional)"}</label>
-					<Textarea
-						id={instructionsId}
-						value={instructions}
-						onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
-						disabled={locked}
-						rows={4}
-						placeholder="Describe any details the fixes should take into account…"
-					/>
-					<div className="button-row improve-tests-actions">
-						<Button disabled={!canApply} onClick={() => void apply()}>
-							{busy ? "Applying fixes…" : target ? "Repair selected test" : findings.length ? "Apply selected fixes" : "Apply improvements"}
-						</Button>
-						<span>{chosen.length} selected</span>
-					</div>
-				</>
-			)}
+			{!showSelectedReport && refinementFields}
 		</section>
 	);
 }
