@@ -230,6 +230,7 @@ export interface ApprovalContinuationStatus {
 
 export interface ApprovalContinuationView {
 	project_revision: number;
+	provider_usage_unconfirmed?: boolean;
 	reason: string | null;
 	request_id: string;
 	result_snapshot_id: string | null;

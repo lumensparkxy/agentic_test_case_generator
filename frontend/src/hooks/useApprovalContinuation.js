@@ -163,9 +163,11 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 			const response = await requestRef.current(cancelPath, { method: API_CONTRACT_ENDPOINTS.approvalContinuationCancel.method });
 			if (!response.ok)
 				throw new Error(
-					checkingTests
-						? "Could not cancel test generation. Check the current status."
-						: "Could not cancel scenario preparation. Check the current status."
+					run.state === "interrupted"
+						? "Could not release the interrupted attempt. Check the current status."
+						: checkingTests
+							? "Could not cancel test generation. Check the current status."
+							: "Could not cancel scenario preparation. Check the current status."
 				);
 			const cancelled = await response.json();
 			if (activeScope.current !== scope) return;

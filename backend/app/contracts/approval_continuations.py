@@ -50,6 +50,7 @@ class ApprovalContinuationView(BaseModel):
     source_snapshot_id: str
     result_snapshot_id: str | None
     retry_available: bool = False
+    provider_usage_unconfirmed: bool = False
 
 
 class ApprovalContinuationReceipt(BaseModel):

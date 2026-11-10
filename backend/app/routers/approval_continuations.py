@@ -89,6 +89,7 @@ def _run_view(run, project_id, actor_id):
             source_snapshot_id=sources.get(source_stage),
             result_snapshot_id=produced.get(result_stage) if isinstance(produced, dict) else None,
             retry_available=can_retry_undispatched_stage(run),
+            provider_usage_unconfirmed=bool(intent.get("dispatch")) and intent.get("state") in ("interrupted", "cancelled"),
         )
     except ValidationError:
         return None

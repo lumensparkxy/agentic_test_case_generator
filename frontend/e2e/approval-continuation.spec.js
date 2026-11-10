@@ -361,7 +361,7 @@ async function fixture(
 	});
 	await page.route(routePath(testCancelPath), (route) => {
 		expect(route.request().method()).toBe("POST");
-		expect(testRun.state).toBe("running");
+		expect(["running", "interrupted"]).toContain(testRun.state);
 		testRun = { ...testRun, state: "cancelled", reason: "cancelled_by_owner" };
 		return route.fulfill({ json: testRun });
 	});
@@ -467,6 +467,9 @@ async function fixture(
 		},
 		startTestRun: () => {
 			testRun = { ...testRun, state: "running" };
+		},
+		interruptTestRun: () => {
+			testRun = { ...testRun, state: "interrupted", reason: "provider_outcome_unconfirmed", provider_usage_unconfirmed: true };
 		},
 		reportSuiteSaved: ({ sourceId = testRun.source_snapshot_id } = {}) => {
 			testRun = {
@@ -1036,8 +1039,32 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(testProgress(page).getByRole("status")).toContainText(/cancelled/i);
 		await page.reload();
 		await expect(testProgress(page).getByRole("status")).toContainText(/cancelled/i);
+		await expect(testProgress(page).getByRole("status")).not.toContainText("Provider usage remains unconfirmed.");
 		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText(/Human approved/i);
 		await expect(page.getByText(readyScenario, { exact: true })).toBeVisible();
+		await expect(openTests(page)).toHaveCount(0);
+		expect(api.writes).toEqual([`POST ${testApprovalPath}`, `POST ${testCancelPath}`]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("acknowledges an interrupted run and preserves its unknown provider usage after reload", async ({ page }) => {
+		const api = await fixture(page, { prepared: true });
+		await openPreparedDecision(page);
+		await approveTests(page).click();
+		const progressStatus = testProgress(page).getByRole("status");
+		await expect(progressStatus).toContainText(/queued/i);
+		api.interruptTestRun();
+		await checkTests(page).click();
+		await expect(progressStatus).toHaveText("Test case generation was interrupted. Provider usage remains unconfirmed.");
+		await expect(testProgress(page).getByRole("button", { name: "Retry test generation" })).toHaveCount(0);
+		const release = testProgress(page).getByRole("button", { name: "Acknowledge and release test generation", exact: true });
+		await release.click();
+		await expect(progressStatus).toHaveText("Test case generation was cancelled. Provider usage remains unconfirmed.");
+		await expect(release).toHaveCount(0);
+		await page.reload();
+		await expect(progressStatus).toHaveText("Test case generation was cancelled. Provider usage remains unconfirmed.");
+		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText(/Human approved/i);
 		await expect(openTests(page)).toHaveCount(0);
 		expect(api.writes).toEqual([`POST ${testApprovalPath}`, `POST ${testCancelPath}`]);
 		expect(api.executionRequests).toEqual([]);

@@ -123,7 +123,8 @@ six authored SDK responses in the loopback emulator.
 - If Review confirms the stage failed before any provider request, use the
   one-time stage retry from the saved approval. The original scope, settings,
   and request budget apply. An interrupted provider outcome still requires
-  the existing explicit recovery decision.
+  explicit acknowledgement and release. Provider usage remains unconfirmed
+  after release when possible dispatch was recorded.
 - An independently assessed suite may have blocked browser setup. Review
   the named prerequisite or publish a permitted file. The browser uses
   the current target preview and an explicit selection.

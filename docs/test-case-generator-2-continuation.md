@@ -200,6 +200,13 @@ duration and changes no project revision or approval. It verifies the original
 receipt and current sources. A repeated retry reads the same run. Possibly
 dispatched, superseded and cancelled work cannot be requeued by this action.
 Checking status never dispatches work.
+
+After possible dispatch, Review can acknowledge and release an interrupted
+attempt. The owner-facing status retains unconfirmed provider usage after
+release and reload. This state comes from the existing durable dispatch marker,
+which records possible provider activity. Usage and charge evidence comes from
+the corresponding provider and billing records.
+
 The link to Review Tests appears when the exact saved suite is current.
 An assessment outage remains a separate saved-suite review action. The
 worker stays limited to the local emulator and invokes no browser execution.

@@ -183,6 +183,7 @@ class ApprovalContinuationApiTests(TestCase):
                 "source_snapshot_id": result["project"]["stage_state"]["requirements"]["current_snapshot_id"],
                 "result_snapshot_id": None,
                 "retry_available": False,
+                "provider_usage_unconfirmed": False,
             },
         )
         self.assertIsNone(result["blocked_reason"])
@@ -317,12 +318,48 @@ class ApprovalContinuationApiTests(TestCase):
         run = response.json()
         self.assertEqual(run["state"], "cancelled")
         self.assertEqual(run["reason"], "cancelled_by_owner")
+        self.assertFalse(run["provider_usage_unconfirmed"])
         self.assertNotIn(f"{continuation.OUTBOX_COLLECTION}/{run_id}", self.store)
         self.assertEqual(self.status().json()["runs"], [run])
         committed = deepcopy(self.store)
         self.assertEqual(self.cancel(run_id).json(), run)
         self.assertEqual(self.store, committed)
         self.assertEqual(self.firestore.transactions[-1].operations, [])
+
+    def test_release_preserves_unconfirmed_provider_usage_on_the_original_receipt(self):
+        approval = self.approve().json()["continuation"]
+        run_id = approval["run_id"]
+        request_id = approval["request_id"]
+        claim = continuation.claim_stage(self.firestore, project_id=PROJECT_ID, run_id=run_id)
+        continuation.mark_dispatched(self.firestore, claim, provider_requests=7)
+        continuation.stop_stage(self.firestore, claim, reason="scenario_preparation_failed")
+        interrupted = self.status(request_id).json()
+        self.assertEqual(interrupted["runs"][0]["state"], "interrupted")
+        self.assertTrue(interrupted["runs"][0]["provider_usage_unconfirmed"])
+        run_path = f"{PROJECT_ROOT}/orchestrator_runs/{run_id}"
+        before = deepcopy(self.store)
+
+        response = self.cancel(run_id)
+        self.assertEqual(response.status_code, 200, response.text)
+        released = response.json()
+        self.assertEqual(released["state"], "cancelled")
+        self.assertEqual(released["reason"], "cancelled_by_owner")
+        self.assertTrue(released["provider_usage_unconfirmed"])
+        self.assertFalse(released["retry_available"])
+        self.assertIsNone(released["result_snapshot_id"])
+        status = self.status(request_id).json()
+        self.assertEqual(status["receipt"], interrupted["receipt"])
+        self.assertEqual(status["runs"], [released])
+        self.assertEqual(self.store[PROJECT_ROOT], before[PROJECT_ROOT])
+        self.assertEqual(self.store[run_path]["continuation"]["dispatch"], before[run_path]["continuation"]["dispatch"])
+        self.assertEqual(self.store[run_path]["continuation"]["provider_requests_reserved"], 7)
+        self.assertNotIn(f"{continuation.OUTBOX_COLLECTION}/{run_id}", self.store)
+        with self.assertRaises(continuation.ContinuationConflict):
+            continuation.renew_claim(self.firestore, claim)
+        committed = deepcopy(self.store)
+        self.assertEqual(self.cancel(run_id).json(), released)
+        self.assertEqual(self.client.post(f"{STATUS_PATH}/{run_id}/retry").status_code, 409)
+        self.assertEqual(self.store, committed)
 
     def test_other_continuation_stages_are_hidden_and_cannot_be_cancelled(self):
         approval = self.approve()
@@ -382,6 +419,7 @@ class ApprovalContinuationApiTests(TestCase):
                 "source_snapshot_id": SNAPSHOT_ID,
                 "result_snapshot_id": None,
                 "retry_available": False,
+                "provider_usage_unconfirmed": False,
             },
         )
         self.assertEqual(outcome["review"]["decision"], "approve")

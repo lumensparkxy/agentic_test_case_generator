@@ -11,7 +11,7 @@ const SCENARIO_STATUS = {
 	awaiting_user: "Scenarios are ready for review.",
 	completed: "Scenario preparation completed.",
 	failed: "Scenario preparation could not finish. Review the current sources before starting again.",
-	interrupted: "Scenario preparation was interrupted. The provider outcome is unconfirmed.",
+	interrupted: "Scenario preparation was interrupted.",
 	cancelled: "Scenario preparation was cancelled.",
 	superseded: "Project sources changed. Review the current scope.",
 };
@@ -21,7 +21,7 @@ const TEST_STATUS = {
 	running: "Generating test cases from the approved scenarios.",
 	completed: "Test cases are saved for review.",
 	failed: "Test case generation could not finish. Check the approved scenarios and current sources.",
-	interrupted: "Test case generation was interrupted. The provider outcome is unconfirmed.",
+	interrupted: "Test case generation was interrupted.",
 	cancelled: "Test case generation was cancelled.",
 	superseded: "Project sources changed. Review the current scenarios.",
 };
@@ -54,6 +54,7 @@ export default function ApprovalContinuationPanel({
 	const generatingTests = stage === "generate_tests";
 	const title = generatingTests ? "Test case generation" : "Scenario preparation";
 	const action = generatingTests ? "test generation" : "preparation";
+	const interrupted = run?.state === "interrupted";
 	const resultState = generatingTests ? "completed" : "awaiting_user";
 	const resultReady = run?.state === resultState && run.result_snapshot_id && !blockedReason;
 	const status = generatingTests ? TEST_STATUS : SCENARIO_STATUS;
@@ -77,6 +78,10 @@ export default function ApprovalContinuationPanel({
 		message = generatingTests
 			? "A test suite was saved. Check test generation status to load the current evidence."
 			: "A scenario plan was saved. Check preparation status to load the current evidence.";
+	} else if (run?.provider_usage_unconfirmed) {
+		message += " Provider usage remains unconfirmed.";
+	} else if (interrupted) {
+		message += " The provider outcome is unconfirmed.";
 	}
 	return (
 		<Surface as="section" className="project-sync-summary" aria-label={title}>
@@ -87,9 +92,9 @@ export default function ApprovalContinuationPanel({
 				<Button variant="secondary" size="compact" disabled={saving || cancelling || retrying} onClick={onCheck}>
 					Check {action} status
 				</Button>
-				{(active || run?.state === "interrupted") && (
+				{(active || interrupted) && (
 					<Button variant="secondary" size="compact" disabled={cancelling || retrying} onClick={() => void cancel()}>
-						Cancel {action}
+						{interrupted ? "Acknowledge and release" : "Cancel"} {action}
 					</Button>
 				)}
 				{retryAvailable && (
