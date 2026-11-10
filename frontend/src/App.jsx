@@ -5107,6 +5107,16 @@ export default function App() {
 	const requirementsRoute = route.destination === PROJECT_DESTINATIONS.REQUIREMENTS;
 	const inputsSources = PROJECT_WORKSPACES_V2 && route.workspaceRoute && requirementsRoute && route.workspace === "inputs";
 	const reviewScope = PROJECT_WORKSPACES_V2 && requirementsRoute && route.workspace === "review";
+	const scenarioPlanReadyForReview =
+		approvedGenerationScopeReady &&
+		!contextRefreshRequired &&
+		!materialSyncRebindRequired &&
+		!imports.preview &&
+		!imports.pending.length &&
+		currentScenarioSnapshotId &&
+		currentScenarioSnapshotId === useCasesStageState.current_snapshot_id &&
+		!useCasesStageState.stale;
+	const reviewEntrySection = scenarioPlanReadyForReview ? (useCasesHumanApproved ? "tests" : "scenarios") : "scope";
 	const openScope = () => navigate(buildProjectWorkspacePath(navigationProjectId, "review"));
 	const scenariosPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "scenarios") : "";
 	const testsPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "tests") : "";
@@ -5562,7 +5572,12 @@ export default function App() {
 				) : (
 					<div className={workflowShellClassName}>
 						{PROJECT_WORKSPACES_V2 ? (
-							<ProjectWorkspaceNavigation route={route} navigate={navigateWorkspace} counts={savedArtifactCounts} />
+							<ProjectWorkspaceNavigation
+								route={route}
+								navigate={navigateWorkspace}
+								counts={savedArtifactCounts}
+								reviewEntrySection={reviewEntrySection}
+							/>
 						) : (
 							<WorkflowNavigationDrawer
 								tabs={tabs}

@@ -48,7 +48,10 @@ flag is off. Keep server admission checks active on both paths.
 | Browser tests | `/deliver/browser-tests` | `/automation` |
 
 These suffixes follow `/projects/:projectId`. The project root still opens
-the overview via Project status. Roll back by rebuilding this compatible
+the overview via Project status. The primary Review link opens Scope until
+the current scope and scenario plan are ready for review. It opens Scenarios
+for the pending human decision, then Tests after the exact plan is approved.
+Each section link keeps its listed destination. Roll back by rebuilding this compatible
 version with the flag off. Older builds released before the aliases were
 added cannot resolve the new suffixes.
 

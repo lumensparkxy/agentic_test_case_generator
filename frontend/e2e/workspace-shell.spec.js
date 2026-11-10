@@ -33,8 +33,8 @@ async function expectDeliverSection(page, name, { focused = false } = {}) {
 	if (focused) await expect(main).toBeFocused();
 }
 
-async function setup(page, count = 50, { reviewApproved = true } = {}) {
-	const project = useCaseProjectFixture();
+async function setup(page, count = 50, { reviewApproved = true, scenarioReviewState = "pending" } = {}) {
+	const project = useCaseProjectFixture({ reviewState: scenarioReviewState });
 	project.current_snapshots.requirements.payload.requirements[0].sources = [
 		{
 			source_id: "checkout",
@@ -152,7 +152,7 @@ test.describe("Opt-in project workspaces", () => {
 			await expect(primary(page).getByRole("link")).toHaveCount(3);
 			for (const [name, suffix] of [
 				["Inputs", "inputs"],
-				["Review", "review"],
+				["Review", "review/scenarios"],
 				["Deliver", "deliver"],
 			]) {
 				await expect(workspace(page, name)).toHaveAttribute("href", projectPath(suffix));
@@ -267,6 +267,10 @@ test.describe("Opt-in project workspaces", () => {
 		await expect(page.locator("#main-content")).toBeFocused();
 
 		await workspace(page, "Review").press("Enter");
+		await expect(page).toHaveURL(projectPath("review/scenarios"), { timeout: 5000 });
+		await expect(page.getByRole("region", { name: "Use Cases review actions", exact: true })).toContainText("Pending human decision");
+		await expect(page.locator("#main-content")).toBeFocused();
+		await section(page, "Scope").press("Enter");
 		await expect(page).toHaveURL(projectPath("review"));
 		await expect(heading(page, "Requirement Review Workbench")).toBeVisible();
 		await page.getByRole("button", { name: /^Review REQ-101:/ }).click();
@@ -354,16 +358,32 @@ test.describe("Opt-in project workspaces", () => {
 		expect(errors).toEqual([]);
 	});
 
-	test("resumes the chosen Review Tests view, filters and case on reload of the same suite", async ({ page }, testInfo) => {
+	test("keeps the Review entry on Scope while an approved plan has stale Context", async ({ page }) => {
+		const { writes, errors, project } = await setup(page, 50, { scenarioReviewState: "approved" });
+		project.stage_state.context = { current_snapshot_id: "earlier-checkout-context", stale: true };
+		await page.goto(projectPath("deliver"));
+		await expect(workspace(page, "Review")).toHaveAttribute("href", projectPath("review"));
+		await workspace(page, "Review").press("Enter");
+		await expect(page).toHaveURL(projectPath("review"));
+		await expect(heading(page, "Review scope")).toBeVisible();
+		await expect(page.getByRole("status").filter({ hasText: "Saved context is stale." })).toBeVisible();
+		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
+	test("resumes the chosen Review Tests view, filters and case from Deliver and on reload", async ({ page }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
-		const { writes, errors, project } = await setup(page, 200, { reviewApproved: false });
+		const { writes, errors, project } = await setup(page, 200, { reviewApproved: false, scenarioReviewState: "approved" });
 		const improve = page.getByRole("tab", { name: /^Improve tests/ });
 		const cases = page.getByRole("tab", { name: /^Generated Test Cases/ });
 		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
 		const reader = page.getByRole("region", { name: "Selected test case" });
 		const chosen = page.getByRole("button", { name: "TC-198 Checkout 198", exact: true });
 		const priority = page.getByRole("combobox", { name: "Priority", exact: true });
-		await page.goto(projectPath("review/tests"));
+		await page.goto(projectPath("deliver"));
+		await workspace(page, "Review").press("Enter");
+		await expect(page).toHaveURL(projectPath("review/tests"));
+		await expect(page.locator("#main-content")).toBeFocused();
 		await expect(improve).toHaveAttribute("aria-selected", "true");
 		await cases.press("Enter");
 		await search.fill("Checkout 19");
@@ -374,7 +394,8 @@ test.describe("Opt-in project workspaces", () => {
 
 		await workspace(page, "Deliver").press("Enter");
 		await expect(page).toHaveURL(projectPath("deliver"));
-		await page.goBack();
+		await workspace(page, "Review").press("Enter");
+		await expect(page).toHaveURL(projectPath("review/tests"));
 		await expect(reader).toContainText("Receipt 198 appears");
 		await page.reload();
 		await expect(cases).toHaveAttribute("aria-selected", "true", { timeout: 5000 });

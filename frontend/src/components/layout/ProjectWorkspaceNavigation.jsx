@@ -1,7 +1,7 @@
 import RouteLink from "../../app/RouteLink";
 import { PROJECT_WORKSPACES, buildProjectPath, buildProjectWorkspacePath } from "../../app/workflowRoutes";
 
-export default function ProjectWorkspaceNavigation({ route, navigate, counts }) {
+export default function ProjectWorkspaceNavigation({ route, navigate, counts, reviewEntrySection }) {
 	const { projectId, workspace, section } = route;
 	const activeWorkspace = PROJECT_WORKSPACES.find(({ id }) => id === workspace);
 
@@ -12,7 +12,7 @@ export default function ProjectWorkspaceNavigation({ route, navigate, counts }) 
 					{PROJECT_WORKSPACES.map(({ id, label }) => (
 						<li key={id}>
 							<RouteLink
-								to={buildProjectWorkspacePath(projectId, id)}
+								to={buildProjectWorkspacePath(projectId, id, id === "review" ? reviewEntrySection : undefined)}
 								navigate={navigate}
 								className={id === workspace ? "global-navigation-link active" : "global-navigation-link"}
 								aria-current={id === workspace ? "location" : undefined}
