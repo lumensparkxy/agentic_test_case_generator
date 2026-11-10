@@ -640,6 +640,96 @@ test.describe("Intake and scope in the 2.0 workspaces", () => {
 		}
 	});
 
+	test("recovers a testing intent conflict in Inputs before explicitly saving against the latest revision", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const { getProject, setProject, writes, errors } = await fixture(page, { existing: true });
+		const original = getProject();
+		const latest = {
+			...original,
+			current_revision: original.current_revision + 2,
+			testing_intent: { objective: "Latest server objective.", risk_emphasis: "regression" },
+		};
+		let conflicted = false;
+		const recoveryResponses = [
+			{ status: 503, json: { detail: "Project temporarily unavailable." } },
+			{ json: { ...latest, current_revision: latest.current_revision - 1 } },
+		];
+		await page.route(`**${root}`, async (route) => {
+			if (route.request().method() === "PATCH" && !conflicted) {
+				expect(route.request().postDataJSON().base_project_revision).toBe(original.current_revision);
+				conflicted = true;
+				setProject(latest);
+				return route.fulfill({
+					status: 409,
+					json: { detail: { message: "Project has changed since this page loaded.", latest_revision: latest.current_revision } },
+				});
+			}
+			if (route.request().method() === "GET" && conflicted && recoveryResponses.length) {
+				return route.fulfill(recoveryResponses.shift());
+			}
+			return route.fallback();
+		});
+		await page.goto(`${root}/inputs`);
+		const intent = page.getByRole("region", { name: "Testing intent", exact: true });
+		const objectiveInput = intent.getByRole("textbox", { name: "Testing objective", exact: true });
+		const risk = intent.getByRole("combobox", { name: "Risk emphasis", exact: true });
+		await objectiveInput.fill(objective);
+		await risk.selectOption("edge_cases");
+		const otherTab = await page.context().newPage();
+		const other = await fixture(otherTab, { existing: true });
+		await otherTab.goto(`${root}/inputs`);
+		const otherIntent = otherTab.getByRole("region", { name: "Testing intent", exact: true });
+		const otherObjective = "A separate tab's unsaved testing objective.";
+		await otherIntent.getByRole("textbox", { name: "Testing objective", exact: true }).fill(otherObjective);
+		await otherIntent.getByRole("combobox", { name: "Risk emphasis", exact: true }).selectOption("business_critical");
+		await notesInput(page).fill(notes);
+		const save = button(intent, "Save testing intent");
+		await save.press("Enter");
+		await expect(intent.getByRole("alert")).toContainText("The project changed.");
+		await expect(save).toBeDisabled();
+		await expect(objectiveInput).toHaveValue(objective);
+		const reload = button(intent, "Reload latest");
+		await expect(reload).toBeEnabled({ timeout: 5000 });
+		for (let attempt = 0; attempt < 2; attempt++) {
+			await reload.press("Enter");
+			await expect(reload).toBeEnabled();
+			await expect(intent.getByRole("alert")).toContainText("The latest project could not be loaded.");
+			await expect(objectiveInput).toHaveValue(objective);
+		}
+		await reload.press("Enter");
+		await expect(page).toHaveURL(`${root}/inputs`);
+		await expect(objectiveInput).toHaveValue(latest.testing_intent.objective);
+		await expect(risk).toHaveValue(latest.testing_intent.risk_emphasis);
+		await expect(notesInput(page)).toHaveValue(notes);
+		await expect(intent.getByText("Draft from an earlier revision", { exact: true })).toBeFocused();
+		await expect(intent.getByText(objective, { exact: true })).toBeVisible();
+		await expect(save).toBeDisabled();
+		expect(writes).toEqual([`PATCH ${root}`]);
+		await expectNoDocumentOverflow(page, "Testing intent comparison");
+		await page.screenshot({ path: testInfo.outputPath("testing-intent-compare-after-conflict.png") });
+
+		await button(intent, "Use earlier draft").press("Enter");
+		await expect(objectiveInput).toBeFocused();
+		await expect(objectiveInput).toHaveValue(objective);
+		await expect(risk).toHaveValue("edge_cases");
+		await expect(intent.getByText("Draft from an earlier revision", { exact: true })).toHaveCount(0);
+		await expect(intent).toContainText("Unsaved changes on this device.");
+		expect(writes).toEqual([`PATCH ${root}`]);
+		await save.press("Enter");
+		await expect(intent).toContainText("Testing intent saved to the project.");
+		expect(getProject().testing_intent).toEqual({ objective, risk_emphasis: "edge_cases" });
+		expect(getProject().current_snapshots).toEqual(original.current_snapshots);
+		expect(writes).toEqual([`PATCH ${root}`, `PATCH ${root}`]);
+		other.setProject(getProject());
+		await otherTab.reload();
+		await otherIntent.getByText("Draft from an earlier revision", { exact: true }).press("Enter");
+		await expect(otherIntent.getByText(otherObjective, { exact: true })).toBeVisible();
+		await expect(otherIntent.locator("dd").filter({ hasText: "Business-critical behavior" })).toBeVisible();
+		expect(other.writes).toEqual([]);
+		expect(other.errors).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
 	test("earlier context and testing intent drafts are visible for comparison and isolated by account", async ({ page }) => {
 		const { getProject, setProject, writes, errors } = await fixture(page, { existing: true });
 		const project = getProject();

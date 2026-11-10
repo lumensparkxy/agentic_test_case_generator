@@ -59,6 +59,9 @@ source replacements and retirements explicit. Local comparison choices are
 scoped to the pending import and base revision. Apply still checks the
 project revision and asks for retirement confirmation. Context and intent
 saves wait until the active comparison is finished or cancelled.
+If a testing-intent save conflicts, **Reload latest** compares the current
+server values with the local draft in Inputs. **Use earlier draft** restores
+those values for editing. **Save testing intent** records the explicit choice.
 
 Supporting context uses the existing Analyze Context action. The 2.0 form
 keeps local drafts under the current user, project, and context snapshot.

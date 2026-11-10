@@ -5001,8 +5001,19 @@ export default function App() {
 				body: JSON.stringify({ testing_intent: testingIntent, base_project_revision: baseRevision }),
 			});
 			if (!response.ok) {
+				const conflict =
+					response.status === 409
+						? await response
+								.clone()
+								.json()
+								.catch(() => null)
+						: null;
 				const error = new Error(await parseApiError(response, "Could not save the testing objective."));
-				error.status = response.status;
+				const latestRevision = conflict?.detail?.latest_revision;
+				if (Number.isInteger(latestRevision) && latestRevision > baseRevision && isProjectOperationCurrent(operationScope)) {
+					error.latestRevision = latestRevision;
+					recordProjectRevision(operationScope.projectId, latestRevision);
+				}
 				throw error;
 			}
 			const project = await response.json();
@@ -5017,6 +5028,11 @@ export default function App() {
 		} finally {
 			if (testingIntentSave.current === operationScope) testingIntentSave.current = null;
 		}
+	};
+	const reloadTestingIntent = async (baseRevision) => {
+		const operationScope = captureProjectOperationScope();
+		const project = await refreshCurrentProject({ hydrate: "if-changed", operationScope });
+		if (!project || project.current_revision <= baseRevision) throw new Error("The latest project could not be loaded. Try again.");
 	};
 
 	const tabs = navigationProjectId
@@ -6569,6 +6585,7 @@ export default function App() {
 											project={currentProject}
 											identity={currentUser?.sub || ""}
 											onSave={saveTestingIntent}
+											onReload={reloadTestingIntent}
 											disabled={authActionDisabled || Boolean(imports.preview) || isAnalyzingContext}
 										/>
 									)}
