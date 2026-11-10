@@ -113,7 +113,7 @@ _FILE_FORMAT_LIST = rf"\.?(?:{_FILE_EXTENSION})(?:(?:\s*[,/]\s*(?:(?:or|and)\s+)
 _QUOTED_VALUE = re.compile(r"""["“]([^"”\n]+)["”]|(?<!\w)['‘]([^'’\n]+)['’]|`([^`\n]+)`""")
 _POLICY_VALUE = re.compile(rf"(?:{_STATE_NAMES}|\.?(?:{_FILE_EXTENSION}))")
 _POLICY_CLAUSE = re.compile(
-    r"[;\n]|\.(?=\s|$)|\s+(?:but|and (?=(?:reject|disallow|prevent|accept|upload|allow|export|download|show|display|present|return)\b))\s*"
+    r"[;\n]|\.(?=\s|$)|\s+(?:but\b|and\s+(?=(?:reject|disallow|prevent|accept|upload|allow|export|download|show|display|present|return)\b))\s*"
 )
 _UPLOAD_ACTION = r"(?:upload(?:s|ed|ing)?|attach(?:es|ed|ing)?)"
 _UPLOAD_CONTEXT = re.compile(rf"\b{_UPLOAD_ACTION}\b")
@@ -130,7 +130,7 @@ _EXCLUSIVE_UPLOAD_FORMATS = re.compile(
     rf"\b(?:only\s+(?P<files>{_FILE_FORMAT_LIST})\s+(?:[a-z-]+\s+)?(?:uploads?|attachments?"
     r"|files?(?: types?)?\s+(?:(?:may|can|must|shall) be uploaded|are allowed for upload))\b"
     rf"|(?:upload|accept|allow|support)(?:s|ed)?\s+only\s+(?P<direct>{_FILE_FORMAT_LIST})"
-    r"(?=\s+(?:(?:[a-z-]+\s+)?(?:files?|attachments?|uploads?)|with|up to)\b|\s*$))"
+    r"(?=\s+(?:(?:[a-z-]+\s+)?(?:files?|attachments?|uploads?|images?|photos?|documents?)|with|up to)\b|\s*$))"
 )
 _SUPPORTED_UPLOAD_FORMATS = re.compile(
     rf"\b{_UPLOAD_ACTION}\b[^,]{{0,80}}?\s+(?:in|as)\s+(?P<formats>{_FILE_FORMAT_LIST})\s+(?:file\s+)?formats?\b"
@@ -156,6 +156,36 @@ _EXPENSE_REPORT = re.compile(r"\bexpense reports?\b")
 _EXPENSE_REJECTION = re.compile(r"\breject(?:s|ing)?\s+(?:(?:an?|the|submitted)\s+)*expense reports?\b(?!\s+(?:attachments?|files?|payloads?))")
 _REQUIRED_REASON = re.compile(r"\brequir(?:e[sd]?|ing)\b[^.]*\breason\b|\breason\b[^.]*\bis required\b")
 _OPTIONAL_REASON = re.compile(r"\b(?:not|never)\s+requir(?:e[sd]?|ing)\b")
+_ACTION_START = r"(?:^\s*|,\s*|\b(?:to|can|may|must|shall|should|will|then|and|system|application|users?|customers?)\s+(?:(?:not|never)\s+)?)"
+_DISPLAY_OBJECT = r"(?:buttons?|labels?|captions?|links?|tabs?|menus?|icons?|previews?|fields?|history|pages?|dialogs?|options?|status)"
+_DISPLAY_PHRASE = rf"(?:[\w-]+\s+){{0,2}}{_DISPLAY_OBJECT}\b"
+_FILE_TRANSFER = r"(?:export|download|import|upload)"
+_FILE_OR_INSTALL_ACTION = re.compile(
+    rf"{_ACTION_START}(?:{_FILE_TRANSFER}|attach|install|uninstall|upgrade)(?:s|es)?\b(?!\s+{_DISPLAY_PHRASE})\s+\S"
+    r"|\b(?:be|is|are)\s+(?:exported|downloaded|imported|uploaded|attached|installed|uninstalled|upgraded)\b"
+    r"|\buploaded\s+(?:file|attachment)\s+(?:must|shall|may|can)\b"
+    rf"|{_ACTION_START}(?:provide|offer|generate)s?\s+(?:(?:a|an|the)\s+)?(?:{_FILE_EXTENSION})\s+(?:download|export)\b(?!\s+{_DISPLAY_PHRASE})"
+    rf"|\ballows?\s+(?:(?:authenticated|authorized|secure)\s+)?{_FILE_TRANSFER}\s+of\b"
+)
+_DELIVERY_CHANNEL = r"(?:e-?mails?(?!\s+(?:address(?:es)?|fields?|inputs?|values?|preferences?)\b)|sms|webhooks?)"
+_DELIVERY_ACTION = re.compile(
+    rf"{_ACTION_START}(?:send|deliver|receive)(?:s)?\s+[^,]{{0,72}}?\b{_DELIVERY_CHANNEL}\b"
+    rf"|\b{_DELIVERY_CHANNEL}\s+(?:is|are|(?:must|may|can|should|will|shall) be)\s+(?:sent|delivered|received)\b"
+    rf"|{_ACTION_START}e-?mail(?:s)?\s+(?:a|an|the)\s+(?!{_DISPLAY_OBJECT}\b)\S"
+    rf"|{_ACTION_START}notif(?:y|ies)\s+[^,]{{0,60}}?\b(?:by|via)\s+{_DELIVERY_CHANNEL}\b"
+    r"|\breset\b[^,]{0,72}?\bvia (?:an? )?e-?mail (?:link|message)\b"
+)
+_EXTERNAL_RESOURCE = r"(?:apis?|endpoints?|webhooks?|providers?|services?)"
+_EXTERNAL_TARGET = rf"(?:[\w-]+\s+){{0,5}}{_EXTERNAL_RESOURCE}\b(?!\s+(?:keys?|tokens?|accounts?|{_DISPLAY_OBJECT})\b)"
+_EXTERNAL_EXCHANGE = re.compile(
+    rf"{_ACTION_START}(?:call|invoke|query|use|contact|integrate with)s?\s+{_EXTERNAL_TARGET}"
+    rf"|\b(?:send|post|forward)s?\s+[^,]{{0,72}}?\bto\s+{_EXTERNAL_TARGET}"
+    rf"|\bdepends? on\s+{_EXTERNAL_TARGET}"
+)
+_EXTERNAL_NAME = re.compile(rf"[\w-]+(?:\s+[\w-]+){{0,4}}\s+{_EXTERNAL_RESOURCE}")
+_TARGET_CONTEXT = re.compile(r"\b(?:to|on|with|via|call|invoke|query|use|contact)\s+(?:(?:a|an|the)\s+)?$")
+_OPERATION_CONDITION = re.compile(r"\b(?:when|if|unless|while|before|after)\b")
+_INPUT_VALIDATION = re.compile(r"\b(?:future dates?|validation|validates?)\b")
 
 ROLE_PATTERNS = [
     "users",
@@ -227,39 +257,53 @@ def _title_from_requirement(requirement: Requirement) -> str:
     return f"{text[:69].rstrip()}..."
 
 
-def _policy_clauses(text: str) -> list[str]:
+def _policy_clauses(text: str, *, keep_external_targets: bool = False) -> list[str]:
     # Retain exact quoted state names and file extensions inside policy syntax.
     # A UI message or sample name cannot supply the surrounding policy.
     def policy_value(match: re.Match[str]) -> str:
         value = next(value for value in match.groups() if value is not None)
-        return value if _POLICY_VALUE.fullmatch(value) else " "
+        if _POLICY_VALUE.fullmatch(value):
+            return value
+        if keep_external_targets and _EXTERNAL_NAME.fullmatch(value) and _TARGET_CONTEXT.search(match.string[max(0, match.start() - 32) : match.start()]):
+            return value.split()[-1]
+        return " "
 
     return _POLICY_CLAUSE.split(_QUOTED_VALUE.sub(policy_value, text.lower()))
 
 
-def _infer_rule_type(text: str, workflow_evidence: bool) -> str:
+def has_integration_evidence(text: str) -> bool:
+    """Recognize observable transfer, delivery, or explicitly external operations."""
+    return any(
+        pattern.search(clause)
+        for policy_clause in _policy_clauses(text, keep_external_targets=True)
+        for clause in _OPERATION_CONDITION.split(policy_clause)
+        for pattern in (_FILE_OR_INSTALL_ACTION, _DELIVERY_ACTION, _EXTERNAL_EXCHANGE)
+    )
+
+
+def _infer_rule_type(text: str, workflow_evidence: bool, integration_evidence: bool) -> str:
     lowered = text.lower()
     if any(keyword in lowered for keyword in ("allow only", "permission", "role", "admin", "manager", "employee")):
         return "Authorization"
     if workflow_evidence:
         return "State Transition"
+    if integration_evidence:
+        return "Integration"
     if any(keyword in lowered for keyword in ("validate", "validation", "required", "must", "prevent", "future date")):
         return "Validation"
-    if any(keyword in lowered for keyword in ("email", "send", "export", "upload")):
-        return "Integration"
     if any(keyword in lowered for keyword in ("search", "sort", "keyword", "relevance")):
         return "Data"
     return "Business"
 
 
-def _build_business_rules(requirement: Requirement, workflow_evidence: bool) -> List[Dict[str, Any]]:
+def _build_business_rules(requirement: Requirement, workflow_evidence: bool, integration_evidence: bool) -> List[Dict[str, Any]]:
     return [
         {
             "id": f"{requirement.id}-BR-01",
             "requirement_id": requirement.id,
             "title": _title_from_requirement(requirement),
             "description": requirement.text,
-            "rule_type": _infer_rule_type(requirement.text, workflow_evidence),
+            "rule_type": _infer_rule_type(requirement.text, workflow_evidence, integration_evidence),
         }
     ]
 
@@ -468,7 +512,7 @@ def _extract_state_transitions(requirement: Requirement, policy_clauses: list[st
     return transitions
 
 
-def _extract_risk_signals(requirement: Requirement, workflow_evidence: bool) -> List[Dict[str, Any]]:
+def _extract_risk_signals(requirement: Requirement, workflow_evidence: bool, integration_evidence: bool, validation_evidence: bool) -> List[Dict[str, Any]]:
     lowered = requirement.text.lower()
     risks: List[Dict[str, Any]] = []
 
@@ -486,30 +530,14 @@ def _extract_risk_signals(requirement: Requirement, workflow_evidence: bool) -> 
 
     if any(keyword in lowered for keyword in ("sign in", "password", "reset password", "lock the account")):
         add_risk("Authentication edge cases", "Authentication flows are security-sensitive and failure-prone.", "Security", "High")
-    if any(keyword in lowered for keyword in ("upload", "file", "jpg", "png", "future date", "validation")):
-        add_risk("Input validation gaps", "Uploaded content and validated fields need negative coverage.", "Validation", "Medium")
+    if validation_evidence:
+        add_risk("Input validation gaps", "The stated input constraints need negative coverage.", "Validation", "Medium")
     if workflow_evidence:
         add_risk("Workflow transition errors", "Status-driven behavior can fail at guard conditions or wrong states.", "Workflow", "High")
-    if any(keyword in lowered for keyword in ("email", "send", "confirmation email", "export", "csv")):
-        add_risk("External dependency behavior", "Integrations or export paths can fail independently of core UI flows.", "Integration", "Medium")
+    if integration_evidence:
+        add_risk("Integration outcome", "Verify the observable result of the stated operation.", "Integration", "Medium")
 
     return risks
-
-
-def _extract_dependencies(requirement: Requirement) -> List[str]:
-    lowered = requirement.text.lower()
-    dependencies: List[str] = []
-
-    if "email" in lowered:
-        dependencies.append("Email delivery service")
-    if any(keyword in lowered for keyword in ("upload", "photo", "file")):
-        dependencies.append("File storage service")
-    if any(keyword in lowered for keyword in ("search", "relevance", "keyword")):
-        dependencies.append("Search indexing service")
-    if any(keyword in lowered for keyword in ("export", "csv")):
-        dependencies.append("Export service")
-
-    return _dedupe_strings(dependencies)
 
 
 def _suggested_scenarios(
@@ -517,7 +545,7 @@ def _suggested_scenarios(
     field_constraints: List[Dict[str, Any]],
     role_permissions: List[Dict[str, Any]],
     state_transitions: List[Dict[str, Any]],
-    dependencies: List[str],
+    integration_evidence: bool,
 ) -> List[str]:
     lowered = requirement.text.lower()
     suggestions = ["Happy Path"]
@@ -532,7 +560,7 @@ def _suggested_scenarios(
         suggestions.append("Authorization")
     if state_transitions:
         suggestions.append("State Transition")
-    if dependencies:
+    if integration_evidence:
         suggestions.append("Integration")
     if any(keyword in lowered for keyword in ("search", "sort", "keyword", "results")):
         suggestions.append("Data Variation")
@@ -544,13 +572,16 @@ def fallback_requirement_analysis(requirements: List[Requirement]) -> List[Dict[
     analysis: List[Dict[str, Any]] = []
     for requirement in requirements:
         policy_clauses = _policy_clauses(requirement.text)
+        integration_evidence = has_integration_evidence(requirement.text)
         state_transitions = _extract_state_transitions(requirement, policy_clauses)
         workflow_evidence = bool(state_transitions or any(_STATUS_REFERENCE.search(clause) and _STATUS_CONDITION.search(clause) for clause in policy_clauses))
-        business_rules = _build_business_rules(requirement, workflow_evidence)
+        business_rules = _build_business_rules(requirement, workflow_evidence, integration_evidence)
         field_constraints = _extract_field_constraints(requirement, policy_clauses)
         role_permissions = _extract_role_permissions(requirement)
-        risk_signals = _extract_risk_signals(requirement, workflow_evidence)
-        dependencies = _extract_dependencies(requirement)
+        validation_evidence = any(_INPUT_VALIDATION.search(clause) for clause in policy_clauses) or any(
+            constraint["constraint_type"] in {"File Type", "File Size"} for constraint in field_constraints
+        )
+        risk_signals = _extract_risk_signals(requirement, workflow_evidence, integration_evidence, validation_evidence)
         analysis.append(
             {
                 "requirement_id": requirement.id,
@@ -565,9 +596,9 @@ def fallback_requirement_analysis(requirements: List[Requirement]) -> List[Dict[
                     field_constraints,
                     role_permissions,
                     state_transitions,
-                    dependencies,
+                    integration_evidence,
                 ),
-                "dependencies": dependencies,
+                "dependencies": [],
             }
         )
     return analysis
@@ -701,7 +732,7 @@ def normalize_requirement_analysis(raw_analysis: List[Dict[str, Any]], requireme
             "state_transitions": state_transitions or fallback["state_transitions"],
             "risk_signals": risk_signals or fallback["risk_signals"],
             "suggested_scenarios": _dedupe_strings(list(item.get("suggested_scenarios") or fallback["suggested_scenarios"])),
-            "dependencies": _dedupe_strings(list(item.get("dependencies") or fallback["dependencies"])),
+            "dependencies": _dedupe_strings(list(item.get("dependencies") or [])),
         }
 
     normalized: List[Dict[str, Any]] = []

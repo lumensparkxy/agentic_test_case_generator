@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from .analysis_agent import fallback_requirement_analysis, normalize_requirement_analysis, normalize_requirement_text
+from .analysis_agent import fallback_requirement_analysis, has_integration_evidence, normalize_requirement_analysis, normalize_requirement_text
 from ..models import Requirement
 from ..services.execution_service import (
     QUOTED_FILL_ACTION,
@@ -439,7 +439,8 @@ def _default_scenarios_for_requirement(requirement: Requirement) -> List[Dict[st
     scenario_types: List[str] = ["Happy Path", "Negative"]
 
     for keywords, scenario_type in SCENARIO_KEYWORD_RULES:
-        if any(keyword in text for keyword in keywords) and scenario_type not in scenario_types:
+        matched = has_integration_evidence(requirement.text) if scenario_type == "Integration" else any(keyword in text for keyword in keywords)
+        if matched and scenario_type not in scenario_types:
             scenario_types.append(scenario_type)
         if len(scenario_types) >= 4:
             break

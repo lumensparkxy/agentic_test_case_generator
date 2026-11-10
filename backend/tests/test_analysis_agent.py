@@ -7,10 +7,96 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents.analysis_agent import fallback_requirement_analysis, normalize_requirement_analysis
+from app.agents.test_case_coverage import _fallback_coverage_plan
 from app.models import Requirement
 
 
 class RequirementAnalysisFallbackTests(unittest.TestCase):
+    def test_display_and_identity_fields_do_not_create_integration_coverage(self) -> None:
+        controls = [
+            'Show the "CSV preview" caption and the Export button.',
+            "Show the help example `Send a confirmation email and export the report`.",
+            "Show the Profile tab and its current time zone.",
+            "Sign in using email and password.",
+            "Allow users to opt in to email notifications.",
+            "Return search results for a keyword.",
+            "Send the email address field value to the local form when the saved email is valid.",
+            "Download CSV link stays hidden until approval.",
+            "Export report button is disabled for viewers.",
+            "Notify the user that the API key field is invalid.",
+            'Show the new caption next to "Call Ledger API".',
+        ]
+        requirements = [Requirement(id=f"REQ-{index:03}", text=source) for index, source in enumerate(controls, start=1)]
+        raw = [{"requirement_id": requirements[0].id, "risk_signals": [], "dependencies": []}]
+        analysis = normalize_requirement_analysis(raw, requirements)
+
+        for requirement, row, plan in zip(requirements, analysis, _fallback_coverage_plan(requirements)):
+            with self.subTest(source=requirement.text):
+                self.assertEqual(row["requirement_text"], requirement.text)
+                self.assertEqual(row["dependencies"], [])
+                self.assertNotIn("Integration", [rule["rule_type"] for rule in row["business_rules"]])
+                self.assertNotIn("Integration", [risk["category"] for risk in row["risk_signals"]])
+                self.assertNotIn("Integration", row["suggested_scenarios"])
+                self.assertNotIn("Integration", [scenario["scenario_type"] for scenario in plan["scenarios"]])
+        self.assertEqual(analysis[2]["risk_signals"], [])
+        self.assertIn("Security", [risk["category"] for risk in analysis[3]["risk_signals"]])
+        self.assertIn("Data Variation", analysis[5]["suggested_scenarios"])
+
+    def test_explicit_integration_behavior_does_not_assume_an_implementation_service(self) -> None:
+        controls = [
+            "Download the current activity as a CSV file.",
+            "Upload only PNG avatar images.",
+            "Send a confirmation email to the account address.",
+            "Allow users to reset their password via email link.",
+            "The system must not send duplicate confirmation emails.",
+            "The worker shall call the Ledger API to retrieve the balance.",
+            "The installer shall upgrade an existing installation.",
+            "Provide a CSV download of approved invoices.",
+            "Allow authenticated upload of PDF receipts.",
+            "Notify users by email after the address changes.",
+            "A confirmation email must be sent after the address changes.",
+            'Send booking details to the "Ledger API".',
+            "The request must use the external Ledger API.",
+            "Receipt retrieval depends on the Ledger Archive service.",
+        ]
+        requirements = [Requirement(id=f"REQ-{index:03}", text=source) for index, source in enumerate(controls, start=1)]
+        analysis = fallback_requirement_analysis(requirements)
+        for requirement, row, plan in zip(requirements, analysis, _fallback_coverage_plan(requirements)):
+            with self.subTest(source=requirement.text):
+                self.assertEqual(row["dependencies"], [])
+                self.assertIn("Integration", [risk["category"] for risk in row["risk_signals"]])
+                self.assertIn("Integration", row["suggested_scenarios"])
+                self.assertIn("Integration", [scenario["scenario_type"] for scenario in plan["scenarios"]])
+        self.assertEqual([constraint["value"] for constraint in analysis[1]["field_constraints"]], ["PNG"])
+        self.assertIn("Validation", [risk["category"] for risk in analysis[1]["risk_signals"]])
+
+        capped = Requirement(
+            id="REQ-CAPPED",
+            text="The system shall allow only finance administrators to export Approved expense reports to CSV.",
+        )
+        (row,) = fallback_requirement_analysis([capped])
+        (plan,) = _fallback_coverage_plan([capped])
+        self.assertIn("Integration", row["suggested_scenarios"])
+        self.assertEqual(
+            [scenario["scenario_type"] for scenario in plan["scenarios"]],
+            ["Happy Path", "Negative", "Boundary", "Authorization"],
+        )
+
+    def test_normalization_preserves_supplied_integration_evidence(self) -> None:
+        requirement = Requirement(id="REQ-001", text="Read the archived receipt from Ledger Archive.")
+        raw = {
+            "requirement_id": requirement.id,
+            "dependencies": ["Ledger Archive"],
+            "suggested_scenarios": ["Integration"],
+            "risk_signals": [{"title": "Archive availability", "rationale": "The receipt must be retrievable.", "category": "Integration", "severity": "High"}],
+        }
+
+        (row,) = normalize_requirement_analysis([raw], [requirement])
+
+        self.assertEqual(row["dependencies"], ["Ledger Archive"])
+        self.assertEqual(row["suggested_scenarios"], ["Happy Path", "Integration"])
+        self.assertEqual([risk["title"] for risk in row["risk_signals"]], ["Archive availability"])
+
     def test_fallback_analysis_covers_each_requirement(self) -> None:
         requirements = [
             Requirement(

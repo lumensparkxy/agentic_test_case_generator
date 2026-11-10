@@ -207,6 +207,11 @@ a transition or a condition on a state. Transition order follows the source,
 and an unspecified prior state or guard stays unknown. The saved plan keeps
 the exact approved requirement text.
 
+Fallback analysis and default scenario planning look for explicit file transfer,
+outbound delivery, or external exchange before suggesting integration coverage.
+The analysis keeps named dependencies supplied by the specialist. The fallback
+leaves service names unspecified and focuses on the observable result.
+
 Generation and refinement assess the exact hydrated, delivered cases independently
 of the generation score. `substantive_assessment` records the input hash, rubric,
 source obligations, exact source quotations and step citations, and required or
