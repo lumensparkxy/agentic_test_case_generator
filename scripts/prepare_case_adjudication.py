@@ -25,6 +25,9 @@ INCOMPLETE_OUTCOMES = {"failed", "partial", "blocked", "interrupted"}
 ARMS = ("baseline", "candidate")
 FROZEN_PAIRS = 36
 MIN_COVERAGE_PERCENT = 95
+FACT_KINDS = ("rule", "account", "record", "locator", "outcome", "other")
+FACT_VERDICTS = ("supported", "unsupported", "unknown")
+CASE_FACT_FIELDS = {"title", "description", "preconditions", "test_data", "expected_result", "execution_prerequisites"}
 
 
 def json_bytes(value):
@@ -376,6 +379,67 @@ def prepare(frozen_root, intake_path, output):
     return Counter(row["status"] for row in ledger)
 
 
+def contains_quote(value, quote):
+    if isinstance(value, str):
+        return quote in value
+    if isinstance(value, dict):
+        return any(contains_quote(item, quote) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_quote(item, quote) for item in value)
+    return False
+
+
+def validate_fact_review(checkpoints, facts):
+    require(isinstance(facts, dict) and type(facts.get("complete")) is bool, "Fact review needs an explicit completeness decision")
+    claims = facts.get("claims")
+    reason = facts.get("reason")
+    require(isinstance(claims, list) and isinstance(reason, str) and reason.strip(), "Fact review needs claims and a reason")
+    cases = {(checkpoint, case["id"]): case for checkpoint, evidence in checkpoints.items() for case in evidence["saved_test_cases"]}
+    cited = set()
+    seen_claims = set()
+    counts = dict.fromkeys(FACT_VERDICTS, 0)
+    critical_unsupported = 0
+    for claim in claims:
+        require(isinstance(claim, dict), "Invalid fact judgment")
+        kind, verdict, critical, reason = (claim.get(key) for key in ("kind", "verdict", "critical", "reason"))
+        require(
+            kind in FACT_KINDS and verdict in FACT_VERDICTS and type(critical) is bool and isinstance(reason, str) and reason.strip(),
+            "Invalid fact judgment",
+        )
+        citation = claim.get("citation")
+        require(isinstance(citation, dict), "Fact judgment needs an exact artifact citation")
+        checkpoint, case_id = citation.get("checkpoint", "after"), citation.get("case_id")
+        field, quote = citation.get("field"), citation.get("quote")
+        require(
+            isinstance(checkpoint, str) and isinstance(case_id, str) and isinstance(field, str) and isinstance(quote, str) and quote.strip(),
+            "Invalid fact citation",
+        )
+        case = cases.get((checkpoint, case_id))
+        require(case is not None, "Fact citation names an unknown case or checkpoint")
+        step = citation.get("step")
+        if "step" in citation:
+            require(type(step) is int and step > 0 and field in STEP_FIELDS - {"step"}, "Invalid fact step citation")
+            value = next((row[field] for row in case["steps"] if row["step"] == step), None)
+        else:
+            require(field in CASE_FACT_FIELDS, "Invalid fact case field")
+            value = case.get(field)
+        location = (checkpoint, case_id, step, field, quote)
+        require(location not in cited and contains_quote(value, quote), "Duplicate fact citation or quote differs from the saved case")
+        claim_key = (checkpoint, kind, quote, reason.strip())
+        require(claim_key not in seen_claims, "Repeated fact judgment within one checkpoint")
+        cited.add(location)
+        seen_claims.add(claim_key)
+        counts[verdict] += 1
+        critical_unsupported += verdict == "unsupported" and critical
+    return {
+        "complete": facts["complete"],
+        "reason": facts["reason"],
+        "claims": claims,
+        **counts,
+        "critical_unsupported": critical_unsupported,
+    }
+
+
 def validate_labels(packet, seal, labels):
     require(
         digest(packet) == seal == labels.get("packet_sha256") and packet["sample_id"] == labels.get("sample_id"),
@@ -406,7 +470,7 @@ def validate_labels(packet, seal, labels):
             require(type(step[2]) is int and step in valid_steps and step not in cited, f"Invalid or duplicate step citation for {obligation}")
             cited.add(step)
     in_scope = {key: value for key, value in judgments.items() if key not in deferred}
-    return {
+    result = {
         "in_scope": len(in_scope),
         "in_scope_status": {key: row["status"] for key, row in in_scope.items()},
         "covered": sum(row["status"] == "covered" for row in in_scope.values()),
@@ -414,6 +478,9 @@ def validate_labels(packet, seal, labels):
         "missed_critical": [key for key, row in in_scope.items() if obligations[key]["critical"] and row["status"] != "covered"],
         "deferred": {key: judgments[key]["status"] for key in sorted(deferred)},
     }
+    if "fact_review" in labels:
+        result["fact_review"] = validate_fact_review(checkpoints, labels["fact_review"])
+    return result
 
 
 def coverage_totals(pairs):
@@ -435,15 +502,18 @@ def coverage_totals(pairs):
     }
 
 
-def paired_coverage(slots, cohort):
+def paired_slots(slots):
     grouped = {}
     for slot in slots:
         identity = (slot["workflow"], slot["repeat"])
         grouped.setdefault(identity, {})[slot["arm"]] = slot
+    return grouped
 
+
+def paired_coverage(slots, cohort):
     pairs = []
     workflows = {}
-    for (workflow, repeat), arms in grouped.items():
+    for (workflow, repeat), arms in paired_slots(slots).items():
         pair = {
             "workflow": workflow,
             "repeat": repeat,
@@ -490,6 +560,57 @@ def paired_coverage(slots, cohort):
     }
 
 
+def fact_totals(pairs):
+    matched = [pair for pair in pairs if pair["matched"]]
+    arms = {}
+    for arm in ARMS:
+        counts = {key: sum(pair["arms"][arm]["facts"][key] for pair in matched) for key in (*FACT_VERDICTS, "critical_unsupported")}
+        adjudicated = counts["supported"] + counts["unsupported"]
+        arms[arm] = {
+            **counts,
+            "adjudicated": adjudicated,
+            "unsupported_percent": round(100 * counts["unsupported"] / adjudicated, 2) if adjudicated else None,
+        }
+    return {"scheduled_pairs": len(pairs), "matched_pairs": len(matched), "arms": arms}
+
+
+def paired_unsupported_facts(slots, cohort):
+    pairs = []
+    workflows = {}
+    for (workflow, repeat), arms in paired_slots(slots).items():
+        evidence = {}
+        for arm in ARMS:
+            slot = arms[arm]
+            review = slot.get("fact_review")
+            facts = {key: review[key] for key in ("complete", *FACT_VERDICTS, "critical_unsupported")} if review is not None else None
+            evidence[arm] = {"status": slot["status"], "facts": facts}
+        matched = all(
+            row["status"] == "delivered" and row["facts"] is not None and row["facts"]["complete"] and not row["facts"]["unknown"] for row in evidence.values()
+        )
+        pair = {"workflow": workflow, "repeat": repeat, "arms": evidence, "matched": matched}
+        pairs.append(pair)
+        workflows.setdefault(workflow, []).append(pair)
+    totals = fact_totals(pairs)
+    baseline, candidate = (totals["arms"][arm] for arm in ARMS)
+    checks = None
+    if cohort == "rehearsal":
+        status = "rehearsal"
+    elif totals["matched_pairs"] != FROZEN_PAIRS or not (baseline["adjudicated"] and candidate["adjudicated"]):
+        status = "incomplete"
+    else:
+        checks = {
+            "no_candidate_critical_unsupported": candidate["critical_unsupported"] == 0,
+            "no_pooled_rate_increase": candidate["unsupported"] * baseline["adjudicated"] <= baseline["unsupported"] * candidate["adjudicated"],
+        }
+        status = "pass" if all(checks.values()) else "fail"
+    return {
+        "gate": {"status": status, "checks": checks},
+        "pooled": totals,
+        "workflows": {workflow: fact_totals(rows) for workflow, rows in workflows.items()},
+        "pairs": pairs,
+    }
+
+
 def summarize(package, label_dir):
     private = read_json((package / "private-ledger.json").read_bytes())
     manifest = read_json(FROZEN_MANIFEST.read_bytes())
@@ -515,6 +636,7 @@ def summarize(package, label_dir):
     results = []
     seen = set()
     for slot in private["slots"]:
+        require("fact_review" not in slot, "Private intake slot contains unverified fact review")
         if slot["status"] != "delivered":
             require(
                 slot["status"] in INCOMPLETE_OUTCOMES | {"unrun", "invalid_evidence"} and not {"sample_id", "packet_sha256"} & slot.keys(),
@@ -542,10 +664,19 @@ def summarize(package, label_dir):
             continue
         label = labels.pop(sample)
         result = validate_labels(packet, slot["packet_sha256"], label)
-        results.append({**slot, "review_sha256": digest(label), "review": result})
+        fact_review = result.pop("fact_review", None)
+        reviewed = {**slot, "review_sha256": digest(label), "review": result}
+        if fact_review is not None:
+            reviewed["fact_review"] = fact_review
+        results.append(reviewed)
     require({path.stem for path in (package / "reviewer").glob("*.json")} == seen, "Reviewer files differ from the private slot ledger")
     require(not labels, "Review references an unknown sample")
-    return {**private, "slots": results, "business_coverage": paired_coverage(results, private["cohort"])}
+    return {
+        **private,
+        "slots": results,
+        "business_coverage": paired_coverage(results, private["cohort"]),
+        "unsupported_facts": paired_unsupported_facts(results, private["cohort"]),
+    }
 
 
 def main():
@@ -555,7 +686,7 @@ def main():
     pack.add_argument("--frozen", type=Path, required=True)
     pack.add_argument("--intake", type=Path, required=True)
     pack.add_argument("--output", type=Path, required=True)
-    score = commands.add_parser("summarize", help="Check finalized labels and record matched business coverage privately")
+    score = commands.add_parser("summarize", help="Check finalized labels and record matched coverage and unsupported facts privately")
     score.add_argument("--package", type=Path, required=True)
     score.add_argument("--labels", type=Path, required=True)
     score.add_argument("--output", type=Path, required=True)

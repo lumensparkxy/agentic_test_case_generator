@@ -128,11 +128,45 @@ and integer `step`. For a pre-change W11 step add `"checkpoint": "before"`. Cove
 requires at least one step citation. An explicitly deferred scope check
 may cite the source decision in its reason with an empty citation list.
 
+Add `fact_review` to the same label for unsupported-fact adjudication.
+Mark `complete` after checking all distinct product facts in the packet.
+Explain the reviewed scope in `reason`, including a reason for an empty
+inventory. List each fact once per checkpoint, using one exact example
+when several cases repeat it. The validator rejects repeated kind, quote,
+and reason within a checkpoint. Reviewers consolidate paraphrases.
+Record `kind` as `rule`, `account`, `record`,
+`locator`, `outcome`, or `other`. Use verdict `supported`, `unsupported`,
+or `unknown`, an explicit boolean `critical`, and the source or observed
+evidence in the judgment reason. Clearly labelled synthetic test inputs
+stay outside the product-fact inventory.
+
+For each fact cite the saved case ID, field, and verbatim quote. A step
+citation also carries the integer step number and uses `action`,
+`expected`, or `test_data`. Case-level citations use `title`,
+`description`, `preconditions`, `test_data`, `expected_result`, or
+`execution_prerequisites`. Use `"checkpoint": "before"` for a fact in
+the original W11 suite. This is an example claim inside `fact_review.claims`.
+
+```json
+{
+  "kind": "outcome",
+  "verdict": "supported",
+  "critical": true,
+  "reason": "The current Room Booking requirement specifies Confirmed status.",
+  "citation": {
+    "case_id": "TC-001",
+    "step": 4,
+    "field": "expected",
+    "quote": "Confirmed"
+  }
+}
+```
+
 ```sh
 .venv/bin/python scripts/prepare_case_adjudication.py summarize \
   --package /tmp/tcg-v2-review/package \
   --labels /tmp/tcg-v2-review/final-labels \
-  --output /tmp/tcg-v2-review/private-coverage.json
+  --output /tmp/tcg-v2-review/private-quality.json
 ```
 
 The private summary retains all 36 pairs and each arm's delivery and label
@@ -148,8 +182,16 @@ cohort. It uses the unrounded candidate ratio for the 95% threshold,
 requires zero missed critical obligations and compares the pooled candidate
 and baseline counts for regression. Partial and rehearsal reports retain
 their separate states. The calculation relies on verified live provenance
-and independent final labels. Assessor accuracy, unsupported facts,
-correction effort and controlled fault outcomes require separate evidence.
+and independent final labels. Assessor accuracy, correction effort and
+controlled fault outcomes require separate evidence.
+
+The separate `unsupported_facts` result reports counts for each arm and
+compares pooled unsupported claims divided by supported plus unsupported
+facts across complete pairs. Unknown judgments stay visible in their
+pair. Missing, incomplete, or unknown fact reviews keep the live gate
+incomplete, as do empty pooled denominators. The live comparison requires
+all 36 matched pairs and uses unrounded rates. Earlier coverage-only
+labels remain readable and leave fact review pending.
 
 ## Frozen acceptance gates
 

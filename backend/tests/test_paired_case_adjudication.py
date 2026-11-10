@@ -257,6 +257,13 @@ def _packet_and_labels():
     return packet, seal, labels
 
 
+def _fact_claim(quote, *, step=None, field="expected_result", verdict="supported", critical=False, checkpoint="after"):
+    citation = {"checkpoint": checkpoint, "case_id": "TC-001", "field": field, "quote": quote}
+    if step is not None:
+        citation["step"] = step
+    return {"kind": "outcome", "verdict": verdict, "critical": critical, "reason": "Reference evidence from source R1.", "citation": citation}
+
+
 class CheckedDeliveryTests(unittest.TestCase):
     def test_frozen_source_checks_exact_version_quote_and_line_range_for_each_requirement(self):
         project, *_ = _delivery()
@@ -466,6 +473,58 @@ class ValidateLabelsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Source citation differs"):
             validate_labels(packet, seal, labels)
 
+    def test_binds_fact_quotes_to_literal_values_and_setup_fields(self):
+        packet, seal, labels = _packet_and_labels()
+        labels["fact_review"] = {
+            "complete": True,
+            "reason": "All distinct product claims reviewed.",
+            "claims": [
+                _fact_claim("  Zürich–01\n第二行  ", step=1, field="test_data"),
+                _fact_claim("Provisioned Supervisor account", field="execution_prerequisites", verdict="unsupported", critical=True),
+                _fact_claim("The expected result is recorded.", step=2, field="expected", verdict="unknown"),
+            ],
+        }
+        review = validate_labels(packet, seal, labels)["fact_review"]
+        self.assertEqual((review["supported"], review["unsupported"], review["unknown"], review["critical_unsupported"]), (1, 1, 1, 1))
+        self.assertEqual(review["claims"], labels["fact_review"]["claims"])
+
+    def test_fact_quote_must_match_the_named_checkpoint_without_normalization(self):
+        packet, _, labels = _packet_and_labels()
+        packet["before"] = {"saved_test_cases": deepcopy(packet["saved_test_cases"])}
+        packet["before"]["saved_test_cases"][0]["steps"][0]["test_data"] = "Old  reference"
+        seal = digest(packet)
+        labels["packet_sha256"] = seal
+        labels["fact_review"] = {
+            "complete": True,
+            "reason": "Checked both source revisions.",
+            "claims": [
+                _fact_claim("Old  reference", step=1, field="test_data", checkpoint="before"),
+                _fact_claim("The expected result is recorded.", step=2, field="expected", checkpoint="before"),
+                _fact_claim("The expected result is recorded.", step=2, field="expected"),
+            ],
+        }
+        self.assertEqual(validate_labels(packet, seal, labels)["fact_review"]["supported"], 3)
+        for change in ({"quote": "Old reference"}, {"checkpoint": "after"}, {"step": 99}, {"step": True}, {"case_id": "other"}):
+            with self.subTest(change=change):
+                wrong = deepcopy(labels)
+                wrong["fact_review"]["claims"][0]["citation"].update(change)
+                with self.assertRaises(ValueError):
+                    validate_labels(packet, seal, wrong)
+
+    def test_fact_inventory_rejects_duplicate_citations_and_missing_completeness(self):
+        packet, seal, labels = _packet_and_labels()
+        fact = _fact_claim("The expected result is recorded.", step=2, field="expected")
+        labels["fact_review"] = {"complete": True, "reason": "Reviewed the sample.", "claims": [fact, deepcopy(fact)]}
+        with self.assertRaisesRegex(ValueError, "Duplicate fact citation"):
+            validate_labels(packet, seal, labels)
+        labels["fact_review"]["claims"][1]["citation"]["case_id"] = "TC-002"
+        with self.assertRaisesRegex(ValueError, "Repeated fact judgment"):
+            validate_labels(packet, seal, labels)
+        labels["fact_review"]["claims"] = []
+        del labels["fact_review"]["complete"]
+        with self.assertRaisesRegex(ValueError, "explicit completeness"):
+            validate_labels(packet, seal, labels)
+
 
 class PairedCoverageTests(unittest.TestCase):
     def slots(self, baseline_covered, candidate_covered, *, critical_miss=False):
@@ -534,6 +593,49 @@ class PairedCoverageTests(unittest.TestCase):
         status["another-rule"] = status.pop("rule-0")
         with self.assertRaisesRegex(ValueError, "Paired obligation scopes differ"):
             adjudication.paired_coverage(slots, "live")
+
+    def fact_slots(self, baseline_supported=1, candidate_supported=3):
+        slots = self.slots(20, 20)
+        for slot in slots:
+            supported = baseline_supported if slot["arm"] == "baseline" else candidate_supported
+            slot["fact_review"] = {"complete": True, "supported": supported, "unsupported": 1, "unknown": 0, "critical_unsupported": 0}
+        return slots
+
+    def test_fact_gate_compares_rates_and_critical_claims_separately(self):
+        slots = self.fact_slots()
+        facts = adjudication.paired_unsupported_facts(slots, "live")
+        self.assertEqual(facts["gate"]["status"], "pass")
+        self.assertEqual(facts["pooled"]["matched_pairs"], 36)
+        self.assertEqual(facts["pooled"]["arms"]["candidate"]["unsupported_percent"], 25.0)
+        self.assertTrue(all(row["matched_pairs"] == 3 for row in facts["workflows"].values()))
+        reversed_rates = adjudication.paired_unsupported_facts(self.fact_slots(baseline_supported=3, candidate_supported=1), "live")
+        self.assertEqual(reversed_rates["gate"], {"status": "fail", "checks": {"no_candidate_critical_unsupported": True, "no_pooled_rate_increase": False}})
+        slots[1]["fact_review"]["critical_unsupported"] = 1
+        critical = adjudication.paired_unsupported_facts(slots, "live")
+        self.assertEqual(critical["gate"], {"status": "fail", "checks": {"no_candidate_critical_unsupported": False, "no_pooled_rate_increase": True}})
+
+    def test_fact_gate_preserves_unknown_unreviewed_and_partial_arms(self):
+        slots = self.fact_slots()
+        self.assertEqual(adjudication.paired_unsupported_facts(slots, "rehearsal")["gate"]["status"], "rehearsal")
+        slots[0]["fact_review"]["unknown"] = 1
+        del slots[3]["fact_review"]
+        slots[5].update(status="partial", fact_review=None)
+        result = adjudication.paired_unsupported_facts(slots, "live")
+        self.assertEqual(result["gate"], {"status": "incomplete", "checks": None})
+        self.assertEqual(len(result["pairs"]), 36)
+        self.assertEqual(result["pooled"]["matched_pairs"], 33)
+        self.assertEqual(result["pairs"][0]["arms"]["baseline"]["facts"]["unknown"], 1)
+        self.assertIsNone(result["pairs"][1]["arms"]["candidate"]["facts"])
+        self.assertEqual(result["pairs"][2]["arms"]["candidate"]["status"], "partial")
+
+    def test_fact_gate_does_not_compare_an_empty_denominator(self):
+        slots = self.fact_slots(baseline_supported=0)
+        for slot in slots:
+            if slot["arm"] == "baseline":
+                slot["fact_review"]["unsupported"] = 0
+        result = adjudication.paired_unsupported_facts(slots, "live")
+        self.assertEqual(result["gate"]["status"], "incomplete")
+        self.assertIsNone(result["pooled"]["arms"]["baseline"]["unsupported_percent"])
 
 
 class PairedPacketTests(unittest.TestCase):
@@ -643,6 +745,34 @@ class PairedPacketTests(unittest.TestCase):
             self.assertTrue(all(slot["review"] is None for slot in private["slots"]))
             self.assertEqual(private["business_coverage"]["gate"]["status"], "rehearsal")
             self.assertEqual(private["business_coverage"]["pooled"]["matched_pairs"], 0)
+            _, _, label = _packet_and_labels()
+            label.update(sample_id=sample, packet_sha256=envelope["packet_sha256"])
+            label["fact_review"] = {
+                "complete": True,
+                "reason": "Reviewed all product claims.",
+                "claims": [_fact_claim("The expected result is recorded.", step=2, field="expected")],
+            }
+            label_file = labels / "review.json"
+            label_file.write_bytes(adjudication.json_bytes(label))
+            reviewed = adjudication.summarize(output, labels)
+            fact_slot = next(slot for slot in reviewed["slots"] if slot.get("sample_id") == sample)
+            self.assertEqual(fact_slot["fact_review"]["supported"], 1)
+            fact_pair = next(row for row in reviewed["unsupported_facts"]["pairs"] if row["workflow"] == workflow and row["repeat"] == 1)
+            self.assertEqual(fact_pair["arms"]["baseline"]["facts"]["supported"], 1)
+            self.assertIsNone(fact_pair["arms"]["candidate"]["facts"])
+            self.assertEqual(reviewed["unsupported_facts"]["gate"]["status"], "rehearsal")
+            label_file.unlink()
+
+            ledger_path = output / "private-ledger.json"
+            raw_ledger = ledger_path.read_bytes()
+            injected = json.loads(raw_ledger)
+            injected_slot = next(slot for slot in injected["slots"] if slot.get("sample_id") == sample)
+            injected_slot["fact_review"] = fact_slot["fact_review"]
+            ledger_path.write_bytes(adjudication.json_bytes(injected))
+            with self.assertRaisesRegex(ValueError, "unverified fact review"):
+                adjudication.summarize(output, labels)
+            ledger_path.write_bytes(raw_ledger)
+
             private["cohort"] = "live"
             (output / "private-ledger.json").write_bytes(adjudication.json_bytes(private))
             with self.assertRaisesRegex(ValueError, "Delivered capture differs from the ledger cohort"):
