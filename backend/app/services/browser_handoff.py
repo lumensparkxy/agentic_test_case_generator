@@ -348,6 +348,8 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             if action == "navigate" or current_page != page:
                 entered_values.clear()
                 pending_values.clear()
+            # A same-page reopen keeps the preceding submission for declared readback.
+            if current_page != page:
                 submission = None
             current_page = page
         locator = step.get("locator")

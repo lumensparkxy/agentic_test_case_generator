@@ -226,6 +226,40 @@ class BrowserHandoffTests(unittest.TestCase):
         case.steps[-1].expected = 'test id "saved-category" text should equal "option-id"'
         self.assertIn("does not match the exact submitted input", validate_browser_handoff([case], grounded, [REQUIREMENT])[1])
 
+    def test_same_page_reopen_preserves_only_the_completed_submission(self):
+        other_page = "https://example.test/other"
+        grounded = context()
+        binding = f'Browser result css "#saved-ref" on "{TARGET}" shows field "Reference" after button "Save request"'
+        grounded.notes = f'Browser page "{other_page}"\nObserved button "Review request".\n{binding}'
+        initial, entry, submit = candidate().steps
+        other_submit = submit.model_copy(update={"action": 'Click exact button "Review request"'})
+        reopen = TestStep(step=1, action=f'Open "{TARGET}"', expected="")
+        open_other = TestStep(step=1, action=f'Open "{other_page}"', expected="")
+        readback = TestStep(step=1, action="Inspect the saved reference", expected='css "#saved-ref" text should equal "Q-17"')
+        mismatched = readback.model_copy(update={"expected": 'css "#saved-ref" text should equal "Request saved"'})
+        form_value = TestStep(step=1, action="Inspect the Reference field", expected='field "Reference" value should equal "Q-17"')
+        missing_evidence = "lacks exact source or controlled input evidence"
+        for label, steps, warning in (
+            ("same page", [initial, entry, submit, reopen, readback], None),
+            ("wrong saved value", [initial, entry, submit, reopen, mismatched], "does not match the exact submitted input"),
+            ("other button", [initial, entry, other_submit, reopen, readback], missing_evidence),
+            ("different page", [initial, entry, submit, open_other, reopen, readback], missing_evidence),
+            ("reopened form", [initial, entry, submit, reopen, form_value], missing_evidence),
+            ("unsubmitted input", [initial, entry, reopen, submit, readback], missing_evidence),
+        ):
+            with self.subTest(label=label):
+                case = candidate()
+                case.steps = [step.model_copy(update={"step": index}) for index, step in enumerate(steps, 1)]
+                exact_steps = [step.model_dump() for step in case.steps]
+                warnings = validate_browser_handoff([case], grounded, [REQUIREMENT])
+                self.assertEqual([step.model_dump() for step in case.steps], exact_steps)
+                if warning is None:
+                    self.assertEqual(warnings, [])
+                    self.assertEqual(case.automation_status, "To Be Automated")
+                else:
+                    self.assertEqual(case.automation_status, "Manual")
+                    self.assertIn(warning, warnings[1])
+
     def test_checkbox_handoff_requires_native_availability_for_interaction(self):
         grounded = context()
         field = grounded.grounded_context.ui_elements[0]
