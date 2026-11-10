@@ -177,6 +177,35 @@ test.describe("Opt-in project workspaces", () => {
 		});
 	}
 
+	test("reveals the destination heading after keyboard navigation from a scrolled case reader", async ({ page }) => {
+		await page.setViewportSize({ width: 720, height: 456 });
+		const { writes, errors } = await setup(page, 200);
+		await page.goto(projectPath("review/tests"));
+		await page.getByRole("tab", { name: /Generated Test Cases/ }).press("Enter");
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		const reader = page.getByRole("region", { name: "Selected test case" });
+		await search.fill("Checkout 200");
+		await page.getByRole("button", { name: "TC-200 Checkout 200", exact: true }).press("Enter");
+		await reader.getByRole("heading", { name: "Checkout 200", exact: true }).scrollIntoViewIfNeeded();
+		await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+		await workspace(page, "Review").focus();
+		await page.keyboard.press("Tab");
+		await expect(workspace(page, "Deliver")).toBeFocused();
+		await page.keyboard.press("End");
+		await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(400);
+		await page.keyboard.press("Enter");
+		await expect(page.locator("#main-content")).toBeFocused();
+		await expect(heading(page, "Export Test Cases")).toBeInViewport({ ratio: 1, timeout: 5000 });
+
+		await page.goBack();
+		await page.getByRole("tab", { name: /Generated Test Cases/ }).press("Enter");
+		await expect(search).toHaveValue("Checkout 200");
+		await expect(reader).toContainText("Receipt 200 appears");
+		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
 	test("section links and browser history restore the correct workbenches and local decisions", async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const { writes, errors, other } = await setup(page);

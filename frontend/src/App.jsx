@@ -1801,6 +1801,14 @@ export default function App() {
 		: `${route.kind}:${route.projectId || ""}:${route.destination || ""}`;
 	const previousRouteFocusKeyRef = useRef(routeFocusKey);
 	const pendingRouteFocusRef = useRef(false);
+	const workspaceEntryPathRef = useRef(null);
+	const navigateWorkspace = useCallback(
+		(path, options) => {
+			workspaceEntryPathRef.current = path === window.location.pathname ? null : path;
+			navigate(path, options);
+		},
+		[navigate]
+	);
 	const focusPendingRoute = useCallback((replacingFocusedLoader = false) => {
 		if (!replacingFocusedLoader && !pendingRouteFocusRef.current) return;
 		const main = document.getElementById("main-content");
@@ -1813,8 +1821,18 @@ export default function App() {
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
 			if (document.activeElement === main) main.blur();
-			main.focus();
+			if (workspaceEntryPathRef.current === window.location.pathname) {
+				main.focus({ preventScroll: true });
+				const heading = main.querySelector("h1");
+				const { top, bottom } = (heading || main).getBoundingClientRect();
+				if (top < 0 || top >= window.innerHeight || (heading && bottom > window.innerHeight)) {
+					main.scrollIntoView({ block: "start", behavior: "instant" });
+				}
+			} else {
+				main.focus();
+			}
 		}
+		workspaceEntryPathRef.current = null;
 		pendingRouteFocusRef.current = false;
 	}, []);
 
@@ -1864,6 +1882,7 @@ export default function App() {
 			pendingRouteFocusRef.current = true;
 		}
 		if (!pendingRouteFocusRef.current) {
+			workspaceEntryPathRef.current = null;
 			return undefined;
 		}
 		if (route.kind === "project" && ["idle", "loading"].includes(projectRouteStatus)) {
@@ -1871,7 +1890,7 @@ export default function App() {
 		}
 		const focusFrame = window.requestAnimationFrame(() => focusPendingRoute());
 		return () => window.cancelAnimationFrame(focusFrame);
-	}, [focusPendingRoute, projectRouteStatus, route.kind, routeFocusKey]);
+	}, [focusPendingRoute, location.pathname, projectRouteStatus, route.kind, routeFocusKey]);
 
 	const hydrateProjectWorkflow = (project) => {
 		invalidateExecutionPreviewRequest();
@@ -5235,7 +5254,7 @@ export default function App() {
 				) : (
 					<div className={workflowShellClassName}>
 						{PROJECT_WORKSPACES_V2 ? (
-							<ProjectWorkspaceNavigation route={route} navigate={navigate} counts={savedArtifactCounts} />
+							<ProjectWorkspaceNavigation route={route} navigate={navigateWorkspace} counts={savedArtifactCounts} />
 						) : (
 							<WorkflowNavigationDrawer
 								tabs={tabs}

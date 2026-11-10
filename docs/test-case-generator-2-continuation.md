@@ -464,6 +464,10 @@ P0 pins the baseline and records the prospective gates (commit `2327ab9`,
 [PR #450](https://github.com/lumensparkxy/agentic_test_case_generator/pull/450)).
 P1 adds opt-in navigation and compatible aliases (commit `1d5977b`,
 [PR #452](https://github.com/lumensparkxy/agentic_test_case_generator/pull/452)).
+Native Chromium at 200% exposed an offscreen Deliver heading after
+keyboard navigation from a scrolled Review reader. Explicit workspace
+links now reveal the destination heading when needed. The 1366, 1440
+and 1920 checks preserved the selected case and search on Back.
 P2 adds unified intake and scoped decisions (commit `750fa78`,
 [PR #454](https://github.com/lumensparkxy/agentic_test_case_generator/pull/454)).
 P3a adds the internal transactional approval, intent outbox and fenced
