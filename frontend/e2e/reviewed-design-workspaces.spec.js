@@ -16,6 +16,9 @@ const root = `/projects/${USE_CASE_PROJECT_ID}`;
 const suiteId = "reviewed-checkout-design-v2";
 const reportId = "reviewed-checkout-report-v1";
 const caseId = "TC-REVIEWED-ORDER";
+const runSnapshotId = "checkout-execution-snapshot-before-repair";
+const priorRunFinding = "Classify the checkout failure from the recorded run.";
+const unrelatedFinding = "A later run needs separate investigation.";
 const literal = "  QA–01  ";
 
 async function setup(page, { stale = false, available = true, oldServer = false } = {}) {
@@ -72,7 +75,13 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 			coverage_plan: coverage,
 			approved: false,
 			review: { approved: false, score: 100, threshold: 90, summary: "The checkout execution fixture is missing." },
-			substantive_assessment: { status: "incomplete", design_status: "assessed_complete", execution_status: "blocked", obligations: [] },
+			substantive_assessment: {
+				status: "incomplete",
+				design_status: "assessed_complete",
+				execution_status: "blocked",
+				execution_blockers: [{ test_case_id: caseId, prerequisite_name: "checkoutFixture" }],
+				obligations: [],
+			},
 			generation_tasks: [],
 		},
 	};
@@ -81,6 +90,10 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 		project_id: project.project_id,
 		run_id: "checkout-run-before-repair",
 		run_record_id: "checkout-run-record-before-repair",
+		snapshot_id: runSnapshotId,
+		results: [
+			{ id: "prior-checkout-candidate", source_test_case_id: caseId, title: "Saved checkout browser case", status: "failed", issues: [] },
+		],
 		source_snapshot_id: "checkout-suite-before-repair",
 		status: "failed",
 	});
@@ -127,8 +140,28 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 		const request = route.request();
 		if (!["fetch", "xhr"].includes(request.resourceType())) return route.fallback();
 		const pathname = new URL(request.url()).pathname;
-		if (pathname.endsWith("/quality-findings"))
-			return route.fulfill({ json: { findings: [], project_revision: project.current_revision } });
+		if (pathname.endsWith("/quality-findings")) {
+			const finding = {
+				status: "open",
+				category: "unknown",
+				expected_behavior: "Preserve the expected checkout confirmation.",
+				prerequisites: [],
+				environment: "staging",
+				source_stage: "execution",
+				source_test_case_snapshot_id: historicalRun.source_snapshot_id,
+				test_case_ids: [caseId],
+				requirement_ids: ["REQ-101"],
+			};
+			return route.fulfill({
+				json: {
+					findings: [
+						{ ...finding, id: "prior-run-finding", summary: priorRunFinding, source_snapshot_id: runSnapshotId },
+						{ ...finding, id: "different-run-finding", summary: unrelatedFinding, source_snapshot_id: "different-execution-snapshot" },
+					],
+					project_revision: project.current_revision,
+				},
+			});
+		}
 		if (pathname.endsWith("/knowledge")) return route.fulfill({ json: { entries: [], skills: [], features: {}, revision: "0" } });
 		return route.fulfill({ status: 404, json: { detail: "No fixture for this optional read." } });
 	});
@@ -261,6 +294,48 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(errors).toEqual([]);
 	});
 
+	test("opens declared setup and exact failed-run findings without dispatch", async ({ page }) => {
+		const { errors, exportRequests, writes, historicalRun } = await setup(page);
+		const prerequisites = (page) => page.getByRole("region", { name: "Declared browser prerequisites", exact: true });
+		await page.goto(`${root}/deliver`);
+		await expect(exportDesign(page)).toBeEnabled();
+		await expect(prerequisites(page)).toContainText("checkoutFixture");
+		await page.goto(`${root}/deliver/browser-tests`);
+		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
+		const setupLink = prerequisites(page).getByRole("link", { name: `Review prerequisite checkoutFixture for ${caseId}`, exact: true });
+		await setupLink.press("Enter");
+		await expect(page).toHaveURL(
+			new RegExp(`[?&]snapshot=${suiteId}&case=${caseId}&prerequisite=checkoutFixture&setup=declared#quality-feedback-heading$`)
+		);
+		await expect(page.getByRole("heading", { name: "Quality feedback", exact: true })).toBeFocused();
+		await expect(page.getByLabel("Missing prerequisite name")).toHaveValue("checkoutFixture");
+		expect(writes).toEqual([]);
+
+		await page.goto(`${root}/deliver?run=${historicalRun.run_record_id}`);
+		await expect(prerequisites(page)).toHaveCount(0);
+		const findingLink = page.getByRole("link", { name: "Review quality findings for this run", exact: true });
+		await expect(findingLink).toHaveAttribute(
+			"href",
+			new RegExp(`[?&]finding_source=${runSnapshotId}&finding_run=${historicalRun.run_record_id}#quality-feedback-heading$`)
+		);
+		await findingLink.press("Enter");
+		await expect(page.getByRole("heading", { name: "Quality feedback", exact: true })).toBeFocused();
+		const runFindings = page.getByRole("list", { name: "Quality findings for this run", exact: true });
+		await expect(runFindings.getByText(priorRunFinding, { exact: true })).toBeVisible();
+		await expect(page.getByText(unrelatedFinding, { exact: true })).toHaveCount(0);
+		await runFindings.getByRole("button", { name: "Review finding", exact: true }).click();
+		await expect(page.getByText(priorRunFinding, { exact: false }).last()).toBeVisible();
+		await page.goto(
+			`${root}/inputs/context?finding_source=different-execution-snapshot&finding_run=${historicalRun.run_record_id}#quality-feedback-heading`
+		);
+		await expect(page.getByText("This saved run's quality findings are unavailable.", { exact: true })).toBeVisible();
+		await expect(page.getByText(unrelatedFinding, { exact: true })).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Review finding", exact: true })).toHaveCount(0);
+		expect(writes).toEqual([]);
+		expect(exportRequests).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
 	for (const [name, options] of [
 		["unknown", { available: false }],
 		["stale", { stale: true }],
@@ -276,6 +351,7 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 				.click();
 			await expect(exportDesign(page)).toHaveCount(0);
 			await expect(page.getByRole("button", { name: /JSON.*API\/Import ready/ })).toBeDisabled();
+			await expect(page.getByRole("region", { name: "Declared browser prerequisites", exact: true })).toHaveCount(0);
 			expect(writes).toEqual([]);
 			expect(errors).toEqual([]);
 		});
@@ -284,11 +360,21 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 
 test("flag-off keeps the existing draft export gate despite server evidence", { tag: "@p1" }, async ({ page }) => {
 	test.skip(v2, "Requires the legacy workspace build");
-	const { errors, writes } = await setup(page);
+	const { errors, writes, historicalRun } = await setup(page);
 	await page.goto(`${root}/reports`);
 	await expect(page.getByText("Export locked by review gate", { exact: true })).toBeVisible();
 	await expect(exportDesign(page)).toHaveCount(0);
 	await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toBeVisible();
+	await expect(page.getByRole("region", { name: "Declared browser prerequisites", exact: true })).toHaveCount(0);
+	await page.goto(`${root}/reports?run=${historicalRun.run_record_id}`);
+	await expect(page.getByText(`Run ${historicalRun.run_id}`, { exact: true })).toBeVisible();
+	await expect(page.getByRole("link", { name: "Review quality findings for this run", exact: true })).toHaveCount(0);
+	await page.goto(
+		`${root}/inputs/context?finding_source=${runSnapshotId}&finding_run=${historicalRun.run_record_id}#quality-feedback-heading`
+	);
+	const findings = page.getByRole("list", { name: "Quality findings for this run", exact: true });
+	await expect(findings.getByText(priorRunFinding, { exact: true })).toBeVisible();
+	await expect(page.getByText(unrelatedFinding, { exact: true })).toHaveCount(0);
 	expect(writes).toEqual([]);
 	expect(errors).toEqual([]);
 });

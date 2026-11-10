@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { API_CONTRACT_ENDPOINTS } from "../../api/generated/api-contracts";
 import RouteLink from "../../app/RouteLink";
 import { buildSavedCasePath } from "../../app/savedCaseLinks";
+import { buildExecutionFindingsPath, hasExecutionFindingEvidence, readExactSavedExecutionRun } from "../../app/executionFindings";
 import { List, ListItem, CollectionState } from "../ui/collections";
 import { Button } from "../ui/controls";
 import { Disclosure } from "../ui/surfaces";
@@ -9,6 +9,7 @@ import { formatExecutionCaseStatus } from "../automation/automationEvidence";
 import { ExecutionIssues, RunnerIssues } from "../automation/ExecutionIssues";
 
 const REPORT_PATH_LIMIT = 8;
+const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
 
 function latestExecutionReport(executionRunResult, currentProject) {
 	if (executionRunResult?.run_id) {
@@ -117,6 +118,7 @@ function PlaywrightExecutionReport({
 	notice,
 	onRetry,
 	caseNavigation,
+	findingsLink,
 	emptyMessage = "No Playwright execution report has been recorded yet.",
 }) {
 	const summary = report?.summary || {};
@@ -165,6 +167,7 @@ function PlaywrightExecutionReport({
 					{report.historical && <p className="helper-text">Historical run from project revision {report.project_revision}.</p>}
 					<RunnerIssues issues={report.issues} />
 					{!notice && <CaseOutcomes results={report.results} caseNavigation={caseNavigation} />}
+					{findingsLink && <p className="execution-finding-next-action">{findingsLink}</p>}
 					{report.artifacts_root && (
 						<p className="helper-text">
 							Artifacts root: <code>{report.artifacts_root}</code>
@@ -195,36 +198,28 @@ function PlaywrightExecutionReport({
 	);
 }
 
-function SavedExecutionReport({ projectId, runRecordId, fallbackReport, expectedSuiteSnapshotId, request, location, navigate }) {
+function SavedExecutionReport({
+	projectId,
+	runRecordId,
+	fallbackReport,
+	expectedSuiteSnapshotId,
+	findingsEnabled,
+	request,
+	location,
+	navigate,
+}) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
-	const fetchRun = useEffectEvent((signal) => {
-		const path = API_CONTRACT_ENDPOINTS.projectExecutionRun.path
-			.replace("{project_id}", encodeURIComponent(projectId))
-			.replace("{run_record_id}", encodeURIComponent(runRecordId));
-		return request(path, { signal });
-	});
+	const fetchRun = useEffectEvent((signal) =>
+		readExactSavedExecutionRun({ projectId, runRecordId, expectedSuiteSnapshotId, request, signal })
+	);
 
 	useEffect(() => {
 		const controller = new AbortController();
 		async function load() {
 			try {
-				const response = await fetchRun(controller.signal);
-				if (response.status === 404 || response.status === 403) {
-					if (!controller.signal.aborted) setResult({ notice: "Saved evidence for this run is unavailable." });
-					return;
-				}
-				if (!response.ok) throw new Error("Run lookup failed.");
-				const run = await response.json();
-				if (
-					run?.project_id !== projectId ||
-					run?.run_record_id !== runRecordId ||
-					!run?.run_id ||
-					(expectedSuiteSnapshotId !== undefined && run.source_snapshot_id !== expectedSuiteSnapshotId)
-				) {
-					throw new Error("The saved evidence did not match the selected run.");
-				}
-				if (!controller.signal.aborted) setResult({ run });
+				const run = await fetchRun(controller.signal);
+				if (!controller.signal.aborted) setResult(run ? { run } : { notice: "Saved evidence for this run is unavailable." });
 			} catch {
 				if (!controller.signal.aborted) setResult({ notice: "Couldn’t load saved evidence for this run.", retryable: true });
 			}
@@ -260,12 +255,20 @@ function SavedExecutionReport({ projectId, runRecordId, fallbackReport, expected
 			notice={result ? result.notice : "Loading saved run evidence…"}
 			onRetry={result?.retryable ? retry : undefined}
 			caseNavigation={caseNavigation}
+			findingsLink={
+				findingsEnabled && hasExecutionFindingEvidence(result?.run) ? (
+					<RouteLink to={buildExecutionFindingsPath(projectId, result.run)} navigate={navigate}>
+						Review quality findings for this run
+					</RouteLink>
+				) : null
+			}
 		/>
 	);
 }
 
 export default function ExecutionReport({
 	currentProject,
+	accountId,
 	executionRunResult,
 	currentSuiteSnapshotId,
 	runRecordId,
@@ -284,9 +287,10 @@ export default function ExecutionReport({
 	const savedRunId = runRecordId || latest?.run_record_id || savedRecordIdForSnapshot(latest, currentProject);
 	return savedRunId && projectId ? (
 		<SavedExecutionReport
-			key={JSON.stringify([projectId, savedRunId, Boolean(runRecordId), expectedSuiteSnapshotId])}
+			key={JSON.stringify([accountId, projectId, savedRunId, Boolean(runRecordId), expectedSuiteSnapshotId])}
 			projectId={projectId}
 			runRecordId={savedRunId}
+			findingsEnabled={PROJECT_WORKSPACES_V2 && currentProject.status === "active"}
 			fallbackReport={runRecordId ? null : latest}
 			expectedSuiteSnapshotId={expectedSuiteSnapshotId}
 			request={request}

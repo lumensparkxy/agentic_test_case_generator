@@ -1,13 +1,11 @@
 import { List, ListItem } from "../ui/collections";
 import { Badge, Disclosure } from "../ui/surfaces";
-import { Button, Link } from "../ui/controls";
+import { Button } from "../ui/controls";
 import RouteLink from "../../app/RouteLink";
 import { buildSavedCasePath, createSavedCasePathResolver } from "../../app/savedCaseLinks";
-import { buildProjectPath, buildProjectWorkspacePath } from "../../app/workflowRoutes";
+import { buildProjectWorkspacePath } from "../../app/workflowRoutes";
 import { requiresIndependentReview } from "./improvementFindings";
 import "./BusinessCoverageSummary.css";
-
-const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
 
 const RECORDED_STATUS = {
 	covered: { label: "Covered", tone: "success" },
@@ -250,43 +248,6 @@ export default function BusinessCoverageSummary({
 						)}
 					</List>
 				</Disclosure>
-			)}
-		</section>
-	);
-}
-
-export function ExecutionSetupSummary({ assessment, projectId, prerequisiteSnapshotId }) {
-	const executionStatus = assessment?.execution_status;
-	if (executionStatus !== "blocked" && executionStatus !== "not_assessed") return null;
-	const blockers = Array.isArray(assessment.execution_blockers) ? assessment.execution_blockers : [];
-	return (
-		<section aria-label="Execution setup">
-			<h3>Execution setup</h3>
-			<p>
-				{executionStatus === "blocked"
-					? PROJECT_WORKSPACES_V2
-						? "Missing prerequisites block browser execution."
-						: "Missing prerequisites block approval and execution."
-					: "No missing prerequisites were recorded in this assessment. Verify execution in Automation."}
-			</p>
-			{blockers.length > 0 && (
-				<List>
-					{blockers.map(({ test_case_id: caseId, prerequisite_name: name }) => (
-						<ListItem key={JSON.stringify([caseId, name])}>
-							{projectId && prerequisiteSnapshotId ? (
-								<Link
-									href={`${buildProjectPath(projectId, "context")}?${new URLSearchParams({ snapshot: prerequisiteSnapshotId, case: caseId, prerequisite: name })}`}
-								>
-									Review prerequisite {name} for {caseId}
-								</Link>
-							) : (
-								<>
-									{name} for {caseId}
-								</>
-							)}
-						</ListItem>
-					))}
-				</List>
 			)}
 		</section>
 	);

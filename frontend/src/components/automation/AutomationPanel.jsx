@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatExecutionCaseStatus, formatExecutionRunSummary, getAutomationEvidenceStatus } from "./automationEvidence";
 import { RunnerIssues } from "./ExecutionIssues";
+import ExecutionSetupSummary from "../generation/ExecutionSetupSummary";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
 import { Checkbox, Field, Input, Button, Link } from "../ui/controls";
 import { Surface, Alert, Disclosure } from "../ui/surfaces";
@@ -224,6 +225,9 @@ const renderRunResults = (runResult) => {
 };
 
 export default function AutomationPanel({
+	projectId,
+	declaredSetup,
+	navigate,
 	guidance,
 	sourceGuidance,
 	testCases,
@@ -278,6 +282,7 @@ export default function AutomationPanel({
 			<p className="helper-text">
 				Automation is optional. You can review and export manual test cases without generating or running scripts.
 			</p>
+			{declaredSetup && <ExecutionSetupSummary declaredSetup={declaredSetup} projectId={projectId} navigate={navigate} />}
 			<div className="workflow-result-notice" role="region" aria-label="Automation evidence">
 				<strong>{evidence.label}</strong>
 				{executionRunResult?.run_id ? (

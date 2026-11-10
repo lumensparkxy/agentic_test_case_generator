@@ -1,4 +1,14 @@
 /* Export Section Styles */
+.declared-browser-prerequisites,
+.execution-finding-next-action {
+	overflow-wrap: anywhere;
+}
+
+.declared-browser-prerequisites .ui-link,
+.execution-finding-next-action .ui-link {
+	color: var(--primary-strong);
+}
+
 .export-readiness-card {
 	display: flex;
 	flex-wrap: wrap;

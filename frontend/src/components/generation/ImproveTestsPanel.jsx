@@ -1,6 +1,7 @@
 import useReviewDraft from "../../hooks/useReviewDraft";
 import DraftRecoveryNotice from "../reviews/DraftRecoveryNotice";
-import BusinessCoverageSummary, { ExecutionSetupSummary } from "./BusinessCoverageSummary";
+import BusinessCoverageSummary from "./BusinessCoverageSummary";
+import ExecutionSetupSummary from "./ExecutionSetupSummary";
 import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
 import { findingCaseIds, groupImprovementFindings, improvementFeedback, requiresIndependentReview } from "./improvementFindings";

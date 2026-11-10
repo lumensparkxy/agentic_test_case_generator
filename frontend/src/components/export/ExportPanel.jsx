@@ -2,6 +2,7 @@ import ExecutionReport from "./ExecutionReport";
 import SavedFileReport from "./SavedFileReport";
 import RouteLink from "../../app/RouteLink";
 import { buildSavedFileReportPath, getSavedFileReportId } from "../../app/savedFileReportLinks";
+import ExecutionSetupSummary from "../generation/ExecutionSetupSummary";
 import { Surface } from "../ui/surfaces";
 import { Checkbox, Textarea, Button } from "../ui/controls";
 const EXPORT_FORMATS = [
@@ -16,6 +17,7 @@ export default function ExportPanel({
 	executionRunResult,
 	currentSuiteSnapshotId,
 	suiteQualitySummary,
+	declaredSetup,
 	reviewedDesignAvailable,
 	currentProject,
 	accountId,
@@ -55,6 +57,7 @@ export default function ExportPanel({
 	const executionReport = (
 		<ExecutionReport
 			currentProject={currentProject}
+			accountId={accountId}
 			executionRunResult={executionRunResult}
 			currentSuiteSnapshotId={currentSuiteSnapshotId}
 			runRecordId={runRecordId}
@@ -164,6 +167,7 @@ export default function ExportPanel({
 					))}
 				</div>
 			</div>
+			{declaredSetup && <ExecutionSetupSummary declaredSetup={declaredSetup} projectId={projectId} navigate={navigate} />}
 			<div className="panel-nav">
 				<Button onClick={goPrev} className="secondary">
 					Back

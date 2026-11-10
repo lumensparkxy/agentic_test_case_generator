@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Link, Select, Textarea } from "../ui/controls";
 import { Surface, Disclosure } from "../ui/surfaces";
+import { getCurrentDeclaredBrowserSetup } from "../../app/declaredBrowserSetup";
+import { hasExecutionFindingEvidence, readExactSavedExecutionRun } from "../../app/executionFindings";
 import { buildProjectPath } from "../../app/workflowRoutes";
 
 const categories = [
@@ -31,6 +33,16 @@ const ids = (value) =>
 
 function resolvePrerequisite(project, search) {
 	const query = new URLSearchParams(search);
+	if (query.has("setup")) {
+		if (query.get("setup") !== "declared" || ["setup", "snapshot", "case", "prerequisite"].some((key) => query.getAll(key).length !== 1))
+			return null;
+		const declared = getCurrentDeclaredBrowserSetup(project);
+		if (!declared || declared.snapshotId !== query.get("snapshot")) return null;
+		const blocker = declared.blockers.find(
+			({ testCase, prerequisite }) => testCase.id === query.get("case") && prerequisite.name === query.get("prerequisite")
+		);
+		return blocker ? { ...blocker, snapshotId: declared.snapshotId } : null;
+	}
 	const snapshot = project?.current_snapshots?.test_cases;
 	if (!snapshot || snapshot.snapshot_id !== query.get("snapshot") || project.stage_state?.test_cases?.stale) return null;
 	const name = query.get("prerequisite");
@@ -49,9 +61,18 @@ function resolvePrerequisite(project, search) {
 	return prerequisite ? { snapshotId: snapshot.snapshot_id, testCase, prerequisite } : null;
 }
 
-export default function QualityFeedbackPanel({ request, projectId, prerequisiteSearch, focusRequested = false, onUpdated }) {
+export default function QualityFeedbackPanel({
+	request,
+	projectId,
+	projectStatus,
+	prerequisiteSearch,
+	executionFindingsLink,
+	focusRequested = false,
+	onUpdated,
+}) {
 	const [data, setData] = useState(null);
 	const [project, setProject] = useState(null);
+	const [sourceRun, setSourceRun] = useState(null);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -62,7 +83,7 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 	const [newPrerequisite, setNewPrerequisite] = useState({ name: "", kind: "test_data", description: "" });
 	const [sourceId, setSourceId] = useState("");
 	const [form, setForm] = useState({
-		category: "missing_data",
+		category: executionFindingsLink ? "unknown" : "missing_data",
 		summary: "",
 		expected_behavior: "",
 		test_case_ids: "",
@@ -75,17 +96,22 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 	const alive = useRef(true);
 	const inFlight = useRef(false);
 	const attempt = useRef(null);
+	const activeRead = useRef(null);
 	const heading = useRef(null);
 	const linkPrefilled = useRef(false);
 	const linked = prerequisiteSearch ? resolvePrerequisite(project, prerequisiteSearch) : null;
 	const projectLoaded = Boolean(project);
+	const scopedFeedback = Boolean(prerequisiteSearch || executionFindingsLink);
+	const archivedRunFeedback = Boolean(executionFindingsLink && projectStatus === "archived");
+	const canChangeRunFeedback = !executionFindingsLink || (Boolean(sourceRun) && projectStatus === "active" && project?.status === "active");
 	useEffect(() => {
-		if (focusRequested || (prerequisiteSearch && projectLoaded)) heading.current?.focus();
-	}, [focusRequested, prerequisiteSearch, projectLoaded]);
+		if (focusRequested || (scopedFeedback && projectLoaded)) heading.current?.focus();
+	}, [focusRequested, scopedFeedback, projectLoaded]);
 	useEffect(() => {
 		alive.current = true;
 		return () => {
 			alive.current = false;
+			activeRead.current?.abort();
 		};
 	}, []);
 	async function read(path, options) {
@@ -98,10 +124,28 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 		return value;
 	}
 	async function load() {
-		const [findings, current] = await Promise.all([read(`/projects/${projectId}/quality-findings`), read(`/projects/${projectId}`)]);
-		if (alive.current) {
+		activeRead.current?.abort();
+		if (archivedRunFeedback) return;
+		const controller = new AbortController();
+		activeRead.current = controller;
+		const options = { signal: controller.signal };
+		try {
+			const [findings, current, run] = await Promise.all([
+				read(`/projects/${projectId}/quality-findings`, options),
+				read(`/projects/${projectId}`, options),
+				executionFindingsLink?.runRecordId
+					? readExactSavedExecutionRun({ projectId, runRecordId: executionFindingsLink.runRecordId, request, ...options })
+					: null,
+			]);
+			if (!alive.current || controller.signal.aborted) return;
+			setError("");
 			setData(findings);
 			setProject(current);
+			setSourceRun(
+				current.project_id === projectId && run?.snapshot_id === executionFindingsLink?.snapshotId && hasExecutionFindingEvidence(run)
+					? run
+					: null
+			);
 			const selection = prerequisiteSearch && !linkPrefilled.current ? resolvePrerequisite(current, prerequisiteSearch) : null;
 			if (selection) {
 				const { testCase, prerequisite } = selection;
@@ -121,6 +165,8 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 			setSourceId((previous) =>
 				Object.values(current.current_snapshots || {}).some((snapshot) => snapshot.snapshot_id === previous) ? previous : ""
 			);
+		} catch (error) {
+			if (!controller.signal.aborted) throw error;
 		}
 	}
 	useEffect(() => {
@@ -128,9 +174,9 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 			if (alive.current) setError(e.message);
 		});
 		// Component is keyed by project; request identities may change on render.
-	}, [projectId]);
+	}, [projectId, archivedRunFeedback]);
 	async function save(path, payload) {
-		if (inFlight.current) return;
+		if (inFlight.current || !canChangeRunFeedback) return;
 		inFlight.current = true;
 		const fingerprint = JSON.stringify([path, payload]);
 		if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, requestId: crypto.randomUUID() };
@@ -162,6 +208,16 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 		project?.current_snapshots?.test_cases ||
 		project?.current_snapshots?.use_cases ||
 		project?.current_snapshots?.requirements;
+	const fixedSourceId = linked?.snapshotId || sourceRun?.snapshot_id;
+	const selectedSourceId = fixedSourceId || sourceId || source?.snapshot_id || "";
+	const canShowRecordForm = canChangeRunFeedback && (!prerequisiteSearch || linked) && (!executionFindingsLink || sourceRun);
+	const findings = (data?.findings || []).filter(
+		(finding) =>
+			!executionFindingsLink ||
+			(!archivedRunFeedback &&
+				sourceRun &&
+				[finding.source_snapshot_id, finding.original_source_snapshot_id].includes(sourceRun.snapshot_id))
+	);
 	return (
 		<Surface as="section" className="result-section" aria-labelledby="quality-feedback-heading">
 			<h3 id="quality-feedback-heading" ref={heading} tabIndex={-1}>
@@ -170,49 +226,62 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 			<p>Capture findings from any stage. Correct missing prerequisites, preserve business assertions, and verify corrections.</p>
 			{error && <p role="alert">{error}</p>}
 			{notice && <p role="status">{notice}</p>}
-			<Button className="secondary" disabled={busy} onClick={() => load().catch((e) => setError(e.message))}>
-				Refresh findings
-			</Button>
-			{data && <p>{data.findings.filter((f) => f.status !== "verified").length} findings awaiting resolution or verification</p>}
+			{!archivedRunFeedback && (
+				<Button className="secondary" disabled={busy} onClick={() => load().catch((e) => setError(e.message))}>
+					Refresh findings
+				</Button>
+			)}
+			{!archivedRunFeedback && sourceRun && (
+				<p>
+					Showing findings for run <code>{sourceRun.run_id}</code>.
+				</p>
+			)}
+			{(archivedRunFeedback || (executionFindingsLink && projectLoaded && !sourceRun)) && (
+				<p role="status">This saved run's quality findings are unavailable.</p>
+			)}
+			{!archivedRunFeedback && sourceRun && !findings.length && <p role="status">No quality findings are recorded for this run.</p>}
+			{data && !executionFindingsLink && (
+				<p>{findings.filter((f) => f.status !== "verified").length} findings awaiting resolution or verification</p>
+			)}
 			{prerequisiteSearch && projectLoaded && !linked && (
 				<p role="status">
 					This prerequisite link is no longer current. <Link href={buildProjectPath(projectId, "test-cases")}>Return to Test Cases</Link> to
 					review the latest findings.
 				</p>
 			)}
-			<Disclosure hidden={Boolean(prerequisiteSearch && !linked)} open={linked ? true : undefined}>
+			<Disclosure hidden={!canShowRecordForm} open={linked ? true : undefined}>
 				<summary>Record a quality finding</summary>
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
-						if (prerequisiteSearch && !linked) return;
+						if (!canShowRecordForm || !selectedSourceId) return;
 						save(`/projects/${projectId}/quality-findings`, {
 							base_project_revision: project.current_revision,
-							source_snapshot_id: linked?.snapshotId || sourceId || source.snapshot_id,
+							source_snapshot_id: selectedSourceId,
 							category: form.category,
 							summary: form.summary,
 							expected_behavior: form.expected_behavior,
 							test_case_ids: linked ? [linked.testCase.id] : ids(form.test_case_ids),
 							requirement_ids: linked ? linked.testCase.linked_requirement_ids || [] : ids(form.requirement_ids),
-							environment: form.environment,
+							environment: sourceRun?.target_environment || form.environment,
 							prerequisites: form.name ? [{ name: form.name, kind: form.kind, description: form.description, status: "missing" }] : [],
 						});
 					}}
 				>
-					<fieldset disabled={busy || !source} className="panel-form">
+					<fieldset disabled={busy || !selectedSourceId} className="panel-form">
 						<legend>Record a finding</legend>
 						<label>
 							Evidence snapshot
-							<Select
-								disabled={Boolean(linked)}
-								value={linked?.snapshotId || sourceId || source?.snapshot_id || ""}
-								onChange={(event) => setSourceId(event.target.value)}
-							>
-								{Object.entries(project?.current_snapshots || {}).map(([stage, snapshot]) => (
-									<option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
-										{words(stage)} — version {snapshot.version}
-									</option>
-								))}
+							<Select disabled={Boolean(fixedSourceId)} value={selectedSourceId} onChange={(event) => setSourceId(event.target.value)}>
+								{sourceRun ? (
+									<option value={sourceRun.snapshot_id}>execution — saved run {sourceRun.run_id}</option>
+								) : (
+									Object.entries(project?.current_snapshots || {}).map(([stage, snapshot]) => (
+										<option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
+											{words(stage)} — version {snapshot.version}
+										</option>
+									))
+								)}
 							</Select>
 						</label>
 						<label>
@@ -253,7 +322,13 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 						</label>
 						<label>
 							Environment
-							<Input required maxLength={120} value={form.environment} onChange={change("environment")} />
+							<Input
+								required
+								maxLength={120}
+								readOnly={Boolean(sourceRun)}
+								value={sourceRun?.target_environment || form.environment}
+								onChange={change("environment")}
+							/>
 						</label>
 						<label>
 							Missing prerequisite name
@@ -284,29 +359,31 @@ export default function QualityFeedbackPanel({ request, projectId, prerequisiteS
 					</fieldset>
 				</form>
 			</Disclosure>
-			<ul>
-				{(data?.findings || []).map((finding) => (
+			<ul aria-label={executionFindingsLink ? "Quality findings for this run" : undefined}>
+				{findings.map((finding) => (
 					<li key={finding.id}>
 						<p>
 							<strong>{finding.summary}</strong> — {words(finding.status)} ({words(finding.category)})
 						</p>
 						<p>{finding.expected_behavior}</p>
-						<Button
-							disabled={busy}
-							className="secondary"
-							onClick={() => {
-								setSelected(finding);
-								setClassification(finding.category);
-								setReferences(Object.fromEntries(finding.prerequisites.map((p) => [p.name, p.reference || ""])));
-								setLesson("");
-							}}
-						>
-							Review finding
-						</Button>
+						{canChangeRunFeedback && (
+							<Button
+								disabled={busy}
+								className="secondary"
+								onClick={() => {
+									setSelected(finding);
+									setClassification(finding.category);
+									setReferences(Object.fromEntries(finding.prerequisites.map((p) => [p.name, p.reference || ""])));
+									setLesson("");
+								}}
+							>
+								Review finding
+							</Button>
+						)}
 					</li>
 				))}
 			</ul>
-			{selected && (
+			{selected && canChangeRunFeedback && (
 				<fieldset disabled={busy} className="panel-form">
 					<legend>Resolve: {selected.summary}</legend>
 					<p>

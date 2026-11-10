@@ -53,6 +53,8 @@ import {
 } from "./app/workspaceModules";
 import { readSavedCaseLink, readSavedCaseStep } from "./app/savedCaseLinks";
 import { readSavedFileReportLink } from "./app/savedFileReportLinks";
+import { getCurrentDeclaredBrowserSetup } from "./app/declaredBrowserSetup";
+import { readExecutionFindingsLink } from "./app/executionFindings";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -321,6 +323,11 @@ export default function App() {
 	const viewingSavedCase = Boolean(savedCaseLink);
 	const savedFileReportLink =
 		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.REPORTS ? readSavedFileReportLink(location.search) : null;
+	const executionFindingsLink =
+		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.CONTEXT ? readExecutionFindingsLink(location.search) : null;
+	const contextQuery = route.destination === PROJECT_DESTINATIONS.CONTEXT ? new URLSearchParams(location.search) : null;
+	const prerequisiteSearch =
+		!executionFindingsLink && (contextQuery?.has("prerequisite") || contextQuery?.has("setup")) ? location.search : "";
 	const projectRouteRequestRef = useRef(0);
 	const projectCreateRequestRef = useRef(0);
 	const projectListRequestRef = useRef(0);
@@ -4263,6 +4270,10 @@ export default function App() {
 		currentSuiteSnapshotId && currentProject?.suite_quality?.suite_snapshot_id === currentSuiteSnapshotId
 			? currentProject.suite_quality
 			: null;
+	const declaredBrowserSetup =
+		suiteQuality && [PROJECT_DESTINATIONS.REPORTS, PROJECT_DESTINATIONS.AUTOMATION].includes(route.destination)
+			? getCurrentDeclaredBrowserSetup(currentProject)
+			: null;
 	const reviewedDesignAvailable = Boolean(
 		suiteQuality &&
 		currentProject?.design_delivery_enabled === true &&
@@ -6218,7 +6229,9 @@ export default function App() {
 											project={currentProject}
 											request={apiRequest}
 											projectId={navigationProjectId}
-											prerequisiteSearch={new URLSearchParams(location.search).has("prerequisite") ? location.search : ""}
+											identity={currentUser?.sub}
+											executionFindingsLink={executionFindingsLink}
+											prerequisiteSearch={prerequisiteSearch}
 											focusQualityFeedback={location.hash === "#quality-feedback-heading"}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
 											{...visibleContextForm}
@@ -6725,6 +6738,9 @@ export default function App() {
 
 									{activeTab === 4 && (
 										<AutomationPanel
+											projectId={navigationProjectId}
+											declaredSetup={declaredBrowserSetup}
+											navigate={navigate}
 											guidance={guidanceSummary("automation")}
 											sourceGuidance={guidanceSummary("test_cases")}
 											testCases={testCases}
@@ -6766,6 +6782,7 @@ export default function App() {
 											executionRunResult={PROJECT_WORKSPACES_V2 ? exactSuiteRun : executionRunResult}
 											currentSuiteSnapshotId={PROJECT_WORKSPACES_V2 ? currentSuiteSnapshotId || "" : undefined}
 											suiteQualitySummary={suiteQualitySummary}
+											declaredSetup={declaredBrowserSetup}
 											reviewedDesignAvailable={reviewedDesignAvailable}
 											currentProject={currentProject}
 											accountId={currentUser?.sub || ""}

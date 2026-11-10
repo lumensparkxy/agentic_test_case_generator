@@ -7,7 +7,9 @@ import { List, ListItem } from "../ui/collections";
 export default function ContextInputsPanel({
 	request,
 	projectId,
+	identity,
 	prerequisiteSearch,
+	executionFindingsLink,
 	focusQualityFeedback,
 	project,
 	onProjectUpdated,
@@ -202,18 +204,20 @@ export default function ContextInputsPanel({
 					</div>
 				</Surface>
 			)}
-			{projectId && request && (
+			{!executionFindingsLink && projectId && request && (
 				<ProjectSyncStatus key={`sync-status-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
-			{!contextDraft && projectId && project && request && (
+			{!executionFindingsLink && !contextDraft && projectId && project && request && (
 				<ProjectSyncPanel key={`sync-${projectId}`} project={project} request={request} onUpdated={onProjectUpdated} />
 			)}
 			{!embedded && projectId && request && (
 				<QualityFeedbackPanel
-					key={`feedback-${projectId}:${prerequisiteSearch}`}
+					key={JSON.stringify([identity, projectId, prerequisiteSearch, executionFindingsLink])}
 					request={request}
 					projectId={projectId}
+					projectStatus={project?.status}
 					prerequisiteSearch={prerequisiteSearch}
+					executionFindingsLink={executionFindingsLink}
 					focusRequested={focusQualityFeedback}
 					onUpdated={onProjectUpdated}
 				/>

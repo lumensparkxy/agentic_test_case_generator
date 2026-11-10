@@ -551,16 +551,30 @@ through the rendered app and actual Chromium, inspected its exact saved
 case link, and kept Run disabled for zero candidates. That proof is
 separate from model and practitioner gates.
 
-P7a opens exact saved file reports under
-[#487](https://github.com/lumensparkxy/agentic_test_case_generator/issues/487).
+P7a opens exact saved file reports (head `54f50cd`,
+[PR #488](https://github.com/lumensparkxy/agentic_test_case_generator/pull/488)).
 Deliver, Reports and Home link to the selected immutable file report.
 Both `/deliver?report=ID` and `/reports?report=ID` resolve the same evidence.
 The owner can inspect recorded decisions and original case versions after
 a newer export, a source edit, archive or a client rollback. The saved
 record retains audit evidence. Exact current file replay remains an export
 operation with its existing policy. Older sparse reports retain their
-recorded header. Next is linking browser setup and failed-run findings
-from the current Deliver task.
+recorded header. P7b exposes current declared browser prerequisites and
+exact failed-run findings from Deliver under
+[#489](https://github.com/lumensparkxy/agentic_test_case_generator/issues/489).
+A deliberate finding read keeps the recorded run, source suite and case
+assertions visible. Current file and execution gates stay separate.
+Rendered Chromium against the real local API opened the one finding from
+the exact failed run without changing its classification.
+
+The current frozen mocked desktop replay still takes seven deliberate
+actions versus eleven. It adds a mock response for the new read-only
+repair status and preserves all four content hashes, both approvals and
+the inspected export. A fresh W01 rendered run with synthetic model
+responses also verified all eleven downloaded cases against exact case
+reads. It exposed a modal race when the named approval receipt and
+suite finished before the original POST response. The saved decision
+was correct. The next action is deterministic dialog reconciliation.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with
