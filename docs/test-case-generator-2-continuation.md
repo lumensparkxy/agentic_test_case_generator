@@ -469,6 +469,14 @@ keyboard navigation from a scrolled Review reader. Explicit workspace
 links reveal the heading even if the prior keyboard scroll finishes after
 navigation. The 1366, 1440 and 1920 checks preserved the selected case
 and search on Back.
+
+A later CI attempt reached Deliver with focus in the main region and
+the export heading above the viewport. Two controlled late scrolls
+reproduced the remaining failure. A correction now keeps the listener
+available for a later scroll until focus, route or deliberate input
+changes. The regression checks both corrections and a new End keypress
+that scrolls normally. The exact timing of the CI failure is unknown.
+
 P2 adds unified intake and scoped decisions (commit `750fa78`,
 [PR #454](https://github.com/lumensparkxy/agentic_test_case_generator/pull/454)).
 P3a adds the internal transactional approval, intent outbox and fenced

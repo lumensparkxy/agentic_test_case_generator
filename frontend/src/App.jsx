@@ -316,9 +316,8 @@ function focusWorkspaceEntry(main) {
 	const heading = main.querySelector("h1");
 	const revealHeading = () => {
 		const { top, bottom } = (heading || main).getBoundingClientRect();
-		if (top >= 0 && top < window.innerHeight && (!heading || bottom <= window.innerHeight)) return false;
+		if (top >= 0 && top < window.innerHeight && (!heading || bottom <= window.innerHeight)) return;
 		main.scrollIntoView({ block: "start", behavior: "instant" });
-		return true;
 	};
 
 	main.focus({ preventScroll: true });
@@ -330,7 +329,8 @@ function focusWorkspaceEntry(main) {
 	document.addEventListener(
 		"scrollend",
 		() => {
-			if (window.location.pathname !== path || document.activeElement !== main || revealHeading()) stop();
+			if (window.location.pathname !== path || document.activeElement !== main) stop();
+			else revealHeading();
 		},
 		options
 	);

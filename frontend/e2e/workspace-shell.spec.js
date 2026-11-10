@@ -198,26 +198,35 @@ test.describe("Opt-in project workspaces", () => {
 		await expect(page.locator("#main-content")).toBeFocused();
 		const exportHeading = heading(page, "Export Test Cases");
 		await expect(exportHeading).toBeVisible();
-		await page.evaluate(
-			() =>
-				new Promise((resolve) => {
-					let timer;
-					const waitForScrollToSettle = () => {
-						window.clearTimeout(timer);
-						timer = window.setTimeout(() => {
-							window.removeEventListener("scroll", waitForScrollToSettle);
-							resolve();
-						}, 150);
-					};
-					window.addEventListener("scroll", waitForScrollToSettle);
-					waitForScrollToSettle();
-				})
-		);
+		const waitForPageScroll = () =>
+			page.evaluate(
+				() =>
+					new Promise((resolve) => {
+						let timer;
+						const waitForScrollToSettle = () => {
+							window.clearTimeout(timer);
+							timer = window.setTimeout(() => {
+								window.removeEventListener("scroll", waitForScrollToSettle);
+								resolve();
+							}, 150);
+						};
+						window.addEventListener("scroll", waitForScrollToSettle);
+						waitForScrollToSettle();
+					})
+			);
+		await waitForPageScroll();
 		await expect(exportHeading).toBeInViewport({ ratio: 1, timeout: 5000 });
+
+		for (let lateScroll = 0; lateScroll < 2; lateScroll++) {
+			await page.evaluate(() => window.scrollBy({ top: window.innerHeight, behavior: "instant" }));
+			await expect(exportHeading).toBeInViewport({ ratio: 1, timeout: 5000 });
+		}
 
 		const entryScroll = await page.evaluate(() => window.scrollY);
 		await page.keyboard.press("End");
 		await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(entryScroll + 100);
+		await waitForPageScroll();
+		expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(entryScroll + 100);
 
 		await page.goBack();
 		await page.getByRole("tab", { name: /Generated Test Cases/ }).press("Enter");
