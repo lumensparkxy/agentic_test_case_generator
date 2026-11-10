@@ -238,20 +238,46 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(quality(page)).toContainText(/Human suite acceptance\s*Unavailable/);
 		await expect(quality(page)).toContainText(/Declared setup\s*Blocked/);
 		await expect(quality(page)).toContainText("No matching run evidence");
+		await page.getByRole("tab", { name: /Generated Test Cases/ }).press("Enter");
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		await search.fill("confirmed order identifier");
+		const savedCase = page.getByRole("button", { name: `${testCase.id} ${testCase.title}`, exact: true });
+		await savedCase.press("Enter");
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		await expect(reader).toContainText(testCase.steps[1].expected);
 		await expectNoDocumentOverflow(page, "Review suite evidence");
 		await page.screenshot({ path: testInfo.outputPath("reviewed-design-review.png") });
 		expect(writes).toEqual([]);
 
-		await page
-			.getByRole("navigation", { name: "Project workspaces" })
-			.getByRole("link", { name: /^Deliver/ })
-			.click();
+		const continueToExport = page.getByRole("button", { name: "Continue to export", exact: true });
+		await continueToExport.press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver`);
 		await expect(page.getByRole("heading", { name: "Reviewed design ready to export", exact: true })).toBeVisible();
 		await expect(exportDesign(page)).toBeEnabled();
 		await expect(page.getByText("Export locked by review gate", { exact: true })).toHaveCount(0);
 		await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
 		await expect(page.getByText("No Playwright execution report matches this saved suite.", { exact: true })).toBeVisible();
 		await page.screenshot({ path: testInfo.outputPath("reviewed-design-deliver.png") });
+
+		await page.getByRole("button", { name: "Back to tests", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/review/tests`);
+		await expect(search).toHaveValue("confirmed order identifier");
+		await expect(savedCase).toHaveAttribute("aria-pressed", "true");
+		await expect(reader).toContainText(testCase.steps[1].expected);
+		await continueToExport.press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver`);
+
+		const sections = page.getByRole("navigation", { name: "Workspace sections", exact: true });
+		await sections.getByRole("link", { name: "Browser tests", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver/browser-tests`);
+		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
+		await expect(page.getByText("No preview yet. Preview execution readiness for the current test cases.", { exact: true })).toBeVisible();
+		await sections.getByRole("link", { name: "Export", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver`);
+		await expect(exportDesign(page)).toBeEnabled();
+		expect(writes).toEqual([]);
+		expect(exportRequests).toEqual([]);
+
 		const downloadPromise = page.waitForEvent("download");
 		await exportDesign(page).click();
 		const download = await downloadPromise;
@@ -271,10 +297,6 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(body).not.toHaveProperty("review");
 		expect(body).not.toHaveProperty("draft_override_requested");
 		expect(body).not.toHaveProperty("draft_override_reason");
-
-		await page.goto(`${root}/deliver/browser-tests`);
-		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
-		await expect(page.getByText("No preview yet. Preview execution readiness for the current test cases.", { exact: true })).toBeVisible();
 
 		await page.goto(`${root}/reports?run=${historicalRun.run_record_id}`);
 		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();

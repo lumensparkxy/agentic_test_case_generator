@@ -424,6 +424,10 @@ setup as blocked.
 
 ### Explicit reviewed-design export
 
+In the 2.0 workspaces, **Continue to export** opens Deliver → Export from
+Review → Tests. **Back to tests** returns directly to the test reader.
+Browser tests have their own section, and navigation starts no delivery work.
+
 `TCG_DESIGN_DELIVERY_ENABLED=true` enables the server capability for a new
 file export request. The capability is off by default and projected in
 Project Detail. An explicit `delivery_intent: reviewed_design` request

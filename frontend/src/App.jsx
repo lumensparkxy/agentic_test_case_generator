@@ -5078,6 +5078,8 @@ export default function App() {
 		});
 	};
 	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
+	const reviewExportPath =
+		PROJECT_WORKSPACES_V2 && testReviewRoute && navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "deliver") : "";
 	const savedPlanOffer = savedPlanGeneration.offer;
 	const savedPlanPending = approvalContinuation.pendingRequest;
 	const retryableSavedPlan =
@@ -6990,8 +6992,12 @@ export default function App() {
 												<Button onClick={goPrev} className="secondary">
 													Back
 												</Button>
-												<Button variant="secondary" onClick={goNext} disabled={testCases.length === 0}>
-													Next
+												<Button
+													variant="secondary"
+													onClick={reviewExportPath ? () => navigate(reviewExportPath) : goNext}
+													disabled={testCases.length === 0}
+												>
+													{reviewExportPath ? "Continue to export" : "Next"}
 												</Button>
 											</div>
 										</section>
@@ -7064,6 +7070,7 @@ export default function App() {
 											exportMessage={exportMessage}
 											exportError={exportError}
 											goPrev={goPrev}
+											backToTestsPath={PROJECT_WORKSPACES_V2 ? testsPath : ""}
 										/>
 									)}
 								</div>

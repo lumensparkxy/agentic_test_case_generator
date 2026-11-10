@@ -38,6 +38,7 @@ export default function ExportPanel({
 	exportMessage,
 	exportError,
 	goPrev,
+	backToTestsPath,
 }) {
 	const projectId = currentProject?.project_id;
 	if (savedFileReportLink && projectId) {
@@ -169,8 +170,8 @@ export default function ExportPanel({
 			</div>
 			{declaredSetup && <ExecutionSetupSummary declaredSetup={declaredSetup} projectId={projectId} navigate={navigate} />}
 			<div className="panel-nav">
-				<Button onClick={goPrev} className="secondary">
-					Back
+				<Button onClick={backToTestsPath ? () => navigate(backToTestsPath) : goPrev} className="secondary">
+					{backToTestsPath ? "Back to tests" : "Back"}
 				</Button>
 			</div>
 		</Surface>
