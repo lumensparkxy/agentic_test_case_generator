@@ -192,6 +192,14 @@ another reservation, including after a change to server settings.
 Review shows the stage and exposes readback and cancellation. After a lost
 response it reads the exact owner, project, stage and request. A retry of an
 unconfirmed decision reuses the original request identity and comment.
+If a stage expires or fails before any durable provider dispatch, Review can
+retry that stage once from the saved decision. The owner-only retry endpoint
+requeues the original run and request with the same exact scope, template,
+settings and request budget. It opens one new window of the original stage
+duration and changes no project revision or approval. It verifies the original
+receipt and current sources. A repeated retry reads the same run. Possibly
+dispatched, superseded and cancelled work cannot be requeued by this action.
+Checking status never dispatches work.
 The link to Review Tests appears when the exact saved suite is current.
 An assessment outage remains a separate saved-suite review action. The
 worker stays limited to the local emulator and invokes no browser execution.

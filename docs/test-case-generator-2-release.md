@@ -120,6 +120,10 @@ six authored SDK responses in the loopback emulator.
   For scope and scenario approvals, Check status reads the project before
   looking up the exact attempt. It clears the local attempt only when the
   project revision advanced and both the receipt and run are absent.
+- If Review confirms the stage failed before any provider request, use the
+  one-time stage retry from the saved approval. The original scope, settings,
+  and request budget apply. An interrupted provider outcome still requires
+  the existing explicit recovery decision.
 - An independently assessed suite may have blocked browser setup. Review
   the named prerequisite or publish a permitted file. The browser uses
   the current target preview and an explicit selection.

@@ -26,6 +26,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const inFlight = useRef(null);
 	const pollCount = useRef(0);
 	const cancelInFlight = useRef(null);
+	const retryInFlight = useRef(null);
 	const savedReviewInFlight = useRef(null);
 	const [readState, setReadState] = useState(null);
 	const [actionState, setActionState] = useState(null);
@@ -189,6 +190,36 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 				setActionState((previous) => (previous?.scope === scope ? { ...previous, cancelling: false } : previous));
 		}
 	};
+	const retry = async () => {
+		if (!scope || !run?.retry_available || retryInFlight.current?.scope === scope) return;
+		const mutation = { scope };
+		retryInFlight.current = mutation;
+		setActionState({ scope, retrying: true, error: "" });
+		let rejection = "";
+		try {
+			const endpoint = API_CONTRACT_ENDPOINTS.approvalContinuationRetry;
+			const path = endpoint.path.replace("{project_id}", projectSegment).replace("{run_id}", encodeURIComponent(run.run_id));
+			try {
+				const response = await requestRef.current(path, { method: endpoint.method });
+				if (!response.ok) {
+					const { detail } = await response.json();
+					if (typeof detail === "string") rejection = detail;
+				}
+			} catch {
+				// A lost reply can follow a committed retry. Read the original run before offering another action.
+			}
+			if (activeScope.current !== scope) return;
+			const status = await refresh({ reset: true, replace: true });
+			const recovered = status?.runs?.find((item) => item.run_id === run.run_id);
+			if (activeScope.current === scope && (!recovered || recovered.retry_available)) {
+				setActionState({ scope, error: rejection || "Could not confirm the retry. Check the current status before trying again." });
+			}
+		} finally {
+			if (retryInFlight.current === mutation) retryInFlight.current = null;
+			if (activeScope.current === scope)
+				setActionState((previous) => (previous?.scope === scope ? { ...previous, retrying: false } : previous));
+		}
+	};
 
 	const reconcileSavedReview = async (readProject, attempt = null) => {
 		if (!scope || savedReviewInFlight.current?.scope === scope) return;
@@ -240,6 +271,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		error: action?.error || current?.error || pending.error,
 		pendingRequest: pending.value,
 		cancelling: action?.cancelling === true,
+		retrying: action?.retrying === true,
 		begin: (value) => {
 			setActionState(null);
 			pending.setValue(value);
@@ -247,6 +279,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		clearPending,
 		accept,
 		cancel,
+		retry,
 		check,
 		savedReview: {
 			enabled: current?.data?.saved_review_enabled === true,

@@ -22,7 +22,13 @@ from ..contracts.approval_continuations import (
 )
 from ..models import AuthUser
 from ..services import use_case_review_service
-from ..services.approval_continuation import cancel_stage
+from ..services.approval_continuation import (
+    ContinuationConflict,
+    ContinuationOptions,
+    can_retry_undispatched_stage,
+    cancel_stage,
+    retry_undispatched_stage,
+)
 from ..services.approval_scenario_worker import (
     approval_scenario_client_allowed,
     approval_scenarios_enabled,
@@ -82,6 +88,7 @@ def _run_view(run, project_id, actor_id):
             reason=intent.get("reason"),
             source_snapshot_id=sources.get(source_stage),
             result_snapshot_id=produced.get(result_stage) if isinstance(produced, dict) else None,
+            retry_available=can_retry_undispatched_stage(run),
         )
     except ValidationError:
         return None
@@ -264,6 +271,40 @@ def cancel_approval_continuation(
         if view is None:
             raise HTTPException(503, "The cancellation outcome could not be confirmed. Check its status before retrying.")
         return view
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.post("/projects/{project_id}/approval-continuations/{run_id}/retry", response_model=ApprovalContinuationView)
+def retry_approval_continuation(
+    project_id: str,
+    run_id: Annotated[str, Path(pattern=r"^continuation_[0-9a-f]{64}$")],
+    actor: AuthUser = Depends(get_current_user),
+):
+    _require_enabled()
+    try:
+        repo = repository()
+        _require_enabled(repo.client)
+        doc = _project_doc(repo, project_id, actor)
+        run = doc.collection("orchestrator_runs").document(run_id).get().to_dict()
+        current = _run_view(run, project_id, actor.sub)
+        if current is None or current.run_id != run_id:
+            raise HTTPException(404, "Approval continuation run not found")
+        _require_enabled(repo.client, stage=current.stage)
+        receipt = _read_receipt(doc, actor, current.request_id, current.stage)
+        if not receipt or receipt.run_id != run_id:
+            raise HTTPException(409, "The original approval receipt does not match this stage.")
+        saved = ContinuationOptions.model_validate(run["continuation"]["options"])
+        options = scenario_continuation_options() if current.stage == "prepare_scenarios" else test_case_continuation_options(saved.template)
+        retry_undispatched_stage(repo.client, project_id=project_id, run_id=run_id, actor_id=actor.sub, options=options)
+        view = _read_run(doc, actor, run_id)
+        if view is None:
+            raise HTTPException(503, "The retry could not be confirmed. Check stage status before trying again.")
+        return view
+    except ContinuationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:

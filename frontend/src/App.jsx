@@ -4910,6 +4910,11 @@ export default function App() {
 	const scenariosPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "scenarios") : "";
 	const testsPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "tests") : "";
 	const continuationBusy = approvalContinuation.active || approvalContinuation.run?.state === "interrupted";
+	const continuationRetryAvailable =
+		!approvalContinuation.unresolved &&
+		approvalContinuation.run?.retry_available &&
+		approvalContinuation.run.project_revision === currentProjectRevision &&
+		(approvalContinuation.stage === "generate_tests" ? approvalContinuation.testsAvailable : approvalContinuation.available);
 	const continuationResultStage = approvalContinuation.stage === "generate_tests" ? "test_cases" : "use_cases";
 	const preparedScenarioId = projectSnapshots.use_cases?.snapshot_id;
 	const retryableScenarioApproval =
@@ -4972,6 +4977,7 @@ export default function App() {
 				}}
 				saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
 				resultCurrent={continuationResultCurrent}
+				retryAvailable={continuationRetryAvailable}
 				projectId={currentProjectId}
 				priorityCases={priorityCases}
 				onOpenPriorityCase={openPriorityCase}
@@ -5425,7 +5431,10 @@ export default function App() {
 												) : null}
 											</div>
 										) : reviewScope && !imports.preview ? (
-											materialSyncRebindRequired || (reboundSyncPlan && !useCasesStageState.stale) ? null : !useScopedScenarioRefreshFlow &&
+											materialSyncRebindRequired ||
+											(reboundSyncPlan && !useCasesStageState.stale) ||
+											(continuationRetryAvailable &&
+												approvalContinuation.stage === "prepare_scenarios") ? null : !useScopedScenarioRefreshFlow &&
 											  approvalContinuation.available &&
 											  (!useCasesStageState.current_snapshot_id || useCasesStageState.stale) ? (
 												<Button

@@ -50,6 +50,7 @@ export interface ApiContractOperations {
 	approveAndPrepareScenarios: ApiOperation<ApproveAndPrepareScenariosRequest, ApproveAndPrepareScenariosResponse, "POST", "/projects/{project_id}/requirements/approve-and-prepare-scenarios">;
 	approveAndGenerateTests: ApiOperation<ApproveAndGenerateTestsRequest, ApproveAndGenerateTestsResponse, "POST", "/projects/{project_id}/use-cases/approve-and-generate-tests">;
 	approvalContinuationCancel: ApiOperation<ApprovalContinuationCancelRequest, ApprovalContinuationCancelResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/cancel">;
+	approvalContinuationRetry: ApiOperation<ApprovalContinuationRetryRequest, ApprovalContinuationRetryResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/retry">;
 	savedReviewAdmissionRelease: ApiOperation<SavedReviewAdmissionReleaseRequest, SavedReviewAdmissionReleaseResponse, "POST", "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release">;
 	jiraImport: ApiOperation<JiraImportRequest, JiraImportResponse, "POST", "/integrations/jira/import">;
 	azureDevOpsImport: ApiOperation<AzureDevOpsImportRequest, AzureDevOpsImportResponse, "POST", "/integrations/azure-devops/import">;
@@ -172,6 +173,8 @@ export type ApproveAndGenerateTestsRequest = ApproveAndGenerateTestsInput;
 export type ApproveAndGenerateTestsResponse = ApproveAndGenerateTestsResult;
 export type ApprovalContinuationCancelRequest = undefined;
 export type ApprovalContinuationCancelResponse = ApprovalContinuationView;
+export type ApprovalContinuationRetryRequest = undefined;
+export type ApprovalContinuationRetryResponse = ApprovalContinuationView;
 export type SavedReviewAdmissionReleaseRequest = SavedReviewReleaseInput;
 export type SavedReviewAdmissionReleaseResponse = SavedReviewReleaseResult;
 export type JiraImportRequest = JiraImportInput;
@@ -230,6 +233,7 @@ export interface ApprovalContinuationView {
 	reason: string | null;
 	request_id: string;
 	result_snapshot_id: string | null;
+	retry_available?: boolean;
 	run_id: string;
 	source_snapshot_id: string;
 	stage: "prepare_scenarios" | "generate_tests";

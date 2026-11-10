@@ -115,7 +115,7 @@ class _StageBudget:
         self.client = client
         self.claim = claim
         self.enabled_for_stage = enabled_for_stage
-        self.deadline_at = intent["deadline_at"]
+        self.deadline_at = claim.deadline_at
         self.limit = intent["options"]["max_provider_requests"]
         self.started = 0
         self.failed = False

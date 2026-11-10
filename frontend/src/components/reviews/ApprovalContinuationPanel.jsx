@@ -43,11 +43,12 @@ export default function ApprovalContinuationPanel({
 	onCheck,
 	saving,
 	resultCurrent,
+	retryAvailable,
 	projectId,
 	priorityCases = [],
 	onOpenPriorityCase,
 }) {
-	const { run, active, unresolved, blockedReason, error, cancelling, cancel, stage } = continuation;
+	const { run, active, unresolved, blockedReason, error, cancelling, cancel, retrying, retry, stage } = continuation;
 	if (!run && !unresolved && !blockedReason && !error && !saving) return null;
 
 	const generatingTests = stage === "generate_tests";
@@ -68,6 +69,10 @@ export default function ApprovalContinuationPanel({
 			? "Check the current project before generating tests."
 			: "Check the current project before preparing scenarios.";
 		message = [approved, BLOCKER[blockedReason] || next].join(" ");
+	} else if (retryAvailable) {
+		message = generatingTests
+			? "Scenario approval saved. Test case generation stopped before contacting the provider."
+			: "Scope approval saved. Scenario preparation stopped before contacting the provider.";
 	} else if (resultReady && !resultCurrent) {
 		message = generatingTests
 			? "A test suite was saved. Check test generation status to load the current evidence."
@@ -79,12 +84,17 @@ export default function ApprovalContinuationPanel({
 			{message && <p role="status">{message}</p>}
 			{error && <p role="alert">{error}</p>}
 			<div className="workbench-actions">
-				<Button variant="secondary" size="compact" disabled={saving || cancelling} onClick={onCheck}>
+				<Button variant="secondary" size="compact" disabled={saving || cancelling || retrying} onClick={onCheck}>
 					Check {action} status
 				</Button>
 				{(active || run?.state === "interrupted") && (
-					<Button variant="secondary" size="compact" disabled={cancelling} onClick={() => void cancel()}>
+					<Button variant="secondary" size="compact" disabled={cancelling || retrying} onClick={() => void cancel()}>
 						Cancel {action}
+					</Button>
+				)}
+				{retryAvailable && (
+					<Button variant="secondary" size="compact" disabled={retrying} onClick={() => void retry()}>
+						{retrying ? "Checking retry…" : generatingTests ? "Retry test generation" : "Retry scenario preparation"}
 					</Button>
 				)}
 				{resultReady && resultCurrent && (

@@ -182,6 +182,7 @@ class ApprovalContinuationApiTests(TestCase):
                 "reason": None,
                 "source_snapshot_id": result["project"]["stage_state"]["requirements"]["current_snapshot_id"],
                 "result_snapshot_id": None,
+                "retry_available": False,
             },
         )
         self.assertIsNone(result["blocked_reason"])
@@ -208,6 +209,38 @@ class ApprovalContinuationApiTests(TestCase):
         self.payload["reviews"][0]["quality_flags"] = ["Changed on retry"]
         self.assertEqual(self.approve().status_code, 409)
         self.assertEqual(self.store, committed)
+
+    def test_retry_restores_the_exact_approved_plan_stage_without_another_approval(self):
+        _, payload = self.prepared_plan()
+        payload["template"] = {"name": "Specific template", "format": "table", "fields": ["id", "title"]}
+        response = self.approve_tests(payload, "approve-child")
+        self.assertEqual(response.status_code, 200, response.text)
+        run_id = response.json()["continuation"]["run_id"]
+        path = f"{STATUS_PATH}/{run_id}/retry"
+        claim = continuation.claim_stage(self.firestore, project_id=PROJECT_ID, run_id=run_id)
+        continuation.stop_stage(self.firestore, claim, reason="test_case_generation_failed")
+        failed = self.status("approve-child", stage="generate_tests").json()
+        self.assertTrue(failed["runs"][0]["retry_available"])
+        before = deepcopy(self.store)
+        owner = self.actor
+        self.actor = AuthUser(sub="outsider", name="Other")
+        self.assertEqual(self.client.post(path).status_code, 404)
+        self.actor = owner
+        self.assertEqual(self.store, before)
+
+        result = self.client.post(path)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["run_id"], run_id)
+        self.assertEqual(result.json()["state"], "queued")
+        self.assertFalse(result.json()["retry_available"])
+        after = deepcopy(self.store)
+        changed = {key for key in before.keys() | after.keys() if before.get(key) != after.get(key)}
+        run_path = f"{PROJECT_ROOT}/orchestrator_runs/{run_id}"
+        self.assertEqual(changed, {run_path, f"{continuation.OUTBOX_COLLECTION}/{run_id}"})
+        self.assertEqual(after[run_path]["continuation"]["options"], before[run_path]["continuation"]["options"])
+        self.assertEqual(self.status("approve-child", stage="generate_tests").json()["receipt"], failed["receipt"])
+        self.assertEqual(self.client.post(path).json(), result.json())
+        self.assertEqual(self.store, after)
 
     def test_blocked_approval_has_a_recoverable_receipt_without_a_run(self):
         self.store[PROJECT_ROOT]["stage_state"]["context"] = {"current_snapshot_id": "stale-context", "stale": True}
@@ -348,6 +381,7 @@ class ApprovalContinuationApiTests(TestCase):
                 "reason": None,
                 "source_snapshot_id": SNAPSHOT_ID,
                 "result_snapshot_id": None,
+                "retry_available": False,
             },
         )
         self.assertEqual(outcome["review"]["decision"], "approve")

@@ -49,6 +49,7 @@ class ApprovalContinuationView(BaseModel):
     reason: str | None
     source_snapshot_id: str
     result_snapshot_id: str | None
+    retry_available: bool = False
 
 
 class ApprovalContinuationReceipt(BaseModel):

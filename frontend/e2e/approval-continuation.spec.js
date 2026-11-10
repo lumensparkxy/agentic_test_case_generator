@@ -16,6 +16,7 @@ const secondRoot = "/projects/continuation-second-project";
 const approvalPath = `${root}/requirements/approve-and-prepare-scenarios`;
 const statusPath = `${root}/approval-continuations`;
 const cancelPath = `${statusPath}/checkout-preparation/cancel`;
+const retryPath = `${statusPath}/checkout-preparation/retry`;
 const testApprovalPath = `${root}/use-cases/approve-and-generate-tests`;
 const scenarioReviewPath = `${root}/use-cases/reviews`;
 const testCancelPath = `${statusPath}/checkout-test-generation/cancel`;
@@ -303,6 +304,12 @@ async function fixture(
 		run = { ...run, state: "cancelled", reason: "cancelled_by_owner" };
 		return route.fulfill({ json: run });
 	});
+	await page.route(routePath(retryPath), (route) => {
+		expect(route.request().method()).toBe("POST");
+		expect(run.retry_available).toBe(true);
+		run = { ...run, state: "queued", reason: null, retry_available: false };
+		return route.abort("failed");
+	});
 	await page.route(routePath(`${root}/requirements/reviews`), (route) => {
 		expect(route.request().method()).toBe("PATCH");
 		saveApproval(route.request().postDataJSON());
@@ -443,6 +450,9 @@ async function fixture(
 		},
 		setRunning: () => {
 			run = { ...run, state: "running" };
+		},
+		failBeforeDispatch: () => {
+			run = { ...run, state: "failed", reason: "deadline_exceeded", retry_available: true };
 		},
 		failedPlanReads: () => failedPlanReads,
 		savePreparedPlan: ({ failReadback = true } = {}) => {
@@ -752,6 +762,29 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(page.getByRole("status").filter({ hasText: /2\/2 approved in scope/ })).toHaveCount(1);
 		await expect(progress(page).getByRole("link", { name: "Open prepared scenarios" })).toHaveCount(0);
 		expect(api.writes).toEqual([`POST ${approvalPath}`, `POST ${cancelPath}`]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("retries only undispatched preparation and reads back the same run after a lost retry reply", async ({ page }) => {
+		const api = await fixture(page);
+		await page.goto(`${root}/review`);
+		await approve(page).click();
+		await expect(progress(page)).toContainText("Scope approved. Scenario preparation is queued.");
+		api.failBeforeDispatch();
+		await check(page).click();
+		await expect(progress(page)).toContainText("Scope approval saved. Scenario preparation stopped before contacting the provider.");
+		await expect(approve(page)).toHaveCount(0);
+		const retry = progress(page).getByRole("button", { name: "Retry scenario preparation", exact: true });
+		await expect(retry).toBeEnabled();
+		expect(api.writes).toEqual([`POST ${approvalPath}`]);
+		await retry.click();
+		await expect(progress(page)).toContainText("Scope approved. Scenario preparation is queued.");
+		await expect(retry).toHaveCount(0);
+		await expect(progress(page).getByRole("alert")).toHaveCount(0);
+		await page.reload();
+		await expect(progress(page)).toContainText("Scope approved. Scenario preparation is queued.");
+		await expect(page.getByRole("status").filter({ hasText: /2\/2 approved in scope/ })).toHaveCount(1);
+		expect(api.writes).toEqual([`POST ${approvalPath}`, `POST ${retryPath}`]);
 		expect(api.errors).toEqual([]);
 	});
 

@@ -211,6 +211,13 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "ApprovalContinuationCancelResponse",
     ),
     SelectedOperation(
+        "approvalContinuationRetry",
+        "post",
+        "/projects/{project_id}/approval-continuations/{run_id}/retry",
+        "ApprovalContinuationRetryRequest",
+        "ApprovalContinuationRetryResponse",
+    ),
+    SelectedOperation(
         "savedReviewAdmissionRelease",
         "post",
         "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release",

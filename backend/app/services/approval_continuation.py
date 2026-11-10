@@ -18,6 +18,7 @@ ContinuationStage = Literal["prepare_scenarios", "generate_tests"]
 OUTBOX_COLLECTION = "approval_continuation_outbox"
 _STAGES = {"prepare_scenarios": "use_cases", "generate_tests": "test_cases"}
 _OPERATIONS = {"use_cases": "use_cases.generate", "test_cases": "testcases.generate"}
+_PRE_DISPATCH_FAILURE = {"prepare_scenarios": "scenario_preparation_failed", "generate_tests": "test_case_generation_failed"}
 _LEGACY_STATUS = {
     "queued": "blocked",
     "running": "running",
@@ -50,6 +51,7 @@ class ContinuationClaim:
     run_id: str
     fence: int
     stage_request_id: str
+    deadline_at: datetime
 
 
 @dataclass(frozen=True)
@@ -185,6 +187,21 @@ def _continuation(run):
     return intent if intent and intent.get("schema_version") == 1 else None
 
 
+def can_retry_undispatched_stage(run) -> bool:
+    intent = _continuation(run)
+    return bool(
+        intent
+        and intent["state"] == "failed"
+        and intent.get("stage") in _PRE_DISPATCH_FAILURE
+        and intent.get("reason") in {"deadline_exceeded", _PRE_DISPATCH_FAILURE[intent["stage"]]}
+        and intent.get("attempts") == 0
+        and intent.get("provider_requests_reserved") == 0
+        and not intent.get("dispatch")
+        and not intent.get("retry_requested_at")
+        and not run.get("produced_snapshot_ids")
+    )
+
+
 def _matches_sources(project, run, intent):
     if (
         not project
@@ -264,7 +281,7 @@ def claim_stage(client, *, project_id, run_id, lease_seconds=60) -> Continuation
         transaction.set(refs.lease, {"run_id": run_id, "fence": fence, "expires_at": expires_at, "dispatched": False})
         transaction.update(refs.outbox, {"available_at": expires_at})
         _update_run(transaction, refs, intent, "running", now)
-        return ContinuationClaim(project_id, run_id, fence, run_id)
+        return ContinuationClaim(project_id, run_id, fence, run_id, intent["deadline_at"])
 
     try:
         return claim(client.transaction())
@@ -344,6 +361,39 @@ def stop_stage(client, claim, *, reason):
         _close(transaction, refs, run, intent, lease, state, now, reason)
 
     stop(client.transaction())
+
+
+def retry_undispatched_stage(client, *, project_id, run_id, actor_id, options: ContinuationOptions):
+    """Requeue a known unstarted stage once, with the original approval and budget."""
+    refs = _documents(client, project_id, run_id)
+
+    @transactional
+    def retry(transaction):
+        project = _read(transaction, refs.project)
+        if not project:
+            raise ProjectNotFoundError(project_id)
+        if project.get("owner_user_id") != actor_id:
+            raise ProjectPermissionError(project_id)
+        run = _read(transaction, refs.run)
+        intent = _continuation(run)
+        if not intent or run.get("project_id") != project_id or run.get("actor_user_id") != actor_id:
+            raise ProjectNotFoundError(run_id)
+        if intent.get("retry_requested_at"):
+            return
+        if not can_retry_undispatched_stage(run) or not _matches_sources(project, run, intent):
+            raise ContinuationConflict("This stage cannot retry from the saved approval and current sources.")
+        if intent.get("options") != options.model_dump(mode="json"):
+            raise ContinuationConflict("The saved approval used different generation settings.")
+        outbox = _read(transaction, refs.outbox)
+        lease = _read(transaction, refs.lease) or {}
+        if outbox or lease_matches(lease, kind="continuation", operation_id=run_id):
+            raise ContinuationConflict("This stage already has outstanding work. Check its status.")
+        now = _utcnow()
+        intent = {**intent, "reason": None, "retry_requested_at": now, "deadline_at": now + timedelta(seconds=options.deadline_seconds)}
+        _update_run(transaction, refs, intent, "queued", now, completed_at=None)
+        transaction.create(refs.outbox, {"project_id": project_id, "run_id": run_id, "available_at": now})
+
+    retry(client.transaction())
 
 
 def cancel_stage(client, *, project_id, run_id, actor_id) -> bool:
