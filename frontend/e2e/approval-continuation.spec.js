@@ -94,6 +94,27 @@ function saveSuite(
 	project.stage_state.test_cases = { current_snapshot_id: snapshotId, version, approved: false, stale, metadata: {} };
 }
 
+function assessSavedSuite(project) {
+	const previous = project.current_snapshots.test_cases;
+	const snapshotId = "checkout-assessed-suite";
+	project.current_revision++;
+	project.current_snapshots.test_cases = {
+		...previous,
+		snapshot_id: snapshotId,
+		operation: "test_cases.review",
+		source_snapshot_id: previous.snapshot_id,
+		project_revision: project.current_revision,
+		approved: true,
+		metadata: {},
+		payload: {
+			...previous.payload,
+			review: { approved: true, score: 100, threshold: 90, summary: "Saved cases assessed.", blocking_issues: [], unmet_criteria: [] },
+			substantive_assessment: { status: "assessed_complete" },
+		},
+	};
+	project.stage_state.test_cases = { ...project.stage_state.test_cases, current_snapshot_id: snapshotId, approved: true };
+}
+
 async function fixture(
 	page,
 	{
@@ -132,6 +153,7 @@ async function fixture(
 			Object.assign(project, applyUseCaseReviewDecision(project, { decision: "approve" }));
 			project.current_revision++;
 			saveSuite(project, { cases: completedCases });
+			if (savedReview?.currentSuiteAssessed) assessSavedSuite(project);
 		}
 	}
 	const other = useCaseProjectFixture({ project_id: "continuation-second-project", name: "Separate checkout", snapshot: null });
@@ -410,24 +432,7 @@ async function fixture(
 			failSavedReviewStatus = Boolean(savedReview.failFirstStatus);
 			return route.abort("failed");
 		}
-		const previous = project.current_snapshots.test_cases;
-		const snapshotId = "checkout-assessed-suite";
-		project.current_revision++;
-		project.current_snapshots.test_cases = {
-			...previous,
-			snapshot_id: snapshotId,
-			operation: "test_cases.review",
-			source_snapshot_id: previous.snapshot_id,
-			project_revision: project.current_revision,
-			approved: true,
-			metadata: {},
-			payload: {
-				...previous.payload,
-				review: { approved: true, score: 100, threshold: 90, summary: "Saved cases assessed.", blocking_issues: [], unmet_criteria: [] },
-				substantive_assessment: { status: "assessed_complete" },
-			},
-		};
-		project.stage_state.test_cases = { ...project.stage_state.test_cases, current_snapshot_id: snapshotId, approved: true };
+		assessSavedSuite(project);
 		return route.fulfill({ json: project });
 	});
 	await page.route(routePath(releasePath), async (route) => {
@@ -1226,6 +1231,68 @@ test.describe("Recoverable approval continuation", () => {
 		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
 		await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toContainText(testExpected);
 		expect(api.writes).toEqual([`POST ${savedReviewPath}`, `POST ${releasePath}`, `POST ${savedReviewPath}`]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("keeps saved review recovery available after release while project readback is unavailable", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const api = await fixture(page, {
+			prepared: true,
+			testsEnabled: false,
+			savedReview: {
+				currentSuiteAssessed: true,
+				attempt: {
+					operation_id: savedReviewOperation,
+					fence: 21,
+					state: "interrupted",
+					source_snapshot_id: "checkout-superseded-suite",
+					request_id: "earlier-interrupted-review",
+				},
+			},
+		});
+		const readbackGate = createDeferred();
+		let failReadback = false;
+		let readbackStarted = false;
+		await page.route(routePath(root), async (route) => {
+			if (!failReadback || route.request().method() !== "GET") return route.fallback();
+			failReadback = false;
+			readbackStarted = true;
+			await readbackGate.promise;
+			return route.fulfill({ status: 503, json: { detail: "Project temporarily unavailable." } });
+		});
+		await page.goto(`${root}/review/tests`);
+		const traceability = page.getByRole("tab", { name: /^Traceability Matrix/ });
+		await traceability.press("Enter");
+		await expect(recovery(page)).toContainText("This attempt uses an earlier source revision.");
+		await expect(page.getByText("Saved suite review passed.", { exact: true })).toBeVisible();
+		await expect(reviewSaved(page)).toHaveCount(0);
+		const release = recovery(page).getByRole("button", { name: "Acknowledge and release", exact: true });
+		failReadback = true;
+		try {
+			await release.press("Enter");
+			await expect.poll(() => readbackStarted).toBe(true);
+			await expect(recovery(page).getByRole("status")).toHaveText("Checking saved review status…", { timeout: 5000 });
+			await expect(checkReview(page)).toBeDisabled();
+			await expect(release).toHaveCount(0);
+		} finally {
+			readbackGate.resolve();
+		}
+		await expect(recovery(page).getByRole("alert")).toHaveText(
+			"Could not load the latest project after checking the saved review. Check status again."
+		);
+		await expect(traceability).toHaveAttribute("aria-selected", "true");
+		await expect(checkReview(page)).toBeEnabled();
+		await checkReview(page).focus();
+		await page.screenshot({ path: testInfo.outputPath("saved-review-readback-retry.png") });
+		await page.keyboard.press("Enter");
+		await expect(recovery(page)).toHaveCount(0);
+		await expect(traceability).toHaveAttribute("aria-selected", "true");
+		await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
+		await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toContainText(testExpected);
+		expect(api.releaseRequests).toEqual([{ fence: 21 }]);
+		expect(api.writes).toEqual([`POST ${releasePath}`]);
+		expect(api.savedReviewRequests).toEqual([]);
 		expect(api.executionRequests).toEqual([]);
 		expect(api.errors).toEqual([]);
 	});

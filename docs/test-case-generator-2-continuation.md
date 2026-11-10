@@ -339,6 +339,9 @@ The owner can cancel a running assessment or acknowledge the interrupted
 attempt. The release names its operation and fence. Requests already sent
 may finish. Further provider calls, checkpoint writes and result publication
 from the old claim lose authority. Rechecking status never starts work.
+If the attempt clears before the project readback succeeds, the recovery
+card stays available for **Check saved review status**. This retry reads the
+current evidence and keeps the reviewer in their selected view.
 
 The opted-in demo still defers paid work from the unenrolled foreground
 scenario, suite, refinement, impact and generated-report producers.

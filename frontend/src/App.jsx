@@ -172,7 +172,6 @@ function savedReviewStatusMessage(review, sharedDraftBusy) {
 	if (review.attempt?.state === "running")
 		return "A saved review is running. Already issued provider requests may finish after cancellation. A cancelled attempt cannot publish a result.";
 	if (sharedDraftBusy) return "Another draft operation is active for this project.";
-	if (review.error || review.statusError) return "Check status before starting a saved review.";
 	return "Review saved suite resumes assessment of these saved cases and reuses compatible completed review groups.";
 }
 
@@ -2487,6 +2486,9 @@ export default function App() {
 		repairReviewRoute && (savedReview.enabled || !selectedRepair.legacy || selectedRepair.attempt || selectedRepair.pending);
 	const savedReviewRecovery =
 		APPROVAL_CONTINUATION_ENABLED && currentProject?.owner_user_id === currentUser?.sub && (savedReview.enabled || !savedReview.statusRead);
+	const showSavedReviewRecovery =
+		savedReviewRecovery && (savedReview.attempt || savedSuiteReviewPending || savedReview.busy || savedReview.error);
+	const savedReviewError = savedReview.error || savedReview.statusError;
 	const sharedDraftBusy =
 		savedReview.enabled &&
 		(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted");
@@ -2499,13 +2501,7 @@ export default function App() {
 				selectedRepair.checking ||
 				selectedRepair.submitting ||
 				selectedRepair.blocked)) ||
-		(savedReviewRecovery &&
-			(!savedReview.statusRead ||
-				savedReview.statusError ||
-				savedReview.error ||
-				savedReview.busy ||
-				savedReview.attempt ||
-				sharedDraftBusy));
+		(savedReviewRecovery && (!savedReview.statusRead || savedReviewError || savedReview.busy || savedReview.attempt || sharedDraftBusy));
 	const checkSavedSuiteReview = (operationScope, { release = false } = {}) => {
 		if (!operationScope || !isProjectOperationCurrent(operationScope)) return;
 		const readProject = () => refreshCurrentProject({ hydrate: true, operationScope });
@@ -4368,6 +4364,7 @@ export default function App() {
 		savedSuiteReviewRequests.current.add(savedSuiteReviewKey);
 		setSavedSuiteReview({ key: savedSuiteReviewKey, busy: true });
 		let reviewError = null;
+		let receivedNewRevision = false;
 		try {
 			const response = await apiRequest(PROJECT_API_PATHS.savedSuiteReview(scope.projectId), {
 				method: "POST",
@@ -4391,6 +4388,7 @@ export default function App() {
 			const project = await response.json();
 			if (!isProjectOperationCurrent(scope)) return;
 			if (project?.project_id !== scope.projectId || !isLatestProjectRevision(project.project_id, project.current_revision)) return;
+			receivedNewRevision = project.current_revision > currentProjectRevision;
 			recordProjectRevision(project.project_id, project.current_revision);
 			setCurrentProject(project);
 			hydrateProjectWorkflow(project);
@@ -4398,7 +4396,8 @@ export default function App() {
 		} catch (error) {
 			if (!savedReview.enabled || !(error instanceof TypeError || error instanceof SyntaxError)) reviewError = error;
 		} finally {
-			if (savedReview.enabled) await checkSavedSuiteReview(scope);
+			// A published revision already triggers a continuation status refresh.
+			if (savedReview.enabled && !receivedNewRevision) await checkSavedSuiteReview(scope);
 			savedSuiteReviewRequests.current.delete(savedSuiteReviewKey);
 			const visibleError = isProjectOperationCurrent(scope) && reviewError;
 			setSavedSuiteReview((current) =>
@@ -6695,11 +6694,13 @@ export default function App() {
 													onReview={selectWorkflowTab}
 												/>
 											)}
-											{savedReviewRecovery && (savedReview.attempt || savedSuiteReviewPending) && (
+											{showSavedReviewRecovery && (
 												<section className="generation-gate-card" aria-label="Saved suite review recovery">
 													<div>
 														<h3>Saved suite review recovery</h3>
-														<p role="status">{savedReviewStatusMessage(savedReview, sharedDraftBusy)}</p>
+														{(!savedReviewError || savedReview.busy || savedReview.attempt) && (
+															<p role="status">{savedReviewStatusMessage(savedReview, sharedDraftBusy)}</p>
+														)}
 														{savedReview.attempt &&
 															(savedReview.attempt.source_snapshot_id !== savedSuite?.snapshot_id || testCaseStageState.stale) && (
 																<p>This attempt uses an earlier source revision.</p>
@@ -6715,9 +6716,7 @@ export default function App() {
 																</p>
 															</Disclosure>
 														)}
-														{(savedReview.error || savedReview.statusError) && (
-															<p role="alert">{savedReview.error || savedReview.statusError}</p>
-														)}
+														{savedReviewError && !savedReview.busy && <p role="alert">{savedReviewError}</p>}
 													</div>
 													<div className="workbench-actions">
 														<Button
@@ -6732,9 +6731,7 @@ export default function App() {
 															<Button
 																variant="secondary"
 																size="compact"
-																disabled={Boolean(
-																	savedReview.busy || savedReview.statusError || savedReview.error || savedSuiteReviewState?.busy
-																)}
+																disabled={Boolean(savedReview.busy || savedReviewError || savedSuiteReviewState?.busy)}
 																onClick={() => void checkSavedSuiteReview(captureProjectOperationScope(), { release: true })}
 															>
 																{savedReview.attempt.state === "interrupted" ? "Acknowledge and release" : "Cancel saved review"}

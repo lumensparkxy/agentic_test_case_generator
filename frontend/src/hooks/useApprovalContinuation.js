@@ -367,8 +367,8 @@ export default function useApprovalContinuation({ enabled, projectId, projectRev
 			}
 			if (activeScope.current !== scope) return;
 			const status = await refresh({ reset: true, replace: true });
-			if (!status || activeScope.current !== scope || !(await readProject()))
-				throw new Error("Could not confirm saved review status. Check status again.");
+			if (!status || activeScope.current !== scope) throw new Error("Could not confirm saved review status. Check status again.");
+			if (!(await readProject())) throw new Error("Could not load the latest project after checking the saved review. Check status again.");
 			const error = releaseUnconfirmed && status.saved_review_attempt ? "The release was not confirmed. Check the current attempt." : "";
 			if (activeScope.current === scope) setSavedReviewState({ scope, error });
 		} catch (error) {
