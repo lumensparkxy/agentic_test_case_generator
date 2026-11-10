@@ -44,20 +44,22 @@ export default function useReviewDraft({ identity, projectId, snapshotId, name, 
 		setValue: write,
 		stale,
 		error: current?.error || loaded.error,
-		clear: ({ keepVisible = false, matches } = {}) => {
+		clear: ({ keepVisible = false, matches, retain } = {}) => {
 			let error = "";
 			try {
-				const removeMatching = (storage, storageKey, clearedRecord) => {
+				const clearMatching = (storage, storageKey, clearedRecord) => {
 					const record = JSON.parse(storage.getItem(storageKey) || "null");
 					if (!record || record.snapshotId !== snapshotId || (matches && !matches(record.value))) return;
-					if (clearedRecord) storage.setItem(storageKey, clearedRecord);
+					const retained = retain?.(record.value);
+					if (retained !== undefined) storage.setItem(storageKey, JSON.stringify({ ...record, value: retained }));
+					else if (clearedRecord) storage.setItem(storageKey, clearedRecord);
 					else storage.removeItem(storageKey);
 				};
 				if (key) {
 					// A resolved tab should not adopt another tab's shared fallback on reload.
-					if (perTab) removeMatching(sessionStorage, key, "null");
-					removeMatching(localStorage, key);
-					removeMatching(localStorage, `${key}:previous`);
+					if (perTab) clearMatching(sessionStorage, key, "null");
+					clearMatching(localStorage, key);
+					clearMatching(localStorage, `${key}:previous`);
 				}
 			} catch {
 				error = "Local recovery is unavailable. Keep this tab open until you save your work.";
@@ -66,9 +68,9 @@ export default function useReviewDraft({ identity, projectId, snapshotId, name, 
 				setEdited((previous) => (previous?.scope === scope && matches(previous.value) ? null : previous));
 				return;
 			}
-			const next = keepVisible ? latest.current.value : initialValue;
+			const next = keepVisible ? latest.current.value : (retain?.(latest.current.value) ?? initialValue);
 			latest.current = { scope, value: next };
-			setEdited({ scope, value: next, stale: null, error });
+			setEdited({ scope, value: next, stale: retain && stale?.snapshotId !== snapshotId ? stale : null, error });
 		},
 		discardStale: () => write(value, true),
 	};

@@ -6,6 +6,20 @@ import { useId, useState, useEffect } from "react";
 import { Button, Checkbox, Textarea } from "../ui/controls";
 import { findingCaseIds, groupImprovementFindings, improvementFeedback, requiresIndependentReview } from "./improvementFindings";
 
+function scopedDraft(value) {
+	if (value.caseInstructions) return value;
+	// Older drafts stored the open case's note in the suite instructions field.
+	return {
+		...value,
+		instructions: value.caseId ? "" : value.instructions,
+		caseInstructions: value.caseId ? { [value.caseId]: value.instructions } : {},
+	};
+}
+
+function caseNote(draft, id) {
+	return Object.hasOwn(draft.caseInstructions, id) ? draft.caseInstructions[id] : "";
+}
+
 export default function ImproveTestsPanel({
 	review,
 	findings,
@@ -45,16 +59,23 @@ export default function ImproveTestsPanel({
 		projectId,
 		snapshotId,
 		name: "test-improvements",
-		initialValue: { selected: [], instructions: "", caseId: "" },
+		initialValue: { selected: [], instructions: "", caseId: "", caseInstructions: {} },
 	});
-	const selected = recovery.value.selected;
-	const instructions = recovery.value.instructions;
+	const draft = scopedDraft(recovery.value);
+	const selected = draft.selected;
+	const target = reportedCase || testCases.find((item) => item.id === draft.caseId);
+	const instructions = target ? caseNote(draft, target.id) : draft.instructions;
 	const setSelected = (next) => recovery.setValue((old) => ({ ...old, selected: typeof next === "function" ? next(old.selected) : next }));
+	const setInstructions = (instructions) =>
+		recovery.setValue((old) => {
+			const current = scopedDraft(old);
+			return target
+				? { ...current, caseId: target.id, caseInstructions: { ...current.caseInstructions, [target.id]: instructions } }
+				: { ...current, caseId: "", instructions };
+		});
 	useEffect(() => {
-		if (reportedCase && recovery.value.caseId !== reportedCase.id)
-			recovery.setValue({ selected: [], instructions: "", caseId: reportedCase.id });
+		if (reportedCase && draft.caseId !== reportedCase.id) recovery.setValue((old) => ({ ...scopedDraft(old), caseId: reportedCase.id }));
 	}, [reportedCase?.id]);
-	const target = reportedCase || testCases.find((item) => item.id === recovery.value.caseId);
 	const reviewOnly = !target && findings.length === 0 && requiresIndependentReview(assessment);
 	const evidence = target
 		? [
@@ -77,6 +98,30 @@ export default function ImproveTestsPanel({
 		!reviewOnly &&
 		testCases.length > 0 &&
 		(target ? Boolean(instructions.trim()) : findings.length ? chosen.length > 0 : Boolean(instructions.trim()));
+	const clearCurrentDraft = () => {
+		recovery.clear({
+			matches: (value) => {
+				const current = scopedDraft(value);
+				return target
+					? caseNote(current, target.id) === instructions
+					: current.instructions === instructions && JSON.stringify(current.selected) === JSON.stringify(selected);
+			},
+			retain: (value) => {
+				const current = scopedDraft(value);
+				const remaining = target
+					? { ...current, caseId: current.caseId === target.id ? "" : current.caseId, caseInstructions: { ...current.caseInstructions } }
+					: { ...current, selected: [], instructions: "" };
+				if (target) delete remaining.caseInstructions[target.id];
+				if (
+					remaining.caseId ||
+					remaining.instructions ||
+					remaining.selected.length ||
+					Object.values(remaining.caseInstructions).some(Boolean)
+				)
+					return remaining;
+			},
+		});
+	};
 	const apply = async () => {
 		if (!canApply) return;
 		setError("");
@@ -88,8 +133,8 @@ export default function ImproveTestsPanel({
 					target ? [target.id] : []
 				)
 			) {
-				recovery.clear();
-				onClearReport?.();
+				clearCurrentDraft();
+				if (target) onClearReport?.(target.id);
 				setSaved(true);
 			}
 		} catch (failure) {
@@ -156,7 +201,7 @@ export default function ImproveTestsPanel({
 									if (await onReload()) {
 										setConflict(false);
 										setError("");
-										recovery.clear();
+										clearCurrentDraft();
 									} else setError("The project could not be reloaded. Try reloading again before applying fixes.");
 								} finally {
 									setReloading(false);
@@ -176,7 +221,7 @@ export default function ImproveTestsPanel({
 			<Textarea
 				id={instructionsId}
 				value={instructions}
-				onChange={(event) => recovery.setValue((old) => ({ ...old, instructions: event.target.value, caseId: target?.id || "" }))}
+				onChange={(event) => setInstructions(event.target.value)}
 				disabled={locked}
 				rows={4}
 				placeholder="Describe any details the fixes should take into account…"
@@ -189,7 +234,7 @@ export default function ImproveTestsPanel({
 					<Button
 						variant="secondary"
 						onClick={() => {
-							recovery.setValue((old) => ({ ...old, caseId: "" }));
+							recovery.setValue((old) => ({ ...scopedDraft(old), caseId: "" }));
 							onClearReport?.();
 						}}
 					>

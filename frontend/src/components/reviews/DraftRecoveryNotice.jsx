@@ -28,6 +28,13 @@ function PreviousDraft({ value }) {
 					))}
 				</ul>
 			)}
+			{Object.entries(value?.caseInstructions || {})
+				.filter(([, instructions]) => instructions)
+				.map(([caseId, instructions]) => (
+					<p key={caseId}>
+						<strong>Report for {caseId}</strong> · {instructions}
+					</p>
+				))}
 			{Object.values(value?.items || {}).map((item) => (
 				<p key={item.scenario_id}>
 					<strong>{item.scenario_id}:</strong> {item.status?.replaceAll("_", " ")}

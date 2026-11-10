@@ -1120,8 +1120,16 @@ export default function App() {
 		name: "pasted-requirements",
 		initialValue: "",
 	});
-	const [reportedCase, setReportedCase] = useState(null);
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
+	const [reportEntry, setReportEntry] = useState(null);
+	const reportedCase =
+		reportEntry?.source === sourceCaseSnapshot && reportEntry.identity === currentUser?.sub ? reportEntry.testCase : null;
+	const clearReport = (caseId) =>
+		setReportEntry((current) =>
+			current?.source === sourceCaseSnapshot && current.identity === currentUser?.sub && (!caseId || current.testCase.id === caseId)
+				? null
+				: current
+		);
 	const [selectedRepairReader, setSelectedRepairReader] = useState(null);
 	const readSelectedRepairCase = useCallback(
 		(caseId) => {
@@ -1138,7 +1146,7 @@ export default function App() {
 	useEffect(() => {
 		setSelectedTestCaseId(null);
 		setFindingCaseSelection(null);
-		setReportedCase(null);
+		setReportEntry(null);
 		setChangedTestCaseIds(null);
 		setReviewCaseScope(null);
 	}, [sourceCaseSnapshot]);
@@ -6894,7 +6902,7 @@ export default function App() {
 																	trustedRepairOnly={trustedRepairOnly}
 																	reportedCase={reportedCase}
 																	summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
-																	onClearReport={() => setReportedCase(null)}
+																	onClearReport={clearReport}
 																	key={sourceCaseSnapshot}
 																	review={testCaseReview}
 																	findings={testCaseFindings}
@@ -6993,7 +7001,7 @@ export default function App() {
 																		trustedRepairOnly
 																			? undefined
 																			: (testCase) => {
-																					setReportedCase(testCase);
+																					setReportEntry({ source: sourceCaseSnapshot, identity: currentUser?.sub, testCase });
 																					setActiveGenerateResultTab("improve");
 																					focusResultContent.current = true;
 																				}

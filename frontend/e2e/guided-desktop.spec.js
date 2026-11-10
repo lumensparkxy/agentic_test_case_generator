@@ -212,6 +212,86 @@ test("recovers a dropped selected repair response with the same request identity
 	expect(attempts[1]).toEqual(attempts[0]);
 });
 
+test(
+	"keeps case report notes separate from suite improvements across navigation and reload",
+	{ tag: "@p1" },
+	async ({ page }, testInfo) => {
+		const { project, api } = await fixture(page, 2);
+		const originalSuite = project.current_snapshots.test_cases;
+		const firstCaseNote = "Check the original receipt on TC-1 only.";
+		const secondCaseNote = "Check the rejection on TC-2 only.";
+		const suiteNote = "Use consistent wording across the saved suite.";
+		await page.addInitScript(
+			({ projectId, snapshotId, instructions }) => {
+				const key = `tcg.draft.v1:${JSON.stringify(["playwright-e2e-user", projectId, "test-improvements"])}`;
+				if (!localStorage.getItem(key)) {
+					localStorage.setItem(key, JSON.stringify({ snapshotId, value: { selected: [], instructions, caseId: "TC-1" } }));
+				}
+			},
+			{ projectId: project.project_id, snapshotId: `${project.project_id}:${originalSuite.snapshot_id}`, instructions: firstCaseNote }
+		);
+		const requests = [];
+		await page.route("**/testcases/refine", (route) => {
+			requests.push(route.request().postDataJSON());
+			const payload = { ...originalSuite.payload, scoped_refinement: { changed: 1, added: 0, preserved: 1 } };
+			const snapshotId = "case-draft-scope-successor";
+			project.current_snapshots.test_cases = { ...originalSuite, snapshot_id: snapshotId, payload };
+			project.stage_state.test_cases.current_snapshot_id = snapshotId;
+			project.current_revision++;
+			api.setProject(project);
+			return route.fulfill({ json: payload });
+		});
+		await page.goto(path("test-cases"));
+		const panel = page.getByRole("region", { name: "Improve test quality" });
+		const caseInstructions = panel.getByRole("textbox", { name: "What is wrong with this test?", exact: true });
+		const suiteInstructions = panel.getByRole("textbox", { name: "Additional instructions (optional)", exact: true });
+		const suiteApply = panel.getByRole("button", { name: "Apply improvements", exact: true });
+		const returnToSuite = panel.getByRole("button", { name: "Return to suite improvements", exact: true });
+		const improve = page.getByRole("tab", { name: /^Improve tests/ });
+		const openReport = async (number) => {
+			await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
+			await page.getByRole("button", { name: `TC-${number} Checkout ${number}`, exact: true }).press("Enter");
+			await page.getByRole("button", { name: "Report a problem", exact: true }).press("Enter");
+		};
+		await improve.press("Enter");
+		await expect(caseInstructions).toHaveValue(firstCaseNote);
+		await returnToSuite.press("Enter");
+		await expect(suiteInstructions).toHaveValue("", { timeout: 5000 });
+		await expect(suiteApply).toBeDisabled();
+		await suiteInstructions.scrollIntoViewIfNeeded();
+		await page.screenshot({ path: testInfo.outputPath("empty-suite-draft.png") });
+		await suiteInstructions.fill(suiteNote);
+		await openReport(2);
+		await expect(caseInstructions).toHaveValue("");
+		await caseInstructions.fill(secondCaseNote);
+		await returnToSuite.press("Enter");
+		await expect(suiteInstructions).toHaveValue(suiteNote);
+		await page.reload();
+		await improve.press("Enter");
+		await expect(suiteInstructions).toHaveValue(suiteNote);
+		await openReport(1);
+		await expect(caseInstructions).toHaveValue(firstCaseNote);
+		await openReport(2);
+		await expect(caseInstructions).toHaveValue(secondCaseNote);
+		expect(requests).toEqual([]);
+		await panel.getByRole("button", { name: "Repair selected test", exact: true }).press("Enter");
+		await expect(panel).toContainText("1 changed · 0 added · 1 preserved");
+		expect(requests).toHaveLength(1);
+		expect(requests[0].selected_test_case_ids).toEqual(["TC-2"]);
+		expect(requests[0].feedback).toContain(secondCaseNote);
+		expect(requests[0].feedback).not.toContain(firstCaseNote);
+		expect(requests[0].feedback).not.toContain(suiteNote);
+		await expect(suiteInstructions).toHaveValue("");
+		await expect(suiteApply).toBeDisabled();
+		await page.reload();
+		await improve.press("Enter");
+		await panel.getByText("Previous source draft kept for reference", { exact: true }).press("Enter");
+		await expect(panel.getByText(suiteNote, { exact: false })).toBeVisible();
+		await expect(panel.getByText(firstCaseNote, { exact: false })).toBeVisible();
+		await expect(panel.getByText(secondCaseNote, { exact: false })).toHaveCount(0);
+	}
+);
+
 test("pasted requirements use reviewed file import and recover without changing source", async ({ page }) => {
 	await fixture(page);
 	let body = "";
