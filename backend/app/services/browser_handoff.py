@@ -74,6 +74,7 @@ class _BrowserEvidence:
     checkboxes: dict[tuple[str, str], bool]
     radios: dict[tuple[str, str], bool | None]
     result_fields: dict[tuple[str, str, str], tuple[str, str]]
+    rejections: set[tuple[str, str, str]]
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,15 @@ def _compiled_steps(candidate: ExecutionCandidate, target: str) -> list[dict[str
     ]
 
 
+def _asserted_text(step: dict[str, Any]) -> str | None:
+    if step["action"] in {"assert_text_equals", "assert_scoped_text_equals"}:
+        return step["expected"]
+    locator = step.get("locator", {})
+    if step["action"] == "assert_visible" and locator.get("strategy") == "text":
+        return locator["value"]
+    return None
+
+
 def _rejection_has_missing_readback(steps: list[dict[str, Any]], rule: RejectionReadback) -> bool:
     locator = {"strategy": "css" if rule.kind == "css" else "test_id", "value": rule.selector}
     ready = {"strategy": "text", "value": rule.ready_name, "exact": True}
@@ -146,10 +156,7 @@ def _rejection_has_missing_readback(steps: list[dict[str, Any]], rule: Rejection
     boundary_actions = {"navigate", "click"}
     boundaries = [index for index, step in enumerate(steps) if step["action"] in boundary_actions]
     for index, step in enumerate(steps):
-        error_locator = step.get("locator", {})
-        error = step["action"] == "assert_visible" and error_locator.get("strategy") == "text" and error_locator.get("value") == rule.message
-        error = error or (step["action"] in {"assert_text_equals", "assert_scoped_text_equals"} and step.get("expected") == rule.message)
-        if not error:
+        if _asserted_text(step) != rule.message:
             continue
         submit_index = next((at for at in reversed(boundaries) if at < index), None)
         submit_locator = steps[submit_index].get("locator", {}) if submit_index is not None else {}
@@ -298,8 +305,20 @@ def _evidence(context: EnrichInput | None, requirements: list[Requirement]) -> _
                 strategy = "css" if kind.lower() == "css" else "test_id"
                 result_bindings.setdefault((page, strategy, selector), set()).add((button, field))
     result_fields = {key: next(iter(bindings)) for key, bindings in result_bindings.items() if len(bindings) == 1}
+    rejections = {(rule.page, rule.button, rule.message) for rule in declared_rejection_readbacks(notes, target)}
     return _BrowserEvidence(
-        target, urls, names_by_type, literals, declared_locators, attribute_values, select_options, select_dom_values, checkboxes, radios, result_fields
+        target,
+        urls,
+        names_by_type,
+        literals,
+        declared_locators,
+        attribute_values,
+        select_options,
+        select_dom_values,
+        checkboxes,
+        radios,
+        result_fields,
+        rejections,
     )
 
 
@@ -366,6 +385,8 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             else:
                 submission = (locator["value"], pending_values)
             pending_values = {}
+        if submission and (current_page, submission[0], _asserted_text(step)) in evidence.rejections:
+            submission = None
         if action == "select_option":
             if current_page is None or step["value"] not in evidence.select_options.get((current_page, locator["value"]), ()):
                 return "A dropdown selection lacks an exact selectable option for this field and page."

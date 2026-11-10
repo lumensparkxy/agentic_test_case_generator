@@ -127,6 +127,7 @@ External outcomes, such as checks in a separate audit store, remain manual.
 A declared `Browser result` can check the exact submitted value after reopening
 the same page. The readback still binds to the named submit button, field and
 result locator. Reopening clears earlier form input evidence.
+An assertion of a declared rejection clears that submission binding.
 
 Business approval and execution are separate. Review the delivered cases, then
 preview eligible cases against the chosen environment before running them.

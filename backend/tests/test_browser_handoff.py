@@ -230,9 +230,14 @@ class BrowserHandoffTests(unittest.TestCase):
         other_page = "https://example.test/other"
         grounded = context()
         binding = f'Browser result css "#saved-ref" on "{TARGET}" shows field "Reference" after button "Save request"'
-        grounded.notes = f'Browser page "{other_page}"\nObserved button "Review request".\n{binding}'
+        rejection = (
+            f'Browser rejection "Reference rejected" on "{TARGET}" after button "Save request" '
+            'preserves css "#records tr" when exact heading "My records" is visible'
+        )
+        grounded.notes = f'Browser page "{other_page}"\nObserved button "Review request".\n{binding}\n{rejection}'
         initial, entry, submit = candidate().steps
         other_submit = submit.model_copy(update={"action": 'Click exact button "Review request"'})
+        rejected = submit.model_copy(update={"expected": 'exact text "Reference rejected" is visible'})
         reopen = TestStep(step=1, action=f'Open "{TARGET}"', expected="")
         open_other = TestStep(step=1, action=f'Open "{other_page}"', expected="")
         readback = TestStep(step=1, action="Inspect the saved reference", expected='css "#saved-ref" text should equal "Q-17"')
@@ -243,6 +248,7 @@ class BrowserHandoffTests(unittest.TestCase):
             ("same page", [initial, entry, submit, reopen, readback], None),
             ("wrong saved value", [initial, entry, submit, reopen, mismatched], "does not match the exact submitted input"),
             ("other button", [initial, entry, other_submit, reopen, readback], missing_evidence),
+            ("rejected submission", [initial, entry, rejected, reopen, readback], missing_evidence),
             ("different page", [initial, entry, submit, open_other, reopen, readback], missing_evidence),
             ("reopened form", [initial, entry, submit, reopen, form_value], missing_evidence),
             ("unsubmitted input", [initial, entry, reopen, submit, readback], missing_evidence),
