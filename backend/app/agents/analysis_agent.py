@@ -494,6 +494,12 @@ def fallback_requirement_analysis(requirements: List[Requirement]) -> List[Dict[
     return analysis
 
 
+def normalize_requirement_text(value: Any, source_text: str) -> str:
+    """Use the exact source text when the model echo differs only at the boundaries."""
+    text = str(value or "").strip()
+    return source_text if not text or text == source_text.strip() else text
+
+
 def normalize_requirement_analysis(raw_analysis: List[Dict[str, Any]], requirements: List[Requirement]) -> List[Dict[str, Any]]:
     requirement_lookup = {requirement.id: requirement for requirement in requirements}
     fallback_lookup = {item["requirement_id"]: item for item in fallback_requirement_analysis(requirements)}
@@ -609,7 +615,7 @@ def normalize_requirement_analysis(raw_analysis: List[Dict[str, Any]], requireme
 
         normalized_by_requirement[requirement_id] = {
             "requirement_id": requirement_id,
-            "requirement_text": str(item.get("requirement_text") or requirement.text).strip() or requirement.text,
+            "requirement_text": normalize_requirement_text(item.get("requirement_text"), requirement.text),
             "business_rules": business_rules or fallback["business_rules"],
             "field_constraints": field_constraints or fallback["field_constraints"],
             "role_permissions": role_permissions or fallback["role_permissions"],

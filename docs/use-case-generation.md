@@ -4,6 +4,10 @@ On a project's **Use Cases** page, select **Generate Use Cases** when there is n
 snapshot, or **Regenerate Use Cases** to replace an existing or stale snapshot.
 The current requirements must be approved. Full regeneration uses every
 currently approved requirement and the saved project Context.
+The plan and analysis retain the exact approved requirement text, including
+leading and trailing whitespace. A model echo that differs only at those
+boundaries is rebound to the saved wording. A change inside the requirement
+still fails publication and preserves the previous plan.
 
 For a stale, previously human-approved snapshot, **Review refresh scope** lists
 the changed, added, retained and removed requirement groups. Changed and added

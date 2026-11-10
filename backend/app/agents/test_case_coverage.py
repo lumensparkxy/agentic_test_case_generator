@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from .analysis_agent import fallback_requirement_analysis, normalize_requirement_analysis
+from .analysis_agent import fallback_requirement_analysis, normalize_requirement_analysis, normalize_requirement_text
 from ..models import Requirement
 from ..services.execution_service import (
     QUOTED_FILL_ACTION,
@@ -510,7 +510,7 @@ def _normalize_coverage_plan(raw_plan: List[Dict[str, Any]], requirements: List[
 
         normalized_by_requirement[requirement_id] = {
             "requirement_id": requirement_id,
-            "requirement_text": str(raw_item.get("requirement_text") or requirement.text).strip() or requirement.text,
+            "requirement_text": normalize_requirement_text(raw_item.get("requirement_text"), requirement.text),
             "scenarios": normalized_scenarios,
         }
 

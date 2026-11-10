@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
 from test_workflow_project_service import FakeCollection
 from app.agents.adk_runtime import _model_reservation
+from app.agents.analysis_agent import normalize_requirement_analysis
+from app.agents.test_case_coverage import _normalize_coverage_plan
 from app.main import app, get_current_user
 from app.models import AuthUser, Requirement
 from app.services import audit_service, project_draft_admission as admission
@@ -164,6 +166,38 @@ class UseCaseGenerationTests(unittest.TestCase):
         with self.assertRaises(ProjectConflictError):
             self.run_generation()
         self.model.assert_called_once()
+
+    def test_generation_preserves_exact_approved_text_without_accepting_a_rewrite(self):
+        requirement = Requirement(id="AC-1", text='  Show the notice "  α  " after saving.\t\n', review_status="Approved")
+        scope = self.save("requirements", {"requirements": [requirement.model_dump(mode="json")]}, approved=True)
+        self.project = get_project(self.project_id, actor=self.actor)
+        previous_plan = self.project.current_snapshots["use_cases"]
+        echoed = requirement.text.replace("  α  ", "α")
+
+        def normalized_output(payload, **_kwargs):
+            output = generated(payload.requirements)
+            output["requirement_analysis"][0]["requirement_text"] = echoed
+            output["coverage_plan"][0]["requirement_text"] = echoed.strip()
+            output["requirement_analysis"] = normalize_requirement_analysis(output["requirement_analysis"], payload.requirements)
+            output["coverage_plan"] = _normalize_coverage_plan(output["coverage_plan"], payload.requirements)
+            return output
+
+        self.model.side_effect = normalized_output
+        with self.assertRaises(HTTPException) as changed:
+            self.run_generation()
+        self.assertEqual(changed.exception.status_code, 502)
+        self.assertIn("different requirements baseline", changed.exception.detail)
+        rejected = get_project(self.project_id, actor=self.actor)
+        self.assertEqual(rejected.current_revision, self.project.current_revision)
+        self.assertEqual(rejected.current_snapshots["use_cases"], previous_plan)
+
+        echoed = requirement.text
+        saved = self.run_generation()
+        plan = saved.current_snapshots["use_cases"]
+        self.assertEqual(plan.source_snapshot_id, scope.snapshot_id)
+        self.assertFalse(plan.approved)
+        for field in ("requirement_analysis", "coverage_plan"):
+            self.assertEqual(plan.payload[field][0]["requirement_text"], requirement.text)
 
     def test_unconfirmed_publication_keeps_committed_workflow_status_and_recovers_on_retry(self):
         self.durable_audit()
