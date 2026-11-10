@@ -7,7 +7,7 @@ from fastapi.responses import Response
 
 from ..services.test_case_quality import placeholder_reason
 from ..services.export_evidence import build_export_evidence
-from ..contracts.exports import ExportTestCasesDocument
+from ..contracts.exports import EXPORT_REPORT_ID_HEADER, ExportTestCasesDocument
 from ..agents.export_agent import export_to_csv, export_to_excel, export_to_jira, export_to_json
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, ExportTestCasesInput, JiraExportInput, JiraExportResponse
@@ -28,6 +28,16 @@ from ..services.workflow_project_service import (
 router = APIRouter()
 
 _EXACT_STEPS_LAYOUT = "exact-steps-v1"
+_FILE_EXPORT_RESPONSES = {
+    200: {
+        "headers": {
+            EXPORT_REPORT_ID_HEADER: {
+                "description": "ID of the exact saved project file report. Omitted for exports without a project.",
+                "schema": {"type": "string"},
+            },
+        },
+    },
+}
 
 
 def _get_request_id(request: Request) -> str:
@@ -314,8 +324,11 @@ def _file_export(
     request_id = _get_request_id(request)
     export_layout = _EXACT_STEPS_LAYOUT if export_format in {"csv", "excel"} else None
 
-    def response(content):
-        return Response(content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename=test_cases.{extension}"})
+    def response(content, report_id=None):
+        headers = {"Content-Disposition": f"attachment; filename=test_cases.{extension}"}
+        if report_id is not None:
+            headers[EXPORT_REPORT_ID_HEADER] = report_id
+        return Response(content, media_type=media_type, headers=headers)
 
     def render_content(audit, layout):
         options = {"include_exact_steps": layout == _EXACT_STEPS_LAYOUT} if export_layout else {}
@@ -331,13 +344,13 @@ def _file_export(
         fingerprint = _export_request_fingerprint(payload)
         receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
         if receipt:
-            return response(render_saved_export(receipt))
+            return response(render_saved_export(receipt), receipt.snapshot_id)
         project = _load_export_project(payload.project_id, current_user)
         if payload.base_project_revision != project.current_revision:
             # A duplicate may have committed between the receipt read and the project read.
             receipt = _find_export_receipt(payload.project_id, current_user, operation, key)
             if receipt:
-                return response(render_saved_export(receipt))
+                return response(render_saved_export(receipt), receipt.snapshot_id)
 
     audit = _export_audit_dict(build_export_evidence(payload, project))
     workflow_run_id = start_workflow_run(operation=operation, actor=current_user, request_id=request_id, metadata=audit)
@@ -390,10 +403,10 @@ def _file_export(
     else:
         complete_workflow_run(workflow_run_id, status="completed", metadata={"reused_snapshot_id": snapshot.snapshot_id})
         content = render_saved_export(snapshot)
-    return response(content)
+    return response(content, snapshot.snapshot_id)
 
 
-@router.post("/export/csv")
+@router.post("/export/csv", responses=_FILE_EXPORT_RESPONSES)
 def export_csv(
     request: Request,
     payload: ExportTestCasesInput,
@@ -403,7 +416,7 @@ def export_csv(
     return _file_export(request, payload, current_user, export_format="csv", render=export_to_csv, media_type="text/csv", extension="csv")
 
 
-@router.post("/export/excel")
+@router.post("/export/excel", responses=_FILE_EXPORT_RESPONSES)
 def export_excel_endpoint(
     request: Request,
     payload: ExportTestCasesInput,
@@ -421,7 +434,7 @@ def export_excel_endpoint(
     )
 
 
-@router.post("/export/json", response_model=ExportTestCasesDocument)
+@router.post("/export/json", response_model=ExportTestCasesDocument, responses=_FILE_EXPORT_RESPONSES)
 def export_json_endpoint(
     request: Request,
     payload: ExportTestCasesInput,

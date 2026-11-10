@@ -35,7 +35,7 @@ export default function ExportPanel({
 	isExporting,
 	authActionDisabled,
 	exportToFormat,
-	exportMessage,
+	exportResult,
 	exportError,
 	goPrev,
 	backToTestsPath,
@@ -80,11 +80,22 @@ export default function ExportPanel({
 	}
 	const reportSnapshot = currentProject?.current_snapshots?.reports;
 	const latestFileReportId = getSavedFileReportId(reportSnapshot?.operation, reportSnapshot?.snapshot_id);
+	const download = exportResult?.projectId === projectId && exportResult?.accountId === accountId ? exportResult : null;
 
 	return (
 		<Surface as="section" className="panel">
 			<h2 className="panel-title">Export Test Cases</h2>
-			{projectId && latestFileReportId && (
+			{download && (
+				<div className="workflow-result-notice success" role="status">
+					<p>{download.message}</p>
+					{download.reportId && (
+						<RouteLink to={buildSavedFileReportPath(projectId, download.reportId)} navigate={navigate}>
+							Open saved report for this download
+						</RouteLink>
+					)}
+				</div>
+			)}
+			{projectId && latestFileReportId && latestFileReportId !== download?.reportId && (
 				<p>
 					<RouteLink to={buildSavedFileReportPath(projectId, latestFileReportId)} navigate={navigate}>
 						Open latest saved file report
@@ -142,11 +153,6 @@ export default function ExportPanel({
 				{exportError && (
 					<div className="workflow-result-notice warning" role="alert">
 						<p>{exportError}</p>
-					</div>
-				)}
-				{exportMessage && (
-					<div className="workflow-result-notice success" role="status">
-						<p>{exportMessage}</p>
 					</div>
 				)}
 				<div className="export-buttons">

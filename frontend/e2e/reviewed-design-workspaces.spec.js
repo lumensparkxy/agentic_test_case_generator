@@ -5,6 +5,7 @@ import { seedAuthenticatedSession } from "./support/auth.js";
 import { expectNoDocumentOverflow } from "./support/layout.js";
 import { USE_CASE_PROJECT_ID, useCaseOrchestratorFixture, useCaseProjectFixture } from "./support/use-case-review.js";
 import {
+	createDeferred,
 	installWorkspaceApi,
 	workspaceProjectFixture,
 	workspaceReportFixture,
@@ -16,13 +17,17 @@ const v2 = process.env.E2E_PROJECT_WORKSPACES_V2 === "true";
 const root = `/projects/${USE_CASE_PROJECT_ID}`;
 const suiteId = "reviewed-checkout-design-v2";
 const reportId = "reviewed-checkout-report-v1";
+const newerReportId = "different-checkout-report-v2";
 const caseId = "TC-REVIEWED-ORDER";
 const runSnapshotId = "checkout-execution-snapshot-before-repair";
 const priorRunFinding = "Classify the checkout failure from the recorded run.";
 const unrelatedFinding = "A later run needs separate investigation.";
 const literal = "  QA–01  ";
 
-async function setup(page, { stale = false, available = true, oldServer = false, runEvidence, browserExecution = false } = {}) {
+async function setup(
+	page,
+	{ stale = false, available = true, oldServer = false, runEvidence, browserExecution = false, supersedeExport = false } = {}
+) {
 	const project = useCaseProjectFixture({ name: "Verified checkout design" });
 	const plan = project.current_snapshots.use_cases;
 	const [firstGroup] = plan.payload.coverage_plan;
@@ -238,12 +243,11 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 		if (pathname.endsWith("/knowledge")) return route.fulfill({ json: { entries: [], skills: [], features: {}, revision: "0" } });
 		return route.fulfill({ status: 404, json: { detail: "No fixture for this optional read." } });
 	});
+	const orchestrator = { ...useCaseOrchestratorFixture(project), reviewed_design_available: project.reviewed_design_available };
 	await installWorkspaceApi(page, {
 		summary,
 		projectDetails: { [project.project_id]: project },
-		orchestratorStatuses: {
-			[project.project_id]: { ...useCaseOrchestratorFixture(project), reviewed_design_available: project.reviewed_design_available },
-		},
+		orchestratorStatuses: { [project.project_id]: orchestrator },
 	});
 	const executionReads = [];
 	for (const run of [historicalRun, matchingRun].filter(Boolean)) {
@@ -254,6 +258,33 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 		});
 	}
 	const exportRequests = [];
+	const reportReads = [];
+	let publishedReport;
+	await page.route(`**${root}/reports/*`, (route) => {
+		const id = new URL(route.request().url()).pathname.split("/").at(-1);
+		expect(route.request().method()).toBe("GET");
+		reportReads.push(id);
+		if (id !== publishedReport?.snapshot_id) return route.fulfill({ status: 404 });
+		return route.fulfill({
+			json: {
+				project_id: project.project_id,
+				report_id: reportId,
+				project_revision: publishedReport.project_revision,
+				format: publishedReport.payload.format,
+				created_at: "2026-07-17T12:35:00Z",
+				delivery_kind: "reviewed_design",
+				legacy_approved: false,
+				historical: true,
+				stale: false,
+				evidence: {
+					suite_snapshot_id: suiteId,
+					source_snapshot_ids: { ...sourceIds, test_cases: suiteId },
+					exported_at: "2026-07-17T12:35:00Z",
+					case_versions: [{ case_id: caseId, case_version_id: testCase.artifact_version_id, case_version_number: 2 }],
+				},
+			},
+		});
+	});
 	await page.route("**/export/json", (route) => {
 		const request = route.request();
 		exportRequests.push({ body: request.postDataJSON(), requestId: request.headers()["x-request-id"] });
@@ -270,6 +301,7 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 			metadata: { delivery_kind: "reviewed_design" },
 			payload: { format: "json", source: "export", delivery_kind: "reviewed_design", approved: false },
 		};
+		publishedReport = report;
 		project.current_snapshots.reports = report;
 		project.stage_state.reports = { current_snapshot_id: reportId, version: 1, stale: false, approved: false, metadata: report.metadata };
 		summary.recent_reports = [
@@ -285,7 +317,22 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 				delivery_kind: "reviewed_design",
 			}),
 		];
+		if (supersedeExport) {
+			project.current_revision += 1;
+			project.current_snapshots.reports = {
+				...report,
+				snapshot_id: newerReportId,
+				operation: "export.csv",
+				version: 2,
+				project_revision: project.current_revision,
+				payload: { ...report.payload, format: "csv" },
+			};
+			project.stage_state.reports.current_snapshot_id = newerReportId;
+			project.stage_state.reports.version = 2;
+		}
+		orchestrator.project_revision = project.current_revision;
 		return route.fulfill({
+			headers: supersedeExport ? { "X-Export-Report-ID": reportId, "Access-Control-Expose-Headers": "X-Export-Report-ID" } : {},
 			json: {
 				test_cases: [testCase],
 				audit_metadata: {
@@ -297,7 +344,7 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 		});
 	});
 	await seedAuthenticatedSession(page);
-	return { errors, exportRequests, writes, testCase, historicalRun, matchingRun, browserCase, executionReads, project };
+	return { errors, exportRequests, writes, testCase, historicalRun, matchingRun, browserCase, executionReads, reportReads, project };
 }
 
 const quality = (page) => page.getByRole("region", { name: "Saved suite quality", exact: true });
@@ -400,6 +447,12 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(body).not.toHaveProperty("review");
 		expect(body).not.toHaveProperty("draft_override_requested");
 		expect(body).not.toHaveProperty("draft_override_reason");
+		await expect(page.getByText("Reviewed design exported as JSON", { exact: true }).first()).toBeVisible();
+		await expect(page.getByRole("link", { name: "Open saved report for this download", exact: true })).toHaveCount(0);
+		await expect(page.getByRole("link", { name: "Open latest saved file report", exact: true })).toHaveAttribute(
+			"href",
+			`${root}/deliver?report=${reportId}`
+		);
 
 		const savedRunPath = `${root}/reports?run=${historicalRun.run_record_id}`;
 		await page.goto(savedRunPath);
@@ -417,6 +470,51 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 			"href",
 			new RegExp(`/projects/project-use-case-review/(reports|deliver)\\?report=${reportId}$`)
 		);
+		expect(writes).toEqual(["POST /export/json"]);
+		expect(errors).toEqual([]);
+	});
+
+	test("links a completed download to its own saved file after a newer publication", async ({ page }, testInfo) => {
+		const { writes, reportReads, errors, testCase, exportRequests } = await setup(page, { supersedeExport: true });
+		const releaseProjectRead = createDeferred();
+		let waitingForProjectRead = false;
+		await page.route(`**${root}`, async (route) => {
+			if (exportRequests.length) {
+				waitingForProjectRead = true;
+				await releaseProjectRead.promise;
+			}
+			await route.fallback();
+		});
+		await page.setViewportSize({ width: 1366, height: 900 });
+		await page.goto(`${root}/deliver`);
+		const downloadEvent = page.waitForEvent("download");
+		await exportDesign(page).press("Enter");
+		const download = await downloadEvent;
+		const file = JSON.parse(await readFile(await download.path(), "utf8"));
+		expect(file.test_cases[0].steps).toEqual(testCase.steps);
+		await expect.poll(() => waitingForProjectRead).toBe(true);
+		const downloadedReport = page.getByRole("link", { name: "Open saved report for this download", exact: true });
+		await expect(downloadedReport).toHaveAttribute("href", `${root}/deliver?report=${reportId}`, { timeout: 4000 });
+		releaseProjectRead.resolve();
+		await expect(page.getByRole("link", { name: "Open latest saved file report", exact: true })).toHaveAttribute(
+			"href",
+			`${root}/deliver?report=${newerReportId}`
+		);
+		await expect(downloadedReport).toBeInViewport();
+		await expect(page).toHaveURL(`${root}/deliver`);
+		expect(reportReads).toEqual([]);
+		await expectNoDocumentOverflow(page);
+		await page.screenshot({ path: testInfo.outputPath("exact-download-report-link.png") });
+		await downloadedReport.press("Enter");
+		const report = page.getByRole("region", { name: "Saved file report", exact: true });
+		await expect(report).toContainText(reportId);
+		await expect(report).toContainText("Historical");
+		await expect(report).toContainText("Reviewed design");
+		await expect(report).toContainText("JSON");
+		await report.getByText("Original saved cases", { exact: true }).press("Enter");
+		await expect(report).toContainText(testCase.artifact_version_id);
+		await page.screenshot({ path: testInfo.outputPath("exact-download-saved-report.png") });
+		expect(reportReads).toEqual([reportId]);
 		expect(writes).toEqual(["POST /export/json"]);
 		expect(errors).toEqual([]);
 	});

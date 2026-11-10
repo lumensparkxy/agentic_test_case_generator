@@ -141,7 +141,9 @@ class ExportEndpointTests(unittest.TestCase):
             patch("app.routers.export.get_project", return_value=project or _project()) as get,
             patch(
                 "app.routers.export.append_stage_snapshot",
-                side_effect=lambda **kwargs: SimpleNamespace(workflow_run_id=kwargs["workflow_run_id"], metadata=kwargs["metadata"]),
+                side_effect=lambda **kwargs: SimpleNamespace(
+                    snapshot_id="saved-export-report", workflow_run_id=kwargs["workflow_run_id"], metadata=kwargs["metadata"]
+                ),
             ) as append,
             TestClient(app) as client,
         ):
@@ -285,6 +287,7 @@ class ExportEndpointTests(unittest.TestCase):
         payload = _payload(project_id=None, source_snapshot_id=None)
         response, append, get = self.export(payload=payload)
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn("X-Export-Report-ID", response.headers)
         metadata = response.json()["audit_metadata"]
         self.assertIsNone(metadata["snapshot_id"])
         self.assertIsNone(metadata["suite_complete"])
@@ -332,6 +335,7 @@ class ExportEndpointTests(unittest.TestCase):
         ):
             response = client.post("/export/json", json=_payload())
         self.assertEqual(response.status_code, 403)
+        self.assertNotIn("X-Export-Report-ID", response.headers)
         export.assert_not_called()
 
     def test_human_review_is_independent_and_bound_to_the_same_snapshot(self):
@@ -406,7 +410,7 @@ class ExportPublicationTests(unittest.TestCase):
         return projects.get_project(self.project_id, actor=self.actor)
 
     def post(self, fmt="json", *, request_id="export", **changes):
-        return self.http.post(f"/export/{fmt}", headers={"X-Request-ID": request_id}, json={**self.input, **changes})
+        return self.http.post(f"/export/{fmt}", headers={"X-Request-ID": request_id, "Origin": "http://127.0.0.1:5173"}, json={**self.input, **changes})
 
     def read_report(self, report_id):
         return self.http.get(f"/projects/{self.project_id}/reports/{report_id}")
@@ -663,6 +667,9 @@ class ExportPublicationTests(unittest.TestCase):
                     changed = self.post(fmt, base_project_revision=revision, delivery_intent=None)
                     fresh = self.post(fmt, request_id="new-design", base_project_revision=after.current_revision, delivery_intent="reviewed_design")
                 self.assertEqual(replay.status_code, 200, replay.status_code)
+                self.assertEqual(first.headers.get("X-Export-Report-ID"), report.snapshot_id)
+                self.assertEqual(replay.headers.get("X-Export-Report-ID"), report.snapshot_id)
+                self.assertIn("X-Export-Report-ID", first.headers.get("Access-Control-Expose-Headers", ""))
                 self.assertEqual(changed.status_code, 409, changed.text)
                 self.assertIn("different inputs", changed.json()["detail"])
                 self.assertEqual(fresh.status_code, 409, fresh.text)
@@ -805,6 +812,8 @@ class ExportPublicationTests(unittest.TestCase):
                 written = deepcopy(self.store)
                 replay = self.post(fmt, base_project_revision=before.current_revision)
                 self.assertEqual(replay.status_code, 200, replay.status_code)
+                self.assertEqual(first.headers.get("X-Export-Report-ID"), snapshot.snapshot_id)
+                self.assertEqual(replay.headers.get("X-Export-Report-ID"), snapshot.snapshot_id)
                 self.assertEqual(replay.headers["content-disposition"], first.headers["content-disposition"])
                 if fmt == "excel":
                     books = [load_workbook(io.BytesIO(reply.content)) for reply in (first, replay)]
@@ -854,6 +863,7 @@ class ExportPublicationTests(unittest.TestCase):
                 self.assertEqual(self.project(), after)
                 for restored in (replay, raced):
                     self.assertEqual(restored.status_code, 200)
+                    self.assertEqual(restored.headers.get("X-Export-Report-ID"), after.current_snapshots["reports"].snapshot_id)
                     if fmt == "csv":
                         self.assertEqual(restored.content, first.content)
                         self.assertNotIn("Exact Steps (JSON)", next(csv.reader(io.StringIO(restored.text))))
@@ -925,7 +935,11 @@ class ExportPublicationTests(unittest.TestCase):
         with patch.object(routes, "append_stage_snapshot", side_effect=lose_reply):
             first = self.post()
         self.assertEqual(first.status_code, 200, first.text)
-        self.assertEqual(self.post().content, first.content)
+        report_id = self.project().current_snapshots["reports"].snapshot_id
+        self.assertEqual(first.headers.get("X-Export-Report-ID"), report_id)
+        replay = self.post()
+        self.assertEqual(replay.headers.get("X-Export-Report-ID"), report_id)
+        self.assertEqual(replay.content, first.content)
         event = self.assert_audit("completed", 1)
         self.assertEqual(self.project().current_snapshots["reports"].source_event_id, event["event_id"])
         self.save("test_cases", self.suite.payload)

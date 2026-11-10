@@ -49,4 +49,4 @@ Design complete · Human acceptance unavailable · Execution blocked · Not run
 Saved reports / runs  →  original suite and cases     [Open execution evidence]
 ```
 
-A historical selection remains labelled and read-only. When a case opens from a saved file report, **Back to saved report** and browser Back return to that file and focus the original case link. A draft export is a separate explicit state requiring a reason under the existing gate. Preview counts never stand in for execution outcomes.
+A completed download links to its own saved report when the file API returns `X-Export-Report-ID`. The separate latest-report link remains available when it points to a different file or the server supplies no download report ID. A historical selection remains labelled and read-only. When a case opens from a saved file report, **Back to saved report** and browser Back return to that file and focus the original case link. A draft export is a separate explicit state requiring a reason under the existing gate. Preview counts never stand in for execution outcomes.

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_cors_allow_origins, get_metrics_settings
 from .auth.jwt_auth import get_current_user
+from .contracts.exports import EXPORT_REPORT_ID_HEADER
 from .observability.logging import bind_log_context, configure_logging, reset_log_context
 from .observability.metrics import record_http_request, render_prometheus_metrics
 from .observability.tracing import configure_tracing, resolve_trace_id
@@ -41,6 +42,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[EXPORT_REPORT_ID_HEADER],
 )
 
 app.include_router(knowledge_router)

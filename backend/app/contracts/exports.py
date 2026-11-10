@@ -7,6 +7,9 @@ from .requirements import ReviewResult
 from .test_cases import TestCase
 
 
+EXPORT_REPORT_ID_HEADER = "X-Export-Report-ID"
+
+
 class JiraExportInput(BaseModel):
     project_key: str
     issue_type: str

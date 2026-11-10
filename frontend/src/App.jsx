@@ -54,7 +54,7 @@ import {
 	UseCaseReviewPage,
 } from "./app/workspaceModules";
 import { readSavedCaseLink, readSavedCaseStep } from "./app/savedCaseLinks";
-import { readSavedFileReportLink } from "./app/savedFileReportLinks";
+import { getSavedFileReportId, readSavedFileReportLink } from "./app/savedFileReportLinks";
 import { getCurrentDeclaredBrowserSetup } from "./app/declaredBrowserSetup";
 import { buildSavedExecutionRunPath, readExecutionFindingsLink } from "./app/executionFindings";
 import {
@@ -511,7 +511,7 @@ export default function App() {
 	const [savedSuiteReview, setSavedSuiteReview] = useState(null);
 	const savedSuiteReviewRequests = useRef(new Set());
 	const [changedTestCaseIds, setChangedTestCaseIds] = useState(null);
-	const [exportMessage, setExportMessage] = useState("");
+	const [exportResult, setExportResult] = useState(null);
 	const [exportDraftRequiredFor, setExportDraftRequiredFor] = useState(null);
 	const [exportError, setExportError] = useState("");
 	const {
@@ -2137,7 +2137,7 @@ export default function App() {
 			setDefaultGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
 		}
 		resetExportWorkflowState();
-		setExportMessage("");
+		setExportResult(null);
 		setExportError("");
 
 		setExecutionTargetBaseUrl(executionPayload?.target_base_url || "");
@@ -4611,7 +4611,7 @@ export default function App() {
 			return;
 		}
 		setIsExporting(true);
-		setExportMessage("");
+		setExportResult(null);
 		setExportError("");
 		setStatus(`Exporting to ${format.toUpperCase()}...`);
 		try {
@@ -4650,7 +4650,10 @@ export default function App() {
 			const send = async () => {
 				try {
 					const res = await apiRequest(exportPath, options);
-					if (res.ok) return await res.blob();
+					if (res.ok) {
+						const reportId = getSavedFileReportId(`export.${format}`, res.headers.get("X-Export-Report-ID"));
+						return { blob: await res.blob(), reportId };
+					}
 					if ([422, 502, 503, 504].includes(res.status)) {
 						const rejection = await res
 							.clone()
@@ -4668,27 +4671,24 @@ export default function App() {
 					throw error;
 				}
 			};
-			let blob = await send();
-			if (!blob && isProjectOperationCurrent(operationScope)) {
-				blob = await send();
+			let file = await send();
+			if (!file && isProjectOperationCurrent(operationScope)) {
+				file = await send();
 			}
 			if (!isProjectOperationCurrent(operationScope)) {
 				return;
 			}
-			if (!blob) throw new Error("The export could not be confirmed. Retry the same format with the same inputs.");
+			if (!file) throw new Error("The export could not be confirmed. Retry the same format with the same inputs.");
 
 			const filename = buildTestCaseExportFilename(currentProject, format);
-			downloadBlob(blob, filename);
+			downloadBlob(file.blob, filename);
 			clearAttempt();
-			await refreshCurrentProject({ hydrate: false, operationScope });
-			if (!isProjectOperationCurrent(operationScope)) {
-				return;
-			}
 			const message = reviewedDesignAvailable
 				? `Reviewed design exported as ${format.toUpperCase()}`
 				: `Exported to ${format.toUpperCase()} successfully`;
-			setExportMessage(message);
+			setExportResult({ message, reportId: file.reportId, projectId: operationScope.projectId, accountId: operationScope.userId });
 			setStatus(message);
+			await refreshCurrentProject({ hydrate: false, operationScope });
 		} catch (error) {
 			if (isProjectOperationCurrent(operationScope)) {
 				setExportError(`Export failed: ${error.message}`);
@@ -7270,7 +7270,7 @@ export default function App() {
 											isExporting={isExporting}
 											authActionDisabled={authActionDisabled}
 											exportToFormat={exportToFormat}
-											exportMessage={exportMessage}
+											exportResult={exportResult}
 											exportError={exportError}
 											goPrev={goPrev}
 											backToTestsPath={PROJECT_WORKSPACES_V2 ? testsPath : ""}
