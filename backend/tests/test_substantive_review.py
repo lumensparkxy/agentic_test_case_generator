@@ -550,7 +550,14 @@ class SubstantiveReviewTests(unittest.TestCase):
         retry_case["id"] = "TC-LOST"
         retry_case["steps"][0]["action"] = "Retry the pending submission then refresh"
         data["test_cases"].append(retry_case)
-        self.assertEqual(known_regression_findings(data), ([], []))
+        for combined in (
+            case.steps[0].expected,
+            "The same recorded booking ID is listed exactly once and is Confirmed.",
+        ):
+            with self.subTest(combined=combined):
+                for row in data["test_cases"]:
+                    row["steps"][0]["expected"] = combined
+                self.assertEqual(known_regression_findings(data), ([], []))
         data["test_cases"][0]["steps"][0]["expected"] = "Exactly one booking remains"
         missing = known_regression_findings(data)[0]
         self.assertEqual(len(missing), 1)
@@ -567,7 +574,8 @@ class SubstantiveReviewTests(unittest.TestCase):
         integer_count = {**count, "expected": "The saved booking count is 1, not 2."}
         locator_count = {**count, "expected": 'Assert that css "#bookings tr" count should be 1.'}
         identity = {"action": "Compare the displayed booking ID with the original", "expected": "The displayed ID matches the original recorded ID."}
-        for checks in ([count, identity], [identity, count], [integer_count, identity], [locator_count, identity]):
+        unchanged_id = {**identity, "expected": "The saved booking ID remains unchanged from the original recorded ID."}
+        for checks in ([count, identity], [identity, count], [integer_count, identity], [locator_count, identity], [count, unchanged_id]):
             with self.subTest(checks=checks):
                 steps = [
                     {"action": 'Double-click the "Book" button', "expected": "The confirmation shows the original booking ID."},
@@ -614,8 +622,17 @@ class SubstantiveReviewTests(unittest.TestCase):
             "locator count alternative": 'css "#bookings tr" count should be 1 or 2.',
             "prose count alternative": "The saved booking count is 1 or 2.",
         }
+        non_equal_identifiers = {
+            "identity capture only": "The original ID is recorded.",
+            "negated ID comparison": "The booking ID does not equal the original recorded ID.",
+            "no longer equal": "The saved booking ID no longer matches the original recorded booking ID.",
+            "optional match": "The saved booking ID may match the original recorded booking ID.",
+            "alternate ID": "The saved booking ID matches the original recorded booking ID or a new ID.",
+            "request log ID only": "The original booking ID remains visible in the request log.",
+        }
         invalid = {
             **{name: [trigger, refresh, {**count, "expected": expected}, identity] for name, expected in non_exact_counts.items()},
+            **{name: [trigger, refresh, count, {**identity, "expected": expected}] for name, expected in non_equal_identifiers.items()},
             "count before reload": [trigger, count, refresh, identity],
             "reload before trigger": [{"action": 'Reload My bookings then double-click "Book"', "expected": "Exactly one booking with the same ID remains."}],
             "mentioned reload": [trigger, {"action": "Read the refresh timestamp", "expected": ""}, count, identity],
@@ -636,8 +653,6 @@ class SubstantiveReviewTests(unittest.TestCase):
                 trigger,
                 {**refresh, "expected": "The saved booking has the same recorded ID and exactly one confirmation is displayed."},
             ],
-            "identity capture only": [trigger, refresh, count, {**identity, "expected": "The original ID is recorded."}],
-            "negated ID comparison": [trigger, refresh, count, {**identity, "expected": "The booking ID does not equal the original recorded ID."}],
             "separate status is not identity comparison": [
                 trigger,
                 refresh,

@@ -70,13 +70,21 @@ _ONE_DURABLE_RECORD = re.compile(
     rf"|{_DURABLE_RECORD} count (?:is|should be|equals?|should equal|increases? by|increased by) 1\b(?![.,]\d|\s+or\b)",
     re.I,
 )
-_COUNT_NEGATION = r"(?:not|never|cannot|[a-z]+n['’]t)"
-_NEGATED_COUNT_PREFIX = re.compile(rf"\b(?:{_COUNT_NEGATION}|no|without)(?: (?:have|see|show|find|observe))?(?: (?:a|an|the))?\s*$", re.I)
-_NEGATED_COUNT_OUTCOME = re.compile(rf"^\s+(?:(?:row|entry|record) )?(?:(?:is|are|was|were|will|shall|should|must|does|do) )?{_COUNT_NEGATION}\b", re.I)
-_RECORD_ID = re.compile(r"\b(?:id|identifier|identity)\b", re.I)
-_ORIGINAL_ID = re.compile(r"\b(?:same|original|unchanged|recorded|identical|existing)\b", re.I)
-_IDENTITY_COMPARISON = re.compile(r"\b(?:same|equals?|matches?|unchanged|identical|retains?|remains?|still)\b", re.I)
-_NEGATED_COMPARISON = re.compile(r"\b(?:not|never|doesn't|isn't) (?:the )?(?:same|equals?|matches?|unchanged|identical|retains?|remains?)\b", re.I)
+_ASSERTION_NEGATION = r"(?:not|never|cannot|[a-z]+n['’]t)"
+_NEGATED_COUNT_PREFIX = re.compile(rf"\b(?:{_ASSERTION_NEGATION}|no|without)(?: (?:have|see|show|find|observe))?(?: (?:a|an|the))?\s*$", re.I)
+_NEGATED_COUNT_OUTCOME = re.compile(rf"^\s+(?:(?:row|entry|record) )?(?:(?:is|are|was|were|will|shall|should|must|does|do) )?{_ASSERTION_NEGATION}\b", re.I)
+_RECORD_ID = r"(?:id|identifier|identity)"
+_ORIGINAL_ID = re.compile(r"\b(?:original|recorded|existing|captured|prior|previous|pre-refresh)\b", re.I)
+_ID_SUBJECT = rf"\b{_RECORD_ID} (?:(?:must|should|will) )?"
+_ID_DESCRIPTION = rf"(?: (?:original|recorded|{_RECORD_CREATION}))* {_RECORD_ID}"
+_IDENTITY_COMPARISON = re.compile(rf"{_ID_SUBJECT}(?:equals?|match(?:es)?|(?:is|be) (?:equal to|identical to|the same as))\b", re.I)
+_IDENTITY_PRESERVATION = re.compile(
+    rf"{_ID_SUBJECT}(?:is|be|remains?|stays?) (?:unchanged\b|the same\s*[.!?]?$)"
+    rf"|\b(?:has|have|with|retains?|keeps?) (?:the )?(?:same|original){_ID_DESCRIPTION}\b"
+    rf"|\bsame{_ID_DESCRIPTION} (?:is )?listed exactly once\b",
+    re.I,
+)
+_NON_AFFIRMATIVE_IDENTITY = re.compile(rf"\b(?:{_ASSERTION_NEGATION}|no|without|or|may|might|could)\b", re.I)
 
 
 class StrictRow(BaseModel):
@@ -473,6 +481,14 @@ def _checks_one_durable_record(clause):
     return bool(count and not _NEGATED_COUNT_PREFIX.search(statement[: count.start()]) and not _NEGATED_COUNT_OUTCOME.match(statement[count.end() :]))
 
 
+def _checks_original_identity(clause):
+    statement = _assertion_statement(clause)
+    return bool(
+        not _NON_AFFIRMATIVE_IDENTITY.search(statement)
+        and (_IDENTITY_PRESERVATION.search(statement) or (_IDENTITY_COMPARISON.search(statement) and _ORIGINAL_ID.search(statement)))
+    )
+
+
 def _has_durable_retry_readback(steps, trigger_pattern):
     """Recognize a trigger, explicit refresh, and observations of that readback."""
     triggered = refreshed = count_checked = identity_checked = False
@@ -490,9 +506,7 @@ def _has_durable_retry_readback(steps, trigger_pattern):
             continue
         for clause in _EXPECTATION_CLAUSES.split(step["expected"]):
             count_checked = count_checked or _checks_one_durable_record(clause)
-            identity_checked = identity_checked or bool(
-                _RECORD_ID.search(clause) and _ORIGINAL_ID.search(clause) and _IDENTITY_COMPARISON.search(clause) and not _NEGATED_COMPARISON.search(clause)
-            )
+            identity_checked = identity_checked or _checks_original_identity(clause)
         if count_checked and identity_checked:
             return True
     return False
