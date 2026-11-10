@@ -82,7 +82,6 @@ export default function ExportPanel({
 	return (
 		<Surface as="section" className="panel">
 			<h2 className="panel-title">Export Test Cases</h2>
-			<p className="panel-description">Download your generated test cases as CSV, Excel, or JSON.</p>
 			{projectId && latestFileReportId && (
 				<p>
 					<RouteLink to={buildSavedFileReportPath(projectId, latestFileReportId)} navigate={navigate}>
@@ -138,9 +137,6 @@ export default function ExportPanel({
 			)}
 			<div className="export-section">
 				<h3 className="section-subtitle">{reviewedDesignAvailable ? "Export reviewed design" : "📥 Quick Export"}</h3>
-				<p className="helper-text">
-					Download test cases directly to your computer. Filenames include the project name and export date/time in UTC.
-				</p>
 				{exportError && (
 					<div className="workflow-result-notice warning" role="alert">
 						<p>{exportError}</p>
@@ -168,6 +164,7 @@ export default function ExportPanel({
 						</Button>
 					))}
 				</div>
+				<p className="helper-text">Filenames include the project name and export time in UTC.</p>
 			</div>
 			{executionReport}
 			{declaredSetup && <ExecutionSetupSummary declaredSetup={declaredSetup} projectId={projectId} navigate={navigate} />}
