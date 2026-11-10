@@ -589,9 +589,11 @@ test.describe("Recoverable approval continuation", () => {
 		await page.goto(`${root}/review/tests`);
 		await expect(reviewSaved(page)).toBeEnabled();
 		await expect(checkReview(page)).toBeInViewport();
+		await expect(reviewSaved(page)).toBeInViewport();
 		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
 		const assertion = reader.getByRole("cell", { name: recheckExpected, exact: true });
-		await expect.poll(async () => (await assertion.boundingBox())?.y ?? Infinity).toBeLessThan(625);
+		await expect.poll(async () => (await reader.boundingBox())?.y ?? Infinity).toBeLessThan(315);
+		await expect.poll(async () => (await assertion.boundingBox())?.y ?? Infinity).toBeLessThan(565);
 		const quality = page.getByRole("region", { name: "Saved suite quality", exact: true });
 		const summary = quality.locator("summary").first();
 		await expect(summary).toHaveText(/Saved suite quality\s*Independent design Unknown\s*Source freshness Current/);
@@ -604,6 +606,12 @@ test.describe("Recoverable approval continuation", () => {
 		await summary.press("Enter");
 		await expect(runResult).toBeHidden();
 		await expect(assertion).toBeInViewport();
+		await expectNoDocumentOverflow(page);
+
+		await page.setViewportSize({ width: 720, height: 900 });
+		await expect(checkReview(page)).toBeVisible();
+		await expect(reviewSaved(page)).toBeVisible();
+		await expect(assertion).toBeVisible();
 		await expectNoDocumentOverflow(page);
 		expect(api.writes).toEqual([]);
 		expect(api.errors).toEqual([]);

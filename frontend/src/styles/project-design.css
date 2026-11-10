@@ -396,18 +396,39 @@ select {
 .test-generation-panel.has-test-cases > .panel-description {
 	display: none;
 }
-.test-generation-panel.has-test-cases > .generation-gate-card.ready {
+.test-generation-panel.has-test-cases .generation-gate-card.ready {
 	background: none;
 	border: 0;
 	padding: 0;
 	margin: 0 0 16px;
 }
-.test-generation-panel.has-test-cases > .generation-gate-card.ready strong {
+.test-generation-panel.has-test-cases .generation-gate-card.ready strong {
 	font-weight: 500;
 	color: var(--text-muted);
 }
-.test-generation-panel.has-test-cases > .generation-gate-card.ready p {
+.test-generation-panel.has-test-cases .generation-gate-card.ready p {
 	font-size: var(--font-secondary);
+}
+.saved-suite-review-controls {
+	display: contents;
+}
+
+@media (min-width: 1100px) {
+	.compact-saved-suite-review-controls {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+		margin-block-end: 8px;
+	}
+
+	.test-generation-panel.has-test-cases > .compact-saved-suite-review-controls > .generation-gate-card.ready {
+		margin: 0;
+		padding: 8px 12px;
+	}
+
+	.compact-saved-suite-review-controls :is(button, .workbench-actions) {
+		flex-shrink: 0;
+	}
 }
 .test-quality-summary {
 	display: flex;

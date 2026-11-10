@@ -4618,6 +4618,15 @@ export default function App() {
 		Array.isArray(readiness.blockers);
 	const targetReadiness = hasExactPreview ? (executionEligibility.ready ? "Ready" : "Blocked") : "Unknown";
 	const compactReviewStatus = PROJECT_WORKSPACES_V2 && route.workspace === "review";
+	const compactSavedSuiteReview =
+		compactReviewStatus &&
+		testCases.length > 0 &&
+		showSavedReviewRecovery &&
+		savedSuiteReviewPending &&
+		savedSuiteInputsReady &&
+		!savedSuiteReviewDisabled &&
+		!savedSuiteReviewState?.busy &&
+		!savedSuiteReviewState?.error;
 	const collapsibleAppMenu = compactReviewStatus && projectRouteStatus === "ready" && currentProject?.project_id === route.projectId;
 	const closeAppMenu = () => {
 		setIsAppMenuOpen(false);
@@ -6834,55 +6843,88 @@ export default function App() {
 													onReview={selectWorkflowTab}
 												/>
 											)}
-											{showSavedReviewRecovery && (
-												<section
-													className={`generation-gate-card${compactReviewStatus ? " compact-saved-review-recovery" : ""}`}
-													aria-label="Saved suite review recovery"
-												>
-													<div>
-														<h3>Saved suite review recovery</h3>
-														{(!savedReviewError || savedReview.busy || savedReview.attempt) && (
-															<p role="status">{savedReviewStatusMessage(savedReview, sharedDraftBusy)}</p>
-														)}
-														{savedReview.attempt &&
-															(savedReview.attempt.source_snapshot_id !== savedSuite?.snapshot_id || testCaseStageState.stale) && (
-																<p>This attempt uses an earlier source revision.</p>
+											<div
+												className={`saved-suite-review-controls${compactSavedSuiteReview ? " compact-saved-suite-review-controls" : ""}`}
+											>
+												{showSavedReviewRecovery && (
+													<section
+														className={`generation-gate-card${compactReviewStatus ? " compact-saved-review-recovery" : ""}`}
+														aria-label="Saved suite review recovery"
+													>
+														<div>
+															<h3>Saved suite review recovery</h3>
+															{(!savedReviewError || savedReview.busy || savedReview.attempt) && (
+																<p role="status">{savedReviewStatusMessage(savedReview, sharedDraftBusy)}</p>
 															)}
-														{savedReview.attempt && (
-															<Disclosure>
-																<summary>Saved review details</summary>
-																<p>
-																	Saved suite <code>{savedReview.attempt.source_snapshot_id}</code>
-																</p>
-																<p>
-																	Request <code>{savedReview.attempt.request_id}</code>
-																</p>
-															</Disclosure>
-														)}
-														{savedReviewError && !savedReview.busy && <p role="alert">{savedReviewError}</p>}
-													</div>
-													<div className="workbench-actions">
-														<Button
-															variant="secondary"
-															size="compact"
-															disabled={savedReview.busy || savedSuiteReviewState?.busy}
-															onClick={() => void checkSavedSuiteReview(captureProjectOperationScope())}
-														>
-															Check saved review status
-														</Button>
-														{savedReview.attempt && (
+															{savedReview.attempt &&
+																(savedReview.attempt.source_snapshot_id !== savedSuite?.snapshot_id || testCaseStageState.stale) && (
+																	<p>This attempt uses an earlier source revision.</p>
+																)}
+															{savedReview.attempt && (
+																<Disclosure>
+																	<summary>Saved review details</summary>
+																	<p>
+																		Saved suite <code>{savedReview.attempt.source_snapshot_id}</code>
+																	</p>
+																	<p>
+																		Request <code>{savedReview.attempt.request_id}</code>
+																	</p>
+																</Disclosure>
+															)}
+															{savedReviewError && !savedReview.busy && <p role="alert">{savedReviewError}</p>}
+														</div>
+														<div className="workbench-actions">
 															<Button
 																variant="secondary"
 																size="compact"
-																disabled={Boolean(savedReview.busy || savedReviewError || savedSuiteReviewState?.busy)}
-																onClick={() => void checkSavedSuiteReview(captureProjectOperationScope(), { release: true })}
+																disabled={savedReview.busy || savedSuiteReviewState?.busy}
+																onClick={() => void checkSavedSuiteReview(captureProjectOperationScope())}
 															>
-																{savedReview.attempt.state === "interrupted" ? "Acknowledge and release" : "Cancel saved review"}
+																Check saved review status
 															</Button>
-														)}
-													</div>
-												</section>
-											)}
+															{savedReview.attempt && (
+																<Button
+																	variant="secondary"
+																	size="compact"
+																	disabled={Boolean(savedReview.busy || savedReviewError || savedSuiteReviewState?.busy)}
+																	onClick={() => void checkSavedSuiteReview(captureProjectOperationScope(), { release: true })}
+																>
+																	{savedReview.attempt.state === "interrupted" ? "Acknowledge and release" : "Cancel saved review"}
+																</Button>
+															)}
+														</div>
+													</section>
+												)}
+												{savedSuiteReviewPending && (
+													<section
+														className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}
+														aria-label={syncDraftSuite ? "Project Sync suite review" : undefined}
+													>
+														<div role="status">
+															<strong>
+																{savedSuiteReviewState?.busy
+																	? "Reviewing saved test cases…"
+																	: syncDraftSuite
+																		? "Sync suite ready for independent review"
+																		: "Saved suite needs review"}
+															</strong>
+															<p>
+																{savedSuiteInputsReady
+																	? syncDraftSuite
+																		? "Assess the saved cases against the approved scenarios and accepted correction. The saved steps and case versions stay the same."
+																		: reassessSavedProof
+																			? "The previous assessment needs to be checked again. Review these saved cases against the current assessment rules."
+																			: "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
+																	: "Review current Requirements and Use Cases or resolve upstream changes first."}
+															</p>
+														</div>
+														{savedSuiteReviewState?.error && <p role="alert">{savedSuiteReviewState.error}</p>}
+														<Button onClick={reviewSavedSuite} disabled={savedSuiteReviewDisabled || savedSuiteReviewState?.busy}>
+															Review saved suite
+														</Button>
+													</section>
+												)}
+											</div>
 											{showSyncDraftReview && !savedSuiteReviewPending && (
 												<section className="generation-gate-card blocked" aria-label="Project Sync suite review">
 													<div role="status">
@@ -6912,35 +6954,6 @@ export default function App() {
 															</Button>
 														)
 													)}
-												</section>
-											)}
-											{savedSuiteReviewPending && (
-												<section
-													className={`generation-gate-card ${savedSuiteInputsReady ? "ready" : "blocked"}`}
-													aria-label={syncDraftSuite ? "Project Sync suite review" : undefined}
-												>
-													<div role="status">
-														<strong>
-															{savedSuiteReviewState?.busy
-																? "Reviewing saved test cases…"
-																: syncDraftSuite
-																	? "Sync suite ready for independent review"
-																	: "Saved suite needs review"}
-														</strong>
-														<p>
-															{savedSuiteInputsReady
-																? syncDraftSuite
-																	? "Assess the saved cases against the approved scenarios and accepted correction. The saved steps and case versions stay the same."
-																	: reassessSavedProof
-																		? "The previous assessment needs to be checked again. Review these saved cases against the current assessment rules."
-																		: "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
-																: "Review current Requirements and Use Cases or resolve upstream changes first."}
-														</p>
-													</div>
-													{savedSuiteReviewState?.error && <p role="alert">{savedSuiteReviewState.error}</p>}
-													<Button onClick={reviewSavedSuite} disabled={savedSuiteReviewDisabled || savedSuiteReviewState?.busy}>
-														Review saved suite
-													</Button>
 												</section>
 											)}
 											{savedSuiteReviewed && (!savedDesignNeedsDraft || !savedSuite.approved) && (
