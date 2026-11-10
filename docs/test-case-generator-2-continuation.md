@@ -751,6 +751,20 @@ unaffected versions stayed exact. The revised rejection failed at the
 intended assertion when replayed against the original limit. The existing
 Manual retry cases stayed Manual.
 
+The original authored W07 pair at `2f6458d` and `2072230` stopped before
+scenario publication. Both normalizers removed an approved requirement's
+trailing space, so exact source validation rejected the output. The
+source-binding fix under
+[#457](https://github.com/lumensparkxy/agentic_test_case_generator/issues/457)
+restores saved text for a boundary-only echo and keeps the strict guard
+for a rewrite. The separate post-fix replay at `efadd99` saved the exact
+plan, recorded its explicit approval, and saved two cases. It exported a
+reasoned JSON draft and compiled both exact literals in Preview. The
+structural score was 89 against 90.
+Run stayed blocked, so the saved cases have no healthy or fault results.
+Independent authored controls verified the three frozen faults on both
+original pins. The original blocked pair and scoring rules stay fixed.
+
 The current scope is offline only. Live provider pairs, independent artifact
 judgments, practitioner validation, and verification of a hosted worker
 identity and timeout policy remain open. The practitioner study stays with
