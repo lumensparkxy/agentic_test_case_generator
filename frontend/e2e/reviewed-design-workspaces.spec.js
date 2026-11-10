@@ -22,7 +22,7 @@ const priorRunFinding = "Classify the checkout failure from the recorded run.";
 const unrelatedFinding = "A later run needs separate investigation.";
 const literal = "  QA–01  ";
 
-async function setup(page, { stale = false, available = true, oldServer = false, runEvidence } = {}) {
+async function setup(page, { stale = false, available = true, oldServer = false, runEvidence, browserExecution = false } = {}) {
 	const project = useCaseProjectFixture({ name: "Verified checkout design" });
 	const plan = project.current_snapshots.use_cases;
 	const [firstGroup] = plan.payload.coverage_plan;
@@ -67,15 +67,20 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 		stage: "test_cases",
 		version: 2,
 		project_revision: project.current_revision,
-		approved: false,
+		approved: browserExecution,
 		operation: "testcases.generate",
 		source_snapshot_id: plan.snapshot_id,
 		metadata,
 		payload: {
 			test_cases: [testCase],
 			coverage_plan: coverage,
-			approved: false,
-			review: { approved: false, score: 100, threshold: 90, summary: "The checkout execution fixture is missing." },
+			approved: browserExecution,
+			review: {
+				approved: browserExecution,
+				score: 100,
+				threshold: 90,
+				summary: browserExecution ? "Approved for browser execution." : "The checkout execution fixture is missing.",
+			},
 			substantive_assessment: {
 				status: "incomplete",
 				design_status: "assessed_complete",
@@ -86,7 +91,7 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 			generation_tasks: [],
 		},
 	};
-	project.stage_state.test_cases = { current_snapshot_id: suiteId, version: 2, stale, approved: false, metadata };
+	project.stage_state.test_cases = { current_snapshot_id: suiteId, version: 2, stale, approved: browserExecution, metadata };
 	const historicalRun = workspaceRunFixture({
 		project_id: project.project_id,
 		run_id: "checkout-run-before-repair",
@@ -107,6 +112,30 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 	project.execution_runs = [historicalRun];
 	let browserCase = null;
 	let matchingRun = null;
+	if (browserExecution || runEvidence === "matching-history") {
+		browserCase = {
+			...testCase,
+			id: "TC-BROWSER-RECEIPT",
+			title: "Check the browser receipt",
+			automation_status: "Automated",
+			artifact_item_id: "browser-receipt-item",
+			artifact_version_id: "browser-receipt-version-1",
+			artifact_version_number: 1,
+			execution_prerequisites: [],
+			steps: [{ step: 1, action: "Submit checkout", expected: "The exact saved receipt appears." }],
+		};
+		project.current_snapshots.test_cases.payload.test_cases.push(browserCase);
+	}
+	if (browserExecution) {
+		project.current_snapshots.test_cases.payload.test_cases.push({
+			...browserCase,
+			id: "TC-BROWSER-SUBMIT",
+			title: "Check the checkout submit control",
+			artifact_item_id: "browser-submit-item",
+			artifact_version_id: "browser-submit-version-1",
+			steps: [{ step: 1, action: "Open checkout", expected: "The submit control is enabled." }],
+		});
+	}
 	if (runEvidence === "prior-suite") {
 		project.current_snapshots.execution = {
 			snapshot_id: runSnapshotId,
@@ -120,18 +149,6 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 		project.stage_state.execution = { current_snapshot_id: runSnapshotId, version: 1, stale: false };
 	} else if (runEvidence === "matching-history") {
 		project.current_revision += 2;
-		browserCase = {
-			...testCase,
-			id: "TC-BROWSER-RECEIPT",
-			title: "Check the browser receipt",
-			automation_status: "Automated",
-			artifact_item_id: "browser-receipt-item",
-			artifact_version_id: "browser-receipt-version-1",
-			artifact_version_number: 1,
-			execution_prerequisites: [],
-			steps: [{ step: 1, action: "Submit checkout", expected: "The exact saved receipt appears." }],
-		};
-		project.current_snapshots.test_cases.payload.test_cases.push(browserCase);
 		const indexedRun = workspaceRunFixture({
 			project_id: project.project_id,
 			project_revision: project.current_revision - 1,
@@ -280,7 +297,7 @@ async function setup(page, { stale = false, available = true, oldServer = false,
 		});
 	});
 	await seedAuthenticatedSession(page);
-	return { errors, exportRequests, writes, testCase, historicalRun, matchingRun, browserCase, executionReads };
+	return { errors, exportRequests, writes, testCase, historicalRun, matchingRun, browserCase, executionReads, project };
 }
 
 const quality = (page) => page.getByRole("region", { name: "Saved suite quality", exact: true });
@@ -542,6 +559,118 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(report).toContainText(`Run ${matchingRun.run_id}`);
 		expect(executionReads).toEqual(Array(3).fill(matchingRun.run_record_id));
 		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
+	test("requires a deliberate browser candidate selection for each fresh preview", async ({ page }, testInfo) => {
+		const { errors, writes, project } = await setup(page, { browserExecution: true });
+		const savedCases = project.current_snapshots.test_cases.payload.test_cases;
+		const [manualCase, ...automatedCases] = savedCases;
+		const [receipt, submit] = automatedCases.map((savedCase) => ({
+			id: `candidate-${savedCase.id}`,
+			source_test_case_id: savedCase.id,
+			title: savedCase.title,
+			status: "executable",
+			spec: { steps: savedCase.steps.map(({ action, expected }) => `${action}. ${expected}`) },
+			traceability_ids: savedCase.linked_requirement_ids,
+		}));
+		const previewResponse = () => ({
+			readiness: {
+				run_allowed: true,
+				blockers: [],
+				project_id: project.project_id,
+				project_revision: project.current_revision,
+				source_snapshot_id: suiteId,
+				target_base_url: "https://checkout.example.test/app",
+				target_source: "configured_default",
+			},
+			executable: [receipt, submit],
+			manual: [{ id: "candidate-manual", source_test_case_id: manualCase.id, title: manualCase.title, status: "manual", spec: null }],
+			unsupported: [],
+			invalid: [],
+			warnings: [],
+			summary: { executable: 2, manual: 1, unsupported: 0, invalid: 0 },
+		});
+		const checkExecutionRequest = (route) => {
+			const request = route.request();
+			expect(request.method()).toBe("POST");
+			expect(request.headers()["x-request-id"]).toBeTruthy();
+			const body = request.postDataJSON();
+			expect(body).toMatchObject({ project_id: project.project_id, base_project_revision: project.current_revision });
+			expect(body.test_cases.map((savedCase) => savedCase.id)).toEqual(savedCases.map((savedCase) => savedCase.id));
+			return body;
+		};
+		await page.route("**/automation/execution/preview", (route) => {
+			checkExecutionRequest(route);
+			project.current_revision += 1;
+			return route.fulfill({ json: previewResponse() });
+		});
+		const selections = [];
+		await page.route("**/automation/execution/run", (route) => {
+			const body = checkExecutionRequest(route);
+			selections.push(body.selected_test_case_ids);
+			project.current_revision += 1;
+			return route.fulfill({
+				json: {
+					run_id: "mock-selected-checkout-browser-run",
+					status: "passed",
+					preview: previewResponse(),
+					summary: { passed: 1, failed: 0, invalid: 0, skipped: 0 },
+					results: [{ id: "receipt-result", source_test_case_id: receipt.source_test_case_id, title: receipt.title, status: "passed" }],
+				},
+			});
+		});
+
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/deliver/browser-tests`);
+		const preview = page.getByRole("button", { name: "Preview Execution", exact: true });
+		const runNone = page.getByRole("button", { name: "Run 0 Candidates", exact: true });
+		const runOne = page.getByRole("button", { name: "Run 1 Candidate", exact: true });
+		const selectReceipt = page.getByRole("checkbox", { name: `Select ${receipt.source_test_case_id} for execution`, exact: true });
+		const selectSubmit = page.getByRole("checkbox", { name: `Select ${submit.source_test_case_id} for execution`, exact: true });
+		const selectAll = page.getByRole("checkbox", { name: "Select all executable candidates", exact: true });
+		const expectUnselectedPreview = async () => {
+			await expect(preview).toBeEnabled();
+			await expect(selectReceipt).toBeEnabled();
+			await expect(selectSubmit).toBeEnabled();
+			await expect(selectReceipt).not.toBeChecked();
+			await expect(selectSubmit).not.toBeChecked();
+			await expect(selectAll).not.toBeChecked();
+			await expect(runNone).toBeDisabled();
+			await expect(page.getByText("Select eligible candidates in Execution Preview to enable Run.", { exact: true })).toBeVisible();
+		};
+		await expect(runNone).toBeDisabled();
+		await preview.press("Enter");
+		await expectUnselectedPreview();
+		await expect(page.getByText(`${manualCase.id} - ${manualCase.title}`, { exact: true })).toBeVisible();
+		await expect(page.getByRole("checkbox", { name: `Select ${manualCase.id} for execution`, exact: true })).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath("browser-preview-no-selection.png"), fullPage: true });
+		const previewPost = "POST /automation/execution/preview";
+		expect(writes).toEqual([previewPost]);
+
+		await selectReceipt.press("Space");
+		await expect(selectReceipt).toBeChecked();
+		await expect(selectSubmit).not.toBeChecked();
+		await expect(runOne).toBeEnabled();
+		const sections = page.getByRole("navigation", { name: "Workspace sections", exact: true });
+		await sections.getByRole("link", { name: "Export", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver`);
+		await sections.getByRole("link", { name: "Browser tests", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver/browser-tests`);
+		await expect(selectReceipt).toBeChecked();
+		await expect(selectSubmit).not.toBeChecked();
+		await expect(runOne).toBeEnabled();
+		expect(writes).toEqual([previewPost]);
+
+		await runOne.press("Enter");
+		await expect(page.getByText("Execution passed: 1 passed, 0 failed, 0 invalid.", { exact: true })).toBeVisible();
+		await expect(selectReceipt).toBeChecked();
+		expect(selections).toEqual([[receipt.id]]);
+		await expect(preview).toBeEnabled();
+		await preview.press("Enter");
+		await expectUnselectedPreview();
+		expect(selections).toEqual([[receipt.id]]);
+		expect(writes).toEqual([previewPost, "POST /automation/execution/run", previewPost]);
 		expect(errors).toEqual([]);
 	});
 

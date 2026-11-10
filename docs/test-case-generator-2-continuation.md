@@ -751,6 +751,8 @@ A deliberate finding read keeps the recorded run, source suite and case
 assertions visible. Current file and execution gates stay separate.
 Browser tests uses the same exact saved-suite run evidence as Export.
 A run from a previous suite opens through a separate saved report link.
+In 2.0, each new execution preview starts with no candidates selected.
+Select eligible cases in the preview and then choose Run.
 Rendered Chromium against the real local API opened the one finding from
 the exact failed run without changing its classification.
 

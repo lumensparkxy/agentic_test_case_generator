@@ -233,6 +233,7 @@ test.describe("Isolated browser workbench", () => {
 					expect(JSON.stringify(await denied.json())).toContain("case_snapshot_mismatch");
 					expect((await fixture.read()).execution_runs).toEqual([]);
 				}
+				await page.getByRole("checkbox", { name: "Select all executable candidates", exact: true }).check();
 				const button = page.getByRole("button", { name: new RegExp(`^Run ${candidates.length} Candidate(s)?$`) });
 				let run;
 				let runInput;

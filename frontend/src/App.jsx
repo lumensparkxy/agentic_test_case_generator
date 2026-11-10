@@ -1923,7 +1923,7 @@ export default function App() {
 			: normalizedPreview;
 		setExecutionPreview(nextPreview);
 		setSelectedExecutionCandidateIds(
-			selectedCandidateIds === null
+			selectedCandidateIds === null && !PROJECT_WORKSPACES_V2
 				? getDefaultSelectedCandidateIds(nextPreview)
 				: resolveSelectedExecutableCandidates(nextPreview, selectedCandidateIds).map((candidate) => candidate.id)
 		);

@@ -292,6 +292,7 @@ async function runBookingVersion(page, fixture, target, suite, environment) {
 	expect(preview.readiness).toMatchObject({ source_snapshot_id: suite.snapshot_id, run_allowed: true, blockers: [] });
 	const ids = preview.executable.map((row) => row.id);
 	expect(ids.length).toBeGreaterThan(0);
+	await page.getByRole("checkbox", { name: "Select all executable candidates", exact: true }).check();
 	const runResponse = await uiResponse(
 		page,
 		"/automation/execution/run",

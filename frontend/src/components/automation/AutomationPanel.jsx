@@ -295,6 +295,10 @@ export default function AutomationPanel({
 		!testCases.length || isPreviewingExecution || isRunningExecution || executionNeedsResolution || authActionDisabled;
 	const runDisabled = previewDisabled || !previewIsActionable || !executionEligibility?.ready || selectedExecutableCount === 0;
 	const inputsDisabled = isPreviewingExecution || isRunningExecution || executionNeedsResolution || authActionDisabled;
+	const runReadinessMessage =
+		executionEligibility?.ready && executableCandidates.length > 0 && selectedExecutableCount === 0
+			? "Select eligible candidates in Execution Preview to enable Run."
+			: executionEligibility?.message || "Execution readiness is unavailable.";
 
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
@@ -310,7 +314,7 @@ export default function AutomationPanel({
 				) : (
 					<p>A preview validates candidate specifications; it does not execute the application.</p>
 				)}
-				<p>{executionEligibility?.message || "Execution readiness is unavailable."}</p>
+				<p>{runReadinessMessage}</p>
 				{!effectiveTarget && executionPreview?.readiness?.target_source === "configured_default" && (
 					<p>Using the explicitly configured backend target: {executionPreview.readiness.target_base_url}</p>
 				)}

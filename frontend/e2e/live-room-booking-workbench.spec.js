@@ -208,6 +208,7 @@ test.describe("Generated Room Booking execution", () => {
 				}
 				expect(preview.readiness.run_allowed, JSON.stringify(preview.readiness.blockers)).toBe(true);
 				expect(candidates.length, "No generated case compiled for this supplied target").toBeGreaterThan(0);
+				await page.getByRole("checkbox", { name: "Select all executable candidates", exact: true }).check();
 				const healthyResponse = await uiResponse(
 					page,
 					"/automation/execution/run",
