@@ -27,6 +27,10 @@ export function hasExecutionFindingEvidence(run) {
 	return validId(run?.snapshot_id) && validId(run.run_record_id) && Array.isArray(run.results) && ["failed", "flaky"].includes(run.status);
 }
 
+export function buildSavedExecutionRunPath(projectId, runRecordId) {
+	return `${buildProjectWorkspacePath(projectId, "deliver")}?run=${encodeURIComponent(runRecordId)}`;
+}
+
 export function buildExecutionFindingsPath(projectId, run) {
 	const query = new URLSearchParams({ finding_source: run.snapshot_id, finding_run: run.run_record_id });
 	return `${buildProjectWorkspacePath(projectId, "inputs", "context")}?${query}#quality-feedback-heading`;

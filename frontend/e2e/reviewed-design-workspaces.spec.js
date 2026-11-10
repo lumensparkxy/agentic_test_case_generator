@@ -421,8 +421,9 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(errors).toEqual([]);
 	});
 
-	test("opens declared setup and exact failed-run findings without dispatch", async ({ page }) => {
-		const { errors, exportRequests, writes, historicalRun } = await setup(page);
+	test("opens declared setup and returns from exact failed-run findings without dispatch", async ({ page }, testInfo) => {
+		const { errors, exportRequests, writes, historicalRun, executionReads } = await setup(page);
+		await page.setViewportSize({ width: 1440, height: 900 });
 		const prerequisites = (page) => page.getByRole("region", { name: "Declared browser prerequisites", exact: true });
 		await page.goto(`${root}/deliver`);
 		await expect(exportDesign(page)).toBeEnabled();
@@ -438,7 +439,8 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(page.getByLabel("Missing prerequisite name")).toHaveValue("checkoutFixture");
 		expect(writes).toEqual([]);
 
-		await page.goto(`${root}/deliver?run=${historicalRun.run_record_id}`);
+		const savedRunPath = `${root}/deliver?run=${historicalRun.run_record_id}`;
+		await page.goto(savedRunPath);
 		await expect(prerequisites(page)).toHaveCount(0);
 		const findingLink = page.getByRole("link", { name: "Review quality findings for this run", exact: true });
 		await expect(findingLink).toHaveAttribute(
@@ -452,12 +454,32 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(page.getByText(unrelatedFinding, { exact: true })).toHaveCount(0);
 		await runFindings.getByRole("button", { name: "Review finding", exact: true }).click();
 		await expect(page.getByText(priorRunFinding, { exact: false }).last()).toBeVisible();
+		const backToRun = page.getByRole("link", { name: "Back to saved run", exact: true });
+		await expect(backToRun).toHaveAttribute("href", savedRunPath, { timeout: 5000 });
+		await backToRun.focus();
+		await page.screenshot({ path: testInfo.outputPath("verified-run-finding-return.png") });
+		await page.keyboard.press("Enter");
+		await expect(page).toHaveURL(savedRunPath);
+		const savedRun = page.getByRole("main", { name: "Workflow workspace: Deliver · Saved execution", exact: true });
+		await expect(savedRun.getByRole("heading", { level: 1, name: "Deliver · Saved execution", exact: true })).toBeVisible();
+		await expect(savedRun.getByRole("region", { name: "Contextual task", exact: true })).toHaveCount(0);
+		await expect(savedRun.getByText("Reviewed design available", { exact: true })).toHaveCount(0);
+		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();
+		await expect(findingLink).toBeVisible();
+		await expect(page.getByText(`Run ${historicalRun.run_id}`, { exact: true })).toBeVisible();
+		await expect(page.getByText(historicalRun.source_snapshot_id, { exact: true })).toBeVisible();
+		await expect(page.getByText("Case outcomes (1)", { exact: true })).toBeVisible();
+		expect(executionReads).toEqual(Array(3).fill(historicalRun.run_record_id));
+		await page.screenshot({ path: testInfo.outputPath("returned-exact-saved-run.png") });
+		await page.goBack();
+		await expect(runFindings.getByText(priorRunFinding, { exact: true })).toBeVisible();
 		await page.goto(
 			`${root}/inputs/context?finding_source=different-execution-snapshot&finding_run=${historicalRun.run_record_id}#quality-feedback-heading`
 		);
 		await expect(page.getByText("This saved run's quality findings are unavailable.", { exact: true })).toBeVisible();
 		await expect(page.getByText(unrelatedFinding, { exact: true })).toHaveCount(0);
 		await expect(page.getByRole("button", { name: "Review finding", exact: true })).toHaveCount(0);
+		await expect(backToRun).toHaveCount(0);
 		expect(writes).toEqual([]);
 		expect(exportRequests).toEqual([]);
 		expect(errors).toEqual([]);
@@ -721,6 +743,9 @@ test("flag-off keeps the existing draft export gate despite server evidence", { 
 	const findings = page.getByRole("list", { name: "Quality findings for this run", exact: true });
 	await expect(findings.getByText(priorRunFinding, { exact: true })).toBeVisible();
 	await expect(page.getByText(unrelatedFinding, { exact: true })).toHaveCount(0);
+	await page.getByRole("link", { name: "Back to saved run", exact: true }).press("Enter");
+	await expect(page).toHaveURL(`${root}/deliver?run=${historicalRun.run_record_id}`);
+	await expect(page.getByText(`Run ${historicalRun.run_id}`, { exact: true })).toBeVisible();
 	expect(writes).toEqual([]);
 	expect(errors).toEqual([]);
 });

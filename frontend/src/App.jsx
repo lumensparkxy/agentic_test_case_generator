@@ -56,7 +56,7 @@ import {
 import { readSavedCaseLink, readSavedCaseStep } from "./app/savedCaseLinks";
 import { readSavedFileReportLink } from "./app/savedFileReportLinks";
 import { getCurrentDeclaredBrowserSetup } from "./app/declaredBrowserSetup";
-import { readExecutionFindingsLink } from "./app/executionFindings";
+import { buildSavedExecutionRunPath, readExecutionFindingsLink } from "./app/executionFindings";
 import {
 	createFirebaseAuthProvider,
 	firebaseAuth,
@@ -365,6 +365,12 @@ export default function App() {
 	const viewingSavedCase = Boolean(savedCaseLink);
 	const savedFileReportLink =
 		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.REPORTS ? readSavedFileReportLink(location.search) : null;
+	const viewingSavedRun =
+		PROJECT_WORKSPACES_V2 &&
+		route.kind === "project" &&
+		route.destination === PROJECT_DESTINATIONS.REPORTS &&
+		!savedFileReportLink &&
+		new URLSearchParams(location.search).has("run");
 	const executionFindingsLink =
 		route.kind === "project" && route.destination === PROJECT_DESTINATIONS.CONTEXT ? readExecutionFindingsLink(location.search) : null;
 	const contextQuery = route.destination === PROJECT_DESTINATIONS.CONTEXT ? new URLSearchParams(location.search) : null;
@@ -5317,7 +5323,7 @@ export default function App() {
 		PROJECT_WORKSPACES_V2 && route.workspace === "deliver" ? PROJECT_WORKSPACES.find(({ id }) => id === "deliver") : null;
 	const deliverSection = deliverWorkspace?.sections.find(({ id }) => id === route.section);
 	const activeProjectDestinationLabel = deliverSection
-		? `${deliverWorkspace.label} · ${deliverSection.label}`
+		? `${deliverWorkspace.label} · ${viewingSavedRun ? "Saved execution" : deliverSection.label}`
 		: tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
 	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
 		destination: PROJECT_DESTINATIONS.TEST_CASES,
@@ -5782,7 +5788,7 @@ export default function App() {
 										/>
 									)}
 
-								{!savedFileReportLink && (
+								{!savedFileReportLink && !viewingSavedRun && (
 									<OrchestratorCockpitPanel
 										currentProject={currentProject}
 										status={orchestratorStatus}
@@ -6573,6 +6579,7 @@ export default function App() {
 											projectId={navigationProjectId}
 											identity={currentUser?.sub}
 											executionFindingsLink={executionFindingsLink}
+											navigate={navigate}
 											prerequisiteSearch={prerequisiteSearch}
 											focusQualityFeedback={location.hash === "#quality-feedback-heading"}
 											onProjectUpdated={() => openProject(navigationProjectId, { silent: true })}
@@ -7121,9 +7128,7 @@ export default function App() {
 													: null
 											}
 											previousSuiteRunPath={
-												previousSuiteRun
-													? `${buildProjectWorkspacePath(currentProjectId, "deliver")}?run=${encodeURIComponent(previousSuiteRun.run_record_id)}`
-													: ""
+												previousSuiteRun ? buildSavedExecutionRunPath(currentProjectId, previousSuiteRun.run_record_id) : ""
 											}
 											executionRecovery={executionRecovery}
 											executionNeedsResolution={executionNeedsResolution}

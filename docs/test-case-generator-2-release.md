@@ -152,8 +152,9 @@ remain open. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generat
   the named prerequisite or publish a permitted file. The browser uses
   the current target preview and an explicit selection.
 - An actual failed browser outcome records its exact source finding. A
-  reviewer classifies it with the saved assertion visible. Current setup
-  and older run evidence retain distinct routes.
+  reviewer classifies it with the saved assertion visible. Use **Back to
+  saved run** on verified findings to reopen that run's evidence in Deliver.
+  Current setup and older run evidence retain distinct routes.
 - Historical file reports retain saved audit evidence and links to original
   case versions. The file bytes are returned at export. Exact current
   receipt replay stays governed by source freshness and original identity.

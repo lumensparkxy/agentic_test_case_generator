@@ -10,6 +10,7 @@ export default function ContextInputsPanel({
 	identity,
 	prerequisiteSearch,
 	executionFindingsLink,
+	navigate,
 	focusQualityFeedback,
 	project,
 	onProjectUpdated,
@@ -218,6 +219,7 @@ export default function ContextInputsPanel({
 					projectStatus={project?.status}
 					prerequisiteSearch={prerequisiteSearch}
 					executionFindingsLink={executionFindingsLink}
+					navigate={navigate}
 					focusRequested={focusQualityFeedback}
 					onUpdated={onProjectUpdated}
 				/>

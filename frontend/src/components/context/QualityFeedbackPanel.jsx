@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import RouteLink from "../../app/RouteLink";
 import { Button, Input, Link, Select, Textarea } from "../ui/controls";
 import { Surface, Disclosure } from "../ui/surfaces";
 import { getCurrentDeclaredBrowserSetup } from "../../app/declaredBrowserSetup";
-import { hasExecutionFindingEvidence, readExactSavedExecutionRun } from "../../app/executionFindings";
+import { buildSavedExecutionRunPath, hasExecutionFindingEvidence, readExactSavedExecutionRun } from "../../app/executionFindings";
 import { buildProjectPath } from "../../app/workflowRoutes";
 
 const categories = [
@@ -67,6 +68,7 @@ export default function QualityFeedbackPanel({
 	projectStatus,
 	prerequisiteSearch,
 	executionFindingsLink,
+	navigate,
 	focusRequested = false,
 	onUpdated,
 }) {
@@ -233,7 +235,10 @@ export default function QualityFeedbackPanel({
 			)}
 			{!archivedRunFeedback && sourceRun && (
 				<p>
-					Showing findings for run <code>{sourceRun.run_id}</code>.
+					Showing findings for run <code>{sourceRun.run_id}</code>.{" "}
+					<RouteLink to={buildSavedExecutionRunPath(projectId, sourceRun.run_record_id)} navigate={navigate}>
+						Back to saved run
+					</RouteLink>
 				</p>
 			)}
 			{(archivedRunFeedback || (executionFindingsLink && projectLoaded && !sourceRun)) && (
