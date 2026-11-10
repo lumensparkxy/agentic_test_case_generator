@@ -51,7 +51,12 @@ These suffixes follow `/projects/:projectId`. The project root still opens
 the overview via Project status. The primary Review link opens Scope until
 the current scope and scenario plan are ready for review. It opens Scenarios
 for the pending human decision, then Tests after the exact plan is approved.
-Each section link keeps its listed destination. Roll back by rebuilding this compatible
+Each section link keeps its listed destination. Review also links to **Test
+findings** or **Assessment needed** for the exact current saved suite. The
+link opens a temporary Tests view. The Tests section still restores the
+reviewer's chosen tab, case, and filters.
+
+Roll back by rebuilding this compatible
 version with the flag off. Older builds released before the aliases were
 added cannot resolve the new suffixes.
 

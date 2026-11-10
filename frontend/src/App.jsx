@@ -24,13 +24,13 @@ import { TabList, Tab, TabPanel } from "./components/ui/tabs";
 import { TableScroll, Table, List, ListItem, CollectionState } from "./components/ui/collections";
 import ProjectPageHeader from "./components/layout/ProjectPageHeader";
 import ProjectWorkspaceNavigation from "./components/layout/ProjectWorkspaceNavigation";
-import { improvementFindings } from "./components/generation/improvementFindings";
+import { improvementFindings, requiresIndependentReview } from "./components/generation/improvementFindings";
 import ReviewGroupSummary from "./components/generation/ReviewGroupSummary";
 import { SavedRepairEvidence, SelectedCaseRepair, SelectedCaseRepairStatus } from "./components/generation/SelectedCaseRepair";
 import useSelectedCaseRepair from "./hooks/useSelectedCaseRepair";
 import SuiteQualitySummary, { findExactSuiteRun } from "./components/generation/SuiteQualitySummary";
 import { findActiveSavedCase, prioritySavedCases } from "./components/generation/prioritySavedCases";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { browserPopupRedirectResolver, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import GlobalAppShell from "./app/GlobalAppShell";
 import { GlobalDestinationPlaceholderPage, ProjectLoadingPage, ProjectOverviewPage, RouteRecoveryPage } from "./app/RoutePages";
@@ -902,6 +902,16 @@ export default function App() {
 		savedSuite?.snapshot_id &&
 		savedSuite.snapshot_id === testCaseStageState.current_snapshot_id &&
 		!testCaseStageState.stale;
+	const reviewFindingsSuite =
+		route.workspace === "review" && canResumeReviewView && savedSuite.project_id === currentProjectId && persistedTestCaseCount > 0
+			? savedSuite
+			: null;
+	const reviewFindingsRequest =
+		PROJECT_WORKSPACES_V2 && route.workspace === "review" && route.section === "tests" && !viewingSavedCase
+			? new URLSearchParams(location.search).getAll("findings")
+			: [];
+	const viewingQueuedFindings =
+		reviewFindingsSuite && reviewFindingsRequest.length === 1 && reviewFindingsRequest[0] === reviewFindingsSuite.snapshot_id;
 	const reviewView = useReviewDraft({
 		identity: canResumeReviewView ? currentUser?.sub : "",
 		projectId: currentProjectId,
@@ -911,6 +921,11 @@ export default function App() {
 	});
 	const resumedResultTab = ["test-cases", "traceability", "improve"].includes(reviewView.value) ? reviewView.value : null;
 	const setActiveGenerateResultTab = (tab) => {
+		if (viewingQueuedFindings && tab !== "improve") {
+			const query = new URLSearchParams(location.search);
+			query.delete("findings");
+			navigate(`${location.pathname}${query.size ? `?${query}` : ""}${location.hash}`, { replace: true, state: location.state });
+		}
 		setDefaultGenerateResultTab(tab);
 		if (canResumeReviewView) reviewView.setValue(tab);
 	};
@@ -970,13 +985,14 @@ export default function App() {
 	useEffect(() => {
 		if (!findingCitationReturn) setPendingFindingCitation(openedFindingCitation);
 	}, [openedFindingCitation, findingCitationReturn]);
-	const activeGenerateResultTab = findingCitationReturn
-		? "improve"
-		: openingPriorityCase
-			? "test-cases"
-			: traceabilityReturn
-				? "traceability"
-				: (resumedResultTab ?? selectedGenerateResultTab);
+	const activeGenerateResultTab =
+		findingCitationReturn || viewingQueuedFindings
+			? "improve"
+			: openingPriorityCase
+				? "test-cases"
+				: traceabilityReturn
+					? "traceability"
+					: (resumedResultTab ?? selectedGenerateResultTab);
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const syncDraftSuite = ["project.sync.draft", "project.sync.rebind"].includes(savedSuite?.operation);
 	const showSyncDraftReview = Boolean(
@@ -1145,6 +1161,12 @@ export default function App() {
 	const activeReviewCaseScope = reviewCaseScope?.snapshot === sourceCaseSnapshot ? reviewCaseScope : null;
 	const focusResultContent = useRef(false);
 	const [improveMountedScope, setImproveMountedScope] = useState(null);
+	const focusQueuedFindings = useEffectEvent(() => {
+		if (!findingCitationReturn) document.getElementById("generate-result-panel")?.focus();
+	});
+	useEffect(() => {
+		if (viewingQueuedFindings && activeTab === 3 && projectRouteStatus === "ready") focusQueuedFindings();
+	}, [viewingQueuedFindings, activeTab, projectRouteStatus, location]);
 	useEffect(() => {
 		if (activeTab === 3 && activeGenerateResultTab === "improve") setImproveMountedScope(sourceCaseSnapshot);
 	}, [activeTab, activeGenerateResultTab, sourceCaseSnapshot]);
@@ -1959,7 +1981,7 @@ export default function App() {
 		const caseFocus = keepPriorityCaseFocus.current && active?.closest("#selected-test-case");
 		const evidenceFocus =
 			active?.matches(
-				"[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-run-case-result], [data-finding-citation]"
+				"[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-run-case-result], [data-finding-citation], [data-review-findings-entry]"
 			) && main.contains(active);
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
@@ -5119,6 +5141,24 @@ export default function App() {
 	const openScope = () => navigate(buildProjectWorkspacePath(navigationProjectId, "review"));
 	const scenariosPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "scenarios") : "";
 	const testsPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "tests") : "";
+	const savedReviewAssessment = reviewFindingsSuite?.payload?.substantive_assessment;
+	const hasSavedDesignFindings =
+		(savedReviewAssessment?.design_status ?? savedReviewAssessment?.status) === "incomplete" ||
+		savedReviewAssessment?.obligations?.some((item) => ["unmet", "unknown"].includes(item.status)) ||
+		improvementFindings(reviewFindingsSuite?.payload?.review, savedReviewAssessment).length > 0;
+	const reviewFindingsLabel = hasSavedDesignFindings
+		? "Test findings"
+		: requiresIndependentReview(savedReviewAssessment)
+			? "Assessment needed"
+			: "";
+	const reviewFindings =
+		reviewFindingsSuite && reviewFindingsLabel
+			? {
+					path: `${testsPath}?findings=${encodeURIComponent(reviewFindingsSuite.snapshot_id)}`,
+					label: reviewFindingsLabel,
+					active: viewingQueuedFindings,
+				}
+			: null;
 	const continuationBusy = approvalContinuation.active || approvalContinuation.run?.state === "interrupted";
 	const continuationRetryAvailable =
 		!approvalContinuation.unresolved &&
@@ -5576,6 +5616,7 @@ export default function App() {
 								navigate={navigateWorkspace}
 								counts={savedArtifactCounts}
 								reviewEntrySection={reviewEntrySection}
+								reviewFindings={reviewFindings}
 							/>
 						) : (
 							<WorkflowNavigationDrawer
@@ -6665,6 +6706,9 @@ export default function App() {
 									{activeTab === 3 && !savedCaseLink && (
 										<section className={`panel test-generation-panel ${testCases.length ? "has-test-cases" : ""}`}>
 											{!testCases.length && <h2 className="panel-title">Generate Test Cases</h2>}
+											{reviewFindingsRequest.length > 0 && !viewingQueuedFindings && (
+												<p role="status">The saved suite for this findings link is no longer current.</p>
+											)}
 											{suiteQualitySummary}
 											<ScopedImpactStatus
 												application={scopedImpact}
@@ -6925,6 +6969,7 @@ export default function App() {
 													</TabList>
 													<TabPanel
 														id="generate-result-panel"
+														data-review-findings-entry={viewingQueuedFindings ? "" : undefined}
 														className="generate-result-panel"
 														role="tabpanel"
 														aria-label={generateResultTabs.find((tab) => tab.id === activeGenerateResultTab)?.label || "Generation result"}
@@ -6957,7 +7002,7 @@ export default function App() {
 																	onOpenCitation={openFindingCitation}
 																	returnCitation={findingCitationReturn}
 																	onCitationReturnHandled={() => {
-																		setActiveGenerateResultTab("improve");
+																		if (!viewingQueuedFindings) setActiveGenerateResultTab("improve");
 																		setPendingFindingCitation(null);
 																	}}
 																	canReviewSavedSuite={savedSuiteReviewPending && !savedSuiteReviewDisabled}

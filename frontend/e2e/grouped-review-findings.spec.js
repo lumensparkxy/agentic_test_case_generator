@@ -124,7 +124,8 @@ async function setup(page, { stale = false } = {}) {
 		if (!["fetch", "xhr"].includes(route.request().resourceType())) return route.fallback();
 		return route.fulfill({ status: 404, json: { detail: "No fixture for this optional read." } });
 	});
-	await installUseCaseReviewApi(page, { initialProject: project });
+	const api = await installUseCaseReviewApi(page, { initialProject: project });
+	await page.route(`**${root}/requirement-imports`, (route) => route.fulfill({ json: [] }));
 	await page.route(new RegExp(`${root}/approval-continuations(?:\\?.*)?$`), (route) =>
 		route.fulfill({ json: { enabled: true, tests_enabled: true, saved_review_enabled: true, runs: [] } })
 	);
@@ -152,11 +153,123 @@ async function setup(page, { stale = false } = {}) {
 		});
 	});
 	await seedAuthenticatedSession(page);
-	return { errors, writes, evidenceReads };
+	return { ...api, errors, writes, evidenceReads };
 }
 
 test.describe("Grouped saved review findings", () => {
 	test.skip(process.env.E2E_PROJECT_WORKSPACES_V2 !== "true", "Requires the opt-in Review workspace");
+
+	test("opens exact findings from each Review section and retains the previous test reader", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const api = await setup(page);
+		const project = api.getProject();
+		project.current_snapshots.test_cases.payload.test_cases.unshift({ ...fixtureCase, id: "TC-BOOK-01", title: "Book for one attendee" });
+		api.setProject(project);
+		const testsPath = `${root}/review/tests`;
+		const findingsPath = `${testsPath}?findings=${suiteId}`;
+		const sections = page.getByRole("navigation", { name: "Workspace sections", exact: true });
+		const queueLink = sections.getByRole("link", { name: "Test findings", exact: true });
+		const improve = page.getByRole("tab", { name: /^Improve tests/ });
+		const cases = page.getByRole("tab", { name: /^Generated Test Cases/ });
+		await page.goto(testsPath);
+		await improve.press("Enter");
+		const instructions = page.getByLabel("Additional instructions (optional)", { exact: true });
+		await instructions.fill("Keep the existing confirmation assertion.");
+		await cases.press("Enter");
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		const selectedCase = page.getByRole("button", { name: `${caseId} ${caseTitle}`, exact: true });
+		await search.fill("Book for six");
+		await page.getByRole("button", { name: "Filters", exact: true }).press("Enter");
+		await page.getByRole("combobox", { name: "Priority", exact: true }).selectOption("High");
+		await selectedCase.press("Enter");
+
+		await sections.getByRole("link", { name: "Scope", exact: true }).press("Enter");
+		await expect(queueLink).toHaveAttribute("href", findingsPath, { timeout: 5000 });
+		await expect(page.getByRole("heading", { name: "Requirement Review Workbench", exact: true })).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath("test-findings-from-scope.png") });
+		await sections.getByRole("link", { name: "Scenarios", exact: true }).press("Enter");
+		await expect(queueLink).toHaveAttribute("href", findingsPath);
+		await page.evaluate(() => {
+			document.documentElement.style.zoom = "2";
+		});
+		await expectNoDocumentOverflow(page, "Review navigation at 200% CSS zoom");
+		await page.evaluate(() => {
+			document.documentElement.style.zoom = "";
+		});
+		await queueLink.press("Enter");
+		await expect(page).toHaveURL(findingsPath);
+		const findingsPanel = page.getByRole("tabpanel", { name: "Improve tests", exact: true });
+		await expect(findingsPanel).toBeFocused();
+		await expect(queueLink).toHaveAttribute("aria-current", "page");
+		await expect(instructions).toHaveValue("Keep the existing confirmation assertion.");
+		await expect(findings(page)).toContainText("Business coverage: incomplete");
+		await findings(page).getByText("Source obligations and prerequisites", { exact: true }).press("Enter");
+		const citation = findings(page)
+			.getByRole("listitem")
+			.filter({ has: page.locator("blockquote").filter({ hasText: savedCountQuote }) })
+			.getByRole("link", { name: `Open saved case ${caseId}, step 2`, exact: true });
+		await citation.press("Enter");
+		await expect(page.getByRole("row").filter({ hasText: fixtureCase.steps[1].expected })).toBeFocused();
+		await page.goBack();
+		await expect(citation).toBeFocused();
+		await expect(page).toHaveURL(findingsPath);
+		await expectNoDocumentOverflow(page, "Review findings entry");
+		await page.screenshot({ path: testInfo.outputPath("exact-review-findings-entry.png") });
+		await page.goBack();
+		await expect(page).toHaveURL(`${root}/review/scenarios`);
+		await page.goForward();
+		await expect(improve).toHaveAttribute("aria-selected", "true");
+		await expect(findingsPanel).toBeFocused();
+		await sections.getByRole("link", { name: "Tests", exact: true }).press("Enter");
+		await expect(page).toHaveURL(testsPath);
+		await expect(cases).toHaveAttribute("aria-selected", "true");
+		await expect(search).toHaveValue("Book for six");
+		await expect(selectedCase).toHaveAttribute("aria-pressed", "true");
+		await page.getByRole("button", { name: "Filters (1)", exact: true }).press("Enter");
+		await expect(page.getByRole("combobox", { name: "Priority", exact: true })).toHaveValue("High");
+		await expect(page.getByRole("region", { name: "Selected test case" })).toContainText(fixtureCase.steps[1].expected);
+		await queueLink.press("Enter");
+		await expect(findingsPanel).toBeFocused();
+		await cases.press("Enter");
+		await expect(page).toHaveURL(testsPath);
+		await expect(search).toHaveValue("Book for six");
+
+		const suite = project.current_snapshots.test_cases;
+		suite.snapshot_id = "newer-booking-suite";
+		project.stage_state.test_cases.current_snapshot_id = suite.snapshot_id;
+		project.current_revision++;
+		const setupOnly = "Browser setup is required.";
+		suite.payload.review = { ...suite.payload.review, blocking_issues: [setupOnly], unmet_criteria: [setupOnly] };
+		suite.payload.substantive_assessment = {
+			...suite.payload.substantive_assessment,
+			design_status: "assessed_complete",
+			status: "assessed_complete",
+			reason: setupOnly,
+			obligations: [],
+		};
+		api.setProject(project);
+		await page.goto(findingsPath);
+		await expect(
+			page.getByRole("status").filter({ hasText: "The saved suite for this findings link is no longer current." })
+		).toBeVisible();
+		await expect(queueLink).toHaveCount(0);
+
+		const unverifiedReason = "The independent assessment is unavailable.";
+		suite.snapshot_id = "unverified-booking-suite";
+		project.stage_state.test_cases.current_snapshot_id = suite.snapshot_id;
+		project.current_revision++;
+		suite.payload.review = { ...suite.payload.review, blocking_issues: [unverifiedReason], unmet_criteria: [unverifiedReason] };
+		suite.payload.substantive_assessment = { status: "unknown", reason: unverifiedReason };
+		api.setProject(project);
+		await page.goto(`${root}/review/scenarios`);
+		const assessment = sections.getByRole("link", { name: "Assessment needed", exact: true });
+		await expect(assessment).toHaveAttribute("href", `${testsPath}?findings=${suite.snapshot_id}`);
+		await assessment.press("Enter");
+		await expect(findings(page)).toContainText("Business coverage: unverified");
+		expect(api.evidenceReads).toEqual([[suiteId, caseId]]);
+		expect(api.writes).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
 
 	test("keeps every business finding and exact step visible without mixing setup or structural blockers", async ({ page }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });

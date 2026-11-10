@@ -1,7 +1,7 @@
 import RouteLink from "../../app/RouteLink";
 import { PROJECT_WORKSPACES, buildProjectPath, buildProjectWorkspacePath } from "../../app/workflowRoutes";
 
-export default function ProjectWorkspaceNavigation({ route, navigate, counts, reviewEntrySection }) {
+export default function ProjectWorkspaceNavigation({ route, navigate, counts, reviewEntrySection, reviewFindings }) {
 	const { projectId, workspace, section } = route;
 	const activeWorkspace = PROJECT_WORKSPACES.find(({ id }) => id === workspace);
 
@@ -32,12 +32,24 @@ export default function ProjectWorkspaceNavigation({ route, navigate, counts, re
 									to={buildProjectWorkspacePath(projectId, workspace, id)}
 									navigate={navigate}
 									className="project-workspace-section"
-									aria-current={id === section ? "page" : undefined}
+									aria-current={id === section && !reviewFindings?.active ? "page" : undefined}
 								>
 									{label}
 								</RouteLink>
 							</li>
 						))}
+						{reviewFindings && (
+							<li>
+								<RouteLink
+									to={reviewFindings.path}
+									navigate={navigate}
+									className="project-workspace-section"
+									aria-current={reviewFindings.active ? "page" : undefined}
+								>
+									{reviewFindings.label}
+								</RouteLink>
+							</li>
+						)}
 					</ul>
 				</nav>
 			)}
