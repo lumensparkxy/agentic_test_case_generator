@@ -620,6 +620,12 @@ original and revised W11 evidence separate, including when only one
 requirement changed. A mismatched capture stays in the private ledger
 without a reviewer packet.
 
+The paired business coverage summary keeps all 36 pair identities,
+calculates deltas only for two labeled arms and distinguishes rehearsals
+and incomplete cohorts from the full-cohort calculation. Unknown
+in-scope obligations count against coverage. One-arm coverage and critical
+misses stay visible per repeat, with workflow and pooled totals.
+
 P6 corpus input rehearsal under
 [#497](https://github.com/lumensparkxy/agentic_test_case_generator/issues/497)
 exercised all twelve frozen workflows on the baseline and candidate

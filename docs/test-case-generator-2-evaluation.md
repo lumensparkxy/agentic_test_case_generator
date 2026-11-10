@@ -135,11 +135,21 @@ may cite the source decision in its reason with an empty citation list.
   --output /tmp/tcg-v2-review/private-coverage.json
 ```
 
-Coverage counts retain unknown in-scope obligations and separate the
-deferred checks. Missing labels remain visible per arm. The commands
-verify case integrity and label binding. Independent labels, assessor
-accuracy, unsupported facts, correction effort, provider provenance and
-controlled fault outcomes still need their own recorded evidence.
+The private summary retains all 36 pairs and each arm's delivery and label
+status. It verifies delivered capture identities against the ledger cohort,
+commit and scheduled slot before scoring. It compares labeled pairs on the
+same obligations and reports
+coverage per repeat, per workflow and pooled across matched pairs. Unknown
+in-scope obligations stay in the denominator. Deferred obligations stay
+separate. The pair records show obligations covered by only one arm.
+
+The business coverage calculation can pass only for a complete live
+cohort. It uses the unrounded candidate ratio for the 95% threshold,
+requires zero missed critical obligations and compares the pooled candidate
+and baseline counts for regression. Partial and rehearsal reports retain
+their separate states. The calculation relies on verified live provenance
+and independent final labels. Assessor accuracy, unsupported facts,
+correction effort and controlled fault outcomes require separate evidence.
 
 ## Frozen acceptance gates
 

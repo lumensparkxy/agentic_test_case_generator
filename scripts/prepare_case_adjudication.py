@@ -22,6 +22,9 @@ VERSION_FIELDS = ("artifact_item_id", "artifact_version_id", "artifact_version_n
 SOURCES = ("requirements", "context", "use_cases", "test_cases")
 CAPTURES = ("project", "hydrated", "exported", "report")
 INCOMPLETE_OUTCOMES = {"failed", "partial", "blocked", "interrupted"}
+ARMS = ("baseline", "candidate")
+FROZEN_PAIRS = 36
+MIN_COVERAGE_PERCENT = 95
 
 
 def json_bytes(value):
@@ -250,8 +253,10 @@ def frozen_inputs(root):
 
 
 def check_schedule(schedule, manifest):
-    expected = {(workflow, repeat, arm) for workflow in manifest["workflow_index"] for repeat in (1, 2, 3) for arm in ("baseline", "candidate")}
-    require(len(schedule) == 72 and all(type(repeat) is int for _, repeat, _ in schedule) and set(schedule) == expected, "Unexpected frozen schedule")
+    expected = {(workflow, repeat, arm) for workflow in manifest["workflow_index"] for repeat in (1, 2, 3) for arm in ARMS}
+    require(
+        len(schedule) == 2 * FROZEN_PAIRS and all(type(repeat) is int for _, repeat, _ in schedule) and set(schedule) == expected, "Unexpected frozen schedule"
+    )
 
 
 def captured_files(root, refs):
@@ -403,10 +408,85 @@ def validate_labels(packet, seal, labels):
     in_scope = {key: value for key, value in judgments.items() if key not in deferred}
     return {
         "in_scope": len(in_scope),
+        "in_scope_status": {key: row["status"] for key, row in in_scope.items()},
         "covered": sum(row["status"] == "covered" for row in in_scope.values()),
         "unknown": sum(row["status"] == "unknown" for row in in_scope.values()),
         "missed_critical": [key for key, row in in_scope.items() if obligations[key]["critical"] and row["status"] != "covered"],
         "deferred": {key: judgments[key]["status"] for key in sorted(deferred)},
+    }
+
+
+def coverage_totals(pairs):
+    matched = [pair["coverage"] for pair in pairs if pair["coverage"] is not None]
+    arms = {}
+    for arm in ARMS:
+        reviews = [pair[arm] for pair in matched]
+        counts = {key: sum(review[key] for review in reviews) for key in ("in_scope", "covered", "unknown")}
+        arms[arm] = {
+            **counts,
+            "missed_critical": sum(len(review["missed_critical"]) for review in reviews),
+            "coverage_percent": round(100 * counts["covered"] / counts["in_scope"], 2) if counts["in_scope"] else None,
+        }
+    return {
+        "scheduled_pairs": len(pairs),
+        "matched_pairs": len(matched),
+        "covered_delta": arms["candidate"]["covered"] - arms["baseline"]["covered"] if matched else None,
+        "arms": arms,
+    }
+
+
+def paired_coverage(slots, cohort):
+    grouped = {}
+    for slot in slots:
+        identity = (slot["workflow"], slot["repeat"])
+        grouped.setdefault(identity, {})[slot["arm"]] = slot
+
+    pairs = []
+    workflows = {}
+    for (workflow, repeat), arms in grouped.items():
+        pair = {
+            "workflow": workflow,
+            "repeat": repeat,
+            "arms": {arm: {"status": arms[arm]["status"], "labeled": arms[arm]["review"] is not None} for arm in ARMS},
+            "coverage": None,
+        }
+        baseline, candidate = (arms[arm]["review"] for arm in ARMS)
+        if baseline is not None and candidate is not None:
+            baseline_status, candidate_status = baseline["in_scope_status"], candidate["in_scope_status"]
+            require(
+                baseline_status.keys() == candidate_status.keys() and baseline["deferred"].keys() == candidate["deferred"].keys(),
+                "Paired obligation scopes differ",
+            )
+            baseline_covered = {key for key, status in baseline_status.items() if status == "covered"}
+            candidate_covered = {key for key, status in candidate_status.items() if status == "covered"}
+            pair.update(
+                coverage={"baseline": baseline, "candidate": candidate},
+                covered_delta=candidate["covered"] - baseline["covered"],
+                baseline_only=sorted(baseline_covered - candidate_covered),
+                candidate_only=sorted(candidate_covered - baseline_covered),
+            )
+        pairs.append(pair)
+        workflows.setdefault(workflow, []).append(pair)
+
+    totals = coverage_totals(pairs)
+    candidate = totals["arms"]["candidate"]
+    checks = None
+    if cohort == "rehearsal":
+        status = "rehearsal"
+    elif totals["matched_pairs"] != FROZEN_PAIRS or not candidate["in_scope"]:
+        status = "incomplete"
+    else:
+        checks = {
+            "minimum_candidate_coverage": candidate["covered"] * 100 >= candidate["in_scope"] * MIN_COVERAGE_PERCENT,
+            "no_missed_critical": candidate["missed_critical"] == 0,
+            "no_pooled_regression": totals["covered_delta"] >= 0,
+        }
+        status = "pass" if all(checks.values()) else "fail"
+    return {
+        "gate": {"status": status, "minimum_percent": MIN_COVERAGE_PERCENT, "checks": checks},
+        "pooled": totals,
+        "workflows": {workflow: coverage_totals(rows) for workflow, rows in workflows.items()},
+        "pairs": pairs,
     }
 
 
@@ -416,6 +496,13 @@ def summarize(package, label_dir):
     require(
         private["protocol"] == manifest["protocol"] and private["schedule_sha256"] == manifest["content_hashes"]["pair_order"],
         "Private ledger does not match the frozen protocol",
+    )
+    require(private["cohort"] in {"rehearsal", "live"}, "Use a separate rehearsal or live cohort")
+    require(
+        private["baseline_commit"] == manifest["baseline"]
+        and re.fullmatch(r"[0-9a-f]{40}", private["candidate_commit"])
+        and private["candidate_commit"] != private["baseline_commit"],
+        "Private ledger does not match the frozen baseline and candidate pins",
     )
     check_schedule([(slot["workflow"], slot["repeat"], slot["arm"]) for slot in private["slots"]], manifest)
     require(label_dir.is_dir(), "Labels directory is missing")
@@ -441,6 +528,15 @@ def summarize(package, label_dir):
         envelope = read_json((package / "reviewer" / f"{sample}.json").read_bytes())
         packet = envelope["packet"]
         require(sample == packet["sample_id"] and digest(packet) == envelope["packet_sha256"] == slot["packet_sha256"], "Changed reviewer envelope")
+        capture = slot["capture"]
+        require(
+            capture["cohort"] == private["cohort"]
+            and capture["commit"] == private[f"{slot['arm']}_commit"]
+            and capture["input_sha256"] == digest(packet["input"])
+            and capture["status"] == "delivered"
+            and all(exact(capture[key], slot[key]) for key in ("workflow", "repeat", "arm")),
+            "Delivered capture differs from the ledger cohort, pins or scheduled slot",
+        )
         if sample not in labels:
             results.append({**slot, "review": None})
             continue
@@ -449,7 +545,7 @@ def summarize(package, label_dir):
         results.append({**slot, "review_sha256": digest(label), "review": result})
     require({path.stem for path in (package / "reviewer").glob("*.json")} == seen, "Reviewer files differ from the private slot ledger")
     require(not labels, "Review references an unknown sample")
-    return {**private, "slots": results}
+    return {**private, "slots": results, "business_coverage": paired_coverage(results, private["cohort"])}
 
 
 def main():
@@ -459,7 +555,7 @@ def main():
     pack.add_argument("--frozen", type=Path, required=True)
     pack.add_argument("--intake", type=Path, required=True)
     pack.add_argument("--output", type=Path, required=True)
-    score = commands.add_parser("summarize", help="Check finalized independent labels and record per-slot coverage counts privately")
+    score = commands.add_parser("summarize", help="Check finalized labels and record matched business coverage privately")
     score.add_argument("--package", type=Path, required=True)
     score.add_argument("--labels", type=Path, required=True)
     score.add_argument("--output", type=Path, required=True)

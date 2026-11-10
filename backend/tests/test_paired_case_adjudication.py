@@ -418,6 +418,7 @@ class ValidateLabelsTests(unittest.TestCase):
         result = validate_labels(packet, seal, labels)
 
         self.assertEqual(result["in_scope"], 2)
+        self.assertEqual(result["in_scope_status"], {"permission": "covered", "durability": "unknown"})
         self.assertEqual(result["covered"], 1)
         self.assertEqual(result["unknown"], 1)
         self.assertEqual(result["missed_critical"], ["durability"])
@@ -464,6 +465,75 @@ class ValidateLabelsTests(unittest.TestCase):
         labels["judgments"]["permission"]["source_id"] = "R2"
         with self.assertRaisesRegex(ValueError, "Source citation differs"):
             validate_labels(packet, seal, labels)
+
+
+class PairedCoverageTests(unittest.TestCase):
+    def slots(self, baseline_covered, candidate_covered, *, critical_miss=False):
+        def review(covered, critical=False):
+            statuses = {f"rule-{index}": "covered" if index < covered else "unknown" for index in range(20)}
+            return {
+                "in_scope": len(statuses),
+                "in_scope_status": statuses,
+                "covered": covered,
+                "unknown": len(statuses) - covered,
+                "missed_critical": ["rule-19"] if critical else [],
+                "deferred": {"deferred-rule": "covered"},
+            }
+
+        manifest = json.loads(adjudication.FROZEN_MANIFEST.read_bytes())
+        reviews = {"baseline": review(baseline_covered), "candidate": review(candidate_covered, critical_miss)}
+        return [
+            {"workflow": workflow, "repeat": repeat, "arm": arm, "status": "delivered", "review": deepcopy(reviews[arm])}
+            for workflow in manifest["workflow_index"]
+            for repeat in (1, 2, 3)
+            for arm in adjudication.ARMS
+        ]
+
+    def test_pools_exact_paired_counts_at_frozen_threshold(self):
+        slots = self.slots(18, 19)
+        coverage = adjudication.paired_coverage(slots, "live")
+        self.assertEqual(coverage["gate"]["status"], "pass")
+        self.assertEqual(coverage["pooled"]["matched_pairs"], 36)
+        self.assertEqual(coverage["pooled"]["covered_delta"], 36)
+        self.assertEqual(
+            coverage["pooled"]["arms"]["candidate"], {"in_scope": 720, "covered": 684, "unknown": 36, "missed_critical": 0, "coverage_percent": 95.0}
+        )
+        self.assertEqual(coverage["pairs"][0]["candidate_only"], ["rule-18"])
+        self.assertTrue(all(workflow["covered_delta"] == 3 for workflow in coverage["workflows"].values()))
+
+    def test_a_complete_pair_set_must_meet_each_numeric_gate(self):
+        for check, slots in (
+            ("minimum_candidate_coverage", self.slots(18, 18)),
+            ("no_missed_critical", self.slots(19, 19, critical_miss=True)),
+            ("no_pooled_regression", self.slots(20, 19)),
+        ):
+            with self.subTest(check=check):
+                gate = adjudication.paired_coverage(slots, "live")["gate"]
+                self.assertEqual(gate["status"], "fail")
+                self.assertFalse(gate["checks"][check])
+                self.assertTrue(all(passed for name, passed in gate["checks"].items() if name != check))
+
+    def test_preserves_unpaired_runs_and_never_gates_rehearsal(self):
+        slots = self.slots(20, 20)
+        self.assertEqual(adjudication.paired_coverage(slots, "rehearsal")["gate"]["status"], "rehearsal")
+        slots[0].update(review=None, status="failed")
+        slots[3].update(review=None)
+        coverage = adjudication.paired_coverage(slots, "live")
+        self.assertEqual(coverage["gate"]["status"], "incomplete")
+        self.assertIsNone(coverage["gate"]["checks"])
+        self.assertEqual(len(coverage["pairs"]), 36)
+        self.assertEqual(coverage["pooled"]["matched_pairs"], 34)
+        self.assertEqual(coverage["pooled"]["arms"]["candidate"]["in_scope"], 680)
+        self.assertEqual(coverage["pairs"][0]["arms"]["baseline"], {"status": "failed", "labeled": False})
+        self.assertEqual(coverage["pairs"][1]["arms"]["candidate"], {"status": "delivered", "labeled": False})
+        self.assertIsNone(coverage["pairs"][0]["coverage"])
+
+    def test_rejects_matched_labels_for_different_obligation_sets(self):
+        slots = self.slots(20, 20)
+        status = slots[1]["review"]["in_scope_status"]
+        status["another-rule"] = status.pop("rule-0")
+        with self.assertRaisesRegex(ValueError, "Paired obligation scopes differ"):
+            adjudication.paired_coverage(slots, "live")
 
 
 class PairedPacketTests(unittest.TestCase):
@@ -571,6 +641,13 @@ class PairedPacketTests(unittest.TestCase):
             private = adjudication.summarize(output, labels)
             self.assertEqual(len(private["slots"]), 72)
             self.assertTrue(all(slot["review"] is None for slot in private["slots"]))
+            self.assertEqual(private["business_coverage"]["gate"]["status"], "rehearsal")
+            self.assertEqual(private["business_coverage"]["pooled"]["matched_pairs"], 0)
+            private["cohort"] = "live"
+            (output / "private-ledger.json").write_bytes(adjudication.json_bytes(private))
+            with self.assertRaisesRegex(ValueError, "Delivered capture differs from the ledger cohort"):
+                adjudication.summarize(output, labels)
+            private["cohort"] = "rehearsal"
             swapped = next(slot for slot in private["slots"] if slot["workflow"] == workflow and slot["arm"] == "baseline" and slot["repeat"] == 2)
             self.assertIn("Runner identity differs", swapped["reason"])
 
