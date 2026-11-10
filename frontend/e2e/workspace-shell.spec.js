@@ -32,7 +32,7 @@ async function expectDeliverSection(page, name, { focused = false } = {}) {
 	if (focused) await expect(main).toBeFocused();
 }
 
-async function setup(page, count = 50) {
+async function setup(page, count = 50, { reviewApproved = true } = {}) {
 	const project = useCaseProjectFixture();
 	project.current_snapshots.requirements.payload.requirements[0].sources = [
 		{
@@ -49,9 +49,9 @@ async function setup(page, count = 50) {
 		snapshot_id: snapshotId,
 		stage: "test_cases",
 		version: 2,
-		approved: true,
+		approved: reviewApproved,
 		payload: {
-			review: { approved: true, score: 100, threshold: 90 },
+			review: { approved: reviewApproved, score: reviewApproved ? 100 : 85, threshold: 90 },
 			test_cases: Array.from({ length: count }, (_, index) => ({
 				id: `TC-${index + 1}`,
 				title: `Checkout ${index + 1}`,
@@ -61,7 +61,7 @@ async function setup(page, count = 50) {
 			})),
 		},
 	};
-	project.stage_state.test_cases = { current_snapshot_id: snapshotId, version: 2, stale: false, approved: true };
+	project.stage_state.test_cases = { current_snapshot_id: snapshotId, version: 2, stale: false, approved: reviewApproved };
 	const other = useCaseProjectFixture({ project_id: "alternate-workspace-project", name: "Other checkout" });
 	other.current_snapshots.requirements.payload.requirements[0].text = "The other checkout uses independent source evidence.";
 	const projects = [project, other].map((entry) =>
@@ -115,7 +115,7 @@ async function setup(page, count = 50) {
 		});
 	});
 	await seedAuthenticatedSession(page);
-	return { writes, errors, lookups, other };
+	return { writes, errors, lookups, project, other };
 }
 
 async function expectHistoricalCase(page, lookups) {
@@ -347,6 +347,60 @@ test.describe("Opt-in project workspaces", () => {
 		await page.getByRole("button", { name: "Import requirements", exact: true }).click();
 		await paste.check();
 		await expect(requirementsText).toHaveValue(draftText);
+		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
+	test("resumes the chosen Review Tests view, filters and case on reload of the same suite", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const { writes, errors, project } = await setup(page, 200, { reviewApproved: false });
+		const improve = page.getByRole("tab", { name: /^Improve tests/ });
+		const cases = page.getByRole("tab", { name: /^Generated Test Cases/ });
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		const reader = page.getByRole("region", { name: "Selected test case" });
+		const chosen = page.getByRole("button", { name: "TC-198 Checkout 198", exact: true });
+		const priority = page.getByRole("combobox", { name: "Priority", exact: true });
+		await page.goto(projectPath("review/tests"));
+		await expect(improve).toHaveAttribute("aria-selected", "true");
+		await cases.press("Enter");
+		await search.fill("Checkout 19");
+		await page.getByRole("button", { name: "Filters", exact: true }).press("Enter");
+		await priority.selectOption("High");
+		await chosen.press("Enter");
+		await expect(reader).toContainText("Receipt 198 appears");
+
+		await workspace(page, "Deliver").press("Enter");
+		await expect(page).toHaveURL(projectPath("deliver"));
+		await page.goBack();
+		await expect(reader).toContainText("Receipt 198 appears");
+		await page.reload();
+		await expect(cases).toHaveAttribute("aria-selected", "true", { timeout: 5000 });
+		await expect(search).toHaveValue("Checkout 19");
+		await expect(chosen).toHaveAttribute("aria-pressed", "true");
+		await expect(reader).toContainText("Receipt 198 appears");
+		await page.getByRole("button", { name: "Filters (1)", exact: true }).press("Enter");
+		await expect(priority).toHaveValue("High");
+		await reader.getByRole("heading", { name: "Checkout 198", exact: true }).scrollIntoViewIfNeeded();
+		await page.screenshot({ path: testInfo.outputPath("resumed-review-case.png") });
+
+		const traceability = page.getByRole("tab", { name: /^Traceability Matrix/ });
+		await traceability.press("Enter");
+		await page.reload();
+		await expect(traceability).toHaveAttribute("aria-selected", "true");
+
+		const suite = project.current_snapshots.test_cases;
+		suite.snapshot_id = "replacement-checkout-suite";
+		suite.version += 1;
+		project.stage_state.test_cases.current_snapshot_id = suite.snapshot_id;
+		project.stage_state.test_cases.version = suite.version;
+		project.current_revision += 1;
+		await page.reload();
+		await expect(improve).toHaveAttribute("aria-selected", "true");
+		await cases.press("Enter");
+		await expect(search).toBeEmpty();
+		await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
+		await expect(chosen).toHaveAttribute("aria-pressed", "false");
+		await expect(reader).toContainText("Receipt 1 appears");
 		expect(writes).toEqual([]);
 		expect(errors).toEqual([]);
 	});

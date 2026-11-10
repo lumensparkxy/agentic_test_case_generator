@@ -469,7 +469,7 @@ export default function App() {
 		testCaseWorkflowSettings,
 		setTestCaseWorkflowSettings,
 		activeGenerateResultTab: selectedGenerateResultTab,
-		setActiveGenerateResultTab,
+		setActiveGenerateResultTab: setDefaultGenerateResultTab,
 		isGenerating,
 		setIsGenerating,
 		resetTestCaseWorkflowState,
@@ -890,6 +890,24 @@ export default function App() {
 	const impactStageState = projectStageState.impact_analysis || {};
 	const testCaseStageState = projectStageState.test_cases || {};
 	const savedSuite = projectSnapshots.test_cases;
+	const canResumeReviewView =
+		PROJECT_WORKSPACES_V2 &&
+		currentProjectId === route.projectId &&
+		savedSuite?.snapshot_id &&
+		savedSuite.snapshot_id === testCaseStageState.current_snapshot_id &&
+		!testCaseStageState.stale;
+	const reviewView = useReviewDraft({
+		identity: canResumeReviewView ? currentUser?.sub : "",
+		projectId: currentProjectId,
+		snapshotId: savedSuite?.snapshot_id || "empty",
+		name: "test-review-view",
+		initialValue: null,
+	});
+	const resumedResultTab = ["test-cases", "traceability", "improve"].includes(reviewView.value) ? reviewView.value : null;
+	const setActiveGenerateResultTab = (tab) => {
+		setDefaultGenerateResultTab(tab);
+		if (canResumeReviewView) reviewView.setValue(tab);
+	};
 	const [priorityCaseState, setPriorityCaseState] = useState(null);
 	const caseEntryState = priorityCaseState?.location === location ? priorityCaseState : null;
 	const requestedPriorityCase = location.state?.priorityTestCase;
@@ -923,7 +941,11 @@ export default function App() {
 		traceabilityCase && snapshotId && traceabilityCase.projectId === projectId && traceabilityCase.snapshotId === snapshotId;
 	const traceabilityReturn =
 		currentProjectId === route.projectId && isTraceabilityReturn(currentProjectId, savedSuite?.snapshot_id) ? traceabilityCase : null;
-	const activeGenerateResultTab = openingPriorityCase ? "test-cases" : traceabilityReturn ? "traceability" : selectedGenerateResultTab;
+	const activeGenerateResultTab = openingPriorityCase
+		? "test-cases"
+		: traceabilityReturn
+			? "traceability"
+			: (resumedResultTab ?? selectedGenerateResultTab);
 	const savedSuiteReviewKey = JSON.stringify([currentUser?.sub, currentProjectId, savedSuite?.snapshot_id, currentProjectRevision]);
 	const syncDraftSuite = ["project.sync.draft", "project.sync.rebind"].includes(savedSuite?.operation);
 	const showSyncDraftReview = Boolean(
@@ -2035,7 +2057,7 @@ export default function App() {
 		const keepsPriorityCase =
 			priorityCase && project?.project_id === currentProjectId && snapshots.test_cases?.snapshot_id === savedSuite?.snapshot_id;
 		if (!keepsPriorityCase && !isTraceabilityReturn(project?.project_id, snapshots.test_cases?.snapshot_id)) {
-			setActiveGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
+			setDefaultGenerateResultTab(chooseGenerateResultTab(hydratedGenerationPayload));
 		}
 		resetExportWorkflowState();
 		setExportMessage("");
@@ -4190,7 +4212,7 @@ export default function App() {
 			setTestCaseWorkflowDiagnostics(data.workflow_diagnostics || null);
 			setAppliedTestCaseWorkflowSettings(data.workflow_settings || null);
 			setTestCaseIterationHistory(data.iteration_history || []);
-			setActiveGenerateResultTab(withFeedback ? "improve" : chooseGenerateResultTab(data));
+			setDefaultGenerateResultTab(withFeedback ? "improve" : chooseGenerateResultTab(data));
 			setDraftExportOverrideRequested(false);
 			setDraftExportOverrideReason("");
 			resetExecutionWorkflowState();
@@ -4215,7 +4237,7 @@ export default function App() {
 			);
 			if (withFeedback) {
 				setFeedback("");
-				setActiveGenerateResultTab("improve");
+				setDefaultGenerateResultTab("improve");
 			}
 			return true;
 		} catch (error) {
