@@ -42,6 +42,64 @@ Use the isolated Firestore emulator, loopback frontend/API, and synthetic target
 - A mutation enters the executable denominator only when the same authored control passes healthy and fails at the specified check against the mutant. Freeze W01's eight non-duplicate Booking probes and W07's three exact-payload probes. Credit detection only when an applicable generated case passes healthy and fails at that intended assertion against the mutant. Missing eligible generated coverage, wrong failure or unverified execution receives no detection credit. W08's two retry probes remain manual-control evidence. W11's boundary outcomes and retained-case checks are a separate regression gate. A control failure invalidates that environment's measurements pending rerun.
 - Capture terminal run status for every scheduled arm and retain partial suites, aborted reviews, timeouts and usage gaps. Report per-workflow and pooled results, repeated-pair deltas, counts of fully paired outputs and each exclusion with reason. Separate manual/design, browser-applicable, admitted and actually run cases. Classify every healthy-target failure before measuring a rerun. Do not drop missing arms or tune to the holdout.
 
+### Prepare blinded case evidence
+
+Use the offline `scripts/prepare_case_adjudication.py` after capturing the
+actual app artifacts. Keep rehearsal and live intake separate. A private
+`intake.json` declares `cohort`, `candidate_commit`, and `records`. Each
+record includes `workflow`, `repeat`, `arm`, `cohort`, `commit`, `status`,
+and `input_sha256` from the frozen generation input. The runner is
+responsible for capturing that identity from the input it actually used.
+
+Each `delivered` record has a `files` object mapping `project`, `hydrated`,
+`exported`, `report`, and `run` to `{ "path": "relative.json", "sha256": "…" }`.
+Use the project read immediately before export, ordered exact case API
+rows, raw exported JSON bytes, the saved file report, and the runner's own
+identity capture. The runner capture binds `workflow`, `arm`, `repeat`,
+`input_sha256`, `suite_snapshot_id`, and `case_count` to the slot. It also
+binds `cohort`, `project_id`, and `commit` for a live run. Keep the original
+case response envelopes and request, approval and provider receipts in
+private run evidence. W11 also uses `before_files` with the project, case,
+export and report captures from before the source change. A `failed`,
+`partial`, `blocked`, or `interrupted` record includes a `reason` and any
+available hashed files. Partial runs stay in the private ledger as incomplete
+deliveries, with no reviewer packet or inferred coverage score.
+
+```sh
+.venv/bin/python scripts/prepare_case_adjudication.py prepare \
+  --frozen "$TCG_V2_EVIDENCE/p0/evaluation/frozen" \
+  --intake /tmp/tcg-v2-review/intake.json \
+  --output /tmp/tcg-v2-review/package
+```
+
+The private ledger retains all 72 scheduled slots, including missing and
+invalid deliveries. The `reviewer/` directory contains opaque packet IDs,
+the frozen source and reviewer keys, and the exact case content. The saved
+view also carries saved execution prerequisites. Keep the raw captures and
+private ledger with the facilitator. Give reviewers only the packet files,
+and resolve reviewer disagreements before opening the arm mapping.
+
+Record one final label file per sample. Use its `sample_id` and
+`packet_sha256`, and include `judgments` keyed by every frozen obligation.
+Each judgment has `status` (`covered`, `unmet`, or `unknown`), the frozen
+`source_id`, an evidence-based `reason`, and `citations` with exact `case_id`
+and integer `step`. For a pre-change W11 step add `"checkpoint": "before"`. Coverage
+requires at least one step citation. An explicitly deferred scope check
+may cite the source decision in its reason with an empty citation list.
+
+```sh
+.venv/bin/python scripts/prepare_case_adjudication.py summarize \
+  --package /tmp/tcg-v2-review/package \
+  --labels /tmp/tcg-v2-review/final-labels \
+  --output /tmp/tcg-v2-review/private-coverage.json
+```
+
+Coverage counts retain unknown in-scope obligations and separate the
+deferred checks. Missing labels remain visible per arm. The commands
+verify case integrity and label binding. Independent labels, assessor
+accuracy, unsupported facts, correction effort, provider provenance and
+controlled fault outcomes still need their own recorded evidence.
+
 ## Frozen acceptance gates
 
 | Dimension | Fixed measurement and threshold |

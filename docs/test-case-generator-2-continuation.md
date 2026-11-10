@@ -592,6 +592,16 @@ All project records matched. The only database changes were two timestamps
 from existing entitlement reads. The release record includes admission,
 drain and rollback boundaries.
 
+P6 blind review preparation under
+[#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495)
+adds an offline intake and reviewer packet compiler. It checks ordered exact
+saved and exported cases, per-case versions, source and approval lineage,
+and the saved file report. A private ledger retains all 72 scheduled slots.
+The W01/W05 native rehearsal produced four arm-neutral packets and retained
+68 unrun slots. The label importer binds judgments and citations to those
+exact packets and keeps unknown obligations in scope. The live cohort and
+independent judgments remain empty.
+
 The next externally gated actions are an authorized W05/W01 live smoke,
 independent practitioner validation, and verification of a hosted worker
 identity and timeout policy. Live provider pairs require a bounded budget
