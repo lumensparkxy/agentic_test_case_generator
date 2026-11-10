@@ -798,9 +798,11 @@ retained all twelve public digests and the original evidence on both aliases.
 The flag-off server replayed the exact eleven-case file and refused fresh
 admission. The full backend suite passed 1,075 tests including local Chromium
 target binding. The release record includes the seven-action engineering
-replay at `db54730`, the Review layout measurements, and exact delivery
-checks against the four archived W11 checkpoints. It retains the earlier
-facilitator evidence and tracks the open independent study and live gates.
+replay and paired headless facilitator preflight at `091c45a`, the Review
+layout measurements, and exact delivery checks against the four archived
+W11 checkpoints. Both facilitator builds loaded identical saved inputs
+with zero writes. Practitioner sessions, independent judgments and the
+live gates remain open.
 
 P6 blind review preparation under
 [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495)
