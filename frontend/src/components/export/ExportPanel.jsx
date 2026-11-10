@@ -156,12 +156,14 @@ export default function ExportPanel({
 					{EXPORT_FORMATS.map((item) => (
 						<Button
 							key={item.format}
+							variant="secondary"
 							className={`export-btn ${item.className}`}
-							aria-label={reviewedDesignAvailable ? `Export reviewed design as ${item.label}` : undefined}
 							onClick={() => exportToFormat(item.format)}
 							disabled={exportDisabled}
 						>
-							<span className="export-icon">{item.icon}</span>
+							<span className="export-icon" aria-hidden="true">
+								{item.icon}
+							</span>
 							<span className="export-label">{reviewedDesignAvailable ? `Export reviewed design as ${item.label}` : item.label}</span>
 							<span className="export-desc">{item.description}</span>
 						</Button>

@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { seedAuthenticatedSession } from "./support/auth.js";
 import { expectNoDocumentOverflow } from "./support/layout.js";
@@ -223,7 +224,7 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 }
 
 const quality = (page) => page.getByRole("region", { name: "Saved suite quality", exact: true });
-const exportDesign = (page) => page.getByRole("button", { name: "Export reviewed design as JSON", exact: true });
+const exportDesign = (page) => page.getByRole("button", { name: "Export reviewed design as JSON API/Import ready", exact: true });
 
 test.describe("Exact suite evidence across Review and Deliver", () => {
 	test.skip(!v2, "Requires the opt-in project workspaces");
@@ -253,6 +254,16 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await continueToExport.press("Enter");
 		await expect(page).toHaveURL(`${root}/deliver`);
 		await expect(page.getByRole("heading", { name: "Reviewed design ready to export", exact: true })).toBeVisible();
+		const formatButtons = page.locator(".export-buttons");
+		await formatButtons.scrollIntoViewIfNeeded();
+		const accessibility = await new AxeBuilder({ page })
+			.include(".export-buttons")
+			.withRules(["color-contrast", "button-name", "label-content-name-mismatch"])
+			.analyze();
+		expect(accessibility.violations).toEqual([]);
+		const excelFormat = formatButtons.getByRole("button", { name: "Export reviewed design as Excel Formatted .xlsx", exact: true });
+		await expect(formatButtons.getByRole("button", { name: "Export reviewed design as CSV Excel compatible", exact: true })).toBeEnabled();
+		await expect(excelFormat).toBeEnabled();
 		await expect(exportDesign(page)).toBeEnabled();
 		await expect(page.getByText("Export locked by review gate", { exact: true })).toHaveCount(0);
 		await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
@@ -278,8 +289,11 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(writes).toEqual([]);
 		expect(exportRequests).toEqual([]);
 
+		await excelFormat.focus();
+		await page.keyboard.press("Tab");
+		await expect(exportDesign(page)).toBeFocused();
 		const downloadPromise = page.waitForEvent("download");
-		await exportDesign(page).click();
+		await page.keyboard.press("Enter");
 		const download = await downloadPromise;
 		const file = JSON.parse(await readFile(await download.path(), "utf8"));
 		expect(file.audit_metadata).toMatchObject({ snapshot_id: suiteId, is_draft: false });
