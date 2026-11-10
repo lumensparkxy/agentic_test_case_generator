@@ -749,6 +749,8 @@ exact failed-run findings from Deliver (commit `d3fd7f8`,
 [PR #490](https://github.com/lumensparkxy/agentic_test_case_generator/pull/490)).
 A deliberate finding read keeps the recorded run, source suite and case
 assertions visible. Current file and execution gates stay separate.
+Browser tests uses the same exact saved-suite run evidence as Export.
+A run from a previous suite opens through a separate saved report link.
 Rendered Chromium against the real local API opened the one finding from
 the exact failed run without changing its classification.
 

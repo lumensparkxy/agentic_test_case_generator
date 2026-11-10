@@ -22,7 +22,7 @@ const priorRunFinding = "Classify the checkout failure from the recorded run.";
 const unrelatedFinding = "A later run needs separate investigation.";
 const literal = "  QA–01  ";
 
-async function setup(page, { stale = false, available = true, oldServer = false } = {}) {
+async function setup(page, { stale = false, available = true, oldServer = false, runEvidence } = {}) {
 	const project = useCaseProjectFixture({ name: "Verified checkout design" });
 	const plan = project.current_snapshots.use_cases;
 	const [firstGroup] = plan.payload.coverage_plan;
@@ -97,8 +97,63 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 		],
 		source_snapshot_id: "checkout-suite-before-repair",
 		status: "failed",
+		historical: true,
+		selected_count: 1,
+		executed_count: 1,
+		passed_count: 0,
+		failed_count: 1,
+		summary: { passed: 0, failed: 1, skipped: 0, invalid: 0 },
 	});
 	project.execution_runs = [historicalRun];
+	let browserCase = null;
+	let matchingRun = null;
+	if (runEvidence === "prior-suite") {
+		project.current_snapshots.execution = {
+			snapshot_id: runSnapshotId,
+			project_id: project.project_id,
+			stage: "execution",
+			version: 1,
+			operation: "execution.run",
+			source_snapshot_id: historicalRun.source_snapshot_id,
+			payload: historicalRun,
+		};
+		project.stage_state.execution = { current_snapshot_id: runSnapshotId, version: 1, stale: false };
+	} else if (runEvidence === "matching-history") {
+		project.current_revision += 2;
+		browserCase = {
+			...testCase,
+			id: "TC-BROWSER-RECEIPT",
+			title: "Check the browser receipt",
+			automation_status: "Automated",
+			artifact_item_id: "browser-receipt-item",
+			artifact_version_id: "browser-receipt-version-1",
+			artifact_version_number: 1,
+			execution_prerequisites: [],
+			steps: [{ step: 1, action: "Submit checkout", expected: "The exact saved receipt appears." }],
+		};
+		project.current_snapshots.test_cases.payload.test_cases.push(browserCase);
+		const indexedRun = workspaceRunFixture({
+			project_id: project.project_id,
+			project_revision: project.current_revision - 1,
+			run_id: "checkout-current-suite-browser-run",
+			run_record_id: "checkout-current-suite-run-record",
+			snapshot_id: "checkout-current-run-history-snapshot",
+			source_snapshot_id: suiteId,
+			status: "passed",
+			historical: true,
+			selected_count: 1,
+			executed_count: 1,
+			passed_count: 1,
+			summary: { passed: 1, failed: 0, skipped: 0, invalid: 0 },
+		});
+		matchingRun = {
+			...indexedRun,
+			results: [
+				{ id: "checkout-receipt-candidate", source_test_case_id: browserCase.id, title: browserCase.title, status: "passed", issues: [] },
+			],
+		};
+		project.execution_runs.unshift(indexedRun);
+	}
 	if (!oldServer) {
 		project.design_delivery_enabled = true;
 		project.reviewed_design_available = available && !stale;
@@ -114,7 +169,7 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 			required_requirement_ids: ["REQ-101"],
 			deferred_requirement_ids: ["REQ-202"],
 			excluded_requirement_ids: [],
-			active_case_count: 1,
+			active_case_count: project.current_snapshots.test_cases.payload.test_cases.length,
 			deprecated_case_count: 0,
 			reason_codes: [stale ? "sources_stale" : available ? "design_verified" : "design_proof_missing"],
 		};
@@ -173,9 +228,14 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 			[project.project_id]: { ...useCaseOrchestratorFixture(project), reviewed_design_available: project.reviewed_design_available },
 		},
 	});
-	await page.route(`**/projects/${project.project_id}/execution-runs/${historicalRun.run_record_id}`, (route) =>
-		route.fulfill({ json: historicalRun })
-	);
+	const executionReads = [];
+	for (const run of [historicalRun, matchingRun].filter(Boolean)) {
+		await page.route(`**${root}/execution-runs/${run.run_record_id}`, (route) => {
+			expect(route.request().method()).toBe("GET");
+			executionReads.push(run.run_record_id);
+			return route.fulfill({ json: run });
+		});
+	}
 	const exportRequests = [];
 	await page.route("**/export/json", (route) => {
 		const request = route.request();
@@ -220,7 +280,7 @@ async function setup(page, { stale = false, available = true, oldServer = false 
 		});
 	});
 	await seedAuthenticatedSession(page);
-	return { errors, exportRequests, writes, testCase, historicalRun };
+	return { errors, exportRequests, writes, testCase, historicalRun, matchingRun, browserCase, executionReads };
 }
 
 const quality = (page) => page.getByRole("region", { name: "Saved suite quality", exact: true });
@@ -383,6 +443,105 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(page.getByRole("button", { name: "Review finding", exact: true })).toHaveCount(0);
 		expect(writes).toEqual([]);
 		expect(exportRequests).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
+	test("keeps a previous suite's failed run separate from current Browser tests", async ({ page }, testInfo) => {
+		const { writes, errors, historicalRun, executionReads } = await setup(page, { runEvidence: "prior-suite" });
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/review/tests`);
+		await expect(quality(page)).toContainText(/Execution result\s*No matching run evidence/);
+		await page
+			.getByRole("navigation", { name: "Project workspaces", exact: true })
+			.getByRole("link", { name: "Deliver", exact: true })
+			.press("Enter");
+		await expect(exportDesign(page)).toBeEnabled();
+		const noReport = page.getByText("No Playwright execution report matches this saved suite.", { exact: true });
+		await expect(noReport).toBeVisible();
+		await page
+			.getByRole("navigation", { name: "Workspace sections", exact: true })
+			.getByRole("link", { name: "Browser tests", exact: true })
+			.press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver/browser-tests`);
+		await expect(noReport).toBeVisible();
+		await expect(page.getByText(/Execution failed|checkout-run-before-repair/)).toHaveCount(0);
+		await expect(page.getByRole("region", { name: "Execution results table", exact: true })).toHaveCount(0);
+		await expect(page.getByRole("region", { name: "Declared browser prerequisites", exact: true })).toContainText("checkoutFixture");
+		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
+		expect(executionReads).toEqual([]);
+		const previous = page.getByRole("link", { name: "Open saved run for a previous suite", exact: true });
+		const savedRunPath = `${root}/deliver?run=${historicalRun.run_record_id}`;
+		await expect(previous).toHaveAttribute("href", savedRunPath);
+		await page.screenshot({ path: testInfo.outputPath("browser-previous-run-separated.png"), fullPage: true });
+		await previous.press("Enter");
+		await expect(page).toHaveURL(savedRunPath);
+		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();
+		await expect(page.getByText(`Run ${historicalRun.run_id}`, { exact: true })).toBeVisible();
+		await expect(page.getByText(historicalRun.source_snapshot_id, { exact: true })).toBeVisible();
+		await expect(page.getByText(/Historical run from project revision/)).toBeVisible();
+		expect(executionReads).toEqual([historicalRun.run_record_id]);
+		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
+	test("reads an exact matching saved run and returns from its case to Deliver evidence", async ({ page }, testInfo) => {
+		const { writes, errors, historicalRun, matchingRun, browserCase, executionReads } = await setup(page, {
+			runEvidence: "matching-history",
+		});
+		const caseReads = [];
+		await page.route(`**${root}/test-case-evidence?*`, (route) => {
+			const request = route.request();
+			expect(request.method()).toBe("GET");
+			caseReads.push(Object.fromEntries(new URL(request.url()).searchParams));
+			return route.fulfill({
+				json: {
+					project_id: USE_CASE_PROJECT_ID,
+					snapshot_id: suiteId,
+					suite_version: 2,
+					project_revision: 7,
+					historical: false,
+					test_case: browserCase,
+				},
+			});
+		});
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/review/tests`);
+		await expect(quality(page)).toContainText(/Execution result\s*Passed/);
+		await page
+			.getByRole("navigation", { name: "Project workspaces", exact: true })
+			.getByRole("link", { name: "Deliver", exact: true })
+			.press("Enter");
+		await expect(quality(page)).toContainText(/Execution result\s*Passed/);
+		await expect(page.getByText(`Run ${matchingRun.run_id}`, { exact: true })).toBeVisible();
+		const browserPath = `${root}/deliver/browser-tests?report=unrelated-file#unrelated`;
+		await page.goto(browserPath);
+		await expect(page).toHaveURL(browserPath);
+		await expect(page.getByRole("region", { name: "Automation evidence", exact: true })).toContainText("Run recorded for this suite");
+		const report = page.locator(".playwright-report-card");
+		await expect(report.getByText(`Run ${matchingRun.run_id}`, { exact: true })).toBeVisible();
+		await expect(report.getByText(suiteId, { exact: true })).toBeVisible();
+		await expect(page.getByRole("link", { name: "Open saved run for a previous suite", exact: true })).toHaveAttribute(
+			"href",
+			`${root}/deliver?run=${historicalRun.run_record_id}`
+		);
+		await expect(page.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
+		await report.getByText("Case outcomes (1)", { exact: true }).press("Enter");
+		const link = report.getByRole("link", { name: `Open saved case ${browserCase.id} ${browserCase.title}`, exact: true });
+		const savedCasePath = `${root}/test-cases?suite=${suiteId}&case=${browserCase.id}`;
+		await expect(link).toHaveAttribute("href", savedCasePath);
+		await page.screenshot({ path: testInfo.outputPath("browser-matching-run.png"), fullPage: true });
+		await link.press("Enter");
+		await expect(page).toHaveURL(savedCasePath);
+		const reader = page.getByRole("region", { name: "Saved test case", exact: true });
+		await expect(reader).toContainText(browserCase.steps[0].expected);
+		expect(caseReads).toEqual([{ snapshot_id: suiteId, case_id: browserCase.id }]);
+		await page.goBack();
+		await expect(page).toHaveURL(`${root}/deliver?run=${matchingRun.run_record_id}`);
+		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();
+		await expect(link).toBeFocused();
+		await expect(report).toContainText(`Run ${matchingRun.run_id}`);
+		expect(executionReads).toEqual(Array(3).fill(matchingRun.run_record_id));
+		expect(writes).toEqual([]);
 		expect(errors).toEqual([]);
 	});
 

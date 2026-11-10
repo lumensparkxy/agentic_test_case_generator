@@ -4455,6 +4455,16 @@ export default function App() {
 		persistedTestCaseCount
 	);
 	const exactSuiteRun = findExactSuiteRun(currentProject, currentSuiteSnapshotId, executionRunResult);
+	const previousSuiteRun =
+		PROJECT_WORKSPACES_V2 && route.destination === PROJECT_DESTINATIONS.AUTOMATION && currentSuiteSnapshotId
+			? currentProject.execution_runs?.find(
+					(run) =>
+						run.project_id === currentProjectId &&
+						run.run_record_id &&
+						run.source_snapshot_id &&
+						run.source_snapshot_id !== currentSuiteSnapshotId
+				)
+			: null;
 	const readiness = executionPreview?.readiness;
 	const hasExactPreview =
 		currentSuiteSnapshotId &&
@@ -7025,6 +7035,24 @@ export default function App() {
 											selectedExecutionCandidateIds={selectedExecutionCandidateIds}
 											setSelectedExecutionCandidateIds={setSelectedExecutionCandidateIds}
 											executionRunResult={executionRunResult}
+											savedRunReport={
+												PROJECT_WORKSPACES_V2
+													? {
+															currentProject,
+															accountId: currentUser?.sub || "",
+															currentSuiteSnapshotId: currentSuiteSnapshotId || "",
+															executionRunResult: exactSuiteRun,
+															caseReturnPath: buildProjectWorkspacePath(currentProjectId, "deliver"),
+															location,
+															request: apiRequest,
+														}
+													: null
+											}
+											previousSuiteRunPath={
+												previousSuiteRun
+													? `${buildProjectWorkspacePath(currentProjectId, "deliver")}?run=${encodeURIComponent(previousSuiteRun.run_record_id)}`
+													: ""
+											}
 											executionRecovery={executionRecovery}
 											executionNeedsResolution={executionNeedsResolution}
 											checkExecutionRecovery={checkExecutionRecovery}

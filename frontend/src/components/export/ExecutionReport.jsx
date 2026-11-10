@@ -207,6 +207,7 @@ function SavedExecutionReport({
 	request,
 	location,
 	navigate,
+	caseReturnPath,
 }) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
@@ -239,9 +240,10 @@ function SavedExecutionReport({
 				snapshotId: result.run.source_snapshot_id,
 				returnResultId: returnCase?.projectId === projectId && returnCase.runRecordId === runRecordId ? returnCase.resultId : null,
 				openCase: (path, resultId) => {
-					const query = new URLSearchParams(location.search);
+					const query = new URLSearchParams(caseReturnPath ? "" : location.search);
 					query.set("run", runRecordId);
-					navigate(`${location.pathname}?${query}${location.hash}`, {
+					const returnPath = `${caseReturnPath || location.pathname}?${query}${caseReturnPath ? "" : location.hash}`;
+					navigate(returnPath, {
 						replace: true,
 						state: { ...location.state, runCase: { projectId, runRecordId, resultId } },
 					});
@@ -275,6 +277,7 @@ export default function ExecutionReport({
 	request,
 	location,
 	navigate,
+	caseReturnPath,
 }) {
 	const projectId = currentProject?.project_id;
 	const expectedSuiteSnapshotId = runRecordId ? undefined : currentSuiteSnapshotId;
@@ -296,6 +299,7 @@ export default function ExecutionReport({
 			request={request}
 			location={location}
 			navigate={navigate}
+			caseReturnPath={caseReturnPath}
 		/>
 	) : (
 		<PlaywrightExecutionReport

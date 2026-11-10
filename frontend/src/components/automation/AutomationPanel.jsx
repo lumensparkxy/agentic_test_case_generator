@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { formatExecutionCaseStatus, formatExecutionRunSummary, getAutomationEvidenceStatus } from "./automationEvidence";
 import { RunnerIssues } from "./ExecutionIssues";
+import RouteLink from "../../app/RouteLink";
+import ExecutionReport from "../export/ExecutionReport";
 import ExecutionSetupSummary from "../generation/ExecutionSetupSummary";
 import { TableScroll, Table, List, ListItem } from "../ui/collections";
 import { Checkbox, Field, Input, Button, Link } from "../ui/controls";
@@ -149,7 +151,7 @@ const renderUnsupportedList = (candidates, emptyMessage = "No unsupported cases 
 	);
 };
 
-const renderRunResults = (runResult) => {
+const renderRunResults = (runResult, showSuite) => {
 	if (!runResult) {
 		return null;
 	}
@@ -172,6 +174,11 @@ const renderRunResults = (runResult) => {
 					{runResult.status}
 				</span>
 			</div>
+			{showSuite && (
+				<p className="helper-text">
+					Source suite snapshot <code>{runResult.source_snapshot_id}</code>
+				</p>
+			)}
 			<div className={`workflow-result-notice ${runResult.status === "passed" ? "success" : "warning"}`} role="status">
 				<p>{resultMessage}</p>
 			</div>
@@ -239,6 +246,8 @@ export default function AutomationPanel({
 	selectedExecutionCandidateIds,
 	setSelectedExecutionCandidateIds,
 	executionRunResult,
+	savedRunReport,
+	previousSuiteRunPath,
 	executionRecovery,
 	executionNeedsResolution,
 	checkExecutionRecovery,
@@ -265,7 +274,18 @@ export default function AutomationPanel({
 			setIsCheckingRecovery(false);
 		}
 	};
-	const evidence = getAutomationEvidenceStatus(executionPreview, executionRunResult, { stale: executionStale });
+	const suiteRun = savedRunReport ? savedRunReport.executionRunResult : executionRunResult;
+	const inlineRun =
+		!savedRunReport ||
+		(suiteRun && executionRunResult?.run_id === suiteRun.run_id && executionRunResult.source_snapshot_id === suiteRun.source_snapshot_id)
+			? executionRunResult
+			: null;
+	const evidenceRun = inlineRun || (!executionPreview?.hasPreview ? suiteRun : null);
+	const evidence = getAutomationEvidenceStatus(executionPreview, evidenceRun, { stale: executionStale });
+	const evidenceLabel =
+		savedRunReport && evidenceRun && !Array.isArray(evidenceRun.results) && !executionStale
+			? "Run recorded for this suite"
+			: evidence.label;
 	const previewSummary = executionPreview?.summary || {};
 	const executableCandidates = executionPreview?.executable || [];
 	const actualCandidateIds = new Set(executableCandidates.map((candidate) => candidate.id));
@@ -284,9 +304,9 @@ export default function AutomationPanel({
 			</p>
 			{declaredSetup && <ExecutionSetupSummary declaredSetup={declaredSetup} projectId={projectId} navigate={navigate} />}
 			<div className="workflow-result-notice" role="region" aria-label="Automation evidence">
-				<strong>{evidence.label}</strong>
-				{executionRunResult?.run_id ? (
-					<p>Run {executionRunResult.run_id}. Completion and pass/fail are separate from preview validation.</p>
+				<strong>{evidenceLabel}</strong>
+				{evidenceRun?.run_id ? (
+					<p>Run {evidenceRun.run_id}. Completion and pass/fail are separate from preview validation.</p>
 				) : (
 					<p>A preview validates candidate specifications; it does not execute the application.</p>
 				)}
@@ -440,7 +460,18 @@ export default function AutomationPanel({
 				</Surface>
 			)}
 
-			{renderRunResults(executionRunResult)}
+			{savedRunReport && !inlineRun ? (
+				<ExecutionReport {...savedRunReport} navigate={navigate} />
+			) : (
+				renderRunResults(inlineRun, Boolean(savedRunReport))
+			)}
+			{previousSuiteRunPath && (
+				<p className="helper-text">
+					<RouteLink to={previousSuiteRunPath} navigate={navigate}>
+						Open saved run for a previous suite
+					</RouteLink>
+				</p>
+			)}
 
 			<div className="panel-nav">
 				<Button onClick={goPrev} className="secondary">
