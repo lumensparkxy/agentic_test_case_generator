@@ -797,9 +797,10 @@ Both local rollback rehearsals passed on `61b7d66`. The flag-off client
 retained all twelve public digests and the original evidence on both aliases.
 The flag-off server replayed the exact eleven-case file and refused fresh
 admission. The full backend suite passed 1,075 tests including local Chromium
-target binding. The current seven-action engineering journey, the headed
-facilitator dry preflights, the controlled browser runs, and the open
-independent study remain separate in the release record.
+target binding. The release record includes the seven-action engineering
+replay at `db54730`, the Review layout measurements, and exact delivery
+checks against the four archived W11 checkpoints. It retains the earlier
+facilitator evidence and tracks the open independent study and live gates.
 
 P6 blind review preparation under
 [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495)

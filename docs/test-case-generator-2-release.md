@@ -4,29 +4,29 @@ The implementation lives on `codex/version_2_0`. The frozen baseline is
 `2f6458d3d1bb68197ba2b5572261870277c8cadb`. The phase history is in the
 [implementation record](test-case-generator-2-continuation.md). Use the
 [frozen evaluation protocol](test-case-generator-2-evaluation.md) for the
-fixed thresholds. The most recent local rollback rehearsal used
-`61b7d66538ced2d515e249a9289981ea1fcd9dde`. Both required CI checks passed
-on that application pin. The stack remains open for final merge approval.
-The current evaluation scope is offline only.
-[PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) ·
-[CI run](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42789788414)
+fixed thresholds. The application verified for this release record is
+`db54730fcce70dbe6ec13f0b4481ce3fab7ed431`. Both required CI checks passed
+on that commit. The stack is held for final merge approval and the evaluation
+scope is offline only.
+[PR #583](https://github.com/lumensparkxy/agentic_test_case_generator/pull/583) ·
+[CI run](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42911957620)
 
 ## Acceptance evidence
 
 | Gate | Evidence | Open requirement |
 | --- | --- | --- |
-| User effort | The matched Chromium replay at `242dec9` used identical saved inputs and opened TC-202 in both arms. The candidate took seven deliberate actions against eleven, a 36.4% reduction, with two explicit approvals and four workbench transitions per arm. | Practitioner active time and waiting. |
-| Practitioner completion and review effort | The task and recording sheet use the frozen rubric. Both headed facilitator dry preflights opened the saved inputs without writes. Zero participant sessions have been collected. | At least four of five unassisted completions, 20% fewer median corrections per adjudicated obligation, and non-increasing active review time. [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354) |
+| User effort | The matched Chromium replay at `db54730` took seven deliberate actions against eleven, a 36.4% reduction against the 30% target. Both arms used identical saved inputs, made two explicit approvals, inspected TC-202, and changed workbenches four times. | Practitioner active time and waiting. |
+| Practitioner completion and review effort | The task and recording sheet use the frozen rubric. Both earlier headed facilitator dry preflights opened the saved inputs without writes. The refreshed kit is pinned to `242dec9` and has static package and observer checks. Zero participant sessions have been collected. | At least four of five unassisted completions, 20% fewer median corrections per adjudicated obligation, and non-increasing active review time. [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354) |
 | Business coverage and unsupported facts | The offline intake and scorer bind obligation and fact judgments to exact saved and exported cases and retain unknowns. The held integration calibration preserved exact cases and removed fabricated dependencies from saved analysis. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | Independently adjudicated coverage of at least 95%, zero critical misses or unsupported facts, and non-regression on the generated cohort. [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495) |
-| Healthy reliability and defect sensitivity | W01 preserved eleven authored cases per arm, passed every eligible healthy case, and detected all eight seeded variants in each arm. On the held pin both exact authored W07 cases passed healthy and all three seeded variants failed at their intended first assertion. [PR #520](https://github.com/lumensparkxy/agentic_test_case_generator/pull/520) · [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | The 95% healthy reliability and 90% intended fault detection thresholds apply to generated applicable cases across the frozen targets. |
+| Healthy reliability and defect sensitivity | W01 preserved eleven authored cases per arm, passed every eligible healthy case, and detected all eight seeded variants in each arm. At `61b7d66` both exact authored W07 cases passed healthy and all three seeded variants failed at their intended first assertion. [PR #520](https://github.com/lumensparkxy/agentic_test_case_generator/pull/520) · [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | The 95% healthy reliability and 90% intended fault detection thresholds apply to generated applicable cases across the frozen targets. |
 | Evaluator correctness | The structural assessor kept five valid authored controls and rejected both defective whitespace controls. The separate retry comparison removed two false unmet findings on identical saved Manual cases. [PR #514](https://github.com/lumensparkxy/agentic_test_case_generator/pull/514) · [PR #530](https://github.com/lumensparkxy/agentic_test_case_generator/pull/530) | Independent verdicts and paired live assessor outputs. [#513](https://github.com/lumensparkxy/agentic_test_case_generator/issues/513) |
-| Exact artifact integrity | The offline delivery replay sealed 24 authored repeat-one packets across 12 workflows and kept 48 unrun slots. The refusal replay retained one partial slot. In W11, seven unaffected versions stayed exact, six were replaced, and a fresh stale export returned HTTP 409. [PR #518](https://github.com/lumensparkxy/agentic_test_case_generator/pull/518) | The live artifact cohort has zero of 36 pairs under the frozen protocol. [#517](https://github.com/lumensparkxy/agentic_test_case_generator/issues/517) |
+| Exact artifact integrity | The offline delivery replay sealed 24 authored repeat-one packets across 12 workflows and kept 48 unrun slots. The refusal replay retained one partial slot. The W11 source change preserved seven unaffected versions, replaced six, and refused fresh stale export. Current delivery code reproduced all 13 rows and their case versions at each of the four archived W11 checkpoints. [PR #518](https://github.com/lumensparkxy/agentic_test_case_generator/pull/518) | The live artifact cohort has zero of 36 pairs under the frozen protocol. [#517](https://github.com/lumensparkxy/agentic_test_case_generator/issues/517) |
 | Durable decisions and recovery | Isolated Firestore verified exact approvals, response loss, cancellation, release and stale fences. Eight forced worker stops exercised lease expiry, known-unstarted replay, interrupted status and exact saved artifact recovery. The rendered W01 dialog restored focus on the saved decision before the delayed acknowledgement arrived. | Hosted worker identity, dispatch timeouts and shared producer admission in an authorized environment. |
-| Runtime cost and latency | The offline ledger exercised bounded mock reservation and settlement. | Paired provider cost and latency, including call and token coverage. |
-| Rollback | The same local project and Chromium session passed through enabled, compatible and restored bundles with all twelve public evidence digests unchanged. The separate server restart preserved exact replay while refusing fresh admission. | Hosted rollout and operator verification. |
+| Runtime cost and latency | The offline ledger exercised bounded mock reservation and settlement. | Paired provider cost and latency within the 20% median ceiling, with call and token coverage. |
+| Rollback | The same local project and Chromium session passed through enabled, compatible and restored bundles at `61b7d66`, with all twelve public evidence digests unchanged. The server restart at that pin preserved exact replay while refusing fresh admission. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | Hosted rollout and operator verification. |
 
 The matched desktop replay used mocked Chromium at the frozen baseline and
-`242dec9`. Both arms started at revision 2 from byte-identical saved input
+`db54730`. Both arms started at revision 2 from byte-identical saved input
 snapshots with both decisions pending. All four frozen fixture hashes matched.
 Both readers displayed the same TC-202 and its saved assertion, and a direct
 case lookup resolved to each arm's exact suite. The two exported case rows
@@ -35,6 +35,29 @@ its earlier archived file byte for byte. The fixture used the legacy approved
 export policy. This measures deliberate actions in one engineering pair.
 Participant time and waiting remain unmeasured. The controlled replays below
 used separate actual app and Firestore projects.
+
+At `db54730`, Review starts with the app-wide menu collapsed. In the matched
+layout fixture, the first requirement row, scenario group, selected test and
+first expected result each start 76 CSS pixels higher at 1366, 1440 and 1920
+pixels wide. The 1440-pixel keyboard check preserved the selected case and
+search filter in a 200-case suite. The 390-pixel check verified the menu and
+project controls without horizontal overflow.
+[PR #583](https://github.com/lumensparkxy/agentic_test_case_generator/pull/583)
+
+Deliver blocks fresh files for stale suite sources. An exact human request for
+changes or a recorded proof that needs reassessment, shows design gaps, or
+cannot be verified requires a reasoned draft where sources permit delivery.
+Paired policy checks preserved ordinary approval for a legacy suite without
+recorded proof and reviewed-design eligibility for the verified control.
+Historical reports retained their recorded classification and case versions.
+[Human decision](https://github.com/lumensparkxy/agentic_test_case_generator/pull/580) ·
+[Source freshness](https://github.com/lumensparkxy/agentic_test_case_generator/pull/581) ·
+[Recorded design proof](https://github.com/lumensparkxy/agentic_test_case_generator/pull/582)
+
+The read-only W11 delivery replay at `db54730` hydrated all 13 exact saved
+cases per checkpoint and reproduced their archived JSON rows and version
+evidence. Both baseline checkpoints qualified for ordinary approved files
+and both candidate checkpoints qualified for reviewed-design files.
 
 The authored W11 browser replay exercised the original and revised booking
 limits. The frozen baseline passed all ten original and nine revised cases
@@ -83,10 +106,11 @@ times were identical across the restart and readback. The worker used
 six authored SDK responses in the loopback emulator. The client and server
 lanes use separate isolated projects.
 
-The full backend suite passed 1,075 tests on the held application pin,
+The full backend suite passed 1,075 tests on the rollback pin `61b7d66`,
 including the opt-in loopback Chromium target-binding test. The clean archive
 contained no local `.env` and used read-only Git metadata for the provenance
 checks. Both required CI jobs passed separately.
+[Rollback CI](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42789788414)
 
 The frozen W07 pair and the earlier reasoned-draft capture remain as
 recorded. The separate current-pin replay kept both approved case contents
