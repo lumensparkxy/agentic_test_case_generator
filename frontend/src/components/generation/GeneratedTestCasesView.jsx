@@ -375,9 +375,8 @@ export default function GeneratedTestCasesView({
 						<>
 							{(priorityCase || findingCase) && selectedIndex < 0 && (
 								<p className="test-detail-meta">
-									{priorityCase
-										? "Opened from the generation result. This case is outside the current filters."
-										: "Opened from Improve tests. This case is outside the current filters."}
+									Opened from {priorityCase ? "the generation result" : (reviewGroup?.label ?? "Improve tests")}. This case is outside the
+									current filters.
 								</p>
 							)}
 							<div className="test-case-identity">

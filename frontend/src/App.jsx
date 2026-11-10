@@ -1111,7 +1111,7 @@ export default function App() {
 	const openCaseResults = (id = null, group = null, { fromFinding = false } = {}) => {
 		dismissPriorityCase();
 		setSelectedTestCaseId(id);
-		setFindingCaseSelection(fromFinding ? { id, source: sourceCaseSnapshot } : null);
+		setFindingCaseSelection(id && (fromFinding || group) ? { id, source: sourceCaseSnapshot } : null);
 		setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
 		if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
 		else focusResultContent.current = true;

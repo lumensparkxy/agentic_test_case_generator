@@ -708,6 +708,9 @@ saved findings by requirement and behavior (head `117ede9`,
 Separate source quotes and case steps stay visible. Verified citations
 open and focus the exact saved step. Unverified evidence, structural
 blockers, setup and classified project findings retain distinct paths.
+Inspecting a review group opens its addressed saved case in the reader
+while keeping the group's search and filters. If they hide the opened
+case, the reader explains why it is outside the filtered list.
 
 Unenrolled paid draft producers remain a release gate.
 P6 error analysis found prior Booking gaps covered by existing regression

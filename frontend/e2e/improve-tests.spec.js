@@ -197,6 +197,75 @@ for (const width of [1440, 390]) {
 	);
 }
 
+test("reopens the exact saved review group case outside recovered filters", { tag: "@p1" }, async ({ page }, testInfo) => {
+	await page.setViewportSize({ width: 1440, height: 900 });
+	const writes = [];
+	page.on("request", (request) => {
+		if (["fetch", "xhr"].includes(request.resourceType()) && !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+			writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+		}
+	});
+	const { api, project, requests } = await open(page, {
+		payload: {
+			test_cases: groupCases,
+			substantive_assessment: {
+				status: "incomplete",
+				diagnostics: {
+					groups: mixedGroups.map((group) => (group.input_hash === "group-2" ? { ...group, case_ids: ["TC-002", "TC-004"] } : group)),
+				},
+			},
+		},
+	});
+	const savedSuite = structuredClone(project.current_snapshots.test_cases);
+	const groups = page.getByRole("region", { name: "Independent review groups", exact: true });
+	const inspectGroup = async () => {
+		await groups.getByText("Show review groups", { exact: true }).press("Enter");
+		await groups.getByRole("button", { name: "Inspect group 2 cases", exact: true }).press("Enter");
+	};
+	const results = page.getByRole("tabpanel", { name: "Generated Test Cases", exact: true });
+	const reader = results.getByRole("region", { name: "Selected test case", exact: true });
+	const addressed = reader.getByRole("heading", { name: "Checkout 2", exact: true });
+	const search = results.getByRole("searchbox", { name: "Search test cases", exact: true });
+	const priority = results.getByRole("combobox", { name: "Priority", exact: true });
+	const visibleCase = results.getByRole("button", { name: "TC-004 Checkout 4", exact: true });
+	const draft = "Check the saved checkout confirmation before changing assertions.";
+	const finding = panel(page).getByRole("checkbox", { name: issue, exact: true });
+	await finding.check();
+	await panel(page).getByRole("textbox").fill(draft);
+	await inspectGroup();
+	await expect(addressed).toBeVisible();
+	await results.getByRole("button", { name: "Filters", exact: true }).press("Enter");
+	await priority.selectOption("Medium");
+	await search.fill("Checkout 4");
+	await expect(reader.getByRole("heading", { name: "Checkout 4", exact: true })).toBeVisible();
+
+	await page.reload();
+	await inspectGroup();
+	await expect(results.getByText("Showing cases in Group 2", { exact: true })).toBeVisible();
+	await expect(search).toHaveValue("Checkout 4");
+	await results.getByRole("button", { name: "Filters (1)", exact: true }).press("Enter");
+	await expect(priority).toHaveValue("Medium");
+	await expect(results.getByText("1 of 4 test cases", { exact: true })).toBeVisible();
+	await expect(results.getByRole("button", { name: "TC-002 Checkout 2", exact: true })).toHaveCount(0);
+	await expect(visibleCase).toBeVisible();
+	await expect(addressed).toBeVisible();
+	await expect(reader.getByText("TC-002", { exact: true })).toBeVisible();
+	await expect(reader.getByText("Opened from Group 2. This case is outside the current filters.", { exact: true })).toBeVisible();
+	await page.screenshot({ path: testInfo.outputPath("exact-group-case-outside-filters.png"), fullPage: true });
+
+	await visibleCase.press("Enter");
+	await expect(reader.getByRole("heading", { name: "Checkout 4", exact: true })).toBeVisible();
+	await expect(visibleCase).toHaveAttribute("aria-pressed", "true");
+	await expect(search).toHaveValue("Checkout 4");
+	await expect(priority).toHaveValue("Medium");
+	await page.getByRole("tab", { name: /^Improve tests/ }).press("Enter");
+	await expect(finding).toBeChecked();
+	await expect(panel(page).getByRole("textbox")).toHaveValue(draft);
+	expect(api.getProject().current_snapshots.test_cases).toEqual(savedSuite);
+	expect(requests).toEqual([]);
+	expect(writes).toEqual([]);
+});
+
 test("a review-only failure shows last attempt groups and keeps review available", { tag: "@p1" }, async ({ page }) => {
 	const reason = "Independent assessment provider unavailable; review is required.";
 	const { requests } = await open(page, {
