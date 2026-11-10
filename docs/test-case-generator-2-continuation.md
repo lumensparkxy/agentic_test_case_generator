@@ -574,17 +574,28 @@ the inspected export. A fresh W01 rendered run with synthetic model
 responses also verified all eleven downloaded cases against exact case
 reads. It exposed a modal race when the named approval receipt and
 suite finished before the original POST response. The saved decision
-was correct. P7c reconciles that exact saved approval under
-[#491](https://github.com/lumensparkxy/agentic_test_case_generator/issues/491).
+was correct. P7c reconciles that exact saved approval (commit `e94ce21`,
+[PR #492](https://github.com/lumensparkxy/agentic_test_case_generator/pull/492)).
 In the deliberately delayed actual W01 run, the dialog closed and
 restored focus before the HTTP acknowledgement. It used seven expected
 browser POSTs, six native SDK mock requests, both explicit approvals,
 and eleven exact saved and exported cases. A later decision draft stayed
-open when the old response arrived in the separate mocked test. Next is
-the final same-project rollback and release handoff.
-The production queue identity and timeout policy remain
-unverified. Live provider pairs require a bounded budget and approved
-environment. Independent practitioner validation stays with
+open when the old response arrived in the separate mocked test.
+
+P8 records the [local release and rollback handoff](test-case-generator-2-release.md)
+under [#493](https://github.com/lumensparkxy/agentic_test_case_generator/issues/493).
+The final application pin `e94ce21` used the same disposable project and
+Chromium session across enabled, flag-off and restored builds. Both aliases
+preserved exact report, run, case and failed-run Context evidence. Twelve
+canonical evidence digests matched, with no API writes from the browser.
+All project records matched. The only database changes were two timestamps
+from existing entitlement reads. The release record includes admission,
+drain and rollback boundaries.
+
+The next externally gated actions are an authorized W05/W01 live smoke,
+independent practitioner validation, and verification of a hosted worker
+identity and timeout policy. Live provider pairs require a bounded budget
+and approved environment. Independent practitioner validation stays with
 [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354).
 [#251](https://github.com/lumensparkxy/agentic_test_case_generator/issues/251)
 retains live journey and source-change acceptance,
