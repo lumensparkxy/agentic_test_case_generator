@@ -24,7 +24,7 @@ from ..contracts.grounding import EnrichInput
 from ..contracts.requirements import Requirement
 from ..contracts.test_cases import TestCase, TestCaseDesignPrecheck
 from ..services.browser_handoff import declared_rejection_readbacks, missing_rejection_readbacks
-from ..services.execution_service import LOCATOR_COUNT_PATTERN
+from ..services.execution_service import LOCATOR_COUNT_PATTERN, _assertion_statement
 from ..services.test_case_quality import case_source_hash, placeholder_reason, project_test_case_view
 from ..services.guidance_service import current_guidance, public_manifest, submit_with_guidance
 
@@ -65,11 +65,14 @@ _RETRY_ACTION_SEQUENCE = re.compile(
 _EXPECTATION_CLAUSES = re.compile(r"\s+and\s+|\s*;\s*|(?<=[.!?])\s+", re.I)
 _DURABLE_RECORD = rf"\b(?:{_RECORD_CREATION}s?|entries|rows?|items?)\b(?![-_\s]+(?:confirmation|message|notification|toast|heading)\b)"
 _ONE_DURABLE_RECORD = re.compile(
-    rf"\b(?:(?:exactly|only) (?:one|1)|single|no duplicate) (?:(?:saved|new|durable|confirmed|matching|additional|existing) )*{_DURABLE_RECORD}"
-    rf"|{_DURABLE_RECORD}(?: (?:id|identifier))? (?:is |are )?(?:listed|appears?|remains?) (?:exactly )?once\b"
-    rf"|{_DURABLE_RECORD} count (?:is|should be|equals?|should equal|increases? by|increased by) 1\b",
+    rf"\b(?:(?:exactly|only) (?:one|1)|single) (?:(?:saved|new|durable|confirmed|matching|additional|existing) )*{_DURABLE_RECORD}"
+    rf"|{_DURABLE_RECORD}(?: (?:id|identifier))? (?:is |are )?(?:listed|appears?|remains?) (?:exactly )?once\b(?!\s+or\b)"
+    rf"|{_DURABLE_RECORD} count (?:is|should be|equals?|should equal|increases? by|increased by) 1\b(?![.,]\d|\s+or\b)",
     re.I,
 )
+_COUNT_NEGATION = r"(?:not|never|cannot|[a-z]+n['’]t)"
+_NEGATED_COUNT_PREFIX = re.compile(rf"\b(?:{_COUNT_NEGATION}|no|without)(?: (?:have|see|show|find|observe))?(?: (?:a|an|the))?\s*$", re.I)
+_NEGATED_COUNT_OUTCOME = re.compile(rf"^\s+(?:(?:row|entry|record) )?(?:(?:is|are|was|were|will|shall|should|must|does|do) )?{_COUNT_NEGATION}\b", re.I)
 _RECORD_ID = re.compile(r"\b(?:id|identifier|identity)\b", re.I)
 _ORIGINAL_ID = re.compile(r"\b(?:same|original|unchanged|recorded|identical|existing)\b", re.I)
 _IDENTITY_COMPARISON = re.compile(r"\b(?:same|equals?|matches?|unchanged|identical|retains?|remains?|still)\b", re.I)
@@ -463,10 +466,11 @@ def _retry_actions(text):
 
 
 def _checks_one_durable_record(clause):
-    if _ONE_DURABLE_RECORD.search(clause):
-        return True
-    count = LOCATOR_COUNT_PATTERN.search(clause)
-    return bool(count and count["count"] == "1" and re.search(_DURABLE_RECORD, count["value"], re.I))
+    statement = _assertion_statement(clause)
+    if count := LOCATOR_COUNT_PATTERN.match(statement):
+        return bool(count.end() == len(statement) and count["count"] == "1" and re.search(_DURABLE_RECORD, count["value"], re.I))
+    count = _ONE_DURABLE_RECORD.search(statement)
+    return bool(count and not _NEGATED_COUNT_PREFIX.search(statement[: count.start()]) and not _NEGATED_COUNT_OUTCOME.match(statement[count.end() :]))
 
 
 def _has_durable_retry_readback(steps, trigger_pattern):

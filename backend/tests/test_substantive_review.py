@@ -564,9 +564,10 @@ class SubstantiveReviewTests(unittest.TestCase):
     def test_separate_durable_readbacks_can_close_a_single_triggering_case(self):
         requirement, case, _, _, _ = fixture(retry=False)
         count = {"action": "Count the saved bookings for this submission", "expected": "Exactly one saved booking remains."}
-        locator_count = {**count, "expected": 'css "#bookings tr" count should be 1.'}
+        integer_count = {**count, "expected": "The saved booking count is 1, not 2."}
+        locator_count = {**count, "expected": 'Assert that css "#bookings tr" count should be 1.'}
         identity = {"action": "Compare the displayed booking ID with the original", "expected": "The displayed ID matches the original recorded ID."}
-        for checks in ([count, identity], [identity, count], [locator_count, identity]):
+        for checks in ([count, identity], [identity, count], [integer_count, identity], [locator_count, identity]):
             with self.subTest(checks=checks):
                 steps = [
                     {"action": 'Double-click the "Book" button', "expected": "The confirmation shows the original booking ID."},
@@ -603,7 +604,18 @@ class SubstantiveReviewTests(unittest.TestCase):
         refresh = {"action": "Reload My bookings", "expected": ""}
         count = {"action": "Count saved bookings", "expected": "Exactly one booking remains."}
         identity = {"action": "Compare the displayed booking ID", "expected": "The saved booking has the same recorded ID."}
+        non_exact_counts = {
+            "negated count": "There is not exactly one saved booking row for the submitted reservation.",
+            "negated outcome": "Exactly one saved booking does not remain.",
+            "negated single count": "There isn't a single saved booking.",
+            "no duplicate upper bound": "No duplicate booking row is listed for the submitted reservation.",
+            "decimal count": "The saved booking count is 1.5.",
+            "decimal locator count": 'css "#bookings tr" count should be 1.5.',
+            "locator count alternative": 'css "#bookings tr" count should be 1 or 2.',
+            "prose count alternative": "The saved booking count is 1 or 2.",
+        }
         invalid = {
+            **{name: [trigger, refresh, {**count, "expected": expected}, identity] for name, expected in non_exact_counts.items()},
             "count before reload": [trigger, count, refresh, identity],
             "reload before trigger": [{"action": 'Reload My bookings then double-click "Book"', "expected": "Exactly one booking with the same ID remains."}],
             "mentioned reload": [trigger, {"action": "Read the refresh timestamp", "expected": ""}, count, identity],
