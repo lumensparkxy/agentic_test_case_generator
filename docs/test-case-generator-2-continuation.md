@@ -213,6 +213,12 @@ assessment receipt and immutable review snapshot commit with release of the
 lease. Compatible partial assessment checkpoints can be recovered.
 Old continuation leases remain readable.
 
+A bounded worker scan moves skipped due rows five seconds ahead so an
+unrelated project can claim work on a later scan. This updates only the
+observed outbox schedule. Firestore rejects the write if another worker
+has already changed or removed the row. The stage's approval, lease and
+request budget remain authoritative.
+
 If an attempt expires before dispatch, new work can claim a higher fence.
 After possible dispatch, Review shows the exact unresolved assessment.
 The owner can cancel a running assessment or acknowledge the interrupted

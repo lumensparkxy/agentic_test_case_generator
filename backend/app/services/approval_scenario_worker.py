@@ -1,6 +1,7 @@
 """Consume approved generation work in an isolated emulator worker."""
 
-from datetime import datetime, timezone
+from contextlib import suppress
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import logging
@@ -8,6 +9,7 @@ import os
 from threading import Lock
 
 from fastapi import HTTPException
+from google.api_core.exceptions import FailedPrecondition, NotFound
 from google.cloud.firestore_v1 import FieldFilter
 
 from ..agents.adk_runtime import bounded_model_requests
@@ -38,6 +40,7 @@ _MAX_REQUEST_SECONDS = 25
 _DEADLINE_SECONDS = 240
 _TEST_CASE_DEADLINE_SECONDS = 300
 _LEASE_SECONDS = 60
+_DEFERRED_RECHECK = timedelta(seconds=5)
 _LOG = logging.getLogger(__name__)
 
 
@@ -238,6 +241,15 @@ def _handle_due(client, project_id, run_id):
     return True
 
 
+def _defer_unclaimed(client, record):
+    # Move skipped rows behind other due work without replacing a concurrent claim or renewal.
+    with suppress(FailedPrecondition, NotFound):
+        record.reference.update(
+            {"available_at": _utcnow() + _DEFERRED_RECHECK},
+            option=client.write_option(last_update_time=record.update_time),
+        )
+
+
 def run_due_scenarios(client, *, limit=12) -> int:
     """Handle a bounded scan of scenario and Test Cases continuations."""
     if not approval_scenario_client_allowed(client):
@@ -249,7 +261,10 @@ def run_due_scenarios(client, *, limit=12) -> int:
     for record in due:
         row = record.to_dict()
         try:
-            handled += _handle_due(client, row["project_id"], row["run_id"])
+            if _handle_due(client, row["project_id"], row["run_id"]):
+                handled += 1
+            else:
+                _defer_unclaimed(client, record)
         except Exception as error:
             _LOG.warning("Could not handle an approval continuation (%s)", type(error).__name__)
     return handled

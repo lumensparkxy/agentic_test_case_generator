@@ -4,9 +4,10 @@ from datetime import datetime, timedelta, timezone
 from os import environ
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from google.adk.models import Gemini, LlmRequest
+from google.api_core.exceptions import FailedPrecondition, NotFound
 from google.genai import types
 from test_approval_continuation import _Client
 from test_use_case_generation import generated
@@ -24,6 +25,62 @@ from app.services.guidance_service import submit_with_guidance
 
 
 _EMULATOR = "127.0.0.1:44123"
+
+
+class ScenarioWorkerPollingTests(TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
+        self.client = Mock()
+        self.query = self.client.collection.return_value.where.return_value.order_by.return_value.limit
+        self.scan = self.query.return_value.stream
+        self.enterContext(patch.object(worker, "approval_scenario_client_allowed", return_value=True))
+        self.enterContext(patch.object(worker, "_utcnow", return_value=self.now))
+
+    def record(self, project_id, update_time):
+        row = Mock(update_time=update_time)
+        row.to_dict.return_value = {"project_id": project_id, "run_id": project_id}
+        return row
+
+    def test_skipped_batch_yields_to_a_different_ready_project(self):
+        available = {f"blocked-{index}": self.now - timedelta(seconds=2) for index in range(12)}
+        available["ready"] = self.now - timedelta(seconds=1)
+        rows = {name: self.record(name, when) for name, when in available.items()}
+        for name, row in rows.items():
+
+            def update(fields, *, option, project_id=name):
+                available[project_id] = fields["available_at"]
+
+            row.reference.update.side_effect = update
+
+        def scan():
+            due = sorted((name for name in available if available[name] <= self.now), key=available.__getitem__)
+            return (rows[name] for name in due[: self.query.call_args.args[0]])
+
+        self.scan.side_effect = scan
+        with patch.object(worker, "_handle_due", side_effect=lambda _client, project, _run: project == "ready") as handle:
+            self.assertEqual(worker.run_due_scenarios(self.client), 0)
+            self.assertEqual(worker.run_due_scenarios(self.client), 1)
+        self.assertEqual(handle.call_count, 13)
+        handle.assert_called_with(self.client, "ready", "ready")
+        self.query.assert_called_with(12)
+        self.assertTrue(all(when > self.now for name, when in available.items() if name != "ready"))
+        rows["ready"].reference.update.assert_not_called()
+        for name, row in rows.items():
+            if name != "ready":
+                self.client.write_option.assert_any_call(last_update_time=row.update_time)
+                row.reference.update.assert_called_once_with({"available_at": available[name]}, option=self.client.write_option.return_value)
+
+    def test_concurrent_update_or_removal_of_skipped_row_does_not_stop_scan(self):
+        rows = [self.record(str(index), self.now) for index in range(3)]
+        rows[0].reference.update.side_effect = FailedPrecondition("schedule changed")
+        rows[1].reference.update.side_effect = NotFound("row removed")
+        self.scan.return_value = iter(rows)
+        with patch.object(worker, "_handle_due", side_effect=[False, False, True]) as handle:
+            self.assertEqual(worker.run_due_scenarios(self.client), 1)
+        self.assertEqual(handle.call_count, 3)
+        rows[0].reference.update.assert_called_once()
+        rows[1].reference.update.assert_called_once()
+        rows[2].reference.update.assert_not_called()
 
 
 class ScenarioWorkerTests(TestCase):
