@@ -311,6 +311,35 @@ const estimateChangedRequirementCount = (snapshots) => {
 	return changedCount;
 };
 
+function focusWorkspaceEntry(main) {
+	const path = window.location.pathname;
+	const heading = main.querySelector("h1");
+	const revealHeading = () => {
+		const { top, bottom } = (heading || main).getBoundingClientRect();
+		if (top >= 0 && top < window.innerHeight && (!heading || bottom <= window.innerHeight)) return false;
+		main.scrollIntoView({ block: "start", behavior: "instant" });
+		return true;
+	};
+
+	main.focus({ preventScroll: true });
+	revealHeading();
+	// An in-flight keyboard scroll can finish after the route changes.
+	const entry = new AbortController();
+	const stop = () => entry.abort();
+	const options = { signal: entry.signal };
+	document.addEventListener(
+		"scrollend",
+		() => {
+			if (window.location.pathname !== path || document.activeElement !== main || revealHeading()) stop();
+		},
+		options
+	);
+	main.addEventListener("blur", stop, options);
+	for (const event of ["keydown", "pointerdown", "wheel", "popstate"]) {
+		window.addEventListener(event, stop, { ...options, capture: true, passive: true });
+	}
+}
+
 export default function App() {
 	const [isSavingRequirementReview, setIsSavingRequirementReview] = useState(false);
 	const requirementReviewLock = useRef(false);
@@ -1822,12 +1851,7 @@ export default function App() {
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
 			if (document.activeElement === main) main.blur();
 			if (workspaceEntryPathRef.current === window.location.pathname) {
-				main.focus({ preventScroll: true });
-				const heading = main.querySelector("h1");
-				const { top, bottom } = (heading || main).getBoundingClientRect();
-				if (top < 0 || top >= window.innerHeight || (heading && bottom > window.innerHeight)) {
-					main.scrollIntoView({ block: "start", behavior: "instant" });
-				}
+				focusWorkspaceEntry(main);
 			} else {
 				main.focus();
 			}

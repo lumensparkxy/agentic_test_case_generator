@@ -196,7 +196,28 @@ test.describe("Opt-in project workspaces", () => {
 		await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(400);
 		await page.keyboard.press("Enter");
 		await expect(page.locator("#main-content")).toBeFocused();
-		await expect(heading(page, "Export Test Cases")).toBeInViewport({ ratio: 1, timeout: 5000 });
+		const exportHeading = heading(page, "Export Test Cases");
+		await expect(exportHeading).toBeVisible();
+		await page.evaluate(
+			() =>
+				new Promise((resolve) => {
+					let timer;
+					const waitForScrollToSettle = () => {
+						window.clearTimeout(timer);
+						timer = window.setTimeout(() => {
+							window.removeEventListener("scroll", waitForScrollToSettle);
+							resolve();
+						}, 150);
+					};
+					window.addEventListener("scroll", waitForScrollToSettle);
+					waitForScrollToSettle();
+				})
+		);
+		await expect(exportHeading).toBeInViewport({ ratio: 1, timeout: 5000 });
+
+		const entryScroll = await page.evaluate(() => window.scrollY);
+		await page.keyboard.press("End");
+		await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(entryScroll + 100);
 
 		await page.goBack();
 		await page.getByRole("tab", { name: /Generated Test Cases/ }).press("Enter");
