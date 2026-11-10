@@ -15,10 +15,14 @@ from .approval_continuation import ContinuationOptions, enqueue_approval
 from .audit_service import USAGE_EVENTS_COLLECTION
 from .guidance_service import public_manifest
 from .firestore_repository import get_required_firestore_client
-from .project_draft_admission import extraction_attempt_has_journey
-from .requirement_reconciliation import build_preview, canonical_requirements, digest, reconcile
+from .project_draft_admission import draft_admission_client, extraction_attempt_has_journey
+from .requirement_reconciliation import build_preview, canonical_requirements, comparison_requirement, digest, reconcile
 from .requirement_scope import eligible_generation_scope
 from .workflow_project_service import get_project, DOWNSTREAM_STAGES
+
+
+_RECOVERY_OPERATION = "requirements.recovery"
+_RECOVERY_PREFIX = "recovery_"
 
 
 def _owned(data, actor, *, require_active=True):
@@ -63,6 +67,36 @@ def check_extraction_receipt(data, fingerprint, *, require_pending=True):
         raise HTTPException(409, "This request already saved a requirements preview for different inputs.")
     if require_pending and data["status"] != "pending":
         raise HTTPException(409, "This requirements preview is no longer pending.")
+
+
+def _recovery_pair(doc, project, ids, transaction=None):
+    if len(ids) != 2 or ids[0] == ids[1] or any(not isinstance(sid, str) or not sid or "/" in sid for sid in ids):
+        raise HTTPException(422, "Select two distinct requirements snapshots from this project.")
+    current_id = ((project.get("stage_state") or {}).get("requirements") or {}).get("current_snapshot_id")
+    if ids[1] != current_id:
+        raise HTTPException(409, "Recovery incoming snapshot must be the current requirements baseline.")
+    snapshots = [doc.collection("snapshots").document(sid).get(transaction=transaction).to_dict() for sid in ids]
+    for sid, snapshot in zip(ids, snapshots, strict=True):
+        if (
+            not snapshot
+            or (snapshot.get("snapshot_id"), snapshot.get("stage"), snapshot.get("project_id")) != (sid, "requirements", doc.id)
+            or type(snapshot.get("project_revision")) is not int
+        ):
+            raise HTTPException(422, "Select two existing requirements snapshots from this project.")
+    if snapshots[0]["project_revision"] >= snapshots[1]["project_revision"]:
+        raise HTTPException(422, "Select an older Requirements snapshot as the recovery baseline.")
+    return snapshots
+
+
+def _recovery_basis(doc, actor, revision, ids):
+    basis = digest([actor.sub, revision, ids])
+    return basis, doc.collection("requirement_import_receipts").document(f"recovery-basis-{basis}")
+
+
+def _requirement_facts(active, retired):
+    # Reconstructing the same row can allocate a new internal ID and import receipt.
+    exclude = {"review_status": True, "quality_flags": True, "requirement_uid": True, "sources": {"__all__": {"import_id"}}}
+    return [[row.model_dump(exclude=exclude) for row in sorted(rows, key=lambda row: row.id)] for rows in (active, retired)]
 
 
 def _context_matches_requirements(transaction, doc, project, active):
@@ -315,6 +349,59 @@ class RequirementImportRepository:
         ]
         return sorted(rows, key=lambda r: r.created_at, reverse=True)
 
+    def recover_pending(self, project_id, actor, payload, request_id, snapshots, *, proposed=None):
+        doc = self.project_doc(project_id)
+        ids = [payload.baseline_snapshot_id, payload.incoming_snapshot_id]
+        basis, basis_ref = _recovery_basis(doc, actor, payload.base_project_revision, ids)
+        receipts = doc.collection("requirement_import_receipts")
+        request_ref = receipts.document(f"recovery-request-{digest([actor.sub, request_id])}")
+        imports = doc.collection("requirement_imports")
+
+        @transactional
+        def recover(transaction):
+            project = _owned(doc.get(transaction=transaction).to_dict(), actor)
+            _revision(project, payload.base_project_revision)
+            if _recovery_pair(doc, project, ids, transaction) != snapshots:
+                raise HTTPException(409, "Recovery source evidence changed. Inspect the saved snapshots again.")
+            request = request_ref.get(transaction=transaction).to_dict()
+            if request is not None and request.get("basis") != basis:
+                raise HTTPException(409, "This retry key was used for different recovery sources.")
+            current = basis_ref.get(transaction=transaction).to_dict()
+            receipt = request if request is not None else current
+            if receipt is not None:
+                saved_id = receipt.get("import_id")
+                if receipt.get("basis") != basis or not isinstance(saved_id, str) or not saved_id.startswith(_RECOVERY_PREFIX) or "/" in saved_id:
+                    raise HTTPException(409, "The saved recovery comparison is unavailable.")
+                saved = imports.document(saved_id).get(transaction=transaction).to_dict()
+                if (
+                    not saved
+                    or saved.get("import_id") != saved_id
+                    or saved.get("project_id") != project_id
+                    or saved.get("operation") != _RECOVERY_OPERATION
+                    or saved.get("recovery_basis") != basis
+                    or saved.get("base_project_revision") != payload.base_project_revision
+                    or saved.get("recovery_snapshot_ids") != ids
+                ):
+                    raise HTTPException(409, "The saved recovery comparison is unavailable.")
+                if saved.get("status") == "pending" and current == receipt:
+                    if request is None:
+                        transaction.create(request_ref, receipt)
+                    return saved, True
+                if request is not None or saved.get("status") != "cancelled":
+                    raise HTTPException(409, "This recovery is no longer pending. Prepare a new comparison.")
+            if proposed is None:
+                return None, current is not None
+            preview, retired = proposed
+            saved = _stored_preview(preview, retired, {}, recovery_basis=basis)
+            new = {"basis": basis, "import_id": preview.import_id}
+            transaction.create(imports.document(preview.import_id), saved)
+            transaction.set(basis_ref, new)
+            transaction.create(request_ref, new)
+            return saved, True
+
+        saved, known_basis = recover(self.client.transaction())
+        return (RequirementImportPreview.model_validate(saved) if saved is not None else None), known_basis
+
     def cancel(self, project_id, import_id, actor):
         doc = self.project_doc(project_id)
         ref = doc.collection("requirement_imports").document(import_id)
@@ -366,7 +453,31 @@ class RequirementImportRepository:
                 current, current_retired = canonical_requirements(project_id, self._requirements_snapshot(doc, project, transaction))
                 if preview.current_requirements != current or retired != current_retired:
                     raise journeys.unavailable()
+            recovery_current = None
+            local_recovery = import_id.startswith(_RECOVERY_PREFIX)
+            if local_recovery or preview.operation == _RECOVERY_OPERATION or preview.recovery_snapshot_ids:
+                if preview.import_id != import_id or preview.project_id != project_id:
+                    raise HTTPException(409, "The saved recovery comparison is unavailable.")
+                older, recovery_current = _recovery_pair(doc, project, preview.recovery_snapshot_ids, transaction)
+                if local_recovery:
+                    basis, basis_ref = _recovery_basis(doc, actor, preview.base_project_revision, preview.recovery_snapshot_ids)
+                    if data.get("recovery_basis") != basis or basis_ref.get(transaction=transaction).to_dict() != {"basis": basis, "import_id": import_id}:
+                        raise HTTPException(409, "The saved recovery comparison is unavailable.")
+                original, original_retired = canonical_requirements(project_id, older)
+                current, current_retired = canonical_requirements(project_id, recovery_current)
+                expected = [(f"incoming-{i}", comparison_requirement(row)) for i, row in enumerate(current, 1)]
+                if (
+                    preview.operation != _RECOVERY_OPERATION
+                    or (preview.current_requirements, retired) != (original, original_retired)
+                    or [(row.candidate_id, row.requirement) for row in preview.candidates] != expected
+                ):
+                    raise HTTPException(409, "Recovery source evidence changed. Inspect the saved snapshots again.")
             active, retired, counts = reconcile(preview, decision, retired)
+            if recovery_current is not None:
+                if (active, retired) == (current, current_retired):
+                    raise HTTPException(409, {"code": "recovery_no_changes", "message": "The reviewed recovery matches the current Requirements."})
+                if _requirement_facts(active, retired) == _requirement_facts(current, current_retired):
+                    budget = journeys.budget_for_artifact(transaction, doc, actor.sub, "requirements", recovery_current["snapshot_id"])
             payload = {
                 **data.get("workflow_payload", {}),
                 "requirements": [r.model_dump(mode="json") for r in active],
@@ -611,34 +722,45 @@ def recompare_import(project_id, import_id, actor):
     return result
 
 
-def prepare_recovery(project_id, actor, payload):
+def prepare_recovery(project_id, actor, payload, *, request_id=None, reuse_legacy_pending=False):
     repo = repository()
-    repo.baseline(project_id, actor, payload.base_project_revision)
+    project, _ = repo.baseline(project_id, actor, payload.base_project_revision)
     doc = repo.project_doc(project_id)
-    snapshots = [doc.collection("snapshots").document(sid).get().to_dict() for sid in (payload.baseline_snapshot_id, payload.incoming_snapshot_id)]
-    if any(not s or s.get("stage") != "requirements" for s in snapshots):
-        raise HTTPException(422, "Select two existing requirements snapshots from this project.")
-    # Restrict recovery to the observed replacement, so a later baseline cannot be silently dropped.
-    _, current_snapshot = repo.baseline(project_id, actor, payload.base_project_revision)
-    if not current_snapshot or current_snapshot["snapshot_id"] != payload.incoming_snapshot_id:
-        raise HTTPException(409, "Recovery incoming snapshot must be the current requirements baseline.")
+    ids = [payload.baseline_snapshot_id, payload.incoming_snapshot_id]
+    snapshots = _recovery_pair(doc, project, ids)
+    request_id = str(uuid4()) if request_id is None else request_id
+    if not request_id.strip() or len(request_id) > 160:
+        raise HTTPException(422, "X-Request-ID must be nonblank and at most 160 characters.")
+    pending, known_basis = repo.recover_pending(project_id, actor, payload, request_id, snapshots)
+    if pending is not None:
+        return pending
+    local = known_basis or draft_admission_client(repo.client) is not None
+    if not local and reuse_legacy_pending:
+        for previous in repo.list_pending(project_id, actor):
+            if previous.base_project_revision == payload.base_project_revision and previous.recovery_snapshot_ids == ids:
+                return previous
     current, retired = canonical_requirements(project_id, snapshots[0])
     incoming, _ = canonical_requirements(project_id, snapshots[1])
     _bounded({"current": [r.model_dump(mode="json") for r in current], "incoming": [r.model_dump(mode="json") for r in incoming]})
-    matches, failed = suggest_matches(current, incoming)
+    matches, failed = ({}, bool(current and incoming)) if local else suggest_matches(current, incoming)
     preview = build_preview(
         project_id,
         payload.base_project_revision,
         current,
         incoming,
         snapshots[1]["payload"].get("source_name") or "Recovered import",
-        "requirements.recovery",
-        str(uuid4()),
+        _RECOVERY_OPERATION,
+        f"{_RECOVERY_PREFIX}{uuid4().hex}" if local else str(uuid4()),
         matches,
         failed,
     )
-    preview.recovery_snapshot_ids = [payload.baseline_snapshot_id, payload.incoming_snapshot_id]
+    preview.recovery_snapshot_ids = ids
+    if local and failed:
+        preview.warnings[0] = "Compared the saved snapshots without model matching. Review unmatched requirements manually."
     preview.warnings.append("Recovery restores the selected saved baseline and merges the incoming snapshot. Review the complete result before applying.")
+    if local:
+        saved, _ = repo.recover_pending(project_id, actor, payload, request_id, snapshots, proposed=(preview, retired))
+        return saved
     return repo.save(preview, actor, retired, {})
 
 

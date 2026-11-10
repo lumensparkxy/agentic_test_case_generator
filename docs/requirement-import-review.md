@@ -111,12 +111,26 @@ Use the repo-local virtual environment and existing administrative Firestore cre
   --expected-revision CURRENT_REVISION
 ```
 
-The default is read-only. Add `--prepare` to save a pending recovery comparison and
-obtain semantic suggestions; this never applies the recovery. Open Requirements,
-choose **Review import**, inspect the full proposed result, and use **Apply reviewed
-changes**. Only the selected current replacement is eligible; a changed revision
-requires fresh inspection. Original baseline IDs/approvals are retained and new IDs
-are allocated for unrelated incoming requirements. Historical snapshots remain intact.
+The default is read-only. Add `--prepare` to save a pending comparison. Open
+Requirements, choose **Review import**, inspect the proposed result, and select
+**Apply reviewed changes** to commit it. Select a distinct, older baseline and
+the current replacement. A changed revision requires fresh inspection.
+Original baseline IDs and approvals are retained. Unrelated incoming requirements
+receive new IDs and the historical snapshots remain intact.
+
+In the opted-in local demo, preparation compares the saved snapshots using
+exact text, source references and similar wording. Review unmatched rows manually.
+Requests for the same snapshot pair and revision share one pending comparison.
+Use `--request-id` with `--prepare` to retry a lost response with the same identity.
+After explicitly cancelling the preview, use a fresh request identity to prepare
+again. Existing local recovery pairs retain their receipts and deterministic
+preparation when the rollout flag is off.
+Outside this path, preparation uses the existing semantic matching workflow.
+
+An Apply that matches the current Requirements leaves them unchanged.
+Restoring review decisions or rebuilding the same source rows keeps their
+current provider budget. A genuine change to the saved sources enters the
+existing prepared-source flow after explicit scope approval.
 
 ## Original identifiers and verified document quotations
 

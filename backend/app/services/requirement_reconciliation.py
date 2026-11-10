@@ -81,6 +81,11 @@ def canonical_requirements(project_id, snapshot):
     return tuple(result)
 
 
+def comparison_requirement(req):
+    # Source rows cannot establish canonical identity or version for a comparison candidate.
+    return req.model_copy(update={"requirement_uid": None, "content_version": 1, "lifecycle_status": "active"})
+
+
 def compare_requirements(current, incoming, semantic_matches=None, semantic_failed=False, source_name="Imported requirements"):
     candidates = []
     semantic_matches = semantic_matches or {}
@@ -144,11 +149,14 @@ def compare_requirements(current, incoming, semantic_matches=None, semantic_fail
                 if semantic_failed and current
                 else ("new", None, "No matching requirement found; add to the project.")
             )
-        # Never accept model-extracted identity, approval or version fields as canonical.
-        req = req.model_copy(update={"requirement_uid": None, "content_version": 1, "lifecycle_status": "active"})
         candidates.append(
             ImportCandidate(
-                candidate_id=cid, requirement=req, classification=kind, target_requirement_uid=target, suggestions=list(suggestions.values()), reason=reason
+                candidate_id=cid,
+                requirement=comparison_requirement(req),
+                classification=kind,
+                target_requirement_uid=target,
+                suggestions=list(suggestions.values()),
+                reason=reason,
             )
         )
     texts = Counter(normalized(c.requirement.text) for c in candidates)

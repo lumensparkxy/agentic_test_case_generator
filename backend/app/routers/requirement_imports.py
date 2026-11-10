@@ -27,8 +27,8 @@ async def pending_imports(project_id: str, actor: AuthUser = Depends(get_current
 
 
 @router.post("/projects/{project_id}/requirement-imports/recovery", response_model=RequirementImportPreview)
-async def recover_import(project_id: str, payload: ImportRecoveryInput, actor: AuthUser = Depends(get_current_user)):
-    return await run_in_threadpool(prepare_recovery, project_id, actor, payload)
+async def recover_import(project_id: str, payload: ImportRecoveryInput, request: Request, actor: AuthUser = Depends(get_current_user)):
+    return await run_in_threadpool(prepare_recovery, project_id, actor, payload, request_id=request.state.request_id)
 
 
 @router.get("/projects/{project_id}/requirement-imports/extraction-status", response_model=RequirementExtractionStatus)

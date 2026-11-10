@@ -22,25 +22,21 @@ def main():
     parser.add_argument("--baseline-snapshot-id", required=True)
     parser.add_argument("--incoming-snapshot-id", required=True)
     parser.add_argument("--expected-revision", type=int, required=True)
-    parser.add_argument("--prepare", action="store_true", help="Save a pending comparison, using semantic suggestions. Does not apply it.")
+    parser.add_argument("--prepare", action="store_true", help="Save a pending comparison for review. Does not apply it.")
+    parser.add_argument("--request-id", help="Reuse this request ID when retrying the same --prepare command.")
     args = parser.parse_args()
+    if args.request_id is not None and not args.prepare:
+        parser.error("--request-id requires --prepare")
     repo = repository()
     project = repo.project_doc(args.project_id).get().to_dict()
     if not project:
         parser.error("Project not found")
     actor = AuthUser(sub=project["owner_user_id"], name="Project owner")
-    repo.baseline(args.project_id, actor, args.expected_revision)
-    payload = ImportRecoveryInput(
-        base_project_revision=args.expected_revision, baseline_snapshot_id=args.baseline_snapshot_id, incoming_snapshot_id=args.incoming_snapshot_id
-    )
     if args.prepare:
-        # Reusing a still-pending recovery avoids duplicates after an uncertain CLI response.
-        existing = [
-            p
-            for p in repo.list_pending(args.project_id, actor)
-            if p.base_project_revision == args.expected_revision and p.recovery_snapshot_ids == [args.baseline_snapshot_id, args.incoming_snapshot_id]
-        ]
-        preview = existing[0] if existing else prepare_recovery(args.project_id, actor, payload)
+        payload = ImportRecoveryInput(
+            base_project_revision=args.expected_revision, baseline_snapshot_id=args.baseline_snapshot_id, incoming_snapshot_id=args.incoming_snapshot_id
+        )
+        preview = prepare_recovery(args.project_id, actor, payload, request_id=args.request_id, reuse_legacy_pending=True)
         print(
             json.dumps(
                 {
@@ -55,6 +51,7 @@ def main():
             )
         )
     else:
+        repo.baseline(args.project_id, actor, args.expected_revision)
         rows = []
         for sid in (args.baseline_snapshot_id, args.incoming_snapshot_id):
             snapshot = repo.project_doc(args.project_id).collection("snapshots").document(sid).get().to_dict()

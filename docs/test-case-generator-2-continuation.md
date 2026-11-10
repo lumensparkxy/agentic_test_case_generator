@@ -298,8 +298,16 @@ provider charges.
 This applies to the opt-in named journey from an enrolled file or connector
 preview and its exact suite successors. Existing file records without an
 origin field remain readable as file intake. Legacy plans and comparisons
-without enrollment, standalone feedback refinement, historical snapshot
-recovery, and Project Sync continue under their existing stage policies.
+without enrollment, standalone feedback refinement, and Project Sync continue
+under their existing stage policies.
+
+Historical snapshot recovery is a separate correction. In the opted-in local
+demo, preparation reads two exact committed Requirements snapshots and saves
+one pending comparison without a provider call. The original request can
+recover it through the API or CLI. An unchanged Apply cannot create another
+Requirements snapshot or planning allocation. Restoring decisions or rebuilding
+the same source rows retains the current budget. A genuinely changed source
+stays in the existing prepared-source flow and still requires explicit scope approval.
 
 ### Shared draft admission and assessment recovery
 

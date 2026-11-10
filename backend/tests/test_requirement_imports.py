@@ -504,6 +504,156 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(rows[0]["review_status"], "Approved")
         self.assertEqual(rows[-1]["id"], "REQ-010")
 
+    def test_local_historical_recovery_replays_pending_and_requires_new_request_after_cancel(self):
+        self.enable_extraction_admission()
+        client, _, _ = self.extraction_client()
+        project = f"qa_projects/{PID}"
+        self.store[f"{project}/snapshots/older"] = snapshot([requirement(1)], "older", 1)
+        self.store[f"{project}/snapshots/another"] = snapshot([requirement(2)], "another", 1)
+        root = f"/projects/{PID}/requirement-imports"
+        body = {"base_project_revision": 7, "baseline_snapshot_id": "older", "incoming_snapshot_id": "original"}
+        first_key = {"X-Request-ID": "historical-first"}
+        alias_key = {"X-Request-ID": "historical-alias"}
+        fresh_key = {"X-Request-ID": "historical-fresh"}
+
+        with patch.object(service, "suggest_matches", side_effect=AssertionError("Local recovery must not contact a model")) as matcher:
+            before = deepcopy(self.store)
+            self.client.fail_on_create_segment = "/requirement_import_receipts/recovery-request-"
+            with self.assertRaisesRegex(RuntimeError, "synthetic create failure"):
+                client.post(f"{root}/recovery", json=body, headers=first_key)
+            self.client.fail_on_create_segment = None
+            self.assertEqual(self.store, before)
+            same = client.post(f"{root}/recovery", json={**body, "baseline_snapshot_id": "original"})
+            self.assertEqual(same.status_code, 422)
+
+            first = client.post(f"{root}/recovery", json=body, headers=first_key)
+            self.assertEqual(first.status_code, 200, first.text)
+            first_id = first.json()["import_id"]
+            self.assertIn("Compared the saved snapshots without model matching. Review unmatched requirements manually.", first.json()["warnings"])
+            self.assertEqual(client.post(f"{root}/recovery", json=body, headers=alias_key).json(), first.json())
+            changed = client.post(f"{root}/recovery", json={**body, "baseline_snapshot_id": "another"}, headers=first_key)
+            self.assertEqual(changed.status_code, 409)
+            with patch.dict(os.environ, {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
+                self.assertEqual(client.post(f"{root}/recovery", json=body, headers=first_key).json(), first.json())
+            self.assertEqual(client.delete(f"{root}/{first_id}").status_code, 204)
+            for key in (first_key, alias_key):
+                self.assertEqual(client.post(f"{root}/recovery", json=body, headers=key).status_code, 409)
+
+            with patch.dict(os.environ, {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}):
+                fresh = client.post(f"{root}/recovery", json=body, headers=fresh_key)
+            self.assertEqual(fresh.status_code, 200, fresh.text)
+            self.assertNotEqual(fresh.json()["import_id"], first_id)
+            self.assertEqual(client.post(f"{root}/recovery", json=body, headers=fresh_key).json(), fresh.json())
+            pending = [row for row in client.get(root).json() if row["recovery_snapshot_ids"]]
+            self.assertEqual(pending, [fresh.json()])
+            self.store[project]["current_revision"] = 8
+            self.assertEqual(client.post(f"{root}/recovery", json=body, headers=fresh_key).status_code, 409)
+        matcher.assert_not_called()
+        self.assertEqual(self._rows("billing_consumption"), [])
+        self.assertEqual(self._rows("usage_events"), [])
+
+    def test_historical_noop_and_review_only_restore_do_not_reset_the_current_budget(self):
+        self.enable_extraction_admission()
+        client, _, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+
+        def extract(*_args, **_kwargs):
+            _model_reservation.get()()
+            return workflow
+
+        with patch.object(requirement_routes, "extract_requirements", side_effect=extract):
+            staged = self._extract(client, "historical-enrolled-intake")
+        self.assertEqual(staged.status_code, 200, staged.text)
+        preview = RequirementImportPreview.model_validate(staged.json())
+        journey_id = self.repo.read(PID, preview.import_id, ACTOR)["extraction"][journeys.BUDGET_FIELD]
+        budget_path = f"{project}/provider_journeys/{journey_id}"
+        applied = self.repo.apply(PID, preview.import_id, ACTOR, choices(preview), "history-intake-apply")
+        original = applied.current_snapshots["requirements"]
+        selected = original.payload["requirements"][-1]
+
+        def review(revision, status, key):
+            return self.repo.review(
+                PID,
+                ACTOR,
+                RequirementReviewsInput(
+                    base_project_revision=revision,
+                    idempotency_key=key,
+                    reviews=[{"requirement_uid": selected["requirement_uid"], "review_status": status, "quality_flags": selected["quality_flags"]}],
+                ),
+                key,
+            )
+
+        def recovery(project_detail, key):
+            new = project_detail.current_snapshots["requirements"]
+            prepared = service.prepare_recovery(
+                PID,
+                ACTOR,
+                ImportRecoveryInput(
+                    base_project_revision=project_detail.current_revision,
+                    baseline_snapshot_id=original.snapshot_id,
+                    incoming_snapshot_id=new.snapshot_id,
+                ),
+                request_id=key,
+            )
+            uid_by_text = {row.text: row.requirement_uid for row in prepared.current_requirements}
+            decisions = ImportApplyInput(
+                base_project_revision=prepared.base_project_revision,
+                idempotency_key=f"{key}-apply",
+                decisions=[
+                    {"candidate_id": row.candidate_id, "action": "keep", "target_requirement_uid": uid_by_text[row.requirement.text]}
+                    for row in prepared.candidates
+                ],
+            )
+            return prepared, decisions
+
+        same = review(applied.current_revision, selected["review_status"], "historical-same-review")
+        unchanged, keep = recovery(same, "historical-noop")
+        path = f"{project}/requirement_imports/{unchanged.import_id}"
+        self.store[path]["import_id"] = "different-import"
+        with self.assertRaises(HTTPException) as forged:
+            self.repo.apply(PID, unchanged.import_id, ACTOR, keep, "historical-noop-apply")
+        self.assertEqual(forged.exception.status_code, 409)
+        self.store[path]["import_id"] = unchanged.import_id
+        before = deepcopy(self.store)
+        with self.assertRaises(HTTPException) as refused:
+            self.repo.apply(PID, unchanged.import_id, ACTOR, keep, "historical-noop-apply")
+        self.assertEqual((refused.exception.status_code, refused.exception.detail["code"]), (409, "recovery_no_changes"))
+        self.assertEqual(self.store, before)
+
+        approved = review(same.current_revision, "Approved", "historical-changed-review")
+        restored, apply = recovery(approved, "historical-restore-review")
+        final = self.repo.apply(PID, restored.import_id, ACTOR, apply, "historical-restore-review-apply")
+        snapshot_id = final.current_snapshots["requirements"].snapshot_id
+        self.assertEqual(self.store[f"{project}/snapshots/{snapshot_id}"][journeys.BUDGET_FIELD], journey_id)
+        self.assertEqual(self.store[budget_path]["requirements_snapshot_id"], snapshot_id)
+        self.assertEqual(self.store[budget_path]["requests_reserved"], 16)
+        self.assertEqual(final.current_snapshots["requirements"].payload["requirements"][-1]["review_status"], selected["review_status"])
+        rebuilt = service.prepare_recovery(
+            PID,
+            ACTOR,
+            ImportRecoveryInput(base_project_revision=final.current_revision, baseline_snapshot_id="original", incoming_snapshot_id=snapshot_id),
+            request_id="historical-rebuild-identical-sources",
+        )
+        known = {row.text: row.requirement_uid for row in rebuilt.current_requirements}
+        decisions = ImportApplyInput(
+            base_project_revision=rebuilt.base_project_revision,
+            idempotency_key="historical-rebuilt-apply",
+            decisions=[
+                {
+                    "candidate_id": row.candidate_id,
+                    "action": "keep" if row.requirement.text in known else "add",
+                    "target_requirement_uid": known.get(row.requirement.text),
+                }
+                for row in rebuilt.candidates
+            ],
+        )
+        identical_sources = self.repo.apply(PID, rebuilt.import_id, ACTOR, decisions, "historical-rebuilt-apply")
+        rebuilt_id = identical_sources.current_snapshots["requirements"].snapshot_id
+        self.assertEqual(self.store[f"{project}/snapshots/{rebuilt_id}"][journeys.BUDGET_FIELD], journey_id)
+        self.assertEqual(self.store[budget_path]["requirements_snapshot_id"], rebuilt_id)
+        self.assertEqual(self.store[budget_path]["requests_reserved"], 16)
+        self.assertEqual(len(self._rows("billing_consumption")), 1)
+
     def test_review_is_durable_and_invalidates_pending_preview(self):
         payload = RequirementReviewsInput(
             base_project_revision=7,
