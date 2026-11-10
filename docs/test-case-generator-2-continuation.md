@@ -665,10 +665,13 @@ open when the old response arrived in the separate mocked test.
 
 P8 records the [local release and rollback handoff](test-case-generator-2-release.md)
 under [#493](https://github.com/lumensparkxy/agentic_test_case_generator/issues/493).
-The latest replay at `6de863c` covers the template and browser compiler
-changes. It passed the frozen seven-action Chromium journey and both local
-rollback rehearsals. The release matrix records exact evidence and the
-remaining acceptance gates.
+Both local rollback rehearsals passed on `61b7d66`. The flag-off client
+retained all twelve public digests and the original evidence on both aliases.
+The flag-off server replayed the exact eleven-case file and refused fresh
+admission. The full backend suite passed 1,075 tests including local Chromium
+target binding. The current seven-action engineering journey, the headed
+facilitator dry preflights, the controlled browser runs, and the open
+independent study remain separate in the release record.
 
 P6 blind review preparation under
 [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495)
