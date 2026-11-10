@@ -44,7 +44,10 @@ const reports = {
 			execution_status: "blocked",
 			execution_run_ids: ["original-browser-run"],
 			requirement_ids: ["REQ-CAPACITY"],
-			case_versions: [{ case_id: caseId, case_version_id: caseVersion, case_version_number: 1 }],
+			case_versions: [
+				{ case_id: "TC-AVAILABILITY", case_version_id: "original-availability-case-version", case_version_number: 1 },
+				{ case_id: caseId, case_version_id: caseVersion, case_version_number: 1 },
+			],
 			design_delivery: {
 				schema_version: 1,
 				delivery_kind: "reviewed_design",
@@ -225,6 +228,45 @@ test("opens the exact file from Reports and retains its original case after a ne
 	await expect(surface(page)).toContainText("Stale");
 	await page.goto(pathFor(priorReport, enabled ? "reports" : "deliver"));
 	await expect(surface(page)).toContainText(priorReport);
+	expect(api.writes).toEqual([]);
+	expect(api.errors).toEqual([]);
+});
+
+test("returns from an original case to the same saved report and case link", { tag: "@p1" }, async ({ page }, testInfo) => {
+	await page.setViewportSize({ width: 1366, height: 900 });
+	const api = await setup(page);
+	const reportPath = pathFor(priorReport, enabled ? "reports" : "deliver");
+	const link = surface(page).getByRole("link", { name: `Open saved case ${caseId}`, exact: true });
+	const savedCase = page.getByRole("region", { name: "Saved test case", exact: true });
+	const backToReport = savedCase.getByRole("button", { name: "Back to saved report", exact: true });
+	await page.goto(reportPath);
+	await surface(page).getByText("Original saved cases", { exact: true }).press("Enter");
+	await link.press("Enter");
+	const caseUrl = page.url();
+	await expect(savedCase).toContainText(oldAssertion);
+	await page.goBack();
+	await expect(page).toHaveURL(reportPath);
+	await expect(link).toBeFocused({ timeout: 4000 });
+	await expect(link).toBeInViewport();
+	await page.goForward();
+	await expect(page).toHaveURL(caseUrl);
+	await expect(savedCase).toContainText(oldAssertion);
+	await page.reload();
+	await expect(savedCase).toContainText(oldAssertion);
+	await expect(backToReport).toBeVisible();
+	await page.screenshot({ path: testInfo.outputPath("original-case-return-action.png") });
+	await backToReport.press("Enter");
+	await expect(page).toHaveURL(reportPath);
+	await expect(surface(page)).toContainText(priorReport);
+	await expect(link).toBeFocused();
+	await expect(link).toBeInViewport();
+	await expect(surface(page).getByRole("link", { name: "Open saved case TC-AVAILABILITY", exact: true })).toBeVisible();
+	await page.screenshot({ path: testInfo.outputPath("original-report-restored-case.png") });
+	await page.goto("/");
+	await page.goto(caseUrl);
+	await expect(savedCase).toContainText(oldAssertion);
+	await expect(backToReport).toHaveCount(0);
+	expect(api.reads).toEqual([priorReport, priorReport, priorReport]);
 	expect(api.writes).toEqual([]);
 	expect(api.errors).toEqual([]);
 });

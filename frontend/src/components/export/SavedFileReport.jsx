@@ -30,7 +30,21 @@ function ReportFacts({ rows }) {
 	);
 }
 
-function SavedExportEvidence({ evidence, projectId, navigate }) {
+function SavedExportEvidence({ evidence, projectId, returnCaseId, openCase }) {
+	const casesDisclosureRef = useRef(null);
+	const returnCaseRef = useRef(null);
+	useLayoutEffect(() => {
+		const link = returnCaseRef.current;
+		if (!link) return;
+		casesDisclosureRef.current.open = true;
+		link.focus({ preventScroll: true });
+		// Let native history scroll restoration finish before revealing the focused case.
+		const frame = window.requestAnimationFrame(() => {
+			if (document.activeElement === link) link.scrollIntoView({ block: "nearest", behavior: "instant" });
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [returnCaseId]);
+
 	const design = evidence.design_delivery;
 	const rows = [
 		["Exported", <RecordedTime value={evidence.exported_at} />],
@@ -79,12 +93,17 @@ function SavedExportEvidence({ evidence, projectId, navigate }) {
 				</Disclosure>
 			)}
 			{cases.length > 0 && (
-				<Disclosure>
+				<Disclosure ref={casesDisclosureRef}>
 					<summary>Original saved cases</summary>
 					<ul className="saved-file-report-cases">
 						{cases.map(({ case_id: caseId, case_version_id: versionId, case_version_number: version }) => (
 							<li key={caseId}>
-								<RouteLink to={buildSavedCasePath(projectId, suiteId, caseId)} navigate={navigate}>
+								<RouteLink
+									ref={caseId === returnCaseId ? returnCaseRef : null}
+									data-saved-report-case={caseId}
+									to={buildSavedCasePath(projectId, suiteId, caseId)}
+									navigate={(path) => openCase(path, suiteId, caseId)}
+								>
 									Open saved case {caseId}
 								</RouteLink>
 								<span>
@@ -100,7 +119,7 @@ function SavedExportEvidence({ evidence, projectId, navigate }) {
 	);
 }
 
-export default function SavedFileReport({ projectId, reportId, request, navigate }) {
+export default function SavedFileReport({ accountId, projectId, reportId, location, request, navigate }) {
 	const headingRef = useRef(null);
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
@@ -124,6 +143,23 @@ export default function SavedFileReport({ projectId, reportId, request, navigate
 	}, [projectId, reportId, attempt]);
 
 	const report = result?.report;
+	const reportCase = location.state?.reportCase;
+	const returnCaseId =
+		accountId &&
+		reportCase?.accountId === accountId &&
+		reportCase.projectId === projectId &&
+		reportCase.reportId === reportId &&
+		reportCase.suiteId === report?.evidence?.suite_snapshot_id
+			? reportCase.caseId
+			: "";
+	const openCase = (path, suiteId, caseId) => {
+		const reportCase = { accountId, projectId, reportId, suiteId, caseId };
+		navigate(`${location.pathname}${location.search}${location.hash}`, {
+			replace: true,
+			state: { ...location.state, reportCase },
+		});
+		navigate(path, { state: { reportCase } });
+	};
 	return (
 		<Surface className="panel saved-file-report" aria-labelledby="saved-file-report-heading">
 			<header className="saved-file-report-header">
@@ -172,7 +208,7 @@ export default function SavedFileReport({ projectId, reportId, request, navigate
 						]}
 					/>
 					{report.evidence ? (
-						<SavedExportEvidence evidence={report.evidence} projectId={projectId} navigate={navigate} />
+						<SavedExportEvidence evidence={report.evidence} projectId={projectId} returnCaseId={returnCaseId} openCase={openCase} />
 					) : (
 						<p className="helper-text">Detailed saved evidence is unavailable for this file.</p>
 					)}

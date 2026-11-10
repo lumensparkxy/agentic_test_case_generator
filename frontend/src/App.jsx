@@ -985,6 +985,14 @@ export default function App() {
 	useEffect(() => {
 		if (!findingCitationReturn) setPendingFindingCitation(openedFindingCitation);
 	}, [openedFindingCitation, findingCitationReturn]);
+	const reportCase = location.state?.reportCase;
+	const openedReportCase =
+		viewingSavedCase &&
+		currentUser?.sub &&
+		reportCase?.accountId === currentUser.sub &&
+		reportCase.projectId === route.projectId &&
+		reportCase.suiteId === savedCaseLink.snapshotId &&
+		reportCase.caseId === savedCaseLink.caseId;
 	const activeGenerateResultTab =
 		findingCitationReturn || viewingQueuedFindings
 			? "improve"
@@ -1988,7 +1996,7 @@ export default function App() {
 		const caseFocus = keepPriorityCaseFocus.current && active?.closest("#selected-test-case");
 		const evidenceFocus =
 			active?.matches(
-				"[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-run-case-result], [data-finding-citation], [data-review-findings-entry]"
+				"[id^='saved-case-step-'], #quality-feedback-heading, #saved-file-report-heading, [data-saved-report-case], [data-run-case-result], [data-finding-citation], [data-review-findings-entry]"
 			) && main.contains(active);
 		const refreshDialogFocus = document.activeElement?.closest(".scoped-scenario-refresh-dialog");
 		if (!evidenceFocus && !refreshDialogFocus && (!caseFocus || !main.contains(caseFocus))) {
@@ -6705,6 +6713,7 @@ export default function App() {
 											{...savedCaseLink}
 											savedStep={readSavedCaseStep(location.hash)}
 											onBackToFinding={openedFindingCitation ? back : undefined}
+											onBackToFileReport={openedReportCase ? back : undefined}
 											request={apiRequest}
 											navigate={navigate}
 										/>

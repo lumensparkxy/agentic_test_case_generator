@@ -5,7 +5,16 @@ import { buildProjectPath, PROJECT_DESTINATIONS } from "../../app/workflowRoutes
 import { Button, Link } from "../ui/controls";
 import GeneratedTestCasesView from "./GeneratedTestCasesView";
 
-export default function LinkedTestCaseView({ projectId, snapshotId, caseId, savedStep, request, navigate, onBackToFinding }) {
+export default function LinkedTestCaseView({
+	projectId,
+	snapshotId,
+	caseId,
+	savedStep,
+	request,
+	navigate,
+	onBackToFinding,
+	onBackToFileReport,
+}) {
 	const [result, setResult] = useState(null);
 	const [attempt, setAttempt] = useState(0);
 	const headingRef = useRef(null);
@@ -42,6 +51,11 @@ export default function LinkedTestCaseView({ projectId, snapshotId, caseId, save
 					{onBackToFinding && (
 						<Button variant="secondary" size="compact" onClick={onBackToFinding}>
 							Back to finding
+						</Button>
+					)}
+					{onBackToFileReport && (
+						<Button variant="secondary" size="compact" onClick={onBackToFileReport}>
+							Back to saved report
 						</Button>
 					)}
 					<Link

@@ -45,8 +45,10 @@ export default function ExportPanel({
 		return (
 			<SavedFileReport
 				key={JSON.stringify([accountId, projectId, savedFileReportLink.reportId])}
+				accountId={accountId}
 				projectId={projectId}
 				reportId={savedFileReportLink.reportId}
+				location={location}
 				request={request}
 				navigate={navigate}
 			/>
