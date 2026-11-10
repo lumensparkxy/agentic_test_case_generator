@@ -857,7 +857,9 @@ class ImportPersistenceTests(unittest.TestCase):
                 attempt = running["attempt"]
                 self.assertTrue(running["blocked"])
                 self.assertEqual((attempt["state"], attempt["source_snapshot_id"]), ("running", "original"))
-                self.assertEqual(self._extract(client, "overlapping-demo-intake").status_code, 409)
+                duplicate = self._extract(client, "overlapping-demo-intake")
+                self.assertEqual(duplicate.status_code, 409)
+                self.assertEqual(duplicate.json()["detail"]["code"], "project_draft_busy")
                 self.assertEqual(self._extract(client, "overlapping-demo-intake", content=b"Changed file").status_code, 409)
                 with self.assertRaises(HTTPException) as overlapping_review:
                     admission.claim_draft_attempt(

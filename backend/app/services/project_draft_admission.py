@@ -833,6 +833,10 @@ def claim_draft_attempt(
                 if intake:
                     return DraftAttemptClaim(client, canonical, attempt["fence"], result_import_id=result)
                 return DraftAttemptClaim(client, canonical, attempt["fence"], result)
+            if intake and attempt.get("state") == "running":
+                current_lease = _read(transaction, lease_doc) or {}
+                if _same_holder(current_lease, attempt) and _projected_state(project, attempt, current_lease, _utcnow())[0] == "running":
+                    raise _conflict("project_draft_busy", "This requirement extraction request is already running. Check its current status.")
             if attempt.get("state") in ("interrupted", "cancelled") or attempt.get("provider_requests_reserved"):
                 raise _conflict(
                     "project_draft_recovery_required", "This request was interrupted or cancelled. Check its saved status before starting new work."
