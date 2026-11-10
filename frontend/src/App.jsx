@@ -7071,6 +7071,7 @@ export default function App() {
 											authActionDisabled={authActionDisabled}
 											previewExecution={previewExecution}
 											runApprovedExecution={runApprovedExecution}
+											runAfterCandidates={PROJECT_WORKSPACES_V2}
 											goPrev={goPrev}
 											goNext={goNext}
 										/>

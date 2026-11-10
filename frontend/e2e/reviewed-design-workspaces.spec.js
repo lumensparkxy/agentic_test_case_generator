@@ -616,7 +616,7 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 					status: "passed",
 					preview: previewResponse(),
 					summary: { passed: 1, failed: 0, invalid: 0, skipped: 0 },
-					results: [{ id: "receipt-result", source_test_case_id: receipt.source_test_case_id, title: receipt.title, status: "passed" }],
+					results: [{ id: "submit-result", source_test_case_id: submit.source_test_case_id, title: submit.title, status: "passed" }],
 				},
 			});
 		});
@@ -625,7 +625,8 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await page.goto(`${root}/deliver/browser-tests`);
 		const preview = page.getByRole("button", { name: "Preview Execution", exact: true });
 		const runNone = page.getByRole("button", { name: "Run 0 Candidates", exact: true });
-		const runOne = page.getByRole("button", { name: "Run 1 Candidate", exact: true });
+		const executable = page.getByRole("region", { name: "Executable candidates", exact: true });
+		const runOne = executable.getByRole("button", { name: "Run 1 Candidate", exact: true });
 		const selectReceipt = page.getByRole("checkbox", { name: `Select ${receipt.source_test_case_id} for execution`, exact: true });
 		const selectSubmit = page.getByRole("checkbox", { name: `Select ${submit.source_test_case_id} for execution`, exact: true });
 		const selectAll = page.getByRole("checkbox", { name: "Select all executable candidates", exact: true });
@@ -636,7 +637,7 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 			await expect(selectReceipt).not.toBeChecked();
 			await expect(selectSubmit).not.toBeChecked();
 			await expect(selectAll).not.toBeChecked();
-			await expect(runNone).toBeDisabled();
+			await expect(executable.getByRole("button", { name: "Run 0 Candidates", exact: true })).toBeDisabled();
 			await expect(page.getByText("Select eligible candidates in Execution Preview to enable Run.", { exact: true })).toBeVisible();
 		};
 		await expect(runNone).toBeDisabled();
@@ -648,28 +649,35 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		const previewPost = "POST /automation/execution/preview";
 		expect(writes).toEqual([previewPost]);
 
-		await selectReceipt.press("Space");
-		await expect(selectReceipt).toBeChecked();
-		await expect(selectSubmit).not.toBeChecked();
+		await selectSubmit.press("Space");
+		await expect(selectSubmit).toBeChecked();
+		await expect(selectReceipt).not.toBeChecked();
 		await expect(runOne).toBeEnabled();
 		const sections = page.getByRole("navigation", { name: "Workspace sections", exact: true });
 		await sections.getByRole("link", { name: "Export", exact: true }).press("Enter");
 		await expect(page).toHaveURL(`${root}/deliver`);
 		await sections.getByRole("link", { name: "Browser tests", exact: true }).press("Enter");
 		await expect(page).toHaveURL(`${root}/deliver/browser-tests`);
-		await expect(selectReceipt).toBeChecked();
-		await expect(selectSubmit).not.toBeChecked();
+		await expect(selectSubmit).toBeChecked();
+		await expect(selectReceipt).not.toBeChecked();
 		await expect(runOne).toBeEnabled();
+		await expect(page.getByRole("button", { name: /^Run \d+ Candidates?$/ })).toHaveCount(1);
+		await selectSubmit.focus();
+		await page.keyboard.press("Tab");
+		await expect(runOne).toBeFocused();
+		await expect(runOne).toBeInViewport({ ratio: 1 });
+		await page.screenshot({ path: testInfo.outputPath("browser-run-after-candidates.png") });
 		expect(writes).toEqual([previewPost]);
+		expect(selections).toEqual([]);
 
-		await runOne.press("Enter");
+		await page.keyboard.press("Enter");
 		await expect(page.getByText("Execution passed: 1 passed, 0 failed, 0 invalid.", { exact: true })).toBeVisible();
-		await expect(selectReceipt).toBeChecked();
-		expect(selections).toEqual([[receipt.id]]);
+		await expect(selectSubmit).toBeChecked();
+		expect(selections).toEqual([[submit.id]]);
 		await expect(preview).toBeEnabled();
 		await preview.press("Enter");
 		await expectUnselectedPreview();
-		expect(selections).toEqual([[receipt.id]]);
+		expect(selections).toEqual([[submit.id]]);
 		expect(writes).toEqual([previewPost, "POST /automation/execution/run", previewPost]);
 		expect(errors).toEqual([]);
 	});

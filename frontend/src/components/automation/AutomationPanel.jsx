@@ -262,6 +262,7 @@ export default function AutomationPanel({
 	authActionDisabled,
 	previewExecution,
 	runApprovedExecution,
+	runAfterCandidates,
 	goPrev,
 	goNext,
 }) {
@@ -299,6 +300,58 @@ export default function AutomationPanel({
 		executionEligibility?.ready && executableCandidates.length > 0 && selectedExecutableCount === 0
 			? "Select eligible candidates in Execution Preview to enable Run."
 			: executionEligibility?.message || "Execution readiness is unavailable.";
+	const placeRunAfterCandidates = runAfterCandidates && previewIsActionable;
+	const runAction = (
+		<Button onClick={runApprovedExecution} disabled={runDisabled}>
+			{isRunningExecution ? "Running..." : `Run ${selectedExecutableCount} Candidate${selectedExecutableCount === 1 ? "" : "s"}`}
+		</Button>
+	);
+
+	const executionFeedback = (
+		<>
+			{executionError ? (
+				<Alert as="div" tone="warning" className="workflow-result-notice warning" role="alert">
+					<p>{executionError}</p>
+				</Alert>
+			) : null}
+			{executionRecovery && !isRunningExecution && (
+				<div className="workflow-result-notice" role="region" aria-label="Execution request recovery">
+					<strong>
+						{recoveredReportPath
+							? executionRecovery.historical
+								? "Execution saved to history"
+								: "Saved execution recovered"
+							: "Check the previous browser request"}
+					</strong>
+					{recoveredReportPath ? (
+						<p>
+							<Link href={recoveredReportPath}>Open saved run {executionRecovery.runId}</Link>
+						</p>
+					) : (
+						<>
+							<p role="status">
+								{executionRecovery.status === "missing"
+									? "No receipt is available yet. Check the application before starting another run."
+									: executionRecovery.status === "unconfirmed"
+										? "The run outcome is unconfirmed. Check the application for changes before starting another run."
+										: "The result is pending confirmation. Checking status does not launch browser actions."}
+							</p>
+							<div className="feedback-actions">
+								<Button type="button" className="secondary" disabled={isCheckingRecovery || authActionDisabled} onClick={checkRecovery}>
+									{isCheckingRecovery ? "Checking…" : "Check saved run"}
+								</Button>
+								{["missing", "unconfirmed"].includes(executionRecovery.status) && (
+									<Button type="button" className="secondary" disabled={isCheckingRecovery} onClick={acknowledgeExecutionRecovery}>
+										Acknowledge uncertain outcome
+									</Button>
+								)}
+							</div>
+						</>
+					)}
+				</div>
+			)}
+		</>
+	);
 
 	return (
 		<Surface as="section" className="panel" aria-busy={isPreviewingExecution || isRunningExecution || undefined}>
@@ -351,52 +404,10 @@ export default function AutomationPanel({
 					<Button className="secondary" onClick={() => previewExecution()} disabled={previewDisabled}>
 						{isPreviewingExecution ? "Previewing..." : "Preview Execution"}
 					</Button>
-					<Button onClick={runApprovedExecution} disabled={runDisabled}>
-						{isRunningExecution ? "Running..." : `Run ${selectedExecutableCount} Candidate${selectedExecutableCount === 1 ? "" : "s"}`}
-					</Button>
+					{!placeRunAfterCandidates && runAction}
 				</div>
 			</div>
-			{executionError ? (
-				<Alert as="div" tone="warning" className="workflow-result-notice warning" role="alert">
-					<p>{executionError}</p>
-				</Alert>
-			) : null}
-			{executionRecovery && !isRunningExecution && (
-				<div className="workflow-result-notice" role="region" aria-label="Execution request recovery">
-					<strong>
-						{recoveredReportPath
-							? executionRecovery.historical
-								? "Execution saved to history"
-								: "Saved execution recovered"
-							: "Check the previous browser request"}
-					</strong>
-					{recoveredReportPath ? (
-						<p>
-							<Link href={recoveredReportPath}>Open saved run {executionRecovery.runId}</Link>
-						</p>
-					) : (
-						<>
-							<p role="status">
-								{executionRecovery.status === "missing"
-									? "No receipt is available yet. Check the application before starting another run."
-									: executionRecovery.status === "unconfirmed"
-										? "The run outcome is unconfirmed. Check the application for changes before starting another run."
-										: "The result is pending confirmation. Checking status does not launch browser actions."}
-							</p>
-							<div className="feedback-actions">
-								<Button type="button" className="secondary" disabled={isCheckingRecovery || authActionDisabled} onClick={checkRecovery}>
-									{isCheckingRecovery ? "Checking…" : "Check saved run"}
-								</Button>
-								{["missing", "unconfirmed"].includes(executionRecovery.status) && (
-									<Button type="button" className="secondary" disabled={isCheckingRecovery} onClick={acknowledgeExecutionRecovery}>
-										Acknowledge uncertain outcome
-									</Button>
-								)}
-							</div>
-						</>
-					)}
-				</div>
-			)}
+			{!placeRunAfterCandidates && executionFeedback}
 
 			{executionPreview ? (
 				<div className="generate-results-workspace">
@@ -420,7 +431,7 @@ export default function AutomationPanel({
 						</Alert>
 					)}
 
-					<Surface as="div" className="result-section">
+					<Surface className="result-section" aria-label="Executable candidates">
 						<h3>Executable</h3>
 						{renderCandidateTable({
 							candidates: executableCandidates,
@@ -428,6 +439,8 @@ export default function AutomationPanel({
 							setSelectedCandidateIds: setSelectedExecutionCandidateIds,
 							selectionDisabled: !previewIsActionable || isPreviewingExecution || isRunningExecution || authActionDisabled,
 						})}
+						{placeRunAfterCandidates && <div className="feedback-actions">{runAction}</div>}
+						{placeRunAfterCandidates && executionFeedback}
 					</Surface>
 
 					<Surface as="div" className="result-section">
