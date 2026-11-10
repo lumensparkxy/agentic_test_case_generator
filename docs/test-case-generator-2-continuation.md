@@ -757,14 +757,15 @@ Run errors and recovery actions appear beside the action for a current preview.
 Rendered Chromium against the real local API opened the one finding from
 the exact failed run without changing its classification.
 
-The current frozen mocked desktop replay still takes seven deliberate
-actions versus eleven. It adds a mock response for the new read-only
-repair status and preserves all four content hashes, both approvals and
-the inspected export. A fresh W01 rendered run with synthetic model
-responses also verified all eleven downloaded cases against exact case
-reads. It exposed a modal race when the named approval receipt and
-suite finished before the original POST response. The saved decision
-was correct. P7c reconciles that exact saved approval (commit `e94ce21`,
+The matched mocked desktop replay at `242dec9` takes seven deliberate
+actions versus eleven. Both arms start from byte-identical saved inputs,
+keep both explicit approvals, inspect TC-202, and download the same case
+rows. The four frozen fixture hashes match. This engineering pair measures
+interactions. Practitioner timing remains open. A fresh W01 rendered run
+with synthetic model responses also verified all eleven downloaded cases
+against exact case reads. It exposed a modal race when the named approval
+receipt and suite finished before the original POST response. The saved
+decision was correct. P7c reconciles that exact saved approval (commit `e94ce21`,
 [PR #492](https://github.com/lumensparkxy/agentic_test_case_generator/pull/492)).
 In the deliberately delayed actual W01 run, the dialog closed and
 restored focus before the HTTP acknowledgement. It used seven expected

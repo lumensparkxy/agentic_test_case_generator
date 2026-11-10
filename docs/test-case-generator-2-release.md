@@ -15,7 +15,7 @@ The current evaluation scope is offline only.
 
 | Gate | Evidence | Open requirement |
 | --- | --- | --- |
-| User effort | The paired, mocked Chromium journey still takes seven deliberate actions against eleven, a 36.4% reduction. Both explicit approvals and all four workbench transitions remain. The four fixture hashes match the frozen run. | Practitioner active time and waiting. |
+| User effort | The matched Chromium replay at `242dec9` used identical saved inputs and opened TC-202 in both arms. The candidate took seven deliberate actions against eleven, a 36.4% reduction, with two explicit approvals and four workbench transitions per arm. | Practitioner active time and waiting. |
 | Practitioner completion and review effort | The task and recording sheet use the frozen rubric. Both headed facilitator dry preflights opened the saved inputs without writes. Zero participant sessions have been collected. | At least four of five unassisted completions, 20% fewer median corrections per adjudicated obligation, and non-increasing active review time. [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354) |
 | Business coverage and unsupported facts | The offline intake and scorer bind obligation and fact judgments to exact saved and exported cases and retain unknowns. The held integration calibration preserved exact cases and removed fabricated dependencies from saved analysis. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | Independently adjudicated coverage of at least 95%, zero critical misses or unsupported facts, and non-regression on the generated cohort. [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495) |
 | Healthy reliability and defect sensitivity | W01 preserved eleven authored cases per arm, passed every eligible healthy case, and detected all eight seeded variants in each arm. On the held pin both exact authored W07 cases passed healthy and all three seeded variants failed at their intended first assertion. [PR #520](https://github.com/lumensparkxy/agentic_test_case_generator/pull/520) · [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | The 95% healthy reliability and 90% intended fault detection thresholds apply to generated applicable cases across the frozen targets. |
@@ -25,12 +25,16 @@ The current evaluation scope is offline only.
 | Runtime cost and latency | The offline ledger exercised bounded mock reservation and settlement. | Paired provider cost and latency, including call and token coverage. |
 | Rollback | The same local project and Chromium session passed through enabled, compatible and restored bundles with all twelve public evidence digests unchanged. The separate server restart preserved exact replay while refusing fresh admission. | Hosted rollout and operator verification. |
 
-The normal desktop comparison used a rendered mock at `61b7d66`. It checked
-the template in the scenario approval request, the exact two exported cases
-including literal whitespace, and the direct saved-case link. The headed
-facilitator dry preflights retained revision 2, both pending approvals and
-the frozen fixture digests. The controlled replays below used separate
-actual app and Firestore projects.
+The matched desktop replay used mocked Chromium at the frozen baseline and
+`242dec9`. Both arms started at revision 2 from byte-identical saved input
+snapshots with both decisions pending. All four frozen fixture hashes matched.
+Both readers displayed the same TC-202 and its saved assertion, and a direct
+case lookup resolved to each arm's exact suite. The two exported case rows
+matched, including literal whitespace in TC-101. Each export also matched
+its earlier archived file byte for byte. The fixture used the legacy approved
+export policy. This measures deliberate actions in one engineering pair.
+Participant time and waiting remain unmeasured. The controlled replays below
+used separate actual app and Firestore projects.
 
 The authored W11 browser replay exercised the original and revised booking
 limits. The frozen baseline passed all ten original and nine revised cases
