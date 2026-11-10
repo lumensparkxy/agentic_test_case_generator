@@ -67,6 +67,13 @@ actual scenario, suite, export and execution evidence separately.
 - A mutation enters the executable denominator only when the same authored control passes healthy and fails at the specified check against the mutant. Freeze W01's eight non-duplicate Booking probes and W07's three exact-payload probes. Credit detection only when an applicable generated case passes healthy and fails at that intended assertion against the mutant. Missing eligible generated coverage, wrong failure or unverified execution receives no detection credit. W08's two retry probes remain manual-control evidence. W11's boundary outcomes and retained-case checks are a separate regression gate. A control failure invalidates that environment's measurements pending rerun.
 - Capture terminal run status for every scheduled arm and retain partial suites, aborted reviews, timeouts and usage gaps. Report per-workflow and pooled results, repeated-pair deltas, counts of fully paired outputs and each exclusion with reason. Separate manual/design, browser-applicable, admitted and actually run cases. Classify every healthy-target failure before measuring a rerun. Do not drop missing arms or tune to the holdout.
 
+For Booking `reject-but-save`, keep the selected case's raw Playwright
+report in the local run artifact directory. The workbench verifies the
+terminal failure after a successful starting count, one invalid submit,
+the exact rejection, and reopening the same ready bookings page. The
+reported count must increase by one for the same actor. An unavailable
+report or an earlier failure leaves this fault uncredited.
+
 ### Prepare blinded case evidence
 
 Use the offline `scripts/prepare_case_adjudication.py` after capturing the

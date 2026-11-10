@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
 import { expect, test } from "@playwright/test";
+import { matchesSavedPostRejectionCountFailure } from "./support/booking-fault-evidence.js";
 import { previewBookingVersion, repairBookingBaseline, verifyBookingRevision } from "./support/booking-revision.js";
 import {
 	applyImport,
@@ -42,11 +43,11 @@ function assertionFailures(item) {
 		);
 }
 
-function matchedAssertions(item, observations, savedColumn) {
-	const messages = assertionFailures(item);
+async function matchedAssertions(item, observations, savedColumn) {
 	if (observations.includes("saved booking count")) {
-		return messages.some((message) => /toHaveCount\(/.test(message) && /^Locator: .*#bookings tr/m.test(message)) ? observations : [];
+		return (await matchesSavedPostRejectionCountFailure(item)) ? observations : [];
 	}
+	const messages = assertionFailures(item);
 	if (savedColumn) {
 		const locator = new RegExp(`^Locator: .*#bookings tr:has\\(.* td:nth-child\\(${savedColumn}\\)`, "m");
 		const mismatch = (message) =>
@@ -264,9 +265,13 @@ test.describe("Generated Room Booking execution", () => {
 					await fixture.save(`fault-${defect}`, run);
 					expect(run.results.map((item) => item.id)).toEqual(record.tested);
 					record.run_id = run.run_id;
-					record.matches = run.results.flatMap((item) =>
-						matchedAssertions(item, observations, savedColumn).map((observation) => ({ id: item.id, observation }))
+					const matches = await Promise.all(
+						run.results.map(async (item) => {
+							const assertions = await matchedAssertions(item, observations, savedColumn);
+							return assertions.map((observation) => ({ id: item.id, observation }));
+						})
 					);
+					record.matches = matches.flat();
 					record.status = record.matches.length
 						? "detected"
 						: run.results.every((item) => item.status === "passed")

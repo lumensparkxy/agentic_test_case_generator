@@ -623,6 +623,17 @@ only the valid control passed healthy and detected the seeded whitespace
 collapse at the intended assertion. The authored comparison sits outside
 the frozen live corpus and keeps independent adjudication open.
 
+P6 Booking fault attribution under
+[#501](https://github.com/lumensparkxy/agentic_test_case_generator/issues/501)
+binds rejected-write count evidence to the selected case's terminal report
+and its post-reopen check. The old matcher could also credit an identical
+count failure during setup. The archived 8- and 6-attendee suites each
+passed eleven eligible cases on their matching local target. The revised
+suite matched all fourteen exported case versions. Eight unaffected rows
+kept their exact versions. The archive contains no successful original
+export. The historical fault replay is separate from the frozen paired live
+cohort. Earlier assertion failures leave downstream checks unobserved.
+
 The next externally gated actions are an authorized W05/W01 live smoke,
 independent practitioner validation, and verification of a hosted worker
 identity and timeout policy. Live provider pairs require a bounded budget
