@@ -13,6 +13,7 @@ from typing import Literal
 from google import genai
 from google.genai import errors as genai_errors
 import httpx
+from plain_english_test_framework.semantic_assertions import QUOTED_BROWSER_LOCATOR
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from .adk_runtime import generate_direct_content, json_generation_config
@@ -23,6 +24,7 @@ from ..contracts.grounding import EnrichInput
 from ..contracts.requirements import Requirement
 from ..contracts.test_cases import TestCase, TestCaseDesignPrecheck
 from ..services.browser_handoff import declared_rejection_readbacks, missing_rejection_readbacks
+from ..services.execution_service import LOCATOR_COUNT_PATTERN
 from ..services.test_case_quality import case_source_hash, placeholder_reason, project_test_case_view
 from ..services.guidance_service import current_guidance, public_manifest, submit_with_guidance
 
@@ -51,6 +53,27 @@ _NO_NEW_RECORD = re.compile(
     rf"|\b(?:not (?:create|save)|without (?:creating|saving)) (?:a|an|any) (?:(?:new|additional) )?{_RECORD_CREATION}\b",
     re.IGNORECASE,
 )
+_CONTROL_ACTION = r'(?:then\s+)?(?:(?:click|press)\s+(?:the\s+)?(?:exact\s+)?(?:button\s+)?["\']?)?'
+_RETRY_TRIGGER_ACTION = re.compile(rf"^{_CONTROL_ACTION}(?P<trigger>double[ -]?click|retry)\b", re.I)
+_RETRY_REFRESH_ACTION = re.compile(rf"^{_CONTROL_ACTION}(?:browser\s+)?(?:refresh|reload)\b", re.I)
+_RETRY_OBSERVATION_ACTION = re.compile(r"^(?:then\s+)?(?:inspect|observe|read|verify|compare|confirm|check|count|record|note|wait for|look at)\b", re.I)
+_RETRY_ACTION_SEQUENCE = re.compile(
+    rf"(?<!\w){QUOTED_BROWSER_LOCATOR}|(?P<separator>\s*;\s*|(?<=[.!?])\s+|,?\s+(?:and\s+)?then\s+"
+    r"|(?:,\s*|\s+and\s+)(?=(?:click|press|submit|retry|double[ -]?click|refresh|reload|create|save|cancel|delete|open|navigate)\b))",
+    re.I,
+)
+_EXPECTATION_CLAUSES = re.compile(r"\s+and\s+|\s*;\s*|(?<=[.!?])\s+", re.I)
+_DURABLE_RECORD = rf"\b(?:{_RECORD_CREATION}s?|entries|rows?|items?)\b(?![-_\s]+(?:confirmation|message|notification|toast|heading)\b)"
+_ONE_DURABLE_RECORD = re.compile(
+    rf"\b(?:(?:exactly|only) (?:one|1)|single|no duplicate) (?:(?:saved|new|durable|confirmed|matching|additional|existing) )*{_DURABLE_RECORD}"
+    rf"|{_DURABLE_RECORD}(?: (?:id|identifier))? (?:is |are )?(?:listed|appears?|remains?) (?:exactly )?once\b"
+    rf"|{_DURABLE_RECORD} count (?:is|should be|equals?|should equal|increases? by|increased by) 1\b",
+    re.I,
+)
+_RECORD_ID = re.compile(r"\b(?:id|identifier|identity)\b", re.I)
+_ORIGINAL_ID = re.compile(r"\b(?:same|original|unchanged|recorded|identical|existing)\b", re.I)
+_IDENTITY_COMPARISON = re.compile(r"\b(?:same|equals?|matches?|unchanged|identical|retains?|remains?|still)\b", re.I)
+_NEGATED_COMPARISON = re.compile(r"\b(?:not|never|doesn't|isn't) (?:the )?(?:same|equals?|matches?|unchanged|identical|retains?|remains?)\b", re.I)
 
 
 class StrictRow(BaseModel):
@@ -430,6 +453,47 @@ def _plan_case_batches(data, suite_hash, budget, components, inventory):
     return [*groups, current] if current else []
 
 
+def _retry_actions(text):
+    start = 0
+    for token in _RETRY_ACTION_SEQUENCE.finditer(text):
+        if token.lastgroup == "separator":
+            yield text[start : token.start()].strip()
+            start = token.end()
+    yield text[start:].strip()
+
+
+def _checks_one_durable_record(clause):
+    if _ONE_DURABLE_RECORD.search(clause):
+        return True
+    count = LOCATOR_COUNT_PATTERN.search(clause)
+    return bool(count and count["count"] == "1" and re.search(_DURABLE_RECORD, count["value"], re.I))
+
+
+def _has_durable_retry_readback(steps, trigger_pattern):
+    """Recognize a trigger, explicit refresh, and observations of that readback."""
+    triggered = refreshed = count_checked = identity_checked = False
+    for step in steps:
+        for action in _retry_actions(step["action"]):
+            if trigger := _RETRY_TRIGGER_ACTION.match(action):
+                triggered = bool(re.search(trigger_pattern, trigger["trigger"], re.I))
+                refreshed = count_checked = identity_checked = False
+            elif _RETRY_REFRESH_ACTION.match(action):
+                refreshed = triggered
+                count_checked = identity_checked = False
+            elif not _RETRY_OBSERVATION_ACTION.match(action):
+                triggered = refreshed = count_checked = identity_checked = False
+        if not refreshed:
+            continue
+        for clause in _EXPECTATION_CLAUSES.split(step["expected"]):
+            count_checked = count_checked or _checks_one_durable_record(clause)
+            identity_checked = identity_checked or bool(
+                _RECORD_ID.search(clause) and _ORIGINAL_ID.search(clause) and _IDENTITY_COMPARISON.search(clause) and not _NEGATED_COMPARISON.search(clause)
+            )
+        if count_checked and identity_checked:
+            return True
+    return False
+
+
 def known_regression_findings(data):
     """Conservative guards for measured false positives; not a general semantic oracle."""
     obligations, prerequisites = rejected_write_findings(data), []
@@ -456,22 +520,7 @@ def known_regression_findings(data):
                 if requirement["id"] in case.get("linked_requirement_ids", [])
                 and re.search(pattern, " ".join(step["action"] for step in case.get("steps", [])), re.I)
             ]
-            adequate = False
-            for case in candidates:
-                triggered = refreshed = False
-                for step in case.get("steps", []):
-                    triggered = triggered or bool(re.search(pattern, step["action"], re.I))
-                    refreshed = refreshed or (triggered and bool(re.search(r"refresh|reload", step["action"], re.I)))
-                    expected = step["expected"]
-                    identity = re.search(r"\b(?:id|identifier|identity)\b", expected, re.I) and re.search(
-                        r"same|original|unchanged|recorded|identical|existing", expected, re.I
-                    )
-                    count = re.search(r"exactly (?:one|1)|\bonce\b|\bsingle\b|no duplicates?|count.*\b1\b", expected, re.I)
-                    if refreshed and identity and count:
-                        adequate = True
-                if adequate:
-                    break
-            if not adequate:
+            if not any(_has_durable_retry_readback(case.get("steps", []), pattern) for case in candidates):
                 case = candidates[0] if candidates else None
                 obligations.append(
                     {

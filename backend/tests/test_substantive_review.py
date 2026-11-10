@@ -561,6 +561,95 @@ class SubstantiveReviewTests(unittest.TestCase):
         data["test_cases"].append(refresh_case)
         self.assertEqual(len(known_regression_findings(data)[0]), 1)
 
+    def test_separate_durable_readbacks_can_close_a_single_triggering_case(self):
+        requirement, case, _, _, _ = fixture(retry=False)
+        count = {"action": "Count the saved bookings for this submission", "expected": "Exactly one saved booking remains."}
+        locator_count = {**count, "expected": 'css "#bookings tr" count should be 1.'}
+        identity = {"action": "Compare the displayed booking ID with the original", "expected": "The displayed ID matches the original recorded ID."}
+        for checks in ([count, identity], [identity, count], [locator_count, identity]):
+            with self.subTest(checks=checks):
+                steps = [
+                    {"action": 'Double-click the "Book" button', "expected": "The confirmation shows the original booking ID."},
+                    {"action": "Refresh My bookings", "expected": "The saved list is visible."},
+                    *checks,
+                ]
+                delivered = TestCase.model_validate({**case.model_dump(), "steps": [{"step": i, **step} for i, step in enumerate(steps, 1)]})
+                data, digest, _ = review_input([delivered], [requirement], None)
+                output = {
+                    "input_hash": digest,
+                    "obligations": [
+                        {
+                            "requirement_id": requirement.id,
+                            "source_field": "text",
+                            "obligation": "Durable double-click identity and count",
+                            "status": "covered",
+                            "reason": "Both durable outcomes are checked after the same refresh.",
+                            "evidence": [{"test_case_id": case.id, "step": i} for i in range(1, 5)],
+                        }
+                    ],
+                    "case_grounding": [{"test_case_id": case.id, "reason": "Manual setup is supplied.", "prerequisites": []}],
+                }
+                assessed = validate_assessment(json.dumps(output), data, digest)
+                self.assertEqual(assessed["model_status"], "assessed_complete")
+                self.assertEqual(assessed["design_status"], "assessed_complete")
+                self.assertEqual(len(assessed["obligations"]), 1)
+                self.assertEqual([item["expected"] for item in assessed["obligations"][0]["evidence"]], [step["expected"] for step in steps])
+
+    def test_retry_readbacks_cannot_cross_submissions_or_use_transient_assertions(self):
+        from app.agents.substantive_review import known_regression_findings
+
+        _, _, data, _, _ = fixture(retry=False)
+        trigger = {"action": 'Double-click "Book"', "expected": ""}
+        refresh = {"action": "Reload My bookings", "expected": ""}
+        count = {"action": "Count saved bookings", "expected": "Exactly one booking remains."}
+        identity = {"action": "Compare the displayed booking ID", "expected": "The saved booking has the same recorded ID."}
+        invalid = {
+            "count before reload": [trigger, count, refresh, identity],
+            "reload before trigger": [{"action": 'Reload My bookings then double-click "Book"', "expected": "Exactly one booking with the same ID remains."}],
+            "mentioned reload": [trigger, {"action": "Read the refresh timestamp", "expected": ""}, count, identity],
+            "mentioned trigger": [{"action": "Inspect the double-click result", "expected": ""}, refresh, count, identity],
+            "new submission": [trigger, refresh, count, {"action": 'Click "Book"', "expected": ""}, identity],
+            "new submission in a compound action": [
+                trigger,
+                refresh,
+                count,
+                {"action": 'Inspect My bookings, click exact button "Book"', "expected": ""},
+                identity,
+            ],
+            "new retry": [trigger, refresh, count, {"action": "Retry pending booking", "expected": ""}, identity],
+            "new double-click": [trigger, refresh, count, trigger, identity],
+            "transient count": [trigger, refresh, {**count, "expected": "Exactly one booking confirmation is displayed."}, identity],
+            "unrelated count": [trigger, refresh, {**count, "expected": "Only one page is displayed for the booking."}, identity],
+            "combined transient count": [
+                trigger,
+                {**refresh, "expected": "The saved booking has the same recorded ID and exactly one confirmation is displayed."},
+            ],
+            "identity capture only": [trigger, refresh, count, {**identity, "expected": "The original ID is recorded."}],
+            "negated ID comparison": [trigger, refresh, count, {**identity, "expected": "The booking ID does not equal the original recorded ID."}],
+            "separate status is not identity comparison": [
+                trigger,
+                refresh,
+                count,
+                {**identity, "expected": "The original ID is recorded. Its status remains Confirmed."},
+            ],
+            "count outcome is not identity comparison": [
+                trigger,
+                {**refresh, "expected": "Exactly one durable booking remains. The original ID is recorded."},
+            ],
+            "quoted refresh label": [
+                {"action": 'Double-click exact button "Book then refresh"', "expected": "Exactly one booking with the same ID remains."},
+            ],
+        }
+        for name, steps in invalid.items():
+            with self.subTest(name=name):
+                data["test_cases"][0]["steps"] = [{"step": i, **step} for i, step in enumerate(steps, 1)]
+                self.assertEqual(len(known_regression_findings(data)[0]), 1)
+
+        original = data["test_cases"][0]
+        original["steps"] = [{"step": i, **step} for i, step in enumerate([trigger, refresh, count], 1)]
+        data["test_cases"].append({**original, "id": "TC-ID-ONLY", "steps": [{"step": i, **step} for i, step in enumerate([trigger, refresh, identity], 1)]})
+        self.assertEqual(len(known_regression_findings(data)[0]), 1)
+
     def test_regression_guard_respects_selected_scope_and_supplied_mechanisms(self):
         from app.agents.substantive_review import known_regression_findings
 
