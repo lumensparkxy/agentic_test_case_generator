@@ -107,6 +107,8 @@ async function fixture(
 		hideScenarioStatus = false,
 		savedReview,
 		completedCases,
+		competingApproval,
+		scopeConflictGate,
 	} = {}
 ) {
 	const project = prepared ? useCaseProjectFixture() : pendingProject();
@@ -264,7 +266,7 @@ async function fixture(
 		project.stage_state.requirements.approved = true;
 	}
 
-	await page.route(routePath(approvalPath), (route) => {
+	await page.route(routePath(approvalPath), async (route) => {
 		const request = route.request();
 		expect(request.method()).toBe("POST");
 		const input = request.postDataJSON();
@@ -277,11 +279,18 @@ async function fixture(
 			state: "queued",
 			stage: "prepare_scenarios",
 			project_revision: project.current_revision,
-			request_id: requestId,
+			request_id: competingApproval === "scope" ? "other-tab-scope" : requestId,
 			reason: null,
 			source_snapshot_id: project.current_snapshots.requirements.snapshot_id,
 			result_snapshot_id: null,
 		};
+		if (competingApproval === "scope") {
+			if (scopeConflictGate) await scopeConflictGate.promise;
+			return route.fulfill({
+				status: 409,
+				json: { detail: { code: "stale_import", latest_revision: project.current_revision, message: "Project changed." } },
+			});
+		}
 		if (loseReply) return route.abort("failed");
 		return route.fulfill({ json: { project, continuation: run, blocked_reason: null } });
 	});
@@ -315,11 +324,23 @@ async function fixture(
 			stage: "generate_tests",
 			state: "queued",
 			project_revision: project.current_revision,
-			request_id: requestId,
+			request_id: competingApproval === "scenarios" ? "other-tab-scenarios" : requestId,
 			reason: null,
 			source_snapshot_id: input.snapshot_id,
 			result_snapshot_id: null,
 		};
+		if (competingApproval === "scenarios")
+			return route.fulfill({
+				status: 409,
+				json: {
+					detail: {
+						reload_required: true,
+						latest_revision: project.current_revision,
+						current_snapshot_id: readyPlanId,
+						message: "Project state changed after this review loaded.",
+					},
+				},
+			});
 		if (loseTestReply) return route.abort("failed");
 		const ack = { ...useCaseReviewResponseFixture(project, { ...input, requestId }), continuation: testRun, blocked_reason: null };
 		if (scenarioAckGate) await scenarioAckGate.promise;
@@ -418,8 +439,8 @@ async function fixture(
 			run = { ...run, state: "running" };
 		},
 		failedPlanReads: () => failedPlanReads,
-		savePreparedPlan: () => {
-			failPlanReadback = true;
+		savePreparedPlan: ({ failReadback = true } = {}) => {
+			failPlanReadback = failReadback;
 			project.current_revision++;
 			project.current_snapshots.use_cases = preparedPlan(project);
 			project.stage_state.use_cases = { current_snapshot_id: readyPlanId, version: 2, approved: false, stale: false, metadata: {} };
@@ -615,6 +636,50 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(page.getByLabel("Current human review status")).toHaveText("Awaiting human review");
 		expect(api.writes).toEqual([`POST ${approvalPath}`]);
 		expect(api.errors).toEqual([]);
+	});
+
+	test("a late scope conflict recovers the competing plan after switching projects", async ({ page }) => {
+		const scopeConflictGate = createDeferred();
+		const api = await fixture(page, { competingApproval: "scope", scopeConflictGate });
+		await page.goto(`${root}/review`);
+		try {
+			await approve(page).click();
+			await expect(progress(page)).toContainText("Saving scope approval");
+			await page.getByRole("button", { name: "Open QA project menu" }).click();
+			await page.getByRole("button", { name: `Open QA project ${api.other.name}`, exact: true }).click();
+			await expect(page).toHaveURL(secondRoot);
+			const conflict = page.waitForResponse((response) => response.url().endsWith(approvalPath) && response.status() === 409);
+			scopeConflictGate.resolve();
+			await (await conflict).finished();
+			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		} finally {
+			scopeConflictGate.resolve();
+		}
+		await page.getByRole("button", { name: "Open QA project menu" }).click();
+		await page.getByRole("button", { name: "Open QA project Mercury Checkout", exact: true }).click();
+		await workspace(page, "Review").click();
+		await expect(progress(page)).toContainText("Scope approved. Scenario preparation is queued.");
+		api.savePreparedPlan({ failReadback: false });
+		await check(page).click();
+		const openPlan = progress(page).getByRole("link", { name: "Open prepared scenarios", exact: true });
+		await expect(openPlan).toBeVisible();
+		await openPlan.click();
+		await expect(page.getByText(readyScenario, { exact: true })).toBeVisible();
+		expect(api.writes).toEqual([`POST ${approvalPath}`]);
+	});
+
+	test("a stale scenario approval reads the competing suite without retrying the rejected request", async ({ page }) => {
+		const api = await fixture(page, { prepared: true, competingApproval: "scenarios" });
+		await openPreparedDecision(page);
+		await approveTests(page).click();
+		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText("Human approved");
+		await decision(page).getByRole("button", { name: "Cancel", exact: true }).click();
+		api.reportSuiteSaved();
+		api.publishSuite();
+		await checkTests(page).click();
+		await expect(openTests(page)).toBeVisible();
+		expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
+		expect(api.executionRequests).toEqual([]);
 	});
 
 	test("cancellation retains the saved scope and is still visible after reload", async ({ page }) => {

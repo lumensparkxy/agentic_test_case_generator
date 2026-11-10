@@ -16,6 +16,8 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		snapshotId: "scope-approval-v1",
 		name: "pending-scope-approval",
 		initialValue: null,
+		// Two tabs can submit different approval keys from the same revision.
+		perTab: true,
 	});
 	const requestRef = useRef(request);
 	requestRef.current = request;
@@ -101,7 +103,8 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		return () => window.clearTimeout(timer);
 	}, [current, refresh, run?.state, scope, unresolved]);
 
-	const accept = (response, stage = "prepare_scenarios") => {
+	const clearPending = (requestId) => pending.clear({ matches: (value) => value?.requestId === requestId });
+	const accept = (response, requestId, stage = "prepare_scenarios") => {
 		const result = response.continuation;
 		if (result) {
 			setReadState((previous) => {
@@ -119,7 +122,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 			});
 		}
 		setActionState({ scope, stage, error: "", blockedReason: response.blocked_reason || "" });
-		pending.clear();
+		clearPending(requestId);
 	};
 	const cancel = async () => {
 		if (!scope || !run || cancelInFlight.current?.scope === scope) return;
@@ -215,7 +218,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 			setActionState(null);
 			pending.setValue(value);
 		},
-		clearPending: () => pending.clear(),
+		clearPending,
 		accept,
 		cancel,
 		refresh,

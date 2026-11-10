@@ -1224,14 +1224,28 @@ export default function App() {
 				}),
 			});
 			if (!res.ok) {
-				if (prepareScenarios && res.status < 500 && res.status !== 409 && isProjectOperationCurrent(operationScope))
-					approvalContinuation.clearPending();
+				if (prepareScenarios) {
+					const conflict =
+						res.status === 409
+							? await res
+									.clone()
+									.json()
+									.catch(() => null)
+							: null;
+					const staleRevision = conflict?.detail?.code === "stale_import" && Number.isInteger(conflict.detail.latest_revision);
+					if (res.status < 500 && (res.status !== 409 || staleRevision)) approvalContinuation.clearPending(key);
+					if (staleRevision && isProjectOperationCurrent(operationScope)) {
+						requirementReviewAttempt.current = null;
+						void refreshCurrentProject({ hydrate: true, operationScope });
+						throw new Error("The project changed before this approval could be saved. The current scope is being reloaded.");
+					}
+				}
 				throw new Error(await parseApiError(res, "Could not save requirement reviews"));
 			}
 			const data = await res.json();
 			if (!isProjectOperationCurrent(operationScope)) return;
 			const project = prepareScenarios ? data.project : data;
-			if (prepareScenarios) approvalContinuation.accept(data);
+			if (prepareScenarios) approvalContinuation.accept(data, key);
 			requirementReviewAttempt.current = null;
 			if (!isLatestProjectRevision(project.project_id, project.current_revision)) return;
 			recordProjectRevision(project.project_id, project.current_revision);

@@ -173,6 +173,7 @@ export default function useUseCaseReview({
 		}
 		callbacksRef.current.continuation.accept(
 			{ continuation: approvalReceipt.run_id ? approvalRun : null, blocked_reason: approvalReceipt.blocked_reason },
+			attempt.requestId,
 			"generate_tests"
 		);
 		recoveryRef.current.clear({ keepVisible: true });
@@ -233,7 +234,8 @@ export default function useUseCaseReview({
 				return null;
 			}
 			const normalizedComment = scenarioReviews ? "" : `${comment || ""}`.trim();
-			const generateTests = options.generateTests === true && submittedDecision === "approve" && Boolean(callbacksRef.current.continuation);
+			const approval = callbacksRef.current.continuation;
+			const generateTests = options.generateTests === true && submittedDecision === "approve" && Boolean(approval);
 			if (submittedDecision === "request_changes" && !normalizedComment) {
 				setOutcome({
 					status: "error",
@@ -258,8 +260,8 @@ export default function useUseCaseReview({
 				comment: normalizedComment,
 				generateTests,
 			});
-			const pending = callbacksRef.current.continuation?.pendingRequest;
-			const pendingOutcome = callbacksRef.current.continuation?.unresolved;
+			const pending = approval?.pendingRequest;
+			const pendingOutcome = approval?.unresolved;
 			if (pendingOutcome && (!generateTests || pending?.fingerprint !== fingerprint)) {
 				setOutcome({
 					...initialOutcome(),
@@ -284,7 +286,7 @@ export default function useUseCaseReview({
 				? { projectScope, snapshotId, requestId, fingerprint, baseRevision: baseProjectRevision, sequence }
 				: null;
 			if (generateTests) {
-				callbacksRef.current.continuation.begin({ requestId, fingerprint, baseRevision: baseProjectRevision, stage: "generate_tests" });
+				approval.begin({ requestId, fingerprint, baseRevision: baseProjectRevision, stage: "generate_tests" });
 			}
 			setOutcome({ status: "submitting", error: "", conflict: null, response: null, announcement: "Saving review decision…" });
 			try {
@@ -303,7 +305,7 @@ export default function useUseCaseReview({
 				}
 				if (generateTests) {
 					namedApprovalRef.current = null;
-					callbacksRef.current.continuation.accept(response, "generate_tests");
+					approval.accept(response, requestId, "generate_tests");
 				}
 				retryIdentityRef.current = null;
 				recoveryRef.current.clear({ keepVisible: true });
@@ -358,14 +360,16 @@ export default function useUseCaseReview({
 				}
 				return response;
 			} catch (error) {
+				const status = error?.status;
+				const rejectedReview = error?.conflict?.reload_required === true && Number.isInteger(error.conflict.latest_revision);
+				if (generateTests && status >= 400 && status < 500 && (status !== 409 || rejectedReview)) {
+					if (namedApprovalRef.current?.requestId === requestId) namedApprovalRef.current = null;
+					approval.clearPending(requestId);
+				}
 				if (!isCurrent()) {
 					return null;
 				}
-				if (generateTests && error?.status >= 400 && error.status < 500 && error.status !== 409) {
-					namedApprovalRef.current = null;
-					callbacksRef.current.continuation.clearPending();
-				}
-				if (error?.status === 409) {
+				if (status === 409) {
 					setOutcome({
 						status: "conflict",
 						error: error.message,

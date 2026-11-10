@@ -496,6 +496,23 @@ explicit interruption or exact published receipt as appropriate.
 The [release record](test-case-generator-2-release.md) records the local
 outcome and the remaining hosted gate.
 
+The two-tab W01 rehearsal under
+[#461](https://github.com/lumensparkxy/agentic_test_case_generator/issues/461)
+submitted both named approvals from matching revisions with distinct
+request keys. At `88b5ee5` both losing tabs stayed unconfirmed after a
+status check even though the server had rejected their writes. The fix
+clears only the definitively rejected key and reads the current result.
+Both losing tabs opened the exact saved evidence without submitting
+again. In a second run, the browser discarded the successful scope
+acknowledgement. After the other tab's conflict, the winning tab
+reloaded and recovered its own exact receipt. Local Firestore recorded
+one plan, one 11-case suite, one usage event per continuation and one
+unapplied suite-generation billing receipt. The rehearsal used authored
+SDK responses and loopback-only networking.
+The next local recovery check is a dropped losing response. A status
+read must confirm both an advanced project revision and the absence of
+the exact receipt before releasing that unconfirmed attempt.
+
 P4a binds independent design evidence to the exact saved suite (commit
 `1be782c`, [PR #468](https://github.com/lumensparkxy/agentic_test_case_generator/pull/468)).
 P4b adds explicit reviewed-design file delivery (commit `2ee40a4`,
