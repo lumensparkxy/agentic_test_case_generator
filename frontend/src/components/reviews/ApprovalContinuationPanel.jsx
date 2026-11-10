@@ -35,6 +35,11 @@ const BLOCKER = {
 	journey_budget_exhausted: "The automatic request budget for this scenario plan has been allocated.",
 };
 
+const RUN_BUDGET_BLOCKER = {
+	journey_run_budget_exhausted: "The provider request budget for this journey has been allocated.",
+	journey_run_budget_unavailable: "The saved provider request budget could not be verified. Check the current sources.",
+};
+
 export default function ApprovalContinuationPanel({
 	continuation,
 	scenariosPath,
@@ -61,6 +66,9 @@ export default function ApprovalContinuationPanel({
 	const generatingTests = stage === "generate_tests" || savedPlanSurface;
 	const title = generatingTests ? "Test case generation" : "Scenario preparation";
 	const action = generatingTests ? "test generation" : "preparation";
+	const savedApproval = generatingTests ? "Scenario approval saved." : "Scope approval saved.";
+	const budgetMessage = RUN_BUDGET_BLOCKER[blockedReason || (run?.state === "failed" ? run.reason : "")];
+	const canRetry = showRun && retryAvailable && !budgetMessage;
 	const interrupted = run?.state === "interrupted";
 	const resultState = generatingTests ? "completed" : "awaiting_user";
 	const resultReady = run?.state === resultState && run.result_snapshot_id && !blockedReason;
@@ -74,13 +82,14 @@ export default function ApprovalContinuationPanel({
 				? "Could not confirm the generation request. Check test generation status."
 				: "Could not confirm the scenario approval response. Check test generation status."
 			: "Could not confirm the approval response. Check preparation status.";
+	} else if (budgetMessage) {
+		message = `${savedApproval} ${title} stopped before contacting the provider. ${budgetMessage}`;
 	} else if (blockedReason) {
-		const approved = generatingTests ? "Scenario approval saved." : "Scope approval saved.";
 		const next = generatingTests
 			? "Check the current project before generating tests."
 			: "Check the current project before preparing scenarios.";
-		message = [approved, BLOCKER[blockedReason] || next].join(" ");
-	} else if (showRun && retryAvailable) {
+		message = [savedApproval, BLOCKER[blockedReason] || next].join(" ");
+	} else if (canRetry) {
 		message = generatingTests
 			? "Scenario approval saved. Test case generation stopped before contacting the provider."
 			: "Scope approval saved. Scenario preparation stopped before contacting the provider.";
@@ -123,7 +132,7 @@ export default function ApprovalContinuationPanel({
 						{interrupted ? "Acknowledge and release" : "Cancel"} {action}
 					</Button>
 				)}
-				{showRun && retryAvailable && (
+				{canRetry && (
 					<Button variant="secondary" size="compact" disabled={retrying} onClick={() => void retry()}>
 						{retrying ? "Checking retry…" : generatingTests ? "Retry test generation" : "Retry scenario preparation"}
 					</Button>

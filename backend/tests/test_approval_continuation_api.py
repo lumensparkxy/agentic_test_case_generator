@@ -549,6 +549,57 @@ class ApprovalContinuationApiTests(TestCase):
         self.assertEqual([row["run_id"] for row in self.status().json()["runs"]], [parent["run_id"]])
         self.assertFalse(any(path.startswith(f"{continuation.OUTBOX_COLLECTION}/") for path in self.store))
 
+    def test_current_budget_blocker_recovers_exact_no_run_approvals_without_a_request_key(self):
+        project = self.store[PROJECT_ROOT]
+        revision = project["current_revision"]
+        state = project["stage_state"]["requirements"]
+        source_id = state["current_snapshot_id"]
+        key = "allocated-budget-scope"
+        state["operation"] = "requirements.review"
+        self.store[f"{PROJECT_ROOT}/snapshots/{source_id}"].update(
+            request_id=key, operation="requirements.review", actor_user_id=self.actor.sub, project_revision=revision
+        )
+        receipt_key = f"{PROJECT_ROOT}/requirement_import_receipts/{routes.digest(key)}"
+        self.store[receipt_key] = {
+            "snapshot_id": source_id,
+            "continuation_options_fingerprint": "a" * 64,
+            "continuation_blocked_reason": "journey_run_budget_exhausted",
+        }
+        self.assertEqual(
+            self.status().json()["current_budget_blocker"],
+            {
+                "stage": "prepare_scenarios",
+                "reason": "journey_run_budget_exhausted",
+                "source_snapshot_id": source_id,
+                "project_revision": revision,
+            },
+        )
+        self.store[PROJECT_ROOT]["current_revision"] = revision + 1
+        after_rename = self.status().json()["current_budget_blocker"]
+        self.assertEqual((after_rename["source_snapshot_id"], after_rename["project_revision"]), (source_id, revision + 1))
+        self.store[receipt_key]["snapshot_id"] = "historical-scope"
+        self.assertNotIn("current_budget_blocker", self.status().json())
+        self.store[PROJECT_ROOT]["current_revision"] = revision
+
+        target = self.ordinary_approved_plan()
+        review_key = f"{PROJECT_ROOT}/use_case_reviews/{target['review_id']}"
+        self.store[review_key].update(
+            require_prepared_journey=True,
+            continuation_options_fingerprint="b" * 64,
+            continuation_blocked_reason="journey_run_budget_unavailable",
+        )
+        self.assertEqual(
+            self.status().json()["current_budget_blocker"],
+            {
+                "stage": "generate_tests",
+                "reason": "journey_run_budget_unavailable",
+                "source_snapshot_id": target["snapshot_id"],
+                "project_revision": target["base_project_revision"],
+            },
+        )
+        self.store[review_key]["resulting_project_revision"] -= 1
+        self.assertNotIn("current_budget_blocker", self.status().json())
+
     def test_saved_plan_generation_uses_original_approval_and_recovers_the_exact_run(self):
         target = self.ordinary_approved_plan()
         before = deepcopy(self.store)

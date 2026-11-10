@@ -2377,11 +2377,27 @@ export default function App() {
 			isAuthenticated &&
 			!isVerifyingSession,
 		projectId: currentProjectId,
+		projectRevision: currentProjectRevision,
 		identity: currentUser?.sub || "",
 		request: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
 		savedPlanSnapshotId,
 	});
 	const savedReview = approvalContinuation.savedReview;
+	const currentBudgetBlocker = approvalContinuation.currentBudgetBlocker;
+	const budgetStopsStage = (stage, snapshotId) =>
+		Boolean(
+			snapshotId &&
+			((currentBudgetBlocker?.stage === stage &&
+				currentBudgetBlocker.source_snapshot_id === snapshotId &&
+				currentBudgetBlocker.project_revision === currentProjectRevision) ||
+				approvalContinuation.runs.some(
+					(run) =>
+						run.stage === stage &&
+						run.source_snapshot_id === snapshotId &&
+						run.state === "failed" &&
+						["journey_run_budget_exhausted", "journey_run_budget_unavailable"].includes(run.reason)
+				))
+		);
 	const savedPlanGeneration = approvalContinuation.savedPlanGeneration;
 	const replacesLegacyGeneration = Boolean(
 		savedPlanSnapshotId &&
@@ -5006,6 +5022,7 @@ export default function App() {
 		!projectSnapshots.use_cases?.metadata?.use_case_refresh &&
 		approvalContinuation.testsAvailable &&
 		preparedScenarioId &&
+		!budgetStopsStage("generate_tests", preparedScenarioId) &&
 		(!approvalContinuation.unresolved || retryableScenarioApproval) &&
 		!continuationBusy &&
 		approvalContinuation.runs.some(
@@ -5556,6 +5573,7 @@ export default function App() {
 											</div>
 										) : reviewScope && !imports.preview ? (
 											materialSyncRebindRequired ||
+											budgetStopsStage("prepare_scenarios", projectStageState.requirements?.current_snapshot_id) ||
 											(reboundSyncPlan && !useCasesStageState.stale) ||
 											(continuationRetryAvailable &&
 												approvalContinuation.stage === "prepare_scenarios") ? null : !useScopedScenarioRefreshFlow &&

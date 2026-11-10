@@ -16,6 +16,7 @@ from ..contracts.approval_continuations import (
     ApproveAndGenerateTestsResult,
     ApproveAndPrepareScenariosInput,
     ApproveAndPrepareScenariosResult,
+    CurrentJourneyBudgetBlocker,
     GenerateTestsFromSavedApprovalInput,
     GenerateTestsFromSavedApprovalResult,
     SavedPlanGenerationTarget,
@@ -24,7 +25,7 @@ from ..contracts.approval_continuations import (
     SavedReviewReleaseResult,
 )
 from ..models import AuthUser
-from ..services import use_case_review_service
+from ..services import provider_journey_budget as journeys, use_case_review_service
 from ..services.approval_continuation import (
     ContinuationConflict,
     ContinuationOptions,
@@ -134,6 +135,78 @@ def _approval_outcome(doc, actor, request_id, stage):
     return continuation, receipt.blocked_reason
 
 
+def _current_budget_blocker(doc, actor, *, tests_enabled):
+    project = doc.get(field_paths=("current_revision", "stage_state")).to_dict() or {}
+    revision = project.get("current_revision")
+    if type(revision) is not int or revision < 1:
+        return None
+    states = project.get("stage_state") or {}
+    for stage in ("generate_tests", "prepare_scenarios") if tests_enabled else ("prepare_scenarios",):
+        source_stage, _ = _STAGE_ARTIFACTS[stage]
+        state = states.get(source_stage) or {}
+        source_id = state.get("current_snapshot_id")
+        if not isinstance(source_id, str) or not source_id or "/" in source_id or state.get("stale"):
+            continue
+        if stage == "generate_tests":
+            latest = (state.get("metadata") or {}).get("latest_human_review") or {}
+            review_id = latest.get("review_id")
+            if (
+                not isinstance(review_id, str)
+                or not review_id
+                or "/" in review_id
+                or latest.get("decision") != "approve"
+                or latest.get("snapshot_id") != source_id
+                or latest.get("reviewer_user_id") != actor.sub
+            ):
+                continue
+            record = doc.collection("use_case_reviews").document(review_id).get().to_dict() or {}
+            if (
+                record.get("project_id") != doc.id
+                or record.get("reviewer_user_id") != actor.sub
+                or record.get("review_id") != review_id
+                or record.get("snapshot_id") != source_id
+                or record.get("resulting_project_revision") != latest.get("resulting_project_revision")
+                or record.get("decision") != "approve"
+                or record.get("require_prepared_journey") is not True
+            ):
+                continue
+            decision_revision = record.get("resulting_project_revision")
+        else:
+            if state.get("operation") != "requirements.review":
+                continue
+            snapshot = (
+                doc.collection("snapshots")
+                .document(source_id)
+                .get(field_paths=("snapshot_id", "project_id", "actor_user_id", "project_revision", "stage", "operation", "request_id"))
+                .to_dict()
+                or {}
+            )
+            key = snapshot.get("request_id")
+            if (
+                snapshot.get("snapshot_id") != source_id
+                or snapshot.get("project_id") != doc.id
+                or snapshot.get("actor_user_id") != actor.sub
+                or snapshot.get("stage") != "requirements"
+                or snapshot.get("operation") != "requirements.review"
+                or not isinstance(key, str)
+                or not key
+            ):
+                continue
+            record = doc.collection("requirement_import_receipts").document(digest(key)).get().to_dict() or {}
+            if record.get("snapshot_id") != source_id:
+                continue
+            decision_revision = snapshot.get("project_revision")
+        reason = record.get("continuation_blocked_reason")
+        if type(decision_revision) is not int or not 1 <= decision_revision <= revision:
+            continue
+        # A spent slot stays spent across unrelated project edits with the same current source.
+        if reason == journeys.UNAVAILABLE and decision_revision != revision:
+            continue
+        if record.get("continuation_options_fingerprint") and not record.get("continuation_run_id") and reason in (journeys.EXHAUSTED, journeys.UNAVAILABLE):
+            return CurrentJourneyBudgetBlocker(stage=stage, reason=reason, source_snapshot_id=source_id, project_revision=revision)
+    return None
+
+
 @router.get("/projects/{project_id}/approval-continuations", response_model=ApprovalContinuationStatus)
 def list_approval_continuations(
     project_id: str,
@@ -172,6 +245,7 @@ def list_approval_continuations(
             saved_review_enabled=draft_client is not None,
             saved_review_attempt=SavedReviewAdmissionView.model_validate(attempt) if attempt and attempt["operation"] == "test_cases.review" else None,
             saved_plan_generation=saved_plan,
+            current_budget_blocker=_current_budget_blocker(doc, actor, tests_enabled=tests_enabled) if scenarios_enabled else None,
         )
     except HTTPException:
         raise

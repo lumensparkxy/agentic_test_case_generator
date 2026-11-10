@@ -16,6 +16,7 @@ from ..models import (
     UseCaseReviewResponse,
 )
 from ..contracts.approval_continuations import SavedPlanGenerationTarget
+from . import provider_journey_budget as journeys
 from .approval_continuation import ContinuationOptions, continuation_run_id, enqueue_approval
 from .requirement_reconciliation import canonical_requirements, digest
 from .requirement_scope import eligible_generation_scope
@@ -256,6 +257,7 @@ def _test_generation_intent(
     sources, requirements = scope
     requirement_ids = [row.id for row in requirements]
     parent = None
+    budget = None
     if require_prepared_journey:
         parent = _read_prepared_journey(
             transaction,
@@ -269,6 +271,16 @@ def _test_generation_intent(
         )
         if isinstance(parent, str):
             return {"continuation_blocked_reason": parent}
+        journey_id = parent[1].get(journeys.BUDGET_FIELD)
+        try:
+            budget = journeys.budget_for_artifact(transaction, project_doc, actor.sub, "use_cases", sources["use_cases"], expected_id=journey_id)
+        except HTTPException:
+            return {"continuation_blocked_reason": journeys.UNAVAILABLE}
+        if budget is not None:
+            if journey_id != budget.id:
+                return {"continuation_blocked_reason": journeys.UNAVAILABLE}
+            if not journeys.available(budget, "generate_tests", options.max_provider_requests):
+                return {"continuation_blocked_reason": journeys.EXHAUSTED}
 
     run_id = enqueue_approval(
         transaction,
@@ -282,6 +294,7 @@ def _test_generation_intent(
         source_snapshot_ids=sources,
         requirement_ids=requirement_ids,
         options=options,
+        provider_journey_id=budget.id if budget is not None else None,
     )
     if parent is not None:
         parent_doc, intent = parent

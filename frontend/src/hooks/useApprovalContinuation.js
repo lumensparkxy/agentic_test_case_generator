@@ -8,7 +8,7 @@ const MAX_AUTOMATIC_CHECKS = 10;
 const ACTIVE_STATES = ["queued", "running"];
 const SAVED_PLAN_GENERATION = "saved_plan_generation";
 
-export default function useApprovalContinuation({ enabled, projectId, identity, request, savedPlanSnapshotId }) {
+export default function useApprovalContinuation({ enabled, projectId, projectRevision, identity, request, savedPlanSnapshotId }) {
 	const scope = enabled ? JSON.stringify([identity, projectId]) : "";
 	const projectSegment = encodeURIComponent(projectId || "");
 	const basePath = API_CONTRACT_ENDPOINTS.approvalContinuations.path.replace("{project_id}", projectSegment);
@@ -42,6 +42,8 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const runs = current?.data?.runs || [];
 	latestRead.current = current;
 	const savedPlanOffer = current?.data?.saved_plan_generation;
+	const readBudgetBlocker = current?.data?.current_budget_blocker;
+	const currentBudgetBlocker = readBudgetBlocker?.project_revision === projectRevision ? readBudgetBlocker : null;
 	const requestId = pending.value?.requestId || "";
 	const pendingStage = pending.value?.stage || "prepare_scenarios";
 	const savedPlanPending = pending.value?.source === SAVED_PLAN_GENERATION;
@@ -127,7 +129,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 				inFlight.current = null;
 			}
 		};
-	}, [refresh, scope]);
+	}, [projectRevision, refresh, scope]);
 
 	useEffect(() => {
 		if (!scope || !current || (!unresolved && !ACTIVE_STATES.includes(run?.state)) || pollCount.current >= MAX_AUTOMATIC_CHECKS)
@@ -382,11 +384,16 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		testsAvailable: current?.data?.tests_enabled === true,
 		runs,
 		run,
-		stage: action?.blockedReason ? action.stage : requestId ? pendingStage : run?.stage || "prepare_scenarios",
+		stage: action?.blockedReason
+			? action.stage
+			: requestId
+				? pendingStage
+				: currentBudgetBlocker?.stage || run?.stage || "prepare_scenarios",
 		active: ACTIVE_STATES.includes(run?.state),
 		unresolved,
 		receipt,
-		blockedReason: action?.blockedReason || receipt?.blocked_reason || "",
+		blockedReason: action?.blockedReason || receipt?.blocked_reason || (!requestId && currentBudgetBlocker?.reason) || "",
+		currentBudgetBlocker,
 		error: action?.error || current?.error || pending.error,
 		pendingRequest: pending.value,
 		cancelling: action?.cancelling === true,

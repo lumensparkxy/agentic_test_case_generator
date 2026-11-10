@@ -10,6 +10,7 @@ from ..contracts.requirement_imports import RequirementImportPreview
 from ..models import AuthUser
 from ..observability.metrics import record_workflow_completed
 from .audit_service import complete_workflow_run, record_usage_event
+from . import provider_journey_budget as journeys
 from .billing_service import record_billing_consumption
 from .guidance_service import current_guidance
 from .project_draft_admission import (
@@ -130,6 +131,8 @@ class ProjectRequirementExtraction:
                 transaction.set(reference, value, merge=merge)
 
         extraction = {"fingerprint": self.fingerprint, "workflow_run_id": run_id, "source_event_id": event_id}
+        if admission is not None and admission.journey_id is not None:
+            extraction[journeys.BUDGET_FIELD] = admission.journey_id
         try:
             saved = stage_extraction(
                 repo,

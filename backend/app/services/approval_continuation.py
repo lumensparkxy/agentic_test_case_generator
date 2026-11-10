@@ -6,11 +6,13 @@ from hashlib import sha256
 import json
 from typing import Literal
 
+from fastapi import HTTPException
 from google.api_core.exceptions import Aborted
 from google.cloud.firestore_v1 import transactional
 from pydantic import BaseModel, Field
 
 from ..contracts.test_cases import TestCaseTemplate
+from . import provider_journey_budget as journeys
 from .workflow_project_service import QA_PROJECTS_COLLECTION, ProjectNotFoundError, ProjectPermissionError
 
 
@@ -123,6 +125,7 @@ def enqueue_approval(
     source_snapshot_ids: dict[str, str | None],
     requirement_ids: list[str],
     options: ContinuationOptions,
+    provider_journey_id: str | None = None,
 ) -> str:
     """Stage writes only. The caller verifies the approval and replays its receipt."""
     artifact_stage = _STAGES.get(stage)
@@ -175,6 +178,7 @@ def enqueue_approval(
                 "deadline_at": now + timedelta(seconds=options.deadline_seconds),
                 "attempts": 0,
                 "provider_requests_reserved": 0,
+                **({journeys.BUDGET_FIELD: provider_journey_id} if provider_journey_id is not None else {}),
             },
         },
     )
@@ -246,6 +250,21 @@ def _expires_at(now, intent, lease_seconds):
     return min(now + timedelta(seconds=lease_seconds), intent["deadline_at"])
 
 
+def _journey_for_intent(transaction, refs, run, intent):
+    journey_id = intent.get(journeys.BUDGET_FIELD)
+    if journey_id is None:
+        return None
+    source_stage = "requirements" if intent["stage"] == "prepare_scenarios" else "use_cases"
+    return journeys.budget_for_artifact(
+        transaction,
+        refs.project,
+        run["actor_user_id"],
+        source_stage,
+        intent["source_snapshot_ids"][source_stage],
+        expected_id=journey_id,
+    )
+
+
 def claim_stage(client, *, project_id, run_id, lease_seconds=60) -> ContinuationClaim | None:
     """Claim one due stage or close a known superseded/expired operation."""
     refs = _documents(client, project_id, run_id)
@@ -275,6 +294,14 @@ def claim_stage(client, *, project_id, run_id, lease_seconds=60) -> Continuation
             _close(transaction, refs, run, intent, lease, "failed", now, "deadline_exceeded")
             return None
         if lease_blocks_claim(lease, now):
+            return None
+        try:
+            budget = _journey_for_intent(transaction, refs, run, intent)
+        except HTTPException:
+            _close(transaction, refs, run, intent, lease, "failed", now, journeys.UNAVAILABLE)
+            return None
+        if budget is not None and not journeys.available(budget, intent["stage"], intent["options"]["max_provider_requests"]):
+            _close(transaction, refs, run, intent, lease, "failed", now, journeys.EXHAUSTED)
             return None
         fence = lease.get("fence", 0) + 1
         expires_at = _expires_at(now, intent, lease_seconds)
@@ -335,12 +362,15 @@ def mark_dispatched(client, claim, *, provider_requests=1):
 
     @transactional
     def dispatch(transaction):
-        _, intent, _, now = _load_claim(transaction, refs, claim)
+        run, intent, _, now = _load_claim(transaction, refs, claim)
         options = intent["options"]
         reserved = intent["provider_requests_reserved"] + provider_requests
         attempt = intent["attempts"] + 1
         if intent.get("dispatch") or attempt > options["max_attempts"] or reserved > options["max_provider_requests"]:
             raise ContinuationConflict("No unspent continuation dispatch is available for this claim")
+        budget = _journey_for_intent(transaction, refs, run, intent)
+        if budget is not None:
+            journeys.reserve(transaction, budget, intent["stage"], claim.run_id, provider_requests, now)
         intent = {**intent, "attempts": attempt, "provider_requests_reserved": reserved, "dispatch": {"fence": claim.fence, "at": now}}
         transaction.update(refs.lease, {"dispatched": True})
         _update_run(transaction, refs, intent, "running", now)
@@ -358,7 +388,16 @@ def stop_stage(client, claim, *, reason):
     def stop(transaction):
         run, intent, lease, now = _load_claim(transaction, refs, claim)
         state = "interrupted" if intent.get("dispatch") else "failed"
-        _close(transaction, refs, run, intent, lease, state, now, reason)
+        stop_reason = reason
+        if state == "failed" and intent.get(journeys.BUDGET_FIELD) is not None:
+            try:
+                budget = _journey_for_intent(transaction, refs, run, intent)
+            except HTTPException:
+                stop_reason = journeys.UNAVAILABLE
+            else:
+                if not journeys.available(budget, intent["stage"], intent["options"]["max_provider_requests"]):
+                    stop_reason = journeys.EXHAUSTED
+        _close(transaction, refs, run, intent, lease, state, now, stop_reason)
 
     stop(client.transaction())
 
@@ -443,11 +482,15 @@ def prepare_result_publication(transaction, client, claim, snapshot):
         or not snapshot.get("snapshot_id")
     ):
         raise ContinuationConflict("Publication does not match the dispatched stage and its approved sources")
+    budget = _journey_for_intent(transaction, refs, run, intent)
 
     def publish():
         now = _utcnow()
         if lease["expires_at"] <= now:
             raise ContinuationConflict("Continuation lease expired before result publication")
+        if budget is not None:
+            journeys.link_artifact(transaction, refs.project, budget, expected_stage, snapshot["snapshot_id"], producer=(intent["stage"], claim.run_id))
+            snapshot[journeys.BUDGET_FIELD] = budget.id
         _close(
             transaction,
             refs,

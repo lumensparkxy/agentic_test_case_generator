@@ -18,12 +18,14 @@ from app.contracts.billing import BillingAccount, BillingUserProfile
 from app.contracts.guidance import GuidanceManifest
 from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementImportPreview, RequirementReviewsInput
 from app.routers import integrations_azure_devops, integrations_jira, requirements as requirement_routes
+from app.services import approval_continuation as continuation_service
 from app.services.approval_continuation import OUTBOX_COLLECTION, ContinuationOptions
 from app.services.billing_service import BillingAccessContext
 from app.services.project_inputs import manifest_from_payload
 from app.services.requirement_reconciliation import canonical_requirements, build_preview, reconcile
 from app.services.requirement_source_evidence import bind_document_evidence
 from app.services import project_draft_admission as admission
+from app.services import provider_journey_budget as journeys
 from app.services import requirement_import_service as service
 from app.services import requirement_import_publication as publication
 from app.utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
@@ -940,6 +942,70 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(attempt["provider_requests_reserved"], 0)
         self.assertEqual(attempt["result_import_id"], saved.json()["import_id"])
         self.assertEqual(self.store[project], before[project])
+
+    def test_file_journey_links_exact_preview_apply_and_scope_and_retains_uncertain_reservations(self):
+        self.enable_extraction_admission()
+        self.enterContext(patch.object(continuation_service, "transactional", side_effect=_run_transaction))
+        client, _, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+
+        def extract(*_args, **_kwargs):
+            _model_reservation.get()()
+            return workflow
+
+        with patch.object(requirement_routes, "extract_requirements", side_effect=extract) as model:
+            saved = self._extract(client, "journey-file")
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(self._extract(client, "journey-file").json(), saved.json())
+        model.assert_called_once()
+        preview = RequirementImportPreview.model_validate(saved.json())
+        preview_record = self.repo.read(PID, preview.import_id, ACTOR)
+        journey_id = preview_record["extraction"][journeys.BUDGET_FIELD]
+        budget_path = f"{project}/provider_journeys/{journey_id}"
+        budget = self.store[budget_path]
+        self.assertEqual(budget["request_limit"], 79)
+        self.assertEqual(budget["requests_reserved"], 16)
+        self.assertEqual(budget["slots"][journeys.INTAKE_STAGE]["result_id"], preview.import_id)
+        self.assertTrue(budget["preview_saved"])
+        self.assertIsNone(budget["requirements_snapshot_id"])
+
+        applied = self.repo.apply(PID, preview.import_id, ACTOR, choices(preview), "journey-apply")
+        applied_id = applied.stage_state["requirements"].current_snapshot_id
+        self.assertEqual(self.store[budget_path]["requirements_snapshot_id"], applied_id)
+        self.assertEqual(self.repo.read(PID, preview.import_id, ACTOR)["applied_snapshot_id"], applied_id)
+        scope = RequirementReviewsInput(
+            base_project_revision=applied.current_revision,
+            idempotency_key="journey-scope",
+            reviews=[
+                {"requirement_uid": row["requirement_uid"], "review_status": "Approved"}
+                for row in applied.current_snapshots["requirements"].payload["requirements"]
+            ],
+        )
+        options = ContinuationOptions(settings_fingerprint="a" * 64, max_provider_requests=7, deadline_seconds=240)
+        approved = self.repo.review(PID, ACTOR, scope, "journey-scope", continuation=options)
+        approved_id = approved.stage_state["requirements"].current_snapshot_id
+        self.assertTrue(approved.stage_state["requirements"].approved)
+        self.assertEqual(self.store[budget_path]["requirements_snapshot_id"], approved_id)
+        receipt = self.review_receipt(scope)
+        run_id = receipt["continuation_run_id"]
+        self.assertEqual(self.store[f"{project}/orchestrator_runs/{run_id}"]["continuation"][journeys.BUDGET_FIELD], journey_id)
+
+        claim = continuation_service.claim_stage(self.client, project_id=PID, run_id=run_id)
+        self.assertIsNotNone(claim)
+        continuation_service.mark_dispatched(self.client, claim, provider_requests=7)
+        with self.assertRaises(continuation_service.ContinuationConflict):
+            continuation_service.mark_dispatched(self.client, claim, provider_requests=7)
+        continuation_service.stop_stage(self.client, claim, reason="scenario_preparation_failed")
+        self.assertTrue(continuation_service.cancel_stage(self.client, project_id=PID, run_id=run_id, actor_id=ACTOR.sub))
+        self.assertEqual(self.store[budget_path]["requests_reserved"], 23)
+        self.assertEqual(self.store[budget_path]["slots"]["prepare_scenarios"]["attempt_id"], run_id)
+
+        repeat = scope.model_copy(update={"base_project_revision": approved.current_revision, "idempotency_key": "journey-scope-again"})
+        reviewed = self.repo.review(PID, ACTOR, repeat, "journey-scope-again", continuation=options)
+        self.assertTrue(reviewed.stage_state["requirements"].approved)
+        self.assertEqual(self.review_receipt(repeat)["continuation_blocked_reason"], journeys.EXHAUSTED)
+        self.assertEqual(self.store[budget_path]["requests_reserved"], 23)
+        self.assertFalse(any(key.startswith(f"{OUTBOX_COLLECTION}/") for key in self.store))
 
     def test_demo_refinement_blocks_stale_publication_and_requires_exact_interruption_release(self):
         self.enable_extraction_admission()

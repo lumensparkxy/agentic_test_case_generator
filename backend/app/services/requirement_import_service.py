@@ -10,6 +10,7 @@ from ..agents.requirement_matching_agent import suggest_matches
 from ..contracts.requirement_imports import RequirementImportPreview, ImportApplyInput, ImportHistoryEntry
 from ..contracts.requirements import Requirement
 from ..utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
+from . import provider_journey_budget as journeys
 from .approval_continuation import ContinuationOptions, enqueue_approval
 from .guidance_service import public_manifest
 from .firestore_repository import get_required_firestore_client
@@ -67,7 +68,7 @@ def _context_matches_requirements(transaction, doc, project, active):
     return [(row.get("id"), row.get("text")) for row in rows] == [(row.id, row.text) for row in active]
 
 
-def _snapshot_write(transaction, doc, project, payload, actor, request_id, snapshot_id, operation, counts, *, preserve_context=False):
+def _snapshot_write(transaction, doc, project, payload, actor, request_id, snapshot_id, operation, counts, *, preserve_context=False, provider_journey_id=None):
     now = datetime.now(timezone.utc)
     revision = project.get("current_revision", 0) + 1
     state = deepcopy(project.get("stage_state") or {})
@@ -89,6 +90,7 @@ def _snapshot_write(transaction, doc, project, payload, actor, request_id, snaps
         "metadata": {"changes": counts, "guidance": payload.get("guidance")},
         "payload": payload,
         "created_at": now,
+        **({journeys.BUDGET_FIELD: provider_journey_id} if provider_journey_id is not None else {}),
     }
     state["requirements"] = {
         "current_snapshot_id": snapshot_id,
@@ -243,6 +245,7 @@ class RequirementImportRepository:
             _revision(project, preview.base_project_revision)
             if decision.base_project_revision != preview.base_project_revision:
                 raise HTTPException(409, "Apply must use the reviewed preview's project revision.")
+            budget = journeys.budget_for_preview(transaction, doc, actor.sub, data)
             active, retired, counts = reconcile(preview, decision, [Requirement.model_validate(r) for r in data.get("retired_requirements", [])])
             payload = {
                 **data.get("workflow_payload", {}),
@@ -260,7 +263,20 @@ class RequirementImportRepository:
             payload["coverage_metrics"] = {"total_requirements": len(active), "document_count": len(payload["source_names"])}
             payload["workflow_diagnostics"] = {}
             sid = digest([import_id, decision.idempotency_key])
-            _snapshot_write(transaction, doc, project, payload, actor, request_id, sid, "requirements.import.applied", counts)
+            _snapshot_write(
+                transaction,
+                doc,
+                project,
+                payload,
+                actor,
+                request_id,
+                sid,
+                "requirements.import.applied",
+                counts,
+                provider_journey_id=budget.id if budget is not None else None,
+            )
+            if budget is not None:
+                journeys.link_artifact(transaction, doc, budget, "requirements", sid)
             transaction.update(ref, {"status": "applied", "applied_snapshot_id": sid, "applied_counts": counts})
             transaction.create(receipt, {"fingerprint": fingerprint, "snapshot_id": sid})
 
@@ -290,6 +306,7 @@ class RequirementImportRepository:
             snapshot = doc.collection("snapshots").document(source_id).get(transaction=transaction).to_dict() if source_id else None
             if not snapshot:
                 raise HTTPException(409, "Import requirements before reviewing them.")
+            budget = journeys.budget_for_artifact(transaction, doc, actor.sub, "requirements", source_id)
             active, retired = canonical_requirements(project_id, snapshot)
             by_uid = {r.requirement_uid: r for r in active}
             seen = set()
@@ -312,8 +329,20 @@ class RequirementImportRepository:
             sid = digest(["review", payload.idempotency_key])
             preserve_context = _context_matches_requirements(transaction, doc, project, active)
             resulting_revision = _snapshot_write(
-                transaction, doc, project, updated, actor, request_id, sid, "requirements.review", {"reviewed": len(seen)}, preserve_context=preserve_context
+                transaction,
+                doc,
+                project,
+                updated,
+                actor,
+                request_id,
+                sid,
+                "requirements.review",
+                {"reviewed": len(seen)},
+                preserve_context=preserve_context,
+                provider_journey_id=budget.id if budget is not None else None,
             )
+            if budget is not None:
+                journeys.link_artifact(transaction, doc, budget, "requirements", sid)
             receipt_data = {"fingerprint": fingerprint, "snapshot_id": sid}
             if continuation is not None:
                 from .project_sync_rebind import material_requirements_review_required, material_scope_pending_rebind
@@ -337,6 +366,8 @@ class RequirementImportRepository:
                     receipt_data["continuation_blocked_reason"] = "sync_rebind_required"
                 elif context_state.get("stale") or (context_id and not preserve_context):
                     receipt_data["continuation_blocked_reason"] = "context_not_current"
+                elif budget is not None and not journeys.available(budget, "prepare_scenarios", continuation.max_provider_requests):
+                    receipt_data["continuation_blocked_reason"] = journeys.EXHAUSTED
                 else:
                     receipt_data["continuation_run_id"] = enqueue_approval(
                         transaction,
@@ -350,6 +381,7 @@ class RequirementImportRepository:
                         source_snapshot_ids={"requirements": sid, "context": context_id},
                         requirement_ids=[row.id for row in scope],
                         options=continuation,
+                        provider_journey_id=budget.id if budget is not None else None,
                     )
             transaction.create(receipt, receipt_data)
 

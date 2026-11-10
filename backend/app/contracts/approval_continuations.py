@@ -94,6 +94,13 @@ class SavedReviewReleaseResult(BaseModel):
     released: Literal[True] = True
 
 
+class CurrentJourneyBudgetBlocker(BaseModel):
+    stage: ApprovalContinuationStage
+    reason: Literal["journey_run_budget_exhausted", "journey_run_budget_unavailable"]
+    source_snapshot_id: str
+    project_revision: int = Field(ge=1)
+
+
 class ApprovalContinuationStatus(BaseModel):
     enabled: bool
     tests_enabled: bool
@@ -102,6 +109,7 @@ class ApprovalContinuationStatus(BaseModel):
     saved_review_enabled: bool = False
     saved_review_attempt: SavedReviewAdmissionView | None = None
     saved_plan_generation: SavedPlanGenerationTarget | None = Field(default=None, exclude_if=lambda value: value is None)
+    current_budget_blocker: CurrentJourneyBudgetBlocker | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ApproveAndPrepareScenariosResult(BaseModel):

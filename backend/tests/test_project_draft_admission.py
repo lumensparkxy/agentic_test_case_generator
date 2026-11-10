@@ -11,6 +11,7 @@ from test_use_case_review_service import _run_transaction
 
 from app.services import approval_continuation as continuation
 from app.services import project_draft_admission as admission
+from app.services import provider_journey_budget as journeys
 from app.services.workflow_project_service import ProjectPermissionError
 
 SOURCE_IDS = {"requirements": "scope-v1", "context": None, "use_cases": "plan-v1", "test_cases": "suite-v1"}
@@ -313,6 +314,170 @@ class DraftAdmissionTests(_AdmissionFixture, TestCase):
 
 SYNC_CHANGE = "change_" + "a" * 24
 SYNC_SOURCES = {"requirements": "scope-v1", "context": "context-v1", "use_cases": "plan-v1", "test_cases": "suite-v1", "reports": None}
+
+
+class ProviderJourneyAdmissionTests(_AdmissionFixture, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.intake_id = "draft_" + "a" * 64
+        self.journey_id = journeys.intake_journey_id(self.intake_id)
+        self.budget_ref = self.project.collection("provider_journeys").document(self.journey_id)
+        transaction = self.client.transaction()
+        create = journeys.prepare_intake_budget(transaction, self.project, "owner", self.intake_id, "import", 1)
+        create()
+        transaction.commit()
+        for stage, attempt_id, requests in (
+            (journeys.INTAKE_STAGE, self.intake_id, 16),
+            ("prepare_scenarios", "plan-run", 7),
+            ("generate_tests", "suite-run", 24),
+        ):
+            transaction = self.client.transaction()
+            budget = journeys.read_budget(transaction, self.project, "owner", self.journey_id)
+            journeys.reserve(transaction, budget, stage, attempt_id, requests, self.now)
+            transaction.commit()
+        for stage, producer in (
+            ("requirements", None),
+            ("use_cases", ("prepare_scenarios", "plan-run")),
+            ("test_cases", ("generate_tests", "suite-run")),
+        ):
+            transaction = self.client.transaction()
+            budget = journeys.read_budget(transaction, self.project, "owner", self.journey_id)
+            artifact_id = SOURCE_IDS[stage]
+            journeys.link_artifact(transaction, self.project, budget, stage, artifact_id, producer=producer)
+            transaction.create(
+                self.project.collection("snapshots").document(artifact_id),
+                {"snapshot_id": artifact_id, "project_id": self.project.id, "actor_user_id": "owner", "stage": stage, journeys.BUDGET_FIELD: self.journey_id},
+            )
+            transaction.commit()
+
+    def claim_followup(self, operation, request_id, sources, revision, **binding):
+        return admission.claim_draft_attempt(
+            self.client,
+            project_id=self.project.id,
+            actor_id="owner",
+            request_id=request_id,
+            operation=operation,
+            source_snapshot_ids=sources,
+            base_revision=revision,
+            max_requests=24 if operation == OPERATION else 8,
+            deadline_seconds=120,
+            **binding,
+        )
+
+    def publish_successor(self, claim, snapshot):
+        def commit(transaction):
+            project = self.project.get(transaction=transaction).to_dict()
+            claim.finish_on_commit(transaction, snapshot)
+            transaction.create(self.project.collection("snapshots").document(snapshot["snapshot_id"]), snapshot)
+            project["stage_state"]["test_cases"]["current_snapshot_id"] = snapshot["snapshot_id"]
+            transaction.update(self.project, {"current_revision": snapshot["project_revision"], "stage_state": project["stage_state"]})
+
+        _run_transaction(commit)(self.client.transaction())
+
+    def test_assessment_and_repair_share_the_exact_suite_journey_and_cannot_exceed_79(self):
+        assess = self.claim_followup(OPERATION, "assess-exact", SOURCE_IDS, 8)
+        self.assertEqual(assess.journey_id, self.journey_id)
+        assess.reserve()
+        self.publish_successor(assess, self.snapshot())
+        self.assertEqual(self.budget_ref.get().to_dict()["requests_reserved"], 71)
+        sources = {**SOURCE_IDS, "test_cases": "reviewed-suite-v2"}
+        binding = {
+            "target_id": "finding-1",
+            "case_id": "TC-001",
+            "case_version_id": "before",
+            "case_version_number": 1,
+            "request_fingerprint": "b" * 64,
+        }
+        repair_settings = {"selected_repair": binding, "settings_fingerprint": "c" * 64}
+        repair = self.claim_followup(journeys.REPAIR_STAGE, "repair-exact", sources, 9, **repair_settings)
+        self.assertEqual(repair.journey_id, self.journey_id)
+        repair.reserve()
+        self.publish_successor(
+            repair,
+            self.snapshot(
+                snapshot_id="repaired-suite-v3",
+                operation=journeys.REPAIR_STAGE,
+                request_id="repair-exact",
+                project_revision=10,
+                source_snapshot_id="plan-v1",
+                metadata={
+                    "source_snapshot_ids": {stage: sources[stage] for stage in ("requirements", "context", "use_cases")},
+                    "source_test_cases_snapshot_id": "reviewed-suite-v2",
+                    "selected_repair": binding,
+                    "generation_request_fingerprint": binding["request_fingerprint"],
+                },
+                payload={"test_cases": [{"id": "TC-001", "artifact_version_id": "after", "artifact_version_number": 2}]},
+            ),
+        )
+        complete = self.budget_ref.get().to_dict()
+        self.assertEqual(complete["requests_reserved"], journeys.REQUEST_LIMIT)
+        self.assertEqual(complete["test_cases_snapshot_id"], "repaired-suite-v3")
+        self.assertEqual(complete["slots"][journeys.ASSESSMENT_STAGE]["result_id"], "reviewed-suite-v2")
+        self.assertEqual(complete["slots"][journeys.REPAIR_STAGE]["result_id"], "repaired-suite-v3")
+
+        latest = {**sources, "test_cases": "repaired-suite-v3"}
+        self.assert_conflict(journeys.EXHAUSTED, lambda: self.claim_followup(OPERATION, "another-assessment", latest, 10))
+        self.assert_conflict(journeys.EXHAUSTED, lambda: self.claim_followup(journeys.REPAIR_STAGE, "another-repair", latest, 10, **repair_settings))
+        replay = self.claim_followup(OPERATION, "assess-exact", SOURCE_IDS, 8)
+        self.assertEqual(replay.result_snapshot_id, "reviewed-suite-v2")
+        self.assertEqual(self.budget_ref.get().to_dict(), complete)
+        self.assertIsNone(self.lease()["run_id"])
+
+        # The immutable snapshot marker disallows a legacy fallback after losing the sidecar.
+        artifact_link = journeys._artifact_ref(self.project, "test_cases", latest["test_cases"])
+        self.client.store.pop(artifact_link.path)
+        self.assert_conflict(journeys.UNAVAILABLE, lambda: self.claim_followup(OPERATION, "missing-lineage", latest, 10))
+        self.assertEqual(self.budget_ref.get().to_dict(), complete)
+        self.assertIsNone(self.lease()["run_id"])
+
+    def test_malformed_attached_budget_is_unavailable_without_acquiring_a_lease(self):
+        self.budget_ref.update({"requests_reserved": 0})
+        self.assert_conflict(journeys.UNAVAILABLE, lambda: self.claim_followup(OPERATION, "assess-exact", SOURCE_IDS, 8))
+        self.assertIsNone(continuation.project_lease_ref(self.project).get().to_dict())
+
+    def enqueue_linked_preparation(self):
+        transaction = self.client.transaction()
+        run_id = continuation.enqueue_approval(
+            transaction,
+            self.project,
+            client=self.client,
+            stage="prepare_scenarios",
+            actor_id="owner",
+            approval_id=SOURCE_IDS["requirements"],
+            request_id="another-preparation",
+            resulting_revision=8,
+            source_snapshot_ids={stage: SOURCE_IDS[stage] for stage in ("requirements", "context")},
+            requirement_ids=["REQ-1"],
+            options=continuation.ContinuationOptions(settings_fingerprint="a" * 64, max_provider_requests=7),
+            provider_journey_id=self.journey_id,
+        )
+        transaction.commit()
+        return run_id
+
+    def test_queued_named_stage_reports_known_exhaustion_without_provider_dispatch(self):
+        run_id = self.enqueue_linked_preparation()
+        self.assertIsNone(self.claim_worker(run_id))
+        state = self.project.collection("orchestrator_runs").document(run_id).get().to_dict()["continuation"]
+        self.assertEqual((state["state"], state["reason"]), ("failed", journeys.EXHAUSTED))
+        self.assertEqual(state["provider_requests_reserved"], 0)
+        self.assertFalse(continuation.can_retry_undispatched_stage({"continuation": state}))
+        self.assertIsNone(self.client.collection(continuation.OUTBOX_COLLECTION).document(run_id).get().to_dict())
+
+    def test_known_lost_lineage_after_named_claim_does_not_become_retryable(self):
+        budget = self.budget_ref.get().to_dict()
+        budget["requests_reserved"] -= budget["slots"].pop("prepare_scenarios")["requests"]
+        self.budget_ref.update(budget)
+        run_id = self.enqueue_linked_preparation()
+        claim = self.claim_worker(run_id)
+        self.assertIsNotNone(claim)
+        self.client.store.pop(self.budget_ref.path)
+        self.assert_conflict(journeys.UNAVAILABLE, lambda: continuation.mark_dispatched(self.client, claim, provider_requests=7))
+        continuation.stop_stage(self.client, claim, reason="scenario_preparation_failed")
+        state = self.project.collection("orchestrator_runs").document(run_id).get().to_dict()["continuation"]
+        self.assertEqual((state["state"], state["reason"]), ("failed", journeys.UNAVAILABLE))
+        self.assertEqual(state["provider_requests_reserved"], 0)
+        self.assertFalse(continuation.can_retry_undispatched_stage({"continuation": state}))
+        self.assertIsNone(self.lease()["run_id"])
 
 
 class ProjectSyncAdmissionTests(_AdmissionFixture, TestCase):

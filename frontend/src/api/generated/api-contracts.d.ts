@@ -229,6 +229,7 @@ export interface ApprovalContinuationReceipt {
 }
 
 export interface ApprovalContinuationStatus {
+	current_budget_blocker?: CurrentJourneyBudgetBlocker | null;
 	enabled: boolean;
 	receipt?: ApprovalContinuationReceipt | null;
 	runs: Array<ApprovalContinuationView>;
@@ -393,6 +394,13 @@ export interface BusinessRule {
 	requirement_id: string;
 	rule_type?: "Business" | "Validation" | "Authorization" | "State Transition" | "Integration" | "Notification" | "Data" | "Constraint" | "Other";
 	title: string;
+}
+
+export interface CurrentJourneyBudgetBlocker {
+	project_revision: number;
+	reason: "journey_run_budget_exhausted" | "journey_run_budget_unavailable";
+	source_snapshot_id: string;
+	stage: "prepare_scenarios" | "generate_tests";
 }
 
 export interface DesignDeliveryEvidence {

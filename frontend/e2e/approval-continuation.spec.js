@@ -112,6 +112,7 @@ async function fixture(
 		competingApproval,
 		scopeConflictGate,
 		dropCompetingReply = false,
+		scopeBlockedReason,
 	} = {}
 ) {
 	const project = prepared ? useCaseProjectFixture() : pendingProject();
@@ -162,6 +163,7 @@ async function fixture(
 	let failSavedReviewStatus = false;
 	let hideTestRun = loseTestReply || hideScenarioStatus;
 	let hideRun = loseReply;
+	let currentBudgetBlocker = null;
 	let failPlanReadback = false;
 	let planAnnounced = false;
 	let failedPlanReads = 0;
@@ -232,6 +234,7 @@ async function fixture(
 					tests_enabled: testsEnabled,
 					runs,
 					receipt,
+					...(currentBudgetBlocker ? { current_budget_blocker: currentBudgetBlocker } : {}),
 					...(savedReview ? { saved_review_enabled: true, saved_review_attempt: reviewAttempt } : {}),
 				},
 			});
@@ -277,6 +280,17 @@ async function fixture(
 		expect(requestId).toBe(input.idempotency_key);
 		approvalRequests.push({ input, requestId });
 		saveApproval(input);
+		if (scopeBlockedReason) {
+			project.stage_state.requirements.operation = "requirements.review";
+			project.current_snapshots.requirements.operation = "requirements.review";
+			currentBudgetBlocker = {
+				stage: "prepare_scenarios",
+				reason: scopeBlockedReason,
+				source_snapshot_id: project.current_snapshots.requirements.snapshot_id,
+				project_revision: project.current_revision,
+			};
+			return route.fulfill({ json: { project, continuation: null, blocked_reason: scopeBlockedReason } });
+		}
 		run = {
 			run_id: "checkout-preparation",
 			state: "queued",
@@ -470,6 +484,9 @@ async function fixture(
 		},
 		interruptTestRun: () => {
 			testRun = { ...testRun, state: "interrupted", reason: "provider_outcome_unconfirmed", provider_usage_unconfirmed: true };
+		},
+		failTestRunBeforeDispatch: (reason) => {
+			testRun = { ...testRun, state: "failed", reason, retry_available: false, provider_usage_unconfirmed: false };
 		},
 		reportSuiteSaved: ({ sourceId = testRun.source_snapshot_id } = {}) => {
 			testRun = {
@@ -768,6 +785,39 @@ test.describe("Recoverable approval continuation", () => {
 		expect(api.errors).toEqual([]);
 	});
 
+	test("keeps the scope approval and file journey budget blocker visible after reload", async ({ page }, testInfo) => {
+		const api = await fixture(page, { scopeBlockedReason: "journey_run_budget_exhausted" });
+		const assertBlockedScope = async () => {
+			await expect(progress(page).getByRole("status")).toHaveText(
+				"Scope approval saved. Scenario preparation stopped before contacting the provider. The provider request budget for this journey has been allocated."
+			);
+			await expect(page.getByRole("status").filter({ hasText: /2\/2 approved in scope/ })).toBeVisible();
+			await expect(page.getByRole("button", { name: /^(Approve scope and prepare scenarios|Retry scope approval request)$/ })).toHaveCount(
+				0
+			);
+			await expect(progress(page).getByRole("button", { name: "Retry scenario preparation", exact: true })).toHaveCount(0);
+			await expect(progress(page).getByRole("link", { name: "Open prepared scenarios", exact: true })).toHaveCount(0);
+		};
+		await page.goto(`${root}/review`);
+		await approve(page).click();
+		await assertBlockedScope();
+		const restoredStatus = page.waitForResponse((response) => response.url().endsWith(statusPath) && response.ok());
+		await page.reload();
+		const readback = await (await restoredStatus).json();
+		expect(readback.runs).toEqual([]);
+		expect(readback.current_budget_blocker).toEqual({
+			stage: "prepare_scenarios",
+			reason: "journey_run_budget_exhausted",
+			source_snapshot_id: "checkout-approved-requirements",
+			project_revision: initialRevision + 1,
+		});
+		await assertBlockedScope();
+		await page.screenshot({ path: testInfo.outputPath("file-journey-budget-exhausted-after-reload.png") });
+		expect(api.writes).toEqual([`POST ${approvalPath}`]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
 	test("retries only undispatched preparation and reads back the same run after a lost retry reply", async ({ page }) => {
 		const api = await fixture(page);
 		await page.goto(`${root}/review`);
@@ -1044,6 +1094,26 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(page.getByText(readyScenario, { exact: true })).toBeVisible();
 		await expect(openTests(page)).toHaveCount(0);
 		expect(api.writes).toEqual([`POST ${testApprovalPath}`, `POST ${testCancelPath}`]);
+		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("reports an unavailable file journey budget before test dispatch after reload", async ({ page }, testInfo) => {
+		const api = await fixture(page, { prepared: true });
+		await openPreparedDecision(page);
+		await approveTests(page).click();
+		await expect(testProgress(page).getByRole("status")).toContainText(/queued/i);
+		api.failTestRunBeforeDispatch("journey_run_budget_unavailable");
+		await page.reload();
+		await expect(testProgress(page).getByRole("status")).toHaveText(
+			"Scenario approval saved. Test case generation stopped before contacting the provider. The saved provider request budget could not be verified. Check the current sources."
+		);
+		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText("Human approved");
+		await expect(page.getByText(readyScenario, { exact: true })).toBeVisible();
+		await expect(testProgress(page).getByRole("button", { name: "Retry test generation", exact: true })).toHaveCount(0);
+		await expect(openTests(page)).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath("file-journey-budget-unavailable.png") });
+		expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
 		expect(api.executionRequests).toEqual([]);
 		expect(api.errors).toEqual([]);
 	});

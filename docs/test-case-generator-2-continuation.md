@@ -253,8 +253,37 @@ dispatch again. The reservation and dispatch marker do not establish the
 actual provider charge.
 
 This admission covers project file and feedback routes in the local demo.
-Connector extraction, semantic recompare and recovery, and an aggregate
-intake-through-repair budget still require their own acceptance evidence.
+Connector extraction and semantic recompare or recovery require their own
+admission and acceptance evidence.
+
+### One request budget for an exact file-backed journey
+
+An admitted file intake starts a private provider-request budget with
+one reservation for each stage and a 79-request ceiling. Intake may reserve
+16, scenario preparation 7, Test Cases generation and its initial assessment
+24, one later saved-suite assessment 24, and one selected repair 8. The
+named preparation and generation still enforce the existing 7+24 allocation.
+Each stage keeps its own deadline and uses the same project fence.
+
+The committed intake preview and exact Apply receipt connect the budget to
+the reviewed Requirements. Both explicit approvals bind the named stages.
+The plan, first suite and exact assessment or repair successors keep private
+links to the same budget. Publication and its link commit together. Pending
+or cancelled imports cannot attach a new project baseline.
+
+Capacity is reserved before possible provider contact and is retained after
+interruption or acknowledgement. Successful replays read their existing
+results. An allocated stage stops with a known reason before provider contact.
+Review reopens that reason for an exact saved approval without prompting for
+a new decision. A repaired suite remains pending if it needs a later assessment
+and the assessment reservation was already used. Request reservations are
+upper bounds on possible provider calls, separate from app billing and actual
+provider charges.
+
+This applies to the opt-in file-backed named journey and its exact suite
+successors. Legacy plans without enrollment, connector intake, standalone
+feedback refinement, semantic recompare or recovery, and Project Sync
+continue under their existing stage policies.
 
 ### Shared draft admission and assessment recovery
 

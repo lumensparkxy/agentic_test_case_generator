@@ -12,6 +12,7 @@ from google.api_core.exceptions import Aborted
 from google.cloud.firestore_v1 import transactional
 
 from ..config import DEFAULT_MODEL_NAME
+from . import provider_journey_budget as journeys
 from .approval_continuation import lease_blocks_claim, lease_matches, project_lease_ref, released_project_lease
 from .firestore_repository import get_required_firestore_client
 from .guidance_service import enabled
@@ -396,6 +397,7 @@ class DraftAttemptClaim:
         self._binding = binding
         self.operation_id = binding["operation_id"]
         self.request_id = binding["request_id"]
+        self.journey_id = binding.get(journeys.BUDGET_FIELD)
         self.fence = fence
         self.result_snapshot_id = result_snapshot_id
         self.result_import_id = result_import_id
@@ -454,6 +456,9 @@ class DraftAttemptClaim:
                     raise _conflict("project_draft_budget_unavailable", "This draft attempt cannot make another provider request.")
                 expires_at = min(now + timedelta(seconds=_LEASE_SECONDS), attempt["deadline_at"])
                 if self._started == 0:
+                    if self.journey_id is not None:
+                        budget = self._journey_budget(transaction)
+                        journeys.reserve(transaction, budget, operation, self.operation_id, cap, now)
                     transaction.update(self._attempt, {"provider_requests_reserved": cap, "dispatched_at": now})
                 transaction.update(self._lease, {"expires_at": expires_at, "dispatched": True})
                 return attempt["deadline_at"]
@@ -470,6 +475,21 @@ class DraftAttemptClaim:
             self._started += 1
             return min(remaining, _MAX_REQUEST_SECONDS)
 
+    def _journey_budget(self, transaction):
+        if self._binding["operation"] == journeys.INTAKE_STAGE:
+            budget = journeys.read_budget(transaction, self._project, self._binding["actor_id"], self.journey_id)
+            if budget.data.get("intake_attempt_id") != self.operation_id:
+                raise journeys.unavailable()
+            return budget
+        return journeys.budget_for_artifact(
+            transaction,
+            self._project,
+            self._binding["actor_id"],
+            "test_cases",
+            self._binding["source_snapshot_ids"]["test_cases"],
+            expected_id=self.journey_id,
+        )
+
     def prepare_publication(self, transaction, snapshot):
         """Read the exact claim, then return a callback that only stages writes."""
         attempt, lease, _ = self._validate(transaction)
@@ -482,14 +502,37 @@ class DraftAttemptClaim:
             }.get(attempt["operation"], "The draft result does not match this Project Sync stage's saved sources and request.")
             raise _conflict("project_draft_result_mismatch", message)
 
-        return self._prepare_finish(transaction, lease, {"result_snapshot_id": snapshot["snapshot_id"]})
+        finish = self._prepare_finish(transaction, lease, {"result_snapshot_id": snapshot["snapshot_id"]})
+        if self.journey_id is None:
+            return finish
+        budget = self._journey_budget(transaction)
+
+        def finish_and_link():
+            journeys.link_artifact(
+                transaction, self._project, budget, "test_cases", snapshot["snapshot_id"], producer=(attempt["operation"], self.operation_id)
+            )
+            snapshot[journeys.BUDGET_FIELD] = budget.id
+            finish()
+
+        return finish_and_link
 
     def prepare_import_publication(self, transaction, preview):
         """Verify the same-revision preview before staging the audit and lease release."""
         attempt, lease, _ = self._validate(transaction)
         if attempt["operation"] not in REQUIREMENT_EXTRACTION_OPERATIONS or preview.get("status") != "pending" or not _import_matches(preview, attempt):
             raise _conflict("project_draft_result_mismatch", "The draft result does not match this requirement import.")
-        return self._prepare_finish(transaction, lease, {"result_import_id": preview["import_id"]})
+        finish = self._prepare_finish(transaction, lease, {"result_import_id": preview["import_id"]})
+        if self.journey_id is None:
+            return finish
+        if (preview.get("extraction") or {}).get(journeys.BUDGET_FIELD) != self.journey_id:
+            raise journeys.unavailable()
+        budget = self._journey_budget(transaction)
+
+        def finish_and_link():
+            journeys.finish_preview(transaction, budget, self.operation_id, preview)
+            finish()
+
+        return finish_and_link
 
     def _prepare_finish(self, transaction, lease, result):
         def finish():
@@ -818,6 +861,11 @@ def claim_draft_attempt(
             canonical, attempt, alias_doc = _resolve_sync_attempt(transaction, project_doc, stage_doc, binding)
         else:
             attempt = _read(transaction, _attempt_doc(project_doc, binding["operation_id"]))
+        saved_journey_id = (attempt or {}).get(journeys.BUDGET_FIELD)
+        if saved_journey_id is not None:
+            if operation not in {journeys.INTAKE_STAGE, journeys.ASSESSMENT_STAGE, journeys.REPAIR_STAGE}:
+                raise journeys.unavailable()
+            canonical = {**canonical, journeys.BUDGET_FIELD: saved_journey_id}
         if attempt is not None:
             if not _same_attempt(attempt, canonical):
                 target = {
@@ -854,6 +902,23 @@ def claim_draft_attempt(
             raise _conflict("project_draft_busy", _BUSY)
         if sync_stage == "test_cases":
             _verify_sync_predecessor(transaction, project_doc, project, canonical)
+        create_budget = None
+        if operation == journeys.INTAKE_STAGE and (attempt is None or saved_journey_id is not None):
+            journey_id = journeys.intake_journey_id(canonical["operation_id"])
+            if saved_journey_id is not None and saved_journey_id != journey_id:
+                raise journeys.unavailable()
+            create_budget = journeys.prepare_intake_budget(
+                transaction, project_doc, actor_id, canonical["operation_id"], requirement_extraction["import_id"], base_revision
+            )
+            canonical = {**canonical, journeys.BUDGET_FIELD: journey_id}
+        if operation in {journeys.ASSESSMENT_STAGE, journeys.REPAIR_STAGE}:
+            budget = journeys.budget_for_artifact(
+                transaction, project_doc, actor_id, "test_cases", source_snapshot_ids["test_cases"], expected_id=saved_journey_id
+            )
+            if budget is not None:
+                if not journeys.available(budget, operation, max_requests):
+                    raise journeys.exhausted()
+                canonical = {**canonical, journeys.BUDGET_FIELD: budget.id}
         fence = lease.get("fence", 0) + 1
         deadline_at = now + timedelta(seconds=deadline_seconds)
         operation_id = canonical["operation_id"]
@@ -880,6 +945,8 @@ def claim_draft_attempt(
                 "started_at": now,
             },
         )
+        if create_budget is not None:
+            create_budget()
         if stage_doc is not None:
             transaction.set(stage_doc, {"operation_id": operation_id})
         if alias_doc is not None:
