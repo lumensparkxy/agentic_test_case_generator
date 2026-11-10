@@ -93,3 +93,9 @@ Fresh exports require current sources. When a suite or its bound inputs
 are stale, refresh and review the current suite before exporting. Draft
 reasons apply to review gates on a current suite. Earlier saved reports
 remain available through their exact report links.
+
+When a recorded design proof cannot be verified, or an exact proof
+records incomplete or unknown design, a fresh file requires a draft
+reason. Its audit preserves a recorded failed machine review and treats a
+conflicting earlier machine approval as unavailable. A legacy suite
+without a proof keeps its existing approval policy.

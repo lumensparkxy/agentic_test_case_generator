@@ -15,6 +15,7 @@ from .test_case_quality import case_source_hash, placeholder_reason
 _PROOF_VERSION = 1
 _PROOF_OPERATIONS = {"testcases.generate", "test_cases.review"}
 DESIGN_REASSESSMENT_REQUIRED = "design_reassessment_required"
+DESIGN_PROOF_UNVERIFIED = "design_proof_unverified"
 _VERSION_FIELDS = {"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
 _SOURCE_FIELDS = {
     "requirements": "source_requirements_snapshot_id",
@@ -491,7 +492,7 @@ def resolve_suite_quality(project, *, raw_suite=None):
         if source_freshness == "current":
             declared_setup = "blocked" if setup_blocked else "not_assessed"
         else:
-            reasons.append("design_proof_unverified")
+            reasons.append(DESIGN_PROOF_UNVERIFIED)
     else:
         reasons.append("design_proof_missing")
     if setup_blocked:

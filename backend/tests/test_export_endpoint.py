@@ -602,6 +602,80 @@ class ExportPublicationTests(unittest.TestCase):
             self.assertEqual(replay.content, draft.content)
             self.assertEqual(self.store, writes)
 
+    def test_recorded_design_proof_controls_draft_admission_without_changing_history(self):
+        self.seed_reviewed_design(legacy_approved=True)
+        original = self.post(request_id="original-proof-approval")
+        self.assertEqual(original.status_code, 200, original.text)
+        original_report_id = original.headers["X-Export-Report-ID"]
+        original_report = self.read_report(original_report_id).json()
+        self.assertEqual(original_report["delivery_kind"], "approved")
+        base = deepcopy(self.store)
+        suite_path = f"qa_projects/{self.project_id}/snapshots/{self.suite.snapshot_id}"
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+            for kind, reason_code, expected_machine_review in (
+                ("missing", "design_proof_missing", "approved"),
+                ("mismatched", "design_proof_unverified", "unavailable"),
+                ("incomplete", "independent_design_gaps", "unavailable"),
+                ("unknown", "independent_design_unverified", "unavailable"),
+                ("failed", "independent_design_gaps", "failed"),
+            ):
+                with self.subTest(kind=kind):
+                    self.store.clear()
+                    self.store.update(deepcopy(base))
+                    stored = self.store[suite_path]
+                    if kind == "missing":
+                        stored["metadata"].pop("suite_design_proof")
+                    elif kind == "mismatched":
+                        stored["metadata"]["suite_design_proof"]["saved_cases_hash"] = "0" * 64
+                    else:
+                        design = "unknown" if kind == "unknown" else "incomplete"
+                        stored["payload"]["substantive_assessment"].update(status=design, design_status=design)
+                        if kind == "failed":
+                            stored["payload"]["review"]["approved"] = False
+                        proof = build_suite_design_proof(self.project(), stored["payload"], stored["metadata"], plan_snapshot_id=self.suite.source_snapshot_id)
+                        self.assertEqual(proof["design_status"], design)
+                        stored["metadata"]["suite_design_proof"] = {**proof, "suite_snapshot_id": self.suite.snapshot_id}
+                    current = self.project()
+                    self.assertIn(reason_code, current.suite_quality.reason_codes)
+                    revision = current.current_revision
+                    before = deepcopy(self.store)
+                    design = self.post(request_id="proof-design", base_project_revision=revision, delivery_intent="reviewed_design")
+                    self.assertEqual(design.status_code, 409, design.text)
+                    self.assertEqual(design.json()["detail"]["code"], "design_delivery_unavailable")
+                    self.assertEqual(self.store, before)
+                    ordinary = self.post(request_id="proof-ordinary", base_project_revision=revision, approved=True)
+                    if kind == "missing":
+                        self.assertEqual(ordinary.status_code, 200, ordinary.text)
+                        audit = ordinary.json()["audit_metadata"]
+                        self.assertFalse(audit["is_draft"])
+                        self.assertEqual(audit["machine_review_status"], expected_machine_review)
+                        continue
+                    self.assertEqual(ordinary.status_code, 422, ordinary.text)
+                    self.assertEqual(ordinary.json()["detail"]["code"], "draft_override_required")
+                    self.assertEqual(self.store, before)
+                    reason = "Inspect the recorded design evidence."
+                    draft = self.post(
+                        request_id="proof-draft",
+                        base_project_revision=revision,
+                        approved=True,
+                        draft_override_requested=True,
+                        draft_override_reason=reason,
+                    )
+                    self.assertEqual(draft.status_code, 200, draft.text)
+                    audit = draft.json()["audit_metadata"]
+                    self.assertTrue(audit["is_draft"])
+                    self.assertEqual(audit["draft_override_reason"], reason)
+                    self.assertEqual(audit["machine_review_status"], expected_machine_review)
+                    self.assertEqual(audit["case_versions"], original.json()["audit_metadata"]["case_versions"])
+                    self.assertEqual(draft.json()["test_cases"], original.json()["test_cases"])
+                    report = self.read_report(draft.headers["X-Export-Report-ID"]).json()
+                    self.assertEqual(report["delivery_kind"], "draft")
+                    self.assertEqual(report["evidence"]["machine_review_status"], expected_machine_review)
+                    self.assertEqual(self.store[suite_path], before[suite_path])
+                    historical = self.read_report(original_report_id).json()
+                    self.assertEqual(historical["delivery_kind"], "approved")
+                    self.assertEqual(historical["evidence"], original_report["evidence"])
+
     def test_exact_stale_projection_blocks_fresh_files_after_explicitly_omitted_context_changes(self):
         self.seed_reviewed_design(legacy_approved=True)
         self.assertIs(self.suite.metadata["source_context_omitted"], True)

@@ -10,7 +10,7 @@ from ..contracts.exports import DesignDeliveryEvidence, ExportAuditMetadata, Exp
 from ..contracts.projects import QaProjectDetail, QaProjectStageSnapshot
 from ..contracts.requirements import Requirement, ReviewResult
 from ..contracts.test_cases import TestCase
-from .suite_quality import DESIGN_REASSESSMENT_REQUIRED
+from .suite_quality import DESIGN_PROOF_UNVERIFIED, DESIGN_REASSESSMENT_REQUIRED
 from .test_case_quality import placeholder_reason
 
 
@@ -142,6 +142,11 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
     if quality and quality.suite_snapshot_id != snapshot.snapshot_id:
         quality = None
     reassessment_required = quality and DESIGN_REASSESSMENT_REQUIRED in quality.reason_codes
+    design_requires_draft = quality and (
+        reassessment_required
+        or DESIGN_PROOF_UNVERIFIED in quality.reason_codes
+        or (quality.source_freshness == "current" and quality.design_status != "complete")
+    )
     review = None
     # Leave the superseded approval on the saved suite and its historical reports.
     if not reassessment_required and isinstance(saved.get("review"), dict) and isinstance(saved["review"].get("approved"), bool):
@@ -149,6 +154,8 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
             review = ReviewResult.model_validate(saved["review"])
         except ValidationError:
             pass
+    if design_requires_draft and review and review.approved:
+        review = None
     human = state.metadata.get("latest_human_review") if state else None
     human_status = "unavailable"
     if snapshot and isinstance(human, dict) and human.get("snapshot_id") == snapshot.snapshot_id:
@@ -260,6 +267,8 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
                 "message": (
                     "The saved design needs reassessment. Request a draft export and provide a nonempty reason."
                     if reassessment_required
+                    else "The saved design is incomplete or could not be verified. Request a draft export and provide a nonempty reason."
+                    if design_requires_draft
                     else "Export is unapproved, incomplete or unverifiable. Request a draft export and provide a nonempty reason."
                 ),
             },
