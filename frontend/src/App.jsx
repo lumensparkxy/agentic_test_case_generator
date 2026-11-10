@@ -1052,6 +1052,10 @@ export default function App() {
 	const currentSuiteSnapshotId = PROJECT_WORKSPACES_V2 ? exactSavedSuiteId : null;
 	const suiteQuality = PROJECT_WORKSPACES_V2 ? exactSuiteQuality : null;
 	const savedProofNeedsReassessment = exactSuiteQuality?.reason_codes?.includes("design_reassessment_required");
+	const savedDesignNeedsDraft =
+		savedProofNeedsReassessment ||
+		exactSuiteQuality?.reason_codes?.includes("design_proof_unverified") ||
+		(exactSuiteQuality?.source_freshness === "current" && ["incomplete", "unknown"].includes(exactSuiteQuality.design_status));
 	const reassessSavedProof = APPROVAL_CONTINUATION_ENABLED && PROJECT_WORKSPACES_V2 && savedProofNeedsReassessment;
 	const pendingStoredReview =
 		savedSuite?.payload?.substantive_assessment?.status === "unknown" &&
@@ -4551,11 +4555,16 @@ export default function App() {
 		(exactSavedSuiteId &&
 			latestSuiteHumanReview?.snapshot_id === exactSavedSuiteId &&
 			latestSuiteHumanReview.decision === "request_changes");
+	const savedDesignExportBlocker = savedProofNeedsReassessment
+		? "The saved design needs reassessment."
+		: savedDesignNeedsDraft
+			? exactSuiteQuality.design_status === "incomplete"
+				? "The saved design has unresolved gaps."
+				: "The saved design proof could not be verified."
+			: "";
 	const savedSuiteExportBlocker = humanSuiteChangesRequested
 		? "Human review requested changes to this saved suite."
-		: savedProofNeedsReassessment
-			? "The saved design needs reassessment."
-			: "";
+		: savedDesignExportBlocker;
 	const declaredBrowserSetup =
 		suiteQuality && [PROJECT_DESTINATIONS.REPORTS, PROJECT_DESTINATIONS.AUTOMATION].includes(route.destination)
 			? getCurrentDeclaredBrowserSetup(currentProject)
@@ -6895,7 +6904,7 @@ export default function App() {
 													</Button>
 												</section>
 											)}
-											{savedSuiteReviewed && (
+											{savedSuiteReviewed && (!savedDesignNeedsDraft || !savedSuite.approved) && (
 												<div className={`generation-gate-card ${savedSuite.approved ? "ready" : "blocked"}`} role="status">
 													<div>
 														<strong>

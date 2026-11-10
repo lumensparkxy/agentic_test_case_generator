@@ -36,6 +36,7 @@ async function setup(
 		supersedeExport = false,
 		reassessment = false,
 		suiteHumanReview,
+		recordedDesign,
 	} = {}
 ) {
 	const project = useCaseProjectFixture({ name: "Verified checkout design" });
@@ -205,7 +206,7 @@ async function setup(
 	}
 	if (!oldServer) {
 		const sourcesStale = stale || staleBoundSource;
-		const complete = available && !sourcesStale && !reassessment;
+		const complete = available && !sourcesStale && !reassessment && !recordedDesign;
 		project.design_delivery_enabled = true;
 		project.reviewed_design_available = complete && !humanChangesRequested;
 		project.suite_quality = {
@@ -232,6 +233,13 @@ async function setup(
 							: "design_proof_missing",
 			],
 		};
+		if (recordedDesign) {
+			Object.assign(project.suite_quality, {
+				design_status: recordedDesign.status,
+				source_freshness: recordedDesign.freshness,
+				reason_codes: [recordedDesign.reason],
+			});
+		}
 	}
 
 	const workspaceProject = workspaceProjectFixture({
@@ -383,7 +391,7 @@ async function setup(
 					...(draft
 						? {
 								draft_override_reason: body.draft_override_reason,
-								machine_review_status: reassessment ? "unavailable" : "approved",
+								machine_review_status: reassessment || recordedDesign ? "unavailable" : "approved",
 								human_review_status: humanChangesRequested ? "changes_requested" : "unavailable",
 							}
 						: { design_delivery: { delivery_kind: "reviewed_design", declared_setup: "blocked" } }),
@@ -400,6 +408,85 @@ const exportDesign = (page) => page.getByRole("button", { name: "Export reviewed
 
 test.describe("Exact suite evidence across Review and Deliver", () => {
 	test.skip(!v2, "Requires the opt-in project workspaces");
+
+	test("delivers a reasoned draft for an exact suite with an unverified recorded proof", async ({ page }, testInfo) => {
+		const { errors, exportRequests, writes, testCase, reportReads, project } = await setup(page, {
+			suiteHumanReview: "earlier",
+			recordedDesign: { status: "unknown", freshness: "unknown", reason: "design_proof_unverified" },
+		});
+		project.current_snapshots.test_cases.operation = "test_cases.review";
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/review/tests`);
+		await expect(quality(page)).toContainText(/Independent design\s*Unknown/);
+		await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Review saved suite", exact: true })).toHaveCount(0);
+		await expect(page.getByText("Saved suite review passed.", { exact: true })).toHaveCount(0);
+
+		await Promise.all([
+			page.waitForResponse((response) => new URL(response.url()).pathname === `${root}/orchestrator/status` && response.ok()),
+			page.goto(`${root}/deliver`),
+		]);
+		const json = page.getByRole("button", { name: "JSON API/Import ready", exact: true });
+		await expect(page.getByText("The saved design proof could not be verified.", { exact: false })).toBeVisible();
+		await expect(page.getByText("Approved for export", { exact: true })).toHaveCount(0);
+		await expect(exportDesign(page)).toHaveCount(0);
+		await expect(json).toBeDisabled();
+		await expect(page.getByText("Loading project recommendations...", { exact: true })).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath("unverified-proof-draft-gate.png") });
+		await page.getByRole("checkbox", { name: "Export draft anyway", exact: true }).check();
+		await expect(json).toBeDisabled();
+		expect(writes).toEqual([]);
+
+		const reason = "Share the exact saved cases while proof is checked.";
+		await page.getByRole("textbox", { name: "Reason for exporting this draft", exact: true }).fill(reason);
+		const downloadPromise = page.waitForEvent("download");
+		await json.press("Enter");
+		const download = await downloadPromise;
+		const file = JSON.parse(await readFile(await download.path(), "utf8"));
+		expect(file.audit_metadata).toMatchObject({
+			snapshot_id: suiteId,
+			is_draft: true,
+			draft_override_reason: reason,
+			machine_review_status: "unavailable",
+		});
+		expect(file.test_cases[0].steps).toEqual(testCase.steps);
+		expect(exportRequests).toHaveLength(1);
+		expect(exportRequests[0].body).toMatchObject({
+			approved: false,
+			source_snapshot_id: suiteId,
+			draft_override_requested: true,
+			draft_override_reason: reason,
+		});
+		expect(exportRequests[0].body).not.toHaveProperty("delivery_intent");
+		await page.getByRole("link", { name: "Open saved report for this download", exact: true }).press("Enter");
+		await expect(page.getByRole("heading", { name: "Saved file report", exact: true })).toBeVisible();
+		await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+		await expect(page.getByText(reason, { exact: true })).toBeVisible();
+		expect(reportReads).toContain(reportId);
+		expect(writes).toEqual(["POST /export/json"]);
+		expect(errors).toEqual([]);
+	});
+
+	for (const [status, reason, message] of [
+		["incomplete", "independent_design_gaps", "The saved design has unresolved gaps."],
+		["unknown", "independent_design_unverified", "The saved design proof could not be verified."],
+	]) {
+		test(`blocks approved delivery when an exact proof records ${status} design`, async ({ page }) => {
+			const { errors, writes } = await setup(page, {
+				suiteHumanReview: "earlier",
+				recordedDesign: { status, freshness: "current", reason },
+			});
+			await page.goto(`${root}/deliver`);
+			await expect(quality(page)).toContainText(new RegExp(`Independent design\\s*${status}`, "i"));
+			await expect(page.getByText(message, { exact: false })).toBeVisible();
+			await expect(page.getByText("Approved for export", { exact: true })).toHaveCount(0);
+			await expect(exportDesign(page)).toHaveCount(0);
+			await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeDisabled();
+			await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toBeVisible();
+			expect(writes).toEqual([]);
+			expect(errors).toEqual([]);
+		});
+	}
 
 	for (const [label, options, reviewSection] of [
 		["a stale suite", { stale: true }, "/review/tests"],
@@ -1046,6 +1133,20 @@ test("blocks a stale suite without a quality projection", { tag: "@p1" }, async 
 	await expect(page.getByText("Export unavailable for stale sources", { exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeDisabled();
 	await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
+	expect(writes).toEqual([]);
+	expect(errors).toEqual([]);
+});
+
+test("keeps ordinary approval for an older suite without a recorded design proof", { tag: "@p1" }, async ({ page }) => {
+	const { errors, writes } = await setup(page, {
+		suiteHumanReview: "earlier",
+		recordedDesign: { status: "unknown", freshness: "unknown", reason: "design_proof_missing" },
+	});
+	await page.goto(v2 ? `${root}/deliver` : `${root}/reports`);
+	if (v2) await expect(quality(page)).toContainText(/Independent design\s*Unknown/);
+	await expect(page.getByText("Approved for export", { exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeEnabled();
+	await expect(exportDesign(page)).toHaveCount(0);
 	expect(writes).toEqual([]);
 	expect(errors).toEqual([]);
 });
