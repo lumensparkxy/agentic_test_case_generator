@@ -82,6 +82,13 @@ actual app artifacts. Keep rehearsal and live intake separate. A private
 record includes `workflow`, `repeat`, `arm`, `cohort`, `commit`, `status`,
 and `input_sha256` from the frozen generation input. The runner is
 responsible for capturing that identity from the input it actually used.
+Upload the frozen `source_document` when supplied. Otherwise use the
+canonical Markdown from the input rehearsal, with each exact requirement
+ID as a heading and its exact text below. The intake verifies saved
+requirements against the recorded import, document hash, verbatim quote
+and cited line range. W11 checks the original and revised documents
+separately. A row carried forward from the original import must match the
+saved original row and cite lines that are identical in both documents.
 
 Each `delivered` record has a `files` object mapping `project`, `hydrated`,
 `exported`, `report`, and `run` to `{ "path": "relative.json", "sha256": "…" }`.
@@ -92,7 +99,9 @@ identity capture. The runner capture binds `workflow`, `arm`, `repeat`,
 binds `cohort`, `project_id`, and `commit` for a live run. Keep the original
 case response envelopes and request, approval and provider receipts in
 private run evidence. W11 also uses `before_files` with the project, case,
-export and report captures from before the source change. A `failed`,
+export and report captures from before the source change. A reviewed suite
+links to the preceding Test Cases snapshot in the captured project timeline
+and records the current scenario plan in its source metadata. A `failed`,
 `partial`, `blocked`, or `interrupted` record includes a `reason` and any
 available hashed files. Partial runs stay in the private ledger as incomplete
 deliveries, with no reviewer packet or inferred coverage score.

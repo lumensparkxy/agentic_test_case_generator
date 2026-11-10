@@ -10,7 +10,7 @@ import re
 from unittest.mock import patch
 from uuid import uuid4
 
-from prepare_case_adjudication import FROZEN_MANIFEST, digest, exact, firestore_fields, json_bytes, read_json, require
+from prepare_case_adjudication import FROZEN_MANIFEST, digest, exact, firestore_fields, json_bytes, markdown_source, read_json, require
 
 
 DEMO_PROJECTS = {"baseline": "demo-tcg-workbench", "candidate": "demo-tcg-v2-continuation"}
@@ -34,10 +34,6 @@ def generation_inputs(directory):
         require(set(source) <= FROZEN_FIELDS and set(source["context"]) <= CONTEXT_FIELDS, "Unexpected generation input field")
         require(digest(source) == manifest["workflow_index"][name]["generation_input_sha256"], "Changed frozen workflow")
     return manifest, workflows
-
-
-def markdown_source(rows):
-    return "\n\n".join(f"## {row['id']}\n{row['text']}" for row in rows) + "\n"
 
 
 def revised_rows(document, original):

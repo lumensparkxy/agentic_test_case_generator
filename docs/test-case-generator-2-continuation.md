@@ -614,6 +614,12 @@ The W01/W05 native rehearsal produced four arm-neutral packets and retained
 exact packets and keeps unknown obligations in scope. The live cohort and
 independent judgments remain empty.
 
+The intake also checks saved file source digests and exact cited lines
+against the frozen documents before creating reviewer packets. It keeps
+original and revised W11 evidence separate, including when only one
+requirement changed. A mismatched capture stays in the private ledger
+without a reviewer packet.
+
 P6 corpus input rehearsal under
 [#497](https://github.com/lumensparkxy/agentic_test_case_generator/issues/497)
 exercised all twelve frozen workflows on the baseline and candidate

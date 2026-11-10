@@ -54,6 +54,59 @@ def exact(left, right):
     return json_bytes(left) == json_bytes(right)
 
 
+def markdown_source(rows):
+    return "\n\n".join(f"## {row['id']}\n{row['text']}" for row in rows) + "\n"
+
+
+def cited_lines(ref, import_id, version, lines):
+    if (
+        ref.get("source_system") != "file"
+        or ref.get("import_id") != import_id
+        or ref.get("source_version") != version
+        or ref.get("excerpt_verified") is not True
+    ):
+        return None
+    excerpt = ref.get("excerpt")
+    span = re.fullmatch(r"Lines ([1-9][0-9]*)-([1-9][0-9]*)", ref.get("source_section") or "")
+    if not isinstance(excerpt, str) or not excerpt.strip() or not span:
+        return None
+    first, last = map(int, span.groups())
+    if last <= len(lines) and last - first == excerpt.count("\n") and excerpt in "\n".join(lines[first - 1 : last]):
+        return slice(first - 1, last)
+    return None
+
+
+def check_saved_source(project, document, *, previous=None):
+    payload = project["current_snapshots"]["requirements"]["payload"]
+    import_id = payload["import_id"]
+    require(isinstance(import_id, str) and import_id, "Saved requirements lack an import identity")
+    version = sha256(document.encode()).hexdigest()
+    lines = document.split("\n")
+    prior_rows = {}
+    if previous:
+        prior_project, prior_document = previous
+        prior = prior_project["current_snapshots"]["requirements"]["payload"]
+        prior_rows = {row["id"]: row for row in prior["requirements"]}
+        prior_import = prior["import_id"]
+        require(prior_import != import_id, "Revised requirements reuse the original import")
+        prior_version = sha256(prior_document.encode()).hexdigest()
+        prior_lines = prior_document.split("\n")
+
+    current_count = 0
+    for row in payload["requirements"]:
+        refs = row.get("sources", [])
+        if any(cited_lines(ref, import_id, version, lines) for ref in refs):
+            current_count += 1
+            continue
+        # A W11 reimport can leave unaffected requirements exactly as they were.
+        if row["id"] in prior_rows and exact(row, prior_rows[row["id"]]):
+            spans = (cited_lines(ref, prior_import, prior_version, prior_lines) for ref in refs)
+            if any(span is not None and prior_lines[span] == lines[span] for span in spans):
+                continue
+        raise ValueError(f"Saved requirement {row['id']} lacks an exact frozen source reference")
+    require(current_count > 0, "Saved requirements lack a reference from the current frozen import")
+
+
 def firestore_fields(value):
     """Match persisted dictionaries that omit nulls during snapshot writes."""
     if isinstance(value, dict):
@@ -61,6 +114,33 @@ def firestore_fields(value):
     if isinstance(value, list):
         return [firestore_fields(item) for item in value]
     return value
+
+
+def check_suite_parent(project, suite, plan_id):
+    parent_id = suite["source_snapshot_id"]
+    if suite["operation"] != "test_cases.review":
+        require(parent_id == plan_id, "Mismatched suite plan")
+        return
+    parent = max(
+        (
+            event
+            for event in project["timeline"]
+            if event["event_type"] == "stage.snapshot_created"
+            and event["stage"] == "test_cases"
+            and event["project_id"] == project["project_id"]
+            and event["project_revision"] < suite["project_revision"]
+        ),
+        key=lambda event: event["project_revision"],
+        default=None,
+    )
+    require(
+        parent_id
+        and parent
+        and parent["snapshot_id"] == parent_id
+        and project["stage_state"]["test_cases"]["source_snapshot_id"] == parent_id
+        and suite["metadata"].get("source_test_cases_snapshot_id", parent_id) == parent_id,
+        "Reviewed suite does not name its preceding saved Test Cases snapshot",
+    )
 
 
 def checked_delivery(project, hydrated, exported, report):
@@ -79,10 +159,10 @@ def checked_delivery(project, hydrated, exported, report):
         require(
             plan_snapshot["source_snapshot_id"] == source_ids["requirements"]
             and plan_snapshot["metadata"]["source_requirements_snapshot_id"] == source_ids["requirements"]
-            and plan_snapshot["metadata"].get("source_context_snapshot_id") == source_ids.get("context")
-            and suite["source_snapshot_id"] == source_ids["use_cases"],
-            "Mismatched plan or suite lineage",
+            and plan_snapshot["metadata"].get("source_context_snapshot_id") == source_ids.get("context"),
+            "Mismatched scenario plan lineage",
         )
+        check_suite_parent(project, suite, source_ids["use_cases"])
         plan = project["stage_state"]["use_cases"]
         approval = plan["metadata"]["latest_human_review"]
         require(
@@ -241,6 +321,7 @@ def prepare(frozen_root, intake_path, output):
                 )
             request_id = captures["report"]["request_id"]
             require(project_id not in used["project"] and request_id not in used["report"], "Delivery reuses another slot's project or export request")
+            document = source.get("source_document", markdown_source(source["requirements"]))
             if "revised_source_document" in source:
                 before = captured_files(root, record["before_files"])
                 previous, current = before["project"], captures["project"]
@@ -252,6 +333,10 @@ def prepare(frozen_root, intake_path, output):
                     "Expected both exact source-change checkpoints in one project",
                 )
                 evidence["before"] = checked_delivery(*(before[kind] for kind in CAPTURES))
+                check_saved_source(before["project"], document)
+                check_saved_source(current, source["revised_source_document"], previous=(previous, document))
+            else:
+                check_saved_source(captures["project"], document)
             used["project"].add(project_id)
             used["report"].add(request_id)
             key = keys[workflow]
