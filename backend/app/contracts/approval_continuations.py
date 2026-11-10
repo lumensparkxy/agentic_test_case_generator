@@ -40,6 +40,23 @@ class ApproveAndGenerateTestsInput(UseCaseReviewRequest):
         return value
 
 
+class SavedPlanGenerationTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_project_revision: int = Field(ge=1)
+    snapshot_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+    review_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class GenerateTestsFromSavedApprovalInput(SavedPlanGenerationTarget):
+    template: TestCaseTemplate | None = None
+
+    @field_validator("template")
+    @classmethod
+    def bounded_template(cls, value: TestCaseTemplate | None) -> TestCaseTemplate | None:
+        return ApproveAndGenerateTestsInput.bounded_template(value)
+
+
 class ApprovalContinuationView(BaseModel):
     run_id: str
     state: ApprovalContinuationState
@@ -84,6 +101,7 @@ class ApprovalContinuationStatus(BaseModel):
     receipt: ApprovalContinuationReceipt | None = None
     saved_review_enabled: bool = False
     saved_review_attempt: SavedReviewAdmissionView | None = None
+    saved_plan_generation: SavedPlanGenerationTarget | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ApproveAndPrepareScenariosResult(BaseModel):
@@ -95,3 +113,7 @@ class ApproveAndPrepareScenariosResult(BaseModel):
 class ApproveAndGenerateTestsResult(UseCaseReviewResponse):
     continuation: ApprovalContinuationView | None
     blocked_reason: str | None
+
+
+class GenerateTestsFromSavedApprovalResult(BaseModel):
+    continuation: ApprovalContinuationView

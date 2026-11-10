@@ -15,6 +15,7 @@ from ..models import (
     UseCaseReviewRecord,
     UseCaseReviewResponse,
 )
+from ..contracts.approval_continuations import SavedPlanGenerationTarget
 from .approval_continuation import ContinuationOptions, continuation_run_id, enqueue_approval
 from .requirement_reconciliation import canonical_requirements, digest
 from .requirement_scope import eligible_generation_scope
@@ -22,6 +23,7 @@ from .scenario_review_state import current_scenario_reviews, scenario_key
 from .audit_service import build_actor_snapshot
 from .firestore_repository import get_required_firestore_client
 from .orchestrator_service import build_orchestrator_status
+from .use_case_generation_service import _validate_output
 from .workflow_project_service import (
     ProjectNotFoundError,
     ProjectPermissionError,
@@ -33,6 +35,7 @@ QA_PROJECTS_COLLECTION = "qa_projects"
 _PREPARED_SCENARIO_RESERVATION = 7
 _TEST_GENERATION_RESERVATION = 24
 _JOURNEY_PROVIDER_REQUEST_LIMIT = _PREPARED_SCENARIO_RESERVATION + _TEST_GENERATION_RESERVATION
+_SAVED_PLAN_ENROLLMENTS = "saved_plan_test_generation"
 
 
 class UseCaseReviewConflictError(RuntimeError):
@@ -193,6 +196,45 @@ def _read_prepared_journey(
     return parent_doc, intent
 
 
+def _test_generation_scope(transaction, project_doc, project_payload, plan_snapshot, *, owner_id=None):
+    if project_payload.get("status") != "active":
+        return "project_inactive"
+    stage_state = project_payload.get("stage_state") or {}
+    requirements_state = stage_state.get("requirements") or {}
+    baseline = _current_source(transaction, project_doc, "requirements", requirements_state)
+    if not baseline:
+        return "requirements_not_current"
+    if owner_id is not None and (baseline.get("operation") != "requirements.review" or baseline.get("actor_user_id") != owner_id):
+        return "requirements_not_eligible"
+    try:
+        rows, _ = canonical_requirements(project_doc.id, baseline)
+    except AttributeError, TypeError, ValidationError:
+        return "requirements_not_eligible"
+    scope = eligible_generation_scope(rows, approved=bool(requirements_state.get("approved")))
+    if not scope:
+        return "requirements_not_eligible"
+
+    context_state = stage_state.get("context") or {}
+    context_id = context_state.get("current_snapshot_id")
+    if context_state.get("stale") or (
+        context_id and not _current_source(transaction, project_doc, "context", context_state, field_paths=("snapshot_id", "project_id", "stage"))
+    ):
+        return "context_not_current"
+    requirements_id = baseline["snapshot_id"]
+    metadata = plan_snapshot.get("metadata") or {}
+    if (
+        plan_snapshot.get("source_snapshot_id") != requirements_id
+        or metadata.get("source_requirements_snapshot_id") != requirements_id
+        or not recorded_use_case_context_matches(metadata, context_id)
+    ):
+        return "use_cases_source_mismatch"
+    groups = plan_snapshot["payload"].get("coverage_plan") or []
+    expected = {row.id: row.text for row in scope}
+    if len(groups) != len(expected) or {group.get("requirement_id"): group.get("requirement_text") for group in groups if group.get("scenarios")} != expected:
+        return "use_cases_scope_mismatch"
+    return {"requirements": requirements_id, "context": context_id, "use_cases": plan_snapshot["snapshot_id"]}, scope
+
+
 def _test_generation_intent(
     transaction,
     project_doc,
@@ -208,41 +250,11 @@ def _test_generation_intent(
     require_prepared_journey,
     decided_at,
 ):
-    if project_payload.get("status") != "active":
-        return {"continuation_blocked_reason": "project_inactive"}
-    stage_state = project_payload.get("stage_state") or {}
-    requirements_state = stage_state.get("requirements") or {}
-    baseline = _current_source(transaction, project_doc, "requirements", requirements_state)
-    if not baseline:
-        return {"continuation_blocked_reason": "requirements_not_current"}
-    try:
-        rows, _ = canonical_requirements(project_doc.id, baseline)
-    except AttributeError, TypeError, ValidationError:
-        return {"continuation_blocked_reason": "requirements_not_eligible"}
-    scope = eligible_generation_scope(rows, approved=bool(requirements_state.get("approved")))
-    if not scope:
-        return {"continuation_blocked_reason": "requirements_not_eligible"}
-
-    context_state = stage_state.get("context") or {}
-    context_id = context_state.get("current_snapshot_id")
-    if context_state.get("stale") or (
-        context_id and not _current_source(transaction, project_doc, "context", context_state, field_paths=("snapshot_id", "project_id", "stage"))
-    ):
-        return {"continuation_blocked_reason": "context_not_current"}
-    requirements_id = baseline["snapshot_id"]
-    metadata = plan_snapshot.get("metadata") or {}
-    if (
-        plan_snapshot.get("source_snapshot_id") != requirements_id
-        or metadata.get("source_requirements_snapshot_id") != requirements_id
-        or not recorded_use_case_context_matches(metadata, context_id)
-    ):
-        return {"continuation_blocked_reason": "use_cases_source_mismatch"}
-    groups = plan_snapshot["payload"].get("coverage_plan") or []
-    expected = {row.id: row.text for row in scope}
-    if len(groups) != len(expected) or {group.get("requirement_id"): group.get("requirement_text") for group in groups if group.get("scenarios")} != expected:
-        return {"continuation_blocked_reason": "use_cases_scope_mismatch"}
-
-    requirement_ids = [row.id for row in scope]
+    scope = _test_generation_scope(transaction, project_doc, project_payload, plan_snapshot)
+    if isinstance(scope, str):
+        return {"continuation_blocked_reason": scope}
+    sources, requirements = scope
+    requirement_ids = [row.id for row in requirements]
     parent = None
     if require_prepared_journey:
         parent = _read_prepared_journey(
@@ -250,8 +262,8 @@ def _test_generation_intent(
             project_doc,
             plan=plan_snapshot,
             actor_id=actor.sub,
-            requirements_id=requirements_id,
-            context_id=context_id,
+            requirements_id=sources["requirements"],
+            context_id=sources["context"],
             requirement_ids=requirement_ids,
             options=options,
         )
@@ -267,7 +279,7 @@ def _test_generation_intent(
         approval_id=review_id,
         request_id=request_id,
         resulting_revision=resulting_revision,
-        source_snapshot_ids={"requirements": requirements_id, "context": context_id, "use_cases": plan_snapshot["snapshot_id"]},
+        source_snapshot_ids=sources,
         requirement_ids=requirement_ids,
         options=options,
     )
@@ -292,6 +304,155 @@ def _test_generation_intent(
             },
         )
     return {"continuation_run_id": run_id}
+
+
+def _saved_plan_record(project_doc, kind, identity):
+    return project_doc.collection(_SAVED_PLAN_ENROLLMENTS).document(f"{kind}_{digest(identity)}")
+
+
+def _saved_plan_receipt_matches(receipt, project_doc, actor, request_id):
+    return (
+        receipt
+        and receipt.get("project_id") == project_doc.id
+        and receipt.get("actor_user_id") == actor.sub
+        and receipt.get("request_id") == request_id
+        and isinstance(receipt.get("run_id"), str)
+    )
+
+
+def saved_plan_generation_receipt(project_doc, actor, request_id):
+    receipt = _document_to_dict(_saved_plan_record(project_doc, "request", request_id).get())
+    return receipt["run_id"] if _saved_plan_receipt_matches(receipt, project_doc, actor, request_id) else None
+
+
+def _saved_plan_generation_basis(transaction, project_doc, project, actor):
+    """Verify the immutable ordinary plan and the owner's current whole decision."""
+    stage_state = project.get("stage_state") or {}
+    use_cases = stage_state.get("use_cases") or {}
+    if project.get("status") != "active" or (stage_state.get("test_cases") or {}).get("current_snapshot_id") or use_cases.get("approved") is not True:
+        return None
+    plan = _current_source(transaction, project_doc, "use_cases", use_cases)
+    if not plan or plan.get("operation") != "use_cases.generate" or plan.get("actor_user_id") != actor.sub:
+        return None
+    plan_request = plan.get("request_id")
+    metadata = plan.get("metadata") or {}
+    source_id = plan.get("source_snapshot_id")
+    if not isinstance(plan_request, str) or not plan_request or not source_id or metadata.get("use_case_refresh"):
+        return None
+    prepared_id = continuation_run_id(project_doc.id, actor.sub, "prepare_scenarios", source_id)
+    if plan_request == prepared_id:
+        return None
+    review_state = use_cases.get("metadata") or {}
+    latest = review_state.get("latest_human_review") or {}
+    plan_id = plan["snapshot_id"]
+    revision = project.get("current_revision")
+    if (
+        type(revision) is not int
+        or revision < 1
+        or latest.get("snapshot_id") != plan_id
+        or latest.get("decision") != "approve"
+        or latest.get("reviewer_user_id") != actor.sub
+        or latest.get("resulting_project_revision") != revision
+    ):
+        return None
+    review_id = latest.get("review_id")
+    if not isinstance(review_id, str) or not review_id or "/" in review_id:
+        return None
+    review = _document_to_dict(project_doc.collection("use_case_reviews").document(review_id).get(transaction=transaction))
+    if (
+        not review
+        or review.get("review_id") != review_id
+        or review.get("project_id") != project_doc.id
+        or review.get("stage") != "use_cases"
+        or review.get("snapshot_id") != plan_id
+        or review.get("decision") != "approve"
+        or review.get("reviewer_user_id") != actor.sub
+        or review.get("resulting_project_revision") != revision
+        or review.get("require_prepared_journey")
+    ):
+        return None
+    try:
+        items = current_scenario_reviews(plan["payload"], review_state, plan_id)
+    except KeyError, TypeError, ValueError:
+        return None
+    if not items or any(item["status"] != "approved" for item in items.values()):
+        return None
+    scope = _test_generation_scope(transaction, project_doc, project, plan, owner_id=actor.sub)
+    if isinstance(scope, str):
+        return None
+    prepared = _document_to_dict(
+        project_doc.collection("orchestrator_runs").document(prepared_id).get(transaction=transaction, field_paths=("produced_snapshot_ids",))
+    )
+    if prepared and (prepared.get("produced_snapshot_ids") or {}).get("use_cases") == plan_id:
+        return None
+    try:
+        _validate_output(plan["payload"], scope[1])
+        target = SavedPlanGenerationTarget(base_project_revision=revision, snapshot_id=plan_id, review_id=review_id)
+    except HTTPException, ValidationError:
+        return None
+    return target, scope
+
+
+def saved_plan_generation_status(project_doc, actor):
+    project = _document_to_dict(project_doc.get()) or {}
+    if project.get("project_id") != project_doc.id or project.get("owner_user_id") != actor.sub:
+        return None, None
+    plan_id = ((project.get("stage_state") or {}).get("use_cases") or {}).get("current_snapshot_id")
+    if not plan_id:
+        return None, None
+    enrollment = _document_to_dict(_saved_plan_record(project_doc, "plan", plan_id).get())
+    if enrollment:
+        return None, enrollment.get("run_id")
+    basis = _saved_plan_generation_basis(None, project_doc, project, actor)
+    return (basis[0], None) if basis else (None, None)
+
+
+def enqueue_saved_plan_generation(*, client, project_doc, actor, target, request_id, options):
+    if options.max_attempts != 1 or options.max_provider_requests != _TEST_GENERATION_RESERVATION:
+        raise ValueError("Saved-plan generation requires one bounded Test Cases stage.")
+    fingerprint = digest([target.model_dump(mode="json"), options.template.model_dump(mode="json") if options.template else None])
+
+    @transactional
+    def enroll(transaction):
+        project = _document_to_dict(project_doc.get(transaction=transaction))
+        if not project or project.get("project_id") != project_doc.id or project.get("owner_user_id") != actor.sub:
+            raise ProjectNotFoundError(project_doc.id)
+        request_doc = _saved_plan_record(project_doc, "request", request_id)
+        receipt = _document_to_dict(request_doc.get(transaction=transaction))
+        if receipt:
+            if not _saved_plan_receipt_matches(receipt, project_doc, actor, request_id) or receipt.get("fingerprint") != fingerprint:
+                raise HTTPException(409, "This request identity already belongs to another generation request.")
+            return receipt["run_id"]
+        if _document_to_dict(project_doc.collection("use_case_reviews").document(use_case_review_id(project_doc.id, request_id)).get(transaction=transaction)):
+            raise HTTPException(409, "This request identity already belongs to a scenario review.")
+        plan_doc = _saved_plan_record(project_doc, "plan", target.snapshot_id)
+        if _document_to_dict(plan_doc.get(transaction=transaction)):
+            raise HTTPException(409, {"code": "saved_plan_generation_exists", "message": "Check the existing Test Cases run for this saved plan."})
+        basis = _saved_plan_generation_basis(transaction, project_doc, project, actor)
+        if not basis or basis[0] != target:
+            raise HTTPException(
+                409, {"code": "saved_plan_generation_unavailable", "message": "Reload Review and verify the current approved scope and scenario plan."}
+            )
+        sources, requirements = basis[1]
+        run_id = enqueue_approval(
+            transaction,
+            project_doc,
+            client=client,
+            stage="generate_tests",
+            actor_id=actor.sub,
+            approval_id=target.review_id,
+            request_id=request_id,
+            resulting_revision=target.base_project_revision,
+            source_snapshot_ids=sources,
+            requirement_ids=[row.id for row in requirements],
+            options=options,
+        )
+        record = {"project_id": project_doc.id, "actor_user_id": actor.sub, "request_id": request_id, "run_id": run_id, "fingerprint": fingerprint}
+        transaction.create(plan_doc, record)
+        transaction.create(request_doc, record)
+        return run_id
+
+    return enroll(client.transaction())
 
 
 def _apply_review_transaction(
@@ -337,6 +498,12 @@ def _apply_review_transaction(
             return UseCaseReviewRecord.model_validate(existing_review)
         raise UseCaseReviewConflictError(
             "This X-Request-ID was already used for a different Use Cases review. Reload and retry with a new request identity.",
+            latest_revision=current_revision,
+            current_snapshot_id=current_snapshot_id,
+        )
+    if _document_to_dict(_saved_plan_record(project_doc, "request", request_id).get(transaction=transaction)):
+        raise UseCaseReviewConflictError(
+            "This X-Request-ID belongs to a saved-plan generation request.",
             latest_revision=current_revision,
             current_snapshot_id=current_snapshot_id,
         )

@@ -204,6 +204,13 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "ApproveAndGenerateTestsResponse",
     ),
     SelectedOperation(
+        "generateTestsFromSavedApproval",
+        "post",
+        "/projects/{project_id}/approval-continuations/generate-tests-from-saved-approval",
+        "GenerateTestsFromSavedApprovalRequest",
+        "GenerateTestsFromSavedApprovalResponse",
+    ),
+    SelectedOperation(
         "approvalContinuationCancel",
         "post",
         "/projects/{project_id}/approval-continuations/{run_id}/cancel",

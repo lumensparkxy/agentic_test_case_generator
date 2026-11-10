@@ -31,6 +31,7 @@ PROJECT_ROOT = f"qa_projects/{PROJECT_ID}"
 STATUS_PATH = f"/projects/{PROJECT_ID}/approval-continuations"
 APPROVAL_PATH = f"/projects/{PROJECT_ID}/requirements/approve-and-prepare-scenarios"
 TEST_APPROVAL_PATH = f"/projects/{PROJECT_ID}/use-cases/approve-and-generate-tests"
+SAVED_PLAN_GENERATION_PATH = f"{STATUS_PATH}/generate-tests-from-saved-approval"
 EMULATOR_HOST = "127.0.0.1:9090"
 
 
@@ -152,6 +153,40 @@ class ApprovalContinuationApiTests(TestCase):
         )
         del self.store[f"{continuation.OUTBOX_COLLECTION}/{parent_id}"]
         return parent, {"snapshot_id": SNAPSHOT_ID, "base_project_revision": revision, "decision": "approve"}
+
+    def ordinary_approved_plan(self):
+        scope = self.client.patch(f"/projects/{PROJECT_ID}/requirements/reviews", json=self.payload)
+        self.assertEqual(scope.status_code, 200, scope.text)
+        project = self.store[PROJECT_ROOT]
+        requirements_id = project["stage_state"]["requirements"]["current_snapshot_id"]
+        project["stage_state"]["use_cases"].update(stale=False, approved=False)
+        plan = self.store[f"{PROJECT_ROOT}/snapshots/{SNAPSHOT_ID}"]
+        plan.update(
+            operation="use_cases.generate",
+            project_revision=project["current_revision"],
+            actor_user_id=self.actor.sub,
+            request_id="continuation_manual",
+            source_snapshot_id=requirements_id,
+            metadata={"source_requirements_snapshot_id": requirements_id, "source_context_omitted": True},
+        )
+        plan["payload"]["coverage_plan"][0]["requirement_text"] = "Checkout"
+        for scenario in plan["payload"]["coverage_plan"][0]["scenarios"]:
+            scenario.update(requirement_id="REQ-1", objective=scenario["title"])
+        plan["payload"]["requirement_analysis"] = [{"requirement_id": "REQ-1", "requirement_text": "Checkout"}]
+        approval = self.client.post(
+            f"/projects/{PROJECT_ID}/use-cases/reviews",
+            json={"snapshot_id": SNAPSHOT_ID, "base_project_revision": project["current_revision"], "decision": "approve"},
+            headers={"X-Request-ID": "ordinary-plan-approval"},
+        )
+        self.assertEqual(approval.status_code, 200, approval.text)
+        return {
+            "snapshot_id": SNAPSHOT_ID,
+            "base_project_revision": approval.json()["project_revision"],
+            "review_id": approval.json()["review"]["review_id"],
+        }
+
+    def enroll_saved_plan(self, payload, request_id="generate-from-saved-plan"):
+        return self.client.post(SAVED_PLAN_GENERATION_PATH, json=payload, headers={"X-Request-ID": request_id})
 
     def cancel(self, run_id):
         return self.client.post(f"{STATUS_PATH}/{run_id}/cancel")
@@ -513,6 +548,69 @@ class ApprovalContinuationApiTests(TestCase):
         self.assertIsNone(self.status(request_id, stage="generate_tests").json()["receipt"])
         self.assertEqual([row["run_id"] for row in self.status().json()["runs"]], [parent["run_id"]])
         self.assertFalse(any(path.startswith(f"{continuation.OUTBOX_COLLECTION}/") for path in self.store))
+
+    def test_saved_plan_generation_uses_original_approval_and_recovers_the_exact_run(self):
+        target = self.ordinary_approved_plan()
+        before = deepcopy(self.store)
+        self.assertEqual(self.status().json()["saved_plan_generation"], target)
+        self.assertEqual(self.store, before)
+        payload = {**target, "template": {"name": "Checkout audit", "format": "table", "fields": ["id", "steps"]}}
+
+        response = self.enroll_saved_plan(payload)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        run = response.json()["continuation"]
+        run_id = run["run_id"]
+        self.assertEqual((run["stage"], run["state"], run["source_snapshot_id"]), ("generate_tests", "queued", SNAPSHOT_ID))
+        self.assertEqual({key: self.store[key] for key in before}, before)
+        stored = self.store[f"{PROJECT_ROOT}/orchestrator_runs/{run_id}"]["continuation"]
+        self.assertEqual(stored["approval_id"], target["review_id"])
+        self.assertEqual(stored["options"]["max_provider_requests"], 24)
+        self.assertEqual(stored["options"]["template"], payload["template"])
+        self.assertEqual([key for key in self.store if key.startswith(f"{continuation.OUTBOX_COLLECTION}/")], [f"{continuation.OUTBOX_COLLECTION}/{run_id}"])
+        status = self.status("generate-from-saved-plan", stage="generate_tests").json()
+        self.assertNotIn("saved_plan_generation", status)
+        self.assertEqual(status["receipt"]["run_id"], run_id)
+        self.assertEqual(status["runs"], [run])
+
+        enqueued = deepcopy(self.store)
+        self.assertEqual(self.enroll_saved_plan(payload).json(), response.json())
+        self.assertEqual(self.enroll_saved_plan(target).status_code, 409)
+        duplicate = self.enroll_saved_plan(payload, "other-tab-key")
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(duplicate.json()["detail"]["code"], "saved_plan_generation_exists")
+        reapproval = {"snapshot_id": SNAPSHOT_ID, "base_project_revision": target["base_project_revision"], "decision": "approve"}
+        for route in (TEST_APPROVAL_PATH, f"/projects/{PROJECT_ID}/use-cases/reviews"):
+            conflicting_review = self.client.post(route, json=reapproval, headers={"X-Request-ID": "generate-from-saved-plan"})
+            self.assertEqual(conflicting_review.status_code, 409, conflicting_review.text)
+        self.assertEqual(self.store, enqueued)
+
+    def test_saved_plan_generation_blocks_inexact_sources_and_prepared_journeys(self):
+        target = self.ordinary_approved_plan()
+        plan = f"{PROJECT_ROOT}/snapshots/{SNAPSHOT_ID}"
+        review = f"{PROJECT_ROOT}/use_case_reviews/{target['review_id']}"
+        before = deepcopy(self.store)
+        parent_id = continuation.continuation_run_id(PROJECT_ID, self.actor.sub, "prepare_scenarios", before[plan]["source_snapshot_id"])
+        mutations = {
+            "stale scope": lambda: self.store[PROJECT_ROOT]["stage_state"]["requirements"].update(stale=True),
+            "already served": lambda: self.store[PROJECT_ROOT]["stage_state"]["test_cases"].update(current_snapshot_id="existing-suite"),
+            "rebound plan": lambda: self.store[plan].update(operation="project.sync.rebind"),
+            "prepared plan": lambda: self.store[plan].update(request_id=parent_id),
+            "partial scope": lambda: self.store[plan]["payload"].update(coverage_plan=[]),
+            "missing analysis": lambda: self.store[plan]["payload"].update(requirement_analysis=[]),
+            "missing decision": lambda: self.store.pop(review),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                self.store.clear()
+                self.store.update(deepcopy(before))
+                mutate()
+                unavailable = deepcopy(self.store)
+                self.assertNotIn("saved_plan_generation", self.status().json())
+                rejected = self.enroll_saved_plan(target)
+                self.assertEqual(rejected.status_code, 409, rejected.text)
+                self.assertEqual(rejected.json()["detail"]["code"], "saved_plan_generation_unavailable")
+                self.assertEqual(self.store, unavailable)
 
     def test_test_generation_has_its_own_enabled_guard_and_owner_only_cancel(self):
         _, payload = self.prepared_plan()

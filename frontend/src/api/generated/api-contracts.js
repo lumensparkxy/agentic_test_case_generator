@@ -42,6 +42,7 @@ export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	approvalContinuations: Object.freeze({ method: "GET", path: "/projects/{project_id}/approval-continuations" }),
 	approveAndPrepareScenarios: Object.freeze({ method: "POST", path: "/projects/{project_id}/requirements/approve-and-prepare-scenarios" }),
 	approveAndGenerateTests: Object.freeze({ method: "POST", path: "/projects/{project_id}/use-cases/approve-and-generate-tests" }),
+	generateTestsFromSavedApproval: Object.freeze({ method: "POST", path: "/projects/{project_id}/approval-continuations/generate-tests-from-saved-approval" }),
 	approvalContinuationCancel: Object.freeze({ method: "POST", path: "/projects/{project_id}/approval-continuations/{run_id}/cancel" }),
 	approvalContinuationRetry: Object.freeze({ method: "POST", path: "/projects/{project_id}/approval-continuations/{run_id}/retry" }),
 	savedReviewAdmissionRelease: Object.freeze({ method: "POST", path: "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release" }),

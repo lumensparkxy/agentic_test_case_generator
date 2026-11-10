@@ -49,6 +49,7 @@ export interface ApiContractOperations {
 	approvalContinuations: ApiOperation<ApprovalContinuationsRequest, ApprovalContinuationsResponse, "GET", "/projects/{project_id}/approval-continuations">;
 	approveAndPrepareScenarios: ApiOperation<ApproveAndPrepareScenariosRequest, ApproveAndPrepareScenariosResponse, "POST", "/projects/{project_id}/requirements/approve-and-prepare-scenarios">;
 	approveAndGenerateTests: ApiOperation<ApproveAndGenerateTestsRequest, ApproveAndGenerateTestsResponse, "POST", "/projects/{project_id}/use-cases/approve-and-generate-tests">;
+	generateTestsFromSavedApproval: ApiOperation<GenerateTestsFromSavedApprovalRequest, GenerateTestsFromSavedApprovalResponse, "POST", "/projects/{project_id}/approval-continuations/generate-tests-from-saved-approval">;
 	approvalContinuationCancel: ApiOperation<ApprovalContinuationCancelRequest, ApprovalContinuationCancelResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/cancel">;
 	approvalContinuationRetry: ApiOperation<ApprovalContinuationRetryRequest, ApprovalContinuationRetryResponse, "POST", "/projects/{project_id}/approval-continuations/{run_id}/retry">;
 	savedReviewAdmissionRelease: ApiOperation<SavedReviewAdmissionReleaseRequest, SavedReviewAdmissionReleaseResponse, "POST", "/projects/{project_id}/approval-continuations/saved-review/{operation_id}/release">;
@@ -171,6 +172,8 @@ export type ApproveAndPrepareScenariosRequest = ApproveAndPrepareScenariosInput;
 export type ApproveAndPrepareScenariosResponse = ApproveAndPrepareScenariosResult;
 export type ApproveAndGenerateTestsRequest = ApproveAndGenerateTestsInput;
 export type ApproveAndGenerateTestsResponse = ApproveAndGenerateTestsResult;
+export type GenerateTestsFromSavedApprovalRequest = GenerateTestsFromSavedApprovalInput;
+export type GenerateTestsFromSavedApprovalResponse = GenerateTestsFromSavedApprovalResult;
 export type ApprovalContinuationCancelRequest = undefined;
 export type ApprovalContinuationCancelResponse = ApprovalContinuationView;
 export type ApprovalContinuationRetryRequest = undefined;
@@ -223,6 +226,7 @@ export interface ApprovalContinuationStatus {
 	enabled: boolean;
 	receipt?: ApprovalContinuationReceipt | null;
 	runs: Array<ApprovalContinuationView>;
+	saved_plan_generation?: SavedPlanGenerationTarget | null;
 	saved_review_attempt?: SavedReviewAdmissionView | null;
 	saved_review_enabled?: boolean;
 	tests_enabled: boolean;
@@ -620,6 +624,17 @@ export interface GenerateTestCasesResponse {
 	test_cases: Array<TestCase>;
 	workflow_diagnostics?: WorkflowDiagnostics;
 	workflow_settings?: WorkflowSettings;
+}
+
+export interface GenerateTestsFromSavedApprovalInput {
+	base_project_revision: number;
+	review_id: string;
+	snapshot_id: string;
+	template?: TestCaseTemplate | null;
+}
+
+export interface GenerateTestsFromSavedApprovalResult {
+	continuation: ApprovalContinuationView;
 }
 
 export interface GroundedApiSurface {
@@ -1321,6 +1336,12 @@ export interface SavedFileReportEvidence {
 	requirement_ids: Array<string>;
 	source_snapshot_ids: Record<string, string>;
 	suite_snapshot_id: string | null;
+}
+
+export interface SavedPlanGenerationTarget {
+	base_project_revision: number;
+	review_id: string;
+	snapshot_id: string;
 }
 
 export interface SavedReviewAdmissionView {

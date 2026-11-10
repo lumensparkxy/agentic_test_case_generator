@@ -218,6 +218,21 @@ from the pending browser request. Requests and queued work that omit the
 template retain the original server default. The named endpoint limits
 the serialized template to 4,096 UTF-8 bytes before saving the approval.
 
+For an existing project with an ordinary generated scenario plan and its
+exact saved approval, **Generate tests from saved approval** starts its first
+suite when the local Test Cases capability is enabled. Review offers the
+action after the server verifies the current sources, approved scope, whole
+decision and absence of a suite or prior enrollment. The action keeps the
+same approval, plan and project revision.
+
+The request uses one 24-request Test Cases stage and the same project fence,
+worker, cancellation and one-time undispatched retry. The plan enrollment,
+request receipt, run and outbox commit together. Review can recover the
+receipt from the original request after a lost response. A competing
+request opens the existing run. Prepared journeys still use their recorded
+31-request budget and one child. Stale, partial, Sync and already served
+plans follow their existing review paths.
+
 ### Shared draft admission and assessment recovery
 
 The local approval worker and saved-suite assessment share the same

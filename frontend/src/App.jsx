@@ -2348,6 +2348,21 @@ export default function App() {
 			return refreshCurrentProject({ hydrate: "if-changed", operationScope });
 		},
 	});
+	const savedPlanSnapshot = projectSnapshots.use_cases;
+	const savedPlanSnapshotId =
+		APPROVAL_CONTINUATION_ENABLED &&
+		route.workspace === "review" &&
+		route.projectId === currentProjectId &&
+		currentProject?.status === "active" &&
+		currentProject.owner_user_id === currentUser?.sub &&
+		useCasesHumanApproved &&
+		savedPlanSnapshot?.operation === "use_cases.generate" &&
+		savedPlanSnapshot.snapshot_id === useCasesStageState.current_snapshot_id &&
+		!savedPlanSnapshot.metadata?.use_case_refresh &&
+		!savedSuite &&
+		!testCaseStageState.current_snapshot_id
+			? savedPlanSnapshot.snapshot_id
+			: null;
 	const approvalContinuation = useApprovalContinuation({
 		enabled:
 			APPROVAL_CONTINUATION_ENABLED &&
@@ -2358,9 +2373,16 @@ export default function App() {
 			!isVerifyingSession,
 		projectId: currentProjectId,
 		identity: currentUser?.sub || "",
-		request: apiRequest,
+		request: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
+		savedPlanSnapshotId,
 	});
 	const savedReview = approvalContinuation.savedReview;
+	const savedPlanGeneration = approvalContinuation.savedPlanGeneration;
+	const replacesLegacyGeneration = Boolean(
+		savedPlanSnapshotId &&
+		(!savedReview.statusRead || savedReview.enabled || approvalContinuation.available) &&
+		!approvalContinuation.runs.some((run) => run.stage === "prepare_scenarios" && run.result_snapshot_id === savedPlanSnapshotId)
+	);
 	const useScopedScenarioRefreshFlow = Boolean(
 		canRecoverScenarioRefresh &&
 		(scenarioRefresh.pending ||
@@ -3959,6 +3981,7 @@ export default function App() {
 		withFeedback = false,
 		{ fullRegeneration = false, feedbackText = feedback, selectedTestCaseIds = [] } = {}
 	) => {
+		if (replacesLegacyGeneration) return false;
 		if (
 			APPROVAL_CONTINUATION_ENABLED &&
 			(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted")
@@ -4317,8 +4340,8 @@ export default function App() {
 		execute: isPreviewingExecution || isRunningExecution,
 	};
 	const orchestratorActionDisabled = {
-		generate: testCaseActionDisabled || !normalGenerationReady,
-		full_regenerate: testCaseActionDisabled,
+		generate: testCaseActionDisabled || !normalGenerationReady || replacesLegacyGeneration,
+		full_regenerate: testCaseActionDisabled || replacesLegacyGeneration,
 		analyze_impact: testCaseActionDisabled,
 		apply_update: testCaseActionDisabled,
 	};
@@ -4919,6 +4942,7 @@ export default function App() {
 	const preparedScenarioId = projectSnapshots.use_cases?.snapshot_id;
 	const retryableScenarioApproval =
 		approvalContinuation.unresolved &&
+		!savedPlanGeneration.pending &&
 		approvalContinuation.pendingRequest?.stage === "generate_tests" &&
 		approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
 	const generateOnScenarioApproval =
@@ -4964,6 +4988,37 @@ export default function App() {
 			},
 		});
 	};
+	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
+	const savedPlanOffer = savedPlanGeneration.offer;
+	const savedPlanPending = approvalContinuation.pendingRequest;
+	const retryableSavedPlan =
+		approvalContinuation.unresolved &&
+		savedPlanGeneration.pending &&
+		savedPlanPending.snapshotId === savedPlanSnapshotId &&
+		savedPlanPending.reviewId === latestUseCasesHumanReview?.review_id &&
+		savedPlanPending.baseRevision === currentProjectRevision;
+	const showSavedPlanGeneration =
+		testReviewRoute &&
+		!savedCaseLink &&
+		((replacesLegacyGeneration && (!approvalContinuation.unresolved || savedPlanGeneration.pending)) || savedPlanGeneration.error);
+	const canStartSavedPlanGeneration =
+		showSavedPlanGeneration &&
+		savedPlanOffer?.snapshot_id === savedPlanSnapshotId &&
+		savedPlanOffer?.review_id === latestUseCasesHumanReview?.review_id &&
+		savedPlanOffer?.base_project_revision === currentProjectRevision &&
+		approvalContinuation.testsAvailable &&
+		!savedReview.statusError &&
+		!continuationBusy &&
+		(!approvalContinuation.unresolved || retryableSavedPlan) &&
+		!approvalContinuation.runs.some((run) => run.stage === "generate_tests" && run.source_snapshot_id === savedPlanSnapshotId);
+	const startSavedPlanGeneration = async () => {
+		const operationScope = captureProjectOperationScope();
+		if (!operationScope || !canStartSavedPlanGeneration || testCaseActionDisabled) return;
+		const outcome = await savedPlanGeneration.start(generationTemplate);
+		if (outcome === "rejected" && isProjectOperationCurrent(operationScope)) {
+			void refreshCurrentProject({ hydrate: true, operationScope });
+		}
+	};
 	const continuationPanel =
 		APPROVAL_CONTINUATION_ENABLED && (!useScopedScenarioRefreshFlow || continuationBusy || approvalContinuation.unresolved) ? (
 			<ApprovalContinuationPanel
@@ -4978,6 +5033,19 @@ export default function App() {
 				saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
 				resultCurrent={continuationResultCurrent}
 				retryAvailable={continuationRetryAvailable}
+				savedPlanRequest={savedPlanGeneration.pending}
+				savedPlanGeneration={
+					showSavedPlanGeneration
+						? {
+								start: canStartSavedPlanGeneration ? startSavedPlanGeneration : null,
+								snapshotId: savedPlanSnapshotId,
+								disabled: testCaseActionDisabled,
+								submitting: savedPlanGeneration.submitting,
+								error: savedPlanGeneration.error,
+								statusRead: savedReview.statusRead,
+							}
+						: null
+				}
 				projectId={currentProjectId}
 				priorityCases={priorityCases}
 				onOpenPriorityCase={openPriorityCase}
@@ -5015,7 +5083,6 @@ export default function App() {
 		approvalContinuation.unresolved &&
 		approvalContinuation.stage === "prepare_scenarios" &&
 		approvalContinuation.pendingRequest?.baseRevision === currentProjectRevision;
-	const testReviewRoute = route.destination === PROJECT_DESTINATIONS.TEST_CASES && activeTab === 3;
 	const rebindReview =
 		APPROVAL_CONTINUATION_ENABLED &&
 		(reviewScope || (testReviewRoute && !savedCaseLink)) &&
@@ -5088,6 +5155,7 @@ export default function App() {
 		: null;
 	const hasOrchestratorRecommendations = Boolean(Array.isArray(orchestratorStatus?.next_actions) && orchestratorStatus.next_actions.length);
 	const allowLegacyTestCaseMutations =
+		!replacesLegacyGeneration &&
 		(upstreamChangedForImpact ||
 			((!useCasesStageState.current_snapshot_id || useCasesHumanApproved) &&
 				hasApprovedGenerationScope(currentProject) &&
@@ -5491,7 +5559,9 @@ export default function App() {
 									}
 								/>
 
-								{(reviewScope || (testReviewRoute && !savedCaseLink && continuationResultStage === "test_cases")) && continuationPanel}
+								{(reviewScope ||
+									(testReviewRoute && !savedCaseLink && (continuationResultStage === "test_cases" || showSavedPlanGeneration))) &&
+									continuationPanel}
 								{!inputsSources && !savedCaseLink && ["requirements", "test-cases", "automation"].includes(route.destination) && (
 									<ProjectSyncStatus
 										key={`sync-${navigationProjectId}-${rebindReview?.identity || "legacy"}`}
@@ -5536,10 +5606,11 @@ export default function App() {
 										}
 										compact={compactReview}
 										hidePrimary={Boolean(
-											reviewPendingRequirementCount &&
-											requirementReviewTask?.action === "approve" &&
-											requirementReviewTask.enabled &&
-											!requirementReviewTask.blockers?.length
+											(replacesLegacyGeneration && contextualTestCaseTask?.action === "generate") ||
+											(reviewPendingRequirementCount &&
+												requirementReviewTask?.action === "approve" &&
+												requirementReviewTask.enabled &&
+												!requirementReviewTask.blockers?.length)
 										)}
 										isLoading={isLoadingOrchestrator}
 										error={orchestratorError}
@@ -6372,14 +6443,16 @@ export default function App() {
 													navigate={navigate}
 												/>
 											)}
-											<TestCaseReadiness
-												project={currentProject}
-												status={orchestratorStatus}
-												unavailable={Boolean(orchestratorError) || isLoadingOrchestrator}
-												caseCount={testCases.length}
-												taskCount={generationTasks.length}
-												onReview={selectWorkflowTab}
-											/>
+											{!replacesLegacyGeneration && (
+												<TestCaseReadiness
+													project={currentProject}
+													status={orchestratorStatus}
+													unavailable={Boolean(orchestratorError) || isLoadingOrchestrator}
+													caseCount={testCases.length}
+													taskCount={generationTasks.length}
+													onReview={selectWorkflowTab}
+												/>
+											)}
 											{savedReviewRecovery && (savedReview.attempt || savedSuiteReviewPending) && (
 												<section className="generation-gate-card" aria-label="Saved suite review recovery">
 													<div>

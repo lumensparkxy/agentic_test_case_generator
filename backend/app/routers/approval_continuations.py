@@ -16,6 +16,9 @@ from ..contracts.approval_continuations import (
     ApproveAndGenerateTestsResult,
     ApproveAndPrepareScenariosInput,
     ApproveAndPrepareScenariosResult,
+    GenerateTestsFromSavedApprovalInput,
+    GenerateTestsFromSavedApprovalResult,
+    SavedPlanGenerationTarget,
     SavedReviewAdmissionView,
     SavedReviewReleaseInput,
     SavedReviewReleaseResult,
@@ -103,6 +106,9 @@ def _read_run(doc, actor, run_id, *, stage=None):
 
 def _read_receipt(doc, actor, request_id, stage):
     if stage == "generate_tests":
+        saved_plan_run_id = use_case_review_service.saved_plan_generation_receipt(doc, actor, request_id)
+        if saved_plan_run_id:
+            return ApprovalContinuationReceipt(request_id=request_id, run_id=saved_plan_run_id, blocked_reason=None)
         review_id = use_case_review_service.use_case_review_id(doc.id, request_id)
         receipt = doc.collection("use_case_reviews").document(review_id).get().to_dict()
         if not receipt or receipt.get("review_id") != review_id or receipt.get("project_id") != doc.id or receipt.get("reviewer_user_id") != actor.sub:
@@ -147,21 +153,25 @@ def list_approval_continuations(
         )
         runs = [view for snapshot in snapshots if (view := _run_view(snapshot.to_dict(), project_id, actor.sub)) is not None]
         receipt = _read_receipt(doc, actor, request_id, stage) if request_id is not None else None
-        if receipt and receipt.run_id and all(view.run_id != receipt.run_id for view in runs):
+        scenarios_enabled = approval_scenario_client_allowed(repo.client)
+        tests_enabled = scenarios_enabled and approval_test_cases_enabled()
+        saved_plan, saved_plan_run_id = use_case_review_service.saved_plan_generation_status(doc, actor) if tests_enabled else (None, None)
+        requested_id, requested_stage = (receipt.run_id, stage) if receipt and receipt.run_id else (saved_plan_run_id, "generate_tests")
+        if requested_id and all(view.run_id != requested_id for view in runs):
             # Keep an exact recovery target readable even after it falls out of the recent window.
-            requested = _read_run(doc, actor, receipt.run_id, stage=stage)
+            requested = _read_run(doc, actor, requested_id, stage=requested_stage)
             if requested is not None:
                 runs = [*runs[: _RUN_LIMIT - 1], requested]
-        scenarios_enabled = approval_scenario_client_allowed(repo.client)
         draft_client = draft_admission_client(repo.client, read_only=True)
         attempt = read_draft_attempt(draft_client, project_id, actor.sub) if draft_client is not None else None
         return ApprovalContinuationStatus(
             enabled=scenarios_enabled,
-            tests_enabled=scenarios_enabled and approval_test_cases_enabled(),
+            tests_enabled=tests_enabled,
             runs=runs,
             receipt=receipt,
             saved_review_enabled=draft_client is not None,
             saved_review_attempt=SavedReviewAdmissionView.model_validate(attempt) if attempt and attempt["operation"] == "test_cases.review" else None,
+            saved_plan_generation=saved_plan,
         )
     except HTTPException:
         raise
@@ -222,6 +232,43 @@ def approve_and_generate_tests(
         )
         continuation, blocked_reason = _approval_outcome(doc, actor, request_id, "generate_tests")
         return ApproveAndGenerateTestsResult(**response.model_dump(), continuation=continuation, blocked_reason=blocked_reason)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise use_case_review_service.use_case_review_error_to_http(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/approval-continuations/generate-tests-from-saved-approval",
+    response_model=GenerateTestsFromSavedApprovalResult,
+)
+def generate_tests_from_saved_approval(
+    project_id: str,
+    payload: GenerateTestsFromSavedApprovalInput,
+    request: Request,
+    actor: AuthUser = Depends(get_current_user),
+):
+    _require_enabled(stage="generate_tests")
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id or len(request_id) > 160 or not request_id.strip() or request_id != request.state.request_id:
+        raise HTTPException(422, "X-Request-ID must be nonblank and at most 160 characters.")
+    try:
+        repo = repository()
+        _require_enabled(repo.client, stage="generate_tests")
+        doc = _project_doc(repo, project_id, actor)
+        target = SavedPlanGenerationTarget(base_project_revision=payload.base_project_revision, snapshot_id=payload.snapshot_id, review_id=payload.review_id)
+        run_id = use_case_review_service.enqueue_saved_plan_generation(
+            client=repo.client,
+            project_doc=doc,
+            actor=actor,
+            target=target,
+            request_id=request_id,
+            options=test_case_continuation_options(payload.template),
+        )
+        continuation = _read_run(doc, actor, run_id, stage="generate_tests")
+        if continuation is None:
+            raise HTTPException(503, "The saved generation request could not be confirmed. Check its status before retrying.")
+        return GenerateTestsFromSavedApprovalResult(continuation=continuation)
     except HTTPException:
         raise
     except Exception as exc:

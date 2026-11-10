@@ -44,14 +44,21 @@ export default function ApprovalContinuationPanel({
 	saving,
 	resultCurrent,
 	retryAvailable,
+	savedPlanRequest,
+	savedPlanGeneration,
 	projectId,
 	priorityCases = [],
 	onOpenPriorityCase,
 }) {
-	const { run, active, unresolved, blockedReason, error, cancelling, cancel, retrying, retry, stage } = continuation;
-	if (!run && !unresolved && !blockedReason && !error && !saving) return null;
+	const { active, unresolved, error, cancelling, cancel, retrying, retry, stage } = continuation;
+	const savedPlanSurface = Boolean(savedPlanGeneration);
+	const showRun =
+		!savedPlanSurface || (stage === "generate_tests" && continuation.run?.source_snapshot_id === savedPlanGeneration.snapshotId);
+	const run = showRun ? continuation.run : null;
+	const blockedReason = showRun ? continuation.blockedReason : "";
+	if (!run && !unresolved && !blockedReason && !error && !saving && !savedPlanSurface) return null;
 
-	const generatingTests = stage === "generate_tests";
+	const generatingTests = stage === "generate_tests" || savedPlanSurface;
 	const title = generatingTests ? "Test case generation" : "Scenario preparation";
 	const action = generatingTests ? "test generation" : "preparation";
 	const interrupted = run?.state === "interrupted";
@@ -59,10 +66,13 @@ export default function ApprovalContinuationPanel({
 	const resultReady = run?.state === resultState && run.result_snapshot_id && !blockedReason;
 	const status = generatingTests ? TEST_STATUS : SCENARIO_STATUS;
 	let message = status[run?.state];
-	if (saving) message = "Saving scope approval…";
+	if (savedPlanGeneration?.submitting) message = "Queueing test generation from the saved approval…";
+	else if (saving) message = "Saving scope approval…";
 	else if (unresolved) {
 		message = generatingTests
-			? "Could not confirm the scenario approval response. Check test generation status."
+			? savedPlanRequest
+				? "Could not confirm the generation request. Check test generation status."
+				: "Could not confirm the scenario approval response. Check test generation status."
 			: "Could not confirm the approval response. Check preparation status.";
 	} else if (blockedReason) {
 		const approved = generatingTests ? "Scenario approval saved." : "Scope approval saved.";
@@ -70,7 +80,7 @@ export default function ApprovalContinuationPanel({
 			? "Check the current project before generating tests."
 			: "Check the current project before preparing scenarios.";
 		message = [approved, BLOCKER[blockedReason] || next].join(" ");
-	} else if (retryAvailable) {
+	} else if (showRun && retryAvailable) {
 		message = generatingTests
 			? "Scenario approval saved. Test case generation stopped before contacting the provider."
 			: "Scope approval saved. Scenario preparation stopped before contacting the provider.";
@@ -82,22 +92,38 @@ export default function ApprovalContinuationPanel({
 		message += " Provider usage remains unconfirmed.";
 	} else if (interrupted) {
 		message += " The provider outcome is unconfirmed.";
+	} else if (!run && savedPlanGeneration) {
+		message = savedPlanGeneration.start
+			? "Generate the first test suite from the current saved scenario approval."
+			: savedPlanGeneration.statusRead
+				? "Test generation is unavailable for this saved approval. Check the current status."
+				: "Checking test generation availability for the saved approval.";
 	}
 	return (
 		<Surface as="section" className="project-sync-summary" aria-label={title}>
 			<h2>{title}</h2>
 			{message && <p role="status">{message}</p>}
 			{error && <p role="alert">{error}</p>}
+			{savedPlanGeneration?.error && <p role="alert">{savedPlanGeneration.error}</p>}
 			<div className="workbench-actions">
+				{savedPlanGeneration?.start && (
+					<Button
+						size="compact"
+						disabled={savedPlanGeneration.disabled || savedPlanGeneration.submitting}
+						onClick={savedPlanGeneration.start}
+					>
+						{unresolved ? "Retry generation request" : "Generate tests from saved approval"}
+					</Button>
+				)}
 				<Button variant="secondary" size="compact" disabled={saving || cancelling || retrying} onClick={onCheck}>
 					Check {action} status
 				</Button>
-				{(active || interrupted) && (
+				{run && (active || interrupted) && (
 					<Button variant="secondary" size="compact" disabled={cancelling || retrying} onClick={() => void cancel()}>
 						{interrupted ? "Acknowledge and release" : "Cancel"} {action}
 					</Button>
 				)}
-				{retryAvailable && (
+				{showRun && retryAvailable && (
 					<Button variant="secondary" size="compact" disabled={retrying} onClick={() => void retry()}>
 						{retrying ? "Checking retry…" : generatingTests ? "Retry test generation" : "Retry scenario preparation"}
 					</Button>

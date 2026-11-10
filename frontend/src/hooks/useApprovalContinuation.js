@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import useReviewDraft from "./useReviewDraft";
 import { API_CONTRACT_ENDPOINTS } from "../api/generated/api-contracts";
+import { createRequestId, parseApiError } from "../services/apiClient";
 
 const POLL_DELAY_MS = 2000;
 const MAX_AUTOMATIC_CHECKS = 10;
 const ACTIVE_STATES = ["queued", "running"];
+const SAVED_PLAN_GENERATION = "saved_plan_generation";
 
-export default function useApprovalContinuation({ enabled, projectId, identity, request }) {
+export default function useApprovalContinuation({ enabled, projectId, identity, request, savedPlanSnapshotId }) {
 	const scope = enabled ? JSON.stringify([identity, projectId]) : "";
 	const projectSegment = encodeURIComponent(projectId || "");
 	const basePath = API_CONTRACT_ENDPOINTS.approvalContinuations.path.replace("{project_id}", projectSegment);
@@ -27,6 +29,8 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const pollCount = useRef(0);
 	const cancelInFlight = useRef(null);
 	const retryInFlight = useRef(null);
+	const savedPlanInFlight = useRef(null);
+	const latestRead = useRef(null);
 	const savedReviewInFlight = useRef(null);
 	const [readState, setReadState] = useState(null);
 	const [actionState, setActionState] = useState(null);
@@ -36,15 +40,44 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	const savedReviewAction = savedReviewState?.scope === scope ? savedReviewState : null;
 	const savedReviewAttempt = current?.data?.saved_review_attempt || null;
 	const runs = current?.data?.runs || [];
+	latestRead.current = current;
+	const savedPlanOffer = current?.data?.saved_plan_generation;
 	const requestId = pending.value?.requestId || "";
 	const pendingStage = pending.value?.stage || "prepare_scenarios";
+	const savedPlanPending = pending.value?.source === SAVED_PLAN_GENERATION;
 	const activeRequestId = useRef(requestId);
 	activeRequestId.current = requestId;
-	const match = requestId && runs.find((item) => item.request_id === requestId && item.stage === pendingStage);
-	const receipt = requestId && current?.data?.receipt?.request_id === requestId ? current.data.receipt : null;
-	const run = match || (!requestId ? runs[0] : null);
+	const match =
+		requestId &&
+		runs.find(
+			(item) =>
+				item.request_id === requestId &&
+				item.stage === pendingStage &&
+				(!savedPlanPending || item.source_snapshot_id === pending.value.snapshotId)
+		);
+	const readReceipt = current?.data?.receipt;
+	const receipt =
+		requestId && readReceipt?.request_id === requestId && (!savedPlanPending || match?.run_id === readReceipt.run_id) ? readReceipt : null;
+	const exactSavedPlanRun =
+		savedPlanSnapshotId && runs.find((item) => item.stage === "generate_tests" && item.source_snapshot_id === savedPlanSnapshotId);
+	const competingSavedPlanRun =
+		savedPlanPending &&
+		requestId &&
+		!match &&
+		current?.requestedId === requestId &&
+		!current.error &&
+		readReceipt === null &&
+		runs.find(
+			(item) =>
+				item.stage === "generate_tests" &&
+				item.source_snapshot_id === pending.value.snapshotId &&
+				item.run_id &&
+				item.request_id &&
+				item.request_id !== requestId
+		);
+	const run = match || competingSavedPlanRun || (!requestId ? exactSavedPlanRun || runs[0] : null);
 	const checkingTests = (requestId ? pendingStage : run?.stage) === "generate_tests";
-	const unresolved = Boolean(requestId && !match && !receipt);
+	const unresolved = Boolean(requestId && !match && !receipt && !competingSavedPlanRun);
 
 	const refresh = useCallback(
 		async ({ reset = false, replace = false } = {}) => {
@@ -67,7 +100,7 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 				if (!response.ok) throw new Error("Approval continuation status is unavailable.");
 				const data = await response.json();
 				if (!controller.signal.aborted && activeScope.current === scope) {
-					setReadState({ scope, data, error: "" });
+					setReadState({ scope, requestedId: requestId, data, error: "" });
 					return data;
 				}
 			} catch {
@@ -107,6 +140,11 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 	}, [current, refresh, run?.state, scope, unresolved]);
 
 	const clearPending = (requestId) => pending.clear({ matches: (value) => value?.requestId === requestId });
+	useEffect(() => {
+		// A different tab can enroll this exact plan without advancing the project revision.
+		if (competingSavedPlanRun) clearPending(requestId);
+	}, [competingSavedPlanRun, requestId]);
+
 	const check = async (readProject) => {
 		if (!requestId) {
 			void refresh({ reset: true });
@@ -150,6 +188,85 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		}
 		setActionState({ scope, stage, error: "", blockedReason: response.blocked_reason || "" });
 		clearPending(requestId);
+	};
+	const startSavedPlanGeneration = async (template) => {
+		if (
+			!scope ||
+			!savedPlanOffer ||
+			current.error ||
+			current.data.tests_enabled !== true ||
+			exactSavedPlanRun ||
+			savedPlanInFlight.current?.scope === scope
+		)
+			return;
+		const { base_project_revision: baseRevision, snapshot_id: snapshotId, review_id: reviewId } = savedPlanOffer;
+		const prior = unresolved ? pending.value : null;
+		if (
+			prior &&
+			(!savedPlanPending || prior.baseRevision !== baseRevision || prior.snapshotId !== snapshotId || prior.reviewId !== reviewId)
+		)
+			return;
+		const key = prior?.requestId || createRequestId();
+		const selectedTemplate = prior ? prior.template : template;
+		const mutation = { scope };
+		const isCurrent = () => activeScope.current === scope && activeRequestId.current === key && savedPlanInFlight.current === mutation;
+		savedPlanInFlight.current = mutation;
+		activeRequestId.current = key;
+		setActionState({ scope, savedPlanSubmitting: true });
+		pending.setValue({
+			requestId: key,
+			stage: "generate_tests",
+			source: SAVED_PLAN_GENERATION,
+			baseRevision,
+			snapshotId,
+			reviewId,
+			template: selectedTemplate,
+		});
+		try {
+			const endpoint = API_CONTRACT_ENDPOINTS.generateTestsFromSavedApproval;
+			const response = await requestRef.current(endpoint.path.replace("{project_id}", projectSegment), {
+				method: endpoint.method,
+				headers: { "Content-Type": "application/json", "X-Request-ID": key },
+				body: JSON.stringify({
+					base_project_revision: baseRevision,
+					snapshot_id: snapshotId,
+					review_id: reviewId,
+					template: selectedTemplate,
+				}),
+			});
+			if (!response.ok) {
+				if (response.status >= 500) return;
+				const error = await parseApiError(response, "Could not queue tests from this saved approval.");
+				if (!isCurrent()) return;
+				clearPending(key);
+				setActionState({ scope, savedPlanError: error });
+				return "rejected";
+			}
+			const { continuation } = await response.json();
+			if (
+				!isCurrent() ||
+				!continuation?.run_id ||
+				continuation?.stage !== "generate_tests" ||
+				continuation.request_id !== key ||
+				continuation.source_snapshot_id !== snapshotId
+			)
+				return;
+			const recovered = latestRead.current?.data?.runs?.find(
+				(item) =>
+					item.run_id === continuation.run_id &&
+					item.request_id === key &&
+					item.stage === "generate_tests" &&
+					item.source_snapshot_id === snapshotId
+			);
+			accept({ continuation: recovered || continuation }, key, "generate_tests");
+		} catch {
+			// The request may have committed. The saved request identity lets status recover it.
+		} finally {
+			if (savedPlanInFlight.current === mutation) savedPlanInFlight.current = null;
+			if (activeScope.current === scope) {
+				setActionState((previous) => (previous?.scope === scope && previous.savedPlanSubmitting ? null : previous));
+			}
+		}
 	};
 	const cancel = async () => {
 		if (!scope || !run || cancelInFlight.current?.scope === scope) return;
@@ -283,6 +400,13 @@ export default function useApprovalContinuation({ enabled, projectId, identity, 
 		cancel,
 		retry,
 		check,
+		savedPlanGeneration: {
+			offer: savedPlanOffer,
+			pending: savedPlanPending,
+			submitting: action?.savedPlanSubmitting === true && savedPlanPending && !match && !competingSavedPlanRun,
+			error: action?.savedPlanError || "",
+			start: startSavedPlanGeneration,
+		},
 		savedReview: {
 			enabled: current?.data?.saved_review_enabled === true,
 			statusRead: Boolean(current?.data),
