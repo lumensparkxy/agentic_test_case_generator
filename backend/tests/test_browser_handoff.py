@@ -242,11 +242,16 @@ class BrowserHandoffTests(unittest.TestCase):
         open_other = TestStep(step=1, action=f'Open "{other_page}"', expected="")
         readback = TestStep(step=1, action="Inspect the saved reference", expected='css "#saved-ref" text should equal "Q-17"')
         mismatched = readback.model_copy(update={"expected": 'css "#saved-ref" text should equal "Request saved"'})
+        rejection_text = readback.model_copy(update={"expected": 'css "#saved-ref" text should equal "Reference rejected"'})
+        reopened_notice = reopen.model_copy(update={"expected": rejected.expected})
         form_value = TestStep(step=1, action="Inspect the Reference field", expected='field "Reference" value should equal "Q-17"')
         missing_evidence = "lacks exact source or controlled input evidence"
         for label, steps, warning in (
             ("same page", [initial, entry, submit, reopen, readback], None),
             ("wrong saved value", [initial, entry, submit, reopen, mismatched], "does not match the exact submitted input"),
+            ("saved value equals rejection copy", [initial, entry, submit, reopen, rejection_text], "does not match the exact submitted input"),
+            ("direct saved value equals rejection copy", [initial, entry, submit, rejection_text], "does not match the exact submitted input"),
+            ("notice after reopening", [initial, entry, submit, reopened_notice, readback], None),
             ("other button", [initial, entry, other_submit, reopen, readback], missing_evidence),
             ("rejected submission", [initial, entry, rejected, reopen, readback], missing_evidence),
             ("different page", [initial, entry, submit, open_other, reopen, readback], missing_evidence),

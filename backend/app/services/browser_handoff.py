@@ -357,6 +357,7 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
     entered_values: dict[tuple[str, str], str] = {}
     pending_values: dict[str, str] = {}
     submission: tuple[str, dict[str, str]] | None = None
+    submission_reopened = False
     current_page: str | None = evidence.target
     for step in steps:
         action = step["action"]
@@ -367,6 +368,7 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
             if action == "navigate" or current_page != page:
                 entered_values.clear()
                 pending_values.clear()
+                submission_reopened = True
             # A same-page reopen keeps the preceding submission for declared readback.
             if current_page != page:
                 submission = None
@@ -384,8 +386,10 @@ def _verify_candidate(case: TestCase, candidate: ExecutionCandidate | None, evid
                 submission = None
             else:
                 submission = (locator["value"], pending_values)
+                submission_reopened = False
             pending_values = {}
-        if submission and (current_page, submission[0], _asserted_text(step)) in evidence.rejections:
+        # A declared result cell must still compare its value even when it contains rejection copy.
+        if submission and not submission_reopened and not binding and (current_page, submission[0], _asserted_text(step)) in evidence.rejections:
             submission = None
         if action == "select_option":
             if current_page is None or step["value"] not in evidence.select_options.get((current_page, locator["value"]), ()):
