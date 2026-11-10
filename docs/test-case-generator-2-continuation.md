@@ -636,6 +636,16 @@ preserved the unaffected requirement decisions, and saved the revised
 6-attendee source and Context. Provider attempts were zero. The native
 W01/W05 smoke remains the separate scenario-through-export rehearsal.
 
+The frozen W11 artifact rehearsal ran the actual app routes on baseline
+`2f6458d` and candidate `66d24ef` with authored SDK responses and isolated
+Firestore. Each project exported 13 exact saved cases before the source
+revision and 13 after scoped refresh, explicit scenario approval,
+six targeted replacements and saved-suite assessment. Seven unaffected
+case versions stayed exact in each project. A fresh stale export request
+returned HTTP 409 before refresh. Blinded intake sealed both two-checkpoint
+packets and retained 70 unrun slots. This rehearsal used synthetic
+specialists and has no independent labels.
+
 P6 structural review under
 [#499](https://github.com/lumensparkxy/agentic_test_case_generator/issues/499)
 requires exact rendered whitespace evidence for structured step-data cases.
