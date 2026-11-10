@@ -176,6 +176,7 @@ test.describe("Independent Project Sync suite review", () => {
 		const assessment = page.getByRole("status").filter({ hasText: "Saved Sync suite review recorded." });
 		await expect(assessment).toContainText("The saved design is complete and browser setup still needs evidence.");
 		const quality = page.getByRole("region", { name: "Saved suite quality", exact: true });
+		await quality.getByText("Saved suite quality", { exact: true }).click();
 		await expect(quality.getByRole("term").filter({ hasText: "Independent design" }).locator("..").getByRole("definition")).toHaveText(
 			"Complete"
 		);

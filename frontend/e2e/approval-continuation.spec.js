@@ -572,6 +572,43 @@ test.describe("Recoverable approval continuation", () => {
 		"Requires VITE_PROJECT_WORKSPACES_V2=true and VITE_APPROVAL_CONTINUATION_ENABLED=true"
 	);
 
+	test("keeps Review artifacts near the top and saved evidence a keyboard action away", async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const api = await fixture(page, { prepared: true, testsEnabled: false, savedReview: { reassessment: true } });
+
+		await page.goto(`${root}/review`);
+		await expect(progress(page).getByRole("link", { name: "Open prepared scenarios" })).toBeVisible();
+		const requirement = page.getByRole("row").filter({ hasText: "Customers can complete express checkout." });
+		await expect.poll(async () => (await requirement.boundingBox())?.y ?? Infinity).toBeLessThan(375);
+
+		await page.goto(`${root}/review/scenarios`);
+		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText("Human approved");
+		const scenario = page.getByRole("row").filter({ hasText: readyScenario });
+		await expect.poll(async () => (await scenario.boundingBox())?.y ?? Infinity).toBeLessThan(375);
+
+		await page.goto(`${root}/review/tests`);
+		await expect(reviewSaved(page)).toBeEnabled();
+		await expect(checkReview(page)).toBeInViewport();
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		const assertion = reader.getByRole("cell", { name: recheckExpected, exact: true });
+		await expect.poll(async () => (await assertion.boundingBox())?.y ?? Infinity).toBeLessThan(700);
+		const quality = page.getByRole("region", { name: "Saved suite quality", exact: true });
+		const summary = quality.locator("summary").first();
+		await expect(summary).toHaveText(/Saved suite quality\s*Independent design Unknown\s*Source freshness Current/);
+		const runResult = quality.getByRole("term").filter({ hasText: "Execution result" });
+		await expect(runResult).toBeHidden();
+		await summary.press("Enter");
+		await expect(runResult).toBeVisible();
+		await quality.getByText("Saved evidence references", { exact: true }).press("Enter");
+		await expect(quality.getByText(readySuiteId, { exact: true })).toBeVisible();
+		await summary.press("Enter");
+		await expect(runResult).toBeHidden();
+		await expect(assertion).toBeInViewport();
+		await expectNoDocumentOverflow(page);
+		expect(api.writes).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
 	test("opens an exact priority case in the current reader without discarding saved filters", async ({ page }, testInfo) => {
 		const cases = Array.from({ length: 200 }, (_, index) => {
 			const number = index + 1;

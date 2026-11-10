@@ -1,3 +1,19 @@
+.suite-quality-overview {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.2rem 0.85rem;
+	align-items: baseline;
+	vertical-align: middle;
+}
+
+.suite-quality-overview > span {
+	color: var(--text-muted);
+}
+
+.suite-quality-details > .suite-quality-evidence {
+	margin-top: 0.75rem;
+}
+
 .suite-quality-evidence {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));

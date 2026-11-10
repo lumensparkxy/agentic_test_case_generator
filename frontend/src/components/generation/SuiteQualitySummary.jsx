@@ -43,15 +43,18 @@ export default function SuiteQualitySummary({
 	reviewedDesignAvailable,
 	targetReadiness,
 	executionRun,
+	compact = false,
 }) {
 	const fileDelivery = reviewedDesignAvailable
 		? "Reviewed design ready"
 		: designDeliveryEnabled === false
 			? "Reviewed design disabled"
 			: "Reviewed design unavailable";
+	const designStatus = QUALITY_LABELS[quality?.design_status] || "Unknown";
+	const sourceFreshness = sourceStale ? "Stale" : QUALITY_LABELS[quality?.source_freshness] || "Unknown";
 	const rows = [
-		["Independent design", QUALITY_LABELS[quality?.design_status] || "Unknown"],
-		["Source freshness", sourceStale ? "Stale" : QUALITY_LABELS[quality?.source_freshness] || "Unknown"],
+		["Independent design", designStatus],
+		["Source freshness", sourceFreshness],
 		["Scenario approval", QUALITY_LABELS[quality?.scenario_decision] || "Unavailable"],
 		["Human suite acceptance", QUALITY_LABELS[quality?.human_acceptance] || "Unavailable"],
 		["Declared setup", QUALITY_LABELS[quality?.declared_setup] || "Unknown"],
@@ -60,9 +63,8 @@ export default function SuiteQualitySummary({
 		["File delivery", fileDelivery],
 	];
 
-	return (
-		<Surface as="section" className="project-sync-summary" aria-label="Saved suite quality">
-			<h3 className="section-subtitle">Saved suite quality</h3>
+	const details = (
+		<>
 			<dl className="suite-quality-evidence">
 				{rows.map(([label, value]) => (
 					<div key={label}>
@@ -92,6 +94,28 @@ export default function SuiteQualitySummary({
 					</p>
 				)}
 			</Disclosure>
+		</>
+	);
+
+	return (
+		<Surface as="section" className="project-sync-summary" aria-label="Saved suite quality">
+			{compact ? (
+				<Disclosure className="suite-quality-details">
+					<summary>
+						<span className="suite-quality-overview">
+							<strong>Saved suite quality</strong>
+							<span>Independent design {designStatus}</span>
+							<span>Source freshness {sourceFreshness}</span>
+						</span>
+					</summary>
+					{details}
+				</Disclosure>
+			) : (
+				<>
+					<h3 className="section-subtitle">Saved suite quality</h3>
+					{details}
+				</>
+			)}
 		</Surface>
 	);
 }

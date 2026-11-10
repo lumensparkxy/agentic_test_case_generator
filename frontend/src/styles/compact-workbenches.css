@@ -76,6 +76,15 @@
 	margin-block: 2px;
 }
 
+.compact-saved-review-recovery {
+	padding: 8px 12px;
+}
+
+.compact-saved-review-recovery h3 {
+	margin: 0;
+	font-size: var(--font-body);
+}
+
 .compact-generation-tasks h3 {
 	margin: 0;
 	font-size: var(--font-body);

@@ -1,3 +1,24 @@
+.compact-continuation-status {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem 0.75rem;
+}
+
+.compact-continuation-status > :is(h2, p) {
+	margin: 0;
+	font-size: var(--font-body);
+}
+
+.compact-continuation-status > .workbench-actions {
+	margin-inline-start: auto;
+}
+
+.compact-continuation-status > :is([role="alert"], .continuation-priority) {
+	flex: 1 0 100%;
+	min-width: 0;
+}
+
 .priority-saved-tests {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));

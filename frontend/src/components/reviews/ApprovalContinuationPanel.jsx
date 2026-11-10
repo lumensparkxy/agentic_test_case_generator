@@ -48,6 +48,7 @@ export default function ApprovalContinuationPanel({
 	onCheck,
 	saving,
 	resultCurrent,
+	compact = false,
 	retryAvailable,
 	savedPlanRequest,
 	savedPlanGeneration,
@@ -109,7 +110,7 @@ export default function ApprovalContinuationPanel({
 				: "Checking test generation availability for the saved approval.";
 	}
 	return (
-		<Surface as="section" className="project-sync-summary" aria-label={title}>
+		<Surface as="section" className={`project-sync-summary${compact ? " compact-continuation-status" : ""}`} aria-label={title}>
 			<h2>{title}</h2>
 			{message && <p role="status">{message}</p>}
 			{error && <p role="alert">{error}</p>}
@@ -144,7 +145,7 @@ export default function ApprovalContinuationPanel({
 				)}
 			</div>
 			{generatingTests && resultReady && resultCurrent && priorityCases.length > 0 && (
-				<div>
+				<div className="continuation-priority">
 					<h3 className="section-subtitle">Priority saved tests</h3>
 					<List className="priority-saved-tests" variant="grouped" role="list" aria-label="Priority saved tests">
 						{priorityCases.map((item) => (

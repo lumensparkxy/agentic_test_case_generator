@@ -4577,6 +4577,7 @@ export default function App() {
 		typeof readiness.run_allowed === "boolean" &&
 		Array.isArray(readiness.blockers);
 	const targetReadiness = hasExactPreview ? (executionEligibility.ready ? "Ready" : "Blocked") : "Unknown";
+	const compactReviewStatus = PROJECT_WORKSPACES_V2 && route.workspace === "review";
 	const suiteQualitySummary = currentSuiteSnapshotId ? (
 		<SuiteQualitySummary
 			snapshotId={currentSuiteSnapshotId}
@@ -4586,6 +4587,7 @@ export default function App() {
 			reviewedDesignAvailable={reviewedDesignAvailable}
 			targetReadiness={targetReadiness}
 			executionRun={exactSuiteRun}
+			compact={compactReviewStatus}
 		/>
 	) : null;
 	const exportReviewApproved = Boolean(
@@ -5278,6 +5280,7 @@ export default function App() {
 				}}
 				saving={isSavingRequirementReview && Boolean(approvalContinuation.pendingRequest)}
 				resultCurrent={continuationResultCurrent}
+				compact={compactReviewStatus}
 				retryAvailable={continuationRetryAvailable}
 				savedPlanRequest={savedPlanGeneration.pending}
 				savedPlanGeneration={
@@ -6756,7 +6759,10 @@ export default function App() {
 												/>
 											)}
 											{showSavedReviewRecovery && (
-												<section className="generation-gate-card" aria-label="Saved suite review recovery">
+												<section
+													className={`generation-gate-card${compactReviewStatus ? " compact-saved-review-recovery" : ""}`}
+													aria-label="Saved suite review recovery"
+												>
 													<div>
 														<h3>Saved suite review recovery</h3>
 														{(!savedReviewError || savedReview.busy || savedReview.attempt) && (
