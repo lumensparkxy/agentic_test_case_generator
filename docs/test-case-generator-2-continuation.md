@@ -602,6 +602,16 @@ The W01/W05 native rehearsal produced four arm-neutral packets and retained
 exact packets and keeps unknown obligations in scope. The live cohort and
 independent judgments remain empty.
 
+P6 corpus input rehearsal under
+[#497](https://github.com/lumensparkxy/agentic_test_case_generator/issues/497)
+exercised all twelve frozen workflows on the baseline and candidate
+`dd6e55e`. Thirteen source and Context checkpoints matched across the two
+pins. The candidate recovered the exact cancelled continuation after
+each explicit approval. W11 recovered the original 8-attendee requirement,
+preserved the unaffected requirement decisions, and saved the revised
+6-attendee source and Context. Provider attempts were zero. The native
+W01/W05 smoke remains the separate scenario-through-export rehearsal.
+
 The next externally gated actions are an authorized W05/W01 live smoke,
 independent practitioner validation, and verification of a hosted worker
 identity and timeout policy. Live provider pairs require a bounded budget

@@ -34,6 +34,31 @@ The runner admits only requirements, source documents, context and template as p
 
 Use the isolated Firestore emulator, loopback frontend/API, and synthetic targets supported by `scripts/e2e_workbench_local.py`. W11 uses the existing `room-booking-change` fixture and compares both source versions. The runner must replay actual approval and persistence routes for all workflows. Existing `evaluate_guidance.py` and `evaluate_browser_handoff.py` establish direct-agent screening and controlled execution. Extend the workbench path or add a thin adapter for the remaining corpus. A direct-agent result cannot satisfy saved/exported acceptance.
 
+### Rehearse project inputs before the live comparison
+
+`scripts/rehearse_paired_inputs.py` opens only the hash-pinned generation
+manifests. It uploads actual Markdown to the pinned app and supplies the
+frozen author rows at the extraction seam. Project creation, source binding,
+saved comparison, application, approval, Context, and W11 requirement
+history use the actual application routes and Firestore. Named candidate
+approvals queue and cancel the exact continuation. No worker is started.
+
+Use a dedicated anonymous loopback emulator for each pinned app. The
+baseline uses `demo-tcg-workbench` and the candidate uses
+`demo-tcg-v2-continuation`. Supply the pinned app's `backend` on
+`PYTHONPATH`, disable dotenv loading and held guidance, use local billing
+shadow mode, and keep provider credentials out of the process. The
+rehearsal launcher in the P6 evidence supplies these settings and restricts
+network access. The CLI takes the frozen directory, arm, full commit and
+new output path. Its output is private input rehearsal evidence.
+
+The rehearsal leaves synthetic target placeholders intact and exercises
+source and scope only. The live runner resolves them to the matching
+healthy target, uses the frozen template where supplied, and captures the
+actual scenario, suite, export and execution evidence separately.
+
+### Capture and score delivered artifacts
+
 - Record the exact source and review-decision manifests, scenario snapshot, suite snapshot, case versions, hydrated readback, both raw export bytes and parsed artifact, request/receipt IDs and all hashes. The export method is JSON for paired semantic comparisons. Validate other offered formats against their documented columns separately. Use the baseline's reasoned draft path where readiness alone blocks its export and log the displayed status and reason. A blocked or missing export remains a failed delivery.
 - Match exported case IDs, exact step order, field values, missing/null/empty distinctions and Unicode against the hydrated saved suite. Separately check currentness, source and plan identity, review evidence, human acceptance, execution outcome, and exact historical links. Sorting object keys for comparison is permitted. Normalizing content, trimming values, or ignoring missing and additional cases is disallowed.
 - Give independent QA adjudicators anonymous saved and exported artifacts with the exact authoritative source, accepted context and reviewer keys. Hide model, arm, automated scores and proposed repair. Each required obligation receives covered, unmet, or unknown with source and case/step citations. Coverage requires a coherent trigger, condition, observable business outcome, and required durable effects in the same case. A known design with named missing environment setup can still cover an obligation. A missing outcome or unverified claim does not. Show explicitly deferred obligations separately from the frozen in-scope denominator.
