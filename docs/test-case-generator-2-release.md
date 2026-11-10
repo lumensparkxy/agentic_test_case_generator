@@ -14,11 +14,20 @@ local and unmerged.
 | --- | --- | --- |
 | Desktop effort | The frozen paired Chromium journey took seven deliberate actions against eleven, a 36.4% reduction. Both explicit approvals and four workbench transitions remained. | Human active time, completion and correction effort. |
 | Exact artifact integrity | Local Firestore and rendered checks exercised saved cases and versions, source changes, scoped repair, CSV/XLSX/JSON delivery, report and run history, and literal data. A fresh W01 rendered journey matched all eleven downloaded cases to their exact saved versions. | The full live 36-pair artifact cohort. |
-| Durable decisions and recovery | Isolated Firestore verified exact approval, claimed continuation, response loss, cancellation, release, restart, stale fences and idempotent publication. The material 8→6 local replay preserved exact unaffected cases and reapproved the revised plan. The rendered W01 dialog closed and restored focus on the exact saved decision before the delayed acknowledgement arrived. | Hosted worker identity, dispatch timeouts and shared producer admission in an authorized environment. |
+| Durable decisions and recovery | Isolated Firestore verified exact approval, response loss, cancellation, release and stale fences. Eight forced worker stops verified natural lease expiry, replay of known unstarted work, explicit interrupted status and exact saved artifact recovery for both stages. The material 8→6 local replay preserved exact unaffected cases and reapproved the revised plan. The rendered W01 dialog restored focus on the exact saved decision before the delayed acknowledgement arrived. | Hosted worker identity, dispatch timeouts and shared producer admission in an authorized environment. |
 | Grounded design and quality | The two-workflow native SDK rehearsal completed four arms with authored responses and exact JSON comparison. Local repair retained prior assertions and appended a checked observation. | Authorized live pairs, independent adjudication, generated-case healthy and fault gates, and runtime cost and latency. |
 | Browser execution | Four authored controls passed on healthy targets and all five seeded faults failed at the intended saved assertion through the actual app/runtime. The rendered Deliver path separately verified deliberate selection, failed evidence, the exact original case, and zero executable candidates. | Applicable generated cases on the frozen targets. |
 | Rollback | A same-project Chromium session exercised enabled, compatible legacy and restored bundles, with exact case, run, Context finding and historical report links. All twelve canonical public evidence digests matched. | Hosted rollout and operator verification. |
 | Practitioner completion | Study task and recording sheet are prepared against the frozen rubric. | At least four of five unassisted completions under [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354). |
+
+The worker recovery replay pinned `bb500a685fcb1be0ae4e47833d1a1238d896e801`
+and used loopback Firestore with a synthetic SDK transport. Fresh workers
+resumed two jobs stopped before dispatch, marked four jobs with uncertain
+dispatch interrupted, and recovered two jobs stopped after publication.
+Eight repeat polls preserved exact evidence with zero additional provider
+attempts. Each published artifact had one usage event. Each published Test
+Cases suite had one local shadow billing receipt and an exact case readback.
+The phase PR records the reproduction command and evidence hashes.
 
 The rendered rollback used one disposable Firestore project at revision 16
 and one Chromium session at 1440×900. The seed saved a historical

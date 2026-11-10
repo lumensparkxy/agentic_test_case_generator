@@ -479,6 +479,18 @@ P3e shares provider admission with saved-suite assessment (commit
 `4a76f0c`, [PR #464](https://github.com/lumensparkxy/agentic_test_case_generator/pull/464)).
 P3f enrolls bounded Project Sync refresh (commit `dbeda56`,
 [PR #466](https://github.com/lumensparkxy/agentic_test_case_generator/pull/466)).
+
+The current local process replay for
+[#457](https://github.com/lumensparkxy/agentic_test_case_generator/issues/457)
+and [#459](https://github.com/lumensparkxy/agentic_test_case_generator/issues/459)
+ran both stages through the worker CLI at `bb500a6` with a synthetic
+provider transport. Separate processes stopped after claim, at first
+provider dispatch, before publication and after publication for each
+stage. After natural lease expiry, fresh workers verified fenced resume,
+explicit interruption or exact published receipt as appropriate.
+The [release record](test-case-generator-2-release.md) records the local
+outcome and the remaining hosted gate.
+
 P4a binds independent design evidence to the exact saved suite (commit
 `1be782c`, [PR #468](https://github.com/lumensparkxy/agentic_test_case_generator/pull/468)).
 P4b adds explicit reviewed-design file delivery (commit `2ee40a4`,
