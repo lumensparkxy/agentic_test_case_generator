@@ -265,8 +265,9 @@ export function resolveSelectedExecutableSourceIds(preview, selectedIds) {
 export { PREVIEW_BUCKETS };
 
 /** Server preflight is required in addition to a well-formed current preview. */
-export function getExecutionEligibility(preview, { projectId, projectRevision, sourceSnapshotId } = {}) {
+export function getExecutionEligibility(preview, { projectId, projectRevision, sourceSnapshotId, sourceStale } = {}) {
 	const blocked = (message) => ({ ready: false, message });
+	if (sourceStale) return blocked("The suite references older upstream inputs. Refresh and review it before running.");
 	if (!preview?.hasPreview) return blocked("Preview the current suite to check execution prerequisites.");
 	if (!preview.isConsistent || preview.requiresRefresh) return blocked("Refresh the preview before running.");
 	const readiness = preview.readiness;

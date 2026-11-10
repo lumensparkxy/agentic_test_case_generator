@@ -95,15 +95,25 @@ def assess_execution(
                     saved_cases = None
                 if not saved_cases or saved_cases != [case.model_dump(mode="json") for case in payload.test_cases]:
                     block("case_snapshot_mismatch", "Run only the exact concrete cases in the current saved test-case snapshot.")
+                recorded_sources = snapshot.metadata.get("source_snapshot_ids")
+                recorded_sources = recorded_sources if isinstance(recorded_sources, dict) else {}
                 for stage, key in (
                     ("requirements", "source_requirements_snapshot_id"),
                     ("context", "source_context_snapshot_id"),
                     ("use_cases", "source_use_case_snapshot_id"),
                 ):
-                    source_id = snapshot.metadata.get(key)
+                    source_id = snapshot.metadata.get(key) or recorded_sources.get(stage)
                     current = project.stage_state.get(stage)
                     if source_id and (not current or source_id != current.current_snapshot_id or current.stale):
                         block("stale_source", f"The suite was generated from older {stage.replace('_', ' ')}. Refresh it before running.")
+                quality = project.suite_quality
+                if (
+                    quality
+                    and quality.suite_snapshot_id == snapshot.snapshot_id
+                    and quality.source_freshness == "stale"
+                    and not any(item.code in {"stale_source", "stale_test_cases"} for item in blockers)
+                ):
+                    block("stale_source", "The suite references older upstream inputs. Refresh and review it before running.")
     if preview is not None and not preview.executable:
         block("no_executable_candidates", "No eligible browser candidates are available. Review manual, unsupported or invalid cases.")
     return ExecutionReadiness(

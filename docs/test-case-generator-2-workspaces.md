@@ -47,6 +47,10 @@ In the bounded Review workflow, a previously verified suite can need a new asses
 
 ## Deliver
 
+Preview can classify saved cases after a source change. Browser tests blocks
+Run while the suite's source evidence is stale and explains that the suite
+needs to be refreshed and reviewed.
+
 ```text
 Projects / Mercury Checkout       Saved suite v2 · current source
 Inputs   Review   [Deliver]

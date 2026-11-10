@@ -19,6 +19,7 @@ from app.models import AuthUser
 from app.routers import automation as routes
 from app.services import workflow_project_service as projects
 from app.services.execution_readiness import assess_execution, selected_candidates
+from app.services.suite_quality import resolve_suite_quality
 from app.services.workflow_project_service import ProjectPermissionError
 from test_use_case_review_service import FakeFirestoreClient, _run_transaction
 
@@ -190,6 +191,42 @@ class ExecutionAdmissionTests(unittest.TestCase):
         self.assertEqual(readiness["source_snapshot_id"], "tests-1")
         self.assertIn("unapproved_test_cases", [item["code"] for item in readiness["blockers"]])
         runtime.assert_not_called()
+
+    def test_preview_and_run_check_exact_sources_with_approved_stage_flags(self):
+        for name, sources, context_id, blocked in (
+            ("legacy unbound", {}, "context-current", False),
+            ("current grouped source", {"source_snapshot_ids": {"context": "context-current"}}, "context-current", False),
+            ("context added after explicit omission", {"source_context_omitted": True}, "context-current", True),
+            ("older grouped source", {"source_snapshot_ids": {"context": "context-older"}}, "context-current", True),
+            ("missing grouped source", {"source_snapshot_ids": {"context": "context-older"}}, None, True),
+        ):
+            with self.subTest(name=name):
+                project = project_fixture()
+                if context_id:
+                    project.stage_state["context"] = QaProjectStageState(current_snapshot_id=context_id, approved=True)
+                project.current_snapshots["test_cases"].metadata.update(sources)
+                project.suite_quality = resolve_suite_quality(project)
+                response = ExecutionRunResponse(status="passed", run_id="exec-current", preview=preview_fixture())
+                with (
+                    patch("app.routers.automation.get_project", return_value=project),
+                    patch("app.routers.automation.append_stage_snapshot", side_effect=persisted_preview),
+                    patch("app.routers.automation.publish_execution_outcome", return_value=SimpleNamespace(run_record_id="saved-run", historical=False)),
+                    patch("app.main.preview_execution", side_effect=lambda *args, **kwargs: preview_fixture()) as compiler,
+                    patch("app.main.run_execution", return_value=response) as runtime,
+                    TestClient(app) as client,
+                ):
+                    preview = client.post("/automation/execution/preview", json=request_fixture())
+                    self.assertEqual(preview.status_code, 200, preview.text)
+                    readiness = preview.json()["readiness"]
+                    project.current_revision = readiness["project_revision"]
+                    run = client.post("/automation/execution/run", json={**request_fixture(), "base_project_revision": project.current_revision})
+                self.assertEqual((readiness["run_allowed"], run.status_code, runtime.call_count), (not blocked, 409 if blocked else 200, int(not blocked)))
+                self.assertEqual(preview.json()["summary"]["executable"], 1)
+                self.assertEqual(readiness["source_snapshot_id"], "tests-1")
+                if blocked:
+                    self.assertEqual([item["code"] for item in readiness["blockers"]], ["stale_source"])
+                    self.assertEqual(run.json()["detail"]["readiness"]["blockers"], readiness["blockers"])
+                    compiler.assert_called_once()
 
     def test_run_rechecks_unsupported_expectation_even_with_other_executable_cases(self):
         supported = case()

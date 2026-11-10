@@ -1052,6 +1052,7 @@ export default function App() {
 			: null;
 	const exactSuiteQuality =
 		exactSavedSuiteId && currentProject?.suite_quality?.suite_snapshot_id === exactSavedSuiteId ? currentProject.suite_quality : null;
+	const savedSuiteSourcesStale = Boolean(testCaseStageState.stale || exactSuiteQuality?.source_freshness === "stale");
 	const currentSuiteSnapshotId = PROJECT_WORKSPACES_V2 ? exactSavedSuiteId : null;
 	const suiteQuality = PROJECT_WORKSPACES_V2 ? exactSuiteQuality : null;
 	const savedProofNeedsReassessment = exactSuiteQuality?.reason_codes?.includes("design_reassessment_required");
@@ -4007,6 +4008,7 @@ export default function App() {
 		projectId: currentProjectId,
 		projectRevision: currentProjectRevision,
 		sourceSnapshotId: projectSnapshots.test_cases?.snapshot_id,
+		sourceStale: savedSuiteSourcesStale,
 	});
 
 	const runApprovedExecution = async () => {
@@ -4551,7 +4553,6 @@ export default function App() {
 		apply_update: testCaseActionDisabled,
 	};
 	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
-	const savedSuiteSourcesStale = Boolean(testCaseStageState.stale || exactSuiteQuality?.source_freshness === "stale");
 	const latestSuiteHumanReview = testCaseStageState.metadata?.latest_human_review;
 	const humanSuiteChangesRequested =
 		exactSuiteQuality?.human_acceptance === "changes_requested" ||

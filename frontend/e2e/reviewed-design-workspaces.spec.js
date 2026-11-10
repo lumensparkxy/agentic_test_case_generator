@@ -975,6 +975,48 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(errors).toEqual([]);
 	});
 
+	test("blocks Run when exact suite sources are stale and a preview still reports ready", async ({ page }, testInfo) => {
+		const { errors, writes, project } = await setup(page, { staleBoundSource: true, browserExecution: true });
+		const [manual, ...automated] = project.current_snapshots.test_cases.payload.test_cases;
+		await page.route("**/automation/execution/preview", (route) => {
+			project.current_revision += 1;
+			return route.fulfill({
+				json: {
+					readiness: {
+						run_allowed: true,
+						blockers: [],
+						project_id: project.project_id,
+						project_revision: project.current_revision,
+						source_snapshot_id: suiteId,
+						target_base_url: "https://checkout.example.test/app",
+						target_source: "configured_default",
+					},
+					executable: automated.map(({ id, title }) => ({ id: `candidate-${id}`, source_test_case_id: id, title, status: "executable" })),
+					manual: [{ id: `candidate-${manual.id}`, source_test_case_id: manual.id, title: manual.title, status: "manual" }],
+					unsupported: [],
+					invalid: [],
+					summary: { executable: automated.length, manual: 1, unsupported: 0, invalid: 0 },
+				},
+			});
+		});
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/deliver/browser-tests`);
+		await page.getByRole("button", { name: "Preview Execution", exact: true }).press("Enter");
+		await page.getByRole("checkbox", { name: `Select ${automated[0].id} for execution`, exact: true }).check();
+		await expect(page.getByRole("button", { name: "Run 1 Candidate", exact: true })).toBeDisabled({ timeout: 3000 });
+		await expect(
+			page.getByText("The suite references older upstream inputs. Refresh and review it before running.", { exact: true })
+		).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath("browser-run-blocked-by-stale-source.png") });
+		await page
+			.getByRole("navigation", { name: "Workspace sections", exact: true })
+			.getByRole("link", { name: "Export", exact: true })
+			.press("Enter");
+		await expect(quality(page)).toContainText(/Target readiness\s*Blocked/);
+		expect(writes).toEqual(["POST /automation/execution/preview"]);
+		expect(errors).toEqual([]);
+	});
+
 	test("requires a deliberate browser candidate selection for each fresh preview", async ({ page }, testInfo) => {
 		const { errors, writes, project } = await setup(page, { browserExecution: true });
 		const savedCases = project.current_snapshots.test_cases.payload.test_cases;
