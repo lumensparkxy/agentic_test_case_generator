@@ -103,6 +103,8 @@ async function fixture(
 		prepared = false,
 		testsEnabled = prepared,
 		loseTestReply = false,
+		scenarioAckGate,
+		hideScenarioStatus = false,
 		savedReview,
 		completedCases,
 	} = {}
@@ -153,7 +155,7 @@ async function fixture(
 		: null;
 	let reviewAttempt = savedReview?.attempt || null;
 	let failSavedReviewStatus = false;
-	let hideTestRun = loseTestReply;
+	let hideTestRun = loseTestReply || hideScenarioStatus;
 	let hideRun = loseReply;
 	let failPlanReadback = false;
 	let planAnnounced = false;
@@ -294,7 +296,7 @@ async function fixture(
 		saveApproval(route.request().postDataJSON());
 		return route.fulfill({ json: project });
 	});
-	await page.route(routePath(testApprovalPath), (route) => {
+	await page.route(routePath(testApprovalPath), async (route) => {
 		const request = route.request();
 		expect(request.method()).toBe("POST");
 		const input = request.postDataJSON();
@@ -319,9 +321,9 @@ async function fixture(
 			result_snapshot_id: null,
 		};
 		if (loseTestReply) return route.abort("failed");
-		return route.fulfill({
-			json: { ...useCaseReviewResponseFixture(project, { ...input, requestId }), continuation: testRun, blocked_reason: null },
-		});
+		const ack = { ...useCaseReviewResponseFixture(project, { ...input, requestId }), continuation: testRun, blocked_reason: null };
+		if (scenarioAckGate) await scenarioAckGate.promise;
+		return route.fulfill({ json: ack });
 	});
 	await page.route(routePath(testCancelPath), (route) => {
 		expect(route.request().method()).toBe("POST");
@@ -429,8 +431,14 @@ async function fixture(
 		startTestRun: () => {
 			testRun = { ...testRun, state: "running" };
 		},
-		reportSuiteSaved: () => {
-			testRun = { ...testRun, state: "completed", project_revision: project.current_revision + 1, result_snapshot_id: readySuiteId };
+		reportSuiteSaved: ({ sourceId = testRun.source_snapshot_id } = {}) => {
+			testRun = {
+				...testRun,
+				state: "completed",
+				project_revision: project.current_revision + 1,
+				result_snapshot_id: readySuiteId,
+				source_snapshot_id: sourceId,
+			};
 		},
 		publishSuite: () => {
 			project.current_revision++;
@@ -693,6 +701,69 @@ test.describe("Recoverable approval continuation", () => {
 		expect(api.approvalRequests).toHaveLength(1);
 		expect(api.writes).toEqual([`POST ${approvalPath}`]);
 		expect(api.errors).toEqual([]);
+	});
+
+	test("closes an exact committed approval before its delayed reply and preserves a newer decision draft", async ({ page }, testInfo) => {
+		const scenarioAckGate = createDeferred();
+		const api = await fixture(page, { prepared: true, scenarioAckGate });
+		try {
+			await openPreparedDecision(page);
+			const approvalAction = page.getByRole("button", { name: "Approve all", exact: true });
+			const oldResponse = page.waitForResponse((response) => {
+				const request = response.request();
+				return request.method() === "POST" && new URL(request.url()).pathname === testApprovalPath;
+			});
+			await approveTests(page).click();
+			await expect.poll(() => api.scenarioApprovalRequests.length).toBe(1);
+			const [{ input, requestId }] = api.scenarioApprovalRequests;
+			expect(input).toMatchObject({ snapshot_id: readyPlanId, decision: "approve" });
+			api.reportSuiteSaved();
+			api.publishSuite();
+			await expect(openTests(page)).toBeVisible();
+			await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText("Human approved");
+			await expect.poll(() => api.reads.some((read) => read.requestId === requestId && read.stage === "generate_tests")).toBe(true);
+			await expect(decision(page)).toHaveCount(0);
+			await expect(approvalAction).toBeFocused();
+			await page.screenshot({ path: testInfo.outputPath("early-saved-scenario-approval.png") });
+
+			await page
+				.getByRole("region", { name: "Use Cases review actions", exact: true })
+				.getByRole("button", { name: "Request changes", exact: true })
+				.click();
+			const currentComment = "Check the order status before updating this scenario.";
+			const inputComment = decision(page).getByRole("textbox", { name: /^Review comment/ });
+			await inputComment.fill(currentComment);
+			scenarioAckGate.resolve();
+			expect((await oldResponse).ok()).toBe(true);
+			await expect(decision(page)).toBeVisible();
+			await expect(decision(page).getByRole("radio", { name: /^Request changes/ })).toBeChecked();
+			await expect(inputComment).toHaveValue(currentComment);
+			expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
+			expect(api.errors).toEqual([]);
+		} finally {
+			scenarioAckGate.resolve();
+		}
+	});
+
+	test("does not resolve the current dialog from a run bound to another scenario source", async ({ page }) => {
+		const scenarioAckGate = createDeferred();
+		const api = await fixture(page, { prepared: true, scenarioAckGate, hideScenarioStatus: true });
+		try {
+			await openPreparedDecision(page);
+			await approveTests(page).click();
+			await expect.poll(() => api.scenarioApprovalRequests.length).toBe(1);
+			const [{ requestId }] = api.scenarioApprovalRequests;
+			const readCount = api.reads.filter((read) => read.requestId === requestId).length;
+			api.reportSuiteSaved({ sourceId: "different-scenario-plan" });
+			api.publishSuite();
+			api.revealTestRun();
+			await expect.poll(() => api.reads.filter((read) => read.requestId === requestId).length).toBeGreaterThan(readCount);
+			await expect(decision(page)).toBeVisible();
+			expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
+			expect(api.errors).toEqual([]);
+		} finally {
+			scenarioAckGate.resolve();
+		}
 	});
 
 	test("recovers a lost scenario approval and opens only the exact saved suite for independent review", async ({ page }, testInfo) => {

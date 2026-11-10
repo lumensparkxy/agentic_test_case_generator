@@ -560,8 +560,8 @@ a newer export, a source edit, archive or a client rollback. The saved
 record retains audit evidence. Exact current file replay remains an export
 operation with its existing policy. Older sparse reports retain their
 recorded header. P7b exposes current declared browser prerequisites and
-exact failed-run findings from Deliver under
-[#489](https://github.com/lumensparkxy/agentic_test_case_generator/issues/489).
+exact failed-run findings from Deliver (commit `d3fd7f8`,
+[PR #490](https://github.com/lumensparkxy/agentic_test_case_generator/pull/490)).
 A deliberate finding read keeps the recorded run, source suite and case
 assertions visible. Current file and execution gates stay separate.
 Rendered Chromium against the real local API opened the one finding from
@@ -574,7 +574,14 @@ the inspected export. A fresh W01 rendered run with synthetic model
 responses also verified all eleven downloaded cases against exact case
 reads. It exposed a modal race when the named approval receipt and
 suite finished before the original POST response. The saved decision
-was correct. The next action is deterministic dialog reconciliation.
+was correct. P7c reconciles that exact saved approval under
+[#491](https://github.com/lumensparkxy/agentic_test_case_generator/issues/491).
+In the deliberately delayed actual W01 run, the dialog closed and
+restored focus before the HTTP acknowledgement. It used seven expected
+browser POSTs, six native SDK mock requests, both explicit approvals,
+and eleven exact saved and exported cases. A later decision draft stayed
+open when the old response arrived in the separate mocked test. Next is
+the final same-project rollback and release handoff.
 The production queue identity and timeout policy remain
 unverified. Live provider pairs require a bounded budget and approved
 environment. Independent practitioner validation stays with

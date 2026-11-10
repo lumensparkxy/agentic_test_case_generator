@@ -222,6 +222,11 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 		review.setDecision(decision);
 		setDialogOpen(true);
 	};
+	const closeDecision = () => {
+		if (isBusy) return;
+		review.dismissDecision();
+		setDialogOpen(false);
+	};
 	return (
 		<>
 			<section id="use-case-review-decision" tabIndex={-1} className="use-case-review-bar" aria-label="Use Cases review actions">
@@ -263,9 +268,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 					<Dialog
 						manageFocus
 						initialFocusRef={commentRef}
-						onClose={() => {
-							if (!isBusy) setDialogOpen(false);
-						}}
+						onClose={closeDecision}
 						className="use-case-review-dialog"
 						aria-labelledby="use-case-review-dialog-title"
 						aria-describedby="use-case-review-scope"
@@ -433,7 +436,7 @@ function ReviewDecisionPanel({ stageState, snapshot, review, scenarioTotal, grou
 											? "Approval queues test generation from this exact scenario plan."
 											: "Approval records this version as ready for downstream work."}
 								</p>
-								<Button type="button" variant="secondary" disabled={isBusy} onClick={() => setDialogOpen(false)}>
+								<Button type="button" variant="secondary" disabled={isBusy} onClick={closeDecision}>
 									Cancel
 								</Button>
 								<Button

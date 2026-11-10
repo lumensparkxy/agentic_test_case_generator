@@ -48,6 +48,7 @@ export default function UseCaseReviewPage({
 		projectId,
 		snapshotId: snapshot?.snapshot_id || "",
 		baseProjectRevision: Number.isInteger(project?.current_revision) ? project.current_revision : null,
+		stageState,
 		onCommitted: onDecisionCommitted,
 		onReload: onReloadLatest,
 		continuation,

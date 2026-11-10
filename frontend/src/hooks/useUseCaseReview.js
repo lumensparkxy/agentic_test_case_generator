@@ -30,6 +30,7 @@ export default function useUseCaseReview({
 	projectId = "",
 	snapshotId = "",
 	baseProjectRevision = null,
+	stageState = null,
 	onCommitted = null,
 	onReload = null,
 	continuation = null,
@@ -38,6 +39,7 @@ export default function useUseCaseReview({
 	const callbacksRef = useRef({ onCommitted, onReload, continuation });
 	const activeRequestRef = useRef({ sequence: 0, scope: "", phase: "idle" });
 	const retryIdentityRef = useRef(null);
+	const namedApprovalRef = useRef(null);
 	const lastSubmissionRef = useRef({});
 	const submittingRef = useRef(false);
 	const projectScopeRef = useRef("");
@@ -81,6 +83,7 @@ export default function useUseCaseReview({
 			submittingRef.current = false;
 		}
 		retryIdentityRef.current = null;
+		if (projectChanged || snapshotChanged) namedApprovalRef.current = null;
 
 		if (projectChanged) {
 			setOutcome(initialOutcome());
@@ -114,25 +117,87 @@ export default function useUseCaseReview({
 			projectScopeRef.current = "unmounted";
 			requestScopeRef.current = "unmounted";
 			submittingRef.current = false;
+			namedApprovalRef.current = null;
 		},
 		[]
 	);
 
-	const recoveredApproval =
-		continuation?.pendingRequest?.stage === "generate_tests" &&
-		continuation.pendingRequest.requestId === retryIdentityRef.current?.requestId &&
-		!continuation.unresolved &&
-		Boolean(continuation.receipt || continuation.run);
+	const pendingApproval = continuation?.pendingRequest;
+	const approvalReceipt = continuation?.receipt;
+	const approvalRun = continuation?.run;
 	useEffect(() => {
-		if (!recoveredApproval || !["error", "conflict"].includes(outcome.status)) return;
+		// A status read can hydrate the committed revision before the original POST replies.
+		const attempt = namedApprovalRef.current;
+		if (
+			!attempt ||
+			attempt.projectScope !== projectScope ||
+			attempt.snapshotId !== snapshotId ||
+			decision !== "approve" ||
+			pendingApproval?.stage !== "generate_tests" ||
+			pendingApproval.requestId !== attempt.requestId ||
+			pendingApproval.fingerprint !== attempt.fingerprint ||
+			approvalReceipt?.request_id !== attempt.requestId
+		)
+			return;
+		const approvalRevision = attempt.baseRevision + 1;
+		const humanReview = stageState?.metadata?.latest_human_review;
+		if (
+			baseProjectRevision < approvalRevision ||
+			stageState?.current_snapshot_id !== snapshotId ||
+			stageState.stale ||
+			stageState.approved !== true ||
+			humanReview?.decision !== "approve" ||
+			humanReview.snapshot_id !== snapshotId ||
+			humanReview.reviewer_user_id !== identity ||
+			humanReview.resulting_project_revision !== approvalRevision
+		)
+			return;
+		if (approvalReceipt.run_id) {
+			if (
+				approvalReceipt.blocked_reason ||
+				approvalRun?.run_id !== approvalReceipt.run_id ||
+				approvalRun.request_id !== attempt.requestId ||
+				approvalRun.stage !== "generate_tests" ||
+				approvalRun.source_snapshot_id !== snapshotId ||
+				!Number.isInteger(approvalRun.project_revision) ||
+				approvalRun.project_revision < approvalRevision
+			)
+				return;
+		} else if (!approvalReceipt.blocked_reason) return;
+
+		namedApprovalRef.current = null;
 		retryIdentityRef.current = null;
+		if (activeRequestRef.current.sequence === attempt.sequence) {
+			activeRequestRef.current = { sequence: attempt.sequence + 1, scope: requestScope, phase: "idle" };
+			submittingRef.current = false;
+		}
+		callbacksRef.current.continuation.accept(
+			{ continuation: approvalReceipt.run_id ? approvalRun : null, blocked_reason: approvalReceipt.blocked_reason },
+			"generate_tests"
+		);
 		recoveryRef.current.clear({ keepVisible: true });
 		setOutcome({ ...initialOutcome(), status: "success", announcement: "Use Cases approved." });
-	}, [outcome.status, recoveredApproval]);
+	}, [
+		approvalReceipt,
+		approvalRun,
+		baseProjectRevision,
+		decision,
+		identity,
+		pendingApproval,
+		projectScope,
+		requestScope,
+		snapshotId,
+		stageState,
+	]);
+
+	const dismissDecision = () => {
+		namedApprovalRef.current = null;
+	};
 
 	const setDecision = useCallback(
 		(nextDecision) => {
 			recoveryRef.current.setValue((old) => ({ ...old, decision: nextDecision, revision: baseProjectRevision }));
+			namedApprovalRef.current = null;
 			retryIdentityRef.current = null;
 			setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
 		},
@@ -142,6 +207,7 @@ export default function useUseCaseReview({
 	const setComment = useCallback(
 		(nextComment) => {
 			recoveryRef.current.setValue((old) => ({ ...old, comment: nextComment, revision: baseProjectRevision }));
+			namedApprovalRef.current = null;
 			retryIdentityRef.current = null;
 			setOutcome((current) => (current.status === "error" ? { ...current, error: "", status: "idle" } : current));
 		},
@@ -214,6 +280,9 @@ export default function useUseCaseReview({
 			const isProjectCurrent = () => activeRequestRef.current.sequence === sequence && projectScopeRef.current === projectScope;
 
 			submittingRef.current = true;
+			namedApprovalRef.current = generateTests
+				? { projectScope, snapshotId, requestId, fingerprint, baseRevision: baseProjectRevision, sequence }
+				: null;
 			if (generateTests) {
 				callbacksRef.current.continuation.begin({ requestId, fingerprint, baseRevision: baseProjectRevision, stage: "generate_tests" });
 			}
@@ -232,7 +301,10 @@ export default function useUseCaseReview({
 				if (!isCurrent()) {
 					return null;
 				}
-				if (generateTests) callbacksRef.current.continuation.accept(response, "generate_tests");
+				if (generateTests) {
+					namedApprovalRef.current = null;
+					callbacksRef.current.continuation.accept(response, "generate_tests");
+				}
 				retryIdentityRef.current = null;
 				recoveryRef.current.clear({ keepVisible: true });
 				activeRequestRef.current = { ...activeRequestRef.current, phase: "committed" };
@@ -290,6 +362,7 @@ export default function useUseCaseReview({
 					return null;
 				}
 				if (generateTests && error?.status >= 400 && error.status < 500 && error.status !== 409) {
+					namedApprovalRef.current = null;
 					callbacksRef.current.continuation.clearPending();
 				}
 				if (error?.status === 409) {
@@ -365,6 +438,7 @@ export default function useUseCaseReview({
 
 	return {
 		recovery,
+		dismissDecision,
 		decision,
 		setDecision,
 		comment,
