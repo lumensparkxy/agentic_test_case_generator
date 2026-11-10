@@ -10,6 +10,7 @@ from google.api_core.exceptions import Aborted
 from google.cloud.firestore_v1 import transactional
 from pydantic import BaseModel, Field
 
+from ..contracts.test_cases import TestCaseTemplate
 from .workflow_project_service import QA_PROJECTS_COLLECTION, ProjectNotFoundError, ProjectPermissionError
 
 
@@ -36,6 +37,7 @@ class ContinuationOptions(BaseModel):
     max_attempts: int = Field(default=1, ge=1, le=3)
     max_provider_requests: int = Field(default=1, ge=1, le=128)
     deadline_seconds: int = Field(default=900, ge=1, le=1800)
+    template: TestCaseTemplate | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ContinuationConflict(RuntimeError):

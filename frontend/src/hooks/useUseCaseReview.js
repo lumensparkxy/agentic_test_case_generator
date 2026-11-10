@@ -12,7 +12,17 @@ const initialOutcome = () => ({
 	announcement: "",
 });
 
-const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevision, decision, comment, scenarioReviews, generateTests }) =>
+const reviewFingerprint = ({
+	identity,
+	projectId,
+	snapshotId,
+	baseProjectRevision,
+	decision,
+	comment,
+	scenarioReviews,
+	generateTests,
+	template,
+}) =>
 	JSON.stringify({
 		identity,
 		projectId,
@@ -21,6 +31,7 @@ const reviewFingerprint = ({ identity, projectId, snapshotId, baseProjectRevisio
 		decision,
 		scenarioReviews,
 		generateTests,
+		template,
 		comment: `${comment || ""}`.trim(),
 	});
 
@@ -34,9 +45,10 @@ export default function useUseCaseReview({
 	onCommitted = null,
 	onReload = null,
 	continuation = null,
+	generationTemplate,
 } = {}) {
 	const requestRef = useRef(request);
-	const callbacksRef = useRef({ onCommitted, onReload, continuation });
+	const callbacksRef = useRef({ onCommitted, onReload, continuation, generationTemplate });
 	const activeRequestRef = useRef({ sequence: 0, scope: "", phase: "idle" });
 	const retryIdentityRef = useRef(null);
 	const namedApprovalRef = useRef(null);
@@ -58,7 +70,7 @@ export default function useUseCaseReview({
 	const [outcome, setOutcome] = useState(initialOutcome);
 
 	requestRef.current = request;
-	callbacksRef.current = { onCommitted, onReload, continuation };
+	callbacksRef.current = { onCommitted, onReload, continuation, generationTemplate };
 	const projectScope = `${identity}::${projectId}`;
 	const requestScope = `${projectScope}::${snapshotId}::${baseProjectRevision ?? ""}`;
 	projectScopeRef.current = projectScope;
@@ -250,6 +262,14 @@ export default function useUseCaseReview({
 			const scope = requestScope;
 			const sequence = activeRequestRef.current.sequence + 1;
 			activeRequestRef.current = { sequence, scope, phase: "pending" };
+			const pending = approval?.pendingRequest;
+			const pendingOutcome = approval?.unresolved;
+			// Preserve the original body even when template settings reset during reload.
+			const template = generateTests
+				? pendingOutcome && pending?.stage === "generate_tests"
+					? pending.template
+					: callbacksRef.current.generationTemplate
+				: undefined;
 			const fingerprint = reviewFingerprint({
 				identity,
 				projectId,
@@ -259,9 +279,8 @@ export default function useUseCaseReview({
 				scenarioReviews,
 				comment: normalizedComment,
 				generateTests,
+				template,
 			});
-			const pending = approval?.pendingRequest;
-			const pendingOutcome = approval?.unresolved;
 			if (pendingOutcome && (!generateTests || pending?.fingerprint !== fingerprint)) {
 				setOutcome({
 					...initialOutcome(),
@@ -286,7 +305,7 @@ export default function useUseCaseReview({
 				? { projectScope, snapshotId, requestId, fingerprint, baseRevision: baseProjectRevision, sequence }
 				: null;
 			if (generateTests) {
-				approval.begin({ requestId, fingerprint, baseRevision: baseProjectRevision, stage: "generate_tests" });
+				approval.begin({ requestId, fingerprint, baseRevision: baseProjectRevision, stage: "generate_tests", template });
 			}
 			setOutcome({ status: "submitting", error: "", conflict: null, response: null, announcement: "Saving review decision…" });
 			try {
@@ -299,6 +318,7 @@ export default function useUseCaseReview({
 					comment: normalizedComment,
 					requestId,
 					generateTests,
+					template,
 				});
 				if (!isCurrent()) {
 					return null;

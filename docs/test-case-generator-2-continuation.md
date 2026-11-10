@@ -196,6 +196,13 @@ The link to Review Tests appears when the exact saved suite is current.
 An assessment outage remains a separate saved-suite review action. The
 worker stays limited to the local emulator and invokes no browser execution.
 
+The named scenario approval can carry the same selected Test Cases
+template as manual generation. It binds the template to the approval
+request and durable worker options. Retries recover the original choice
+from the pending browser request. Requests and queued work that omit the
+template retain the original server default. The named endpoint limits
+the serialized template to 4,096 UTF-8 bytes before saving the approval.
+
 ### Shared draft admission and assessment recovery
 
 The local approval worker and saved-suite assessment share the same

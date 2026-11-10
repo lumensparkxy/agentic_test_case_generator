@@ -462,6 +462,32 @@ export default function App() {
 		setIsGenerating,
 		resetTestCaseWorkflowState,
 	} = useTestCaseWorkflowState();
+	const generationTemplate = useMemo(
+		() => ({
+			name: templateName,
+			format: templateFormat,
+			fields: [
+				"id",
+				"title",
+				"description",
+				"priority",
+				"type",
+				"status",
+				"preconditions",
+				"steps",
+				"expected_result",
+				"test_data",
+				"estimated_time",
+				"automation_status",
+				"component",
+				"linked_requirement_ids",
+				"scenario_refs",
+				"source_refs",
+				"tags",
+			],
+		}),
+		[templateName, templateFormat]
+	);
 	const [impactAnalysis, setImpactAnalysis] = useState(null);
 	const [isAnalyzingImpact, setIsAnalyzingImpact] = useState(false);
 	const [savedSuiteReview, setSavedSuiteReview] = useState(null);
@@ -3975,29 +4001,7 @@ export default function App() {
 			const workflowSettingsPayload = buildWorkflowSettingsPayload(testCaseWorkflowSettings);
 			const sharedPayload = {
 				requirements: requirementsForGeneration,
-				template: {
-					name: templateName,
-					format: templateFormat,
-					fields: [
-						"id",
-						"title",
-						"description",
-						"priority",
-						"type",
-						"status",
-						"preconditions",
-						"steps",
-						"expected_result",
-						"test_data",
-						"estimated_time",
-						"automation_status",
-						"component",
-						"linked_requirement_ids",
-						"scenario_refs",
-						"source_refs",
-						"tags",
-					],
-				},
+				template: generationTemplate,
 				context: buildContextPayload(requirementsForGeneration),
 				workflow_settings: workflowSettingsPayload,
 				project_id: operationScope.projectId,
@@ -5346,6 +5350,7 @@ export default function App() {
 								continuationPanel={continuationPanel}
 								continuation={APPROVAL_CONTINUATION_ENABLED ? approvalContinuation : null}
 								generateOnApproval={generateOnScenarioApproval}
+								generationTemplate={generationTemplate}
 								scopedRefresh={useScopedScenarioRefreshFlow ? scenarioRefresh : null}
 								openRefreshScope={openRefreshScope}
 								materialSyncState={

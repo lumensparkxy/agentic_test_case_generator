@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .projects import QaProjectDetail
 from .requirement_imports import RequirementReviewChange, RequirementReviewsInput
+from .test_cases import TestCaseTemplate
 from .use_case_reviews import UseCaseReviewRequest, UseCaseReviewResponse
 
 
@@ -29,6 +30,14 @@ class ApproveAndGenerateTestsInput(UseCaseReviewRequest):
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["approve"]
+    template: TestCaseTemplate | None = None
+
+    @field_validator("template")
+    @classmethod
+    def bounded_template(cls, value: TestCaseTemplate | None) -> TestCaseTemplate | None:
+        if value is not None and len(value.model_dump_json().encode("utf-8")) > 4096:
+            raise ValueError("The continuation template must fit in 4096 UTF-8 bytes.")
+        return value
 
 
 class ApprovalContinuationView(BaseModel):

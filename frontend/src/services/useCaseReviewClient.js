@@ -45,7 +45,18 @@ export class UseCaseReviewRequestError extends Error {
 
 export async function submitUseCaseReviewDecision(
 	request,
-	{ projectId, snapshotId, baseProjectRevision, decision, comment = "", scenarioReviews, requestId, signal, generateTests = false } = {}
+	{
+		projectId,
+		snapshotId,
+		baseProjectRevision,
+		decision,
+		comment = "",
+		scenarioReviews,
+		requestId,
+		signal,
+		generateTests = false,
+		template,
+	} = {}
 ) {
 	if (typeof request !== "function") {
 		throw new TypeError("An authenticated request function is required to submit a Use Cases review.");
@@ -78,6 +89,7 @@ export async function submitUseCaseReviewDecision(
 			decision,
 			...(scenarioReviews || generateTests ? { scenario_reviews: scenarioReviews || [] } : {}),
 			comment: normalizedComment || null,
+			...(generateTests && template ? { template } : {}),
 		}),
 	});
 	const payload = await parseResponsePayload(response);

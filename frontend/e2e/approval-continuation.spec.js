@@ -103,6 +103,7 @@ async function fixture(
 		prepared = false,
 		testsEnabled = prepared,
 		loseTestReply = false,
+		loseFirstTestRequest = false,
 		scenarioAckGate,
 		hideScenarioStatus = false,
 		savedReview,
@@ -320,6 +321,7 @@ async function fixture(
 			decision: "approve",
 		});
 		scenarioApprovalRequests.push({ input, requestId });
+		if (loseFirstTestRequest && scenarioApprovalRequests.length === 1) return route.abort("failed");
 		Object.assign(project, applyUseCaseReviewDecision(project, input));
 		testRun = {
 			run_id: "checkout-test-generation",
@@ -884,6 +886,42 @@ test.describe("Recoverable approval continuation", () => {
 		}
 	});
 
+	test("retries an unconfirmed scenario approval with the selected template after reload", async ({ page }) => {
+		const api = await fixture(page, { prepared: true, loseFirstTestRequest: true });
+		await page.goto(`${root}/review/tests`);
+		await page.getByRole("button", { name: "Template setup", exact: true }).click();
+		await page.getByLabel("Template name").fill("Checkout audit");
+		await page.getByLabel("Template format").selectOption("cards");
+		await page.getByRole("navigation", { name: "Workspace sections" }).getByRole("link", { name: "Scenarios" }).click();
+		await expect(page.getByText(readyScenario, { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Approve all", exact: true }).click();
+		await decision(page)
+			.getByRole("textbox", { name: /^Review comment/ })
+			.fill("Keep the selected audit template.");
+		await approveTests(page).click();
+
+		await expect(testProgress(page)).toContainText(/could not confirm.*approval/i);
+		expect(api.scenarioApprovalRequests).toHaveLength(1);
+		const [original] = api.scenarioApprovalRequests;
+		expect(original.input.template).toMatchObject({
+			name: "Checkout audit",
+			format: "cards",
+			fields: expect.arrayContaining(["steps", "expected_result", "source_refs"]),
+		});
+
+		await page.reload();
+		await expect(testProgress(page)).toContainText(/could not confirm.*approval/i);
+		if (!(await decision(page).isVisible())) {
+			await page.getByRole("button", { name: "Approve all", exact: true }).click();
+		}
+		await expect(decision(page).getByRole("textbox", { name: /^Review comment/ })).toHaveValue("Keep the selected audit template.");
+		await approveTests(page).click();
+		await expect.poll(() => api.scenarioApprovalRequests.length).toBe(2);
+		expect(api.scenarioApprovalRequests[1]).toEqual(original);
+		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText(/Human approved/i);
+		expect(api.errors).toEqual([]);
+	});
+
 	test("recovers a lost scenario approval and opens only the exact saved suite for independent review", async ({ page }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const api = await fixture(page, { prepared: true, loseTestReply: true });
@@ -908,6 +946,7 @@ test.describe("Recoverable approval continuation", () => {
 			decision: "approve",
 			comment,
 			scenario_reviews: [],
+			template: { name: "default", format: "table", fields: expect.arrayContaining(["steps", "expected_result", "source_refs"]) },
 		});
 		expect(api.writes).toEqual([`POST ${testApprovalPath}`]);
 

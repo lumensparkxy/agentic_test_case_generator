@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from ..models import (
     AuthUser,
+    TestCaseTemplate,
     UseCaseReviewRecord,
     UseCaseReviewResponse,
 )
@@ -70,6 +71,7 @@ def _request_fingerprint(
     decision: str,
     comment: Optional[str],
     scenario_reviews: Optional[list[dict]] = None,
+    template: TestCaseTemplate | None = None,
 ) -> str:
     canonical = json.dumps(
         {
@@ -79,6 +81,7 @@ def _request_fingerprint(
             "decision": decision,
             "comment": comment,
             **({"scenario_reviews": scenario_reviews} if scenario_reviews else {}),
+            **({"template": template.model_dump(mode="json")} if template is not None else {}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -328,7 +331,7 @@ def _apply_review_transaction(
         if (
             existing_review.get("request_fingerprint") == request_fingerprint
             and existing_review.get("require_prepared_journey", False) == require_prepared_journey
-            # The named path's settings are server-owned and already pinned by the saved decision.
+            # The named path can replay after server settings change. Request data, including its template, must still match.
             and (require_prepared_journey or existing_review.get("continuation_options_fingerprint") == continuation_fingerprint)
         ):
             return UseCaseReviewRecord.model_validate(existing_review)
@@ -536,6 +539,7 @@ def review_use_case_snapshot(
         decision=decision,
         comment=comment,
         scenario_reviews=scenario_reviews,
+        template=continuation.template if continuation is not None else None,
     )
     review_id = use_case_review_id(project_id, request_id)
     timeline_event_id = _stable_id("timeline", project_id, idempotency_key)

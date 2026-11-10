@@ -29,6 +29,7 @@ export default function UseCaseReviewPage({
 	continuationPanel = null,
 	continuation = null,
 	generateOnApproval = false,
+	generationTemplate,
 	scopedRefresh = null,
 	openRefreshScope = false,
 	materialSyncState = null,
@@ -52,6 +53,7 @@ export default function UseCaseReviewPage({
 		onCommitted: onDecisionCommitted,
 		onReload: onReloadLatest,
 		continuation,
+		generationTemplate,
 	});
 	const requirementsSnapshot = project?.current_snapshots?.requirements || null;
 	const requirementsState = project?.stage_state?.requirements || null;

@@ -15,7 +15,7 @@ from test_use_case_review_service import _run_transaction
 from app.agents import substantive_review
 from app.agents.adk_runtime import bounded_adk_model
 from app.config import DEFAULT_MODEL_NAME
-from app.models import AuthUser
+from app.models import AuthUser, TestCaseTemplate
 from app.routers import testcases as test_case_routes
 from app.services import approval_continuation as runs, approval_scenario_worker as worker, use_case_generation_service as generation
 from app.services import use_case_review_service as reviews
@@ -124,7 +124,7 @@ class ScenarioWorkerTests(TestCase):
         project = projects.get_project(self.project_id, actor=self.actor)
         self.assertNotIn("use_cases", project.current_snapshots)
 
-    def approve_saved_plan_for_tests(self):
+    def approve_saved_plan_for_tests(self, template=None):
         self.assertTrue(self.handle())
         parent_run_id = self.run_id
         project = projects.get_project(self.project_id, actor=self.actor)
@@ -142,7 +142,7 @@ class ScenarioWorkerTests(TestCase):
                 comment=None,
                 actor=self.actor,
                 request_id="approve-scenarios",
-                continuation=worker.test_case_continuation_options(),
+                continuation=worker.test_case_continuation_options(template),
                 require_prepared_journey=True,
             )
         self.run_id = runs.continuation_run_id(self.project_id, self.actor.sub, "generate_tests", result.review.review_id)
@@ -298,8 +298,28 @@ class ScenarioWorkerTests(TestCase):
         generate_tests.assert_not_called()
         self.assertEqual(self.saved_run()["continuation"]["state"], "queued")
 
+    def test_omitted_template_uses_legacy_worker_default(self):
+        self.approve_saved_plan_for_tests()
+        self.assertNotIn("template", self.saved_run()["continuation"]["options"])
+        with patch.object(test_case_routes, "generate_bound_test_cases") as generate_tests:
+            self.assertTrue(self.handle())
+        generate_tests.assert_called_once()
+        self.assertEqual(generate_tests.call_args.args[0].template, TestCaseTemplate(name="Default", format="json", fields=[]))
+
+    def test_changed_saved_template_fails_before_test_generation(self):
+        template = TestCaseTemplate(name="Expense", format="table", fields=["id", "expected_result"])
+        self.approve_saved_plan_for_tests(template)
+        self.client.store[f"{self.project_doc.path}/orchestrator_runs/{self.run_id}"]["continuation"]["options"]["template"]["name"] = "Different"
+        with patch.object(test_case_routes, "generate_bound_test_cases") as generate_tests:
+            self.assertTrue(self.handle())
+        generate_tests.assert_not_called()
+        intent = self.saved_run()["continuation"]
+        self.assertEqual((intent["state"], intent["reason"], intent["provider_requests_reserved"]), ("failed", "settings_changed", 0))
+
     def test_test_case_generation_and_direct_critic_share_one_durable_request_budget(self):
-        plan = self.approve_saved_plan_for_tests()
+        template = TestCaseTemplate(name="default", format="table", fields=["id", "title", "steps", "expected_result"])
+        plan = self.approve_saved_plan_for_tests(template)
+        self.assertEqual(self.saved_run()["continuation"]["options"]["template"], template.model_dump(mode="json"))
         critic_settings = SimpleNamespace(gemini_api_key="offline-fixture", model_name=DEFAULT_MODEL_NAME)
 
         def request_critic():
@@ -357,6 +377,7 @@ class ScenarioWorkerTests(TestCase):
         self.assertFalse(critic_client.call_args.kwargs["vertexai"])
         self.assertFalse(critic_client.call_args.kwargs["http_options"].async_client_args["allow_redirects"])
         model.assert_called_once()
+        self.assertEqual(model.call_args.args[0].template, template)
         bill.assert_called_once()
         project = projects.get_project(self.project_id, actor=self.actor)
         suite = project.current_snapshots["test_cases"]

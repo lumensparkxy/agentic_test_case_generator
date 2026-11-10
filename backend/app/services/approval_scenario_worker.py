@@ -91,16 +91,16 @@ def _default_test_case_template():
     return TestCaseTemplate(name="Default", format="json", fields=[])
 
 
-def test_case_continuation_options() -> ContinuationOptions:
+def test_case_continuation_options(template: TestCaseTemplate | None = None) -> ContinuationOptions:
     generation_settings = get_generation_settings().model_dump(mode="json")
     return _continuation_options(
         "generate_tests",
         "emulator-test-case-worker-v1",
         _MAX_TEST_CASE_PROVIDER_REQUESTS,
         _TEST_CASE_DEADLINE_SECONDS,
-        template=_default_test_case_template().model_dump(mode="json"),
+        template=(template or _default_test_case_template()).model_dump(mode="json"),
         parallel_settings={name: value for name, value in generation_settings.items() if name.startswith("parallel_test_case_")},
-    )
+    ).model_copy(update={"template": template})
 
 
 def _utcnow():
@@ -148,7 +148,7 @@ def _owner_actor(project, actor_id):
     return AuthUser(sub=actor_id, name=recorded.get("name") or actor_id, email=recorded.get("email"), provider=recorded.get("provider"))
 
 
-def _invoke_stage(claim, run, intent, actor):
+def _invoke_stage(claim, run, intent, actor, template):
     sources = intent["source_snapshot_ids"]
     stage = intent["stage"]
     requirement_ids = tuple(intent["requirement_ids"])
@@ -178,7 +178,7 @@ def _invoke_stage(claim, run, intent, actor):
         project_id=claim.project_id,
         base_project_revision=run["project_revision"],
         requirements=[],
-        template=_default_test_case_template(),
+        template=template or _default_test_case_template(),
         workflow_settings=workflow_settings,
     )
     manifest = prepare_run(
@@ -209,9 +209,10 @@ def _handle_due(client, project_id, run_id):
         return False
 
     reason = "scenario_preparation_failed" if stage == "prepare_scenarios" else "test_case_generation_failed"
-    options = scenario_continuation_options if stage == "prepare_scenarios" else test_case_continuation_options
     try:
-        if intent["options"] != options().model_dump(mode="json") or not enabled_for_stage():
+        saved_options = ContinuationOptions.model_validate(intent["options"])
+        options = scenario_continuation_options() if stage == "prepare_scenarios" else test_case_continuation_options(saved_options.template)
+        if intent["options"] != options.model_dump(mode="json") or not enabled_for_stage():
             reason = "settings_changed"
         else:
             actor = _owner_actor(project_doc.get().to_dict(), run["actor_user_id"])
@@ -220,7 +221,7 @@ def _handle_due(client, project_id, run_id):
             else:
                 budget = _StageBudget(client, claim, intent, enabled_for_stage)
                 with bounded_model_requests(budget.reserve), model_scope(os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)):
-                    _invoke_stage(claim, run, intent, actor)
+                    _invoke_stage(claim, run, intent, actor, options.template)
                 return True
     except HTTPException as error:
         if isinstance(error.detail, dict) and error.detail.get("code") in {"use_case_publication_unconfirmed", "generation_publication_unconfirmed"}:

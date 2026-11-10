@@ -242,6 +242,7 @@ export interface ApproveAndGenerateTestsInput {
 	decision: "approve";
 	scenario_reviews?: Array<ScenarioReviewUpdate>;
 	snapshot_id: string;
+	template?: TestCaseTemplate | null;
 }
 
 export interface ApproveAndGenerateTestsResult {

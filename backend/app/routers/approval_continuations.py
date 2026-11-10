@@ -209,7 +209,7 @@ def approve_and_generate_tests(
             comment=payload.comment,
             actor=actor,
             request_id=request_id,
-            continuation=test_case_continuation_options(),
+            continuation=test_case_continuation_options(payload.template),
             require_prepared_journey=True,
         )
         continuation, blocked_reason = _approval_outcome(doc, actor, request_id, "generate_tests")

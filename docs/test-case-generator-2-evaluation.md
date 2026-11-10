@@ -55,7 +55,10 @@ new output path. Its output is private input rehearsal evidence.
 The rehearsal leaves synthetic target placeholders intact and exercises
 source and scope only. The live runner resolves them to the matching
 healthy target, uses the frozen template where supplied, and captures the
-actual scenario, suite, export and execution evidence separately.
+actual scenario, suite, export and execution evidence separately. For
+W02 and W03 pass the exact frozen template to baseline generation and as
+`template` on the candidate's named scenario approval. Preserve its field
+order and record the template that reached the generator in each arm.
 
 ### Capture and score delivered artifacts
 

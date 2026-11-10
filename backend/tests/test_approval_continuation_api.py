@@ -375,6 +375,32 @@ class ApprovalContinuationApiTests(TestCase):
         self.assertEqual(self.approve_tests({**payload, "comment": "Different retry"}, request_id).status_code, 409)
         self.assertEqual(self.store, before)
 
+    def test_scenario_approval_binds_an_explicit_template_to_the_receipt(self):
+        _, payload = self.prepared_plan()
+        template = {"name": "Expense – audit", "format": "table", "fields": ["id", "expected_result", "steps"]}
+        request_id = "scenario-approval-template"
+        selected = {**payload, "template": template}
+        initial = deepcopy(self.store)
+        oversized = {**payload, "template": {**template, "name": "監" * 1600}}
+        response = self.approve_tests(oversized, request_id)
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.store, initial)
+        response = self.approve_tests(selected, request_id)
+        self.assertEqual(response.status_code, 200, response.text)
+        child = response.json()["continuation"]
+        intent = self.store[f"{PROJECT_ROOT}/orchestrator_runs/{child['run_id']}"]["continuation"]
+        self.assertEqual(intent["options"]["template"], template)
+        self.assertNotIn("template", child)
+        before = deepcopy(self.store)
+        replay = self.approve_tests(selected, request_id)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        for key in ("review", "project_revision", "use_cases_state", "continuation", "blocked_reason"):
+            self.assertEqual(replay.json()[key], response.json()[key])
+        for changed in (payload, {**payload, "template": {**template, "fields": list(reversed(template["fields"]))}}):
+            with self.subTest(changed=changed):
+                self.assertEqual(self.approve_tests(changed, request_id).status_code, 409)
+        self.assertEqual(self.store, before)
+
     def test_blocked_test_generation_recovers_the_saved_scenario_approval(self):
         _, payload = self.prepared_plan()
         self.store[f"{PROJECT_ROOT}/snapshots/{SNAPSHOT_ID}"]["request_id"] = "not-a-prepared-result"
