@@ -65,8 +65,10 @@ keeps local drafts under the current user, project, and context snapshot.
 It shows older values for comparison when a newer context snapshot or a
 material source change supersedes them. Only saved evidence feeds the
 normal project generation request. Context with a stale source must be
-analyzed again before starting generation. Compatible saved context stays
-current across approval-only requirements edits.
+analyzed again before starting generation. Review Scope names the blocker
+and links directly to Inputs → Context. Analyze Context and scope approval
+remain separate actions. Compatible saved context stays current across
+approval-only requirements edits.
 
 Testing intent uses the existing revision-checked project PATCH. The
 optional `testing_intent` record stores a testing objective and risk

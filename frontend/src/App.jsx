@@ -5649,6 +5649,15 @@ export default function App() {
 									}
 								/>
 
+								{reviewScope && !imports.preview && contextRefreshRequired && (
+									<Alert tone="warning" className="compact-readiness" role="status">
+										Saved context is stale.{" "}
+										<RouteLink to={buildProjectWorkspacePath(navigationProjectId, "inputs", "context")} navigate={navigate}>
+											Open Context
+										</RouteLink>{" "}
+										and select Analyze Context before preparing scenarios.
+									</Alert>
+								)}
 								{requirementsRoute && !reviewScope && (
 									<RequirementExtractionStatus
 										status={requirementExtraction}

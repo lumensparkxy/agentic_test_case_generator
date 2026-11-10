@@ -65,7 +65,7 @@ function saveSnapshot(project, stage, payload, { approved = false, stale = false
 	return snapshotId;
 }
 
-async function fixture(page, { existing = false } = {}) {
+async function fixture(page, { existing = false, failInitialContextSave = true } = {}) {
 	const initialProject = useCaseProjectFixture({ current_revision: 0, current_snapshots: {}, stage_state: {} });
 	if (existing) {
 		saveSnapshot(
@@ -205,7 +205,7 @@ async function fixture(page, { existing = false } = {}) {
 			notes,
 			grounded_context: null,
 		});
-		if (contextInputs.length === 1) {
+		if (failInitialContextSave && contextInputs.length === 1) {
 			return route.fulfill({ status: 503, json: { detail: { code: "context_unavailable", message: "Context service unavailable." } } });
 		}
 		const artifact = { id: "ART-APP-01", source_type: "app", label: "Application link", url: target, status: "Unavailable" };
@@ -562,6 +562,82 @@ test.describe("Intake and scope in the 2.0 workspaces", () => {
 			`POST ${root}/quality-findings/threshold-question`,
 		]);
 		expect(errors).toEqual([]);
+	});
+
+	test("links blocked scope to the exact stale Context recovery without starting approval", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1366, height: 900 });
+		const { getProject, setProject, writes, errors, contextInputs } = await fixture(page, {
+			existing: true,
+			failInitialContextSave: false,
+		});
+		const project = getProject();
+		project.current_revision = 3;
+		const staleContextId = saveSnapshot(project, "context", { app_link: target, notes }, { approved: true, stale: true });
+		project.current_snapshots.context.source_snapshot_id = "previous-requirements";
+		const requirementsSnapshot = structuredClone(project.current_snapshots.requirements);
+		const requirementsState = structuredClone(project.stage_state.requirements);
+		setProject(project);
+		await page.route(`**${root}/approval-continuations`, (route) =>
+			route.fulfill({ json: { enabled: true, tests_enabled: false, runs: [] } })
+		);
+		await page.route(`**${root}/requirement-imports/extraction-status`, (route) =>
+			route.fulfill({ json: { enabled: true, blocked: false, attempt: null } })
+		);
+
+		await page.goto(`${root}/review`);
+		await expect(heading(page, "Review scope")).toBeVisible();
+		await expect(heading(page, "Requirement Review Workbench")).toBeVisible();
+		const approvedScope = page.getByRole("status").filter({ hasText: /^2\/2 approved in scope/ });
+		await expect(approvedScope).toBeVisible();
+		const approval = button(page, "Approve scope and prepare scenarios");
+		const continuationEnabled = process.env.E2E_APPROVAL_CONTINUATION_ENABLED === "true";
+		if (continuationEnabled) await expect(approval).toBeDisabled();
+		const notice = page.getByRole("main").getByRole("status").filter({ hasText: "Saved context is stale." });
+		const recovery = notice.getByRole("link", { name: "Open Context", exact: true });
+		await expect(recovery).toHaveAttribute("href", `${root}/inputs/context`);
+		await expect(notice).toContainText("and select Analyze Context before preparing scenarios.");
+		for (const width of [1366, 1440]) {
+			await page.setViewportSize({ width, height: 900 });
+			await expect(notice).toBeInViewport({ ratio: 1 });
+			await expectNoDocumentOverflow(page, `Scope Context recovery at ${width}`);
+			await page.screenshot({ path: testInfo.outputPath(`stale-context-scope-${width}.png`), fullPage: true });
+		}
+		expect(writes).toEqual([]);
+
+		await recovery.focus();
+		await expect(recovery).toBeFocused();
+		await page.keyboard.press("Enter");
+		await expect(page).toHaveURL(`${root}/inputs/context`);
+		await expect(heading(page, "Context Inputs")).toBeVisible();
+		await expect(notesInput(page)).toHaveValue(notes);
+		await expect(
+			page.getByText("Saved context is stale. Analyze Context against the current requirements.", { exact: true })
+		).toBeVisible();
+		expect(writes).toEqual([]);
+		await button(page, "Analyze Context").press("Enter");
+		await expect(heading(page, "Saved context evidence")).toBeVisible();
+		await expect(page.getByText("Saved context is stale. Analyze Context against the current requirements.", { exact: true })).toHaveCount(
+			0
+		);
+
+		await workspace(page, "Review").press("Enter");
+		await expect(page).toHaveURL(`${root}/review`);
+		await expect(approvedScope).toBeVisible();
+		await expect(notice).toHaveCount(0);
+		if (continuationEnabled) await expect(approval).toBeEnabled();
+		expect(getProject().current_snapshots.requirements).toEqual(requirementsSnapshot);
+		expect(getProject().stage_state.requirements).toEqual(requirementsState);
+		expect(getProject().stage_state.context).toMatchObject({ stale: false });
+		expect(getProject().current_snapshots.context.snapshot_id).not.toBe(staleContextId);
+		expect(getProject().current_snapshots.use_cases).toBeUndefined();
+		expect(contextInputs).toHaveLength(1);
+		expect(writes).toEqual(["POST /requirements/enrich"]);
+		expect(errors).toEqual([]);
+		for (const width of [1366, 1440]) {
+			await page.setViewportSize({ width, height: 900 });
+			await expectNoDocumentOverflow(page, `Recovered Scope at ${width}`);
+			await page.screenshot({ path: testInfo.outputPath(`recovered-context-scope-${width}.png`), fullPage: true });
+		}
 	});
 
 	test("earlier context and testing intent drafts are visible for comparison and isolated by account", async ({ page }) => {
