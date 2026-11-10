@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import GlobalNavigation from "./GlobalNavigation";
 
-export default function GlobalAppShell({ route, navigate, controls = null, compactControls = false, children }) {
+export default function GlobalAppShell({ route, navigate, controls = null, compactControls = false, headerCollapsed = false, children }) {
 	const [areControlsOpen, setAreControlsOpen] = useState(false);
 	const controlsToggleRef = useRef(null);
 	const controlsId = "workspace-controls-panel";
@@ -22,6 +22,8 @@ export default function GlobalAppShell({ route, navigate, controls = null, compa
 	return (
 		<div className="global-app-shell">
 			<header
+				id="application-menu"
+				hidden={headerCollapsed}
 				className={`global-app-shell-header ${compactControls ? "compact" : ""}`.trim()}
 				onKeyDown={(event) => {
 					if (event.key !== "Escape" || !compactControls || !areControlsOpen) return;

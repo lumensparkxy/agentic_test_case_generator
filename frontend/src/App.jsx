@@ -397,6 +397,7 @@ export default function App() {
 	const [projectRouteError, setProjectRouteError] = useState("");
 	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
 	const [authActionError, setAuthActionError] = useState("");
+	const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
 	const { isWorkflowNavCollapsed, isCompactWorkflowNavigation, toggleWorkflowNavCollapsed, closeCompactWorkflowNavigation } =
 		useWorkflowShellLayoutState();
 	const {
@@ -4601,6 +4602,7 @@ export default function App() {
 		Array.isArray(readiness.blockers);
 	const targetReadiness = hasExactPreview ? (executionEligibility.ready ? "Ready" : "Blocked") : "Unknown";
 	const compactReviewStatus = PROJECT_WORKSPACES_V2 && route.workspace === "review";
+	const collapsibleAppMenu = compactReviewStatus && projectRouteStatus === "ready" && currentProject?.project_id === route.projectId;
 	const suiteQualitySummary = currentSuiteSnapshotId ? (
 		<SuiteQualitySummary
 			snapshotId={currentSuiteSnapshotId}
@@ -5578,7 +5580,13 @@ export default function App() {
 				azureDevOpsSettings={azureDevOpsSettings}
 			/>
 
-			<GlobalAppShell route={route} navigate={navigate} controls={navigationControls} compactControls={isCompactWorkflowNavigation}>
+			<GlobalAppShell
+				route={route}
+				navigate={navigate}
+				controls={navigationControls}
+				compactControls={isCompactWorkflowNavigation}
+				headerCollapsed={collapsibleAppMenu && !isAppMenuOpen}
+			>
 				{route.kind === "global" ? (
 					route.destination === "home" ? (
 						<HomePage
@@ -5673,6 +5681,7 @@ export default function App() {
 								counts={savedArtifactCounts}
 								reviewEntrySection={reviewEntrySection}
 								reviewFindings={reviewFindings}
+								appMenu={collapsibleAppMenu ? { open: isAppMenuOpen, toggle: () => setIsAppMenuOpen((open) => !open) } : null}
 							/>
 						) : (
 							<WorkflowNavigationDrawer

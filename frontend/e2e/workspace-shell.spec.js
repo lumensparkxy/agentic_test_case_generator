@@ -134,6 +134,54 @@ async function expectHistoricalCase(page, lookups) {
 test.describe("Opt-in project workspaces", () => {
 	test.skip(!v2, "Requires VITE_PROJECT_WORKSPACES_V2=true on the frontend");
 
+	test("collapses the app menu while preserving the selected artifact and keyboard navigation", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const { writes, errors } = await setup(page, 200);
+		await page.goto(projectPath("review/tests"));
+		const menu = page.getByRole("button", { name: "Show app menu", exact: true });
+		const navigation = page.getByRole("navigation", { name: "Global navigation", exact: true });
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		await expect(menu).toHaveAttribute("aria-expanded", "false");
+		await expect(navigation).toBeHidden();
+		await search.fill("Checkout 200");
+		await page.getByRole("button", { name: "TC-200 Checkout 200", exact: true }).press("Enter");
+		await expect(reader).toContainText("Receipt 200 appears");
+		await page.evaluate(async () => {
+			await document.fonts.ready;
+			window.scrollTo(0, 0);
+		});
+		const collapsedTop = (await reader.boundingBox()).y;
+		await page.screenshot({ path: testInfo.outputPath("review-app-menu-collapsed.png") });
+		await menu.press("Enter");
+		const hideMenu = page.getByRole("button", { name: "Hide app menu", exact: true });
+		await expect(hideMenu).toHaveAttribute("aria-expanded", "true");
+		await expect(navigation.getByRole("link", { name: "Projects", exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Open QA project menu", exact: true })).toBeVisible();
+		await expect(reader).toContainText("Receipt 200 appears");
+		await expect(search).toHaveValue("Checkout 200");
+		expect((await reader.boundingBox()).y - collapsedTop).toBeGreaterThanOrEqual(76);
+		await page.screenshot({ path: testInfo.outputPath("review-app-menu-expanded.png") });
+		await section(page, "Scenarios").press("Enter");
+		await expect(hideMenu).toHaveAttribute("aria-expanded", "true");
+		await hideMenu.press("Enter");
+		await expect(menu).toBeFocused();
+		await expect(navigation).toBeHidden();
+		await section(page, "Tests").press("Enter");
+		await expect(reader).toContainText("Receipt 200 appears");
+		await expect(search).toHaveValue("Checkout 200");
+		await expect(menu).toHaveAttribute("aria-expanded", "false");
+		await expectNoDocumentOverflow(page);
+
+		await menu.press("Enter");
+		await navigation.getByRole("link", { name: "Home", exact: true }).press("Enter");
+		await expect(page).toHaveURL("/");
+		await expect(navigation).toBeVisible();
+		await expect(menu).toHaveCount(0);
+		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
 	for (const [width, initial, current, expected] of [
 		[1366, "inputs", "Inputs", "Context Inputs"],
 		[1440, "review/tests", "Review", "Test Cases"],

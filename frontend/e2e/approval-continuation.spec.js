@@ -579,19 +579,19 @@ test.describe("Recoverable approval continuation", () => {
 		await page.goto(`${root}/review`);
 		await expect(progress(page).getByRole("link", { name: "Open prepared scenarios" })).toBeVisible();
 		const requirement = page.getByRole("row").filter({ hasText: "Customers can complete express checkout." });
-		await expect.poll(async () => (await requirement.boundingBox())?.y ?? Infinity).toBeLessThan(375);
+		await expect.poll(async () => (await requirement.boundingBox())?.y ?? Infinity).toBeLessThan(300);
 
 		await page.goto(`${root}/review/scenarios`);
 		await expect(page.getByRole("status", { name: "Current human review status" })).toHaveText("Human approved");
 		const scenario = page.getByRole("row").filter({ hasText: readyScenario });
-		await expect.poll(async () => (await scenario.boundingBox())?.y ?? Infinity).toBeLessThan(375);
+		await expect.poll(async () => (await scenario.boundingBox())?.y ?? Infinity).toBeLessThan(300);
 
 		await page.goto(`${root}/review/tests`);
 		await expect(reviewSaved(page)).toBeEnabled();
 		await expect(checkReview(page)).toBeInViewport();
 		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
 		const assertion = reader.getByRole("cell", { name: recheckExpected, exact: true });
-		await expect.poll(async () => (await assertion.boundingBox())?.y ?? Infinity).toBeLessThan(700);
+		await expect.poll(async () => (await assertion.boundingBox())?.y ?? Infinity).toBeLessThan(625);
 		const quality = page.getByRole("region", { name: "Saved suite quality", exact: true });
 		const summary = quality.locator("summary").first();
 		await expect(summary).toHaveText(/Saved suite quality\s*Independent design Unknown\s*Source freshness Current/);
@@ -758,6 +758,7 @@ test.describe("Recoverable approval continuation", () => {
 		try {
 			await approve(page).click();
 			await expect(progress(page)).toContainText("Saving scope approval");
+			await page.getByRole("button", { name: "Show app menu", exact: true }).click();
 			await page.getByRole("button", { name: "Open QA project menu" }).click();
 			await page.getByRole("button", { name: `Open QA project ${api.other.name}`, exact: true }).click();
 			await expect(page).toHaveURL(secondRoot);
@@ -946,6 +947,7 @@ test.describe("Recoverable approval continuation", () => {
 		});
 		await page.goto(`${root}/review`);
 		await expect.poll(() => api.reads.length).toBe(1);
+		await page.getByRole("button", { name: "Show app menu", exact: true }).click();
 		await page.getByRole("button", { name: "Open QA project menu" }).click();
 		await page.getByRole("button", { name: `Open QA project ${api.other.name}`, exact: true }).click();
 		await expect(page).toHaveURL(secondRoot);

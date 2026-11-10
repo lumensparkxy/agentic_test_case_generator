@@ -1,7 +1,9 @@
 import RouteLink from "../../app/RouteLink";
+import { Button } from "../ui/controls";
+import { Menu } from "lucide-react";
 import { PROJECT_WORKSPACES, buildProjectPath, buildProjectWorkspacePath } from "../../app/workflowRoutes";
 
-export default function ProjectWorkspaceNavigation({ route, navigate, counts, reviewEntrySection, reviewFindings }) {
+export default function ProjectWorkspaceNavigation({ route, navigate, counts, reviewEntrySection, reviewFindings, appMenu }) {
 	const { projectId, workspace, section } = route;
 	const activeWorkspace = PROJECT_WORKSPACES.find(({ id }) => id === workspace);
 
@@ -54,6 +56,12 @@ export default function ProjectWorkspaceNavigation({ route, navigate, counts, re
 				</nav>
 			)}
 			<div className="project-workspace-meta">
+				{appMenu && (
+					<Button variant="secondary" size="compact" aria-expanded={appMenu.open} aria-controls="application-menu" onClick={appMenu.toggle}>
+						<Menu size={16} aria-hidden="true" />
+						{appMenu.open ? "Hide app menu" : "Show app menu"}
+					</Button>
+				)}
 				{activeWorkspace && (
 					<p className="project-workspace-counts">
 						{counts.requirements} {counts.requirements === 1 ? "requirement" : "requirements"} · {counts.scenarios}{" "}

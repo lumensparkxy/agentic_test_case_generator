@@ -18,6 +18,10 @@
 	box-shadow: var(--shadow-sm);
 }
 
+.global-app-shell-header[hidden] {
+	display: none;
+}
+
 .global-app-shell-controls {
 	min-width: 0;
 	margin-left: auto;

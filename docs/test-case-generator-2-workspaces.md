@@ -20,6 +20,12 @@ Source comparison replaces the left body while a draft is active. Save/prepare i
 
 ## Review
 
+Review starts with the workspace navigation visible and the app-wide menu
+collapsed. **Show app menu** reveals Home, Projects, Reviews, Runs, Reports and
+project/account controls. **Hide app menu** returns the space to the artifact
+reader. The choice carries across Review sections during the session. A reload
+starts collapsed. Project identity, revision, counts and status remain visible.
+
 ```text
 Projects / Mercury Checkout          Source current · plan v3 · suite v2
 Inputs   [Review]   Deliver
