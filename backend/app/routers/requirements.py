@@ -1,6 +1,5 @@
 from ..services.knowledge_feedback import finish_generation
 from ..services.guidance_dependency import generation_guidance
-from contextlib import nullcontext
 from io import BytesIO
 from typing import Any, List, Optional
 import hashlib
@@ -13,7 +12,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
-from ..agents.adk_runtime import bounded_model_requests
 from ..agents.requirements_agent import extract_requirements, refine_requirements
 from ..auth.jwt_auth import get_current_user
 from ..config import get_settings
@@ -37,7 +35,12 @@ from ..utils.excel_parser import parse_excel_to_text
 
 from ..contracts.requirement_imports import RequirementImportPreview
 from ..services.requirement_import_service import require_review_client
-from ..services.requirement_import_publication import ExtractionPublicationUnconfirmed, ProjectRequirementExtraction
+from ..services.requirement_import_publication import (
+    ExtractionPublicationUnconfirmed,
+    ProjectRequirementExtraction,
+    run_extraction_call,
+    stop_extraction_admission,
+)
 from ..services.requirement_reconciliation import digest
 from ..services.requirement_source_evidence import bind_document_evidence
 
@@ -337,17 +340,6 @@ async def parse_requirements(
     if admission is not None and admission.result_import_id:
         return await run_in_threadpool(extraction.find_preview, required=True)
 
-    async def stop_admission():
-        if admission is not None:
-            try:
-                await run_in_threadpool(admission.stop)
-            except Exception:
-                logging.exception("Could not reconcile requirement extraction admission")
-
-    async def bounded_call(function, *args, **kwargs):
-        with bounded_model_requests(admission.reserve) if admission is not None else nullcontext():
-            return await run_in_threadpool(function, *args, **kwargs)
-
     try:
         workflow_run_id = start_workflow_run(
             operation=operation,
@@ -359,14 +351,15 @@ async def parse_requirements(
             },
         )
     except Exception:
-        await stop_admission()
+        await stop_extraction_admission(admission)
         raise
 
     published = False
 
     async def publish(response, quantity, result_metadata, billing_metadata):
         nonlocal published
-        await bounded_call(
+        await run_extraction_call(
+            admission,
             extraction.publish,
             response=response,
             event_type=event_type,
@@ -383,7 +376,7 @@ async def parse_requirements(
 
     async def fail(error_message):
         if not published:
-            await stop_admission()
+            await stop_extraction_admission(admission)
             await run_in_threadpool(
                 _log_failure,
                 current_user=current_user,
@@ -400,7 +393,8 @@ async def parse_requirements(
     if is_refinement_request:
         try:
             existing_reqs = json.loads(existing_requirements)
-            workflow = await bounded_call(
+            workflow = await run_extraction_call(
+                admission,
                 refine_requirements,
                 existing_reqs,
                 feedback,
@@ -468,7 +462,7 @@ async def parse_requirements(
             )
             return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
         except ExtractionPublicationUnconfirmed:
-            await stop_admission()
+            await stop_extraction_admission(admission)
             raise
         except HTTPException:
             if project_id:
@@ -506,7 +500,8 @@ async def parse_requirements(
             raw_sections.append(f"--- SOURCE: {filename} ---\n{parsed_text}")
 
         raw_text = "\n\n".join(raw_sections)
-        workflow = await bounded_call(
+        workflow = await run_extraction_call(
+            admission,
             extract_requirements,
             raw_text,
             len(source_names),
@@ -587,7 +582,7 @@ async def parse_requirements(
         )
         return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
     except ExtractionPublicationUnconfirmed:
-        await stop_admission()
+        await stop_extraction_admission(admission)
         raise
     except HTTPException:
         await fail("http_exception")

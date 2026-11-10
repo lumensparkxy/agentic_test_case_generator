@@ -1218,7 +1218,7 @@ export interface RequirementCoveragePlan {
 
 export interface RequirementExtractionAttempt {
 	fence: number;
-	operation: "requirements.parse" | "requirements.refine";
+	operation: "requirements.parse" | "requirements.refine" | "requirements.import.jira" | "requirements.import.azure_devops";
 	operation_id: string;
 	reason: string | null;
 	request_id: string;

@@ -42,7 +42,7 @@ class RequirementImportPreview(BaseModel):
 class RequirementExtractionAttempt(BaseModel):
     operation_id: str
     fence: int = Field(ge=1)
-    operation: Literal["requirements.parse", "requirements.refine"]
+    operation: Literal["requirements.parse", "requirements.refine", "requirements.import.jira", "requirements.import.azure_devops"]
     request_id: str
     state: Literal["running", "interrupted"]
     source_snapshot_id: str | None

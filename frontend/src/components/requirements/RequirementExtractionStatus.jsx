@@ -1,6 +1,12 @@
 import { Button } from "../ui/controls";
 import { Surface } from "../ui/surfaces";
 
+const OPERATION_LABELS = {
+	"requirements.refine": "Requirement refinement",
+	"requirements.import.jira": "Jira requirements import",
+	"requirements.import.azure_devops": "Azure DevOps requirements import",
+};
+
 export default function RequirementExtractionStatus({ status, submitting, extractionError, requirementsSnapshotId }) {
 	const { attempt, ready, managed, sharedBlocked, statusError, actionError, note, releaseNote, busy, canRelease, check, release } = status;
 	if (
@@ -8,7 +14,7 @@ export default function RequirementExtractionStatus({ status, submitting, extrac
 		!(attempt || !ready || sharedBlocked || statusError || actionError || note || releaseNote || busy || submitting || extractionError)
 	)
 		return null;
-	const operation = attempt?.operation === "requirements.refine" ? "Requirement refinement" : "Requirement extraction";
+	const operation = OPERATION_LABELS[attempt?.operation] || "Requirement extraction";
 	const earlierSource = attempt?.source_snapshot_id && attempt.source_snapshot_id !== requirementsSnapshotId;
 	let message = releaseNote || note || "No extraction or refinement is active.";
 	if (attempt?.state === "interrupted") {

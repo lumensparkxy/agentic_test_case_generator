@@ -1,4 +1,4 @@
-"""Conservative provider-request reservations for one exact file-backed journey."""
+"""Conservative provider-request reservations for one exact intake-backed journey."""
 
 from dataclasses import dataclass
 from hashlib import sha256
@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 
 INTAKE_STAGE = "requirements.parse"
+CONNECTOR_INTAKE_OPERATIONS = frozenset({"requirements.import.jira", "requirements.import.azure_devops"})
+INTAKE_OPERATIONS = CONNECTOR_INTAKE_OPERATIONS | {INTAKE_STAGE}
 ASSESSMENT_STAGE = "test_cases.review"
 REPAIR_STAGE = "testcases.repair"
 EXHAUSTED = "journey_run_budget_exhausted"
@@ -59,11 +61,20 @@ def _budget_ref(project_doc, journey_id):
     return project_doc.collection(_COLLECTION).document(journey_id)
 
 
+def _intake_operation(data):
+    # Existing file-backed records predate the explicit origin field.
+    return data.get("intake_operation", INTAKE_STAGE)
+
+
+def _slot(stage):
+    return INTAKE_STAGE if stage in INTAKE_OPERATIONS else stage
+
+
 def _validate_budget(ref, data, project_id, actor_id):
     if (
         not isinstance(data, dict)
         or type(data.get("schema_version")) is not int
-        or data["schema_version"] != 1
+        or data["schema_version"] not in {1, 2}
         or data.get("journey_id") != ref.id
         or data.get("project_id") != project_id
         or data.get("actor_user_id") != actor_id
@@ -75,6 +86,9 @@ def _validate_budget(ref, data, project_id, actor_id):
         or data["intake_revision"] < 1
         or type(data.get("preview_saved")) is not bool
         or data.get("request_limit") != REQUEST_LIMIT
+        or not isinstance(_intake_operation(data), str)
+        or (data["schema_version"] == 1 and _intake_operation(data) != INTAKE_STAGE)
+        or (data["schema_version"] == 2 and _intake_operation(data) not in CONNECTOR_INTAKE_OPERATIONS)
         or not isinstance(data.get("slots"), dict)
     ):
         raise unavailable()
@@ -104,7 +118,9 @@ def intake_journey_id(attempt_id):
     return f"journey_{attempt_id.removeprefix('draft_')}"
 
 
-def prepare_intake_budget(transaction, project_doc, actor_id, attempt_id, import_id, revision):
+def prepare_intake_budget(transaction, project_doc, actor_id, attempt_id, import_id, revision, *, operation=INTAKE_STAGE):
+    if operation not in INTAKE_OPERATIONS:
+        raise unavailable()
     journey_id = intake_journey_id(attempt_id)
     ref = _budget_ref(project_doc, journey_id)
     identity = {
@@ -118,13 +134,14 @@ def prepare_intake_budget(transaction, project_doc, actor_id, attempt_id, import
     stored = _read(transaction, ref)
     if stored is not None:
         budget = _validate_budget(ref, stored, project_doc.id, actor_id)
-        if any(budget.data.get(key) != value for key, value in identity.items()):
+        if _intake_operation(budget.data) != operation or any(budget.data.get(key) != value for key, value in identity.items()):
             raise unavailable()
         return None
 
     data = {
         **identity,
-        "schema_version": 1,
+        "intake_operation": operation,
+        "schema_version": 2 if operation in CONNECTOR_INTAKE_OPERATIONS else 1,
         "request_limit": REQUEST_LIMIT,
         "requests_reserved": 0,
         "slots": {},
@@ -135,10 +152,12 @@ def prepare_intake_budget(transaction, project_doc, actor_id, attempt_id, import
 
 
 def available(budget, stage, requests):
+    slot = _slot(stage)
     return (
         type(requests) is int
-        and 1 <= requests <= _STAGE_LIMITS[stage]
-        and stage not in budget.data["slots"]
+        and 1 <= requests <= _STAGE_LIMITS[slot]
+        and (slot != INTAKE_STAGE or stage == _intake_operation(budget.data))
+        and slot not in budget.data["slots"]
         and budget.data["requests_reserved"] + requests <= REQUEST_LIMIT
     )
 
@@ -146,13 +165,14 @@ def available(budget, stage, requests):
 def reserve(transaction, budget, stage, attempt_id, requests, now):
     if not available(budget, stage, requests):
         raise exhausted()
-    slots = {**budget.data["slots"], stage: {"attempt_id": attempt_id, "requests": requests, "reserved_at": now}}
+    slots = {**budget.data["slots"], _slot(stage): {"attempt_id": attempt_id, "requests": requests, "reserved_at": now}}
     transaction.update(budget.ref, {"slots": slots, "requests_reserved": budget.data["requests_reserved"] + requests})
 
 
 def _result_fields(budget, stage, attempt_id, result_id):
     slots = budget.data["slots"]
-    slot = slots.get(stage)
+    slot_key = _slot(stage)
+    slot = slots.get(slot_key)
     if slot is None:
         if stage in {"prepare_scenarios", "generate_tests"}:
             raise unavailable()
@@ -160,13 +180,19 @@ def _result_fields(budget, stage, attempt_id, result_id):
         return {}
     if slot["attempt_id"] != attempt_id or "result_id" in slot:
         raise unavailable()
-    return {"slots": {**slots, stage: {**slot, "result_id": result_id}}}
+    return {"slots": {**slots, slot_key: {**slot, "result_id": result_id}}}
 
 
 def finish_preview(transaction, budget, attempt_id, preview):
-    if budget.data["intake_attempt_id"] != attempt_id or budget.data["import_id"] != preview["import_id"] or budget.data["preview_saved"]:
+    operation = _intake_operation(budget.data)
+    if (
+        budget.data["intake_attempt_id"] != attempt_id
+        or budget.data["import_id"] != preview["import_id"]
+        or preview.get("operation") != operation
+        or budget.data["preview_saved"]
+    ):
         raise unavailable()
-    transaction.update(budget.ref, {"preview_saved": True, **_result_fields(budget, INTAKE_STAGE, attempt_id, preview["import_id"])})
+    transaction.update(budget.ref, {"preview_saved": True, **_result_fields(budget, operation, attempt_id, preview["import_id"])})
 
 
 def budget_for_preview(transaction, project_doc, actor_id, preview):
@@ -175,9 +201,11 @@ def budget_for_preview(transaction, project_doc, actor_id, preview):
         return None
     budget = read_budget(transaction, project_doc, actor_id, extraction[BUDGET_FIELD])
     data = budget.data
+    operation = _intake_operation(data)
     if (
         not data.get("preview_saved")
         or data.get("import_id") != preview.get("import_id")
+        or preview.get("operation") != operation
         or data.get("intake_revision") != preview.get("base_project_revision")
         or data.get("requirements_snapshot_id") is not None
     ):
@@ -188,7 +216,7 @@ def budget_for_preview(transaction, project_doc, actor_id, preview):
         attempt.get("project_id") != project_doc.id
         or attempt.get("actor_id") != actor_id
         or attempt.get("operation_id") != data["intake_attempt_id"]
-        or attempt.get("operation") != INTAKE_STAGE
+        or attempt.get("operation") != operation
         or attempt.get("state") != "completed"
         or attempt.get(BUDGET_FIELD) != budget.id
         or attempt.get("result_import_id") != data["import_id"]

@@ -427,7 +427,7 @@ def require_review_client(project_id, base_project_revision, import_mode, actor)
     repository().baseline(project_id, actor, base_project_revision)
 
 
-def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit, *, admission=None):
+def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit, *, admission=None, source_warnings=()):
     project, snapshot = repo.baseline(project_id, actor, revision)
     current, retired = canonical_requirements(project_id, snapshot)
     incoming = response.requirements
@@ -442,6 +442,9 @@ def stage_extraction(repo, project_id, actor, revision, response, operation, imp
         preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
     workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text", "source_evidence_findings"})
     workflow["guidance"] = preview.guidance
+    if source_warnings:
+        preview.warnings.extend(source_warnings)
+        workflow["source_extraction_warnings"] = list(source_warnings)
     return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit, admission=admission)
 
 
@@ -463,7 +466,9 @@ def recompare_import(project_id, import_id, actor):
     preview.source_evidence_findings = old.source_evidence_findings
     if RETAINED_REQUIREMENT_DRAFT_WARNING in old.warnings:
         preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
-    result = repo.save(preview, actor, retired, data.get("workflow_payload", {}))
+    workflow = data.get("workflow_payload") or {}
+    preview.warnings.extend(workflow.get("source_extraction_warnings") or [])
+    result = repo.save(preview, actor, retired, workflow)
     repo.cancel(project_id, import_id, actor)
     return result
 

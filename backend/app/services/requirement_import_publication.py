@@ -1,10 +1,14 @@
 """Publish a reviewed intake preview and its audit in one project transaction."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass
+import logging
 import os
 
 from fastapi import HTTPException
+from fastapi.concurrency import run_in_threadpool
 
+from ..agents.adk_runtime import bounded_model_requests
 from ..config import DEFAULT_MODEL_NAME
 from ..contracts.requirement_imports import RequirementImportPreview
 from ..models import AuthUser
@@ -24,6 +28,19 @@ from .project_inputs import check_run_inputs
 from .requirement_import_service import repository, stage_extraction
 from .requirement_reconciliation import digest
 from .workflow_project_service import project_error_to_http
+
+
+async def run_extraction_call(admission, function, /, *args, **kwargs):
+    with bounded_model_requests(admission.reserve) if admission is not None else nullcontext():
+        return await run_in_threadpool(function, *args, **kwargs)
+
+
+async def stop_extraction_admission(admission):
+    if admission is not None:
+        try:
+            await run_in_threadpool(admission.stop)
+        except Exception:
+            logging.exception("Could not reconcile requirement extraction admission")
 
 
 class ExtractionPublicationUnconfirmed(HTTPException):
@@ -88,7 +105,9 @@ class ProjectRequirementExtraction:
         except Exception as exc:
             raise project_error_to_http(exc) from exc
 
-    def publish(self, *, response, event_type, billing_key, run_id, billing_context, quantity, result_metadata, billing_metadata, admission=None):
+    def publish(
+        self, *, response, event_type, billing_key, run_id, billing_context, quantity, result_metadata, billing_metadata, admission=None, source_warnings=()
+    ):
         try:
             repo = repository()
         except RuntimeError as exc:
@@ -145,6 +164,7 @@ class ProjectRequirementExtraction:
                 extraction,
                 commit_audit,
                 **({"admission": admission} if admission is not None else {}),
+                **({"source_warnings": source_warnings} if source_warnings else {}),
             )
         except Exception as publish_error:
             try:

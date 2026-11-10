@@ -23,7 +23,7 @@ _REVIEW_OPERATION = "test_cases.review"
 REPAIR_OPERATION = "testcases.repair"
 SCENARIO_REFRESH_OPERATION = "use_cases.refresh"
 SCOPED_IMPACT_OPERATION = "impact.update.apply"
-REQUIREMENT_EXTRACTION_OPERATIONS = frozenset({"requirements.parse", "requirements.refine"})
+REQUIREMENT_EXTRACTION_OPERATIONS = journeys.INTAKE_OPERATIONS | {"requirements.refine"}
 REQUIREMENT_EXTRACTION_REQUEST_CAP = 16
 REQUIREMENT_EXTRACTION_DEADLINE_SECONDS = 180
 _OPERATION_SOURCE_STAGE = {
@@ -124,7 +124,7 @@ def _attempt_doc(project_doc, operation_id):
 
 
 def _operation_id(project_id, actor_id, operation, request_id, change_id=None):
-    # Parse and refine share one request endpoint and one import preview identity.
+    # File, feedback and connector intake share one import preview identity.
     namespace = "requirements.extraction" if operation in REQUIREMENT_EXTRACTION_OPERATIONS else operation
     identity = [project_id, actor_id, namespace, request_id]
     if change_id is not None:
@@ -476,7 +476,7 @@ class DraftAttemptClaim:
             return min(remaining, _MAX_REQUEST_SECONDS)
 
     def _journey_budget(self, transaction):
-        if self._binding["operation"] == journeys.INTAKE_STAGE:
+        if self._binding["operation"] in journeys.INTAKE_OPERATIONS:
             budget = journeys.read_budget(transaction, self._project, self._binding["actor_id"], self.journey_id)
             if budget.data.get("intake_attempt_id") != self.operation_id:
                 raise journeys.unavailable()
@@ -863,7 +863,7 @@ def claim_draft_attempt(
             attempt = _read(transaction, _attempt_doc(project_doc, binding["operation_id"]))
         saved_journey_id = (attempt or {}).get(journeys.BUDGET_FIELD)
         if saved_journey_id is not None:
-            if operation not in {journeys.INTAKE_STAGE, journeys.ASSESSMENT_STAGE, journeys.REPAIR_STAGE}:
+            if operation not in journeys.INTAKE_OPERATIONS | {journeys.ASSESSMENT_STAGE, journeys.REPAIR_STAGE}:
                 raise journeys.unavailable()
             canonical = {**canonical, journeys.BUDGET_FIELD: saved_journey_id}
         if attempt is not None:
@@ -903,12 +903,12 @@ def claim_draft_attempt(
         if sync_stage == "test_cases":
             _verify_sync_predecessor(transaction, project_doc, project, canonical)
         create_budget = None
-        if operation == journeys.INTAKE_STAGE and (attempt is None or saved_journey_id is not None):
+        if operation in journeys.INTAKE_OPERATIONS and (attempt is None or saved_journey_id is not None):
             journey_id = journeys.intake_journey_id(canonical["operation_id"])
             if saved_journey_id is not None and saved_journey_id != journey_id:
                 raise journeys.unavailable()
             create_budget = journeys.prepare_intake_budget(
-                transaction, project_doc, actor_id, canonical["operation_id"], requirement_extraction["import_id"], base_revision
+                transaction, project_doc, actor_id, canonical["operation_id"], requirement_extraction["import_id"], base_revision, operation=operation
             )
             canonical = {**canonical, journeys.BUDGET_FIELD: journey_id}
         if operation in {journeys.ASSESSMENT_STAGE, journeys.REPAIR_STAGE}:
@@ -921,6 +921,8 @@ def claim_draft_attempt(
                 canonical = {**canonical, journeys.BUDGET_FIELD: budget.id}
         fence = lease.get("fence", 0) + 1
         deadline_at = now + timedelta(seconds=deadline_seconds)
+        # A connector can fetch several selected sources before its first provider request.
+        expires_at = deadline_at if operation in journeys.CONNECTOR_INTAKE_OPERATIONS else min(now + timedelta(seconds=_LEASE_SECONDS), deadline_at)
         operation_id = canonical["operation_id"]
         transaction.set(
             lease_doc,
@@ -928,7 +930,7 @@ def claim_draft_attempt(
                 "kind": _KIND,
                 "run_id": operation_id,
                 "fence": fence,
-                "expires_at": min(now + timedelta(seconds=_LEASE_SECONDS), deadline_at),
+                "expires_at": expires_at,
                 "dispatched": False,
             },
         )

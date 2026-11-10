@@ -138,6 +138,12 @@ import "./styles/index.css";
 const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
 const DRAFT_ADMISSION_ENABLED = import.meta.env.VITE_APPROVAL_CONTINUATION_ENABLED === "true";
 const APPROVAL_CONTINUATION_ENABLED = PROJECT_WORKSPACES_V2 && DRAFT_ADMISSION_ENABLED;
+const REQUIREMENT_INTAKE_PATHS = Object.freeze({
+	"requirements.parse": API_CONTRACT_ENDPOINTS.requirementsParse.path,
+	"requirements.refine": API_CONTRACT_ENDPOINTS.requirementsParse.path,
+	"requirements.import.jira": API_CONTRACT_ENDPOINTS.jiraImport.path,
+	"requirements.import.azure_devops": API_CONTRACT_ENDPOINTS.azureDevOpsImport.path,
+});
 const REQUIREMENT_PREVIEW_UNCONFIRMED =
 	"Could not confirm the requirements preview. Check extraction status and review any saved import before retrying.";
 
@@ -3272,30 +3278,38 @@ export default function App() {
 		request: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
 		loadPending: imports.load,
 		onReleased: (released) => {
-			const path = API_CONTRACT_ENDPOINTS.requirementsParse.path;
+			const path = REQUIREMENT_INTAKE_PATHS[released.operation];
 			const attempts = requirementExtractionAttempts.current;
 			const local = attempts.get(path);
 			if (local?.requestId === released.request_id) {
 				local.released = true;
 				attempts.delete(path);
-				setIsParsing(false);
+				local.setBusy(false);
 			}
 			imports.setExtractionError("");
 		},
 	});
 
-	const showParsingProgress = isParsing && requirementExtraction.attempt?.state !== "interrupted";
+	const intakeInterrupted = requirementExtraction.attempt?.state === "interrupted";
+	const showParsingProgress = isParsing && !intakeInterrupted;
+	const submittingRequirementPreview = isParsing || isImportingFromJira || isImportingFromAzureDevOps;
+	const requirementIntakeBlocked = requirementExtraction.blocked || (requirementExtraction.managed && submittingRequirementPreview);
 
 	const submitRequirementPreview = async ({ path, body, headers = {}, input, upload = null, operationScope, setBusy, pendingMessage }) => {
-		const managed = path === API_CONTRACT_ENDPOINTS.requirementsParse.path && requirementExtraction.managed;
+		const managed = requirementExtraction.managed;
 		const fingerprint = JSON.stringify([operationScope, input]);
 		const attempts = requirementExtractionAttempts.current;
 		const prior = attempts.get(path);
-		if (managed && (requirementExtraction.blocked || (prior?.inFlight && prior.scope?.generation === operationScope.generation))) return;
+		if (
+			managed &&
+			(requirementExtraction.blocked ||
+				[...attempts.values()].some((entry) => entry.inFlight && entry.scope.generation === operationScope.generation))
+		)
+			return;
 		const attempt =
 			prior?.fingerprint === fingerprint && prior.file === upload
 				? prior
-				: { fingerprint, file: upload, requestId: createRequestId(), scope: operationScope };
+				: { fingerprint, file: upload, requestId: createRequestId(), scope: operationScope, setBusy };
 		attempt.inFlight = true;
 		attempts.set(path, attempt);
 		const isCurrent = () => isProjectOperationCurrent(operationScope) && !attempt.released;
@@ -3368,6 +3382,7 @@ export default function App() {
 	};
 
 	const importRequirementsFromJira = async () => {
+		if (requirementIntakeBlocked) return;
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -3392,7 +3407,7 @@ export default function App() {
 			workflow_settings: buildWorkflowSettingsPayload(requirementWorkflowSettings),
 		};
 		await submitRequirementPreview({
-			path: "/integrations/jira/import",
+			path: API_CONTRACT_ENDPOINTS.jiraImport.path,
 			body: JSON.stringify(input),
 			headers: { "Content-Type": "application/json" },
 			input,
@@ -3403,6 +3418,7 @@ export default function App() {
 	};
 
 	const importRequirementsFromAzureDevOps = async () => {
+		if (requirementIntakeBlocked) return;
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -3432,7 +3448,7 @@ export default function App() {
 			workflow_settings: buildWorkflowSettingsPayload(requirementWorkflowSettings),
 		};
 		await submitRequirementPreview({
-			path: "/integrations/azure-devops/import",
+			path: API_CONTRACT_ENDPOINTS.azureDevOpsImport.path,
 			body: JSON.stringify(input),
 			headers: { "Content-Type": "application/json" },
 			input,
@@ -3692,7 +3708,7 @@ export default function App() {
 	};
 
 	const parseRequirements = async (withFeedback = false) => {
-		if (requirementExtraction.blocked) return;
+		if (requirementIntakeBlocked) return;
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -5636,7 +5652,7 @@ export default function App() {
 								{requirementsRoute && !reviewScope && (
 									<RequirementExtractionStatus
 										status={requirementExtraction}
-										submitting={isParsing}
+										submitting={submittingRequirementPreview}
 										extractionError={imports.extractionError}
 										requirementsSnapshotId={projectSnapshots.requirements?.snapshot_id}
 									/>
@@ -5745,7 +5761,7 @@ export default function App() {
 													</Field>
 													<Button
 														onClick={() => parseRequirements(false)}
-														disabled={!file || isParsing || requirementActionDisabled || requirementExtraction.blocked}
+														disabled={!file || isParsing || requirementActionDisabled || requirementIntakeBlocked}
 													>
 														{showParsingProgress ? "⏳ Parsing..." : "Parse Requirements"}
 													</Button>
@@ -5766,7 +5782,7 @@ export default function App() {
 													<DraftRecoveryNotice draft={pasteDraft} />
 													<Button
 														onClick={() => parseRequirements(false)}
-														disabled={!pasteDraft.value.trim() || isParsing || requirementActionDisabled || requirementExtraction.blocked}
+														disabled={!pasteDraft.value.trim() || isParsing || requirementActionDisabled || requirementIntakeBlocked}
 													>
 														{showParsingProgress ? "Parsing…" : "Parse Requirements"}
 													</Button>
@@ -5907,9 +5923,13 @@ export default function App() {
 														<div className="panel-form button-row jira-import-actions">
 															<Button
 																onClick={importRequirementsFromJira}
-																disabled={!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled}
+																disabled={
+																	!selectedJiraIssueKey || isImportingFromJira || requirementActionDisabled || requirementIntakeBlocked
+																}
 															>
-																{isImportingFromJira ? "⏳ Importing..." : `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
+																{isImportingFromJira && !intakeInterrupted
+																	? "⏳ Importing..."
+																	: `Import ${selectedJiraIssue?.key || jiraIssueType || "issue"}`}
 															</Button>
 															{selectedJiraIssue ? (
 																<span className="helper-text">
@@ -6057,9 +6077,14 @@ export default function App() {
 														<div className="panel-form button-row jira-import-actions">
 															<Button
 																onClick={importRequirementsFromAzureDevOps}
-																disabled={!selectedAzureDevOpsWorkItemId || isImportingFromAzureDevOps || requirementActionDisabled}
+																disabled={
+																	!selectedAzureDevOpsWorkItemId ||
+																	isImportingFromAzureDevOps ||
+																	requirementActionDisabled ||
+																	requirementIntakeBlocked
+																}
 															>
-																{isImportingFromAzureDevOps
+																{isImportingFromAzureDevOps && !intakeInterrupted
 																	? "⏳ Importing..."
 																	: `Import ${selectedAzureDevOpsWorkItem ? `#${selectedAzureDevOpsWorkItem.work_item_id}` : azureDevOpsWorkItemType || "work item"}`}
 															</Button>
@@ -6416,7 +6441,7 @@ export default function App() {
 																if (reviewScope) navigate(buildProjectWorkspacePath(navigationProjectId, "inputs"));
 																void parseRequirements(true);
 															}}
-															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled || requirementExtraction.blocked}
+															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled || requirementIntakeBlocked}
 															className="feedback-button"
 														>
 															{showParsingProgress ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}

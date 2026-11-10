@@ -45,7 +45,12 @@ from ..services.versioning_service import persist_requirement_versions
 
 from ..contracts.requirement_imports import RequirementImportPreview
 from ..services.requirement_import_service import require_review_client
-from ..services.requirement_import_publication import ExtractionPublicationUnconfirmed, ProjectRequirementExtraction
+from ..services.requirement_import_publication import (
+    ExtractionPublicationUnconfirmed,
+    ProjectRequirementExtraction,
+    run_extraction_call,
+    stop_extraction_admission,
+)
 from ..services.requirement_reconciliation import digest
 
 router = APIRouter()
@@ -289,7 +294,7 @@ async def azure_devops_work_item_search(
 @router.post(
     "/integrations/azure-devops/import",
     response_model=RequirementsWorkflowResponse | RequirementImportPreview,
-    dependencies=[Depends(generation_guidance("requirements"))],
+    dependencies=[Depends(generation_guidance("requirements", bounded_extraction=True))],
 )
 async def azure_devops_import_requirements_endpoint(
     request: Request,
@@ -313,21 +318,29 @@ async def azure_devops_import_requirements_endpoint(
         current_user=current_user,
         billing_key="requirements.parse",
     )
-    workflow_run_id = start_workflow_run(
-        operation=operation,
-        actor=current_user,
-        request_id=request_id,
-        metadata={
-            "project": payload.project,
-            "work_item_id": payload.work_item_id,
-            "work_item_ids": payload.work_item_ids,
-            "has_wiql": bool((payload.wiql or "").strip()),
-            "include_children": payload.include_children,
-        },
-    )
+    admission = await run_in_threadpool(extraction.admit) if extraction is not None else None
+    if admission is not None and admission.result_import_id:
+        return await run_in_threadpool(extraction.find_preview, required=True)
+    try:
+        workflow_run_id = start_workflow_run(
+            operation=operation,
+            actor=current_user,
+            request_id=request_id,
+            metadata={
+                "project": payload.project,
+                "work_item_id": payload.work_item_id,
+                "work_item_ids": payload.work_item_ids,
+                "has_wiql": bool((payload.wiql or "").strip()),
+                "include_children": payload.include_children,
+            },
+        )
+    except Exception:
+        await stop_extraction_admission(admission)
+        raise
     published = False
     try:
-        workflow = await run_in_threadpool(
+        workflow = await run_extraction_call(
+            admission,
             import_requirements_from_azure_devops,
             current_user=current_user,
             payload=payload,
@@ -359,7 +372,8 @@ async def azure_devops_import_requirements_endpoint(
             "source_work_item_count": int(workflow.get("work_item_count") or 0),
         }
         if extraction is not None:
-            await run_in_threadpool(
+            await run_extraction_call(
+                admission,
                 extraction.publish,
                 response=response,
                 event_type=event_type,
@@ -369,6 +383,8 @@ async def azure_devops_import_requirements_endpoint(
                 quantity=len(response.requirements),
                 result_metadata=result_metadata,
                 billing_metadata=billing_metadata,
+                admission=admission,
+                source_warnings=workflow.get("source_extraction_warnings") or (),
             )
             published = True
             return await run_in_threadpool(extraction.find_preview, required=True)
@@ -479,6 +495,9 @@ async def azure_devops_import_requirements_endpoint(
             metadata={"source": "azure_devops"},
         )
         raise HTTPException(status_code=500, detail="Azure DevOps requirements import failed") from exc
+    finally:
+        if not published:
+            await stop_extraction_admission(admission)
 
 
 @router.post("/integrations/azure-devops/sync/preview", response_model=AzureDevOpsSyncPreviewResponse)

@@ -235,14 +235,15 @@ plans follow their existing review paths.
 
 ### Bounded project requirement extraction
 
-Project file extraction and feedback refinement in the opted-in local demo
-claim the existing project lease before dispatch. The claim binds the
-owner, request identity, input fingerprint, effective model, project
-revision and current Requirements snapshot or its explicit absence. One
-stage reserves up to 16 physical SDK requests over three minutes. Extraction,
-its review and refinement loop, and semantic matching share that cap, with
-one SDK attempt and at most 25 seconds per request. A missing semantic match
-remains a visible comparison limitation.
+Project file extraction, feedback refinement, and Jira and Azure DevOps
+intake in the opted-in local demo claim the existing project lease before
+model dispatch. The claim binds the owner, request identity, input fingerprint,
+effective model, project revision and current Requirements snapshot or its
+explicit absence. Connector selectors and existing read permissions remain in
+effect. Each stage reserves up to 16 physical SDK requests over three minutes.
+Extraction across the selected sources, its review and refinement loop, and
+semantic matching share that cap, with one SDK attempt and at most 25 seconds
+per request. A missing semantic match remains a visible comparison limitation.
 
 The pending import preview, audit, debit and lease completion commit
 together without advancing the project revision. Compare and Apply remain
@@ -252,14 +253,19 @@ and release an interrupted exact claim. Its request identity cannot
 dispatch again. The reservation and dispatch marker do not establish the
 actual provider charge.
 
-This admission covers project file and feedback routes in the local demo.
-Connector extraction and semantic recompare or recovery require their own
-admission and acceptance evidence.
+All four project entry points share the same import request namespace.
+Connector extraction uses the existing requirement tariff. The pending
+preview keeps its source provenance and exact replay. If a selected source
+produces no requirements or needs fallback review, the preview names that
+source and leaves its requirements unapproved. Standalone and flag-off
+intake use the existing workflow. Semantic recompare and recovery still need
+their own admission and evidence.
 
-### One request budget for an exact file-backed journey
+### One request budget for an exact intake-backed journey
 
-An admitted file intake starts a private provider-request budget with
-one reservation for each stage and a 79-request ceiling. Intake may reserve
+An admitted file or connector intake starts a private provider-request budget
+with one reservation for each stage and a 79-request ceiling. The intake slot
+is common and the record retains its exact origin. Intake may reserve
 16, scenario preparation 7, Test Cases generation and its initial assessment
 24, one later saved-suite assessment 24, and one selected repair 8. The
 named preparation and generation still enforce the existing 7+24 allocation.
@@ -280,10 +286,11 @@ and the assessment reservation was already used. Request reservations are
 upper bounds on possible provider calls, separate from app billing and actual
 provider charges.
 
-This applies to the opt-in file-backed named journey and its exact suite
-successors. Legacy plans without enrollment, connector intake, standalone
-feedback refinement, semantic recompare or recovery, and Project Sync
-continue under their existing stage policies.
+This applies to the opt-in named journey from an enrolled file or connector
+preview and its exact suite successors. Existing file records without an
+origin field remain readable as file intake. Legacy plans without enrollment,
+standalone feedback refinement, semantic recompare or recovery, and Project
+Sync continue under their existing stage policies.
 
 ### Shared draft admission and assessment recovery
 

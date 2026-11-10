@@ -7,6 +7,17 @@ REVIEW_SCHEMA_INVALID = "review_schema_invalid"
 RETAINED_REQUIREMENT_DRAFT_WARNING = "Structural review could not complete. Review the retained requirement draft."
 
 
+def source_extraction_warning(source: str, workflow: dict) -> str | None:
+    if not workflow.get("requirements"):
+        return f"No draft requirements were extracted from {source}. Review that source before applying."
+    diagnostics = workflow.get("workflow_diagnostics") or {}
+    if diagnostics.get("used_fallback") or diagnostics.get("status") == "fallback":
+        return f"Extraction used a fallback for {source}. Check the draft against that source before applying."
+    if diagnostics.get("status") == "failed":
+        return f"Extraction did not complete for {source}. Review the retained draft against that source before applying."
+    return None
+
+
 def mark_retryable_parser_failure(diagnostics: Dict[str, Any], reason: str) -> None:
     diagnostics[RETRYABLE_PARSER_FAILURE_KEY] = True
     diagnostics[RETRY_REASON_KEY] = str(reason or "parser_failure").strip() or "parser_failure"

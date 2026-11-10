@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Optional, Sequence
 
 from ..agents.requirements_agent import extract_requirements
+from ..utils.workflow_diagnostics import source_extraction_warning
 from ..config import get_jira_settings
 from ..models import (
     AuthUser,
@@ -308,6 +309,7 @@ def _merge_issue_workflows(
     suggestions: list[str] = []
     unmet_criteria: list[str] = []
     warnings: list[str] = []
+    source_warnings: list[str] = []
     parser_failures: list[str] = []
     history: list[dict[str, Any]] = []
     diagnostics_payloads: list[dict[str, Any]] = []
@@ -324,6 +326,10 @@ def _merge_issue_workflows(
         suggestions.extend(str(item) for item in (review.get("suggestions") or []))
         unmet_criteria.extend(str(item) for item in (review.get("unmet_criteria") or []))
         warnings.extend(str(item) for item in (diagnostics.get("warnings") or []))
+        warning = source_extraction_warning(f"Jira {issue.key}", workflow)
+        if warning:
+            source_warnings.append(warning)
+            approved = False
         parser_failures.extend(str(item) for item in (diagnostics.get("parser_failures") or []))
         for iteration in workflow.get("iteration_history") or []:
             item = dict(iteration or {})
@@ -368,6 +374,7 @@ def _merge_issue_workflows(
             "source_issue_keys": [issue.key for issue, _ in issue_workflows],
         },
         "workflow_settings": dict(workflow_settings),
+        "source_extraction_warnings": source_warnings,
         "workflow_diagnostics": {
             "status": diagnostics_status,
             "used_fallback": any(bool(payload.get("used_fallback")) for payload in diagnostics_payloads),

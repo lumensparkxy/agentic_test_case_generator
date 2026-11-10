@@ -20,12 +20,49 @@ const fileInput = (page) => page.locator("#requirement-import-setup input[type=f
 const comparison = (page) => page.getByRole("region", { name: "Compare incoming requirements", exact: true });
 const revision = 1;
 
-const previewFixture = () => ({
+const connectors = {
+	jira: {
+		slug: "jira",
+		operation: "requirements.import.jira",
+		label: "JIRA Cloud",
+		item: "QA-416",
+		selection: "Select JIRA issue QA-416",
+		results: "Jira issue search results table",
+		searchPath: "/integrations/jira/issues/search",
+		input: { epic_key: "QA-416" },
+		routes: {
+			connection: { connected: true, connection: { site_url: "https://jira.example.test" } },
+			"projects?*": { projects: [{ project_id: "123", key: "QA", name: "QA Project" }] },
+			"projects/*/issue-types": { issue_types: [{ name: "Epic" }] },
+			"issues/search?*": { issues: [{ key: "QA-416", issue_type: "Epic", summary: "Synthetic Jira source" }] },
+		},
+	},
+	azure: {
+		slug: "azure-devops",
+		operation: "requirements.import.azure_devops",
+		label: "Azure DevOps",
+		item: "#416",
+		selection: "Select Azure DevOps work item 416",
+		results: "Azure DevOps work item search results table",
+		searchPath: "/integrations/azure-devops/work-items/search",
+		input: { project: "QA Project", work_item_id: 416 },
+		routes: {
+			connection: { connected: true, connection: { default_project: "QA Project" } },
+			"projects?*": { projects: [{ project_id: "123", name: "QA Project" }] },
+			"projects/*/work-item-types": { work_item_types: [{ name: "Feature" }] },
+			"work-items/search?*": { work_items: [{ work_item_id: 416, work_item_type: "Feature", title: "Synthetic Azure DevOps source" }] },
+		},
+	},
+};
+const importPath = (connector) => `/integrations/${connector.slug}/import`;
+const sourceSearch = (page) => page.locator("#requirement-import-setup").getByRole("button", { name: "Search", exact: true });
+
+const previewFixture = (source = sourceName, operation = "requirements.parse") => ({
 	import_id: "saved-booking-comparison",
 	project_id: USE_CASE_PROJECT_ID,
 	base_project_revision: revision,
-	source_name: sourceName,
-	operation: "requirements.parse",
+	source_name: source,
+	operation,
 	status: "pending",
 	current_requirements: [],
 	candidates: [
@@ -43,7 +80,10 @@ const previewFixture = () => ({
 	warnings: [],
 });
 
-async function installExtraction(page, { firstParse = "success", initialStatus = 200, holdFirstStatus = false, dropRelease = false } = {}) {
+async function installExtraction(
+	page,
+	{ firstParse = "success", initialStatus = 200, holdFirstStatus = false, dropRelease = false, connector } = {}
+) {
 	const initial = useCaseProjectFixture({ current_revision: revision, current_snapshots: {}, stage_state: {} });
 	const other = useCaseProjectFixture({
 		project_id: "separate-extraction-project",
@@ -54,6 +94,7 @@ async function installExtraction(page, { firstParse = "success", initialStatus =
 	});
 	const writes = [];
 	const attempts = [];
+	const connectorRequests = [];
 	const releases = [];
 	const reads = [];
 	const pageErrors = [];
@@ -61,6 +102,16 @@ async function installExtraction(page, { firstParse = "success", initialStatus =
 	let attempt = null;
 	let pending = null;
 	let statusCode = initialStatus;
+	const operation = connector?.operation || "requirements.parse";
+	const attemptFor = (request_id, state) => ({
+		operation_id: operationId,
+		fence: 7,
+		operation,
+		request_id,
+		state,
+		source_snapshot_id: null,
+		reason: state === "interrupted" ? "provider_outcome_unconfirmed" : null,
+	});
 	const parseReply = createDeferred();
 	const statusReply = createDeferred();
 	page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -91,21 +142,34 @@ async function installExtraction(page, { firstParse = "success", initialStatus =
 		pendingReads++;
 		return route.fulfill({ json: pending ? [pending] : [] });
 	});
-	await page.route(`**${parsePath}`, async (route) => {
+	if (connector) {
+		for (const [endpoint, payload] of Object.entries(connector.routes)) {
+			await page.route(`**/integrations/${connector.slug}/${endpoint}`, (route) => route.fulfill({ json: payload }));
+		}
+	}
+	await page.route(`**${connector ? importPath(connector) : parsePath}`, async (route) => {
 		const requestId = route.request().headers()["x-request-id"];
 		expect(requestId).toBeTruthy();
-		expect(route.request().postData()).toContain(sourceText);
+		if (connector) {
+			const input = route.request().postDataJSON();
+			expect(input).toMatchObject({
+				...connector.input,
+				project_id: USE_CASE_PROJECT_ID,
+				base_project_revision: revision,
+				import_mode: "review",
+				include_children: true,
+			});
+			connectorRequests.push(input);
+		} else {
+			expect(route.request().postData()).toContain(sourceText);
+		}
 		attempts.push(requestId);
+		if (attempts.length === 1 && firstParse === "interrupted") {
+			attempt = attemptFor(requestId, "interrupted");
+			return route.abort("connectionreset");
+		}
 		if (attempts.length === 1 && firstParse === "held") {
-			attempt = {
-				operation_id: operationId,
-				fence: 7,
-				operation: "requirements.parse",
-				request_id: requestId,
-				state: "running",
-				source_snapshot_id: null,
-				reason: null,
-			};
+			attempt = attemptFor(requestId, "running");
 			await parseReply.promise;
 			return route.fulfill({
 				status: 409,
@@ -113,18 +177,10 @@ async function installExtraction(page, { firstParse = "success", initialStatus =
 			});
 		}
 		if (attempts.length === 1 && firstParse === "busy") {
-			attempt = {
-				operation_id: operationId,
-				fence: 7,
-				operation: "requirements.parse",
-				request_id: "other-tabs-request",
-				state: "running",
-				source_snapshot_id: null,
-				reason: null,
-			};
+			attempt = attemptFor("other-tabs-request", "running");
 			return route.fulfill({ status: 409, json: { detail: { code: "project_draft_busy", message: "Another extraction is active." } } });
 		}
-		pending = previewFixture();
+		pending = previewFixture(connector?.item, operation);
 		if (attempts.length === 1 && firstParse === "lost") return route.abort("connectionreset");
 		return route.fulfill({ json: pending });
 	});
@@ -141,6 +197,7 @@ async function installExtraction(page, { firstParse = "success", initialStatus =
 	return {
 		writes,
 		attempts,
+		connectorRequests,
 		releases,
 		reads,
 		parseReply,
@@ -164,6 +221,9 @@ async function installExtraction(page, { firstParse = "success", initialStatus =
 		finishAttempt() {
 			attempt = null;
 		},
+		startOtherAttempt() {
+			attempt = attemptFor("other-tabs-request", "running");
+		},
 	};
 }
 
@@ -172,6 +232,36 @@ test.describe("Requirement extraction admission", () => {
 	const sources = process.env.E2E_PROJECT_WORKSPACES_V2 === "true" ? "inputs" : "requirements";
 	const selectFile = (page) =>
 		fileInput(page).setInputFiles({ name: sourceName, mimeType: "text/markdown", buffer: Buffer.from(sourceText) });
+	const selectConnector = async (page, connector) => {
+		await page.getByRole("radio", { name: connector.label, exact: true }).check();
+		await sourceSearch(page).click();
+		await expect(page.getByRole("radio", { name: connector.selection, exact: true })).toBeChecked();
+	};
+	const checkConnectorSearchWithResults = async (page, connector) => {
+		const results = page.getByRole("region", { name: connector.results, exact: true });
+		for (const width of [1366, 1440]) {
+			await page.setViewportSize({ width, height: 900 });
+			if (process.env.E2E_PROJECT_WORKSPACES_V2 === "true") {
+				const geometry = await results.evaluate((table) => ({
+					resultsRight: table.getBoundingClientRect().right,
+					cardRight: table.closest(".jira-card").getBoundingClientRect().right,
+					contextLeft: document.querySelector(".project-intake-context").getBoundingClientRect().left,
+					internalOverflow: table.scrollWidth - table.clientWidth,
+					documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+				}));
+				expect(geometry.resultsRight).toBeLessThanOrEqual(geometry.cardRight);
+				expect(geometry.cardRight).toBeLessThan(geometry.contextLeft);
+				expect(geometry.internalOverflow).toBeGreaterThan(0);
+				expect(geometry.documentOverflow).toBeLessThanOrEqual(0);
+			}
+			const searched = page.waitForRequest(
+				(request) => request.method() === "GET" && new URL(request.url()).pathname === connector.searchPath
+			);
+			await sourceSearch(page).click();
+			await searched;
+			await expect(page.getByRole("radio", { name: connector.selection, exact: true })).toBeChecked();
+		}
+	};
 
 	test("checks a running parse, releases only interruption, and preserves the selected file for a new deliberate request", async ({
 		page,
@@ -272,6 +362,60 @@ test.describe("Requirement extraction admission", () => {
 		await parse(page).click();
 		await expect(comparison(page)).toContainText(sourceText);
 		expect(api.writes).toEqual([`POST ${parsePath}`]);
+	});
+
+	test("recovers a dropped Jira import and release without resubmitting or losing the selected issue", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const connector = connectors.jira;
+		const api = await installExtraction(page, { connector, firstParse: "interrupted", dropRelease: true });
+		const importSource = page.getByRole("button", { name: `Import ${connector.item}`, exact: true });
+		const selection = page.getByRole("radio", { name: connector.selection, exact: true });
+		await page.goto(`${root}/${sources}`);
+		await selectConnector(page, connector);
+		expect(api.writes).toEqual([]);
+		await importSource.click();
+		await expect(status(page)).toContainText("Jira requirements import was interrupted. Provider usage remains unconfirmed.");
+		await expect(importSource).toBeDisabled();
+		await checkConnectorSearchWithResults(page, connector);
+		await expect(selection).toBeChecked();
+		expect(api.writes).toEqual([`POST ${importPath(connector)}`]);
+		await page.screenshot({ path: testInfo.outputPath("jira-requirements-import-interrupted.png"), fullPage: true });
+		await release(page).click();
+		await expect(status(page)).toContainText("The interrupted attempt was released. Provider usage remains unconfirmed.");
+		await expect(selection).toBeChecked();
+		await expect(importSource).toBeEnabled();
+		expect(api.releases).toEqual([{ fence: 7 }]);
+		expect(api.writes).toEqual([`POST ${importPath(connector)}`, `POST ${releasePath}`]);
+		await importSource.click();
+		await expect(comparison(page)).toContainText(sourceText);
+		expect(new Set(api.attempts).size).toBe(2);
+		expect(api.connectorRequests).toEqual([api.connectorRequests[0], api.connectorRequests[0]]);
+		expect(api.writes).toEqual([`POST ${importPath(connector)}`, `POST ${releasePath}`, `POST ${importPath(connector)}`]);
+		expect(api.pageErrors).toEqual([]);
+	});
+
+	test("gates only Azure DevOps import while another import is running", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const connector = connectors.azure;
+		const api = await installExtraction(page, { connector });
+		api.startOtherAttempt();
+		const importSource = page.getByRole("button", { name: `Import ${connector.item}`, exact: true });
+		await page.goto(`${root}/${sources}`);
+		await expect(status(page)).toContainText("Azure DevOps requirements import is running.");
+		await selectConnector(page, connector);
+		await expect(importSource).toBeDisabled();
+		await checkConnectorSearchWithResults(page, connector);
+		await expect(release(page)).toHaveCount(0);
+		expect(api.writes).toEqual([]);
+		await page.screenshot({ path: testInfo.outputPath("azure-devops-requirements-import-running.png"), fullPage: true });
+		api.finishAttempt();
+		await check(page).click();
+		await expect(importSource).toBeEnabled();
+		expect(api.writes).toEqual([]);
+		await importSource.click();
+		await expect(comparison(page)).toContainText(sourceText);
+		expect(api.writes).toEqual([`POST ${importPath(connector)}`]);
+		expect(api.pageErrors).toEqual([]);
 	});
 
 	test("drops a late owner status on project navigation and hides recovery from a different account", async ({ page }) => {

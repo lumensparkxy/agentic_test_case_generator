@@ -5,6 +5,10 @@
 	margin-bottom: 1.5rem;
 }
 
+.project-intake .jira-workflow-panel {
+	grid-template-columns: minmax(0, 1fr);
+}
+
 .jira-card,
 .jira-sync-panel {
 	padding: 1rem 1.25rem;

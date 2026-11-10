@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import sys
@@ -28,7 +28,7 @@ from app.services import project_draft_admission as admission
 from app.services import provider_journey_budget as journeys
 from app.services import requirement_import_service as service
 from app.services import requirement_import_publication as publication
-from app.utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
+from app.utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID, source_extraction_warning
 from app.agents.requirement_matching_agent import suggest_matches
 from app.main import app, get_current_user
 from test_use_case_review_service import FakeFirestoreClient, FakeTransaction, _run_transaction
@@ -968,6 +968,7 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(budget["slots"][journeys.INTAKE_STAGE]["result_id"], preview.import_id)
         self.assertTrue(budget["preview_saved"])
         self.assertIsNone(budget["requirements_snapshot_id"])
+        self.assertEqual(budget.pop("intake_operation"), journeys.INTAKE_STAGE)
 
         applied = self.repo.apply(PID, preview.import_id, ACTOR, choices(preview), "journey-apply")
         applied_id = applied.stage_state["requirements"].current_snapshot_id
@@ -1162,6 +1163,160 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(len(self._rows("usage_events")), 2)
         self.assertEqual(len(self._rows("billing_consumption")), 2)
         self.assertEqual(self.store[f"qa_projects/{PID}"]["current_revision"], 7)
+
+    def test_demo_connectors_fence_exact_dispatch_and_link_origin_to_the_intake_budget(self):
+        self.enable_extraction_admission()
+        client, billing, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+        cases = (
+            ("jira", integrations_jira, "/integrations/jira/import", {"epic_key": "QA-16"}),
+            ("azure_devops", integrations_azure_devops, "/integrations/azure-devops/import", {"project": "QA", "work_item_id": 16}),
+        )
+        original_stage = publication.stage_extraction
+
+        def lose_commit_reply(*args, **kwargs):
+            original_stage(*args, **kwargs)
+            raise RuntimeError("Synthetic lost preview transaction reply")
+
+        for index, (provider, router, path, selector) in enumerate(cases):
+            with self.subTest(provider=provider):
+                _, other_router, other_path, other_selector = cases[1 - index]
+                revision = self.store[project]["current_revision"]
+                options = {"project_id": PID, "base_project_revision": revision, "import_mode": "review"}
+                key = f"bounded-{provider}"
+                headers = {"X-Request-ID": key}
+                body = {**options, **selector}
+                ready, allow_publish = Event(), Event()
+                requests = []
+                clock = datetime.now(timezone.utc)
+                result = {**workflow, "requirements": [row.model_copy(update={"source_system": provider}) for row in workflow["requirements"]]}
+
+                def extract(**_kwargs):
+                    nonlocal clock
+                    # Several authorized connector reads can finish after the ordinary first lease.
+                    clock += timedelta(seconds=65)
+                    requests.append(_model_reservation.get()())
+                    ready.set()
+                    self.assertTrue(allow_publish.wait(5))
+                    return result
+
+                def match(*_args):
+                    requests.append(_model_reservation.get()())
+                    return {}, False
+
+                with (
+                    patch.object(admission, "_utcnow", side_effect=lambda: clock),
+                    patch.object(router, "enforce_billing_access", billing),
+                    patch.object(other_router, "enforce_billing_access", billing),
+                    patch.object(router, f"import_requirements_from_{provider}", side_effect=extract) as extractor,
+                    patch.object(service, "suggest_matches", side_effect=match) as matcher,
+                    patch.object(publication, "stage_extraction", side_effect=lose_commit_reply),
+                    ThreadPoolExecutor(max_workers=1) as pool,
+                ):
+                    in_flight = pool.submit(client.post, path, headers=headers, json=body)
+                    try:
+                        self.assertTrue(ready.wait(5))
+                        status = client.get(f"/projects/{PID}/requirement-imports/extraction-status").json()
+                        self.assertEqual((status["attempt"]["operation"], status["attempt"]["state"]), (f"requirements.import.{provider}", "running"))
+                        duplicate = client.post(path, headers=headers, json=body)
+                        self.assertEqual(duplicate.status_code, 409)
+                        self.assertEqual(duplicate.json()["detail"]["code"], "project_draft_busy")
+                        cross_operation = client.post(other_path, headers=headers, json={**options, **other_selector})
+                        self.assertEqual(cross_operation.status_code, 409)
+                        self.assertEqual(cross_operation.json()["detail"]["code"], "project_draft_request_mismatch")
+                    finally:
+                        allow_publish.set()
+                    saved = in_flight.result(timeout=5)
+                    self.assertEqual(saved.status_code, 200, saved.text)
+                    self.assertEqual(client.post(path, headers=headers, json=body).json(), saved.json())
+                    changed = client.post(path, headers=headers, json={**body, "include_children": False})
+                    self.assertEqual(changed.status_code, 409)
+                extractor.assert_called_once()
+                matcher.assert_called_once()
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(all(0 < timeout <= 25 for timeout in requests))
+                preview = RequirementImportPreview.model_validate(saved.json())
+                self.assertEqual({row.requirement.source_system for row in preview.candidates}, {provider})
+                raw = self.repo.read(PID, preview.import_id, ACTOR)
+                budget_path = f"{project}/provider_journeys/{raw['extraction'][journeys.BUDGET_FIELD]}"
+                budget = self.store[budget_path]
+                self.assertEqual((budget["schema_version"], budget["request_limit"], budget["requests_reserved"]), (2, 79, 16))
+                self.assertEqual(budget["intake_operation"], f"requirements.import.{provider}")
+                self.assertEqual(budget["slots"][journeys.INTAKE_STAGE]["result_id"], preview.import_id)
+                decisions = choices(preview).model_copy(update={"idempotency_key": f"apply-{provider}"})
+                origin = budget.pop("intake_operation")
+                with self.assertRaises(HTTPException) as missing_origin:
+                    self.repo.apply(PID, preview.import_id, ACTOR, decisions, key)
+                self.assertEqual(missing_origin.exception.detail["code"], journeys.UNAVAILABLE)
+                self.store[budget_path]["intake_operation"] = origin
+                applied = self.repo.apply(PID, preview.import_id, ACTOR, decisions, key)
+                self.assertEqual(self.store[budget_path]["requirements_snapshot_id"], applied.stage_state["requirements"].current_snapshot_id)
+                self.assertEqual(len(self._rows("billing_consumption")), index + 1)
+                self.assertEqual(len(self._rows("usage_events")), index + 1)
+
+    def test_connector_partial_source_warnings_survive_preview_and_recompare(self):
+        warnings = [
+            source_extraction_warning("Jira QA-2", {"requirements": []}),
+            source_extraction_warning("Jira QA-3", {"requirements": [requirement(9)], "workflow_diagnostics": {"used_fallback": True}}),
+        ]
+        incoming = RequirementsWorkflowResponse(
+            source_name="3 Jira issues",
+            raw_text=requirement(9).text,
+            requirements=[requirement(9)],
+            workflow_diagnostics={"status": "partial", "warnings": ["Provider exception text"]},
+        )
+        saved = service.stage_extraction(
+            self.repo,
+            PID,
+            ACTOR,
+            7,
+            incoming,
+            "requirements.import.jira",
+            "partial-connector",
+            {"fingerprint": "partial"},
+            lambda _transaction: None,
+            source_warnings=warnings,
+        )
+        self.assertNotIn("Provider exception text", saved["warnings"])
+        for warning in warnings:
+            self.assertIn(warning, saved["warnings"])
+        self.store[f"qa_projects/{PID}"]["current_revision"] += 1
+        recomparison = service.recompare_import(PID, "partial-connector", ACTOR)
+        self.assertNotIn("Provider exception text", recomparison.warnings)
+        for warning in warnings:
+            self.assertIn(warning, recomparison.warnings)
+
+    def test_demo_connector_stale_result_retains_unknown_usage_and_exact_owner_release(self):
+        self.enable_extraction_admission()
+        client, billing, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+        url = "/integrations/azure-devops/import"
+        body = {"project_id": PID, "base_project_revision": 7, "import_mode": "review", "project": "QA", "work_item_id": 16}
+        headers = {"X-Request-ID": "interrupted-ado"}
+
+        def supersede(**_kwargs):
+            _model_reservation.get()()
+            self.store[project]["current_revision"] += 1
+            return workflow
+
+        with (
+            patch.object(integrations_azure_devops, "enforce_billing_access", billing),
+            patch.object(integrations_azure_devops, "import_requirements_from_azure_devops", side_effect=supersede) as extractor,
+        ):
+            stale = client.post(url, headers=headers, json=body)
+        self.assertEqual(stale.status_code, 409, stale.text)
+        extractor.assert_called_once()
+        self.assertEqual(self._rows("billing_consumption"), [])
+        status_path = f"/projects/{PID}/requirement-imports/extraction-status"
+        attempt = client.get(status_path).json()["attempt"]
+        self.assertEqual((attempt["operation"], attempt["state"]), ("requirements.import.azure_devops", "interrupted"))
+        release = f"/projects/{PID}/requirement-imports/extraction-attempts/{attempt['operation_id']}/release"
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"]}).json(), {"released": True})
+        self.assertIsNone(client.get(status_path).json()["attempt"])
+        [budget] = [row for key, row in self.store.items() if key.startswith(f"{project}/provider_journeys/")]
+        self.assertFalse(budget["preview_saved"])
+        self.assertEqual(budget["requests_reserved"], 16)
+        self.assertIsNone(budget["requirements_snapshot_id"])
 
     def test_connector_imports_leave_no_success_writes_on_stale_revision_or_preview_failure(self):
         client, billing, workflow = self.extraction_client()
