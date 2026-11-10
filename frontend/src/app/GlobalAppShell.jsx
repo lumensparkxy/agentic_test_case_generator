@@ -4,7 +4,16 @@ import { useEffect, useRef, useState } from "react";
 
 import GlobalNavigation from "./GlobalNavigation";
 
-export default function GlobalAppShell({ route, navigate, controls = null, compactControls = false, headerCollapsed = false, children }) {
+export default function GlobalAppShell({
+	route,
+	navigate,
+	controls = null,
+	compactControls = false,
+	headerCollapsed = false,
+	headerRef,
+	onDismissHeader,
+	children,
+}) {
 	const [areControlsOpen, setAreControlsOpen] = useState(false);
 	const controlsToggleRef = useRef(null);
 	const controlsId = "workspace-controls-panel";
@@ -23,12 +32,18 @@ export default function GlobalAppShell({ route, navigate, controls = null, compa
 		<div className="global-app-shell">
 			<header
 				id="application-menu"
+				ref={headerRef}
 				hidden={headerCollapsed}
 				className={`global-app-shell-header ${compactControls ? "compact" : ""}`.trim()}
 				onKeyDown={(event) => {
-					if (event.key !== "Escape" || !compactControls || !areControlsOpen) return;
-					event.preventDefault();
-					closeControls({ restoreFocus: true });
+					if (event.key !== "Escape" || event.defaultPrevented) return;
+					if (compactControls && areControlsOpen) {
+						event.preventDefault();
+						closeControls({ restoreFocus: true });
+					} else if (onDismissHeader) {
+						event.preventDefault();
+						onDismissHeader();
+					}
 				}}
 			>
 				<GlobalNavigation route={route} navigate={navigate} />

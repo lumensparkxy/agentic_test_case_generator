@@ -140,6 +140,8 @@ test.describe("Opt-in project workspaces", () => {
 		await page.goto(projectPath("review/tests"));
 		const menu = page.getByRole("button", { name: "Show app menu", exact: true });
 		const navigation = page.getByRole("navigation", { name: "Global navigation", exact: true });
+		const home = navigation.getByRole("link", { name: "Home", exact: true });
+		const projects = navigation.getByRole("link", { name: "Projects", exact: true });
 		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
 		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
 		await expect(menu).toHaveAttribute("aria-expanded", "false");
@@ -156,12 +158,18 @@ test.describe("Opt-in project workspaces", () => {
 		await menu.press("Enter");
 		const hideMenu = page.getByRole("button", { name: "Hide app menu", exact: true });
 		await expect(hideMenu).toHaveAttribute("aria-expanded", "true");
-		await expect(navigation.getByRole("link", { name: "Projects", exact: true })).toBeVisible();
+		await expect(home).toBeFocused({ timeout: 3000 });
+		await page.keyboard.press("Tab");
+		await expect(projects).toBeFocused();
 		await expect(page.getByRole("button", { name: "Open QA project menu", exact: true })).toBeVisible();
 		await expect(reader).toContainText("Receipt 200 appears");
 		await expect(search).toHaveValue("Checkout 200");
 		expect((await reader.boundingBox()).y - collapsedTop).toBeGreaterThanOrEqual(76);
 		await page.screenshot({ path: testInfo.outputPath("review-app-menu-expanded.png") });
+		await page.keyboard.press("Escape");
+		await expect(menu).toBeFocused();
+		await expect(navigation).toBeHidden();
+		await menu.press("Enter");
 		await section(page, "Scenarios").press("Enter");
 		await expect(hideMenu).toHaveAttribute("aria-expanded", "true");
 		await hideMenu.press("Enter");
@@ -174,10 +182,42 @@ test.describe("Opt-in project workspaces", () => {
 		await expectNoDocumentOverflow(page);
 
 		await menu.press("Enter");
-		await navigation.getByRole("link", { name: "Home", exact: true }).press("Enter");
+		await expect(home).toBeFocused();
+		await page.keyboard.press("Enter");
 		await expect(page).toHaveURL("/");
 		await expect(navigation).toBeVisible();
 		await expect(menu).toHaveCount(0);
+		expect(writes).toEqual([]);
+		expect(errors).toEqual([]);
+	});
+
+	test("dismisses nested app controls in order on a narrow Review screen", async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		const { writes, errors } = await setup(page);
+		await page.goto(projectPath("review/tests"));
+		const menu = page.getByRole("button", { name: "Show app menu", exact: true });
+		const controls = page.getByRole("button", { name: "Open workspace controls", exact: true });
+		const projectMenu = page.getByRole("button", { name: "Open QA project menu", exact: true });
+		const picker = page.getByRole("dialog", { name: "Projects", exact: true });
+
+		await menu.press("Enter");
+		await expect(
+			page.getByRole("navigation", { name: "Global navigation" }).getByRole("link", { name: "Home", exact: true })
+		).toBeFocused();
+		await controls.press("Enter");
+		await projectMenu.press("Enter");
+		await expect(picker).toBeVisible();
+		await expect(picker.locator('[aria-current="true"]')).toBeFocused();
+		await page.keyboard.press("Escape");
+		await expect(picker).toBeHidden();
+		await expect(projectMenu).toBeFocused();
+		await page.keyboard.press("Escape");
+		await expect(controls).toBeFocused();
+		await expect(projectMenu).toBeHidden();
+		await page.keyboard.press("Escape");
+		await expect(menu).toBeFocused();
+		await expect(controls).toBeHidden();
+		await expectNoDocumentOverflow(page);
 		expect(writes).toEqual([]);
 		expect(errors).toEqual([]);
 	});

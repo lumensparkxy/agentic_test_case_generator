@@ -398,6 +398,8 @@ export default function App() {
 	const [applicationLiveStatus, setApplicationLiveStatus] = useState("");
 	const [authActionError, setAuthActionError] = useState("");
 	const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+	const appMenuHeaderRef = useRef(null);
+	const appMenuToggleRef = useRef(null);
 	const { isWorkflowNavCollapsed, isCompactWorkflowNavigation, toggleWorkflowNavCollapsed, closeCompactWorkflowNavigation } =
 		useWorkflowShellLayoutState();
 	const {
@@ -4603,6 +4605,18 @@ export default function App() {
 	const targetReadiness = hasExactPreview ? (executionEligibility.ready ? "Ready" : "Blocked") : "Unknown";
 	const compactReviewStatus = PROJECT_WORKSPACES_V2 && route.workspace === "review";
 	const collapsibleAppMenu = compactReviewStatus && projectRouteStatus === "ready" && currentProject?.project_id === route.projectId;
+	const closeAppMenu = () => {
+		setIsAppMenuOpen(false);
+		appMenuToggleRef.current?.focus();
+	};
+	const toggleAppMenu = () => {
+		if (isAppMenuOpen) {
+			closeAppMenu();
+			return;
+		}
+		setIsAppMenuOpen(true);
+		window.requestAnimationFrame(() => appMenuHeaderRef.current?.querySelector("nav a[href]")?.focus());
+	};
 	const suiteQualitySummary = currentSuiteSnapshotId ? (
 		<SuiteQualitySummary
 			snapshotId={currentSuiteSnapshotId}
@@ -5586,6 +5600,8 @@ export default function App() {
 				controls={navigationControls}
 				compactControls={isCompactWorkflowNavigation}
 				headerCollapsed={collapsibleAppMenu && !isAppMenuOpen}
+				headerRef={appMenuHeaderRef}
+				onDismissHeader={collapsibleAppMenu && isAppMenuOpen ? closeAppMenu : undefined}
 			>
 				{route.kind === "global" ? (
 					route.destination === "home" ? (
@@ -5681,7 +5697,7 @@ export default function App() {
 								counts={savedArtifactCounts}
 								reviewEntrySection={reviewEntrySection}
 								reviewFindings={reviewFindings}
-								appMenu={collapsibleAppMenu ? { open: isAppMenuOpen, toggle: () => setIsAppMenuOpen((open) => !open) } : null}
+								appMenu={collapsibleAppMenu ? { open: isAppMenuOpen, toggle: toggleAppMenu, toggleRef: appMenuToggleRef } : null}
 							/>
 						) : (
 							<WorkflowNavigationDrawer

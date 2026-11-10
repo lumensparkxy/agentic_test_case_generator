@@ -57,7 +57,14 @@ export default function ProjectWorkspaceNavigation({ route, navigate, counts, re
 			)}
 			<div className="project-workspace-meta">
 				{appMenu && (
-					<Button variant="secondary" size="compact" aria-expanded={appMenu.open} aria-controls="application-menu" onClick={appMenu.toggle}>
+					<Button
+						ref={appMenu.toggleRef}
+						variant="secondary"
+						size="compact"
+						aria-expanded={appMenu.open}
+						aria-controls="application-menu"
+						onClick={appMenu.toggle}
+					>
 						<Menu size={16} aria-hidden="true" />
 						{appMenu.open ? "Hide app menu" : "Show app menu"}
 					</Button>
