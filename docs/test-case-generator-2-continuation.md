@@ -729,6 +729,16 @@ kept their exact versions. The archive contains no successful original
 export. The historical fault replay is separate from the frozen paired live
 cohort. Earlier assertion failures leave downstream checks unobserved.
 
+The authored W11 browser replay under
+[#522](https://github.com/lumensparkxy/agentic_test_case_generator/issues/522)
+bound both exact export checkpoints to deliberate local runs. It exposed
+loss of submitted-value evidence after reopening the same page. At
+`e21f06e` the handoff retained that binding for the declared saved-value
+assertion. All eleven admitted cases passed at both limits and seven
+unaffected versions stayed exact. The revised rejection failed at the
+intended assertion when replayed against the original limit. The existing
+Manual retry cases stayed Manual.
+
 The current scope is offline only. Live provider pairs, independent artifact
 judgments, practitioner validation, and verification of a hosted worker
 identity and timeout policy remain open. The practitioner study stays with

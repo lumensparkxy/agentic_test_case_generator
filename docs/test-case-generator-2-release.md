@@ -4,7 +4,7 @@ The implementation lives on `codex/version_2_0`. The frozen baseline is
 `2f6458d3d1bb68197ba2b5572261870277c8cadb`. The phase history is in the
 [implementation record](test-case-generator-2-continuation.md). Use the
 [frozen evaluation protocol](test-case-generator-2-evaluation.md) for the
-fixed thresholds. The latest locally verified application commit is
+fixed thresholds. The most recent local rollback rehearsal used
 `6de863c4757a7c1560fafd5e0c58dcd8cf5064a0`. The stack remains open for
 final merge approval. The current evaluation scope is offline only.
 
@@ -27,6 +27,15 @@ scenario approval request, the same two exported cases including literal
 whitespace, and the direct saved-case link. The archived mock initially
 expected the earlier request shape. The replay assertion now includes the
 template field. Source, Context, plan and suite fixtures are unchanged.
+
+The authored W11 browser replay exercised the original and revised booking
+limits. The frozen baseline passed all ten original and nine revised cases
+admitted to Chromium. The candidate at `e21f06e` passed eleven at each
+checkpoint, including the exact saved lower-bound check after reopening.
+Seven unaffected case versions stayed exact. The revised case rejected seven
+attendees and found the same saved count after reopening. Against the old
+limit it failed at the intended inline assertion. Both arms refused a fresh
+Run on stale source. [#522](https://github.com/lumensparkxy/agentic_test_case_generator/issues/522)
 
 The worker recovery replay pinned `bb500a685fcb1be0ae4e47833d1a1238d896e801`
 and used loopback Firestore with a synthetic SDK transport. Fresh workers
