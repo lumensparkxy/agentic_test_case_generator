@@ -3268,6 +3268,8 @@ export default function App() {
 		},
 	});
 
+	const showParsingProgress = isParsing && requirementExtraction.attempt?.state !== "interrupted";
+
 	const submitRequirementPreview = async ({ path, body, headers = {}, input, upload = null, operationScope, setBusy, pendingMessage }) => {
 		const managed = path === API_CONTRACT_ENDPOINTS.requirementsParse.path && requirementExtraction.managed;
 		const fingerprint = JSON.stringify([operationScope, input]);
@@ -5727,7 +5729,7 @@ export default function App() {
 														onClick={() => parseRequirements(false)}
 														disabled={!file || isParsing || requirementActionDisabled || requirementExtraction.blocked}
 													>
-														{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
+														{showParsingProgress ? "⏳ Parsing..." : "Parse Requirements"}
 													</Button>
 												</div>
 											) : requirementSourceMode === "paste" ? (
@@ -5748,7 +5750,7 @@ export default function App() {
 														onClick={() => parseRequirements(false)}
 														disabled={!pasteDraft.value.trim() || isParsing || requirementActionDisabled || requirementExtraction.blocked}
 													>
-														{isParsing ? "Parsing…" : "Parse Requirements"}
+														{showParsingProgress ? "Parsing…" : "Parse Requirements"}
 													</Button>
 												</div>
 											) : requirementSourceMode === "jira" ? (
@@ -6399,7 +6401,7 @@ export default function App() {
 															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled || requirementExtraction.blocked}
 															className="feedback-button"
 														>
-															{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
+															{showParsingProgress ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
 														</Button>
 													</div>
 												</Disclosure>

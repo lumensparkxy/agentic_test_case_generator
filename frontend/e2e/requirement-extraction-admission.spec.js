@@ -190,6 +190,7 @@ test.describe("Requirement extraction admission", () => {
 			api.interrupt();
 			await check(page).click();
 			await expect(status(page)).toContainText("Requirement extraction was interrupted. Provider usage remains unconfirmed.");
+			await expect(parse(page)).toBeDisabled();
 			await page.screenshot({ path: testInfo.outputPath("interrupted-extraction.png") });
 			await release(page).click();
 			await expect(status(page)).toContainText("The interrupted attempt was released. Provider usage remains unconfirmed.");
