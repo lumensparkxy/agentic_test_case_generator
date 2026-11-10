@@ -27,6 +27,25 @@ const rows = [
 }));
 
 const source = rows.map(({ text }) => text).join("\n");
+const uploadName = "checkout-policy.md";
+const uploadOriginalId = "PAYMENT-POLICY-07";
+const uploadText = `## ${uploadOriginalId}\n${rows[0].text}\n`;
+const uploadedRequirement = {
+	...rows[0],
+	id: "REQ-007",
+	requirement_uid: "incoming-policy-7",
+	sources: [
+		{
+			source_id: "checkout-policy",
+			source_version: "policy-v1",
+			label: uploadName,
+			original_requirement_ids: [uploadOriginalId],
+			source_section: "Lines 2-2",
+			excerpt: rows[0].text,
+			excerpt_verified: true,
+		},
+	],
+};
 const notes = "  Use a synthetic saved card.\nKeep the checkout account isolated.  ";
 const target = "https://checkout.example.test";
 const objective = "Prioritize confirmation behavior after a saved-card retry.";
@@ -87,47 +106,89 @@ async function fixture(page, { existing = false } = {}) {
 		return project;
 	};
 	await page.route(`**${root}/requirement-imports`, (route) => route.fulfill({ json: pending ? [pending] : [] }));
-	await page.route("**/requirements/parse", (route) => {
-		const request = route.request();
-		expect(request.postData()).toContain('filename="pasted-requirements.md"');
-		expect(request.postData()).toContain('name="import_mode"');
-		for (const row of rows) expect(request.postData()).toContain(row.text);
+	const stageComparison = (sourceName, incomingRows) => {
 		const project = api.getProject();
 		const baseline = project.current_snapshots.requirements?.payload.requirements || [];
-		pending = {
+		return {
 			import_id: `import-${++imports}`,
 			project_id: project.project_id,
 			base_project_revision: project.current_revision,
-			source_name: "pasted-requirements.md",
+			source_name: sourceName,
 			operation: "requirements.parse",
 			status: "pending",
 			current_requirements: baseline,
-			candidates: rows.map((requirement, index) => ({
-				candidate_id: `candidate-${index + 1}`,
-				requirement,
-				classification: baseline.length ? "unchanged" : "new",
-				target_requirement_uid: baseline.length ? requirement.requirement_uid : null,
-				suggestions: [],
-				reason: baseline.length ? "Same exact source and content." : "New requirement.",
-			})),
+			candidates: incomingRows.map((requirement, index) => {
+				const unchanged = baseline.find(({ text }) => text === requirement.text);
+				return {
+					candidate_id: `candidate-${index + 1}`,
+					requirement,
+					classification: unchanged ? "unchanged" : "new",
+					target_requirement_uid: unchanged?.requirement_uid || null,
+					suggestions: [],
+					reason: unchanged ? "Exact content match." : "New requirement.",
+				};
+			}),
 			recovery_snapshot_ids: [],
 			suggested_update_scope: [],
 			counts: {},
 			warnings: [],
 		};
+	};
+	await page.route("**/requirements/parse", (route) => {
+		const body = route.request().postData();
+		const uploaded = body.includes(`filename="${uploadName}"`);
+		const name = uploaded ? uploadName : "pasted-requirements.md";
+		expect(body).toContain(`filename="${name}"`);
+		expect(body).toContain('name="import_mode"\r\n\r\nreview');
+		expect(body).toContain(uploaded ? uploadText : source);
+		pending = stageComparison(name, uploaded ? [uploadedRequirement] : rows);
+		return route.fulfill({ json: pending });
+	});
+	await page.route(`**${root}/requirement-imports/*`, (route) => {
+		expect(route.request().method()).toBe("DELETE");
+		expect(new URL(route.request().url()).pathname).toBe(`${root}/requirement-imports/${pending.import_id}`);
+		pending = null;
+		return route.fulfill({ status: 204 });
+	});
+	await page.route(`**${root}/requirement-imports/*/compare`, (route) => {
+		expect(route.request().method()).toBe("POST");
+		expect(new URL(route.request().url()).pathname).toBe(`${root}/requirement-imports/${pending.import_id}/compare`);
+		pending = stageComparison(
+			pending.source_name,
+			pending.candidates.map(({ requirement }) => requirement)
+		);
 		return route.fulfill({ json: pending });
 	});
 	await page.route(`**${root}/requirement-imports/*/apply`, (route) => {
 		const request = route.request().postDataJSON();
 		const existingRows = pending.current_requirements;
-		expect(request.base_project_revision).toBe(api.getProject().current_revision);
-		expect(request.decisions.map(({ action }) => action)).toEqual(existingRows.length ? ["keep", "keep"] : ["add", "add"]);
-		expect(request.update_scope).toEqual([]);
-		expect(request.confirm_retirements).toBe(false);
+		expect(new URL(route.request().url()).pathname).toBe(`${root}/requirement-imports/${pending.import_id}/apply`);
+		expect(pending.base_project_revision).toBe(api.getProject().current_revision);
+		expect(request).toMatchObject({
+			base_project_revision: pending.base_project_revision,
+			decisions: pending.candidates.map(({ candidate_id, target_requirement_uid }) => ({
+				candidate_id,
+				target_requirement_uid,
+				action: target_requirement_uid ? "keep" : "add",
+			})),
+			update_scope: [],
+			confirm_retirements: false,
+		});
+		expect(request.idempotency_key).toBeTruthy();
+		const added = pending.candidates.filter(({ target_requirement_uid }) => !target_requirement_uid).map(({ requirement }) => requirement);
+		const kept = existingRows.map((row) => {
+			const match = pending.candidates.find(({ target_requirement_uid }) => target_requirement_uid === row.requirement_uid);
+			const additional = (match?.requirement.sources || []).filter(
+				(source) =>
+					!row.sources.some(({ source_id, source_version }) => source_id === source.source_id && source_version === source.source_version)
+			);
+			return { ...row, sources: [...row.sources, ...additional] };
+		});
+		const requirements = [...kept, ...added];
 		const project = update((current) => {
 			saveSnapshot(current, "requirements", {
-				requirements: existingRows.length ? existingRows : rows,
-				import_changes: { added: existingRows.length ? 0 : 2, updated: 0, retired: 0, active: 2 },
+				requirements,
+				import_changes: { added: added.length, updated: 0, retired: 0, active: requirements.length },
 			});
 			if (current.stage_state.context) current.stage_state.context.stale = true;
 		});
@@ -240,6 +301,19 @@ async function comparePastedSource(page) {
 	await expect(comparison(page)).toBeVisible();
 }
 
+async function compareUploadedSource(page) {
+	const importToggle = button(page, "Import requirements");
+	if (await importToggle.isVisible()) await importToggle.click();
+	await page.getByRole("radio", { name: "File upload", exact: true }).check();
+	await page.getByLabel("Requirements file", { exact: true }).setInputFiles({
+		name: uploadName,
+		mimeType: "text/markdown",
+		buffer: Buffer.from(uploadText),
+	});
+	await button(page, "Parse Requirements").click();
+	await expect(heading(page, "Compare incoming requirements")).toBeFocused();
+}
+
 test.describe("Intake and scope in the 2.0 workspaces", () => {
 	test.skip(process.env.E2E_PROJECT_WORKSPACES_V2 !== "true", "Requires VITE_PROJECT_WORKSPACES_V2=true on the frontend");
 
@@ -339,6 +413,98 @@ test.describe("Intake and scope in the 2.0 workspaces", () => {
 			`PATCH ${root}/requirements/reviews`,
 			"POST /requirements/parse",
 			`POST ${root}/requirement-imports/import-2/apply`,
+		]);
+		expect(errors).toEqual([]);
+	});
+
+	test("keeps both sources and the approved identity after cancellation and stale comparison recovery", async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const { getProject, setProject, writes, errors } = await fixture(page);
+		await page.goto("/projects");
+		const project = page
+			.getByRole("region", { name: "Projects", exact: true })
+			.getByRole("listitem")
+			.filter({ hasText: getProject().name });
+		await project.getByRole("link", { name: "Open", exact: true }).press("Enter");
+		await workspace(page, "Inputs").press("Enter");
+		await expect(page).toHaveURL(`${root}/inputs`);
+		await expect(heading(page, "Context Inputs")).toBeVisible();
+		expect(writes).toEqual([]);
+
+		await comparePastedSource(page);
+		await button(comparison(page), "Apply reviewed changes").click();
+		await button(page, "Review scope").press("Enter");
+		const firstRequirement = page.getByRole("button", { name: /^Review REQ-101:/ });
+		const reviewStatus = page.getByRole("combobox", { name: "Review status for REQ-101", exact: true });
+		await firstRequirement.click();
+		await reviewStatus.selectOption("Approved");
+		await expect(page.getByText(/1\/2 approved in scope/)).toBeVisible();
+		const approvedBaseline = getProject();
+
+		await workspace(page, "Inputs").press("Enter");
+		await compareUploadedSource(page);
+		await expect(comparison(page)).toContainText("Unchanged (1)");
+		await button(comparison(page), `Review incoming requirement: ${uploadedRequirement.text}`).click();
+		await comparison(page).getByText("Source evidence and suggested matches", { exact: true }).click();
+		await expect(comparison(page).getByText(`Original IDs: ${uploadOriginalId}`, { exact: true })).toBeVisible();
+		await expect(comparison(page).locator("blockquote")).toHaveText(uploadedRequirement.text);
+		expect(getProject()).toEqual(approvedBaseline);
+		await button(comparison(page), "Cancel import").click();
+		await expect(comparison(page)).toHaveCount(0);
+		await page.reload();
+		await expect(heading(page, "Context Inputs")).toBeVisible();
+		await expect(button(page, `Review import: ${uploadName}`)).toHaveCount(0);
+		expect(getProject()).toEqual(approvedBaseline);
+		expect(writes.slice(-2)).toEqual(["POST /requirements/parse", `DELETE ${root}/requirement-imports/import-2`]);
+
+		await compareUploadedSource(page);
+		const revisedProject = { ...approvedBaseline, current_revision: approvedBaseline.current_revision + 1 };
+		setProject(revisedProject);
+		await page.reload();
+		await button(page, `Review import: ${uploadName}`).press("Enter");
+		await expect(comparison(page).getByRole("alert")).toHaveText("Project changed after this comparison. Compare again before applying.");
+		const apply = button(comparison(page), "Apply reviewed changes");
+		await expect(apply).toBeDisabled();
+		expect(getProject()).toEqual(revisedProject);
+		expect(writes.at(-1)).toBe("POST /requirements/parse");
+		await button(comparison(page), "Compare again").click();
+		await expect(comparison(page).getByText(`${uploadName} · Revision ${revisedProject.current_revision}`, { exact: true })).toBeVisible();
+		await expect(apply).toBeEnabled();
+		await apply.click();
+		await expect(comparison(page)).toHaveCount(0);
+		await button(page, "Review scope").press("Enter");
+		await page.reload();
+		await expect(page).toHaveURL(`${root}/review`);
+		await expect(page.getByText(/1\/2 approved in scope/)).toBeVisible();
+		await firstRequirement.click();
+		await expect(reviewStatus).toHaveValue("Approved");
+		const evidence = page.getByText("Source evidence (2)", { exact: true });
+		await evidence.click();
+		const citations = page.locator("details").filter({ has: evidence });
+		await expect(citations.getByText("pasted-requirements.md", { exact: true })).toBeVisible();
+		await expect(citations.getByText("Original IDs: CHECKOUT-1", { exact: true })).toBeVisible();
+		await expect(citations.getByText(uploadName, { exact: true })).toBeVisible();
+		await expect(citations.getByText(`Original IDs: ${uploadOriginalId}`, { exact: true })).toBeVisible();
+		await expect(citations.locator("blockquote")).toHaveText([rows[0].text, rows[0].text]);
+		const saved = getProject().current_snapshots.requirements.payload.requirements;
+		expect(saved).toHaveLength(2);
+		expect(saved[0]).toMatchObject({
+			id: rows[0].id,
+			requirement_uid: rows[0].requirement_uid,
+			content_version: 1,
+			review_status: "Approved",
+		});
+		expect(saved[0].sources).toEqual([...rows[0].sources, ...uploadedRequirement.sources]);
+		expect(getProject().current_revision).toBe(revisedProject.current_revision + 1);
+		expect(writes).toEqual([
+			"POST /requirements/parse",
+			`POST ${root}/requirement-imports/import-1/apply`,
+			`PATCH ${root}/requirements/reviews`,
+			"POST /requirements/parse",
+			`DELETE ${root}/requirement-imports/import-2`,
+			"POST /requirements/parse",
+			`POST ${root}/requirement-imports/import-3/compare`,
+			`POST ${root}/requirement-imports/import-4/apply`,
 		]);
 		expect(errors).toEqual([]);
 	});

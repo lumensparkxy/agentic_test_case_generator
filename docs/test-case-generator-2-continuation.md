@@ -486,6 +486,12 @@ that scrolls normally. The exact timing of the CI failure is unknown.
 
 P2 adds unified intake and scoped decisions (commit `750fa78`,
 [PR #454](https://github.com/lumensparkxy/agentic_test_case_generator/pull/454)).
+The mixed-source replay at `a95c27b` used pasted text and an uploaded
+Markdown source with the same requirement. Cancellation left the project
+revision and snapshots unchanged. A stale Apply returned HTTP 409. After
+reload, the reviewer reopened the saved comparison and compared again
+without another extraction. Review showed both verified quotations and
+retained the original requirement ID, content version and approval.
 P3a adds the internal transactional approval, intent outbox and fenced
 stage claim (commit `ca554da`,
 [PR #456](https://github.com/lumensparkxy/agentic_test_case_generator/pull/456)).
