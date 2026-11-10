@@ -107,6 +107,55 @@ KNOWN_STATES = [
     "Signed Out",
     "Signed In",
 ]
+_STATE_NAMES = "|".join(state.lower() for state in KNOWN_STATES)
+_FILE_EXTENSION = r"jpg|png|pdf|csv|xlsx|docx|json"
+_FILE_FORMAT_LIST = rf"\.?(?:{_FILE_EXTENSION})(?:(?:\s*[,/]\s*(?:(?:or|and)\s+)?|\s+(?:or|and)\s+)\.?(?:{_FILE_EXTENSION}))*"
+_QUOTED_VALUE = re.compile(r"""["“]([^"”\n]+)["”]|(?<!\w)['‘]([^'’\n]+)['’]|`([^`\n]+)`""")
+_POLICY_VALUE = re.compile(rf"(?:{_STATE_NAMES}|\.?(?:{_FILE_EXTENSION}))")
+_POLICY_CLAUSE = re.compile(
+    r"[;\n]|\.(?=\s|$)|\s+(?:but|and (?=(?:reject|disallow|prevent|accept|upload|allow|export|download|show|display|present|return)\b))\s*"
+)
+_UPLOAD_ACTION = r"(?:upload(?:s|ed|ing)?|attach(?:es|ed|ing)?)"
+_UPLOAD_CONTEXT = re.compile(rf"\b{_UPLOAD_ACTION}\b")
+_ATTACHMENT_CONTEXT = re.compile(r"\battachments?\b")
+_FILE_CLAUSE = re.compile(
+    rf",?\s+which\b|,?\s+and\s+(?!(?:\.?(?:{_FILE_EXTENSION})|must|may|can|shall|should|with|up to)\b)"
+    r"|,\s+(?=(?:export|download|show|display|present|return)\b)"
+)
+_NEGATED_UPLOAD = re.compile(
+    r"\b(?:reject(?:s|ed|ing)?|disallow(?:s|ed|ing)?|prohibit(?:s|ed|ing)?|unsupported|(?:not|never)\s+(?:allow|accept|upload)"
+    r"|not\s+(?:be\s+)?(?:uploaded|accepted|allowed))\b"
+)
+_EXCLUSIVE_UPLOAD_FORMATS = re.compile(
+    rf"\b(?:only\s+(?P<files>{_FILE_FORMAT_LIST})\s+(?:[a-z-]+\s+)?(?:uploads?|attachments?"
+    r"|files?(?: types?)?\s+(?:(?:may|can|must|shall) be uploaded|are allowed for upload))\b"
+    rf"|(?:upload|accept|allow|support)(?:s|ed)?\s+only\s+(?P<direct>{_FILE_FORMAT_LIST})"
+    r"(?=\s+(?:(?:[a-z-]+\s+)?(?:files?|attachments?|uploads?)|with|up to)\b|\s*$))"
+)
+_SUPPORTED_UPLOAD_FORMATS = re.compile(
+    rf"\b{_UPLOAD_ACTION}\b[^,]{{0,80}}?\s+(?:in|as)\s+(?P<formats>{_FILE_FORMAT_LIST})\s+(?:file\s+)?formats?\b"
+    rf"|\b(?:upload|accept|allow|support)(?:s|ed)?\s+(?P<files>{_FILE_FORMAT_LIST})\s+(?:files?|uploads?|attachments?)\b"
+)
+_UPLOAD_SIZE = re.compile(r"\b(?:max(?:imum)?|up to|at most|no more than|must not exceed)\s+(\d+(?:\.\d+)?)\s*(kb|mb|gb)\b")
+_STATUS_REFERENCE = re.compile(
+    rf"\b(?:(?:{_STATE_NAMES})\s+(?:status|state|expense reports?)|(?:status|state)\s+is\s+(?:{_STATE_NAMES})"
+    rf"|(?:when|while|if|unless)\s+[\w -]{{1,50}}?\s+(?:is|remains)\s+(?:{_STATE_NAMES}))\b"
+)
+_STATUS_CONDITION = re.compile(r"\b(?:only|when|while|until|if|unless|keep|remain)\b")
+_WORKFLOW_ACTION = r"(?:chang(?:e|ing)|mov(?:e|ing)|transition(?:ing)?|revert(?:ing)?|set(?:ting)?|lock(?:ing)?|reject(?:ing)?|approv(?:e|ing)|submit(?:ting)?)"
+_BLOCKED_WORKFLOW_ACTION = re.compile(
+    rf"\b(?:(?:not|never)\s+(?:(?:allow|permit)\b[^,]{{0,80}}?\s+)?{_WORKFLOW_ACTION}"
+    rf"|(?:prevent|prohibit|disallow|forbid)(?:s|ed)?\b[^,]{{0,80}}?\s+{_WORKFLOW_ACTION}"
+    r"|(?:is|are)\s+(?:prohibited|disallowed|forbidden|not allowed))\b"
+)
+_ORDERED_TRANSITION = re.compile(
+    rf"\b(?:change|move|transition|revert|set)(?:s|d|ed)?\s+(?:(?:(?P<object>[^,]{{0,80}}?)\bfrom|the)\s+)?"
+    rf"(?P<before>{_STATE_NAMES})(?:\s+(?P<kind>expense reports?|status|state))?\s+to\s+(?P<after>{_STATE_NAMES})\b"
+)
+_EXPENSE_REPORT = re.compile(r"\bexpense reports?\b")
+_EXPENSE_REJECTION = re.compile(r"\breject(?:s|ing)?\s+(?:(?:an?|the|submitted)\s+)*expense reports?\b(?!\s+(?:attachments?|files?|payloads?))")
+_REQUIRED_REASON = re.compile(r"\brequir(?:e[sd]?|ing)\b[^.]*\breason\b|\breason\b[^.]*\bis required\b")
+_OPTIONAL_REASON = re.compile(r"\b(?:not|never)\s+requir(?:e[sd]?|ing)\b")
 
 ROLE_PATTERNS = [
     "users",
@@ -178,11 +227,21 @@ def _title_from_requirement(requirement: Requirement) -> str:
     return f"{text[:69].rstrip()}..."
 
 
-def _infer_rule_type(text: str) -> str:
+def _policy_clauses(text: str) -> list[str]:
+    # Retain exact quoted state names and file extensions inside policy syntax.
+    # A UI message or sample name cannot supply the surrounding policy.
+    def policy_value(match: re.Match[str]) -> str:
+        value = next(value for value in match.groups() if value is not None)
+        return value if _POLICY_VALUE.fullmatch(value) else " "
+
+    return _POLICY_CLAUSE.split(_QUOTED_VALUE.sub(policy_value, text.lower()))
+
+
+def _infer_rule_type(text: str, workflow_evidence: bool) -> str:
     lowered = text.lower()
     if any(keyword in lowered for keyword in ("allow only", "permission", "role", "admin", "manager", "employee")):
         return "Authorization"
-    if any(keyword in lowered for keyword in ("status", "state", "draft", "submitted", "approved", "rejected", "lock")):
+    if workflow_evidence:
         return "State Transition"
     if any(keyword in lowered for keyword in ("validate", "validation", "required", "must", "prevent", "future date")):
         return "Validation"
@@ -193,24 +252,29 @@ def _infer_rule_type(text: str) -> str:
     return "Business"
 
 
-def _build_business_rules(requirement: Requirement) -> List[Dict[str, Any]]:
+def _build_business_rules(requirement: Requirement, workflow_evidence: bool) -> List[Dict[str, Any]]:
     return [
         {
             "id": f"{requirement.id}-BR-01",
             "requirement_id": requirement.id,
             "title": _title_from_requirement(requirement),
             "description": requirement.text,
-            "rule_type": _infer_rule_type(requirement.text),
+            "rule_type": _infer_rule_type(requirement.text, workflow_evidence),
         }
     ]
 
 
-def _extract_field_constraints(requirement: Requirement) -> List[Dict[str, Any]]:
-    text = requirement.text
-    lowered = text.lower()
+def _extract_field_constraints(requirement: Requirement, policy_clauses: list[str]) -> List[Dict[str, Any]]:
+    lowered = requirement.text.lower()
     constraints: List[Dict[str, Any]] = []
 
-    size_match = re.search(r"max\s+(\d+(?:\.\d+)?)\s*(kb|mb|gb)", lowered)
+    file_clauses = [
+        clause
+        for policy_clause in policy_clauses
+        for clause in _FILE_CLAUSE.split(policy_clause)
+        if (_UPLOAD_CONTEXT.search(clause) or _ATTACHMENT_CONTEXT.search(clause)) and not _NEGATED_UPLOAD.search(clause)
+    ]
+    size_match = next((match for clause in file_clauses if _UPLOAD_CONTEXT.search(clause) and (match := _UPLOAD_SIZE.search(clause))), None)
     if size_match:
         value = f"{size_match.group(1)} {size_match.group(2).upper()}"
         constraints.append(
@@ -226,18 +290,21 @@ def _extract_field_constraints(requirement: Requirement) -> List[Dict[str, Any]]
             }
         )
 
-    allowed_extensions = re.findall(r"\b(jpg|png|pdf|csv|xlsx|docx|json)\b", lowered)
-    if allowed_extensions:
-        allowed_values = ", ".join(extension.upper() for extension in _dedupe_strings(allowed_extensions))
+    exclusive = next((match for clause in file_clauses if (match := _EXCLUSIVE_UPLOAD_FORMATS.search(clause))), None)
+    if format_match := exclusive or next((match for clause in file_clauses if (match := _SUPPORTED_UPLOAD_FORMATS.search(clause))), None):
+        listed_formats = next(group for group in format_match.groups() if group is not None)
+        extensions = re.findall(rf"\b({_FILE_EXTENSION})\b", listed_formats)
+        allowed_values = ", ".join(extension.upper() for extension in _dedupe_strings(extensions))
+        description = f"Only the following file types are allowed: {allowed_values}." if exclusive else f"Supported upload file types: {allowed_values}."
         constraints.append(
             {
                 "id": f"{requirement.id}-FC-{len(constraints) + 1:02d}",
                 "requirement_id": requirement.id,
                 "field_name": "uploaded file",
-                "description": f"Only the following file types are allowed: {allowed_values}.",
+                "description": description,
                 "constraint_type": "File Type",
                 "value": allowed_values,
-                "negative_example": "Upload an unsupported file type",
+                "negative_example": "Upload an unsupported file type" if exclusive else None,
             }
         )
 
@@ -284,7 +351,7 @@ def _extract_field_constraints(requirement: Requirement) -> List[Dict[str, Any]]
             }
         )
 
-    if "require" in lowered and "reason" in lowered:
+    if any(_REQUIRED_REASON.search(clause) and not _OPTIONAL_REASON.search(clause) for clause in policy_clauses):
         constraints.append(
             {
                 "id": f"{requirement.id}-FC-{len(constraints) + 1:02d}",
@@ -353,12 +420,10 @@ def _extract_role_permissions(requirement: Requirement) -> List[Dict[str, Any]]:
     return permissions
 
 
-def _extract_state_transitions(requirement: Requirement) -> List[Dict[str, Any]]:
-    text = requirement.text.strip().rstrip(".")
-    lowered = text.lower()
+def _extract_state_transitions(requirement: Requirement, policy_clauses: list[str]) -> List[Dict[str, Any]]:
     transitions: List[Dict[str, Any]] = []
 
-    def add_transition(entity: str, from_state: str, to_state: str, trigger: str, guards: Optional[str] = None) -> None:
+    def add_transition(entity: str, from_state: str, to_state: str, guards: Optional[str] = None) -> None:
         transitions.append(
             {
                 "id": f"{requirement.id}-ST-{len(transitions) + 1:02d}",
@@ -366,32 +431,44 @@ def _extract_state_transitions(requirement: Requirement) -> List[Dict[str, Any]]
                 "entity": entity,
                 "from_state": from_state,
                 "to_state": to_state,
-                "trigger": trigger,
+                "trigger": _title_from_requirement(requirement),
                 "guards": guards,
             }
         )
 
-    if "lock the account" in lowered:
-        add_transition("Account", "Active", "Locked", "Exceed failed login threshold")
-
-    if "draft status" in lowered and "submit" in lowered:
-        add_transition("Expense report", "Draft", "Submitted", "Employee submits report")
-
-    if "approve" in lowered and "submitted status" in lowered:
-        add_transition("Expense report", "Submitted", "Approved", "Manager approves report")
-
-    if "reject" in lowered:
-        add_transition("Expense report", "Submitted", "Rejected", "Manager rejects report", "Rejection reason entered")
-
-    if not transitions:
-        mentioned_states = [state for state in KNOWN_STATES if state.lower() in lowered]
-        if len(mentioned_states) >= 2:
-            add_transition("Workflow item", mentioned_states[0], mentioned_states[1], _title_from_requirement(requirement))
+    for clause in policy_clauses:
+        if _BLOCKED_WORKFLOW_ACTION.search(clause):
+            continue
+        expense = bool(_EXPENSE_REPORT.search(clause))
+        rejection = bool(_EXPENSE_REJECTION.search(clause))
+        reason = (
+            "Rejection reason entered"
+            if rejection and _REQUIRED_REASON.search(clause) and not _OPTIONAL_REASON.search(clause) and "rejection reason" in clause
+            else None
+        )
+        if change := _ORDERED_TRANSITION.search(clause):
+            subject = change["object"] or change["kind"] or clause[: change.start()].rsplit(",", 1)[-1]
+            entity = "Workflow item"
+            if _EXPENSE_REPORT.search(subject) or (expense and re.search(r"\breports?\s*$", subject)):
+                entity = "Expense report"
+            elif re.search(r"\baccount\b", subject):
+                entity = "Account"
+            guards = reason if entity == "Expense report" and change["after"] == "rejected" else None
+            add_transition(entity, change["before"].title(), change["after"].title(), guards)
+        elif re.search(r"\block(?:s|ed|ing)?\s+(?:(?:an?|the)\s+)?account\b", clause):
+            add_transition("Account", "Unknown", "Locked")
+        elif rejection:
+            source = "Submitted" if re.search(r"\bsubmitted (?:expense reports?|status|state)\b", clause) else "Unknown"
+            add_transition("Expense report", source, "Rejected", reason)
+        elif expense and re.search(r"\bdraft status\b.*\buntil\b.*\bsubmit(?:s|ted)?\b", clause):
+            add_transition("Expense report", "Draft", "Submitted")
+        elif expense and re.search(r"\bapprove(?:s|ing)?\b.*\bsubmitted status\b", clause):
+            add_transition("Expense report", "Submitted", "Approved")
 
     return transitions
 
 
-def _extract_risk_signals(requirement: Requirement) -> List[Dict[str, Any]]:
+def _extract_risk_signals(requirement: Requirement, workflow_evidence: bool) -> List[Dict[str, Any]]:
     lowered = requirement.text.lower()
     risks: List[Dict[str, Any]] = []
 
@@ -411,7 +488,7 @@ def _extract_risk_signals(requirement: Requirement) -> List[Dict[str, Any]]:
         add_risk("Authentication edge cases", "Authentication flows are security-sensitive and failure-prone.", "Security", "High")
     if any(keyword in lowered for keyword in ("upload", "file", "jpg", "png", "future date", "validation")):
         add_risk("Input validation gaps", "Uploaded content and validated fields need negative coverage.", "Validation", "Medium")
-    if any(keyword in lowered for keyword in ("status", "draft", "submitted", "approved", "rejected")):
+    if workflow_evidence:
         add_risk("Workflow transition errors", "Status-driven behavior can fail at guard conditions or wrong states.", "Workflow", "High")
     if any(keyword in lowered for keyword in ("email", "send", "confirmation email", "export", "csv")):
         add_risk("External dependency behavior", "Integrations or export paths can fail independently of core UI flows.", "Integration", "Medium")
@@ -466,11 +543,13 @@ def _suggested_scenarios(
 def fallback_requirement_analysis(requirements: List[Requirement]) -> List[Dict[str, Any]]:
     analysis: List[Dict[str, Any]] = []
     for requirement in requirements:
-        business_rules = _build_business_rules(requirement)
-        field_constraints = _extract_field_constraints(requirement)
+        policy_clauses = _policy_clauses(requirement.text)
+        state_transitions = _extract_state_transitions(requirement, policy_clauses)
+        workflow_evidence = bool(state_transitions or any(_STATUS_REFERENCE.search(clause) and _STATUS_CONDITION.search(clause) for clause in policy_clauses))
+        business_rules = _build_business_rules(requirement, workflow_evidence)
+        field_constraints = _extract_field_constraints(requirement, policy_clauses)
         role_permissions = _extract_role_permissions(requirement)
-        state_transitions = _extract_state_transitions(requirement)
-        risk_signals = _extract_risk_signals(requirement)
+        risk_signals = _extract_risk_signals(requirement, workflow_evidence)
         dependencies = _extract_dependencies(requirement)
         analysis.append(
             {

@@ -200,6 +200,13 @@ The separate structured-data/guidance rollout work in issue #280 remains held.
 
 ## Substantive business coverage
 
+When specialist analysis omits a requirement or section, the fallback derives
+file type and size constraints from the upload clause. A list of supported
+formats is exclusive only when the source says so. Workflow findings require
+a transition or a condition on a state. Transition order follows the source,
+and an unspecified prior state or guard stays unknown. The saved plan keeps
+the exact approved requirement text.
+
 Generation and refinement assess the exact hydrated, delivered cases independently
 of the generation score. `substantive_assessment` records the input hash, rubric,
 source obligations, exact source quotations and step citations, and required or
