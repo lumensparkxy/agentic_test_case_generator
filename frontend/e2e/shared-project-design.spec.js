@@ -203,6 +203,25 @@ test("copies an exact case link and keeps its original evidence after the suite 
 		{ snapshot_id: "cases-v1", case_id: original.id },
 	]);
 
+	const stepUrl = `${copied.href}#saved-case-step-2`;
+	await reader.getByRole("link", { name: "Open current suite" }).click();
+	await expect(page).toHaveURL(beforeCopy);
+	await page.goto(stepUrl);
+	const citedStep = reader.getByRole("row").filter({ has: page.getByRole("cell", { name: original.steps[1].expected, exact: true }) });
+	await expect(citedStep).toBeFocused();
+	const copyStep = reader.getByRole("button", { name: "Copy cited step link", exact: true });
+	await copyStep.press("Enter");
+	await expect(reader.getByText("Cited step link copied.", { exact: true })).toBeVisible();
+	const copiedStepUrl = await page.evaluate(() => navigator.clipboard.readText());
+	expect(copiedStepUrl).toBe(stepUrl);
+	await expect(page).toHaveURL(stepUrl);
+	await reader.getByRole("link", { name: "Open current suite" }).click();
+	await expect(page).toHaveURL(beforeCopy);
+	await page.goto(copiedStepUrl);
+	await expect(citedStep).toBeFocused();
+	await expect(reader.getByText("Historical saved suite · Version 1 · Project revision 7")).toBeVisible();
+	expect(caseQueries).toEqual(Array(4).fill({ snapshot_id: "cases-v1", case_id: original.id }));
+
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	await reader.getByRole("link", { name: "Open current suite" }).click();

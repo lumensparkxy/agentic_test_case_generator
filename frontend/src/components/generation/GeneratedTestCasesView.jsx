@@ -49,10 +49,11 @@ function CaseReaderLayout({ singleCase, children, ...props }) {
 	return singleCase ? children[1] : <ListDetail {...props}>{children}</ListDetail>;
 }
 
-function CaseLinkControl({ path }) {
+function CaseLinkControl({ path, hasStepCitation }) {
 	const [copyStatus, setCopyStatus] = useState("");
 	const inputRef = useRef(null);
 	const url = new URL(path, window.location.href).href;
+	const linkType = hasStepCitation ? "cited step" : "case";
 	useEffect(() => {
 		if (copyStatus === "manual") inputRef.current?.focus();
 	}, [copyStatus]);
@@ -67,12 +68,12 @@ function CaseLinkControl({ path }) {
 	return (
 		<div className="test-case-link-control">
 			<Button variant="secondary" size="compact" onClick={copyLink}>
-				Copy case link
+				Copy {linkType} link
 			</Button>
-			{copyStatus === "copied" && <span role="status">Case link copied.</span>}
+			{copyStatus === "copied" && <span role="status">{hasStepCitation ? "Cited step link copied." : "Case link copied."}</span>}
 			{copyStatus === "manual" && (
 				<label>
-					Select and copy the case link
+					Select and copy the {linkType} link
 					<Input ref={inputRef} value={url} readOnly onFocus={(event) => event.currentTarget.select()} />
 				</label>
 			)}
@@ -398,7 +399,7 @@ export default function GeneratedTestCasesView({
 								</h2>
 								{(sharePath || onReport) && (
 									<div className="test-detail-actions">
-										{sharePath && <CaseLinkControl key={sharePath} path={sharePath} />}
+										{sharePath && <CaseLinkControl key={sharePath} path={sharePath} hasStepCitation={Boolean(singleCase && savedStep)} />}
 										{onReport && (
 											<Button variant="secondary" size="compact" onClick={() => onReport(selected)}>
 												Report a problem

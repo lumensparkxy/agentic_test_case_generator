@@ -87,7 +87,7 @@ export default function LinkedTestCaseView({ projectId, snapshotId, caseId, save
 						testCases={[evidence.test_case]}
 						requirements={evidence.requirements}
 						substantiveAssessment={{ obligations: evidence.obligations }}
-						exactCasePath={buildSavedCasePath(projectId, snapshotId, caseId)}
+						exactCasePath={buildSavedCasePath(projectId, snapshotId, caseId, savedStep)}
 					/>
 				</>
 			)}

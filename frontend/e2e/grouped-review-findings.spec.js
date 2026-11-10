@@ -160,6 +160,11 @@ test.describe("Grouped saved review findings", () => {
 
 	test("keeps every business finding and exact step visible without mixing setup or structural blockers", async ({ page }, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.addInitScript(() => {
+			Object.defineProperty(navigator, "clipboard", {
+				value: { writeText: () => Promise.reject(new DOMException("Clipboard blocked", "NotAllowedError")) },
+			});
+		});
 		const api = await setup(page);
 		await page.goto(`${root}/review/tests`);
 		const improve = page.getByRole("tab", { name: /^Improve tests/ });
@@ -243,6 +248,19 @@ test.describe("Grouped saved review findings", () => {
 		await expect(page.getByRole("heading", { name: caseTitle, exact: true })).toBeVisible();
 		await expect(backToFinding).toHaveCount(0);
 		await expect(page.getByRole("link", { name: "Open current suite", exact: true })).toBeVisible();
+		const copyCitation = page.getByRole("button", { name: "Copy cited step link", exact: true });
+		await copyCitation.press("Enter");
+		const fallback = page.getByRole("textbox", { name: "Select and copy the cited step link", exact: true });
+		const expectedUrl = new URL(savedCasePath, page.url()).href;
+		await expect(fallback).toBeFocused();
+		await expect(fallback).toHaveJSProperty("readOnly", true);
+		await expect(fallback).toHaveValue(expectedUrl);
+		expect(await fallback.evaluate((input) => input.selectionEnd - input.selectionStart)).toBe(expectedUrl.length);
+		await page.screenshot({ path: testInfo.outputPath("cited-step-manual-copy.png") });
+		await page.goto(`${expectedUrl.split("#")[0]}#saved-case-step-4`);
+		await expect(page.getByText("The cited step is unavailable in this saved case.", { exact: true })).toBeVisible();
+		await copyCitation.press("Enter");
+		await expect(fallback).toHaveValue(`${expectedUrl.split("#")[0]}#saved-case-step-4`);
 		expect(api.evidenceReads).toEqual([
 			[suiteId, caseId],
 			[suiteId, caseId],
