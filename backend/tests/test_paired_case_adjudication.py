@@ -473,6 +473,29 @@ class ValidateLabelsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Source citation differs"):
             validate_labels(packet, seal, labels)
 
+    def test_covered_business_obligations_require_one_case_at_one_checkpoint(self):
+        packet, _, labels = _packet_and_labels()
+        packet["before"] = {"saved_test_cases": deepcopy(packet["saved_test_cases"])}
+        seal = labels["packet_sha256"] = digest(packet)
+        first = {"case_id": "TC-001", "step": 1}
+        second = {"case_id": "TC-001", "step": 2}
+        other_case = {"case_id": "TC-002", "step": 2}
+        earlier = {**second, "checkpoint": "before"}
+        judgment = labels["judgments"]["permission"]
+        for citations in ([first, other_case], [first, earlier]):
+            with self.subTest(citations=citations):
+                judgment.update(status="covered", citations=citations)
+                with self.assertRaisesRegex(ValueError, "Covered permission must cite one saved case in one checkpoint"):
+                    validate_labels(packet, seal, labels)
+                for status in ("unmet", "unknown"):
+                    judgment["status"] = status
+                    self.assertEqual(validate_labels(packet, seal, labels)["in_scope_status"]["permission"], status)
+
+        for citations in ([first, second], [{**first, "checkpoint": "before"}, earlier]):
+            with self.subTest(citations=citations):
+                judgment.update(status="covered", citations=citations)
+                self.assertEqual(validate_labels(packet, seal, labels)["covered"], 1)
+
     def test_binds_fact_quotes_to_literal_values_and_setup_fields(self):
         packet, seal, labels = _packet_and_labels()
         labels["fact_review"] = {
@@ -646,7 +669,10 @@ class PairedPacketTests(unittest.TestCase):
         original = adjudication.markdown_source(REQUIREMENT_ROWS)
         revised = original.replace("unspecified", "173 EUR")
         source = {"requirements": REQUIREMENT_ROWS, "source_document": original, "revised_source_document": revised}
-        key = {"obligations": {}, "approved_scope": None}
+        key = {
+            "obligations": {"revision": {"critical": True, "source_id": "REQ-002", "required_observation": "Compare the original and revised records."}},
+            "approved_scope": None,
+        }
         before = _delivery()
         after = _delivery(revision_offset=10)
         project = after[0]
@@ -684,9 +710,30 @@ class PairedPacketTests(unittest.TestCase):
                 output = root / "package"
                 self.assertEqual(adjudication.prepare(root, intake, output), {"delivered": 1, "unrun": 71})
             (reviewer_file,) = (output / "reviewer").glob("*.json")
-            packet = json.loads(reviewer_file.read_bytes())["packet"]
+            envelope = json.loads(reviewer_file.read_bytes())
+            packet = envelope["packet"]
             self.assertEqual(len(packet["before"]["saved_test_cases"]), 2)
             self.assertEqual(len(packet["saved_test_cases"]), 2)
+            label = {
+                "sample_id": packet["sample_id"],
+                "packet_sha256": envelope["packet_sha256"],
+                "judgments": {
+                    "revision": {
+                        "status": "covered",
+                        "source_id": "REQ-002",
+                        "reason": "Synthetic comparison label for the two source checkpoints.",
+                        "citations": [{"checkpoint": "before", "case_id": "TC-001", "step": 2}, {"case_id": "TC-002", "step": 2}],
+                    },
+                },
+            }
+            labels = root / "labels"
+            labels.mkdir()
+            (labels / "revision.json").write_bytes(adjudication.json_bytes(label))
+            summary = adjudication.summarize(output, labels)
+            reviewed = next(slot["review"] for slot in summary["slots"] if slot.get("sample_id") == packet["sample_id"])
+            self.assertEqual(reviewed["in_scope_status"], {"revision": "covered"})
+            with self.assertRaisesRegex(ValueError, "Covered revision must cite one saved case in one checkpoint"):
+                validate_labels(packet, envelope["packet_sha256"], label)
 
         with self.assertRaisesRegex(ValueError, "REQ-002 lacks an exact frozen source reference"):
             adjudication.check_saved_source(project, original, previous=(before[0], original))

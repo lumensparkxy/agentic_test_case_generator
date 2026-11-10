@@ -440,7 +440,7 @@ def validate_fact_review(checkpoints, facts):
     }
 
 
-def validate_labels(packet, seal, labels):
+def validate_labels(packet, seal, labels, *, workflow=None):
     require(
         digest(packet) == seal == labels.get("packet_sha256") and packet["sample_id"] == labels.get("sample_id"),
         "Labels must bind to the sealed reviewer packet",
@@ -452,6 +452,7 @@ def validate_labels(packet, seal, labels):
     checkpoints = {"after": packet}
     if "before" in packet:
         checkpoints["before"] = packet["before"]
+    source_change = workflow == "W11-source-update" and "before" in checkpoints
     valid_steps = {
         (checkpoint, case["id"], step["step"])
         for checkpoint, evidence in checkpoints.items()
@@ -469,6 +470,11 @@ def validate_labels(packet, seal, labels):
             step = (item.get("checkpoint", "after"), item.get("case_id"), item.get("step"))
             require(type(step[2]) is int and step in valid_steps and step not in cited, f"Invalid or duplicate step citation for {obligation}")
             cited.add(step)
+        if status == "covered" and obligation not in deferred and not (source_change and obligation == "revision"):
+            require(
+                len({(checkpoint, case_id) for checkpoint, case_id, _ in cited}) == 1,
+                f"Covered {obligation} must cite one saved case in one checkpoint",
+            )
     in_scope = {key: value for key, value in judgments.items() if key not in deferred}
     result = {
         "in_scope": len(in_scope),
@@ -663,7 +669,7 @@ def summarize(package, label_dir):
             results.append({**slot, "review": None})
             continue
         label = labels.pop(sample)
-        result = validate_labels(packet, slot["packet_sha256"], label)
+        result = validate_labels(packet, slot["packet_sha256"], label, workflow=slot["workflow"])
         fact_review = result.pop("fact_review", None)
         reviewed = {**slot, "review_sha256": digest(label), "review": result}
         if fact_review is not None:

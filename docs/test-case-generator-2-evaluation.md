@@ -152,9 +152,13 @@ Record one final label file per sample. Use its `sample_id` and
 `packet_sha256`, and include `judgments` keyed by every frozen obligation.
 Each judgment has `status` (`covered`, `unmet`, or `unknown`), the frozen
 `source_id`, an evidence-based `reason`, and `citations` with exact `case_id`
-and integer `step`. For a pre-change W11 step add `"checkpoint": "before"`. Coverage
-requires at least one step citation. An explicitly deferred scope check
-may cite the source decision in its reason with an empty citation list.
+and integer `step`. For a pre-change W11 step add `"checkpoint": "before"`.
+For each covered business obligation, choose one complete saved case at
+one checkpoint and cite one or more of its steps. The W11 `revision`
+obligation can cite multiple cases and checkpoints to compare the original
+and revised evidence. Unmet and unknown judgments may cite any relevant
+exact steps. An explicitly deferred scope check may cite the source
+decision in its reason with an empty citation list.
 
 Add `fact_review` to the same label for unsupported-fact adjudication.
 Mark `complete` after checking all distinct product facts in the packet.
