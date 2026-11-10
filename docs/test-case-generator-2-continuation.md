@@ -427,6 +427,8 @@ setup as blocked.
 In the 2.0 workspaces, **Continue to export** opens Deliver → Export from
 Review → Tests. **Back to tests** returns directly to the test reader.
 Browser tests have their own section, and navigation starts no delivery work.
+Deliver identifies the selected Export or Browser tests section in its page
+heading and main landmark. Export controls appear before browser run evidence.
 The CSV, Excel and JSON controls use the shared secondary button style.
 Their visible format labels and descriptions supply the accessible names.
 

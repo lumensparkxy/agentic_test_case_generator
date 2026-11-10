@@ -255,6 +255,10 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(page).toHaveURL(`${root}/deliver`);
 		await expect(page.getByRole("heading", { name: "Reviewed design ready to export", exact: true })).toBeVisible();
 		const formatButtons = page.locator(".export-buttons");
+		const formats = formatButtons.getByRole("button");
+		await expect(formats).toHaveCount(3);
+		for (const format of await formats.all()) await expect(format).toBeInViewport({ ratio: 0.75 });
+		await page.screenshot({ path: testInfo.outputPath("reviewed-design-initial-export.png") });
 		await formatButtons.scrollIntoViewIfNeeded();
 		const accessibility = await new AxeBuilder({ page })
 			.include(".export-buttons")
@@ -268,6 +272,14 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(page.getByText("Export locked by review gate", { exact: true })).toHaveCount(0);
 		await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
 		await expect(page.getByText("No Playwright execution report matches this saved suite.", { exact: true })).toBeVisible();
+		const reportHeading = page.getByRole("heading", { name: "Playwright Execution Report", exact: true });
+		expect(
+			await reportHeading.evaluate((heading) =>
+				Boolean(
+					heading.compareDocumentPosition(heading.closest("main").querySelector(".export-buttons")) & Node.DOCUMENT_POSITION_PRECEDING
+				)
+			)
+		).toBe(true);
 		await page.screenshot({ path: testInfo.outputPath("reviewed-design-deliver.png") });
 
 		await page.getByRole("button", { name: "Back to tests", exact: true }).press("Enter");
@@ -312,7 +324,9 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		expect(body).not.toHaveProperty("draft_override_requested");
 		expect(body).not.toHaveProperty("draft_override_reason");
 
-		await page.goto(`${root}/reports?run=${historicalRun.run_record_id}`);
+		const savedRunPath = `${root}/reports?run=${historicalRun.run_record_id}`;
+		await page.goto(savedRunPath);
+		await expect(page).toHaveURL(savedRunPath);
 		await expect(page.getByRole("heading", { name: "Saved execution", exact: true })).toBeVisible();
 		await expect(page.getByText(`Run ${historicalRun.run_id}`, { exact: true })).toBeVisible();
 		await expect(page.getByText(historicalRun.source_snapshot_id, { exact: true })).toBeVisible();

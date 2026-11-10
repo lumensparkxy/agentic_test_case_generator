@@ -95,6 +95,7 @@ import HomePage from "./pages/HomePage";
 import {
 	GLOBAL_DESTINATIONS,
 	PROJECT_DESTINATIONS,
+	PROJECT_WORKSPACES,
 	buildProjectPath,
 	buildProjectWorkspacePath,
 	getDestinationForLegacyTab,
@@ -5237,7 +5238,12 @@ export default function App() {
 
 	const goPrev = () => moveProjectStep(-1);
 	const activeProjectNavigationTab = route.destination === "overview" ? 7 : activeTab === 2 ? 3 : activeTab;
-	const activeProjectDestinationLabel = tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
+	const deliverWorkspace =
+		PROJECT_WORKSPACES_V2 && route.workspace === "deliver" ? PROJECT_WORKSPACES.find(({ id }) => id === "deliver") : null;
+	const deliverSection = deliverWorkspace?.sections.find(({ id }) => id === route.section);
+	const activeProjectDestinationLabel = deliverSection
+		? `${deliverWorkspace.label} · ${deliverSection.label}`
+		: tabs.find((tab) => tab.id === activeProjectNavigationTab)?.label || "Project";
 	const contextualTestCaseTask = selectContextualTask(orchestratorStatus, {
 		destination: PROJECT_DESTINATIONS.TEST_CASES,
 	}).primaryAction;

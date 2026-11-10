@@ -22,6 +22,16 @@ const workspace = (page, name) => primary(page).getByRole("link", { name: new Re
 const section = (page, name) => sections(page).getByRole("link", { name, exact: true });
 const heading = (page, name) => page.getByRole("heading", { name, exact: true });
 
+async function expectDeliverSection(page, name, { focused = false } = {}) {
+	const title = `Deliver · ${name}`;
+	await expect(workspace(page, "Deliver")).toHaveAttribute("aria-current", "location");
+	await expect(section(page, name)).toHaveAttribute("aria-current", "page");
+	await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+	const main = page.getByRole("main", { name: `Workflow workspace: ${title}`, exact: true });
+	await expect(main).toBeVisible();
+	if (focused) await expect(main).toBeFocused();
+}
+
 async function setup(page, count = 50) {
 	const project = useCaseProjectFixture();
 	project.current_snapshots.requirements.payload.requirements[0].sources = [
@@ -277,8 +287,9 @@ test.describe("Opt-in project workspaces", () => {
 		await expect(page.getByRole("region", { name: "Selected test case" })).toContainText("Receipt 40 appears");
 
 		await workspace(page, "Deliver").press("Enter");
+		await expect(page).toHaveURL(projectPath("deliver"));
 		await expect(heading(page, "Export Test Cases")).toBeVisible();
-		await expect(section(page, "Export")).toHaveAttribute("aria-current", "page");
+		await expectDeliverSection(page, "Export", { focused: true });
 		await page.goBack();
 		await expect(page).toHaveURL(projectPath("review/tests"));
 		await page.getByRole("tab", { name: /Generated Test Cases/ }).click();
@@ -299,6 +310,17 @@ test.describe("Opt-in project workspaces", () => {
 		await section(page, "Browser tests").press("Enter");
 		await expect(page).toHaveURL(projectPath("deliver/browser-tests"));
 		await expect(heading(page, "Execution setup")).toBeVisible();
+		await expectDeliverSection(page, "Browser tests", { focused: true });
+
+		for (const [alias, name] of [
+			["reports", "Export"],
+			["automation", "Browser tests"],
+		]) {
+			await page.goto(projectPath(alias));
+			await expect(page).toHaveURL(projectPath(alias));
+			await expectDeliverSection(page, name);
+		}
+		expect(writes).toEqual([]);
 
 		const projectStatus = page.getByRole("link", { name: "Project status", exact: true });
 		await projectStatus.press("Enter");

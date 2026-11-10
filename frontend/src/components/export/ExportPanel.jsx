@@ -136,7 +136,6 @@ export default function ExportPanel({
 					)}
 				</div>
 			)}
-			{executionReport}
 			<div className="export-section">
 				<h3 className="section-subtitle">{reviewedDesignAvailable ? "Export reviewed design" : "📥 Quick Export"}</h3>
 				<p className="helper-text">
@@ -170,6 +169,7 @@ export default function ExportPanel({
 					))}
 				</div>
 			</div>
+			{executionReport}
 			{declaredSetup && <ExecutionSetupSummary declaredSetup={declaredSetup} projectId={projectId} navigate={navigate} />}
 			<div className="panel-nav">
 				<Button onClick={backToTestsPath ? () => navigate(backToTestsPath) : goPrev} className="secondary">
