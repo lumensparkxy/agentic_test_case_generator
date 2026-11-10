@@ -96,6 +96,7 @@ export default function GeneratedTestCasesView({
 	selectedId,
 	setSelectedId,
 	findingCaseId,
+	temporaryFindingCase,
 	onDismissFindingCase,
 	priorityCaseId,
 	focusPriorityCase = false,
@@ -209,6 +210,9 @@ export default function GeneratedTestCasesView({
 		focusSelectedCase();
 		onPriorityCaseOpened();
 	}, [focusPriorityCase, priorityCase?.id, focusSelectedCase]);
+	useLayoutEffect(() => {
+		if (temporaryFindingCase && findingCase?.id === visibleCaseId && visibleCaseId) focusSelectedCase();
+	}, [temporaryFindingCase, findingCase?.id, visibleCaseId, focusSelectedCase]);
 	const moveToCase = (index) => {
 		const next = cases[index];
 		if (!next) return;
@@ -219,8 +223,9 @@ export default function GeneratedTestCasesView({
 	useLayoutEffect(() => {
 		if (!focusAfterMove.current) return;
 		focusAfterMove.current = false;
-		focusSelectedCase();
-	}, [selected?.id, focusSelectedCase]);
+		if (visibleCaseId) focusSelectedCase();
+		else searchRef.current?.focus();
+	}, [visibleCaseId, focusSelectedCase]);
 	const steps = selected?.steps || [];
 	const citedSteps = singleCase && savedStep ? steps.filter((step) => step.step === savedStep) : [];
 	const citedStep = citedSteps.length === 1 ? citedSteps[0] : null;
@@ -377,9 +382,26 @@ export default function GeneratedTestCasesView({
 						<>
 							{(priorityCase || findingCase) && selectedIndex < 0 && (
 								<p className="test-detail-meta">
-									Opened from {priorityCase ? "the generation result" : (reviewGroup?.label ?? "Improve tests")}. This case is outside the
-									current filters.
+									Opened from{" "}
+									{priorityCase
+										? "the generation result"
+										: temporaryFindingCase
+											? "Improve tests"
+											: (reviewGroup?.label ?? "Improve tests")}
+									. This case is outside the current filters.
 								</p>
+							)}
+							{temporaryFindingCase && findingCase && selectedIndex < 0 && (
+								<Button
+									variant="secondary"
+									size="compact"
+									onClick={() => {
+										focusAfterMove.current = true;
+										onDismissFindingCase();
+									}}
+								>
+									Return to filtered tests
+								</Button>
 							)}
 							<div className="test-case-identity">
 								<Badge icon={null} tone="info" className="case-id">

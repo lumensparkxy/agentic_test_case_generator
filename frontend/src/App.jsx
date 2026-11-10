@@ -1142,6 +1142,8 @@ export default function App() {
 		initialValue: "",
 	});
 	const sourceCaseSnapshot = `${currentProjectId}:${currentProject?.current_snapshots?.test_cases?.snapshot_id || "draft"}`;
+	const findingCaseEntry =
+		findingCaseSelection?.source === sourceCaseSnapshot && findingCaseSelection.identity === currentUser?.sub ? findingCaseSelection : null;
 	const [reportEntry, setReportEntry] = useState(null);
 	const reportedCase =
 		reportEntry?.source === sourceCaseSnapshot && reportEntry.identity === currentUser?.sub ? reportEntry.testCase : null;
@@ -1194,11 +1196,16 @@ export default function App() {
 	};
 	const openCaseResults = (id = null, group = null, { fromFinding = false } = {}) => {
 		dismissPriorityCase();
-		setSelectedTestCaseId(id);
-		setFindingCaseSelection(id && (fromFinding || group) ? { id, source: sourceCaseSnapshot } : null);
-		setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
-		if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
-		else focusResultContent.current = true;
+		const temporary = fromFinding && trustedRepairOnly;
+		setFindingCaseSelection(
+			id && (fromFinding || group) ? { id, source: sourceCaseSnapshot, identity: currentUser?.sub, temporary } : null
+		);
+		if (!temporary) {
+			setSelectedTestCaseId(id);
+			setReviewCaseScope(group ? { ...group, snapshot: sourceCaseSnapshot } : null);
+			if (activeGenerateResultTab === "test-cases") document.getElementById("generate-result-panel")?.focus();
+			else focusResultContent.current = true;
+		}
 		setActiveGenerateResultTab("test-cases");
 	};
 	const testCaseReviewMeta = getReviewScoreMeta(testCaseReview);
@@ -7122,7 +7129,8 @@ export default function App() {
 																	substantiveAssessment={substantiveAssessment}
 																	selectedId={selectedPriorityCaseExpired ? null : selectedTestCaseId}
 																	setSelectedId={setSelectedTestCaseId}
-																	findingCaseId={findingCaseSelection?.source === sourceCaseSnapshot ? findingCaseSelection.id : null}
+																	findingCaseId={findingCaseEntry?.id}
+																	temporaryFindingCase={findingCaseEntry?.temporary}
 																	onDismissFindingCase={() => setFindingCaseSelection(null)}
 																	priorityCaseId={priorityCase?.id}
 																	focusPriorityCase={openingPriorityCase}

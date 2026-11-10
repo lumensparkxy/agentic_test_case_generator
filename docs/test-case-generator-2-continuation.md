@@ -477,6 +477,10 @@ verified expected result. The preceding steps and data, sibling case
 rows and sibling version identities stay exact. Setup blockers and
 recorded application defects retain their separate paths.
 
+Opening a case for scoped repair from a saved finding focuses its exact
+reader. When it falls outside the current filters, **Return to filtered
+tests** restores the previous selection and search without applying a repair.
+
 The owner can check or release the exact attempt while a request is
 running or interrupted. The same request ID recovers a committed
 result. Read-only before and after links use the original suite and

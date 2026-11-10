@@ -80,7 +80,23 @@ async function setup(page, { loseReply = false, interrupted = false, holdPost = 
 			coverage_plan: plan.payload.coverage_plan,
 			approved: false,
 			review: { approved: false, score: 100, threshold: 90, blocking_issues: [review] },
-			substantive_assessment: { status: version === 2 ? "unknown" : "incomplete", reason: review, obligations: [] },
+			substantive_assessment: {
+				status: version === 2 ? "unknown" : "incomplete",
+				reason: review,
+				obligations:
+					version === 2
+						? []
+						: [
+								{
+									obligation: target.obligation,
+									requirement_id: requirementId,
+									source_quote: sourceQuote,
+									status: "unmet",
+									reason: target.reason,
+									evidence: [{ test_case_id: caseId, ...original.steps[0] }],
+								},
+							],
+			},
 			generation_tasks: [],
 			...(version === 2 ? { scoped_refinement: { changed: 1, preserved: 1, added: 0, changed_ids: [caseId] } } : {}),
 		},
@@ -238,11 +254,77 @@ async function setup(page, { loseReply = false, interrupted = false, holdPost = 
 		});
 	});
 	await seedAuthenticatedSession(page);
-	return { errors, writes, repairs, statusReads, evidenceReads, releasePath };
+	return {
+		errors,
+		writes,
+		repairs,
+		statusReads,
+		evidenceReads,
+		releasePath,
+		savedCases: () => project.current_snapshots.test_cases.payload.test_cases,
+	};
 }
 
 test.describe("Exact selected case repair", () => {
 	test.skip(!enabled, "Requires the opt-in workspace and continuation");
+
+	test("opens a hidden finding for scoped repair and restores the filtered case selection", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const api = await setup(page);
+		const originalCases = api.savedCases();
+		const testsPath = `${root}/review/tests`;
+		await page.goto(testsPath);
+		await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
+		const search = page.getByRole("searchbox", { name: "Search test cases", exact: true });
+		await search.fill("supervisor");
+		const sibling = page.getByRole("button", { name: "TC-SUPERVISOR Verify the supervisor decision", exact: true });
+		await sibling.press("Enter");
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		await expect(reader).toContainText(originalCases[1].steps[0].expected);
+		const sections = page.getByRole("navigation", { name: "Workspace sections", exact: true });
+		const findingsEntry = sections.getByRole("link", { name: "Test findings", exact: true });
+		const openFindingCase = async () => {
+			await findingsEntry.press("Enter");
+			const coverage = page.getByRole("region", { name: "Business coverage assessment", exact: true });
+			const disclosure = coverage.getByText("Source obligations and prerequisites", { exact: true });
+			if (!(await disclosure.evaluate((summary) => summary.parentElement.open))) await disclosure.press("Enter");
+			await coverage.getByRole("button", { name: `Open ${caseId} in Review`, exact: true }).press("Enter");
+		};
+		await sections.getByRole("link", { name: "Scenarios", exact: true }).press("Enter");
+		await openFindingCase();
+		await expect(page).toHaveURL(testsPath);
+		await expect(search).toHaveValue("supervisor");
+		await expect(reader).toContainText("This case is outside the current filters.");
+		await expect(reader).toContainText(priorAssertion);
+		const repair = reader.getByRole("region", { name: "Selected test repair", exact: true });
+		const addCheck = repair.getByRole("button", { name: "Add missing check", exact: true });
+		await expect(addCheck).toBeEnabled();
+		await expect(repair).toContainText(sourceQuote);
+		await expect(reader.getByRole("heading", { name: originalCases[0].title, exact: true })).toBeFocused({ timeout: 5000 });
+		expect(api.statusReads).toContainEqual({ snapshot_id: beforeId, case_id: caseId });
+		expect(api.writes).toEqual([]);
+		await page.screenshot({ path: testInfo.outputPath("hidden-exact-repair-target.png") });
+
+		await reader.getByRole("button", { name: "Return to filtered tests", exact: true }).press("Enter");
+		await expect(search).toHaveValue("supervisor");
+		await expect(sibling).toHaveAttribute("aria-pressed", "true");
+		await expect(reader.getByRole("heading", { name: originalCases[1].title, exact: true })).toBeFocused();
+		expect(api.writes).toEqual([]);
+		await page.screenshot({ path: testInfo.outputPath("restored-filtered-repair-reader.png") });
+
+		await openFindingCase();
+		await addCheck.press("Enter");
+		const comparison = page.getByRole("region", { name: "Saved repair evidence", exact: true });
+		await comparison.getByText("Compare saved steps", { exact: true }).press("Enter");
+		await expect(comparison).toContainText(priorAssertion);
+		await expect(comparison).toContainText(addedAssertion);
+		await expect(comparison).toContainText(/1 .*preserved/i);
+		expect(api.repairs).toHaveLength(1);
+		expect(api.savedCases()[0].steps[0]).toEqual(originalCases[0].steps[0]);
+		expect(api.savedCases()[1]).toEqual(originalCases[1]);
+		expect(api.writes).toEqual([`POST ${repairPath}`]);
+		expect(api.errors).toEqual([]);
+	});
 
 	test("explicitly releases an interrupted repair on an older suite", async ({ page }) => {
 		const api = await setup(page, { interrupted: true });
