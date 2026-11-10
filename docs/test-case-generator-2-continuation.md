@@ -694,6 +694,17 @@ only the valid control passed healthy and detected the seeded whitespace
 collapse at the intended assertion. The authored comparison sits outside
 the frozen live corpus and keeps independent adjudication open.
 
+P6 assessor comparison under
+[#513](https://github.com/lumensparkxy/agentic_test_case_generator/issues/513)
+separates accuracy on identical inputs from the quality of generated
+artifacts. The offline rehearsal pinned `2f6458d` and `8eb7656`.
+The candidate structural review rejected both authored whitespace defects
+the baseline approved and retained all five valid controls, including four
+quoted filenames. Two authored transport responses verified that a blocked
+execution prerequisite stays separate from the design verdict on both
+pins. Independent assessor outputs and human verdicts are still needed
+for the frozen evaluator gate.
+
 P6 Booking fault attribution under
 [#501](https://github.com/lumensparkxy/agentic_test_case_generator/issues/501)
 binds rejected-write count evidence to the selected case's terminal report

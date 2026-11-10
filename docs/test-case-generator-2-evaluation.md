@@ -193,6 +193,65 @@ incomplete, as do empty pooled denominators. The live comparison requires
 all 36 matched pairs and uses unrounded rates. Earlier coverage-only
 labels remain readable and leave fact review pending.
 
+### Compare assessors separately
+
+Prepare a separate private manifest before replay. List the pinned
+adjudication examples and exact saved-suite inputs from both generation
+arms. Each entry has an opaque `id`, `layer` (`structural` or `design`),
+a relative `file`, and its `input_sha256`. Keep the exact inputs with the
+manifest, including the accepted source, context, plan and case bytes
+actually supplied to the reviewer. Record `baseline_commit`,
+`candidate_commit`, `cohort` (`independent` or `rehearsal`) and the
+`examples` list. Record the SHA-256 of the manifest in the private study
+record before running either assessor. Feed both pinned assessors those
+same inputs. For each `design` example, record `review_inputs.baseline`
+and `review_inputs.candidate` before assessment. Each entry has the
+relative `file` containing the exact canonical bytes returned by that
+pin's `review_input` and their `input_sha256`. The scorer verifies those
+files and matches the raw result's own `input_hash` to the expected pin's
+projection. Save the complete raw output from each layer separately.
+Structural review relies on the capture runner's invocation record for
+input identity.
+
+Each arm capture has `cohort`, `manifest_sha256`, `arm` (`baseline` or
+`candidate`), `commit` and `rows`. Each row has `id`, `input_sha256`
+and `status`. A `completed` row includes its raw reviewer `output`. A
+`failed`, `interrupted` or `blocked` row includes its `reason`. Keep
+unscheduled or missing results visible through the precommitted manifest.
+If an arm produced no results, record an empty `rows` list. The scorer
+reads `approved` for structural review and `design_status` for independent
+assessment. A model verdict of `unknown` or any unverified review groups
+remain unknown even if deterministic checks report a gap. Execution
+readiness and overall approval are separate.
+
+Give adjudicators the opaque IDs, input digests and exact source and suite
+evidence. Keep both assessor outputs and pins private until disagreements
+are resolved and the verdicts sealed. The private label file carries
+`cohort`, `manifest_sha256` and `rows` with `id`, `input_sha256`,
+`verdict` (`valid`, `defective` or `unknown`), a `critical` boolean
+and the adjudicator's `reason`. Reserve critical labels for defective
+designs whose failure could mask a critical outcome. Retain identities
+and disagreements separately in private evidence.
+
+Run the comparison from the repository root.
+
+```sh
+python -m scripts.score_paired_assessor \
+  --manifest assessor-manifest.json --manifest-sha256 "$FROZEN_ASSESSOR_SHA" \
+  --baseline baseline-assessments.json --candidate candidate-assessments.json \
+  --labels independent-labels.json --output assessor-comparison.json
+```
+
+Omit `--labels` while human evidence is pending. The report counts false
+approvals, critical false approvals, false rejections and unknown verdicts
+by arm and layer. The paired human thresholds require both layers, a known
+verdict from each assessor and the adjudicator for every input, and at
+least one adjudicated valid design and one critical defective design per
+layer. The `rehearsal` cohort always stays separate from this gate. Keep the
+original quoted-filename and rendered-whitespace regression evidence with
+the report. The scorer verifies file and capture identities. Keep operator
+provenance and adjudicator independence in the study record.
+
 ## Frozen acceptance gates
 
 | Dimension | Fixed measurement and threshold |
