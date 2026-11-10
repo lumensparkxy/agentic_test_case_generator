@@ -690,6 +690,17 @@ returned HTTP 409 before refresh. Blinded intake sealed both two-checkpoint
 packets and retained 70 unrun slots. This rehearsal used synthetic
 specialists and has no independent labels.
 
+P6 saved-delivery rehearsal under
+[#517](https://github.com/lumensparkxy/agentic_test_case_generator/issues/517)
+adds the repeat-one common route runner. Both app pins imported the
+frozen inputs, preserved two explicit approvals, and exported exact
+reasoned drafts for eleven workflows with authored specialist controls.
+A separate refusal retained the W05 suite and marked the delivery partial.
+The W11 replay on candidate `097d403` and frozen baseline `2f6458d`
+preserved both source-change checkpoints. Private intake still reserves
+all 72 slots. Live generation, independent judgments and browser fault
+execution remain separate.
+
 P6 structural review under
 [#499](https://github.com/lumensparkxy/agentic_test_case_generator/issues/499)
 requires exact rendered whitespace evidence for structured step-data cases.

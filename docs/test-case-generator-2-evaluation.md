@@ -60,6 +60,31 @@ W02 and W03 pass the exact frozen template to baseline generation and as
 `template` on the candidate's named scenario approval. Preserve its field
 order and record the template that reached the generator in each arm.
 
+### Rehearse saved delivery before the live comparison
+
+`scripts/rehearse_paired_delivery.py` uses an isolated app pin and the same
+hash-checked source intake for the eleven workflows with one source
+checkpoint. Keep the authored case controls outside Git and record their
+SHA-256 separately from the frozen corpus. Pass the digest with
+`--controls-sha256`. Use separate loopback Firestore processes for the two
+app pins. The archived launcher serves the pinned healthy Booking and
+payload editor fixtures, blocks external networking, verifies the app
+archive, and keeps the generation inputs separate from reviewer keys.
+
+The runner uses actual approvals and persistence. It exercises the
+baseline generation routes and the exact named candidate continuations,
+records the template that reached the generator, and compares saved case
+versions with raw JSON and the saved export report. These authored cases
+are deliberately delivered as reasoned drafts. The W05 refusal control
+omits the draft reason and keeps its saved project and cases with HTTP 422.
+A refused export is a partial slot. Keep the separately recorded W11
+source-change replay with both export checkpoints.
+
+The runner writes repeat-one private records for each arm. Combine them
+with the same-pin W11 records in the intake format below after generation
+exits. Do not use the rehearsal artifacts as live pairs, practitioner
+labels, or evidence of fault detection.
+
 ### Capture and score delivered artifacts
 
 - Record the exact source and review-decision manifests, scenario snapshot, suite snapshot, case versions, hydrated readback, both raw export bytes and parsed artifact, request/receipt IDs and all hashes. The export method is JSON for paired semantic comparisons. Validate other offered formats against their documented columns separately. Use the baseline's reasoned draft path where readiness alone blocks its export and log the displayed status and reason. A blocked or missing export remains a failed delivery.

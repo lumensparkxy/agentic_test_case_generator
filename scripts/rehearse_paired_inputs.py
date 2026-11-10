@@ -100,10 +100,14 @@ class InputRehearsal:
         project = self.call("POST", "/projects", json={"name": f"Frozen input rehearsal {workflow}"})
         self.prefix = f"/projects/{project['project_id']}"
 
-    def call(self, method, path, *, request=None, **kwargs):
+    def request(self, method, path, *, request=None, **kwargs):
         request = request or uuid4().hex
         response = self.client.request(method, path, headers={"X-Request-ID": request}, **kwargs)
         self.routes.append({"method": method, "path": path, "status": response.status_code, "request_id": request})
+        return response
+
+    def call(self, method, path, **kwargs):
+        response = self.request(method, path, **kwargs)
         require(response.is_success, f"{method} {path} failed: {response.status_code} {response.text[:600]}")
         return response.json()
 
