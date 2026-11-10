@@ -631,13 +631,15 @@ open when the old response arrived in the separate mocked test.
 
 P8 records the [local release and rollback handoff](test-case-generator-2-release.md)
 under [#493](https://github.com/lumensparkxy/agentic_test_case_generator/issues/493).
-The final application pin `e94ce21` used the same disposable project and
-Chromium session across enabled, flag-off and restored builds. Both aliases
+The initial rehearsal at `e94ce21` and repeat at `6ad1efa` each used the
+same disposable project and Chromium session across enabled, flag-off
+and restored builds. Both aliases
 preserved exact report, run, case and failed-run Context evidence. Twelve
 canonical evidence digests matched, with no API writes from the browser.
 All project records matched. The only database changes were two timestamps
-from existing entitlement reads. The release record includes admission,
-drain and rollback boundaries.
+from existing entitlement reads. The separate server restart verified
+exact reviewed-design JSON replay, rejection of a fresh intent and saved
+evidence readback with server delivery disabled.
 
 P6 blind review preparation under
 [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495)

@@ -4,9 +4,9 @@ The implementation lives on `codex/version_2_0`. The frozen baseline is
 `2f6458d3d1bb68197ba2b5572261870277c8cadb`. The phase history is in the
 [implementation record](test-case-generator-2-continuation.md). Use the
 [frozen evaluation protocol](test-case-generator-2-evaluation.md) to
-score live results. The verified application commit is
-`e94ce215da16630c53edfa90d170542d4bf8eb65`. The current release record is
-local and unmerged.
+score live results. The latest locally verified application commit is
+`6ad1efab5c67d7f1745f3e5442fd56867fec51d4`. The stack remains open for
+final merge approval.
 
 ## Acceptance evidence
 
@@ -29,8 +29,8 @@ attempts. Each published artifact had one usage event. Each published Test
 Cases suite had one local shadow billing receipt and an exact case readback.
 The phase PR records the reproduction command and evidence hashes.
 
-The rendered rollback used one disposable Firestore project at revision 16
-and one Chromium session at 1440×900. The seed saved a historical
+The rendered rollback at `6ad1efa` used one disposable Firestore project
+at revision 16 and one Chromium session at 1440×900. The seed saved a historical
 reasoned-draft JSON report, a successor report with a distinct case version,
 and a healthy and seeded-fault Directory run. Both aliases resolved in all
 three bundle states. The browser followed six historical report-to-case
@@ -45,6 +45,18 @@ only `updated_at` on the owner billing account and user profile. All project
 evidence matched. The harness blocked 36 optional font stylesheet requests
 and all provider traffic. The phase PR records the manifest, input and file
 digests, browser captures, and reproduction command.
+The current client rehearsal is recorded in
+[#510](https://github.com/lumensparkxy/agentic_test_case_generator/pull/510).
+
+In a separate W01 server rehearsal at the same pin, Chromium exported the
+11 exact reviewed cases as JSON. The local worker finished and the outbox
+was empty before the API restarted with reviewed-design delivery disabled.
+The second process replayed the original request with HTTP 200 and
+byte-identical JSON. A fresh request against the current revision returned
+HTTP 409 with `design_delivery_disabled`. The exact saved report and
+original case still matched. All 59 Firestore document contents and update
+times were identical across the restart and readback. The worker used
+authored SDK responses in the loopback emulator.
 
 ## Local rollout and rollback
 
@@ -88,6 +100,9 @@ digests, browser captures, and reproduction command.
 - For an unconfirmed approval or draft attempt, use the existing status
   read with its original request ID. Inspect the exact saved result before
   an explicit release or retry. Project switches keep their own state.
+  For scope and scenario approvals, Check status reads the project before
+  looking up the exact attempt. It clears the local attempt only when the
+  project revision advanced and both the receipt and run are absent.
 - An independently assessed suite may have blocked browser setup. Review
   the named prerequisite or publish a permitted file. The browser uses
   the current target preview and an explicit selection.
