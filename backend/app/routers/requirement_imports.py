@@ -1,9 +1,22 @@
-from fastapi import APIRouter, Depends, Request, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from ..auth.jwt_auth import get_current_user
 from ..models import AuthUser, QaProjectDetail
-from ..contracts.requirement_imports import RequirementImportPreview, ImportApplyInput, ImportRecoveryInput, ImportHistoryEntry, RequirementReviewsInput
+from ..contracts.requirement_imports import (
+    ImportApplyInput,
+    ImportHistoryEntry,
+    ImportRecoveryInput,
+    RequirementExtractionRelease,
+    RequirementExtractionReleaseResult,
+    RequirementExtractionStatus,
+    RequirementImportPreview,
+    RequirementReviewsInput,
+)
+from ..services import project_draft_admission as admission
 from ..services.requirement_import_service import repository, prepare_recovery, recompare_import
+from ..services.workflow_project_service import project_error_to_http
 
 router = APIRouter()
 
@@ -16,6 +29,41 @@ async def pending_imports(project_id: str, actor: AuthUser = Depends(get_current
 @router.post("/projects/{project_id}/requirement-imports/recovery", response_model=RequirementImportPreview)
 async def recover_import(project_id: str, payload: ImportRecoveryInput, actor: AuthUser = Depends(get_current_user)):
     return await run_in_threadpool(prepare_recovery, project_id, actor, payload)
+
+
+@router.get("/projects/{project_id}/requirement-imports/extraction-status", response_model=RequirementExtractionStatus)
+def requirement_extraction_status(project_id: str, actor: AuthUser = Depends(get_current_user)):
+    try:
+        client = admission.draft_admission_client(read_only=True)
+        if client is None:
+            return RequirementExtractionStatus(enabled=False)
+        return RequirementExtractionStatus(enabled=True, **admission.read_requirement_extraction_admission(client, project_id, actor.sub))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/requirement-imports/extraction-attempts/{operation_id}/release",
+    response_model=RequirementExtractionReleaseResult,
+)
+def release_requirement_extraction(
+    project_id: str,
+    operation_id: Annotated[str, Path(pattern=r"^draft_[0-9a-f]{64}$")],
+    payload: RequirementExtractionRelease,
+    actor: AuthUser = Depends(get_current_user),
+):
+    try:
+        client = admission.draft_admission_client()
+        if client is None:
+            raise HTTPException(409, "Requirement extraction recovery is unavailable.")
+        admission.release_draft_attempt(client, project_id, actor.sub, operation_id, payload.fence, requirement_extraction=True)
+        return RequirementExtractionReleaseResult()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise project_error_to_http(exc) from exc
 
 
 @router.get("/projects/{project_id}/requirement-imports/{import_id}", response_model=RequirementImportPreview)

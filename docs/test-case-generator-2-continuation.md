@@ -233,6 +233,29 @@ request opens the existing run. Prepared journeys still use their recorded
 31-request budget and one child. Stale, partial, Sync and already served
 plans follow their existing review paths.
 
+### Bounded project requirement extraction
+
+Project file extraction and feedback refinement in the opted-in local demo
+claim the existing project lease before dispatch. The claim binds the
+owner, request identity, input fingerprint, effective model, project
+revision and current Requirements snapshot or its explicit absence. One
+stage reserves up to 16 physical SDK requests over three minutes. Extraction,
+its review and refinement loop, and semantic matching share that cap, with
+one SDK attempt and at most 25 seconds per request. A missing semantic match
+remains a visible comparison limitation.
+
+The pending import preview, audit, debit and lease completion commit
+together without advancing the project revision. Compare and Apply remain
+separate. Inputs reads the authoritative extraction status and existing
+pending previews after an uncertain response. An owner can acknowledge
+and release an interrupted exact claim. Its request identity cannot
+dispatch again. The reservation and dispatch marker do not establish the
+actual provider charge.
+
+This admission covers project file and feedback routes in the local demo.
+Connector extraction, semantic recompare and recovery, and an aggregate
+intake-through-repair budget still require their own acceptance evidence.
+
 ### Shared draft admission and assessment recovery
 
 The local approval worker and saved-suite assessment share the same

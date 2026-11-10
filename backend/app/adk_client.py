@@ -13,6 +13,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
+from google.adk.models import Gemini
 from .services.guidance_service import apply_agent_guidance, submit_with_guidance, memory_service_for_run, guidance_text
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -20,7 +21,7 @@ from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 from pydantic import ValidationError
 
-from .agents.adk_runtime import json_generation_config, text_generation_config, tool_generation_config
+from .agents.adk_runtime import bounded_adk_model, generate_direct_content, json_generation_config, text_generation_config, tool_generation_config
 from .agents.prompting import REAL_WORLD_QA_POLICY, REQUIREMENT_PROMPT_GUARDRAILS, human_feedback_section
 from .config import DEFAULT_MODEL_NAME
 from .models import RequirementsOutput, WorkflowSettings
@@ -402,7 +403,7 @@ def exit_loop(tool_context: ToolContext) -> dict:
 
 
 def _build_review_loop(
-    model: str, threshold: int, max_iterations: int, human_feedback: Optional[str] = None, *, verify_range_quotes: bool = False
+    model: str | Gemini, threshold: int, max_iterations: int, human_feedback: Optional[str] = None, *, verify_range_quotes: bool = False
 ) -> LoopAgent:
     feedback_section = human_feedback_section("Human Feedback That Must Be Honored", human_feedback)
     range_review = (
@@ -494,7 +495,7 @@ Either call exit_loop OR output the refined JSON array. Never do both. Never add
     )
 
 
-def _build_requirement_extraction_pipeline(model: str, max_iterations: int, threshold: int, *, verify_range_quotes: bool = True) -> Agent:
+def _build_requirement_extraction_pipeline(model: str | Gemini, max_iterations: int, threshold: int, *, verify_range_quotes: bool = True) -> Agent:
     range_extraction = (
         "Keep an inclusive input range with that field's stated rejected examples when they describe the same validation rule. "
         "Quote the contiguous source sentences for the range and the examples. If they need separate rows, give each row its own exact "
@@ -555,7 +556,7 @@ Keep original document requirement identifiers (for example ROOM-101) in origina
 
 
 def _build_requirement_refinement_pipeline(
-    model: str,
+    model: str | Gemini,
     max_iterations: int,
     threshold: int,
     human_feedback: str,
@@ -617,10 +618,11 @@ async def _run_requirement_workflow_async(
     stall_iteration_limit = int(resolved_settings["stall_iteration_limit"] or DEFAULT_REQUIREMENT_STALL_ITERATION_LIMIT)
     diagnostics = _new_workflow_diagnostics()
 
+    runtime_model = bounded_adk_model(model)
     is_refinement = bool(existing_requirements is not None)
     if is_refinement:
         root_agent = _build_requirement_refinement_pipeline(
-            model,
+            runtime_model,
             safe_iterations,
             threshold,
             human_feedback or "No human feedback provided.",
@@ -634,7 +636,9 @@ Human feedback:
 {human_feedback or "No human feedback provided."}
 """
     else:
-        root_agent = _build_requirement_extraction_pipeline(model, safe_iterations, threshold, verify_range_quotes=operation in (None, "requirements.parse"))
+        root_agent = _build_requirement_extraction_pipeline(
+            runtime_model, safe_iterations, threshold, verify_range_quotes=operation in (None, "requirements.parse")
+        )
         message_text = f"""Please extract and refine testable requirements from these document contents.
 
 ---DOCUMENT START---
@@ -1130,13 +1134,15 @@ def run_adk_prompt(
     from google import genai
 
     try:
-        with genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", "")) as client:
-            response = client.models.generate_content(
-                model=model or DEFAULT_MODEL,
-                contents=prompt,
-                config=text_generation_config(system_instruction=instruction + guidance_text()),
-            )
-            return extract_response_text(response)
+        response = generate_direct_content(
+            genai.Client,
+            api_key=os.environ.get("GOOGLE_API_KEY", ""),
+            model=model or DEFAULT_MODEL,
+            contents=prompt,
+            config=text_generation_config(system_instruction=instruction + guidance_text()),
+            timeout_seconds=25,
+        )
+        return extract_response_text(response)
     except Exception as exc:
         logging.error("[%s] Error: %s", agent_name, exc)
         return ""

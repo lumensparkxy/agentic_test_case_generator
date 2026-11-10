@@ -43,6 +43,8 @@ export interface ApiContractOperations {
 	requirementImportGet: ApiOperation<RequirementImportGetRequest, RequirementImportGetResponse, "GET", "/projects/{project_id}/requirement-imports/{import_id}">;
 	requirementImportApply: ApiOperation<RequirementImportApplyRequest, RequirementImportApplyResponse, "POST", "/projects/{project_id}/requirement-imports/{import_id}/apply">;
 	requirementImportCompare: ApiOperation<RequirementImportCompareRequest, RequirementImportCompareResponse, "POST", "/projects/{project_id}/requirement-imports/{import_id}/compare">;
+	requirementExtractionStatus: ApiOperation<RequirementExtractionStatusRequest, RequirementExtractionStatusResponse, "GET", "/projects/{project_id}/requirement-imports/extraction-status">;
+	releaseRequirementExtraction: ApiOperation<ReleaseRequirementExtractionRequest, ReleaseRequirementExtractionResponse, "POST", "/projects/{project_id}/requirement-imports/extraction-attempts/{operation_id}/release">;
 	requirementImportRecovery: ApiOperation<RequirementImportRecoveryRequest, RequirementImportRecoveryResponse, "POST", "/projects/{project_id}/requirement-imports/recovery">;
 	requirementHistory: ApiOperation<RequirementHistoryRequest, RequirementHistoryResponse, "GET", "/projects/{project_id}/requirements/{requirement_uid}/history">;
 	requirementReviews: ApiOperation<RequirementReviewsRequest, RequirementReviewsResponse, "PATCH", "/projects/{project_id}/requirements/reviews">;
@@ -157,6 +159,10 @@ export type RequirementImportApplyRequest = ImportApplyInput;
 export type RequirementImportApplyResponse = QaProjectDetail;
 export type RequirementImportCompareRequest = undefined;
 export type RequirementImportCompareResponse = RequirementImportPreview;
+export type RequirementExtractionStatusRequest = undefined;
+export type RequirementExtractionStatusResponse = RequirementExtractionStatus;
+export type ReleaseRequirementExtractionRequest = RequirementExtractionRelease;
+export type ReleaseRequirementExtractionResponse = RequirementExtractionReleaseResult;
 export type RequirementImportRecoveryRequest = ImportRecoveryInput;
 export type RequirementImportRecoveryResponse = RequirementImportPreview;
 export type RequirementHistoryRequest = undefined;
@@ -1200,6 +1206,30 @@ export interface RequirementCoveragePlan {
 	requirement_id: string;
 	requirement_text: string;
 	scenarios?: Array<ScenarioIntent>;
+}
+
+export interface RequirementExtractionAttempt {
+	fence: number;
+	operation: "requirements.parse" | "requirements.refine";
+	operation_id: string;
+	reason: string | null;
+	request_id: string;
+	source_snapshot_id: string | null;
+	state: "running" | "interrupted";
+}
+
+export interface RequirementExtractionRelease {
+	fence: number;
+}
+
+export interface RequirementExtractionReleaseResult {
+	released?: true;
+}
+
+export interface RequirementExtractionStatus {
+	attempt?: RequirementExtractionAttempt | null;
+	blocked?: boolean;
+	enabled: boolean;
 }
 
 export interface RequirementImportPreview {

@@ -36,6 +36,8 @@ export const API_CONTRACT_ENDPOINTS = Object.freeze({
 	requirementImportGet: Object.freeze({ method: "GET", path: "/projects/{project_id}/requirement-imports/{import_id}" }),
 	requirementImportApply: Object.freeze({ method: "POST", path: "/projects/{project_id}/requirement-imports/{import_id}/apply" }),
 	requirementImportCompare: Object.freeze({ method: "POST", path: "/projects/{project_id}/requirement-imports/{import_id}/compare" }),
+	requirementExtractionStatus: Object.freeze({ method: "GET", path: "/projects/{project_id}/requirement-imports/extraction-status" }),
+	releaseRequirementExtraction: Object.freeze({ method: "POST", path: "/projects/{project_id}/requirement-imports/extraction-attempts/{operation_id}/release" }),
 	requirementImportRecovery: Object.freeze({ method: "POST", path: "/projects/{project_id}/requirement-imports/recovery" }),
 	requirementHistory: Object.freeze({ method: "GET", path: "/projects/{project_id}/requirements/{requirement_uid}/history" }),
 	requirementReviews: Object.freeze({ method: "PATCH", path: "/projects/{project_id}/requirements/reviews" }),

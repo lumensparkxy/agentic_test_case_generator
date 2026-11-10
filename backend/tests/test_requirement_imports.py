@@ -1,22 +1,29 @@
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from copy import deepcopy
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import sys
+from threading import Event
 import unittest
 from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.agents.adk_runtime import _model_reservation
 from app.models import AuthUser, Requirement, RequirementsWorkflowResponse
 from app.contracts.billing import BillingAccount, BillingUserProfile
+from app.contracts.guidance import GuidanceManifest
 from app.contracts.requirement_imports import ImportApplyInput, ImportRecoveryInput, RequirementImportPreview, RequirementReviewsInput
 from app.routers import integrations_azure_devops, integrations_jira, requirements as requirement_routes
 from app.services.approval_continuation import OUTBOX_COLLECTION, ContinuationOptions
 from app.services.billing_service import BillingAccessContext
+from app.services.project_inputs import manifest_from_payload
 from app.services.requirement_reconciliation import canonical_requirements, build_preview, reconcile
 from app.services.requirement_source_evidence import bind_document_evidence
+from app.services import project_draft_admission as admission
 from app.services import requirement_import_service as service
 from app.services import requirement_import_publication as publication
 from app.utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
@@ -786,6 +793,194 @@ class ImportPersistenceTests(unittest.TestCase):
         self.repo.apply(PID, preview_id, ACTOR, choices(RequirementImportPreview.model_validate(first.json())), "apply-extraction")
         self.assertEqual(self._extract(client, "file-extraction").status_code, 409)
         self.assertEqual(len(self._rows("billing_consumption")), 1)
+
+    def enable_extraction_admission(self):
+        self.client.project = admission.DEMO_PROJECT_ID
+        self.client._emulator_host = "127.0.0.1:9090"
+        self.enterContext(
+            patch.dict(
+                os.environ,
+                {
+                    "TCG_APPROVAL_SCENARIOS_ENABLED": "true",
+                    "FIREBASE_PROJECT_ID": self.client.project,
+                    "FIRESTORE_EMULATOR_HOST": self.client._emulator_host,
+                    "ADK_SKILLS_ENABLED": "false",
+                    "ADK_MEMORY_ENABLED": "false",
+                    "GOOGLE_GENAI_USE_VERTEXAI": "false",
+                },
+            )
+        )
+        self.enterContext(patch.object(admission, "get_required_firestore_client", return_value=self.client))
+        self.enterContext(patch.object(admission, "transactional", side_effect=_run_transaction))
+
+    def test_demo_extraction_fences_inflight_replays_and_bounds_matching_before_atomic_preview(self):
+        self.enable_extraction_admission()
+        client, _, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+        self.store[project]["stage_state"]["use_cases"] = {"current_snapshot_id": "plan"}
+        ready, allow_publish = Event(), Event()
+        requests = []
+
+        def extract(*_args, **_kwargs):
+            reserve = _model_reservation.get()
+            for _ in range(admission.REQUIREMENT_EXTRACTION_REQUEST_CAP - 1):
+                requests.append(reserve())
+            ready.set()
+            self.assertTrue(allow_publish.wait(5))
+            return workflow
+
+        def match(*_args):
+            reserve = _model_reservation.get()
+            requests.append(reserve())
+            with self.assertRaises(HTTPException) as exhausted:
+                reserve()
+            self.assertEqual(exhausted.exception.detail["code"], "project_draft_budget_unavailable")
+            return {}, True
+
+        stage = publication.stage_extraction
+
+        def lose_commit_response(*args, **kwargs):
+            stage(*args, **kwargs)
+            raise RuntimeError("Synthetic lost transaction reply")
+
+        status_path = f"/projects/{PID}/requirement-imports/extraction-status"
+        with (
+            patch.object(requirement_routes, "extract_requirements", side_effect=extract) as model,
+            patch.object(service, "suggest_matches", side_effect=match) as matcher,
+            patch.object(publication, "stage_extraction", side_effect=lose_commit_response),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            first = pool.submit(self._extract, client, "overlapping-demo-intake")
+            try:
+                self.assertTrue(ready.wait(5))
+                running = client.get(status_path).json()
+                attempt = running["attempt"]
+                self.assertTrue(running["blocked"])
+                self.assertEqual((attempt["state"], attempt["source_snapshot_id"]), ("running", "original"))
+                self.assertEqual(self._extract(client, "overlapping-demo-intake").status_code, 409)
+                self.assertEqual(self._extract(client, "overlapping-demo-intake", content=b"Changed file").status_code, 409)
+                with self.assertRaises(HTTPException) as overlapping_review:
+                    admission.claim_draft_attempt(
+                        self.client,
+                        project_id=PID,
+                        actor_id=ACTOR.sub,
+                        request_id="overlapping-review",
+                        operation="test_cases.review",
+                        source_snapshot_ids={"requirements": "original", "use_cases": "plan", "test_cases": "tests", "context": None},
+                        base_revision=7,
+                        max_requests=24,
+                        deadline_seconds=60,
+                    )
+                self.assertEqual(overlapping_review.exception.detail["code"], "project_draft_busy")
+                release_path = f"/projects/{PID}/requirement-imports/extraction-attempts/{attempt['operation_id']}/release"
+                self.assertEqual(client.post(release_path, json={"fence": attempt["fence"]}).status_code, 409)
+            finally:
+                allow_publish.set()
+            saved = first.result(timeout=5)
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(self._extract(client, "overlapping-demo-intake").json(), saved.json())
+            self.assertEqual(self._extract(client, "overlapping-demo-intake", content=b"Changed file").status_code, 409)
+
+        model.assert_called_once()
+        matcher.assert_called_once()
+        self.assertEqual(len(requests), admission.REQUIREMENT_EXTRACTION_REQUEST_CAP)
+        self.assertTrue(all(0 < timeout <= 25 for timeout in requests))
+        self.assertEqual(client.get(status_path).json(), {"enabled": True, "blocked": False, "attempt": None})
+        import_id = saved.json()["import_id"]
+        attempt_record = self.store[f"{project}/project_draft_attempts/{attempt['operation_id']}"]
+        self.assertEqual(attempt_record["result_import_id"], import_id)
+        self.assertEqual(attempt_record["state"], "completed")
+        self.assertEqual(attempt_record["provider_requests_reserved"], admission.REQUIREMENT_EXTRACTION_REQUEST_CAP)
+        self.assertEqual(self.store[project]["current_revision"], 7)
+        [usage] = self._rows("usage_events")
+        [consumption] = self._rows("billing_consumption")
+        self.assertEqual(consumption["source_event_id"], usage["event_id"])
+        self.assertEqual(usage["metadata"]["import_id"], import_id)
+
+    def test_demo_first_file_binds_absent_requirements_and_refuses_held_guidance_before_dispatch(self):
+        self.enable_extraction_admission()
+        client, _, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+        self.store[project]["stage_state"].pop("requirements")
+        before = deepcopy(self.store)
+        with (
+            patch.dict(os.environ, {"ADK_MEMORY_ENABLED": "true", "ADK_GUIDANCE_STAGES": "requirements"}),
+            patch("app.services.guidance_dependency.prepare_run") as guidance,
+            patch.object(requirement_routes, "extract_requirements") as model,
+        ):
+            refused = self._extract(client, "first-file")
+            self.assertEqual(refused.status_code, 409, refused.text)
+            guidance.assert_not_called()
+            model.assert_not_called()
+        self.assertEqual(self.store, before)
+
+        inputs = manifest_from_payload(self.store[project])
+        stale_guidance = GuidanceManifest(
+            manifest_id="stale", stage="requirements", model="gemini-3.8-flash", project_inputs=inputs.model_copy(update={"revision": inputs.revision + 1})
+        )
+        with (
+            patch("app.services.guidance_dependency.prepare_run", return_value=stale_guidance),
+            patch.object(requirement_routes, "extract_requirements") as model,
+        ):
+            superseded = self._extract(client, "first-file")
+            self.assertEqual(superseded.status_code, 409, superseded.text)
+            model.assert_not_called()
+        self.assertEqual(self.store, before)
+
+        with patch.object(requirement_routes, "extract_requirements", return_value=workflow) as model:
+            saved = self._extract(client, "first-file")
+        self.assertEqual(saved.status_code, 200, saved.text)
+        model.assert_called_once()
+        self.assertEqual(saved.json()["current_requirements"], [])
+        [attempt] = [row for key, row in self.store.items() if key.startswith(f"{project}/project_draft_attempts/")]
+        self.assertEqual(attempt["source_snapshot_ids"], {"requirements": None})
+        self.assertEqual(attempt["state"], "completed")
+        self.assertEqual(attempt["provider_requests_reserved"], 0)
+        self.assertEqual(attempt["result_import_id"], saved.json()["import_id"])
+        self.assertEqual(self.store[project], before[project])
+
+    def test_demo_refinement_blocks_stale_publication_and_requires_exact_interruption_release(self):
+        self.enable_extraction_admission()
+        client, _, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+        data = {"feedback": "Clarify requirement", "existing_requirements": "[]"}
+        status_path = f"/projects/{PID}/requirement-imports/extraction-status"
+
+        def supersede(*_args, **_kwargs):
+            _model_reservation.get()()
+            self.store[project]["current_revision"] += 1
+            return workflow
+
+        with patch.object(requirement_routes, "refine_requirements", side_effect=supersede) as refine:
+            stale = self._extract(client, "superseded-refinement", data=data)
+        self.assertEqual(stale.status_code, 409, stale.text)
+        refine.assert_called_once()
+        self.assertEqual(self._rows("billing_consumption"), [])
+        [preview] = self.repo.list_pending(PID, ACTOR)
+        self.assertEqual(preview.import_id, self.p.import_id)
+        status = client.get(status_path).json()
+        attempt = status["attempt"]
+        self.assertTrue(status["blocked"])
+        self.assertEqual((attempt["operation"], attempt["state"], attempt["reason"]), ("requirements.refine", "interrupted", "provider_outcome_unconfirmed"))
+        release = f"/projects/{PID}/requirement-imports/extraction-attempts/{attempt['operation_id']}/release"
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"] + 1}).status_code, 409)
+        app.dependency_overrides[get_current_user] = lambda: AuthUser(sub="other", name="Other")
+        self.assertEqual(client.get(status_path).status_code, 403)
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"]}).status_code, 403)
+        app.dependency_overrides[get_current_user] = lambda: ACTOR
+        self.assertEqual(client.post(release, json={"fence": attempt["fence"]}).json(), {"released": True})
+        self.assertFalse(client.get(status_path).json()["blocked"])
+        record = self.store[f"{project}/project_draft_attempts/{attempt['operation_id']}"]
+        self.assertEqual((record["state"], record["reason"]), ("cancelled", "provider_outcome_acknowledged"))
+        with patch.object(requirement_routes, "refine_requirements", return_value=workflow) as no_replay:
+            current = {**data, "base_project_revision": "8"}
+            self.assertEqual(self._extract(client, "superseded-refinement", data=current).status_code, 409)
+        no_replay.assert_not_called()
+        with patch.object(requirement_routes, "extract_requirements") as different_operation:
+            rejected = self._extract(client, "superseded-refinement", data={"base_project_revision": "8"})
+        self.assertEqual(rejected.status_code, 409)
+        self.assertEqual(rejected.json()["detail"]["code"], "project_draft_request_mismatch")
+        different_operation.assert_not_called()
 
     def test_feedback_refinement_recovers_pending_preview_and_rejects_cancelled_or_changed_request(self):
         client, billing, workflow = self.extraction_client()

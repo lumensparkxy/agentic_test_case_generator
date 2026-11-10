@@ -22,6 +22,13 @@ _REVIEW_OPERATION = "test_cases.review"
 REPAIR_OPERATION = "testcases.repair"
 SCENARIO_REFRESH_OPERATION = "use_cases.refresh"
 SCOPED_IMPACT_OPERATION = "impact.update.apply"
+REQUIREMENT_EXTRACTION_OPERATIONS = frozenset({"requirements.parse", "requirements.refine"})
+REQUIREMENT_EXTRACTION_REQUEST_CAP = 16
+REQUIREMENT_EXTRACTION_DEADLINE_SECONDS = 180
+_OPERATION_SOURCE_STAGE = {
+    SCENARIO_REFRESH_OPERATION: "use_cases",
+    **dict.fromkeys(REQUIREMENT_EXTRACTION_OPERATIONS, "requirements"),
+}
 _SCENARIO_REFRESH_SCOPE_FIELDS = {"refreshed_requirement_ids", "retained_requirement_ids", "removed_requirement_ids"}
 _REPAIR_BINDING_FIELDS = {"target_id", "case_id", "case_version_id", "case_version_number", "request_fingerprint"}
 _SOURCE_STAGES = {"requirements", "context", "use_cases", "test_cases"}
@@ -34,6 +41,7 @@ _REQUEST_CAPS = {
     SCOPED_IMPACT_OPERATION: 24,
     "project.sync.use_cases": 7,
     "project.sync.test_cases": 24,
+    **dict.fromkeys(REQUIREMENT_EXTRACTION_OPERATIONS, REQUIREMENT_EXTRACTION_REQUEST_CAP),
 }
 _ATTEMPTS = "project_draft_attempts"
 _KIND = "draft"
@@ -93,6 +101,11 @@ def _conflict(code, message):
     return HTTPException(409, {"code": code, "message": message})
 
 
+def require_standard_extraction_guidance():
+    if _draft_admission_requested() and (enabled("memory", "requirements") or enabled("skills", "requirements")):
+        raise _conflict("project_draft_budget_unavailable", "Requirement extraction in this demo requires the standard guidance settings.")
+
+
 def draft_refresh_deferred():
     return _conflict("project_draft_refresh_deferred", "Paid draft refresh is unavailable until it uses shared project admission.")
 
@@ -110,7 +123,9 @@ def _attempt_doc(project_doc, operation_id):
 
 
 def _operation_id(project_id, actor_id, operation, request_id, change_id=None):
-    identity = [project_id, actor_id, operation, request_id]
+    # Parse and refine share one request endpoint and one import preview identity.
+    namespace = "requirements.extraction" if operation in REQUIREMENT_EXTRACTION_OPERATIONS else operation
+    identity = [project_id, actor_id, namespace, request_id]
     if change_id is not None:
         identity.append(change_id)
     fingerprint = sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
@@ -315,7 +330,27 @@ def _impact_versions_match(snapshot, binding):
     return all(_repair_version_matches(snapshot, {"case_id": case_id, **version}) for case_id, version in versions.items())
 
 
+def _import_matches(preview, attempt):
+    binding = attempt["requirement_extraction"]
+    return bool(
+        preview
+        and preview.get("import_id") == binding["import_id"]
+        and preview.get("project_id") == attempt["project_id"]
+        and preview.get("base_project_revision") == attempt["base_revision"]
+        and preview.get("operation") == attempt["operation"]
+        and (preview.get("extraction") or {}).get("fingerprint") == binding["request_fingerprint"]
+    )
+
+
 def _read_result(transaction, project_doc, attempt, *, include_snapshot=False):
+    if attempt["operation"] in REQUIREMENT_EXTRACTION_OPERATIONS:
+        import_id = attempt.get("result_import_id")
+        if not import_id or import_id != attempt["requirement_extraction"]["import_id"]:
+            raise HTTPException(503, "The saved requirement preview could not be confirmed.")
+        preview = _read(transaction, project_doc.collection("requirement_imports").document(import_id))
+        if not _import_matches(preview, attempt):
+            raise HTTPException(503, "The saved requirement preview could not be confirmed.")
+        return import_id
     unavailable = {
         _REVIEW_OPERATION: "The saved assessment result could not be confirmed.",
         REPAIR_OPERATION: "The saved selected-case repair could not be confirmed.",
@@ -356,13 +391,14 @@ def _projected_state(project, attempt, lease, now):
 class DraftAttemptClaim:
     """In-process capability for one exact persisted attempt and fence."""
 
-    def __init__(self, client, binding, fence, result_snapshot_id=None):
+    def __init__(self, client, binding, fence, result_snapshot_id=None, *, result_import_id=None):
         self._client = client
         self._binding = binding
         self.operation_id = binding["operation_id"]
         self.request_id = binding["request_id"]
         self.fence = fence
         self.result_snapshot_id = result_snapshot_id
+        self.result_import_id = result_import_id
         self._project = _project_doc(client, binding["project_id"])
         self._attempt = _attempt_doc(self._project, self.operation_id)
         self._lease = project_lease_ref(self._project)
@@ -394,7 +430,7 @@ class DraftAttemptClaim:
     def reserve(self):
         """Reserve the full stage cap durably before the first actual provider request."""
         operation = self._binding["operation"]
-        guidance_stage = "use_cases" if operation == SCENARIO_REFRESH_OPERATION else _SYNC_STAGES.get(operation, "test_cases")
+        guidance_stage = _OPERATION_SOURCE_STAGE.get(operation, _SYNC_STAGES.get(operation, "test_cases"))
         with self._lock:
             if (
                 self._reservation_failed
@@ -446,14 +482,21 @@ class DraftAttemptClaim:
             }.get(attempt["operation"], "The draft result does not match this Project Sync stage's saved sources and request.")
             raise _conflict("project_draft_result_mismatch", message)
 
+        return self._prepare_finish(transaction, lease, {"result_snapshot_id": snapshot["snapshot_id"]})
+
+    def prepare_import_publication(self, transaction, preview):
+        """Verify the same-revision preview before staging the audit and lease release."""
+        attempt, lease, _ = self._validate(transaction)
+        if attempt["operation"] not in REQUIREMENT_EXTRACTION_OPERATIONS or preview.get("status") != "pending" or not _import_matches(preview, attempt):
+            raise _conflict("project_draft_result_mismatch", "The draft result does not match this requirement import.")
+        return self._prepare_finish(transaction, lease, {"result_import_id": preview["import_id"]})
+
+    def _prepare_finish(self, transaction, lease, result):
         def finish():
             now = _utcnow()
             if not _valid_until(lease.get("expires_at"), now):
                 raise _conflict("project_draft_claim_lost", "This draft attempt expired before publication.")
-            transaction.update(
-                self._attempt,
-                {"state": "completed", "result_snapshot_id": snapshot["snapshot_id"], "completed_at": now, "reason": None},
-            )
+            transaction.update(self._attempt, {"state": "completed", **result, "completed_at": now, "reason": None})
             transaction.set(self._lease, released_project_lease(self.fence))
 
         return finish
@@ -639,12 +682,16 @@ def claim_draft_attempt(
     selected_repair=None,
     scenario_refresh=None,
     scoped_impact=None,
+    requirement_extraction=None,
 ):
     if not demo_client_matches(client):
         raise HTTPException(503, "Project draft admission is unavailable.")
     sync_stage = _SYNC_STAGES.get(operation)
     source_stages = _SYNC_SOURCE_STAGES if sync_stage else _SOURCE_STAGES
     optional_sources = {"context"}
+    intake = operation in REQUIREMENT_EXTRACTION_OPERATIONS
+    if intake:
+        source_stages = optional_sources = {"requirements"}
     if operation == SCOPED_IMPACT_OPERATION:
         source_stages = _SOURCE_STAGES | {"impact_analysis"}
     if operation in {SCENARIO_REFRESH_OPERATION, SCOPED_IMPACT_OPERATION}:
@@ -710,6 +757,16 @@ def claim_draft_attempt(
             or re.fullmatch(r"[0-9a-f]{64}", selected_repair["request_fingerprint"]) is None
         ):
             raise ValueError("Repair admission requires an exact target and settings fingerprint")
+    elif intake:
+        if (
+            change_id is not None
+            or not isinstance(settings_fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", settings_fingerprint) is None
+            or not isinstance(requirement_extraction, dict)
+            or requirement_extraction.keys() != {"import_id", "request_fingerprint"}
+            or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in requirement_extraction.values())
+        ):
+            raise ValueError("Requirement extraction admission requires an exact preview and settings fingerprint")
     elif change_id is not None or settings_fingerprint is not None:
         raise ValueError("Saved-suite assessment does not accept Project Sync settings")
     if operation != REPAIR_OPERATION and selected_repair is not None:
@@ -718,6 +775,8 @@ def claim_draft_attempt(
         raise ValueError("Only a scoped scenario refresh accepts previous plan scope")
     if operation != SCOPED_IMPACT_OPERATION and scoped_impact is not None:
         raise ValueError("Only scoped impact accepts an impact selection")
+    if not intake and requirement_extraction is not None:
+        raise ValueError("Only requirement extraction accepts an import preview binding")
     binding = {
         "operation_id": _operation_id(project_id, actor_id, operation, request_id, change_id),
         "operation": operation,
@@ -739,6 +798,13 @@ def claim_draft_attempt(
         )
     if operation == SCOPED_IMPACT_OPERATION:
         binding.update(scoped_impact=scoped_impact, settings_fingerprint=settings_fingerprint, max_requests=max_requests, deadline_seconds=deadline_seconds)
+    if intake:
+        binding.update(
+            requirement_extraction=dict(requirement_extraction),
+            settings_fingerprint=settings_fingerprint,
+            max_requests=max_requests,
+            deadline_seconds=deadline_seconds,
+        )
     project_doc = _project_doc(client, project_id)
     stage_doc = _sync_stage_doc(project_doc, change_id, sync_stage) if sync_stage else None
     lease_doc = project_lease_ref(project_doc)
@@ -759,10 +825,14 @@ def claim_draft_attempt(
                     _REVIEW_OPERATION: "draft assessment",
                     SCENARIO_REFRESH_OPERATION: "scenario refresh",
                     SCOPED_IMPACT_OPERATION: "scoped impact application",
+                    **dict.fromkeys(REQUIREMENT_EXTRACTION_OPERATIONS, "requirement import"),
                 }.get(operation, "Project Sync draft")
                 raise _conflict("project_draft_request_mismatch", f"This request ID belongs to a different {target}.")
             if attempt.get("state") == "completed":
-                return DraftAttemptClaim(client, canonical, attempt["fence"], _read_result(transaction, project_doc, attempt))
+                result = _read_result(transaction, project_doc, attempt)
+                if intake:
+                    return DraftAttemptClaim(client, canonical, attempt["fence"], result_import_id=result)
+                return DraftAttemptClaim(client, canonical, attempt["fence"], result)
             if attempt.get("state") in ("interrupted", "cancelled") or attempt.get("provider_requests_reserved"):
                 raise _conflict(
                     "project_draft_recovery_required", "This request was interrupted or cancelled. Check its saved status before starting new work."
@@ -771,7 +841,9 @@ def claim_draft_attempt(
         now = _utcnow()
         if not _matches_sources(project, canonical):
             message = "Project sources changed. Reload the current project draft."
-            if not sync_stage:
+            if intake:
+                message = "Project requirements changed. Reload the current project before extracting requirements."
+            elif not sync_stage:
                 message = "Project sources changed. Reload the saved suite before reviewing it."
             raise _conflict("project_draft_sources_changed", message)
         if lease_blocks_claim(lease, now):
@@ -915,7 +987,7 @@ def _read_active_attempt(client, project_id, actor_id, *, operations):
         if sync_stage:
             public.update(change_id=attempt["change_id"], stage=sync_stage)
         else:
-            stage = "use_cases" if attempt["operation"] == SCENARIO_REFRESH_OPERATION else "test_cases"
+            stage = _OPERATION_SOURCE_STAGE.get(attempt["operation"], "test_cases")
             public["source_snapshot_id"] = attempt["source_snapshot_ids"][stage]
         if attempt["operation"] == SCOPED_IMPACT_OPERATION:
             public.update(
@@ -954,10 +1026,25 @@ def read_scoped_impact_admission(client, project_id, actor_id):
     return {"blocked": blocked, "attempt": attempt}
 
 
+def read_requirement_extraction_admission(client, project_id, actor_id):
+    blocked, attempt = _read_active_attempt(client, project_id, actor_id, operations=REQUIREMENT_EXTRACTION_OPERATIONS)
+    return {"blocked": blocked, "attempt": attempt}
+
+
 def release_draft_attempt(
-    client, project_id, actor_id, operation_id, fence, *, project_sync=False, selected_repair=False, scenario_refresh=False, scoped_impact=False
+    client,
+    project_id,
+    actor_id,
+    operation_id,
+    fence,
+    *,
+    project_sync=False,
+    selected_repair=False,
+    scenario_refresh=False,
+    scoped_impact=False,
+    requirement_extraction=False,
 ):
-    if sum((project_sync, selected_repair, scenario_refresh, scoped_impact)) > 1:
+    if sum((project_sync, selected_repair, scenario_refresh, scoped_impact, requirement_extraction)) > 1:
         raise ValueError("Choose one draft admission operation family")
     if not _is_operation_id(operation_id) or type(fence) is not int or fence < 1:
         raise _conflict("project_draft_release_mismatch", "This draft attempt identity is unavailable. Reload its current status.")
@@ -983,6 +1070,8 @@ def release_draft_attempt(
             allowed_operations = {SCENARIO_REFRESH_OPERATION}
         if scoped_impact:
             allowed_operations = {SCOPED_IMPACT_OPERATION}
+        if requirement_extraction:
+            allowed_operations = REQUIREMENT_EXTRACTION_OPERATIONS
         if not _same_attempt(attempt, identity) or attempt.get("operation") not in allowed_operations:
             raise _conflict("project_draft_release_mismatch", "This draft attempt changed. Reload its current status.")
         if attempt.get("state") == "cancelled":
@@ -992,6 +1081,8 @@ def release_draft_attempt(
             raise _conflict("project_draft_release_mismatch", "This draft attempt changed. Reload its current status.")
         now = _utcnow()
         state, _ = _projected_state(project, attempt, lease, now)
+        if requirement_extraction and state != "interrupted":
+            raise _conflict("project_draft_release_mismatch", "This requirement extraction is still running. Check its current status.")
         reason = "provider_outcome_acknowledged" if state == "interrupted" else "cancelled_by_owner"
         transaction.update(attempt_doc, {"state": "cancelled", "reason": reason, "completed_at": now})
         transaction.set(lease_doc, released_project_lease(fence))

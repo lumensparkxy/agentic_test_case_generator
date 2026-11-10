@@ -176,6 +176,20 @@ SELECTED_OPERATIONS: tuple[SelectedOperation, ...] = (
         "RequirementImportCompareResponse",
     ),
     SelectedOperation(
+        "requirementExtractionStatus",
+        "get",
+        "/projects/{project_id}/requirement-imports/extraction-status",
+        "RequirementExtractionStatusRequest",
+        "RequirementExtractionStatusResponse",
+    ),
+    SelectedOperation(
+        "releaseRequirementExtraction",
+        "post",
+        "/projects/{project_id}/requirement-imports/extraction-attempts/{operation_id}/release",
+        "ReleaseRequirementExtractionRequest",
+        "ReleaseRequirementExtractionResponse",
+    ),
+    SelectedOperation(
         "requirementImportRecovery",
         "post",
         "/projects/{project_id}/requirement-imports/recovery",

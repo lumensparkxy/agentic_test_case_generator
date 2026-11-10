@@ -165,7 +165,7 @@ class RequirementImportRepository:
                 _revision(_owned(doc.get().to_dict(), actor), revision)
         return data
 
-    def _save_preview(self, preview, actor, retired, workflow_payload, *, extraction=None, commit_audit=None):
+    def _save_preview(self, preview, actor, retired, workflow_payload, *, extraction=None, commit_audit=None, admission=None):
         doc = self.project_doc(preview.project_id)
         ref = doc.collection("requirement_imports").document(preview.import_id)
         data = _bounded(
@@ -186,7 +186,10 @@ class RequirementImportRepository:
                 if previous is not None:
                     check_extraction_receipt(previous, extraction["fingerprint"])
                     return previous
+                finish = admission.prepare_import_publication(transaction, data) if admission is not None else None
                 commit_audit(transaction)
+                if finish is not None:
+                    finish()
             transaction.create(ref, data)
             return data
 
@@ -392,7 +395,7 @@ def require_review_client(project_id, base_project_revision, import_mode, actor)
     repository().baseline(project_id, actor, base_project_revision)
 
 
-def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit):
+def stage_extraction(repo, project_id, actor, revision, response, operation, import_id, extraction, commit_audit, *, admission=None):
     project, snapshot = repo.baseline(project_id, actor, revision)
     current, retired = canonical_requirements(project_id, snapshot)
     incoming = response.requirements
@@ -407,7 +410,7 @@ def stage_extraction(repo, project_id, actor, revision, response, operation, imp
         preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
     workflow = response.model_dump(mode="json", exclude={"requirements", "raw_text", "source_evidence_findings"})
     workflow["guidance"] = preview.guidance
-    return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit)
+    return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit, admission=admission)
 
 
 def recompare_import(project_id, import_id, actor):

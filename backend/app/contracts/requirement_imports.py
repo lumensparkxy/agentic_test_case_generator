@@ -39,6 +39,32 @@ class RequirementImportPreview(BaseModel):
     guidance: dict[str, Any] | None = None
 
 
+class RequirementExtractionAttempt(BaseModel):
+    operation_id: str
+    fence: int = Field(ge=1)
+    operation: Literal["requirements.parse", "requirements.refine"]
+    request_id: str
+    state: Literal["running", "interrupted"]
+    source_snapshot_id: str | None
+    reason: str | None
+
+
+class RequirementExtractionStatus(BaseModel):
+    enabled: bool
+    blocked: bool = False
+    attempt: RequirementExtractionAttempt | None = None
+
+
+class RequirementExtractionRelease(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fence: int = Field(strict=True, ge=1)
+
+
+class RequirementExtractionReleaseResult(BaseModel):
+    released: Literal[True] = True
+
+
 class ImportDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candidate_id: str

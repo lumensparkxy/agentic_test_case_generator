@@ -1,14 +1,25 @@
 """Publish a reviewed intake preview and its audit in one project transaction."""
 
 from dataclasses import dataclass
+import os
 
 from fastapi import HTTPException
 
+from ..config import DEFAULT_MODEL_NAME
 from ..contracts.requirement_imports import RequirementImportPreview
 from ..models import AuthUser
 from ..observability.metrics import record_workflow_completed
 from .audit_service import complete_workflow_run, record_usage_event
 from .billing_service import record_billing_consumption
+from .guidance_service import current_guidance
+from .project_draft_admission import (
+    REQUIREMENT_EXTRACTION_DEADLINE_SECONDS,
+    REQUIREMENT_EXTRACTION_REQUEST_CAP,
+    claim_draft_attempt,
+    draft_admission_client,
+    require_standard_extraction_guidance,
+)
+from .project_inputs import check_run_inputs
 from .requirement_import_service import repository, stage_extraction
 from .requirement_reconciliation import digest
 from .workflow_project_service import project_error_to_http
@@ -45,11 +56,44 @@ class ProjectRequirementExtraction:
             raise ExtractionPublicationUnconfirmed()
         return None
 
-    def publish(self, *, response, event_type, billing_key, run_id, billing_context, quantity, result_metadata, billing_metadata):
+    def admit(self):
+        try:
+            repo = repository()
+            client = draft_admission_client(repo.client)
+            if client is None:
+                return None
+            require_standard_extraction_guidance()
+            if not self.request_id.strip() or len(self.request_id) > 160:
+                raise HTTPException(422, "X-Request-ID must be nonblank and at most 160 characters.")
+            project, snapshot = repo.baseline(self.project_id, self.actor, self.revision)
+            check_run_inputs(project)
+            guidance = current_guidance()
+            settings = digest(["native-requirement-extraction-v1", os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME), guidance.manifest_id if guidance else None])
+            return claim_draft_attempt(
+                client,
+                project_id=self.project_id,
+                actor_id=self.actor.sub,
+                request_id=self.request_id,
+                operation=self.operation,
+                base_revision=self.revision,
+                source_snapshot_ids={"requirements": snapshot["snapshot_id"] if snapshot else None},
+                max_requests=REQUIREMENT_EXTRACTION_REQUEST_CAP,
+                deadline_seconds=REQUIREMENT_EXTRACTION_DEADLINE_SECONDS,
+                settings_fingerprint=settings,
+                requirement_extraction={"import_id": self.import_id, "request_fingerprint": self.fingerprint},
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise project_error_to_http(exc) from exc
+
+    def publish(self, *, response, event_type, billing_key, run_id, billing_context, quantity, result_metadata, billing_metadata, admission=None):
         try:
             repo = repository()
         except RuntimeError as exc:
             raise project_error_to_http(exc) from exc
+        if admission is not None and draft_admission_client(repo.client) is None:
+            raise HTTPException(409, "Requirement extraction recovery is unavailable.")
         import_id = self.import_id
         writes = []
         metadata = {"operation": self.operation, "project_id": self.project_id, "import_id": import_id, **result_metadata}
@@ -87,7 +131,18 @@ class ProjectRequirementExtraction:
 
         extraction = {"fingerprint": self.fingerprint, "workflow_run_id": run_id, "source_event_id": event_id}
         try:
-            saved = stage_extraction(repo, self.project_id, self.actor, self.revision, response, self.operation, import_id, extraction, commit_audit)
+            saved = stage_extraction(
+                repo,
+                self.project_id,
+                self.actor,
+                self.revision,
+                response,
+                self.operation,
+                import_id,
+                extraction,
+                commit_audit,
+                **({"admission": admission} if admission is not None else {}),
+            )
         except Exception as publish_error:
             try:
                 # Reconcile a past commit before checking whether it can still be replayed.

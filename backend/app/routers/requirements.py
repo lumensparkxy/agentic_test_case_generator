@@ -1,5 +1,6 @@
 from ..services.knowledge_feedback import finish_generation
 from ..services.guidance_dependency import generation_guidance
+from contextlib import nullcontext
 from io import BytesIO
 from typing import Any, List, Optional
 import hashlib
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
+from ..agents.adk_runtime import bounded_model_requests
 from ..agents.requirements_agent import extract_requirements, refine_requirements
 from ..auth.jwt_auth import get_current_user
 from ..config import get_settings
@@ -281,7 +283,9 @@ def _record_billing_consumption_safe(
 
 
 @router.post(
-    "/requirements/parse", response_model=RequirementsWorkflowResponse | RequirementImportPreview, dependencies=[Depends(generation_guidance("requirements"))]
+    "/requirements/parse",
+    response_model=RequirementsWorkflowResponse | RequirementImportPreview,
+    dependencies=[Depends(generation_guidance("requirements", bounded_extraction=True))],
 )
 async def parse_requirements(
     request: Request,
@@ -329,21 +333,40 @@ async def parse_requirements(
         billing_key=operation,
     )
 
-    workflow_run_id = start_workflow_run(
-        operation=operation,
-        actor=current_user,
-        request_id=request_id,
-        metadata={
-            "has_feedback": is_refinement_request,
-            "workflow_settings": parsed_workflow_settings.model_dump() if parsed_workflow_settings else {},
-        },
-    )
+    admission = await run_in_threadpool(extraction.admit) if project_id else None
+    if admission is not None and admission.result_import_id:
+        return await run_in_threadpool(extraction.find_preview, required=True)
+
+    async def stop_admission():
+        if admission is not None:
+            try:
+                await run_in_threadpool(admission.stop)
+            except Exception:
+                logging.exception("Could not reconcile requirement extraction admission")
+
+    async def bounded_call(function, *args, **kwargs):
+        with bounded_model_requests(admission.reserve) if admission is not None else nullcontext():
+            return await run_in_threadpool(function, *args, **kwargs)
+
+    try:
+        workflow_run_id = start_workflow_run(
+            operation=operation,
+            actor=current_user,
+            request_id=request_id,
+            metadata={
+                "has_feedback": is_refinement_request,
+                "workflow_settings": parsed_workflow_settings.model_dump() if parsed_workflow_settings else {},
+            },
+        )
+    except Exception:
+        await stop_admission()
+        raise
 
     published = False
 
     async def publish(response, quantity, result_metadata, billing_metadata):
         nonlocal published
-        await run_in_threadpool(
+        await bounded_call(
             extraction.publish,
             response=response,
             event_type=event_type,
@@ -353,13 +376,16 @@ async def parse_requirements(
             quantity=quantity,
             result_metadata=result_metadata,
             billing_metadata=billing_metadata,
+            admission=admission,
         )
         published = True
         return await run_in_threadpool(extraction.find_preview, required=True)
 
-    def fail(error_message):
+    async def fail(error_message):
         if not published:
-            _log_failure(
+            await stop_admission()
+            await run_in_threadpool(
+                _log_failure,
                 current_user=current_user,
                 request=request,
                 workflow_run_id=workflow_run_id,
@@ -374,7 +400,7 @@ async def parse_requirements(
     if is_refinement_request:
         try:
             existing_reqs = json.loads(existing_requirements)
-            workflow = await run_in_threadpool(
+            workflow = await bounded_call(
                 refine_requirements,
                 existing_reqs,
                 feedback,
@@ -442,14 +468,15 @@ async def parse_requirements(
             )
             return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
         except ExtractionPublicationUnconfirmed:
+            await stop_admission()
             raise
         except HTTPException:
             if project_id:
-                fail("http_exception")
+                await fail("http_exception")
             raise
         except Exception as exc:
             logging.exception("Requirement refinement failed")
-            fail(str(exc))
+            await fail(str(exc))
             raise HTTPException(status_code=500, detail="Refinement failed") from exc
 
     # Otherwise, parse the uploaded file
@@ -479,7 +506,7 @@ async def parse_requirements(
             raw_sections.append(f"--- SOURCE: {filename} ---\n{parsed_text}")
 
         raw_text = "\n\n".join(raw_sections)
-        workflow = await run_in_threadpool(
+        workflow = await bounded_call(
             extract_requirements,
             raw_text,
             len(source_names),
@@ -560,13 +587,14 @@ async def parse_requirements(
         )
         return finish_generation(response, current_user, project_id, "requirements", feedback, request_id)
     except ExtractionPublicationUnconfirmed:
+        await stop_admission()
         raise
     except HTTPException:
-        fail("http_exception")
+        await fail("http_exception")
         raise
     except Exception as exc:
         logging.exception("Requirement parsing failed")
-        fail(str(exc))
+        await fail(str(exc))
         raise HTTPException(status_code=500, detail="Requirement parsing failed") from exc
 
 

@@ -12,6 +12,8 @@ import useImpactApplication from "./hooks/useImpactApplication";
 import ImpactApplicationBar from "./components/generation/ImpactApplicationBar";
 import ScopedImpactStatus from "./components/generation/ScopedImpactStatus";
 import useRequirementImports from "./hooks/useRequirementImports";
+import useRequirementExtractionStatus from "./hooks/useRequirementExtractionStatus";
+import RequirementExtractionStatus from "./components/requirements/RequirementExtractionStatus";
 import useGuidanceRecovery from "./hooks/useGuidanceRecovery";
 import GuidanceUsed from "./components/knowledge/GuidanceUsed";
 import GenerationGuidance from "./components/knowledge/GenerationGuidance";
@@ -134,7 +136,10 @@ import { buildWorkflowSettingsPayload, getReviewScoreMeta } from "./utils/workfl
 import "./styles/index.css";
 
 const PROJECT_WORKSPACES_V2 = import.meta.env.VITE_PROJECT_WORKSPACES_V2 === "true";
-const APPROVAL_CONTINUATION_ENABLED = PROJECT_WORKSPACES_V2 && import.meta.env.VITE_APPROVAL_CONTINUATION_ENABLED === "true";
+const DRAFT_ADMISSION_ENABLED = import.meta.env.VITE_APPROVAL_CONTINUATION_ENABLED === "true";
+const APPROVAL_CONTINUATION_ENABLED = PROJECT_WORKSPACES_V2 && DRAFT_ADMISSION_ENABLED;
+const REQUIREMENT_PREVIEW_UNCONFIRMED =
+	"Could not confirm the requirements preview. Check extraction status and review any saved import before retrying.";
 
 const EXPORT_API_PATHS = Object.freeze({
 	csv: API_CONTRACT_ENDPOINTS.exportCsv.path,
@@ -3214,7 +3219,7 @@ export default function App() {
 	const imports = useRequirementImports(
 		apiRequest,
 		currentProjectId,
-		isAuthenticated && !isVerifyingSession,
+		isAuthenticated && !isVerifyingSession && (route.kind !== "project" || route.projectId === currentProjectId),
 		async (project, didApply = true) => {
 			const operationScope = captureProjectOperationScope();
 			if (
@@ -3233,23 +3238,55 @@ export default function App() {
 					: "Comparison refreshed against the current project. Review the new decisions before applying."
 			);
 			await refreshRequirementGuidance(project, operationScope);
-		}
+		},
+		currentUser?.sub
 	);
+	const requirementExtraction = useRequirementExtractionStatus({
+		enabled: Boolean(
+			DRAFT_ADMISSION_ENABLED &&
+			route.destination === PROJECT_DESTINATIONS.REQUIREMENTS &&
+			route.projectId === currentProjectId &&
+			isAuthenticated &&
+			!isVerifyingSession &&
+			currentUser?.sub &&
+			currentProject?.owner_user_id === currentUser.sub
+		),
+		projectId: currentProjectId,
+		identity: currentUser?.sub,
+		request: (path, options) => apiRequest(path, options, true, { allowGuidanceRecovery: false }),
+		loadPending: imports.load,
+		onReleased: (released) => {
+			const path = API_CONTRACT_ENDPOINTS.requirementsParse.path;
+			const attempts = requirementExtractionAttempts.current;
+			const local = attempts.get(path);
+			if (local?.requestId === released.request_id) {
+				local.released = true;
+				attempts.delete(path);
+				setIsParsing(false);
+			}
+			imports.setExtractionError("");
+		},
+	});
 
 	const submitRequirementPreview = async ({ path, body, headers = {}, input, upload = null, operationScope, setBusy, pendingMessage }) => {
+		const managed = path === API_CONTRACT_ENDPOINTS.requirementsParse.path && requirementExtraction.managed;
+		const fingerprint = JSON.stringify([operationScope, input]);
+		const attempts = requirementExtractionAttempts.current;
+		const prior = attempts.get(path);
+		if (managed && (requirementExtraction.blocked || (prior?.inFlight && prior.scope?.generation === operationScope.generation))) return;
+		const attempt =
+			prior?.fingerprint === fingerprint && prior.file === upload
+				? prior
+				: { fingerprint, file: upload, requestId: createRequestId(), scope: operationScope };
+		attempt.inFlight = true;
+		attempts.set(path, attempt);
+		const isCurrent = () => isProjectOperationCurrent(operationScope) && !attempt.released;
+		let clearAttempt = false;
+		let checkPending = false;
 		setBusy(true);
 		imports.setExtractionError("");
 		setStatus(pendingMessage);
 		try {
-			const fingerprint = JSON.stringify([operationScope, input]);
-			const attempts = requirementExtractionAttempts.current;
-			const prior = attempts.get(path);
-			const attempt =
-				prior?.fingerprint === fingerprint && prior.file === upload ? prior : { fingerprint, file: upload, requestId: createRequestId() };
-			attempts.set(path, attempt);
-			const clearAttempt = () => {
-				if (attempts.get(path) === attempt) attempts.delete(path);
-			};
 			const options = { method: "POST", headers: { ...headers, "X-Request-ID": attempt.requestId }, body };
 			const send = async () => {
 				const res = await apiRequest(path, options);
@@ -3268,22 +3305,33 @@ export default function App() {
 				return !data?.detail || data.detail.code === "requirement_extraction_unconfirmed";
 			};
 			if (!reply || (await unconfirmed(reply.res))) {
-				if (!isProjectOperationCurrent(operationScope)) return;
+				if (!isCurrent()) return;
+				if (managed) {
+					checkPending = true;
+					throw new Error(REQUIREMENT_PREVIEW_UNCONFIRMED);
+				}
 				reply = await send();
 			}
 			const { res, data } = reply;
 			if (!res.ok) {
 				if (await unconfirmed(res)) throw new Error("The requirements preview could not be confirmed. Retry with the same inputs.");
-				clearAttempt();
+				if (managed && res.status === 409) {
+					const rejection = await res
+						.clone()
+						.json()
+						.catch(() => null);
+					checkPending = ["project_draft_busy", "project_draft_recovery_required"].includes(rejection?.detail?.code);
+				}
+				clearAttempt = !checkPending;
 				throw new Error(await parseApiError(res, "Failed to prepare requirements"));
 			}
-			if (!isProjectOperationCurrent(operationScope)) return;
+			if (!isCurrent()) return;
 			imports.accept(data);
-			clearAttempt();
+			clearAttempt = true;
 			setStatus("Incoming requirements are ready to compare. The project baseline has not changed.");
 			await Promise.all([refreshUsageSummary(), refreshBillingEntitlements()]);
 		} catch (error) {
-			if (isProjectOperationCurrent(operationScope)) {
+			if (isCurrent()) {
 				const message =
 					error instanceof TypeError || error instanceof SyntaxError
 						? "The requirements preview could not be confirmed. Retry with the same inputs."
@@ -3292,7 +3340,12 @@ export default function App() {
 				setStatus(message);
 			}
 		} finally {
-			if (isProjectOperationCurrent(operationScope)) setBusy(false);
+			attempt.inFlight = false;
+			if (clearAttempt && attempts.get(path) === attempt) attempts.delete(path);
+			if (isCurrent()) {
+				setBusy(false);
+				if (managed) void (checkPending ? requirementExtraction.check() : requirementExtraction.refresh());
+			}
 		}
 	};
 
@@ -3621,6 +3674,7 @@ export default function App() {
 	};
 
 	const parseRequirements = async (withFeedback = false) => {
+		if (requirementExtraction.blocked) return;
 		if (requirementWorkflowLocked) {
 			const contactEmail = billingEntitlements?.account?.support_contact_email || "hello@spica-digital.eu";
 			setStatus(`Requirement workflows are locked. Contact ${contactEmail} to upgrade.`);
@@ -5559,6 +5613,14 @@ export default function App() {
 									}
 								/>
 
+								{requirementsRoute && !reviewScope && (
+									<RequirementExtractionStatus
+										status={requirementExtraction}
+										submitting={isParsing}
+										extractionError={imports.extractionError}
+										requirementsSnapshotId={projectSnapshots.requirements?.snapshot_id}
+									/>
+								)}
 								{(reviewScope ||
 									(testReviewRoute && !savedCaseLink && (continuationResultStage === "test_cases" || showSavedPlanGeneration))) &&
 									continuationPanel}
@@ -5630,7 +5692,7 @@ export default function App() {
 												Import requirements, compare them with the current project, and apply reviewed changes. Existing requirements remain
 												until you apply an update.
 											</p>
-											{imports.extractionError && (
+											{imports.extractionError && !requirementExtraction.managed && (
 												<Alert tone="danger" role="alert">
 													{imports.extractionError}
 												</Alert>
@@ -5661,7 +5723,10 @@ export default function App() {
 														<label>Requirements file</label>
 														<Input type="file" accept=".md,.docx,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
 													</Field>
-													<Button onClick={() => parseRequirements(false)} disabled={!file || isParsing || requirementActionDisabled}>
+													<Button
+														onClick={() => parseRequirements(false)}
+														disabled={!file || isParsing || requirementActionDisabled || requirementExtraction.blocked}
+													>
 														{isParsing ? "⏳ Parsing..." : "Parse Requirements"}
 													</Button>
 												</div>
@@ -5681,7 +5746,7 @@ export default function App() {
 													<DraftRecoveryNotice draft={pasteDraft} />
 													<Button
 														onClick={() => parseRequirements(false)}
-														disabled={!pasteDraft.value.trim() || isParsing || requirementActionDisabled}
+														disabled={!pasteDraft.value.trim() || isParsing || requirementActionDisabled || requirementExtraction.blocked}
 													>
 														{isParsing ? "Parsing…" : "Parse Requirements"}
 													</Button>
@@ -6331,7 +6396,7 @@ export default function App() {
 																if (reviewScope) navigate(buildProjectWorkspacePath(navigationProjectId, "inputs"));
 																void parseRequirements(true);
 															}}
-															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled}
+															disabled={!reqFeedback.trim() || isParsing || requirementActionDisabled || requirementExtraction.blocked}
 															className="feedback-button"
 														>
 															{isParsing ? "⏳ Refining Requirements..." : "🔄 Implement Changes"}
